@@ -65,3 +65,38 @@ clock recovery, refusal and Unknown. The reducer's synthetic `/probe` is outside
 the device endpoint allowlist and retains its local control. Independent ethers
 vectors pin all 16 V3 signatures; actual WASM fixtures exercise V1 HTTP parity,
 V3 vectors, keyless startup/WS, secondary custody and redacted failure paths.
+
+# Legacy write parity
+
+Split lots, batch rows and separate entry/SL/TP children retain the legacy
+TypeScript driver's partial placement behavior. Rejected elements do not stop
+later writes. Caller client IDs are checked across the batch before I/O, while
+algo capacity is checked per intent without a cumulative batch reservation.
+Cancellation batches continue after a refusal; a refused single cancel in an
+amend prevents its replacement. Accepted placement IDs survive partial failures.
+
+The shared write-plan types report indexed placed, applied, refused and uncertain
+outcomes on terminal failures. They do not gate payloads or decide continuation.
+Engine-owned transport ambiguity still seals writes under its existing custody
+rules. No new validation or retry policy is introduced here.
+
+Known legacy limitations remain: a split tail or later row can be refused after
+an earlier write takes effect, and an entry can succeed without both protective
+children. A replacement can fail after its original order was canceled.
+
+The class-A restore kept pending policy is the inherited Rust exception: after
+a confirmed protective cancel and a definite replacement refusal, its existing
+single put-back is unchanged. Legacy TS `updateOrder` has no corresponding
+restore; this exception follows the lead's explicit HOLD/no-removal instruction.
+
+Evidence: `packages/safe-cex/src/__tests__/reference/asterdex/asterdex.exchange.ts`
+lines 742–867 (per-intent checks and splitting), 955–997 (placement and batch
+continuation), and 1000–1081 (cancel-replace and cancellation fan-out).
+
+Stop-after-Unknown is a recorded TS parity exception (Sean/daxx, 2026-11-08).
+An uncertain row ends the action with its placed/applied prefix, Unknown row
+and unsent suffix in the journal, standard Check Open Orders guidance and a
+`write.unknown` event for venue-decoded failures. Telemetry for engine-sealed
+Unknown is pending an engine hook in a later engine PR; halt, canonical engine
+wording and journal coverage remain pinned. Definite refusals keep the TS
+continuation behavior.

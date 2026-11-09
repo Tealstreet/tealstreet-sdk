@@ -838,6 +838,7 @@ impl crate::engine::CoreCx<'_> {
         let execution = match (moved, founder_root) {
             (Some((identity, _)), Some(root)) => {
                 let physical = CommandOwner {
+                    engine_unknown: None,
                     request_class: owner.request_class,
                     generation: identity,
                     phase: CommandPhase::Planned(State { body }),

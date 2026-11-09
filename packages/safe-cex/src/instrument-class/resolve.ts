@@ -55,4 +55,4 @@ export const isNonCryptoInstrument = (result: InstrumentClassResult): boolean | 
   result.kind === 'classified' ? result.assetClass !== 'crypto' : undefined;
 
 export const venuesWithInstrumentClassFn = (): InstrumentClassVenue[] =>
-  Object.keys(VENUE_INSTRUMENT_CLASS) as InstrumentClassVenue[];
+  Object.keys(VENUE_INSTRUMENT_CLASS).filter(isInstrumentClassVenue);

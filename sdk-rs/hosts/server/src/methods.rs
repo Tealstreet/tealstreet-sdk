@@ -834,6 +834,33 @@ pub fn translate(
             }
             one(command("fetchIncome", out, false))
         }
+        "fetchClosedPnl" if capabilities.closed_positions => {
+            let options = arg(args, 0);
+            let mut out = Map::new();
+            if let Some(symbol) = optional(options, "symbol") {
+                let symbol = text(&symbol, "symbol")?;
+                if !symbol.is_empty()
+                    || !matches!(
+                        capabilities.closed_position_format,
+                        safe_cex_engine::ClosedPositionFormat::Okx
+                            | safe_cex_engine::ClosedPositionFormat::Blofin
+                    )
+                {
+                    out.insert("symbol".into(), symbol.into());
+                }
+            }
+            for field in ["from", "to"] {
+                if let Some(bound) = optional(options, field) {
+                    out.insert(field.into(), finite(&bound, field)?.into());
+                }
+            }
+            let account = optional(options, "accountName")
+                .map(|value| text(&value, "accountName"))
+                .transpose()?
+                .unwrap_or_default();
+            out.insert("account".into(), account.into());
+            one(command("fetchClosedPnl", out, false))
+        }
         // The raw rows a mirror's journal maps; it folds the journal itself.
         "fetchClosedPositions" if capabilities.closed_positions => {
             let options = arg(args, 0);
@@ -1648,6 +1675,29 @@ mod tests {
             false,
         );
         assert_eq!(filtered.unwrap_err().name, "Error");
+    }
+
+    #[test]
+    fn reported_closed_pnl_forwards_account_and_normalizes_account_wide_symbols() {
+        let closed = Capabilities {
+            closed_positions: true,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Okx,
+            ..caps()
+        };
+        assert_eq!(
+            single(
+                "fetchClosedPnl",
+                json!([{"symbol":"", "from":1,"to":2,"accountName":"fixture-account"}]),
+                &closed
+            ),
+            json!({"op":"fetchClosedPnl","from":1.0,"to":2.0,"account":"fixture-account"})
+        );
+        assert_eq!(
+            translate("fetchClosedPnl", &[json!({})], &caps(), &[], false)
+                .unwrap_err()
+                .name,
+            "UnsupportedMethod"
+        );
     }
 
     #[test]

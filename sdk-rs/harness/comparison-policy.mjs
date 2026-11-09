@@ -28,14 +28,15 @@ export const captureTsFill = (fill) => ({
   timestamp: fill.timestamp ?? null,
 });
 
-// Raw native evidence: an order id must never stand in for execution identity.
+// Revision 2 carries the public event ID, which falls back to the order ID.
+// Only a distinct event ID proves native execution identity.
 export const captureRustFill = (rows, i) => ({
   market: rows.market[i],
   side: rows.side[i],
   amount: rows.rows[i * 2 + 1],
   price: rows.rows[i * 2],
   id: rows.orderId(i),
-  executionId: rows.fillId?.(i),
+  executionId: rows.fillId?.(i) === rows.orderId(i) ? undefined : rows.fillId?.(i),
   fee: Number.isFinite(rows.fee?.[i]) ? rows.fee[i] : undefined,
 });
 
@@ -130,7 +131,11 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
     leverage: p.leverage ?? null,
     unrealizedPnl: p.unrealizedPnl ?? null,
     realizedPnl: finiteOrNull(p.realizedPnl),
-    liquidationPrice: p.liquidationPrice ?? null,
+    // P1 maps legacy unknown thresholds to null at the public edge.
+    // Keep Rust values unchanged so malformed producer output remains visible.
+    liquidationPrice: impl === 'ts'
+      && (finiteOrNull(p.liquidationPrice) === null || Number(p.liquidationPrice) <= 0)
+      ? null : p.liquidationPrice ?? null,
     marginType: p.marginType ?? null,
     positionMode: p.positionMode ?? null,
     marginSize: Number.isFinite(p.marginSize) ? p.marginSize : null,

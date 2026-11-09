@@ -23,8 +23,18 @@ const CALL_MS: u32 = 20_000;
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
-const NONE_PLACED: &str = "none-placed";
-const UNKNOWN_RATE: &str = "BloFin write outcome is unknown. Check Open Orders";
+const UNKNOWN_WRITE: &str = "BloFin write outcome is unknown. Check Open Orders";
+
+pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
+    if error.outcome == Some(Outcome::Unknown)
+        && !(error.message.contains("unknown") && error.message.contains("Check Open Orders"))
+    {
+        format!("{UNKNOWN_WRITE}: {}", error.message)
+    } else {
+        error.message.clone()
+    }
+}
+
 const CODES: CodeTable = CodeTable {
     rows: &[
         Row {
@@ -66,7 +76,6 @@ const CODES: CodeTable = CodeTable {
         // Seen live inside a 200 on refused placements (deaws2 capture).
         refused(Key::Int(102016), ErrorKind::Rejected),
         refused(Key::Int(102123), ErrorKind::Rejected),
-        refused(Key::Text(NONE_PLACED), ErrorKind::Rejected),
         // Internal error: proves nothing.
         Row {
             key: Key::Int(103013),
@@ -403,6 +412,53 @@ struct ResultRow<'a> {
     #[serde(borrow, default, deserialize_with = "nullable_text")]
     msg: Str<'a>,
 }
+impl ResultRow<'_> {
+    fn has_unproven_error(&self) -> bool {
+        self.code.is_empty()
+            && !matches!(
+                self.msg.trim().to_ascii_lowercase().as_str(),
+                "" | "success" | "order placed"
+            )
+    }
+    fn failed(&self) -> bool {
+        (!self.code.is_empty() && self.code != "0") || self.has_unproven_error()
+    }
+}
+fn failed_row<'r, 'a>(rows: &'r [ResultRow<'a>], intent: Intent) -> Option<&'r ResultRow<'a>> {
+    // A known refusal cannot hide another row whose write may have landed.
+    rows.iter()
+        .find(|row| {
+            row.failed()
+                && matches!(
+                    CODES.verdict(&native(&row.code, &row.msg), intent),
+                    Verdict::Unknown(_)
+                )
+        })
+        .or_else(|| rows.iter().find(|row| row.failed()))
+}
+
+fn failed_detail<'r>(
+    code: &'r str,
+    message: &'r str,
+    rows: &'r [ResultRow<'_>],
+    intent: Intent,
+) -> Option<(&'r str, &'r str)> {
+    let row = failed_row(rows, intent).map(|row| (&*row.code, &*row.msg));
+    // Aggregate failure/partial-success envelopes defer to their physical rows.
+    let aggregate = matches!(code, "1" | "2") && row.is_some();
+    let envelope = (code != "0" && !aggregate).then_some((code, message));
+    envelope
+        .into_iter()
+        .chain(row)
+        .find(|(code, message)| {
+            matches!(
+                CODES.verdict(&native(code, message), intent),
+                Verdict::Unknown(_)
+            )
+        })
+        .or(row)
+        .or(envelope)
+}
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum ResultRows<'a> {
@@ -410,6 +466,12 @@ enum ResultRows<'a> {
     One(#[serde(borrow)] ResultRow<'a>),
 }
 impl<'a> ResultRows<'a> {
+    fn as_slice(&self) -> &[ResultRow<'a>] {
+        match self {
+            Self::Many(rows) => rows,
+            Self::One(row) => std::slice::from_ref(row),
+        }
+    }
     fn rows(self) -> Vec<ResultRow<'a>> {
         match self {
             Self::Many(v) => v,
@@ -456,12 +518,10 @@ fn trigger(value: Option<StopTriggerType>) -> &'static str {
 }
 /// A code the table cannot call a refusal (busy, internal, unlisted): the write may be live.
 fn outcome_unknown(code: &str, message: &str) -> bool {
-    !code.is_empty()
-        && code != "0"
-        && matches!(
-            CODES.verdict(&native(code, message), Intent::Place),
-            Verdict::Unknown(_)
-        )
+    matches!(
+        CODES.verdict(&native(code, message), Intent::Place),
+        Verdict::Unknown(_)
+    )
 }
 fn native_side(side: OrderSide) -> &'static str {
     if side == OrderSide::Buy {
@@ -2554,7 +2614,13 @@ impl Blofin {
             active.job.amend_fallback.clear();
             return self.drive(cx, active, At::Data(&request.slot, &request.context));
         }
-        if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
+        let mut reconcile = false;
+        if let Err(error) =
+            self.write_answer(cx, &mut active.job, &request, &response, &mut reconcile)
+        {
+            if reconcile {
+                self.reconcile_orders(cx);
+            }
             if request.step.is_place() {
                 cx.store.invalidate_order_snapshots();
             }
@@ -2595,46 +2661,64 @@ impl Blofin {
         self.drive(cx, active, At::Data(&request.slot, &request.context))
     }
     /// Decodes one write answer, records its journal fact exactly once and
-    /// applies native Store effects. `Err` ends the job.
+    /// applies native Store effects. `Err` ends the job; any requested account
+    /// reconciliation is dispatched by the response handler after classification.
     fn write_answer(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         job: &mut Job,
         request: &Request,
         response: &Response<'_>,
+        reconcile: &mut bool,
     ) -> Result<(), VenueError> {
         let context = &request.context;
         let parsed = serde_json::from_str::<Reply<'_>>(response.body);
         if !(200..300).contains(&response.status) {
-            let native = parsed
-                .as_ref()
-                .ok()
-                .filter(|reply| !reply.code.is_empty())
-                .map(|reply| native(&reply.code, &reply.msg));
-            let error = if let Effect::Setting = &request.step.effect {
-                let detail = parsed
-                    .as_ref()
-                    .ok()
-                    .filter(|reply| !reply.code.is_empty())
-                    .map(|reply| (&*reply.code, &*reply.msg));
+            let detail = parsed.as_ref().ok().and_then(|reply| {
+                failed_detail(
+                    &reply.code,
+                    &reply.msg,
+                    reply.data.as_ref().map_or(&[], ResultRows::as_slice),
+                    request.step.intent(),
+                )
+            });
+            let native = detail.map(|(code, message)| native(code, message));
+            let mut error = if let Effect::Setting = &request.step.effect {
                 setting_failure(request.step.path, response.status, detail)
-            } else if response.status == 429 {
-                http_failure(response.status, response.body).kind(ErrorKind::RateLimited)
             } else {
                 http_failure(response.status, response.body)
             };
-            record_failed(cx, context, native, &error.message);
+            self.record_failed(cx, context, native, &mut error);
             return Err(error);
         }
         let reply = match parsed {
             Ok(reply) => reply,
-            Err(error) => {
-                let message = error.to_string();
-                let _ = cx.http_write_unproven(context, message.clone());
-                return Err(unknown(message));
+            Err(_) => {
+                let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
+                return Err(unknown(UNKNOWN_WRITE));
             }
         };
         let rows = reply.data.map(ResultRows::rows).unwrap_or_default();
+        // Success and aggregate envelopes delegate to rows. An uncertain error
+        // envelope makes the entire batch unproven before any row or Store effect.
+        if matches!(
+            request.step.effect,
+            Effect::Place { .. } | Effect::Cancel(_)
+        ) && !matches!(&*reply.code, "0" | "1" | "2")
+            && matches!(
+                CODES.verdict(&native(&reply.code, &reply.msg), request.step.intent()),
+                Verdict::Unknown(_)
+            )
+        {
+            let mut error = unknown(UNKNOWN_WRITE);
+            self.record_failed(
+                cx,
+                context,
+                Some(native(&reply.code, &reply.msg)),
+                &mut error,
+            );
+            return Err(error);
+        }
         match &request.step.effect {
             Effect::Place {
                 family,
@@ -2650,15 +2734,17 @@ impl Blofin {
                 };
                 if rows.len() != *count {
                     if reply.code != "0" && rows.is_empty() {
-                        record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                        return Err(if outcome_unknown(&reply.code, &reply.msg) {
-                            unknown(message)
-                        } else {
-                            VenueError::new(message)
-                        });
+                        let mut error = VenueError::new(message);
+                        self.record_failed(
+                            cx,
+                            context,
+                            Some(native(&reply.code, &reply.msg)),
+                            &mut error,
+                        );
+                        return Err(error);
                     }
-                    let _ = cx.http_write_unproven(context, message.clone());
-                    return Err(unknown(message));
+                    let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
+                    return Err(unknown(UNKNOWN_WRITE));
                 }
                 let mut maybe_live = false;
                 let mut items = Vec::with_capacity(rows.len());
@@ -2671,26 +2757,13 @@ impl Blofin {
                         1 => &row.tpsl_id,
                         _ => &row.algo_id,
                     };
-                    let text = row.msg.trim().to_ascii_lowercase();
                     // Only a non-zero row code refuses, and code 0 accepts whatever its
                     // text says. A cancel-only "gone" code or a code-less row with
                     // unexpected text proves nothing here.
                     let refused = !row.code.is_empty() && row.code != "0";
                     let gone = matches!(&*row.code, "1000" | "102068");
-                    let odd = row.code.is_empty()
-                        && !matches!(text.as_str(), "" | "success" | "order placed");
-                    // Order ID 0 under this envelope names no order, but a rate
-                    // code still cannot prove that nothing was placed.
-                    let none_placed = id == "0"
-                        && reply.code != "0"
-                        && reply.msg.eq_ignore_ascii_case("All operations failed");
-                    if none_placed && row.code != "429" {
-                        items.push(BatchItem::Native(Native {
-                            code: NativeCode::Text(NONE_PLACED),
-                            message: &row.msg,
-                        }));
-                        error = Some(format!("BloFin placement rejected: {}", row.msg));
-                    } else if refused && !gone {
+                    let odd = row.has_unproven_error();
+                    if refused && !gone {
                         items.push(BatchItem::Native(native(&row.code, &row.msg)));
                         maybe_live |= outcome_unknown(&row.code, &row.msg);
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
@@ -2708,7 +2781,7 @@ impl Blofin {
                 }
                 let accepted: Vec<String> = items
                     .iter()
-                    .filter_map(|item| match item {
+                    .filter_map(|item: &BatchItem<'_>| match item {
                         BatchItem::Accepted(id) => Some((*id).to_owned()),
                         BatchItem::Native(_) => None,
                     })
@@ -2719,8 +2792,8 @@ impl Blofin {
                 if multi_position {
                     error = Some(MULTI_POSITION_MESSAGE.to_owned());
                 }
-                if rows.iter().any(|row| row.code == "429") {
-                    error = Some(UNKNOWN_RATE.to_owned());
+                if unproven || maybe_live {
+                    error = Some(UNKNOWN_WRITE.to_owned());
                 }
                 if unproven {
                     let message = error.clone().unwrap_or_else(|| message.clone());
@@ -2755,8 +2828,14 @@ impl Blofin {
             Effect::Cancel(targets) => {
                 if reply.code != "0" && rows.is_empty() {
                     let message = format!("BloFin cancellation rejected: {}", reply.msg);
-                    record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                    return Err(VenueError::new(message));
+                    let mut error = VenueError::new(message);
+                    self.record_failed(
+                        cx,
+                        context,
+                        Some(native(&reply.code, &reply.msg)),
+                        &mut error,
+                    );
+                    return Err(error);
                 }
                 let mut matched: Vec<Option<&ResultRow<'_>>> = vec![None; targets.len()];
                 let mut unproven = rows.len() != targets.len();
@@ -2790,6 +2869,7 @@ impl Blofin {
                     }
                 }
                 let mut items = Vec::with_capacity(targets.len());
+                let mut maybe_live = false;
                 for (target, row) in targets.iter().zip(&matched) {
                     let Some(row) = row else {
                         continue;
@@ -2804,7 +2884,8 @@ impl Blofin {
                             .contains("filled, triggered, canceled or does not exist");
                     let gone = matches!(&*row.code, "1000" | "102068") || gone_text;
                     // Each row speaks for itself: code 2 is "partially succeeded".
-                    let accepted = row.code == "0" || (reply.code == "0" && row.code.is_empty());
+                    let accepted = row.code == "0"
+                        || (reply.code == "0" && row.code.is_empty() && !row.has_unproven_error());
                     let replacing = !job.replacement_targets.is_empty();
                     if gone && replacing {
                         // Nothing to move: the old order ended first, and no replacement goes out.
@@ -2851,11 +2932,15 @@ impl Blofin {
                             self.account.sources.remove(id);
                         }
                     } else {
+                        maybe_live |= matches!(
+                            CODES.verdict(&native(&row.code, &row.msg), Intent::Cancel),
+                            Verdict::Unknown(_)
+                        );
                         error = Some(format!("BloFin cancellation rejected: {}", row.msg));
                     }
                 }
-                if rows.iter().any(|row| row.code == "429") {
-                    error = Some(UNKNOWN_RATE.to_owned());
+                if unproven || maybe_live {
+                    error = Some(UNKNOWN_WRITE.to_owned());
                 }
                 if unproven {
                     let message = error.clone().unwrap_or_default();
@@ -2866,21 +2951,20 @@ impl Blofin {
                         cx.http_write_batch(context, &CODES, targets.len(), &items, message, None);
                 }
                 match error {
-                    Some(error) if unproven => Err(unknown(error)),
+                    Some(error) if unproven || maybe_live => Err(unknown(error)),
                     Some(error) => Err(VenueError::new(error)),
                     None => Ok(()),
                 }
             }
             Effect::Setting => {
-                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                let refused = failed_row(&rows, request.step.intent());
                 if reply.code != "0" || refused.is_some() {
-                    let (code, message) = match refused {
-                        Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
-                        _ => (&*reply.code, &*reply.msg),
-                    };
-                    let error =
+                    let (code, message) =
+                        failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
+                            .expect("failed setting answer");
+                    let mut error =
                         setting_failure(request.step.path, response.status, Some((code, message)));
-                    record_failed(cx, context, Some(native(code, message)), &error.message);
+                    self.record_failed(cx, context, Some(native(code, message)), &mut error);
                     return Err(error);
                 }
                 let accepted = WriteFact::Accepted { order_ids: vec![] };
@@ -2888,7 +2972,7 @@ impl Blofin {
                 Ok(())
             }
             Effect::AmendTpsl(removed) => {
-                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                let refused = failed_row(&rows, request.step.intent());
                 if reply.code == "0" && refused.is_none() {
                     let _ = cx.http_write_fact(
                         context,
@@ -2904,17 +2988,15 @@ impl Blofin {
                     }
                     return Ok(());
                 }
-                let (code, msg) = match refused {
-                    Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
-                    _ => (&*reply.code, &*reply.msg),
-                };
+                let (code, msg) =
+                    failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
+                        .expect("failed TP/SL answer");
                 let message = format!("BloFin TP/SL amend {code}: {msg}");
-                record_failed(cx, context, Some(native(code, msg)), &message);
+                let mut error = VenueError::new(message);
+                self.record_failed(cx, context, Some(native(code, msg)), &mut error);
                 // Only a definite refusal falls back; one that may have landed must not stack a cancel.
-                if outcome_unknown(code, msg) {
-                    return Err(unknown(format!(
-                        "{message}; whether the leg was removed is unknown. Check Open Orders"
-                    )));
+                if !definite_refusal(&error) {
+                    return Err(error);
                 }
                 let fallback = std::mem::take(&mut job.amend_fallback);
                 for step in fallback.into_iter().rev() {
@@ -2923,7 +3005,7 @@ impl Blofin {
                 Ok(())
             }
             Effect::NativeAmend { symbol } => {
-                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                let refused = failed_row(&rows, request.step.intent());
                 if reply.code == "0" && refused.is_none() {
                     let _ = cx.http_write_fact(
                         context,
@@ -2933,37 +3015,29 @@ impl Blofin {
                     cx.store.invalidate_order_snapshots();
                     return Ok(());
                 }
-                // A row speaks for its order, whatever the envelope says.
-                let (code, msg) = match refused {
-                    Some(row) => (&*row.code, &*row.msg),
-                    None => (&*reply.code, &*reply.msg),
-                };
+                let (code, msg) =
+                    failed_detail(&reply.code, &reply.msg, &rows, request.step.intent())
+                        .expect("failed native amendment answer");
                 let gone = matches!(code, "1000" | "102068")
                     || (code == "500"
                         && msg
                             .to_ascii_lowercase()
                             .contains("filled, triggered, canceled or does not exist"));
-                let unknown_outcome = !gone && outcome_unknown(code, msg);
                 let message = if gone {
                     format!(
                         "Your {symbol} was already filled, triggered or canceled; nothing was edited"
                     )
-                } else if unknown_outcome {
-                    format!(
-                        "BloFin edit {code}: {msg}; whether your {symbol} changed is unknown. Check Open Orders"
-                    )
                 } else {
                     format!("Your {symbol} is unchanged: BloFin refused the edit ({code}: {msg})")
                 };
-                record_failed(cx, context, Some(native(code, msg)), &message);
+                let mut error = VenueError::new(message.clone());
+                self.record_failed(cx, context, Some(native(code, msg)), &mut error);
                 if gone {
-                    self.reconcile_orders(cx);
+                    *reconcile = true;
+                    error.message = format!("{}; {message}", error.message);
+                    error.presents = true;
                 }
-                Err(if unknown_outcome {
-                    unknown(message)
-                } else {
-                    VenueError::new(message).outcome(Outcome::Rejected)
-                })
+                Err(error)
             }
             Effect::Verify(_) | Effect::VerifyTpsl { .. } | Effect::VerifyAmend(_) => {
                 unreachable!("a Read call")
@@ -3143,35 +3217,42 @@ fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
     }
 }
 
-/// Records one whole failed answer for the delivered write.
-fn record_failed(
-    cx: &mut Cx<'_, Pending>,
-    context: &Context,
-    native: Option<Native<'_>>,
-    message: &str,
-) {
-    // A native rate response can arrive inside HTTP 200. Keep its diagnostic
-    // evidence, but do not present the unknown write as a definitive refusal.
-    let message = if native
-        .as_ref()
-        .is_some_and(|n| n.code == NativeCode::Int(429))
-    {
-        UNKNOWN_RATE
-    } else {
-        message
-    };
-    match cx.classify_write(context, &CODES, native.as_ref(), message.to_owned()) {
-        Ok(fact) => {
-            let failed = WriteFact::Failed {
-                fact,
-                known_effects: false,
+impl Blofin {
+    /// Records one whole failed answer for the delivered write.
+    fn record_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        context: &Context,
+        native: Option<Native<'_>>,
+        error: &mut VenueError,
+    ) {
+        // Keep Cx calls in this synchronous helper, outside closures and nested
+        // expressions, so the managed request's provenance remains inspectable.
+        // Classify the delivered attempt before choosing its presentation or fallback.
+        // Unknown guidance must be in the journal, not only in the later terminal.
+        let classified =
+            match cx.classify_write(context, &CODES, native.as_ref(), UNKNOWN_WRITE.to_owned()) {
+                Ok(fact) if !matches!(fact.verdict(), Verdict::Unknown(_)) => {
+                    cx.classify_write(context, &CODES, native.as_ref(), error.message.clone())
+                }
+                other => other,
             };
-            let _ = cx.http_write_fact(context, failed, None);
-        }
-        // A released write never ends factless.
-        Err(_) => {
-            let _ = cx.http_write_unproven(context, message.to_owned());
-        }
+        *error = match classified {
+            Ok(fact) => {
+                let error = fact.error().clone();
+                let failed = WriteFact::Failed {
+                    fact,
+                    known_effects: false,
+                };
+                let _ = cx.http_write_fact(context, failed, None);
+                error
+            }
+            // A released write never ends factless.
+            Err(_) => {
+                let _ = cx.http_write_unproven(context, UNKNOWN_WRITE.to_owned());
+                unknown(UNKNOWN_WRITE)
+            }
+        };
     }
 }
 
@@ -3233,7 +3314,15 @@ mod tests {
             verdict("152401", Intent::Setting),
             Verdict::Refused(ErrorKind::AuthInvalid)
         );
-        for code in ["102036", "102056", "152016", "999999", "1", "2"] {
+        for code in [
+            "102036",
+            "102056",
+            "152016",
+            "999999",
+            "1",
+            "2",
+            "none-placed",
+        ] {
             assert_eq!(
                 verdict(code, Intent::Place),
                 Verdict::Unknown(None),

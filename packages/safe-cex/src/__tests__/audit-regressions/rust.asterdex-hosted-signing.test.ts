@@ -15,9 +15,11 @@ const remote = (sign = vi.fn()) => ({ sign, isAvailable: () => true, onAvailabil
 
 it('admits Aster RemoteSigner and retains the undeclared-venue gate without callbacks', () => {
   const remoteSigner = remote();
+  const options = { key: 'fixture-key', secret: '', remoteSigner };
   expect(deriveRemoteSigningPolicy('asterdex')?.enabled).toBe(true);
-  expect(() => assertBetaAccount('asterdex', { remoteSigner })).not.toThrow();
-  expect(() => assertBetaAccount('cryptocom', { remoteSigner })).toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+  expect(() => assertBetaAccount('asterdex', options)).not.toThrow();
+  expect(() => assertBetaAccount('cryptocom', options)).not.toThrow();
+  expect(() => assertBetaAccount('kraken', options)).toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
   expect(remoteSigner.sign).not.toHaveBeenCalled();
   expect(remoteSignerAlgorithms('asterdex')).toEqual(['hmacSha256', 'secp256k1Digest']);
 });
