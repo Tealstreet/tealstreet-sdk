@@ -54,12 +54,15 @@ class ControlledEngine implements WasmEngineLike {
   algoStart?: () => void;
   algoStartOwned?: (account: string, ownerJson: string) => void;
   algoOwner?: { ownerId: string; generation: number };
+  algoStartUnowned?: () => void;
+  algoUnowned = false;
   algoOp?: (op: string, dataJson: string) => string;
   constructor(readonly venue = 'binance') {
     sources.push(this);
     if (!algosBuild) return;
     this.algoStart = () => {};
     this.algoStartOwned = (_account, ownerJson) => { this.algoOwner = JSON.parse(ownerJson); };
+    this.algoStartUnowned = () => { this.algoUnowned = true; };
     this.algoOp = (op, dataJson) => {
       this.algoOps.push([op, JSON.parse(dataJson)]);
       return '[]';
@@ -497,15 +500,17 @@ describe('Rust worker engine ownership', () => {
     expect(sources[0].algoOwner).toEqual({ ownerId: 'A', generation: 7 });
   });
 
-  it.each(['owner', 'generation'])('refuses native algo startup if the %s switches while the worker is starting', async (change) => {
+  it.each(['owner', 'generation'])('starts the account with algos unowned if the %s switches while the worker is starting', async (change) => {
     algosBuild = true;
     let owner = { ownerId: 'A', generation: 7 };
     const { worker } = createWorker({}, 'same-name', () => owner);
     const pending = worker.start();
     owner = { ownerId: change === 'owner' ? 'B' : 'A', generation: 8 };
     await vi.advanceTimersByTimeAsync(250);
-    expect(await pending).toBe(false);
+    // Owner unavailable refuses TWAP restores, never the account start.
+    expect(await pending).toBe(true);
     expect(sources[0].algoOwner).toBeUndefined();
+    expect(sources[0].algoUnowned).toBe(true);
     expect(sources[0].algoOps).toEqual([]);
   });
 
