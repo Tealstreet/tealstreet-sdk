@@ -48,6 +48,11 @@ It does not correct rounding loss or a remainder below the native minimum.
 (`4,4,4,4,4,4,1`), 22/10/2 (`6,6,6,2`), and a below-minimum remainder
 12/5/1 (`3,3,3,2`), where the inputs are amount/maximum/step.
 
+Attached Spot and COIN-M SL/TP children each keep the whole adjusted intent
+quantity. For amount 11/max 5/step 1, the primary entry is `[3,3,3,1]` (sum 10),
+while SL and TP are each `[11]`. The kept entry under-allocation does not change
+attached protection quantities; standalone stops retain the primary split policy.
+
 After a definite native batch item refusal in a successful HTTP response, USD-M
 and COIN-M continue later chunks and attached children, matching the reference's
 per-item logging loop. Returned signature-error rows also continue without
