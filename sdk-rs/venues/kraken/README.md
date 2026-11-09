@@ -15,6 +15,12 @@ data. Private primary and secondary read credentials retain their validation.
 The SDK's shared explicit-public setup also ignores unused signing callbacks
 and grants no signing authority.
 
+Trusted native and private-capsule setup preserve construction refusal ordering:
+incomplete raw remote accounts refuse before secret decoding, and malformed
+private primary secrets retain Kraken's base64 diagnostic before provider
+installation. Explicit public setup discards unused primary material before
+decoding; secondary read validation remains active.
+
 REST signs the exact encoded form, optional frozen decimal nonce and path (without the
 `/derivatives` prefix) with SHA256 followed by HMAC-SHA512. WS signs SHA256 of
 the challenge with the same MAC. See Kraken's [REST authentication](https://support.kraken.com/ca/articles/360022635592-generate-authentication-strings-rest-api-derivatives)

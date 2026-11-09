@@ -1,6 +1,8 @@
 //! Every Rust venue, constructed by name from one options shape. Hosts (wasm,
 //! native) parse the account options once and receive the venue's engine
 //! through a [`Visit`]or; each venue's construction rules live here.
+#[cfg(feature = "kraken")]
+mod kraken_setup;
 #[cfg(feature = "mexc")]
 mod mexc_setup;
 #[cfg(not(any(
@@ -692,6 +694,10 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        kraken_setup::preflight(options, public_data_only)?;
+    }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
@@ -1005,6 +1011,10 @@ pub fn local_signer_from_json_for(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, false);
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::json(input, false);
@@ -1107,6 +1117,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, construction::signer_setup_public_data_only(options));
+    }
     // Paradex records its key form on the options: `local_signer_from_capsule`.
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
