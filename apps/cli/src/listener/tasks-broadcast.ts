@@ -1,3 +1,4 @@
+import { captureStorageSession } from '../storage-context';
 // Listener-side state:tasks broadcaster. Watches ~/.tealstreet/tasks.json
 // and pushes the current tasks snapshot to every WS subscribed to the
 // 'tasks' topic. Reuses the account-broadcast pattern (fs.watch + 250ms
@@ -43,11 +44,15 @@ export interface TasksBroadcastHandle {
 }
 
 export function startTasksBroadcast(server: ServerLike): TasksBroadcastHandle {
+  const ownerSession = captureStorageSession();
+  let stopped = false;
+  const isCurrent = () => !stopped && ownerSession.isCurrent();
   let lastHash = tasksHash();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let watcher: FSWatcher | null = null;
 
   const broadcast = () => {
+    if (!isCurrent()) return;
     const hash = tasksHash();
     if (hash === lastHash) return;
     lastHash = hash;
@@ -57,8 +62,10 @@ export function startTasksBroadcast(server: ServerLike): TasksBroadcastHandle {
   };
 
   const onChange = () => {
+    if (!isCurrent()) return;
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      if (!isCurrent()) return;
       debounceTimer = null;
       try {
         broadcast();
@@ -79,6 +86,7 @@ export function startTasksBroadcast(server: ServerLike): TasksBroadcastHandle {
 
   return {
     stop() {
+      stopped = true;
       if (debounceTimer) {
         clearTimeout(debounceTimer);
         debounceTimer = null;

@@ -592,19 +592,22 @@ pub struct Position {
     pub side: PositionSide,
     pub entry_price: f64,
     pub notional: f64,
+    #[serde(serialize_with = "crate::position_output::serialize_display")]
     pub leverage: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub margin_type: Option<MarginType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_mode: Option<PositionMode>,
+    #[serde(serialize_with = "crate::position_output::serialize_display")]
     pub unrealized_pnl: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "crate::position_output::optional_absent")]
     pub realized_pnl: Option<f64>,
     pub contracts: f64,
+    #[serde(serialize_with = "crate::position_output::serialize_liquidation")]
     pub liquidation_price: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "crate::position_output::optional_absent")]
     pub margin_size: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "crate::position_output::optional_absent")]
     pub last_update: Option<f64>,
 }
 

@@ -143,7 +143,7 @@ const take = <T>(list: readonly T[] | undefined, max: number, map: (item: T) => 
  */
 const droppedCount = (before: unknown, after: readonly unknown[], carried: number | undefined): number | undefined => {
   const dropped = Math.max(0, (Array.isArray(before) ? before.length : 0) - after.length);
-  const merged = Math.max(dropped, Number.isFinite(carried) ? (carried as number) : 0);
+  const merged = Math.max(dropped, typeof carried === 'number' && Number.isFinite(carried) ? carried : 0);
   return merged > 0 ? merged : undefined;
 };
 

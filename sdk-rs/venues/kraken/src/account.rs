@@ -1,5 +1,5 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
-use crate::{Kraken, Pending, wire};
+use crate::{Kraken, Pending, sign, wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
@@ -154,6 +154,7 @@ pub struct Account {
     pub(super) feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
     open: bool,
+    challenge: Option<String>,
     signed_challenge: Option<String>,
     waiting_challenge: bool,
     acks: HashSet<String>,
@@ -438,14 +439,42 @@ struct SignedParts {
     body: Option<String>,
 }
 impl Kraken {
+    pub(super) fn account_signing_released(&mut self, socket: SocketId) {
+        if self.account.socket == Some(socket) && self.account.challenge.is_some() {
+            self.account.signed_challenge = Some(String::new());
+        }
+    }
     pub(crate) fn signed_request(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
         form: String,
-        pending: Pending,
+        mut pending: Pending,
     ) -> Result<(), String> {
+        if let Some(ids) = &self.identities {
+            let selected = self.select_http(ids, method, path)?;
+            let selection = *selected.selection();
+            let context = self.signing_context(cx, &pending, method, selected.credential())?;
+            if let Pending::Trade(request) = &mut pending {
+                request.context = Some(context.clone());
+            }
+            let recipe = selected
+                .futures_http(method, path, &form, self.options.testnet, 5000.)
+                .map_err(|_| "Invalid Kraken signing request")?;
+            cx.request_selected_managed(
+                context.clone(),
+                &selection,
+                None,
+                method,
+                recipe.url().into(),
+                recipe.body().map(str::to_owned),
+                Box::new(recipe),
+                Pending::Signing(Box::new(pending), context),
+            )
+            .map_err(|(_, reason)| reason.to_string())?;
+            return Ok(());
+        }
         let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
         cx.request(method, url, headers, body, pending);
         Ok(())
@@ -457,8 +486,33 @@ impl Kraken {
         path: &str,
         form: String,
         at: ArrayAt,
-        pending: Pending,
+        mut pending: Pending,
     ) -> Result<(), String> {
+        if let Some(ids) = &self.identities {
+            let selected = self.select_http(ids, method, path)?;
+            let selection = *selected.selection();
+            let context = self.signing_context(cx, &pending, method, selected.credential())?;
+            if let Pending::History(request) = &mut pending {
+                request.set_leg(context.clone());
+            }
+            let recipe = selected
+                .futures_http(method, path, &form, self.options.testnet, 5000.)
+                .map_err(|_| "Invalid Kraken signing request")?;
+            let id = cx
+                .request_selected_managed(
+                    context.clone(),
+                    &selection,
+                    None,
+                    method,
+                    recipe.url().into(),
+                    recipe.body().map(str::to_owned),
+                    Box::new(recipe),
+                    Pending::Signing(Box::new(pending), context),
+                )
+                .map_err(|(_, reason)| reason.to_string())?;
+            cx.stream_response(id, at);
+            return Ok(());
+        }
         let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
         let id = cx.request_streamed_body(method, url, headers, body, at, pending);
         if path.starts_with("/api/history/") {
@@ -526,6 +580,70 @@ impl Kraken {
     }
     pub(crate) fn account_settings_revision(&self) -> u64 {
         self.account.settings_revision
+    }
+    fn select_http(
+        &self,
+        ids: &safe_cex_engine::signing::Identities,
+        method: Method,
+        path: &str,
+    ) -> Result<sign::dispatch::Selected, String> {
+        use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
+        let role = if path.starts_with("/api/history/") {
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::History,
+                scope: None,
+            }
+        } else if method == Method::Get {
+            CredentialRole::Read { scope: None }
+        } else {
+            CredentialRole::Mutation
+        };
+        sign::dispatch::Selected::futures_without_nonce(ids, role)
+            .map_err(|_| "Kraken signing identity is unavailable".into())
+    }
+    fn signing_context(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        pending: &Pending,
+        method: Method,
+        credential: safe_cex_engine::request_context::Credential,
+    ) -> Result<safe_cex_engine::request_context::Context, String> {
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+        let scope = match pending {
+            Pending::History(request) => Scope::Command(request.command()),
+            Pending::Trade(_) => Scope::Command(
+                self.active_trading_command()
+                    .ok_or("Missing Kraken command")?,
+            ),
+            _ => Scope::Background,
+        };
+        let policy = Policy {
+            operation: if method == Method::Get {
+                Operation::Read
+            } else {
+                Operation::Mutation
+            },
+            credential: Some(credential),
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        if let Pending::History(request) = pending
+            && let Some(root) = request.root()
+        {
+            return cx
+                .http_leg_context(root, policy)
+                .map_err(|reason| reason.to_string());
+        }
+        if let Some(root) = self
+            .trading_root()
+            .filter(|_| matches!(pending, Pending::Trade(_)))
+        {
+            cx.http_leg_context(root, policy)
+        } else {
+            cx.http_context(scope, policy)
+        }
+        .map_err(|reason| reason.to_string())
     }
     pub(crate) fn account_setting(&self, symbol: &str) -> Option<(f64, MarginType)> {
         self.account.settings.get(symbol).copied()
@@ -657,7 +775,7 @@ impl Kraken {
         }
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.started || self.signer.is_none() || self.options.public_data_only {
+        if self.account.started || !self.can_sign() || self.options.public_data_only {
             return;
         }
         self.account.started = true;
@@ -696,7 +814,7 @@ impl Kraken {
         self.account_refresh(cx);
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.signer.is_none() {
+        if !self.can_sign() {
             return;
         }
         for (scope, path, array) in [
@@ -820,11 +938,22 @@ impl Kraken {
         self.account.snapshot_settings_revision = self.account.settings_write_revision;
         self.account.snapshot_positions_seen = false;
         self.account.waiting_challenge = true;
+        self.account.challenge = None;
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
         self.account.payload_complete = false;
         cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
+        if let Some(ids) = &self.identities {
+            if let Some(identity) = &ids.primary {
+                cx.send_signed(
+                    socket,
+                    String::new(),
+                    Box::new(sign::dispatch::WsAuth::challenge(identity.clone(), socket)),
+                );
+            }
+            return true;
+        }
         cx.send(
             socket,
             serde_json::to_string(
@@ -845,6 +974,7 @@ impl Kraken {
         self.account.positions_revision += 1;
         self.account.socket = None;
         self.account.open = false;
+        self.account.challenge = None;
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
@@ -898,6 +1028,24 @@ impl Kraken {
                 return true;
             }
             self.account.waiting_challenge = false;
+            self.account.challenge = Some(msg.message.to_string());
+            if let Some(ids) = &self.identities {
+                if let Some(identity) = &ids.primary {
+                    for feed in FEEDS {
+                        cx.send_signed(
+                            socket,
+                            String::new(),
+                            Box::new(sign::dispatch::WsAuth::subscribe(
+                                identity.clone(),
+                                socket,
+                                msg.message.to_string(),
+                                feed,
+                            )),
+                        );
+                    }
+                }
+                return true;
+            }
             let Some(signer) = self.signer.as_ref() else {
                 self.account_disconnect(
                     cx,
