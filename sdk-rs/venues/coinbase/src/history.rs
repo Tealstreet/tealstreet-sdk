@@ -242,7 +242,7 @@ impl Coinbase {
                 Query::Income{..}=>return Err("Coinbase Advanced Trade does not publish an income ledger API for this account path".into()),
                 Query::OrderByClientId{..}=>return Err("Coinbase has no exact client-order-ID lookup API; a bounded history scan cannot prove placement absence".into()),
             };
-            if kind != Kind::Trades && self.credentials.is_none() {
+            if kind != Kind::Trades && !self.signers.has_primary() {
                 return Err("Coinbase private history requires credentials".into());
             }
             // A window with no limit walks to its start; no default may stop it.

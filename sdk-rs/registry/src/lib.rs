@@ -1,6 +1,8 @@
 //! Every Rust venue, constructed by name from one options shape. Hosts (wasm,
 //! native) parse the account options once and receive the venue's engine
 //! through a [`Visit`]or; each venue's construction rules live here.
+#[cfg(feature = "kraken")]
+mod kraken_setup;
 #[cfg(feature = "mexc")]
 mod mexc_setup;
 #[cfg(not(any(
@@ -45,6 +47,8 @@ pub use safe_cex_venue_kraken::sign::dispatch::Selected as kraken_selected;
 pub use safe_cex_venue_kraken::sign::hosted as kraken_hosted;
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
+#[cfg(feature = "coinbase")]
+mod coinbase_setup;
 mod construction;
 #[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
@@ -692,6 +696,14 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "coinbase")]
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        return coinbase_setup::raw(options);
+    }
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        kraken_setup::preflight(options, public_data_only)?;
+    }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
@@ -1005,6 +1017,10 @@ pub fn local_signer_from_json_for(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, false);
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::json(input, false);
@@ -1084,6 +1100,10 @@ pub fn local_signer_from_capsule(
     ),
     VenueError,
 > {
+    #[cfg(feature = "coinbase")]
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        return coinbase_setup::json(input, options);
+    }
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
         let policy = signer_setup_policy_for(venue, options);
@@ -1107,6 +1127,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, construction::signer_setup_public_data_only(options));
+    }
     // Paradex records its key form on the options: `local_signer_from_capsule`.
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
@@ -1404,7 +1428,7 @@ pub fn build_with_signer<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
-    signer: Option<safe_cex_engine::signing::Provider>,
+    mut signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
     #[cfg(feature = "polymarket")]
@@ -1414,6 +1438,20 @@ pub fn build_with_signer<T: Visit>(
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));
+    }
+    let orderly = cfg!(feature = "orderly")
+        && matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi");
+    if orderly && construction::signer_setup_public_data_only(&options) {
+        options.public_data_only = true;
+        options.signing = None;
+        signer = None;
+    }
+    if orderly && (options.signing.is_some() || signer.is_some()) {
+        return Err(
+            VenueError::new("Orderly injected private signing admission is closed")
+                .kind(ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
     }
     if (options.signing.is_some() || signer.is_some())
         && !construction::bridge(venue, &options).dispatch_signing
@@ -1570,23 +1608,46 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "coinbase")]
-        "coinbase" | "coinbasespot" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Coinbase::new(CoinbaseOptions {
-                    key: options.key.take().unwrap_or_default(),
-                    secret: options.secret.take().unwrap_or_default(),
+        "coinbase" | "coinbasespot" => {
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid("Coinbase signing material belongs in signer setup"));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            if options.public_data_only || identities.primary.is_none() {
+                identities = Default::default();
+                options.coinbase_signing = None;
+                options.coinbase_read_signing = None;
+            }
+            let primary = options
+                .coinbase_signing
+                .take()
+                .zip(identities.primary.clone());
+            let secondary = options
+                .coinbase_read_signing
+                .take()
+                .zip(identities.secondary.clone());
+            if identities.primary.is_some() && (primary.is_none() || signer.is_none()) {
+                return Err(invalid("Coinbase requires a bound JWT signing provider"));
+            }
+            let venue = Coinbase::with_signing(
+                CoinbaseOptions {
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
-                    read_credentials: options.read_credentials.clone(),
-                })
-                .map_err(invalid)?,
-                entropy,
-            )?,
-        ),
+                    ..Default::default()
+                },
+                primary,
+                secondary,
+            )
+            .map_err(invalid)?;
+            let mut engine = Engine::new(venue, entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "polymarket")]
         "polymarket" => {
             polymarket_rules(&options)?;
@@ -1698,21 +1759,44 @@ pub fn build_with_signer<T: Visit>(
             )
         }
         #[cfg(feature = "kraken")]
-        "kraken" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Kraken::new(KrakenOptions {
-                    read_credentials: options.read_credentials.take(),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                }),
+        "kraken" => {
+            let mut identities = options.signing.take().unwrap_or_default();
+            if options.public_data_only {
+                identities.primary = None;
+            }
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Kraken credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut engine = Engine::new(
+                Kraken::with_signing(
+                    KrakenOptions {
+                        testnet: options.testnet,
+                        public_data_only: options.public_data_only,
+                        ..Default::default()
+                    },
+                    identities.clone(),
+                ),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kraken")]
         "krakenspot" => finish(
             visitor,
@@ -2019,6 +2103,7 @@ pub fn build_with_signer<T: Visit>(
             }
             let mut engine = Engine::new(
                 MexcFutures::new(MexcOptions {
+                    signing_policy: remote_signing_policy("mexc"),
                     recv_window: tighter_recv_window(options.recv_window),
                     public_data_only: options.public_data_only,
                     read_credentials_valid: identities.secondary.as_ref().map(|_| true),
@@ -2510,6 +2595,12 @@ pub struct EngineOptions {
     #[cfg(feature = "coinbase")]
     #[serde(default)]
     pub spot_only: bool,
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    pub coinbase_signing: Option<safe_cex_venue_coinbase::sign::Binding>,
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    pub coinbase_read_signing: Option<safe_cex_venue_coinbase::sign::Binding>,
     #[cfg(feature = "polymarket")]
     #[serde(default)]
     pub polymarket: Option<PolymarketAccountOptions>,

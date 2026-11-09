@@ -74,6 +74,7 @@ pub fn configured_with_provider(
             public_data_only: options.public_data_only,
             identities: identities.clone(),
             read_credentials_valid: valid,
+            ..Default::default()
         },
     ));
     let provider = wrap(Arc::new(provider));

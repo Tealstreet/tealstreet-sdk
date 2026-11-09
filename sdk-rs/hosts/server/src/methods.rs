@@ -379,6 +379,24 @@ fn fill_bound(value: Option<Value>, time: FillHistoryTime) -> Option<Value> {
     Some(value.floor().into())
 }
 
+/// DELEGATED uses the existing translation only for an enabled private venue.
+pub fn translate_delegated(
+    venue: &str,
+    method: &str,
+    args: &[Value],
+    capabilities: &Capabilities,
+    open_order_symbols: &[String],
+    public_only: bool,
+) -> Result<Vec<Plan>, Refused> {
+    if public_only || !safe_cex_remote_signer::delegated_enabled(venue) {
+        return Err(refused(
+            "UnsupportedMethod",
+            "DELEGATED methods are not enabled for this account",
+        ));
+    }
+    translate(method, args, capabilities, open_order_symbols, public_only)
+}
+
 /// Translates one hosted `callMethod`. `open_order_symbols` (engine store) answers
 /// cancel-all for venues whose engine cancels one symbol at a time; a
 /// `public_only` account has no private reads.
