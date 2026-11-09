@@ -72,6 +72,11 @@ export class DelegatedSignerSetup {
     const setupPolicy = deriveSignerSetupPolicy(name);
     const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
+    const apexomni = name === 'apexomni';
+    if (apexomni && this.usesPayloadSigner) {
+      const message = 'ApeX Omni requires RemoteSigner HMAC and zkLink contract custody';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (name === 'kraken' && this.usesPayloadSigner) {
       const message = 'Kraken Futures requires RemoteSigner SHA256/HMAC-SHA512 custody; PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
@@ -99,13 +104,17 @@ export class DelegatedSignerSetup {
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
+    if (apexomni && secondaryRequested) {
+      const message = 'ApeX Omni secondary read keys are unsupported';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (coinbase && secondaryRequested) {
       const message = 'Coinbase Hosted secondary signing is unsupported; remove the secondary credentials';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     // Raw HMAC callbacks have no slot selector; never install unusable read refs.
-    if ((name === 'woo' || name === 'bitrue' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
-      const venue = name === 'woo' ? 'WOO X' : name === 'bitrue' ? 'Bitrue' : 'Crypto.com';
+    if ((name === 'woo' || name === 'bitrue' || name === 'cryptocom' || name === 'mexc') && remoteSigner && secondaryRequested) {
+      const venue = name === 'woo' ? 'WOO X' : name === 'bitrue' ? 'Bitrue' : name === 'mexc' ? 'MEXC' : 'Crypto.com';
       const message = `${venue} secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
@@ -128,12 +137,16 @@ export class DelegatedSignerSetup {
       : secondaryPassphrase.inheritPrimary ? primaryPassphraseRef : `delegated/${nanoid()}/passphrase`;
     const broker = kucoin && options.extra?.kucoinBroker;
     const brokerRef = broker && broker.partner.trim() && broker.brokerName.trim() ? `delegated/${nanoid()}/broker` : undefined;
+    const zklinkSeed = apexomni && primary !== undefined ? `delegated/${nanoid()}/zklink` : undefined;
     const identity = (stableId: string | undefined, passphrase: string | undefined) => Object.freeze({
       credential: `delegated/${nanoid()}/credential`,
       signing: `delegated/${nanoid()}/signing`,
       ...(stableId === undefined ? {} : { stableId }),
       ...(passphrase === undefined ? {} : { passphrase }),
-      ...(brokerRef === undefined ? {} : { extra: { kucoinBroker: brokerRef } }),
+      ...(brokerRef === undefined && zklinkSeed === undefined ? {} : { extra: {
+        ...(brokerRef === undefined ? {} : { kucoinBroker: brokerRef }),
+        ...(zklinkSeed === undefined ? {} : { zklinkSeed }),
+      } }),
     });
     const identities: SigningIdentities = Object.freeze({
       ...(primary === undefined || primaryDropped ? {} : { primary: identity(primaryMetadata?.stableId, primaryPassphraseRef) }),

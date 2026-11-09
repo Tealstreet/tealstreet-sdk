@@ -438,6 +438,7 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'kraken-sha512'
       | 'apexomni-base64'
+      | 'apexomni-batch'
       | 'bitunix-double-sha256'
       | 'backpack-ed25519'
       | 'orderly-ed25519'

@@ -932,7 +932,8 @@ export class RustEngineExchange extends BaseExchange {
     const signerSetup =
       bridgeConstruction.dispatchSigning && !setupError
         ? delegated
-          ? new DelegatedSignerSetup(exchangeName, options)
+          ? new DelegatedSignerSetup(exchangeName,
+              deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options)
           : aster
             ? new LocalSignerSetup(
                 aster.setupOptions,
