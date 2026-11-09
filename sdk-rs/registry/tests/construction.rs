@@ -743,10 +743,6 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             "hyperliquidspot",
             "Delegated signing requires a configured callback provider",
         ),
-        (
-            "orderly",
-            "Delegated signing requires a configured callback provider",
-        ),
     ] {
         assert_eq!(
             rejected(
@@ -756,6 +752,24 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             expected
         );
     }
+    let error = construct(
+        "orderly",
+        r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#,
+    ).expect_err("Orderly private injection stays closed");
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Orderly injected private signing admission is closed"
+    );
+    // Without injected custody, the callback provider is still validated first.
+    assert_eq!(
+        rejected(
+            "orderly",
+            r#"{"key":"configured-key","remoteSigning":true,"publicMode":{"requested":false}}"#,
+        ),
+        "Delegated signing requires a configured callback provider",
+    );
 }
 
 #[test]

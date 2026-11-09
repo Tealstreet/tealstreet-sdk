@@ -300,9 +300,19 @@ fn disabled_private_payload_checks_callback_configuration_before_admission() {
                         assert_eq!(
                             error.message,
                             if injected {
-                                format!(
-                                    "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
-                                )
+                                match venue {
+                                    "kraken" => {
+                                        "Rust kraken has no REST-only PayloadSigner lifecycle"
+                                            .to_owned()
+                                    }
+                                    "kodiakfi" | "mode" | "what" | "woofi" => {
+                                        "Orderly injected private signing admission is closed"
+                                            .to_owned()
+                                    }
+                                    _ => format!(
+                                        "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
+                                    ),
+                                }
                             } else {
                                 "Delegated signing requires a configured callback provider"
                                     .to_owned()

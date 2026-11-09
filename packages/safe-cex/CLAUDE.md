@@ -11,6 +11,7 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
+Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
@@ -537,6 +538,24 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+Owner fencing is optional and additive. Without `setWorkerOwner`, calls retain
+legacy bridge-wait and dispatch behavior, including calls queued before attachment.
+With the hook installed, forwarding captures the bridge subscription
+identity and the host owner binding at admission, before page-engine startup,
+and checks both again before dispatch. A removed or replaced bridge
+drops the pending call; an undispatched write rejects as `notSent`. Reattaching
+the same callback is a new subscription, even when the account name is reused.
+Hosts opting into fencing install
+`setWorkerOwner(() => ({ ownerId, generation }))`, reading the current login's
+authenticated principal (never an account label) and a monotonic, nonnegative
+safe-integer generation. Change the generation on retirement/replacement;
+return `undefined` after logout. An installed hook without a current owner fails
+closed; attaching the first listener cannot establish its earlier owner. An
+unchanged bound owner can bootstrap normally. Changing the provider itself also
+retires pending work.
+The direct source-order refresh and capability-adopted `fetchClosedPnl` use the
+same optional admission fence. Only the existing public candle read is permitted
+to retry across a replacement bridge.
 
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from

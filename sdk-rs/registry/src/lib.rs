@@ -1,6 +1,8 @@
 //! Every Rust venue, constructed by name from one options shape. Hosts (wasm,
 //! native) parse the account options once and receive the venue's engine
 //! through a [`Visit`]or; each venue's construction rules live here.
+#[cfg(feature = "kraken")]
+mod kraken_setup;
 #[cfg(feature = "mexc")]
 mod mexc_setup;
 #[cfg(not(any(
@@ -288,9 +290,22 @@ fn private_custody_rules(
     context: ConstructionContext,
     venue: &str,
     options: &EngineOptions,
+    provider_ready: bool,
 ) -> Result<(), VenueError> {
     context.validate_venue(venue)?;
-    let _ = options;
+    let _ = (options, provider_ready);
+    // Preserve closed injected custody before callback/public-mode resolution.
+    #[cfg(feature = "orderly")]
+    if matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi")
+        && !construction::signer_setup_public_data_only(options)
+        && (options.signing.is_some() || provider_ready)
+    {
+        return Err(
+            VenueError::new("Orderly injected private signing admission is closed")
+                .kind(ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
+    }
     #[cfg(feature = "polymarket")]
     if venue == "polymarket"
         && !resolved_public_data_only(venue, options)
@@ -807,6 +822,10 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        kraken_setup::preflight(options, public_data_only)?;
+    }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
@@ -1120,6 +1139,10 @@ pub fn local_signer_from_json_for(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, false);
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::json(input, false);
@@ -1222,6 +1245,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, construction::signer_setup_public_data_only(options));
+    }
     // Paradex records its key form on the options: `local_signer_from_capsule`.
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
@@ -1389,7 +1416,7 @@ pub fn build_in_context<T: Visit>(
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    private_custody_rules(context, venue, &options)?;
+    private_custody_rules(context, venue, &options, false)?;
     callback_rules(venue, &options, false)?;
     retain_delegated_public_mode(venue, &mut options);
     payload_signing_rules(venue, &options, false)?;
@@ -1553,15 +1580,22 @@ pub fn build_with_signer_in_context<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
-    signer: Option<safe_cex_engine::signing::Provider>,
+    mut signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    private_custody_rules(context, venue, &options)?;
+    private_custody_rules(context, venue, &options, signer.is_some())?;
     callback_rules(venue, &options, signer.is_some())?;
     retain_delegated_public_mode(venue, &mut options);
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));
+    }
+    let orderly = cfg!(feature = "orderly")
+        && matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi");
+    if orderly && construction::signer_setup_public_data_only(&options) {
+        options.public_data_only = true;
+        options.signing = None;
+        signer = None;
     }
     if (options.signing.is_some() || signer.is_some())
         && !construction::bridge(venue, &options).dispatch_signing
@@ -1846,21 +1880,44 @@ pub fn build_with_signer_in_context<T: Visit>(
             )
         }
         #[cfg(feature = "kraken")]
-        "kraken" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Kraken::new(KrakenOptions {
-                    read_credentials: options.read_credentials.take(),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                }),
+        "kraken" => {
+            let mut identities = options.signing.take().unwrap_or_default();
+            if options.public_data_only {
+                identities.primary = None;
+            }
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Kraken credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut engine = Engine::new(
+                Kraken::with_signing(
+                    KrakenOptions {
+                        testnet: options.testnet,
+                        public_data_only: options.public_data_only,
+                        ..Default::default()
+                    },
+                    identities.clone(),
+                ),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kraken")]
         "krakenspot" => finish(
             visitor,
