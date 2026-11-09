@@ -15,9 +15,9 @@ it('admits Backpack RemoteSigner while undeclared venues still refuse before cal
   const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
   expect(() => assertBetaAccount('backpack', { remoteSigner })).not.toThrow();
   expect(deriveRemoteSigningPolicy('backpack')?.enabled).toBe(true);
-  for (const name of ['cryptocom', 'krakenspot'] as const) {
+  for (const name of ['kraken', 'krakenspot'] as const) {
     let refusal: unknown;
-    try { assertBetaAccount(name, { remoteSigner }); } catch (error) { refusal = error; }
+    try { assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner }); } catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();

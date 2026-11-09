@@ -1725,6 +1725,18 @@ fn protective_amend_refusal_restores_exact_original_stop_once() {
         h.failures.last().unwrap().protection,
         Some(safe_cex_engine::error::Protection::Restored)
     );
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let rows = h.failures.last().unwrap().elements.as_ref().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(
+        matches!(&rows[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "991")
+    );
+    assert!(
+        matches!(&rows[1].result, ElementResult::NotSent { error: Some(e) } if e.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert!(
+        matches!(&rows[2].result, ElementResult::Placed { order_ids } if order_ids == &["992"])
+    );
     assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
 }
 const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;

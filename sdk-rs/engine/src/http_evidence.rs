@@ -35,7 +35,7 @@ impl ResponseProof {
         match self {
             Self::NativeCodec => None,
             Self::Unproven(kind) => Some(
-                VenueError::new("HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders")
+                VenueError::new(crate::UNKNOWN_HTTP_OUTCOME_TEXT)
                     .kind(kind)
                     .outcome(Outcome::Unknown),
             ),
@@ -108,8 +108,23 @@ impl UnprovenEvidence {
 
     pub fn venue_message(&mut self, message: &str) {
         if self.error.venue_message.is_none() {
-            self.error.venue_message = Some(self.budget.text(message));
+            self.error.venue_message = Some(self.budget.text(message).into_boxed_str());
         }
+    }
+
+    /// Preserve the venue's recorded logical facts when the engine seals an
+    /// unproven response before the venue decoder runs. Pending rows stay Unknown.
+    pub fn write_plan(&mut self, plan: &crate::write_plan::WritePlan) {
+        let mut elements = plan.outcomes();
+        let mut failure = self.error.clone();
+        failure.elements = None;
+        failure.partial = None;
+        for element in &mut elements {
+            if let crate::write_plan::ElementResult::Unknown { error } = &mut element.result {
+                **error = failure.clone();
+            }
+        }
+        self.error.elements = Some(Box::new(crate::write_plan::ElementOutcomes(elements)));
     }
 
     pub(crate) fn retry_after_ms(&mut self, delay: Option<f64>) {
@@ -253,7 +268,10 @@ impl EvidenceBudget {
     fn error_text(&mut self, error: &mut VenueError) {
         error.message = self.text(&error.message);
         error.venue_code = error.venue_code.as_ref().map(|value| self.text(value));
-        error.venue_message = error.venue_message.as_ref().map(|value| self.text(value));
+        error.venue_message = error
+            .venue_message
+            .as_ref()
+            .map(|value| self.text(value).into_boxed_str());
     }
 
     fn text(&mut self, source: &str) -> String {
@@ -298,4 +316,56 @@ pub(super) fn mark_id_overflow(error: &mut VenueError) {
     error.message = format!("{prefix}{ID_OVERFLOW}")
         .into_boxed_str()
         .into_string();
+}
+
+#[cfg(test)]
+mod write_plan_tests {
+    use super::*;
+    use crate::write_plan::{Element, ElementResult, WritePlan};
+
+    #[test]
+    fn unproven_http_seal_preserves_prefix_pending_and_unissued_rows() {
+        let mut plan = WritePlan::new(
+            (0..3)
+                .map(|index| Element {
+                    index,
+                    client_order_id: None,
+                })
+                .collect(),
+        );
+        plan.record(
+            0,
+            ElementResult::Placed {
+                order_ids: vec!["native-0".into()],
+            },
+        )
+        .unwrap();
+        plan.record(
+            1,
+            ElementResult::Unknown {
+                error: Box::new(
+                    VenueError::new("awaiting native response").outcome(Outcome::Unknown),
+                ),
+            },
+        )
+        .unwrap();
+        let mut evidence = UnprovenEvidence::new(EvidenceBudget::default(), 503).unwrap();
+        evidence.write_plan(&plan);
+        evidence.write_plan(&plan);
+        let (_, error, _) = evidence.finish();
+        let elements = error.elements.unwrap();
+        assert!(
+            matches!(&elements[0].result, ElementResult::Placed { order_ids } if order_ids == &["native-0"])
+        );
+        assert!(
+            matches!(&elements[1].result, ElementResult::Unknown { error }
+            if error.kind == Some(ErrorKind::VenueUnavailable)
+                && error.outcome == Some(Outcome::Unknown) && error.elements.is_none())
+        );
+        assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+        assert!(matches!(
+            plan.outcomes()[1].result,
+            ElementResult::Unknown { .. }
+        ));
+    }
 }

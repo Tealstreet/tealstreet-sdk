@@ -7,7 +7,7 @@ it('explicitly refuses Polymarket signature-only custody before callbacks or con
   const sign = vi.fn();
   const remoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
   for (const options of [{ remoteSigner }, { payloadSigner: sign }, { remoteSigner, payloadSigner: sign }]) {
-    expect(() => assertBetaAccount('polymarket', options)).toThrowError(expect.objectContaining({
+    expect(() => assertBetaAccount('polymarket', { key: 'fixture-private-key', ...options })).toThrowError(expect.objectContaining({
       kind: 'unsupported', outcome: 'notSent',
       message: expect.stringContaining('user WebSocket requires the API secret'),
     }));

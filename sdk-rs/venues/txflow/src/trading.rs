@@ -779,9 +779,9 @@ impl TxFlow {
         {
             if error.outcome == Some(Outcome::Rejected) {
                 if let Ok(reply) = response {
-                    let code = serde_json::from_str::<serde_json::Value>(reply.body)
+                    let code = serde_json::from_str::<Reply>(reply.body)
                         .ok()
-                        .and_then(|value| value["code"].as_i64())
+                        .and_then(|reply| reply.code)
                         .unwrap_or(-1);
                     let native = safe_cex_engine::classify::Native {
                         code: safe_cex_engine::classify::NativeCode::Int(code),
@@ -818,26 +818,32 @@ impl TxFlow {
             self.finish_trade(cx, Err(unknown("TxFlow active trade is missing")));
             return;
         };
-        let pending_place = matches!(&request.effect, Effect::Place(_));
-        if pending_place {
-            let receipt = match cx.http_pending_placement(&request.context) {
-                Ok(receipt) => receipt,
-                Err(error) => {
-                    self.finish_trade(cx, Err(error.venue_error()));
+        let pending_place = match &request.effect {
+            Effect::Place(_) => {
+                let receipt = match cx.http_pending_placement(&request.context) {
+                    Ok(receipt) => receipt,
+                    Err(error) => {
+                        self.finish_trade(cx, Err(error.venue_error()));
+                        return;
+                    }
+                };
+                job.custody.pending_identity = Some(receipt);
+                true
+            }
+            _ => {
+                if cx
+                    .http_write_fact(
+                        &request.context,
+                        safe_cex_engine::classify::WriteFact::Accepted { order_ids: vec![] },
+                        None,
+                    )
+                    .is_err()
+                {
                     return;
                 }
-            };
-            job.custody.pending_identity = Some(receipt);
-        } else if cx
-            .http_write_fact(
-                &request.context,
-                safe_cex_engine::classify::WriteFact::Accepted { order_ids: vec![] },
-                None,
-            )
-            .is_err()
-        {
-            return;
-        }
+                false
+            }
+        };
         job.effective = true;
         if job.steps.is_empty() {
             if let (Some(plan), Some(slot)) = (&job.custody.plan, &job.custody.slot) {

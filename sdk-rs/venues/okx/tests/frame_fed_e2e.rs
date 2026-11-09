@@ -3,7 +3,7 @@
 //! engine (the browser's main-thread engine), which signs and sends the writes.
 mod support;
 use safe_cex_engine::model::{
-    Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, Position, PositionSide,
+    Order, OrderExtra, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, Position, PositionSide,
 };
 use safe_cex_engine::{Action, Command, Engine, Event, Method, VenueAction};
 use safe_cex_venue_okx::Okx;
@@ -50,7 +50,12 @@ fn resting(id: &str, price: f64) -> Order {
         trigger_type: None,
         take_profit: None,
         stop_loss: None,
-        extra: None,
+        // MARKET's 0.01 BTC contract makes this one-BTC order 100 native contracts.
+        extra: Some(OrderExtra {
+            remaining_native: Some(100.),
+            filled_in_placement_units: Some(0.),
+            ..OrderExtra::default()
+        }),
     }
 }
 
@@ -106,6 +111,19 @@ fn source() -> Engine<Okx> {
     store.set_orders(vec![resting("701", 39000.)]);
     store.set_positions(vec![long(2.)]);
     source
+}
+
+#[test]
+fn source_frames_derive_native_order_sizing_without_losing_base_units() {
+    let mut source = source();
+    let mut order = resting("701", 39000.);
+    order.extra = None;
+    source.store_mut().set_orders(vec![order]);
+    let mut page = frame_fed();
+    page.apply_frame(2., source.snapshot_frame(2.), true)
+        .unwrap();
+    assert_eq!(page.store().orders(), &[resting("701", 39000.)]);
+    assert!(source.store().orders()[0].extra.is_none());
 }
 
 #[test]

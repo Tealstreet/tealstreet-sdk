@@ -13,6 +13,7 @@ import {
   takePerfFixture,
 } from './perfFixture';
 import { StoreWorkerPayload, WorkerConfig } from './StoreWorkerPayload';
+import { isWorkerMessage, isWorkerRecord } from './workerMessage';
 import { TelegramWorker } from './TelgramWorker';
 import { serializeWorkerErrorForSentry } from './workerErrorSerialization';
 
@@ -324,17 +325,18 @@ const start = (ctx: Worker, shared = false) => {
     }
   };
 
-  ctx.addEventListener('message', async (event: any) => {
-    const payload = event.data as StoreWorkerPayload;
+  ctx.addEventListener('message', async (event: MessageEvent<unknown>) => {
+    const input = event.data;
+    if (!isWorkerRecord(input)) return;
 
     // Heartbeat — answer before any init / instanceId checks so a worker that's
     // alive but has not finished init (or has a stale instanceId) still proves
     // it's running. Main thread uses this to detect a dead/hung worker.
-    if (payload?.op === '__worker_ping__') {
+    if (input.op === '__worker_ping__') {
       try {
         ctx.postMessage({
           op: '__worker_pong__',
-          instanceId: payload.instanceId,
+          instanceId: input.instanceId,
           data: { ts: Date.now() },
         });
       } catch (_e) {
@@ -342,6 +344,9 @@ const start = (ctx: Worker, shared = false) => {
       }
       return;
     }
+
+    if (!isWorkerMessage(input)) return;
+    const payload = input;
 
     // Global worker config: the host app derives these knobs from per-user feature flags
     // and pushes them once, before any 'init', so safe-cex resolves the right hosts from
@@ -480,9 +485,10 @@ const start = (ctx: Worker, shared = false) => {
         // case 'unsubscribeOHLCV':
         // case 'unsubscribeOrderBook':
         if (exchangeWorker) {
-          if (shared && payload?.data?.subId) {
+          const data: unknown = payload.data;
+          if (shared && isWorkerRecord(data) && typeof data.subId === 'string' && data.subId) {
             // For shared workers, store the port by subId for targeted messaging
-            portsBySubId[payload.data.subId] = ctx;
+            portsBySubId[data.subId] = ctx;
           }
           exchangeWorker.handlePayload(payload);
         } else {

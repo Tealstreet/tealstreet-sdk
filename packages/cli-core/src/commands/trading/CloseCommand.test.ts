@@ -341,9 +341,10 @@ describe('CloseCommand', () => {
       const exchange = createMockExchange([
         { symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 },
       ]);
-      await command.execute(createMockContext(['close', '100'], exchange, 'BTCUSDT'));
-      const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(order.amount).toBe(1); // full close, not 100 anything
+      const result = await command.execute(createMockContext(['close', '100'], exchange));
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/unknown argument/i);
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
     });
 
     it('e2e: `close 1000$` with a base="1000" market still partial-closes correctly', async () => {

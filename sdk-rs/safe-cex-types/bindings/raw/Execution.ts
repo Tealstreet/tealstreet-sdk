@@ -2,4 +2,20 @@
 import type { OrderSide } from "./OrderSide";
 import type { PositionSide } from "./PositionSide";
 
-export type Execution = { id?: string, timestamp: number, symbol: string, orderId?: string, price: number, qty: number, side: OrderSide, commission?: number, commissionAsset?: string, positionSide?: PositionSide | 'both', realizedPnl?: number, maker?: boolean, venueReportedRevenue?: number, venueReportedRevenueAsset?: string, };
+export type Execution = { id?: string, 
+/**
+ * Seconds, unlike PublicTrade.timestamp and HistoricalTrade.time (milliseconds).
+ */
+timestamp: number, symbol: string, orderId?: string, price: number, qty: number, side: OrderSide, commission?: number, commissionAsset?: string, 
+/**
+ * Absent means unreported; both is explicit one-way attribution.
+ */
+positionSide?: PositionSide | 'both', 
+/**
+ * Venue-reported gross realized PnL; commission is separate.
+ */
+realizedPnl?: number, maker?: boolean, 
+/**
+ * Venue-reported integrator revenue, distinct from user commission.
+ */
+venueReportedRevenue?: number, venueReportedRevenueAsset?: string, };

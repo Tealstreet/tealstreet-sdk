@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Market, Order } from '@tealstreet/safe-cex/src/types';
+import { OrderSide, OrderStatus, OrderType, type Market, type Order } from '@tealstreet/safe-cex/src/types';
 import { formatBaseSize, formatOrderBaseSize } from './formatBaseSize';
 
 const market = (amountStep: number, contractSize: number, isInverse = false): Market => ({
@@ -13,6 +13,21 @@ const market = (amountStep: number, contractSize: number, isInverse = false): Ma
   limits: { amount: { min: amountStep, max: 100 }, leverage: { min: 1, max: 100 } },
   contractSize,
   isInverse,
+});
+
+const orderFixture = (overrides: Partial<Order>): Order => ({
+  id: 'partial',
+  status: OrderStatus.Open,
+  symbol: 'BTCUSD',
+  type: OrderType.Limit,
+  side: OrderSide.Buy,
+  price: 0,
+  amount: 7,
+  filled: 2,
+  remaining: 5,
+  reduceOnly: false,
+  lastUpdate: 0,
+  ...overrides,
 });
 
 describe('formatBaseSize', () => {
@@ -45,16 +60,16 @@ describe('formatOrderBaseSize', () => {
     { name: 'infinite price', remaining: 5, price: Infinity, notional: 500, expected: '-' },
     { name: 'invalid notional', remaining: 5, price: 50_000, notional: NaN, expected: '-' },
   ])('formats $name without claiming a native count is base', ({ remaining, price, notional, expected }) => {
-    const order = { remaining, price, extra: { remainingNotional: notional } } as Order;
+    const order = orderFixture({ remaining, price, extra: { remainingNotional: notional } });
     expect(formatOrderBaseSize(order, market(1, 100, true))).toBe(expected);
   });
 
   it('preserves inverse base remainders without native metadata', () => {
-    expect(formatOrderBaseSize({ remaining: 0.01 } as Order, market(1, 100, true))).toBe('0.01');
+    expect(formatOrderBaseSize(orderFixture({ remaining: 0.01 }), market(1, 100, true))).toBe('0.01');
   });
 
   it('keeps linear base remainders even when notional metadata is present', () => {
-    const order = { remaining: 0.0012, price: 50_000, extra: { remainingNotional: 500 } } as Order;
+    const order = orderFixture({ remaining: 0.0012, price: 50_000, extra: { remainingNotional: 500 } });
     expect(formatOrderBaseSize(order, market(0.01, 0.01))).toBe('0.0012');
   });
 });
