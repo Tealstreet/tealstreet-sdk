@@ -76,6 +76,11 @@ pass a connection-scoped `accountName` into the `init` payload** (it does:
 name, and don't assume `accountName` is globally unique here. See
 `services/exchange-server/CLAUDE.md` → "Multi-tenant invariant".
 
+Each shared worker's outbound proxy captures its original routing key and exact
+registry instance. Rebinding its creating port must not redirect a surviving
+worker's updates; replacing that registry instance drops its stale output.
+Subscription-targeted delivery is restricted to ports attached to that routing key.
+
 ## Files
 
 - `ExchangeWorker.ts` — the class.
