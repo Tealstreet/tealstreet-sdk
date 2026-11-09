@@ -1,6 +1,6 @@
 // Every family package built by `yarn rust:build-wasm --families` loads in a
-// fresh web initialization, constructs each of its venues, refuses every
-// other family's venues and fits the single-venue size budget.
+// fresh web initialization, constructs admitted names, checks fixture-only
+// refusals, refuses other families and fits the single-venue size budget.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
@@ -15,10 +15,18 @@ const pkg = new URL('../hosts/wasm/pkg/', import.meta.url);
 const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.url), 'utf8')
   .match(/^\s+'?[a-z-]+'?: '[a-z]+',$/gm)
   .map((line) => line.trim().split(':')[0].replaceAll("'", ''));
+const types = readFileSync(new URL('../../packages/safe-cex/src/types.ts', import.meta.url), 'utf8');
+const exchangeNames = types.match(/^export type ExchangeName =([\s\S]*?);/m);
+if (!exchangeNames) throw new Error('ExchangeName inventory not found');
+const expectedVenues = [...exchangeNames[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+// Orderly's native family name supplements its SDK broker aliases.
+expectedVenues.push('orderly');
 
 test('the venue list is read from the family map', () => {
-  // Pin the live venue and alias inventory so isolation covers every name.
-  assert.equal(venues.length, 48);
+  // Pin the declared venue and alias inventory so isolation covers every name.
+  assert.deepEqual([...venues].sort(), expectedVenues.sort());
+  assert.ok(venues.includes('bingxspot'));
+  assert.equal(venueFamily('bingxspot'), venueFamily('bingx'));
   for (const venue of venues) assert.doesNotThrow(() => venueFamily(venue), venue);
 });
 
@@ -64,6 +72,12 @@ for (const family of selectedFamilies) {
       if (venueFamily(venue) === family) {
         for (const [profile, options] of constructionProfiles(venue).entries()) {
           const label = `${family}/${venue}/profile${profile}`;
+          // Spot stays fixture-only until its live-key transport smoke passes.
+          if (venue === 'bingxspot') {
+            assert.throws(() => new engine.WasmEngine(venue, JSON.stringify(options)),
+              /unsupported venue: bingxspot/, label);
+            continue;
+          }
           const proofs = checkAdvertisedCommands(() => new engine.WasmEngine(venue, JSON.stringify(options)), label);
           // Descriptive coverage only: preconditions/deferred responses are not
           // positive valid-state handler proof (covered separately by native fixtures).

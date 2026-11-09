@@ -20,6 +20,10 @@ tickInterval?: number,
 /**
  * @ts-mutable
  */
+rustCommandTimeoutMs?: number, 
+/**
+ * @ts-mutable
+ */
 recvWindow?: number, 
 /**
  * @ts-mutable
@@ -56,7 +60,11 @@ hyrotraderMode?: "demo" | "production",
 /**
  * @ts-mutable
  */
-kucoinBroker?: { partner: string, brokerKey: string, brokerName: string, verify?: boolean, }, }, remoteSigner?: RemoteSigner, transport?: TransportProvider, payloadSigner?: PayloadSigner, hostedMode?: boolean, externalPublicData?: { 
+kucoinBroker?: { partner: string, brokerKey: string, brokerName: string, verify?: boolean, }, }, 
+/**
+ * Typed extension consumed by the Polymarket source constructor.
+ */
+polymarket?: { marketSlugs?: Array<string>, apiKey?: string, apiSecret?: string, apiPassphrase?: string, signerType?: 0 | 1 | 2 | 3, funderAddress?: string, }, remoteSigner?: RemoteSigner, transport?: TransportProvider, payloadSigner?: PayloadSigner, hostedMode?: boolean, externalPublicData?: { 
 /**
  * @ts-mutable
  */
@@ -80,4 +88,4 @@ type: "in-process",
 /**
  * @ts-mutable
  */
-source: PublicDataSource, }, };
+source: PublicDataSource, }, localSigner?: LocalSignerMetadata, hyperliquidFastBook?: boolean, callerReportsPlacementFailures?: boolean, workerMirror?: boolean, engine?: "rust", publicFeed?: RustPublicFeedPolicy, };

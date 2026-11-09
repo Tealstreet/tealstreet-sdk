@@ -76,7 +76,7 @@ export const resolveClosedPositions = async (
     const entries = await exchange.deriveClosedPositions(opts);
     const sharesSource = exchange.closedPositionsShareLedgerSource ?? true;
     return {
-      entries: entries.map((entry) => ({ ...entry, provenance: 'derived' as const })),
+      entries: entries.map<ClosedPnlEntry>((entry) => ({ ...entry, provenance: 'derived' })),
       provenance: 'derived',
       // A fold can still be an independent check — if it folds a DIFFERENT source than
       // the ledger reads. What disqualifies it is sharing the source, not being a fold.
