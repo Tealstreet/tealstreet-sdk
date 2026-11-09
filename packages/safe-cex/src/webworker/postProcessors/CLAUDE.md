@@ -189,7 +189,7 @@ This is the margin analog of `displayedPositions`: a worker-derived
 internal layer the margin UI reads instead of looping positions on the
 render path. It's a single order-preserving pass: finite values use absolute
 notional and preserve the old filter+reduce accumulation order. Missing or
-nonfinite notional makes its side and the total unknown (`NaN`), rather than
+nonfinite notional makes its side and the total unknown (`null`), rather than
 publishing a partial sum. The opposite side remains usable when complete;
 empty scopes and reported zero remain zero. Tests pin both finite parity and
 unknown propagation.

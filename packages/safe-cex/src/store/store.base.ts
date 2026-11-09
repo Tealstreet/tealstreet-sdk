@@ -1,8 +1,8 @@
 import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import uniqBy from 'lodash/uniqBy';
-import { initialStoreData as defaultStore } from '../generated/StoreData';
 
+import { initialStoreData as defaultStore } from '../generated/StoreData';
 import { Market, Order, OrderStatus, Position, RequestOutcome, StoreData, Ticker, Writable } from '../types';
 import { clone } from '../utils/clone';
 import { virtualClock } from '../utils/virtualClock';
@@ -109,11 +109,7 @@ export class DefaultStore implements Store {
       tickers: [...this.tickers],
       positions: [...this.positions],
       displayedPositions: [...this.displayedPositions],
-      displayedMargin: {
-        longExposure: this.displayedMargin?.longExposure ?? 0,
-        shortExposure: this.displayedMargin?.shortExposure ?? 0,
-        totalNotional: this.displayedMargin?.totalNotional ?? 0,
-      },
+      displayedMargin: { ...(this.displayedMargin ?? { longExposure: 0, shortExposure: 0, totalNotional: 0 }) },
       ordersRisk: { ...this.ordersRisk },
       activeChasers: [...this.activeChasers],
       activeTWAPs: [...this.activeTWAPs],
@@ -257,9 +253,10 @@ export class DefaultStore implements Store {
     if (this.pendingTickerDeltas.size === 0) {
       return [];
     }
-    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(
-      ([index, changes]): [number, Partial<Ticker>] => [index, changes],
-    );
+    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(([index, changes]): [number, Partial<Ticker>] => [
+      index,
+      changes,
+    ]);
     this.pendingTickerDeltas.clear();
     return deltas;
   }

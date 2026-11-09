@@ -41,6 +41,8 @@ ids.orders = 0; ids.positions = 0;
 const leverage: FetchedLeverage = { buyLeverage: 0, sellLeverage: 0, marginType: MarginType.Cross, positionMode: PositionMode.Hedged };
 leverage.isFetching = false;
 const margin: DisplayedMargin = { longExposure: 0, shortExposure: 0, totalNotional: 0 };
+const unknownMargin: DisplayedMargin = { longExposure: null, shortExposure: 250, totalNotional: null };
+const unsafeNotional: number = unknownMargin.totalNotional;
 const unsafeLatency: number = store.latency;
 loaded.positions = true;
 options.isHedged = true;
@@ -61,6 +63,7 @@ const opaque: string = store.userData;
   const diagnostics = ts.getPreEmitDiagnostics(program);
   const lineOf = (text) => source.slice(0, source.indexOf(text)).split('\n').length;
   const expected = [
+    ['const unsafeNotional:', 2322],
     ['const unsafeLatency:', 2322],
     ['loaded.positions =', 2540],
     ['options.isHedged =', 2540],

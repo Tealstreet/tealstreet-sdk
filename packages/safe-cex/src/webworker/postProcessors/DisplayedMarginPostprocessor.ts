@@ -23,6 +23,10 @@ export class DisplayedMarginPostprocessor extends BasePostprocessor {
       }
     }
 
-    store.displayedMargin = { longExposure, shortExposure, totalNotional };
+    store.displayedMargin = {
+      longExposure: Number.isFinite(longExposure) ? longExposure : null,
+      shortExposure: Number.isFinite(shortExposure) ? shortExposure : null,
+      totalNotional: Number.isFinite(totalNotional) ? totalNotional : null,
+    };
   }
 }

@@ -332,7 +332,7 @@ fn decoded_task_snapshots_use_distinct_dimensions_and_one_hot_flags() {
             margin.short_exposure,
             margin.total_notional
         ),
-        (11.0, 23.0, 37.0),
+        (Some(11.0), Some(23.0), Some(37.0)),
         "FIELD-IDENTITY DisplayedMargin dimensions"
     );
 }

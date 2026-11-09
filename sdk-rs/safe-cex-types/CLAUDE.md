@@ -331,3 +331,7 @@ strict codecs. `initial_store_data` owns unloaded Store defaults. The scoped
 publishes six modules and the initial value without overwriting other slices.
 Composed model imports use their owning public generated identities. Opaque
 config/user data projects to unknown; its native retained/JSON policy is unchanged.
+
+DisplayedMargin sides and total are required nullable numbers: unknown exposure
+remains null through Store serialization, while known zero stays zero. The
+postprocessor poisons only incomplete scopes; native codecs reject missing fields.

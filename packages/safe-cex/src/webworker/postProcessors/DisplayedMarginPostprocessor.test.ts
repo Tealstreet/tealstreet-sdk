@@ -2,6 +2,7 @@ import type { DisplayedPosition, StoreData, Writable } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
+import { DefaultStore } from '../../store/store.base';
 import { PositionSide } from '../../types';
 import { DisplayedMarginPostprocessor } from './DisplayedMarginPostprocessor';
 
@@ -58,8 +59,8 @@ describe('DisplayedMarginPostprocessor', () => {
         ]) {
           const store = createStore(positions);
           createProcessor().process(store);
-          expect(store.displayedMargin?.totalNotional).toBeNaN();
-          expect(side === L ? store.displayedMargin?.longExposure : store.displayedMargin?.shortExposure).toBeNaN();
+          expect(store.displayedMargin?.totalNotional).toBeNull();
+          expect(side === L ? store.displayedMargin?.longExposure : store.displayedMargin?.shortExposure).toBeNull();
           expect(side === L ? store.displayedMargin?.shortExposure : store.displayedMargin?.longExposure).toBe(0);
         }
       });
@@ -69,9 +70,22 @@ describe('DisplayedMarginPostprocessor', () => {
   it('preserves a complete opposite-side sum when only one side has unknown exposure', () => {
     const store = createStore([pos(L, NaN), pos(S, 250)]);
     createProcessor().process(store);
-    expect(store.displayedMargin?.longExposure).toBeNaN();
+    expect(store.displayedMargin?.longExposure).toBeNull();
     expect(store.displayedMargin?.shortExposure).toBe(250);
-    expect(store.displayedMargin?.totalNotional).toBeNaN();
+    expect(store.displayedMargin?.totalNotional).toBeNull();
+  });
+
+  it('keeps unknown totals null through serialization, JSON and a receiving store', () => {
+    const store = new DefaultStore();
+    store.update({ displayedPositions: [pos(L, null), pos(S, 250)] });
+    const snapshot = store.serialize();
+    createProcessor().process(snapshot);
+    store.update({ displayedMargin: snapshot.displayedMargin });
+    const serialized = store.serialize();
+    expect(serialized.displayedMargin).toEqual({ longExposure: null, shortExposure: 250, totalNotional: null });
+    const receiving = new DefaultStore();
+    receiving.update(JSON.parse(JSON.stringify(serialized)));
+    expect(receiving.displayedMargin).toEqual(serialized.displayedMargin);
   });
 
   it('counts an unknown side toward totalNotional only (matches old behavior)', () => {
