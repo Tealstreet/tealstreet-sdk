@@ -1057,6 +1057,11 @@ pub async fn run(
                     let dispatched = if crate::user_drain::starts_job(&op) {
                         if let Some(user) = running.user.get() {
                             match user.admit() {
+                                // Admission can wait: re-check the owner after it, right before dispatch.
+                                Ok(_admission) if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() => {
+                                    port.emit("error", serde_json::json!("Algo operation cancelled-for-owner-change: authenticated connection binding changed").to_string());
+                                    continue;
+                                }
                                 Ok(_admission) => dispatch(),
                                 Err(error) => {
                                     port.emit("error", error.to_string());
