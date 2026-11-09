@@ -3511,19 +3511,31 @@ impl BitgetFutures {
                     child.side = base.side.opposite();
                     child.kind = kind;
                     child.price = price;
-                    let reference = if self.account.uta
-                        && match kind {
-                            OrderType::StopLoss => raw.sl_trigger_by == "mark",
-                            _ => raw.tp_trigger_by == "mark",
-                        } {
-                        StopTriggerType::MarkPrice
+                    let reference = if self.account.uta {
+                        Some(
+                            if match kind {
+                                OrderType::StopLoss => raw.sl_trigger_by == "mark",
+                                _ => raw.tp_trigger_by == "mark",
+                            } {
+                                StopTriggerType::MarkPrice
+                            } else {
+                                StopTriggerType::LastPrice
+                            },
+                        )
                     } else {
-                        StopTriggerType::LastPrice
+                        match match kind {
+                            OrderType::StopLoss => raw.preset_sl_trigger_type.as_ref(),
+                            _ => raw.preset_tp_trigger_type.as_ref(),
+                        } {
+                            "fill_price" => Some(StopTriggerType::LastPrice),
+                            "mark_price" => Some(StopTriggerType::MarkPrice),
+                            _ => None,
+                        }
                     };
                     let extra = child.extra.get_or_insert_with(OrderExtra::default);
                     match kind {
-                        OrderType::StopLoss => extra.sl_trigger_type = Some(reference),
-                        _ => extra.tp_trigger_type = Some(reference),
+                        OrderType::StopLoss => extra.sl_trigger_type = reference,
+                        _ => extra.tp_trigger_type = reference,
                     }
                     orders.push(child);
                 }
