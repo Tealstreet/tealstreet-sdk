@@ -1430,8 +1430,13 @@ Its test also requires each advertised route to select an existing backend; comm
 are not routes. Remove retired DNS names from both files together, or
 `engine.ts` can select an HTTP fallback the fleet cannot serve. WEEX remains
 HTTP-only (no HOW); adding its fleet route does not enable the venue or change
-that transport policy. Lighter's `testnet-api.lighter.xyz` does not resolve and
-is intentionally absent; do not introduce another dead backend to cover it.
+that transport policy. Lighter's `testnet-api.lighter.xyz` was documented as retired
+and previously excluded. The SDK inventory now includes every fixed REST base
+declared by the venue crates, including that testnet URL; the source-derived
+coverage test includes production, demo/testnet and auxiliary APIs. Configured
+HyroTrader endpoints are caller-owned rather than fixed venue bases. SDK coverage
+does not prove endpoint reachability: HAProxy config and the fleet rollout remain
+a human step, including resolving the retired Lighter endpoint before routing it.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned family (bybit when tunnelling), whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 

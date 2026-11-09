@@ -3594,8 +3594,8 @@ fn execution_price(row: &OrderRow<'_>, classic: bool) -> Option<f64> {
             if classic
                 && row.order_type == "market"
                 && matches!(
-                    row.plan_type.as_ref(),
-                    "pos_loss" | "pos_profit" | "loss_plan" | "profit_plan"
+                    plan_type(&row.plan_type),
+                    Some("pos_loss" | "pos_profit" | "loss_plan" | "profit_plan")
                 ) =>
         {
             Some(0.0)
