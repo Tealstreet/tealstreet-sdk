@@ -18,7 +18,6 @@ struct Fixture {
     private_reads: Arc<AtomicUsize>,
     gate: Arc<tokio::sync::Semaphore>,
     server: tokio::task::JoinHandle<()>,
-    plan: RoutingPlan,
     rejected: Arc<AtomicUsize>,
 }
 impl Drop for Fixture {
@@ -100,12 +99,11 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
         ..Default::default()
     };
     Fixture {
-        registry: crate::accounts::testing::probe_registry(plan.clone()),
+        registry: crate::accounts::testing::probe_registry(plan),
         code,
         private_reads,
         gate,
         server,
-        plan,
         rejected,
     }
 }
