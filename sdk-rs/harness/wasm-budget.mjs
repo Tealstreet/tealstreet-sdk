@@ -228,7 +228,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_915_904,
   blofin: 2_049_024,
   bybit: 2_320_384,
-  coinbase: 2_080_768,
+  // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
+  // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.
+  coinbase: 2_102_272,
   cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
