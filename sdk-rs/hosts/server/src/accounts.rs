@@ -1215,7 +1215,7 @@ impl Registry {
             Arc::downgrade(&account),
         );
         if self.user_drains.get(user).latched() {
-            Self::stop(
+            self.stop(
                 &account,
                 "the user is draining",
                 None,
@@ -1428,27 +1428,32 @@ impl Registry {
         holds.then_some(account)
     }
 
-    /// Lets go of one holder; the last one disposes the account, for `disposal`.
+    /// Releases a holder; DELEGATED disconnects start their separate retention clock.
     pub fn release(self: &Arc<Self>, account: &Arc<Account>, holder: u64, disposal: Disposal) {
-        let empty = {
+        let (last, stopped) = {
             let mut holders = account.holders.lock().unwrap();
-            if holders.by_id.remove(&holder).is_none() {
+            if holders.by_id.remove(&holder).is_none() && account.delegated.is_some() {
                 return;
             }
             account.hand_over(&mut holders, holder);
-            holders.by_id.is_empty()
+            let last = if account.delegated.is_some() {
+                holders.by_id.values().all(Option::is_none)
+            } else {
+                holders.by_id.is_empty()
+            };
+            (last, holders.disposed)
         };
         if account.delegated.is_some() {
             if matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned) {
                 self.dispose_for(account, disposal, "account disposed", None);
                 return;
             }
-            if disposal == Disposal::SocketClosed {
+            if disposal == Disposal::SocketClosed && !stopped {
                 self.retain_delegated(account);
                 return;
             }
         }
-        if empty {
+        if last {
             self.dispose_for(account, disposal, "account disposed", None);
         }
     }
@@ -1564,16 +1569,26 @@ impl Registry {
 
     /// With algos, their host settles chases first, then disposes the engine and signer.
     fn stop(
-        account: &Account,
+        &self,
+        account: &Arc<Account>,
         reason: &str,
         stopped: Option<crate::algos::StopNotice>,
         cause: DisposalCause,
     ) {
         if let Some(resident) = &account.delegated {
+            let mut accounts = self.accounts.lock().unwrap();
             let mut holders = account.holders.lock().unwrap();
             holders.cancel_retention();
             holders.disposed = true;
             resident.revoke();
+            let key = (account.user.clone(), account.name.clone());
+            if holders.by_id.values().all(Option::is_none)
+                && accounts
+                    .get(&key)
+                    .is_some_and(|current| Arc::ptr_eq(current, account))
+            {
+                accounts.remove(&key);
+            }
         }
         account.handle.begin_disposal(cause);
         if !account.running.io_allowed() {
@@ -1709,18 +1724,19 @@ impl Registry {
         {
             accounts.remove(&key);
         }
-        {
+        if let Some(resident) = &account.delegated {
             let mut holders = account.holders.lock().unwrap();
             holders.cancel_retention();
-            if let Some(resident) = &account.delegated {
-                resident.revoke();
-            }
+            resident.revoke();
             *holders = Holders {
                 disposed: true,
                 ..Default::default()
             };
         }
         drop(accounts);
+        if account.delegated.is_none() {
+            *account.holders.lock().unwrap() = Holders::default();
+        }
         let stopped = if stopped.is_none() && !account.running.io_allowed() {
             Some(self.keep_notice(account, "router-lease"))
         } else {
@@ -1731,7 +1747,7 @@ impl Registry {
         } else {
             DisposalCause::Stopped
         };
-        Self::stop(account, reason, stopped, cause);
+        self.stop(account, reason, stopped, cause);
     }
 
     /// The process is stopping: every account's algos settle and its engine ends,
@@ -1742,7 +1758,7 @@ impl Registry {
         self.user_drains.box_draining(true);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
         for account in &accounts {
-            Self::stop(
+            self.stop(
                 account,
                 "the server is restarting",
                 None,
@@ -1839,7 +1855,7 @@ impl Registry {
                     }
                     keep(kept);
                 });
-                Self::stop(
+                registry.stop(
                     &account,
                     "the operator forced a user drain",
                     Some(stopped),
@@ -1909,13 +1925,16 @@ impl Registry {
     ) {
         let mut parked = Vec::with_capacity(accounts.len());
         for (account, holder) in accounts {
-            if account.user != user {
+            if account.delegated.is_some() && account.user != user {
                 continue;
             }
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
-                if holders.disposed || !holders.by_id.get(&holder).is_some_and(Option::is_some) {
+                if account.delegated.is_some()
+                    && (holders.disposed
+                        || !holders.by_id.get(&holder).is_some_and(Option::is_some))
+                {
                     continue;
                 }
                 holders.by_id.remove(&holder);
@@ -2043,15 +2062,17 @@ impl Registry {
         accounts
             .into_iter()
             .filter_map(|(account, park_holder)| {
-                let current = self
-                    .accounts
-                    .lock()
-                    .unwrap()
-                    .get(&(account.user.clone(), account.name.clone()))
-                    .is_some_and(|current| Arc::ptr_eq(current, &account));
                 // A DELEGATED resume must still name the registered account.
-                if account.delegated.is_some() && !current {
-                    return None;
+                if account.delegated.is_some() {
+                    let current = self
+                        .accounts
+                        .lock()
+                        .unwrap()
+                        .get(&(account.user.clone(), account.name.clone()))
+                        .is_some_and(|current| Arc::ptr_eq(current, &account));
+                    if !current {
+                        return None;
+                    }
                 }
                 account.holders.lock().unwrap().by_id.remove(&park_holder);
                 let admitted = account.hold(

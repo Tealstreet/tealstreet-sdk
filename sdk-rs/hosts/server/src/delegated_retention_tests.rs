@@ -365,3 +365,81 @@ async fn restart_marker_reports_waiting_for_key_and_keeps_restores_paused() {
         assert!(!notices.deliver("B", "synthetic-main", &out));
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn delegated_cleanup_does_not_leave_a_copy_behind_an_old_resume_holder() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for disposal in [Disposal::Moving, Disposal::JoinFailed] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                let provider = account.delegated.as_ref().unwrap().provider();
+                registry.park("old-resume".into(), "A", vec![(account.clone(), 7)]);
+                hold(&account, 8);
+                hold(&account, 9);
+                registry.release(&account, 8, disposal);
+                assert_eq!(
+                    registry.account_count(),
+                    1,
+                    "another admitted client still holds it"
+                );
+                assert!(inbox.try_recv().is_err());
+                registry.release(&account, 9, disposal);
+                assert_eq!(
+                    registry.account_count(),
+                    0,
+                    "a resume holder cannot retain a moved or failed account"
+                );
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(
+                    provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                    Capability::Unsupported
+                );
+                advance(RETAIN).await;
+                assert!(
+                    inbox.try_recv().is_err(),
+                    "old resume cleanup cannot dispose it again"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delegated_stopped_accounts_retire_without_rearming_retention() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for live in [false, true] {
+                let registry = tests::registry();
+                let (account, _inbox) = resident(&registry, "A");
+                if !live {
+                    registry.release(&account, 7, Disposal::SocketClosed);
+                }
+                registry.stop(
+                    &account,
+                    "the server is restarting",
+                    None,
+                    DisposalCause::Stopped,
+                );
+                if live {
+                    assert_eq!(
+                        registry.account_count(),
+                        1,
+                        "live holders remain for stop notices"
+                    );
+                    registry.release(&account, 7, Disposal::SocketClosed);
+                }
+                assert_eq!(
+                    registry.account_count(),
+                    0,
+                    "a stopped account must leave the registry"
+                );
+                advance(RETAIN).await;
+                assert_eq!(registry.account_count(), 0);
+            }
+        })
+        .await;
+}
