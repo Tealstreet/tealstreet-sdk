@@ -219,7 +219,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_058_240,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
-  asterdex: 2_230_272,
+  // #3302 merge 80d25442f36f: local optimized web/node 2,231,057 B; measured + 10 KiB rounded up.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue asterdex, twice -Oz.
+  asterdex: 2_241_536,
   backpack: 2_040_832,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
