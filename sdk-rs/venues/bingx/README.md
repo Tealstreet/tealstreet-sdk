@@ -44,6 +44,11 @@ can differ from the normalized requested amount. Recording tests in
 `tests/trading/allocation.rs` pin the six audited sequences, including integer,
 half-step and thousandth-step cases.
 
+Attached SL and TP each send once at the normalized entry amount, independently
+of the entry lots (`bingx.exchange.ts:1567-1595`). Failure text counts accepted
+entry lots from the journal: accepted children never confirm a refused entry,
+and an accepted subset is described as a partially placed entry.
+
 Prepared native writes use the shared `WritePlan` journal. Failures expose an
 ordered `elements` array covering each placed, refused, unknown and unsent lot
 or child, with exact client/native identities. Accepted cancellation, amendment

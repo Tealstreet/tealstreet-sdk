@@ -138,7 +138,7 @@ struct Job {
     restoring: bool,
     cancelled: bool,
     // A failed bracket leaves the placed entry without the protection the user asked for.
-    entry_with_brackets: Option<String>,
+    entry_with_brackets: Option<(String, usize)>,
 }
 struct Run {
     job: Job,
@@ -173,11 +173,20 @@ fn partial_failure_note(run: &Run, request: &Request, may_be_live: bool) -> Opti
             may_be_live,
         ));
     }
-    let symbol = run.job.entry_with_brackets.as_ref()?;
-    (!run.native_ids.is_empty()).then(|| {
-        let state = if may_be_live { "may not be" } else { "is not" };
-        format!("Your {symbol} entry was placed, but its stop or take profit {state} in place")
-    })
+    let (symbol, lots) = run.job.entry_with_brackets.as_ref()?;
+    let placed = run.writes.placed_count(*lots);
+    if placed == 0 {
+        return None;
+    }
+    let placement = if placed == *lots {
+        "placed"
+    } else {
+        "partially placed"
+    };
+    let state = if may_be_live { "may not be" } else { "is not" };
+    Some(format!(
+        "Your {symbol} entry was {placement}, but its stop or take profit {state} in place"
+    ))
 }
 struct Observation {
     order: Order,
@@ -1385,10 +1394,14 @@ impl Trading {
             ..Job::default()
         };
         for o in orders {
-            job.steps.extend(self.format(cx, o)?);
+            let steps = self.format(cx, o)?;
             if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {
-                job.entry_with_brackets = Some(o.symbol.clone());
+                let lots = steps.len()
+                    - usize::from(o.stop_loss.is_some())
+                    - usize::from(o.take_profit.is_some());
+                job.entry_with_brackets = Some((o.symbol.clone(), lots));
             }
+            job.steps.extend(steps);
         }
         Ok(job)
     }
@@ -1607,9 +1620,7 @@ impl Trading {
             if !cx.store.hedged() {
                 bracket = bracket.boolean("reduceOnly", true);
             }
-            for &lot in &lots {
-                out.push(place_step(bracket.clone().num("quantity", lot)));
-            }
+            out.push(place_step(bracket.num("quantity", amount)));
         }
         Ok(out)
     }

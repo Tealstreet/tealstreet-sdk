@@ -1547,9 +1547,9 @@ fn every_split_entry_is_receipted_but_trigger_children_still_omit_identity() {
         ..opts()
     }]);
     let mut actual = std::collections::HashSet::new();
-    for index in 0..8 {
+    for (index, quantity) in [6.667, 6.667, 6.667, 5., 25.].into_iter().enumerate() {
         let payload: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-        assert_eq!(payload["quantity"], [6.667, 6.667, 6.667, 5.][index % 4]);
+        assert_eq!(payload["quantity"], quantity);
         if index < 4 {
             assert!(actual.insert(payload["clientOrderId"].as_str().unwrap().to_owned()));
         } else {
@@ -1562,8 +1562,16 @@ fn every_split_entry_is_receipted_but_trigger_children_still_omit_identity() {
             r#"{{"code":0,"data":{{"orderId":"accepted-{index}"}}}}"#
         ));
     }
+    assert_eq!(actual.len(), 4);
+    assert_eq!(h.sent.len(), 5);
     assert!(h.requests.is_empty());
-    assert!(h.done[0].is_ok());
+    let ids: Vec<String> = serde_json::from_str(h.done[0].as_ref().unwrap()).unwrap();
+    assert_eq!(
+        ids,
+        (0..5)
+            .map(|index| format!("accepted-{index}"))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -1733,10 +1741,6 @@ fn pending_native_orders_use_the_pending_cancel_restriction() {
 
 #[test]
 fn entry_and_bracket_lots_share_the_exact_ts_allocation() {
-    #[derive(serde::Deserialize)]
-    struct Quantity {
-        quantity: f64,
-    }
     let mut h = Harness::new(None);
     h.place(vec![PlaceOrderOpts {
         amount: 25.001,
@@ -1744,23 +1748,106 @@ fn entry_and_bracket_lots_share_the_exact_ts_allocation() {
         take_profit: Some(110.0),
         ..opts()
     }]);
-    for family in 0..3 {
-        let mut total = 0.0;
-        for (lot, expected) in [6.667, 6.667, 6.667, 5.001].into_iter().enumerate() {
-            let q: Quantity = serde_json::from_str(h.body()).unwrap();
-            assert_eq!(q.quantity, expected);
-            total += q.quantity;
-            if family > 0 {
-                assert!(h.body().contains("\"type\":\"TRIGGER_MARKET\""));
-            }
-            h.reply(&format!(
-                r#"{{"code":0,"data":{{"orderId":{}}}}}"#,
-                family * 4 + lot + 1
-            ));
-        }
-        assert!((total - 25.002).abs() < 1e-10);
+    // TS formatCreateOrder splits only the entry; each attached child uses amount.
+    let mut total = 0.;
+    for (lot, expected) in [6.667, 6.667, 6.667, 5.001].into_iter().enumerate() {
+        let body = accept_parity_payload(&mut h, &format!("entry-{lot}"));
+        assert_eq!(body["type"], "LIMIT");
+        assert_eq!(body["quantity"], expected);
+        assert!(body["clientOrderId"].is_string());
+        total += body["quantity"].as_f64().unwrap();
     }
-    assert!(h.done[0].is_ok());
+    assert!((total - 25.002_f64).abs() < 1e-10);
+    for (name, trigger) in [("stop", 90.), ("take-profit", 110.)] {
+        let body = accept_parity_payload(&mut h, name);
+        assert_eq!(body["type"], "TRIGGER_MARKET");
+        assert_eq!(body["quantity"], 25.001);
+        assert_eq!(body["stopPrice"], trigger);
+        assert_eq!(body["side"], "SELL");
+        assert_eq!(body["reduceOnly"], true);
+        assert_eq!(body["timeInForce"], "GTC");
+        assert!(body.get("clientOrderId").is_none());
+    }
+    assert_eq!(h.sent.len(), 6);
+    assert!(h.requests.is_empty());
+    assert!(h.failures.is_empty());
+    assert_eq!(h.done.len(), 1);
+    let ids: Vec<String> = serde_json::from_str(h.done[0].as_ref().unwrap()).unwrap();
+    assert_eq!(
+        ids,
+        [
+            "entry-0",
+            "entry-1",
+            "entry-2",
+            "entry-3",
+            "stop",
+            "take-profit"
+        ]
+    );
+}
+
+#[test]
+fn bracket_failure_text_distinguishes_refused_partial_and_accepted_entry() {
+    use safe_cex_engine::write_plan::ElementResult;
+    for (amount, accepted_entries, entry_count) in [(1., 0, 1), (1., 1, 1), (11., 1, 3)] {
+        let mut h = Harness::new(None);
+        h.place(vec![PlaceOrderOpts {
+            amount,
+            stop_loss: Some(90.),
+            take_profit: Some(110.),
+            ..opts()
+        }]);
+        for index in 0..entry_count {
+            if index < accepted_entries {
+                accept_parity_payload(&mut h, &format!("entry-{index}"));
+            } else {
+                h.reply(r#"{"code":100400,"msg":"entry refused"}"#);
+            }
+        }
+        accept_parity_payload(&mut h, "stop-only");
+        h.failed();
+        assert!(h.requests.is_empty());
+        assert_eq!(h.failures.len(), 1);
+        let error = &h.failures[0];
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let rows = error.elements.as_ref().unwrap();
+        assert_eq!(rows.len(), entry_count + 2);
+        for (index, row) in rows.iter().take(entry_count).enumerate() {
+            if index < accepted_entries {
+                assert!(matches!(&row.result, ElementResult::Placed { order_ids }
+                    if order_ids == &[format!("entry-{index}")]));
+            } else {
+                assert!(
+                    matches!(&row.result, ElementResult::NotSent { error: Some(e) }
+                    if e.outcome == Some(safe_cex_engine::Outcome::Rejected))
+                );
+            }
+        }
+        assert!(
+            matches!(&rows[entry_count].result, ElementResult::Placed { order_ids }
+            if order_ids == &["stop-only"])
+        );
+        assert!(matches!(
+            &rows[entry_count + 1].result,
+            ElementResult::Unknown { .. }
+        ));
+        assert!(error.message.contains("unknown"), "{}", error.message);
+        if accepted_entries == 0 {
+            assert!(!error.message.contains("entry was"), "{}", error.message);
+        } else if accepted_entries < entry_count {
+            assert!(
+                error.message.contains("entry was partially placed"),
+                "{}",
+                error.message
+            );
+        } else {
+            assert!(
+                error.message.contains("entry was placed"),
+                "{}",
+                error.message
+            );
+        }
+    }
 }
 
 #[test]

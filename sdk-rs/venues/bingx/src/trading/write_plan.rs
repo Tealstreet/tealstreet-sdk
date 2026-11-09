@@ -176,6 +176,12 @@ impl Journals {
         self.plan.attach(error)
     }
 
+    pub(super) fn placed_count(&self, end: usize) -> usize {
+        self.plan.outcomes().into_iter().take(end).filter(|row| {
+            matches!(&row.result, ElementResult::Placed { order_ids } if !order_ids.is_empty())
+        }).count()
+    }
+
     pub(super) fn evidence(
         &self,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,

@@ -43,19 +43,19 @@ fn assert_lots(amount: f64, maximum: f64, step: f64, expected: &[f64], expected_
 
 #[test]
 fn twenty_six_uses_six_equal_lots_and_the_native_remainder() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     assert_lots(26., 5., 1., &[4., 4., 4., 4., 4., 4., 1.], 25.);
 }
 
 #[test]
 fn eleven_uses_three_equal_lots_and_the_native_remainder() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
     assert_lots(11., 5., 1., &[3., 3., 3., 1.], 10.);
 }
 
 #[test]
 fn twelve_keeps_the_ts_rounded_total() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
     assert_lots(12., 5., 1., &[3., 3., 3., 2.], 11.);
 }
 
