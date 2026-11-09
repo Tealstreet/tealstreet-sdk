@@ -258,6 +258,7 @@ fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
         "grvt",
         "hyperliquid",
         "hyperliquidspot",
+        "kraken",
         "krakenspot",
         "lighter",
         "lighter-robinhood",
