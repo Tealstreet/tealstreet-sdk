@@ -176,6 +176,30 @@ async fn queued<F: Future>(future: std::pin::Pin<&mut F>, registry: &Registry, c
     .expect("real construction is queued behind the held engine lane");
 }
 
+fn assert_construction_outbox(
+    out: &mut mpsc::Receiver<String>,
+    expected: Option<&str>,
+    admitted: bool,
+) {
+    let startup = crate::envelope::msg(
+        "synthetic-main",
+        "store",
+        json!({"activeChasers":[],"activeTWAPs":[]}),
+    );
+    let mut received = Vec::new();
+    while let Ok(frame) = out.try_recv() {
+        if admitted && frame == startup {
+            continue;
+        }
+        received.push(frame);
+    }
+    assert_eq!(
+        received,
+        expected.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+        "only the captured owner's explicit result reaches this socket"
+    );
+}
+
 async fn construction_case(switch_user: bool, revoke_a: bool) {
     let Loopback {
         plan,
@@ -249,7 +273,7 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         assert!(registry.held(A, &account.name, a_socket).is_some());
         assert!(!registry.holds(&account, caller.socket) || !switch_user);
         account.notify("synthetic-A-result".into());
-        assert_eq!(a_out.try_recv().unwrap(), "synthetic-A-result");
+        assert_construction_outbox(&mut a_out, Some("synthetic-A-result"), true);
         Some(account)
     };
     let b = if let Some(b) = b {
@@ -260,20 +284,14 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         assert_eq!(account.user, B);
         assert!(registry.held(B, &account.name, caller.socket).is_some());
         assert!(!registry.holds(&account, a_socket));
-        assert!(
-            b_out.as_mut().unwrap().try_recv().is_err(),
-            "A results stay off B's socket"
-        );
+        assert_construction_outbox(b_out.as_mut().unwrap(), None, true);
         account.notify("synthetic-B-result".into());
-        assert_eq!(
-            b_out.as_mut().unwrap().try_recv().unwrap(),
-            "synthetic-B-result"
-        );
+        assert_construction_outbox(b_out.as_mut().unwrap(), Some("synthetic-B-result"), true);
         Some(account)
     } else {
         None
     };
-    assert!(a_out.try_recv().is_err(), "B results stay off A's socket");
+    assert_construction_outbox(&mut a_out, None, !revoke_a);
 
     // Startup's signed private fee read exercises the actual injected provider
     // and the actual transport's per-operation proxy token, not a label-only mock.

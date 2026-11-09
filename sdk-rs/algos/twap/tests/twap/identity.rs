@@ -4,9 +4,11 @@ use super::*;
 fn identity_is_recorded_for_new_schedules_and_survives_restore_after_a_rename() {
     let (mut env, view) = (Env::new(), View::default());
     let mut first = TwapBook::new_with_owner("test-account", "identity-A".into());
-    let (id, _) = start(&mut first, &mut env, &view, json!({}));
+    let (id, effects) = start(&mut first, &mut env, &view, json!({}));
+    settle_all(&mut first, &mut env, &id, &effects, Ok(vec![]));
     let state = first.serialize_state();
     assert_eq!(state[&id]["ownerId"], "identity-A");
+    assert!(state[&id]["state"]["inFlight"].is_null());
     let row = json!({"id":id,"options":state[&id]["options"],"state":state[&id]["state"],"ownerId":state[&id]["ownerId"]});
     let mut renamed = TwapBook::new_with_owner("new-label", "identity-A".into());
     renamed.handle("twap:state", &json!([row]), &mut env, &view);

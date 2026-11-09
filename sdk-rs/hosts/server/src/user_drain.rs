@@ -291,7 +291,9 @@ impl Users {
             }
         } else {
             state.tracked.push(Tracked {
-                name: name.into(),
+                name: account
+                    .upgrade()
+                    .map_or_else(|| name.to_owned(), |account| account.name.clone()),
                 running: Arc::downgrade(running),
                 account,
             });
