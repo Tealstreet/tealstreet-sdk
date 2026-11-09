@@ -5020,3 +5020,7 @@ mod tests {
 #[cfg(test)]
 #[path = "session_delegated_writes_tests.rs"]
 mod delegated_writes_tests;
+
+#[cfg(test)]
+#[path = "session/tests/delegated_e2e.rs"]
+mod delegated_e2e;

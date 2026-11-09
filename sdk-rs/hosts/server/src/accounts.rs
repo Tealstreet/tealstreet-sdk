@@ -498,6 +498,8 @@ pub struct Registry {
     /// Unit-test loopback routing; the normal construction and transport run unchanged.
     #[cfg(test)]
     construction_test_plans: HashMap<String, RoutingPlan>,
+    #[cfg(test)]
+    e2e_venue: Option<crate::delegated_e2e_io::MockVenue>,
 }
 
 /// A chart's forced reset repairs its upstream stream at most this often per account and topic.
@@ -838,6 +840,8 @@ impl Registry {
             repairs: Mutex::default(),
             #[cfg(test)]
             construction_test_plans: HashMap::new(),
+            #[cfg(test)]
+            e2e_venue: None,
         }
     }
 
@@ -1337,6 +1341,8 @@ impl Registry {
             .cloned()
             .unwrap_or(plan);
         let authority = authority.clone();
+        #[cfg(test)]
+        let e2e_venue = self.e2e_venue.clone();
         let placed = self.threads.place(move |placement| {
             if let Err(error) = authority.check() {
                 let _ = spawned.send(Err(error));
@@ -1344,6 +1350,8 @@ impl Registry {
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
+            #[cfg(test)]
+            let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
             let result =
                 safe_cex_native::spawn_venue_account(&venue, &options, transport, signer, config)
                     .map(|(handle, task)| {
@@ -2039,6 +2047,45 @@ pub fn resume_id() -> String {
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
     use super::*;
+
+    #[cfg(test)]
+    pub(crate) fn e2e_registry(
+        user: &str,
+        venue: crate::delegated_e2e_io::MockVenue,
+    ) -> Arc<Registry> {
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        registry.e2e_venue = Some(venue);
+        // A missing override must fail locally rather than reach a venue.
+        let http = safe_cex_native::HttpRoute {
+            prefix: "in-memory://delegated-e2e".into(),
+            ..Default::default()
+        };
+        let ws = safe_cex_native::WsRoute {
+            host: Some("in-memory://delegated-e2e".into()),
+            ..Default::default()
+        };
+        registry.construction_test_plans.insert(
+            user.into(),
+            RoutingPlan {
+                http: http.clone(),
+                public_http: Some(http.clone()),
+                read_http: Some(http.clone()),
+                read_public_http: Some(http.clone()),
+                public_read_http: Some(http),
+                ws: safe_cex_native::WsRoutes {
+                    public: ws.clone(),
+                    private: ws.clone(),
+                    business: ws,
+                },
+                ..Default::default()
+            },
+        );
+        Arc::new(registry)
+    }
 
     #[cfg(test)]
     pub(crate) fn engine_count(registry: &Registry) -> usize {
