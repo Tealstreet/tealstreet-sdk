@@ -10,7 +10,7 @@ use safe_cex_engine::capabilities::CancelAll;
 use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use safe_cex_remote_signer::Outbox;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
@@ -65,12 +65,19 @@ const MAX_SUBSCRIBERS_PER_KEY: u32 = 64;
 
 struct Joined {
     account: Arc<Account>,
+    out: Out,
     client: Client,
     old: Vec<Client>,
     next_command: u32,
     /// Book and candle subscribe commands this socket holds, by command text and count.
     /// The engine keeps one demand per client, so a re-snapshot replays each key once.
     subscriptions: HashMap<String, u32>,
+}
+
+#[derive(Default)]
+struct RefusalNotifications {
+    legacy_reason: Option<String>,
+    registered: HashSet<(String, String)>,
 }
 
 pub struct Session {
@@ -82,6 +89,8 @@ pub struct Session {
     pub resume_id: String,
     out: Out,
     joined: HashMap<String, Joined>,
+    /// Current fallback reply registration, independent of live account authority.
+    registration_outputs: HashMap<String, Out>,
     /// A held client's account has loaded: `(account name, client id)`.
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
@@ -92,14 +101,47 @@ pub struct Session {
     rejoined_at: HashMap<String, std::time::Instant>,
     /// Told when a resume of this session's id takes it over.
     taken_over: Arc<tokio::sync::Notify>,
-    /// The settings refusal last sent per account, so the client's backoff
-    /// retries show it once; cleared when that account's init succeeds.
-    refused: HashMap<String, String>,
+    /// Settings refusals already sent per account and registration, so backoff
+    /// retries are quiet; cleared before an init proceeds to account obtain.
+    refused: HashMap<String, RefusalNotifications>,
     /// Chart and book subscriptions that arrived before their account joined,
     /// applied at join: the page sends them whenever its chart asks.
     early: HashMap<String, Vec<Topic>>,
     /// Moved off a draining box: its accounts are released, never parked here.
     moved: bool,
+    handovers: crate::delegated::Handovers,
+    pending_verifications: HashMap<String, PendingVerification>,
+    next_verification: u64,
+    verified: tokio::sync::mpsc::UnboundedSender<JoinCompletion>,
+    verified_rx: Option<tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>>,
+}
+
+struct PendingVerification {
+    generation: u64,
+    task: tokio::task::JoinHandle<()>,
+    out: Out,
+}
+
+impl Drop for PendingVerification {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// An off-loop result still belongs to the exact connection and init that
+/// created it. The socket loop alone decides whether it may be applied.
+pub struct JoinCompletion {
+    user: String,
+    socket: u64,
+    generation: u64,
+    account_name: String,
+    candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
+    probe: Option<ProbedInit>,
+}
+
+struct ProbedInit {
+    init: InitPayload,
+    permit: Result<crate::accounts::ProbePermit, crate::delegated::probe::ProbeRefusal>,
 }
 
 /// A chart or book subscription, by its page op.
@@ -182,6 +224,7 @@ impl Session {
         let socket = registry.next_id();
         let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
         let (dropped, dropped_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (verified, verified_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             user_socket: identity
                 .user
@@ -194,6 +237,7 @@ impl Session {
             resume_id: crate::accounts::resume_id(),
             out,
             joined: HashMap::new(),
+            registration_outputs: HashMap::new(),
             loaded,
             loaded_rx: Some(loaded_rx),
             dropped,
@@ -203,6 +247,11 @@ impl Session {
             refused: HashMap::new(),
             early: HashMap::new(),
             moved: false,
+            handovers: crate::delegated::Handovers::default(),
+            pending_verifications: HashMap::new(),
+            next_verification: 0,
+            verified,
+            verified_rx: Some(verified_rx),
         }
     }
 
@@ -301,6 +350,277 @@ impl Session {
         self.dropped_rx.take().expect("taken once")
     }
 
+    pub fn take_verified(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<JoinCompletion> {
+        self.verified_rx.take().expect("taken once")
+    }
+
+    pub fn expire_handovers(&mut self) {
+        self.handovers.expire(crate::accounts::now_ms());
+    }
+
+    fn cancel_verification(&mut self, name: &str) {
+        self.pending_verifications.remove(name);
+    }
+
+    #[cfg(test)]
+    fn start_verification<F>(&mut self, name: String, verify: F)
+    where
+        F: std::future::Future<
+                Output = Result<crate::delegated::Credentials, crate::delegated::Refused>,
+            > + Send
+            + 'static,
+    {
+        self.start_probe_verification(name, async move { (verify.await, None) });
+    }
+
+    fn start_probe_verification<F>(&mut self, name: String, verify: F)
+    where
+        F: std::future::Future<
+                Output = (
+                    Result<crate::delegated::Credentials, crate::delegated::Refused>,
+                    Option<ProbedInit>,
+                ),
+            > + Send
+            + 'static,
+    {
+        self.cancel_verification(&name);
+        self.next_verification += 1;
+        let generation = self.next_verification;
+        let user = self.user().to_owned();
+        let socket = self.socket;
+        let account_name = name.clone();
+        let completed = self.verified.clone();
+        let out = self.handover_out(&name);
+        let task = tokio::spawn(async move {
+            let (candidate, probe) = verify.await;
+            // A closed receiver drops the candidate and erases its fields.
+            let _ = completed.send(JoinCompletion {
+                user,
+                socket,
+                generation,
+                account_name,
+                candidate,
+                probe,
+            });
+        });
+        self.pending_verifications.insert(
+            name,
+            PendingVerification {
+                generation,
+                task,
+                out,
+            },
+        );
+    }
+
+    pub async fn verification_completed(&mut self, completed: JoinCompletion) -> Result<(), Close> {
+        if completed.user != self.user()
+            || completed.socket != self.socket
+            || self
+                .pending_verifications
+                .get(&completed.account_name)
+                .is_none_or(|pending| pending.generation != completed.generation)
+        {
+            return Ok(());
+        }
+        let Some(out) = self
+            .pending_verifications
+            .get(&completed.account_name)
+            .map(|pending| pending.out.clone())
+        else {
+            return Ok(());
+        };
+        self.cancel_verification(&completed.account_name);
+        if self.moved_by_drain() {
+            self.moved = true;
+            return Err(Close::Moved);
+        }
+        if let Some(probe) = completed.probe {
+            match (completed.candidate, probe.permit) {
+                (Ok(candidate), Ok(permit)) => {
+                    let account = self
+                        .registry
+                        .obtain_probed_delegated(
+                            self.user(),
+                            &probe.init,
+                            self.socket,
+                            self.identity.token.clone(),
+                            out.outbox(),
+                            candidate.pair(),
+                            permit,
+                        )
+                        .await;
+                    drop(candidate);
+                    match account {
+                        Ok(account) => {
+                            self.metrics.note_init();
+                            if let Some(joined) = self.joined.get_mut(&completed.account_name)
+                                && Arc::ptr_eq(&joined.account, &account)
+                            {
+                                let previous = std::mem::replace(&mut joined.out, out.clone());
+                                previous.finish_registration(&out);
+                                self.resnapshot(&completed.account_name).await;
+                            } else {
+                                if let Some(previous) = self.joined.remove(&completed.account_name)
+                                {
+                                    previous.out.retire_registration();
+                                    Self::leave_engine(previous);
+                                }
+                                self.join(account, out.clone()).await;
+                            }
+                            if self.joined.contains_key(&completed.account_name) {
+                                self.registry.interruptions.deliver(
+                                    self.user(),
+                                    &completed.account_name,
+                                    &out,
+                                );
+                                if let Some(kept) = self.registry.take_notice(
+                                    self.user(),
+                                    &completed.account_name,
+                                    &self.joined[&completed.account_name].account.fingerprint,
+                                    self.identity.resume_from.as_deref(),
+                                ) {
+                                    for frame in kept.frames(&completed.account_name) {
+                                        out.send(frame);
+                                    }
+                                }
+                            }
+                        }
+                        Err(refusal) => {
+                            self.drop_early(&completed.account_name, "verification refused");
+                            out.send(envelope::init_unverified(
+                                &completed.account_name,
+                                refusal.transient,
+                            ));
+                        }
+                    }
+                }
+                (_, permit) => {
+                    self.drop_early(&completed.account_name, "verification refused");
+                    out.send(envelope::init_unverified(
+                        &completed.account_name,
+                        permit.err().is_some_and(|refusal| refusal.transient),
+                    ));
+                }
+            }
+            return Ok(());
+        }
+        // Opening-only test completions do not carry venue verification.
+        let transient = completed.candidate.is_ok();
+        self.drop_early(&completed.account_name, "verification refused");
+        out.send(envelope::init_unverified(
+            &completed.account_name,
+            transient,
+        ));
+        Ok(())
+    }
+
+    fn delegated_init(&mut self, init: InitPayload) {
+        self.cancel_verification(&init.account_name);
+        if !crate::delegated::enabled(&init.exchange_name)
+            || init.public_only == Some(true)
+            || init.account_name.starts_with("__pub_")
+            || self
+                .registry
+                .signing_mode_refusal(self.user(), &init, false, true)
+                .is_some()
+            || self.pending_verifications.len() >= 64
+        {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "delegated init refused");
+            self.refuse_handover(&init.account_name, false);
+            return;
+        }
+        self.open_probed_handover(init);
+    }
+
+    fn open_probed_handover(&mut self, mut init: InitPayload) {
+        let permit = match self.registry.probe_permit(self.user(), &init) {
+            Ok(permit) => permit,
+            Err(refusal) => {
+                self.handovers.forget(&init.account_name);
+                self.drop_early(&init.account_name, "verification refused");
+                self.refuse_handover(&init.account_name, refusal.transient);
+                return;
+            }
+        };
+        let Some(sealed) = init.sealed.take() else {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "delegated init refused");
+            self.refuse_handover(&init.account_name, false);
+            return;
+        };
+        let opening =
+            match self
+                .handovers
+                .take(&init.account_name, &sealed, crate::accounts::now_ms())
+            {
+                Ok(opening) => opening,
+                Err(_) => {
+                    self.drop_early(&init.account_name, "delegated init refused");
+                    self.refuse_handover(&init.account_name, false);
+                    return;
+                }
+            };
+        let registry = self.registry.clone();
+        let user = self.user().to_owned();
+        let token = self.identity.token.clone();
+        self.start_probe_verification(init.account_name.clone(), async move {
+            let candidate = opening.open(
+                &init.exchange_name,
+                &init.key,
+                &sealed,
+                crate::accounts::now_ms(),
+            );
+            let probe = match candidate.as_ref() {
+                Ok(candidate) => Some(ProbedInit {
+                    permit: registry
+                        .probe_delegated(&user, &init, token, candidate, permit)
+                        .await,
+                    init,
+                }),
+                Err(_) => None,
+            };
+            let candidate = if probe.as_ref().is_some_and(|probe| probe.permit.is_err()) {
+                drop(candidate);
+                Err(crate::delegated::Refused)
+            } else {
+                candidate
+            };
+            (candidate, probe)
+        });
+    }
+
+    #[cfg(test)]
+    fn open_handover(&mut self, mut init: InitPayload) {
+        let Some(sealed) = init.sealed.take() else {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "delegated init refused");
+            self.refuse_handover(&init.account_name, false);
+            return;
+        };
+        let opening =
+            match self
+                .handovers
+                .take(&init.account_name, &sealed, crate::accounts::now_ms())
+            {
+                Ok(opening) => opening,
+                Err(_) => {
+                    self.drop_early(&init.account_name, "delegated init refused");
+                    self.refuse_handover(&init.account_name, false);
+                    return;
+                }
+            };
+        self.start_verification(init.account_name.clone(), async move {
+            opening.open(
+                &init.exchange_name,
+                &init.key,
+                &sealed,
+                crate::accounts::now_ms(),
+            )
+        });
+    }
+
     /// The engine removed this client without the session asking: its queue was
     /// full or a frame too large. Without this the page got nothing and saw no gap.
     pub async fn client_dropped(&mut self, name: &str, client: u64) {
@@ -349,12 +669,51 @@ impl Session {
     }
 
     fn send(&self, text: String) {
-        let _ = self.out.send(text);
+        let out = envelope::account_name(&text)
+            .map(|name| self.account_out(&name))
+            .unwrap_or_else(|| self.out.clone());
+        let _ = out.send(text);
     }
 
-    fn outbox(&self) -> Outbox {
-        let out = self.out.clone();
-        Arc::new(move |text: String| out.send(text))
+    fn account_out(&self, name: &str) -> Out {
+        self.joined
+            .get(name)
+            .map(|joined| &joined.out)
+            .or_else(|| self.registration_outputs.get(name))
+            .cloned()
+            .unwrap_or_else(|| self.out.clone())
+    }
+
+    fn handover_out(&self, name: &str) -> Out {
+        self.registration_outputs
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| self.account_out(name))
+    }
+
+    fn refuse_handover(&self, name: &str, transient: bool) {
+        self.handover_out(name)
+            .send(envelope::init_unverified(name, transient));
+    }
+
+    /// Exercise the trusted construction entry point from this authenticated
+    /// socket without enabling a new socket operation.
+    #[cfg(test)]
+    pub(crate) fn delegated_test_build(
+        &self,
+        init: InitPayload,
+        pair: crate::delegated::DelegatedPair,
+    ) -> impl std::future::Future<Output = Result<Arc<Account>, String>> + use<> {
+        let registry = self.registry.clone();
+        let identity = self.identity.clone();
+        let socket = self.socket;
+        let outbox = self.out.outbox();
+        async move {
+            let user = identity.user.ok_or("Authenticated user required")?;
+            registry
+                .obtain_delegated(&user, &init, socket, identity.token, outbox, pair)
+                .await
+        }
     }
 
     /// Called once after the upgrade, for `resumable=1` sockets.
@@ -376,9 +735,23 @@ impl Session {
             self.identity.user.clone(),
             self.identity.token.clone(),
         ) {
+            let outputs = Arc::new(Mutex::new(HashMap::<String, Out>::new()));
+            let (routes, socket_out) = (outputs.clone(), self.out.clone());
+            let outbox: Outbox = Arc::new(move |text| {
+                let Some(name) = envelope::account_name(&text) else {
+                    return socket_out.send(text);
+                };
+                let out = routes
+                    .lock()
+                    .unwrap()
+                    .entry(name)
+                    .or_insert_with(|| socket_out.awaiting_instance_id())
+                    .clone();
+                out.send(text)
+            });
             let mut accounts =
                 self.registry
-                    .resume(&from, &user, self.socket, token.clone(), &self.outbox());
+                    .resume(&from, &user, self.socket, token.clone(), &outbox);
             // Not parked yet: the old socket dropped without a close frame. Close it now.
             if accounts.is_empty()
                 && let Some(parked) = self.registry.take_over(&from, &user)
@@ -386,7 +759,7 @@ impl Session {
                 let _ = tokio::time::timeout(TAKEOVER_WAIT, parked).await;
                 accounts = self
                     .registry
-                    .resume(&from, &user, self.socket, token, &self.outbox());
+                    .resume(&from, &user, self.socket, token, &outbox);
             }
             resumed = !accounts.is_empty();
             // `init` is logged either way; this tells a resume from a rebuild.
@@ -397,7 +770,13 @@ impl Session {
             ));
             // The client re-inits each one; an identical init then keeps it.
             for account in accounts {
-                self.join(account).await;
+                let out = outputs
+                    .lock()
+                    .unwrap()
+                    .entry(account.name.clone())
+                    .or_insert_with(|| self.out.awaiting_instance_id())
+                    .clone();
+                self.join(account, out).await;
             }
         }
         if let Some(user) = &self.identity.user {
@@ -441,11 +820,17 @@ impl Session {
                 }
             }
             Inbound::Dispose { account_name } => {
+                if self.pending_verifications.contains_key(&account_name) {
+                    self.drop_early(&account_name, "account disposed during verification");
+                }
+                self.cancel_verification(&account_name);
+                self.handovers.forget(&account_name);
                 Log::info(&format!(
                     "dispose request {account_name} socket {} session {}",
                     self.socket,
                     self.resume_id_prefix()
                 ));
+                self.registration_outputs.remove(&account_name);
                 if let Some(joined) = self.joined.remove(&account_name) {
                     self.metrics.note_dispose();
                     self.leave(joined, Disposal::PageDisposed);
@@ -490,10 +875,11 @@ impl Session {
     }
 
     async fn init(&mut self, init: InitPayload) -> Result<(), Close> {
+        let out = self.out.with_instance_id(init.instance_id.as_deref());
         let authenticated = self.identity.user.is_some();
         let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
         if !authenticated && let Some(reason) = unauthenticated_init_refusal(&init) {
-            self.send(envelope::error(Some(&init.account_name), reason));
+            out.send(envelope::error(Some(&init.account_name), reason));
             return Err(Close::Policy(reason));
         }
         if self.moved_by_drain() {
@@ -504,6 +890,8 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
+        self.registration_outputs
+            .insert(init.account_name.clone(), out.clone());
         Log::info(&format!(
             "init {} ({}) socket {} session {}",
             init.account_name,
@@ -511,30 +899,51 @@ impl Session {
             self.socket,
             self.resume_id_prefix()
         ));
+        self.cancel_verification(&init.account_name);
         // Refuse before routing can erase the classification or a rebuild can
         // dispose a live account with the same saved name.
         if !safe_cex_venues::supported(&init.exchange_name) {
+            self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "unsupported venue");
-            self.send(envelope::init_unsupported(
+            out.send(envelope::init_unsupported(
                 &init.account_name,
                 &init.exchange_name,
             ));
             return Ok(());
         }
+        if init.signing_mode.as_deref() == Some("delegated") {
+            self.delegated_init(init);
+            return Ok(());
+        }
+        self.handovers.forget(&init.account_name);
+        if init.sealed.is_some() {
+            self.drop_early(&init.account_name, "sealed init requires delegated signing");
+            self.refuse_handover(&init.account_name, false);
+            return Ok(());
+        }
         self.forget_disposed();
+        if let Some(refusal) =
+            self.registry
+                .signing_mode_refusal(self.user(), &init, public_only, false)
+        {
+            out.send(envelope::init_refused(&init.account_name, &refusal));
+            self.drop_early(&init.account_name, "init refused for signing mode");
+            return Ok(());
+        }
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
         {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
-            self.resnapshot(&init.account_name).await;
-            let account = self.joined[&init.account_name].account.clone();
+            let joined = self.joined.get_mut(&init.account_name).unwrap();
+            let previous = std::mem::replace(&mut joined.out, out.clone());
+            let account = joined.account.clone();
             if account.link.is_some() {
-                account.sign_through_socket(
-                    self.socket,
-                    self.outbox(),
-                    self.identity.token.clone(),
-                );
+                account.sign_through_socket(self.socket, out.outbox(), self.identity.token.clone());
+            } else {
+                account.update_reply_outbox(self.socket, out.outbox());
             }
+            previous.finish_registration(&out);
+            self.resnapshot(&init.account_name).await;
             return Ok(());
         }
         // Another live socket holds it with other settings: keep both as they are.
@@ -542,20 +951,26 @@ impl Session {
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
         {
-            if first_refusal(&mut self.refused, &init.account_name, &refusal) {
-                self.send(envelope::init_refused(&init.account_name, &refusal));
+            if first_refusal(
+                &mut self.refused,
+                &init.account_name,
+                &refusal,
+                init.instance_id.as_deref(),
+            ) {
+                out.send(envelope::init_refused(&init.account_name, &refusal));
             }
             self.drop_early(&init.account_name, "init refused for other settings");
             return Ok(());
         }
         self.refused.remove(&init.account_name);
         if let Some(joined) = self.joined.remove(&init.account_name) {
+            joined.out.retire_registration();
             // New settings rebuild it. Unless another live socket keeps it, its algos stop
             // here and this page hears their finals; leaving first would tell no one.
             let disposal = Disposal::rebuild(joined.account.is_public(), public_only);
             if joined.account.live_holders_besides(self.socket).is_empty() {
                 self.registry
-                    .stop_for_new_settings(&joined.account, self.outbox(), disposal);
+                    .stop_for_new_settings(&joined.account, joined.out.outbox(), disposal);
                 Self::leave_engine(joined);
             } else {
                 self.leave(joined, disposal);
@@ -570,26 +985,29 @@ impl Session {
                 public_only,
                 self.socket,
                 token,
-                self.outbox(),
+                out.outbox(),
             )
             .await;
         match account {
             Ok(account) => {
                 self.metrics.note_init();
                 let private = !account.is_public();
-                self.join(account).await;
+                self.join(account, out.clone()).await;
                 if private && self.joined.contains_key(&init.account_name) {
                     self.registry
                         .interruptions
-                        .deliver(self.user(), &init.account_name, &self.out);
+                        .deliver(self.user(), &init.account_name, &out);
                 }
                 // Algos stopped while no browser was attached: say why.
                 // Chases that ended while it was gone are told as their replayed ends.
-                if let Some(kept) = self.registry.take_notice(
-                    self.user(),
-                    &init.account_name,
-                    self.identity.resume_from.as_deref(),
-                ) {
+                if self.joined.contains_key(&init.account_name)
+                    && let Some(kept) = self.registry.take_notice(
+                        self.user(),
+                        &init.account_name,
+                        &self.joined[&init.account_name].account.fingerprint,
+                        self.identity.resume_from.as_deref(),
+                    )
+                {
                     Log::info(&format!(
                         "algo stop notice {} to socket {}: {} ({} chase ends)",
                         init.account_name,
@@ -598,22 +1016,22 @@ impl Session {
                         kept.ends.len()
                     ));
                     for frame in kept.frames(&init.account_name) {
-                        self.send(frame);
+                        out.send(frame);
                     }
                 }
             }
             Err(error) => {
                 Log::warn(&format!("init {} refused: {error}", init.account_name));
                 self.drop_early(&init.account_name, "init refused");
-                self.send(envelope::error(Some(&init.account_name), &error));
+                out.send(envelope::error(Some(&init.account_name), &error));
             }
         }
         Ok(())
     }
 
-    async fn join(&mut self, account: Arc<Account>) {
+    async fn join(&mut self, account: Arc<Account>, out: Out) {
         let name = account.name.clone();
-        match self.client(&account).await {
+        match self.client(&account, out.clone()).await {
             Ok(client) => {
                 if let Some(algos) = &account.algos {
                     let _ = algos.send(crate::algos::AlgoInput::Joined);
@@ -622,6 +1040,7 @@ impl Session {
                     name.clone(),
                     Joined {
                         account,
+                        out,
                         client,
                         old: Vec::new(),
                         next_command: 0,
@@ -632,14 +1051,14 @@ impl Session {
             }
             Err(error) => {
                 self.drop_early(&name, "account did not join");
-                self.account_stop_error(&account, error);
+                self.account_stop_error(&account, error, &out);
                 self.registry
                     .release(&account, self.socket, Disposal::JoinFailed);
             }
         }
     }
 
-    async fn client(&self, account: &Arc<Account>) -> Result<Client, &'static str> {
+    async fn client(&self, account: &Arc<Account>, out: Out) -> Result<Client, &'static str> {
         let id = self.registry.next_id();
         let link = account.handle.join(id, true).await?;
         let pending = Arc::new(Mutex::new(HashMap::new()));
@@ -654,7 +1073,7 @@ impl Session {
             self.dropped.clone(),
             account.handle.clone(),
             account.name.clone(),
-            self.out.clone(),
+            out,
             pending.clone(),
             draining.clone(),
             hold,
@@ -671,10 +1090,14 @@ impl Session {
     /// one stops forwarding frames and leaves once its replies are in. False when
     /// no new client could join.
     async fn resnapshot(&mut self, name: &str) -> bool {
-        let Some(account) = self.joined.get(name).map(|joined| joined.account.clone()) else {
+        let Some((account, out)) = self
+            .joined
+            .get(name)
+            .map(|joined| (joined.account.clone(), joined.out.clone()))
+        else {
             return false;
         };
-        match self.client(&account).await {
+        match self.client(&account, out.clone()).await {
             Ok(client) => {
                 let joined = self.joined.get_mut(name).unwrap();
                 // Before the old client leaves, so the venue never unsubscribes in between.
@@ -697,13 +1120,13 @@ impl Session {
                 true
             }
             Err(error) => {
-                self.account_stop_error(&account, error);
+                self.account_stop_error(&account, error, &out);
                 false
             }
         }
     }
 
-    fn account_stop_error(&self, account: &Account, error: &str) {
+    fn account_stop_error(&self, account: &Account, error: &str, out: &Out) {
         // A latch alone is not evidence: an unrelated actor crash must still report.
         let frame = if error == "account stopped"
             && account.moving()
@@ -713,7 +1136,7 @@ impl Session {
         } else {
             envelope::error(Some(&account.name), error)
         };
-        self.send(frame);
+        out.send(frame);
     }
 
     fn leave(&self, joined: Joined, disposal: Disposal) {
@@ -751,6 +1174,34 @@ impl Session {
         let Some(name) = msg.account_name.clone() else {
             return;
         };
+        if msg.op == "delegated-key-req" {
+            self.cancel_verification(&name);
+            if crate::delegated::enabled("bybit") {
+                self.issue_handover(&name);
+            } else {
+                self.handovers.forget(&name);
+                self.drop_early(&name, "delegated init refused");
+                self.refuse_handover(&name, false);
+            }
+            return;
+        }
+        if let Some(pending) = self.pending_verifications.get(&name) {
+            let out = pending.out.clone();
+            if msg.op == "callMethod" {
+                out.send(envelope::msg(
+                    &name,
+                    "callMethod:done",
+                    json!({
+                        "requestId": msg.data.get("requestId").cloned().unwrap_or(Value::Null),
+                        "success": false,
+                        "result": {"name":"Error", "message":"verifying", "outcome":"notSent"},
+                    }),
+                ));
+            } else {
+                out.send(envelope::error(Some(&name), "verifying"));
+            }
+            return;
+        }
         self.forget_disposed();
         let topic = Self::topic_of(&msg);
         if !self.joined.contains_key(&name)
@@ -833,6 +1284,19 @@ impl Session {
                 }
             }
             (op, _, _) => Log::warn(&format!("ignored account op {op}")),
+        }
+    }
+
+    fn issue_handover(&mut self, name: &str) {
+        match self.handovers.issue(name, crate::accounts::now_ms()) {
+            Ok(offer) => {
+                self.handover_out(name)
+                    .send(envelope::delegated_key(name, &offer));
+            }
+            Err(_) => {
+                self.drop_early(name, "delegated init refused");
+                self.refuse_handover(name, false);
+            }
         }
     }
 
@@ -1025,13 +1489,25 @@ impl Session {
         } else {
             Vec::new()
         };
-        let plans = match methods::translate(
-            &method,
-            &args,
-            account.handle.capabilities(),
-            &symbols,
-            account.is_public(),
-        ) {
+        let plans = if account.delegated.is_some() {
+            methods::translate_delegated(
+                &account.venue,
+                &method,
+                &args,
+                account.handle.capabilities(),
+                &symbols,
+                account.is_public(),
+            )
+        } else {
+            methods::translate(
+                &method,
+                &args,
+                account.handle.capabilities(),
+                &symbols,
+                account.is_public(),
+            )
+        };
+        let plans = match plans {
             Ok(plans) => plans,
             Err(refused) => {
                 if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
@@ -1100,7 +1576,7 @@ impl Session {
                     }
                     // Off the socket loop: the wait must not hold the signatures loading needs.
                     let (out, name, request_id) =
-                        (self.out.clone(), name.to_owned(), request_id.clone());
+                        (self.account_out(name), name.to_owned(), request_id.clone());
                     tokio::spawn(async move {
                         let refused =
                             match methods::until_nuke_can_see(&handle, mode, methods::READ_WAIT)
@@ -1159,7 +1635,7 @@ impl Session {
                             }
                         }
                     };
-                    let (handle, out) = (account.handle.clone(), self.out.clone());
+                    let (handle, out) = (account.handle.clone(), self.account_out(name));
                     let (name, request_id) = (name.to_owned(), request_id.clone());
                     tokio::spawn(async move {
                         let _permit = permit;
@@ -1243,6 +1719,7 @@ impl Session {
         } else {
             None
         };
+        let out = self.account_out(name);
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
@@ -1268,11 +1745,7 @@ impl Session {
             },
         );
         let (client, handle) = (joined.client.id, joined.account.handle.clone());
-        let (pending, out, name) = (
-            joined.client.pending.clone(),
-            self.out.clone(),
-            name.to_owned(),
-        );
+        let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
         let send = move || {
@@ -1338,6 +1811,7 @@ impl Session {
 
     /// On close: park private accounts for resumable sockets, release the rest.
     pub fn close(mut self) {
+        self.pending_verifications.clear();
         let disposal = if self.moved && self.registry.planned_move(self.user()) {
             Disposal::Moving
         } else {
@@ -1368,12 +1842,24 @@ impl Session {
     }
 }
 
-/// True the first time `refusal` is the one for `account`; a changed refusal counts again.
-fn first_refusal(refused: &mut HashMap<String, String>, account: &str, refusal: &str) -> bool {
-    if refused.get(account).is_some_and(|sent| sent == refusal) {
+/// One notification per account, reason and registration; legacy retries retain
+/// master's last-reason suppression and existing cache clearing point.
+fn first_refusal(
+    refused: &mut HashMap<String, RefusalNotifications>,
+    account: &str,
+    refusal: &str,
+    instance_id: Option<&str>,
+) -> bool {
+    let notifications = refused.entry(account.to_owned()).or_default();
+    if let Some(instance_id) = instance_id.filter(|id| !id.is_empty()) {
+        return notifications
+            .registered
+            .insert((refusal.to_owned(), instance_id.to_owned()));
+    }
+    if notifications.legacy_reason.as_deref() == Some(refusal) {
         return false;
     }
-    refused.insert(account.to_owned(), refusal.to_owned());
+    notifications.legacy_reason = Some(refusal.to_owned());
     true
 }
 
@@ -1786,6 +2272,8 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         return Some("Unauthenticated exchange-server sessions must be public-only");
     }
     let present = [
+        init.signing_mode.is_some(),
+        init.sealed.is_some(),
         !init.key.is_empty(),
         init.passphrase.is_some(),
         init.testnet.is_some(),
@@ -1796,6 +2284,7 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         init.subaccount.is_some(),
         init.orderly_exchange_id.is_some(),
         init.grvt_trading_account_id.is_some(),
+        init.grvt_signer_address.is_some(),
         init.tealstreet_proxy.is_some(),
         init.tealstreet_tunnel.is_some(),
         init.tealstreet_ws_route.is_some(),
@@ -1816,6 +2305,341 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod delegated_probe;
+
+    fn synthetic_candidate() -> crate::delegated::Credentials {
+        serde_json::from_str(r#"{"key":"synthetic-key","secret":"synthetic-secret"}"#).unwrap()
+    }
+
+    #[tokio::test]
+    async fn sealed_init_is_opened_off_loop_without_account_attachment() {
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry, "a");
+        let mut completed = session.take_verified();
+        let offer = session
+            .handovers
+            .issue("acct", crate::accounts::now_ms())
+            .unwrap();
+        let sealed = crate::delegated::tests::seal(
+            &offer,
+            "bybit",
+            "synthetic-key",
+            br#"{"key":"synthetic-key","secret":"synthetic-secret"}"#,
+        );
+        let wire = json!({"t":"init", "d":{"accountName":"acct", "exchangeName":"bybit", "key":"synthetic-key", "signingMode":"delegated", "sealed":sealed}});
+        let Inbound::Init(init) = serde_json::from_value(wire).unwrap() else {
+            panic!("init expected")
+        };
+        assert_eq!(init.signing_mode.as_deref(), Some("delegated"));
+        assert!(init.sealed.is_some());
+        assert!(serde_json::to_value(&init).unwrap().get("sealed").is_none());
+        // Exercise the opening boundary directly: the shared opt-in is supplied
+        // by the separate account-build change, not enabled by this test.
+        session.open_handover(*init);
+        assert!(session.pending_verifications.contains_key("acct"));
+        assert!(session.joined.is_empty());
+        assert!(sent.try_recv().is_err());
+        let completion = completed.recv().await.unwrap();
+        assert!(completion.candidate.is_ok());
+        session.verification_completed(completion).await.unwrap();
+        let refusal: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(refusal["d"]["data"][1]["transient"], true);
+        assert!(session.joined.is_empty());
+        session.close();
+    }
+
+    #[test]
+    fn local_and_cosigned_settings_keep_the_legacy_engine_bytes_and_fingerprint() {
+        let legacy = acct_init();
+        let options = crate::accounts::engine_options(&legacy, false).to_string();
+        let fingerprint = legacy.fingerprint();
+        assert!(legacy.signing_mode.is_none() && legacy.sealed.is_none());
+        let serialized = serde_json::to_value(&legacy).unwrap();
+        assert!(serialized.get("signingMode").is_none());
+        assert!(serialized.get("sealed").is_none());
+        for mode in ["local", "cosigned"] {
+            let mut explicit = legacy.clone();
+            explicit.signing_mode = Some(mode.into());
+            assert_eq!(
+                crate::accounts::engine_options(&explicit, false).to_string(),
+                options
+            );
+            assert_eq!(explicit.fingerprint(), fingerprint);
+        }
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_connections_cannot_request_handover_keys() {
+        let (out, mut sent, _) = Out::channel(16);
+        let mut session = Session::new(
+            crate::accounts::tests::registry(),
+            Arc::default(),
+            Identity {
+                user: None,
+                chat_handle: None,
+                token: None,
+                resume_from: None,
+                resumable: false,
+            },
+            out,
+        );
+        let refused = session
+            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct"}}"#)
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code(), 1008);
+        assert!(sent.try_recv().is_err());
+        session.close();
+    }
+
+    #[tokio::test]
+    async fn verification_completion_checks_socket_and_drain_after_the_await() {
+        let registry = crate::accounts::tests::registry();
+        let (mut first, mut first_sent) = user_session(registry.clone(), "a");
+        let mut first_results = first.take_verified();
+        first.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let mut completion = first_results.recv().await.unwrap();
+        let (mut second, mut second_sent) = user_session(registry.clone(), "a");
+        second.start_verification("acct".into(), std::future::pending());
+        // Same user and generation still cannot transfer a socket's result.
+        completion.generation = second.pending_verifications["acct"].generation;
+        second.verification_completed(completion).await.unwrap();
+        assert!(second_sent.try_recv().is_err());
+        assert!(second.pending_verifications.contains_key("acct"));
+        first.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let completion = first_results.recv().await.unwrap();
+        registry.start_drain();
+        assert_eq!(
+            first.verification_completed(completion).await,
+            Err(Close::Moved)
+        );
+        assert!(first_sent.try_recv().is_err());
+        first.close();
+        second.close();
+    }
+
+    #[tokio::test]
+    async fn pending_verification_keeps_socket_responsive_and_refuses_commands() {
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry.clone(), "a");
+        let mut verified = session.take_verified();
+        session.handle(r#"{"t":"msg","d":{"op":"subscribeOHLCV","accountName":"acct","data":{"symbol":"BTCUSDT","interval":"1"}}}"#).await.unwrap();
+        assert_eq!(session.early["acct"].len(), 1);
+        let (release, wait) = tokio::sync::oneshot::channel();
+        session.start_verification("acct".into(), async move {
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        for (op, data) in [
+            (
+                "callMethod",
+                json!({"requestId": "pending", "method": "cancelAllOrders", "args": []}),
+            ),
+            ("subscribeOrderBook", json!({"symbol": "BTCUSDT"})),
+            ("updatePositions", json!({})),
+            ("chaser:start", json!({})),
+        ] {
+            session
+                .handle(
+                    &json!({"t":"msg", "d":{"op":op, "accountName":"acct", "data":data}})
+                        .to_string(),
+                )
+                .await
+                .unwrap();
+            let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            if op == "callMethod" {
+                assert_eq!(frame["d"]["op"], "callMethod:done");
+                assert_eq!(frame["d"]["data"]["result"]["message"], "verifying");
+                assert_eq!(frame["d"]["data"]["result"]["outcome"], "notSent");
+            } else {
+                assert_eq!(frame["d"]["op"], "error");
+                assert_eq!(frame["d"]["data"][0], "verifying");
+            }
+        }
+        assert!(session.joined.is_empty());
+        assert_eq!(
+            session.early["acct"].len(),
+            1,
+            "pre-init topics wait for the verification outcome"
+        );
+        session.handle(r#"{"t":"ping"}"#).await.unwrap();
+        let pong: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(pong["t"], "pong");
+        assert_eq!(pong["d"]["accounts"], json!([]));
+        assert!(sent.try_recv().is_err(), "no account frames while pending");
+        release.send(()).unwrap();
+        session
+            .verification_completed(verified.recv().await.unwrap())
+            .await
+            .unwrap();
+        let refusal: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(refusal["d"]["data"][1]["kind"], "unverified");
+        assert_eq!(refusal["d"]["data"][1]["transient"], true);
+        assert!(
+            session.early.is_empty(),
+            "a refused init retires its early topics"
+        );
+        assert!(
+            session.joined.is_empty(),
+            "opening alone cannot attach an account"
+        );
+        session.close();
+    }
+
+    #[tokio::test]
+    async fn two_users_switch_during_verification_await_without_reassigning_the_result() {
+        let registry = crate::accounts::tests::registry();
+        let (mut alice, mut alice_sent) = user_session(registry.clone(), "alice");
+        let mut alice_results = alice.take_verified();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let (started, waiting) = tokio::sync::oneshot::channel();
+        alice.start_verification("acct".into(), async move {
+            started.send(()).unwrap();
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        waiting.await.unwrap();
+        // Login changes while the device/venue proof is still awaited. The new
+        // authenticated connection has its own init for the same saved name.
+        let (mut bob, mut bob_sent) = user_session(registry, "bob");
+        let mut bob_results = bob.take_verified();
+        let (bob_release, bob_wait) = tokio::sync::oneshot::channel();
+        bob.start_verification("acct".into(), async move {
+            bob_wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        release.send(()).unwrap();
+        let alice_result = alice_results.recv().await.unwrap();
+        alice.close();
+        bob.verification_completed(alice_result).await.unwrap();
+        assert!(bob_sent.try_recv().is_err());
+        assert!(alice_sent.try_recv().is_err());
+        assert!(bob.pending_verifications.contains_key("acct"));
+        assert!(bob.joined.is_empty());
+        bob_release.send(()).unwrap();
+        bob.verification_completed(bob_results.recv().await.unwrap())
+            .await
+            .unwrap();
+        let own: Value = serde_json::from_str(&bob_sent.try_recv().unwrap()).unwrap();
+        assert_eq!(own["d"]["data"][1]["kind"], "unverified");
+        bob.close();
+    }
+
+    #[tokio::test]
+    async fn queued_completions_are_discarded_after_reinit_or_dispose_and_close_aborts_awaits() {
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry, "a");
+        let mut results = session.take_verified();
+        session.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let stale = results.recv().await.unwrap();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        session.start_verification("acct".into(), async move {
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        session.verification_completed(stale).await.unwrap();
+        assert!(sent.try_recv().is_err());
+        assert!(session.pending_verifications.contains_key("acct"));
+        session
+            .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            release.send(()).is_err(),
+            "dispose aborted the pending await"
+        );
+        session.start_verification("acct".into(), async { Ok(synthetic_candidate()) });
+        let stale = results.recv().await.unwrap();
+        session
+            .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+            .await
+            .unwrap();
+        session.verification_completed(stale).await.unwrap();
+        assert!(sent.try_recv().is_err());
+        let (release, wait) = tokio::sync::oneshot::channel();
+        session.start_verification("acct".into(), async move {
+            wait.await.unwrap();
+            Ok(synthetic_candidate())
+        });
+        tokio::task::yield_now().await;
+        session.close();
+        tokio::task::yield_now().await;
+        assert!(release.send(()).is_err(), "close aborted the pending await");
+    }
+
+    #[tokio::test]
+    async fn malformed_sealed_init_keeps_the_existing_account_and_other_windows_unchanged() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account = crate::accounts::tests::held_account_counted(
+                    &registry,
+                    link,
+                    acct_init().fingerprint(),
+                );
+                let (mut session, mut sent) = user_session(registry.clone(), "u");
+                let before = account.fingerprint.clone();
+                for mode in [None, Some("delegated")] {
+                    let mut init = acct_init();
+                    init.signing_mode = mode.map(str::to_owned);
+                    init.sealed = Some(crate::delegated::Sealed {
+                        attempt_id: "stale".into(),
+                        enc: String::new(),
+                        ciphertext: String::new(),
+                    });
+                    session.init(init).await.unwrap();
+                    let refusal: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+                    assert_eq!(refusal["d"]["data"][1]["initRefused"], true);
+                    assert!(session.joined.is_empty());
+                    assert!(registry.held("u", "acct", 7).is_some());
+                    assert_eq!(account.fingerprint, before);
+                }
+                session.close();
+                registry.release(&account, 7, Disposal::PageDisposed);
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn delegated_key_requests_use_the_existing_authenticated_socket() {
+        use base64::Engine as _;
+        let registry = crate::accounts::tests::registry();
+        let (mut session, mut sent) = user_session(registry, "handover-user");
+        session
+            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct"}}"#)
+            .await
+            .unwrap();
+        let frame = sent.try_recv().expect("a handover key response");
+        let mut frame: Value = serde_json::from_str(&frame).unwrap();
+        if !crate::delegated::enabled("bybit") {
+            assert_eq!(frame["d"]["op"], "error");
+            assert_eq!(frame["d"]["data"][1]["initRefused"], true);
+            assert_eq!(frame["d"]["data"][1]["kind"], "unverified");
+            // The account-build change owns the opt-in declaration. Also pin
+            // the exact offer envelope while that flag remains off here.
+            session.issue_handover("acct");
+            frame = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        }
+        assert_eq!(frame["t"], "msg");
+        assert_eq!(frame["d"]["op"], "delegated-key");
+        assert_eq!(frame["d"]["accountName"], "acct");
+        assert_eq!(frame["d"]["bootId"], crate::state::boot_id());
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(frame["d"]["publicKey"].as_str().unwrap())
+                .unwrap()
+                .len(),
+            32
+        );
+        assert!(!frame["d"]["attemptId"].as_str().unwrap().is_empty());
+        assert!(frame["d"]["expiresAtMs"].as_u64().unwrap() > crate::accounts::now_ms());
+        session.close();
+    }
+    mod delegated_instance_id;
+    mod instance_id;
 
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
     const WEB_TWAP: &str = r#"{"accountName":"acct","activeMarket":{"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true},"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"}"#;
@@ -1899,6 +2723,190 @@ mod tests {
         (session, sent)
     }
 
+    async fn callback_snapshot(sent: &mut tokio::sync::mpsc::Receiver<String>) -> (u64, bool) {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                let text = sent.recv().await.expect("account output remains open");
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                if frame["d"]["op"] == "frame" && frame["d"]["snapshot"] == true {
+                    assert_eq!(frame["d"]["accountName"], "acct");
+                    return (
+                        frame["d"]["seq"].as_u64().unwrap(),
+                        frame["d"]["snapshot"].as_bool().unwrap(),
+                    );
+                }
+            }
+        })
+        .await
+        .expect("account snapshot arrives")
+    }
+
+    async fn callback_account_loaded(account: &Account) {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while !account_loaded(&account.handle).await {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("control account loads before its first snapshot");
+    }
+
+    async fn queued_callback_keeps_its_original_account(held_load: bool) {
+        let registry = crate::accounts::tests::registry();
+        let first = InitPayload {
+            key: "synthetic-callback-owner-A".into(),
+            ..acct_init()
+        };
+        let account_a = if held_load {
+            let (account, inbox) = crate::accounts::testing::account_on(
+                crate::accounts::testing::HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: None,
+                    ticker: false,
+                },
+                ("u", "acct", "bybit"),
+                Some(safe_cex_remote_signer::SignerLink::new(
+                    0,
+                    Arc::new(|_| false),
+                )),
+                first.fingerprint(),
+                Arc::default(),
+            );
+            drop(inbox);
+            crate::accounts::tests::register(&registry, &account);
+            account
+        } else {
+            crate::accounts::testing::trading_account(&registry, "u", &first)
+        };
+        if !held_load {
+            callback_account_loaded(&account_a).await;
+        }
+        let (mut session, mut sent) = user_session(registry.clone(), "u");
+        let mut callbacks = if held_load {
+            session.take_loaded()
+        } else {
+            session.take_dropped()
+        };
+        session.init(first.clone()).await.unwrap();
+        let client_a = session.joined["acct"].client.id;
+        if held_load {
+            let mut hold = Some(Hold {
+                client: client_a,
+                loaded: session.loaded.clone(),
+            });
+            // Exercise the real timeout-release producer without a 30-second sleep.
+            release_hold(
+                &account_a.handle,
+                "acct",
+                &mut hold,
+                std::time::Instant::now() - SNAPSHOT_HOLD_LIMIT,
+            )
+            .await;
+            assert!(hold.is_none());
+        } else {
+            assert_eq!(callback_snapshot(&mut sent).await, (1, true));
+            account_a.handle.leave(client_a);
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while callbacks.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("A's callback is queued before changing owner");
+
+        let second = InitPayload {
+            key: "synthetic-callback-owner-B".into(),
+            ..first
+        };
+        let account_b = crate::accounts::testing::trading_account(&registry, "u", &second);
+        callback_account_loaded(&account_b).await;
+        session.init(second).await.unwrap();
+        assert!(Arc::ptr_eq(&session.joined["acct"].account, &account_b));
+        let client_b = session.joined["acct"].client.id;
+        assert_ne!(client_a, client_b);
+        assert_eq!(callback_snapshot(&mut sent).await, (1, true));
+        session
+            .msg(AccountMsg {
+                op: "subscribeOHLCV".into(),
+                data: json!({"symbol": "BTCUSDT", "interval": "1m"}),
+                account_name: Some("acct".into()),
+            })
+            .await;
+        let subscriptions = session.joined["acct"].subscriptions.clone();
+        assert!(!subscriptions.is_empty());
+        let old_clients = session.joined["acct"].old.len();
+        let next_command = session.joined["acct"].next_command;
+
+        let stale = callbacks
+            .try_recv()
+            .expect("A remained queued during B's init");
+        assert_eq!(stale, ("acct".into(), client_a));
+        if held_load {
+            session.account_loaded(&stale.0, stale.1).await;
+        } else {
+            session.client_dropped(&stale.0, stale.1).await;
+        }
+        let current = &session.joined["acct"];
+        assert!(Arc::ptr_eq(&current.account, &account_b));
+        assert_eq!(current.client.id, client_b, "A must not re-snapshot B");
+        assert_eq!(current.old.len(), old_clients);
+        assert_eq!(current.next_command, next_command);
+        assert_eq!(current.subscriptions, subscriptions);
+        assert!(!session.rejoined_at.contains_key("acct"));
+        while let Ok(text) = sent.try_recv() {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["d"]["op"] == "frame" {
+                assert_eq!(frame["d"]["snapshot"], false, "no B sequence reset");
+                assert!(frame["d"]["seq"].as_u64().unwrap() > 1);
+            }
+        }
+
+        if held_load {
+            let mut hold = Some(Hold {
+                client: client_b,
+                loaded: session.loaded.clone(),
+            });
+            release_hold(
+                &account_b.handle,
+                "acct",
+                &mut hold,
+                std::time::Instant::now() - SNAPSHOT_HOLD_LIMIT,
+            )
+            .await;
+        } else {
+            account_b.handle.leave(client_b);
+        }
+        let current = tokio::time::timeout(std::time::Duration::from_secs(3), callbacks.recv())
+            .await
+            .expect("B's callback is produced")
+            .unwrap();
+        assert_eq!(current, ("acct".into(), client_b));
+        if held_load {
+            session.account_loaded(&current.0, current.1).await;
+        } else {
+            session.client_dropped(&current.0, current.1).await;
+            assert!(session.rejoined_at.contains_key("acct"));
+        }
+        assert_ne!(session.joined["acct"].client.id, client_b);
+        assert_eq!(session.joined["acct"].subscriptions, subscriptions);
+        assert_eq!(callback_snapshot(&mut sent).await, (1, true));
+        session.close();
+    }
+
+    #[tokio::test]
+    async fn a_queued_held_load_callback_cannot_rejoin_a_replacement_owner() {
+        tokio::task::LocalSet::new()
+            .run_until(queued_callback_keeps_its_original_account(true))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn a_queued_dropped_client_callback_cannot_rejoin_a_replacement_owner() {
+        tokio::task::LocalSet::new()
+            .run_until(queued_callback_keeps_its_original_account(false))
+            .await;
+    }
     /// User u's account under `registry`, with a chase running and a socket of u joined to it.
     async fn chasing_session(
         registry: &Arc<Registry>,
@@ -1984,7 +2992,7 @@ mod tests {
                 assert_eq!(original.drain_close(), Some(Close::Moved));
                 original.close();
                 let (mut late, mut frames) = user_session(registry, "u");
-                late.join(account).await;
+                late.join(account, late.out.clone()).await;
                 let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                 assert_eq!(frame["d"]["data"], json!(["account stopped"]),
                     "{mode}: closing a draining session must not relabel an earlier actor crash: {frame}");
@@ -2026,7 +3034,7 @@ mod tests {
                     .await
                     .expect("the account really ended");
                     let (mut late, mut frames) = user_session(registry, "u");
-                    late.join(account).await;
+                    late.join(account, late.out.clone()).await;
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                     assert_eq!(frame["d"]["op"], "error");
                     assert_eq!(frame["d"]["data"][0], "account stopped");
@@ -3168,22 +4176,25 @@ mod tests {
     fn a_settings_refusal_is_sent_once_until_its_fields_change_or_it_resolves() {
         let mut refused = HashMap::new();
         let spot = "bear5 is open elsewhere with different settings (enableSpotMarkets)";
-        assert!(first_refusal(&mut refused, "bear5", spot));
+        assert!(first_refusal(&mut refused, "bear5", spot, None));
         for _ in 0..4 {
             assert!(
-                !first_refusal(&mut refused, "bear5", spot),
+                !first_refusal(&mut refused, "bear5", spot, None),
                 "a backoff retry is quiet"
             );
         }
-        assert!(first_refusal(&mut refused, "other", spot), "per account");
+        assert!(
+            first_refusal(&mut refused, "other", spot, None),
+            "per account"
+        );
         let both = "bear5 is open elsewhere with different settings (enableSpotMarkets, testnet)";
         assert!(
-            first_refusal(&mut refused, "bear5", both),
+            first_refusal(&mut refused, "bear5", both, None),
             "changed fields show again"
         );
         // A successful init clears it (Session::init), so a later refusal shows again.
         refused.remove("bear5");
-        assert!(first_refusal(&mut refused, "bear5", both));
+        assert!(first_refusal(&mut refused, "bear5", both, None));
     }
 
     /// Every Hosted init logged engine dropped client once: while startup was held the
@@ -4005,3 +5016,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "session_delegated_writes_tests.rs"]
+mod delegated_writes_tests;

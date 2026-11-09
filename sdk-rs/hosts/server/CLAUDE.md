@@ -35,3 +35,13 @@ One server-owned, self-rescheduling task emits a single INFO journal line every
 peak=P peakAt=ms; ...`. It stops on shutdown and does not catch up missed intervals.
 Both the route and log are counts-only: never add user IDs, account names, topic
 keys, symbol lists, request payloads, credentials, or per-user breakdowns.
+
+## DELEGATED construction
+
+The trusted `Registry::obtain_delegated` entry point consumes an already-verified
+handover pair. Admission follows `delegated.enabled` in construction-rules.json
+(exact `bybit` only). The account retains the existing LocalSigner provider,
+passes opaque refs to the engine and creates no remote signer link. Public mode
+is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
+modes; a refused init leaves the running account intact. Socket handover and
+private-read verification must complete before calling this entry point.

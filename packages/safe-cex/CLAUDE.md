@@ -13,8 +13,12 @@ the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
 see `sdk-rs/venues/asterdex/README.md`),
+MEXC (RemoteSigner and REST-only PayloadSigner; see `sdk-rs/venues/mexc/README.md`),
+Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
+Bitrue (HMAC RemoteSigner and REST-only PayloadSigner; `sdk-rs/venues/bitrue/README.md`),
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
+Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures and Spot (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md` and `docs/plans/callers/kucoinspot-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
@@ -41,6 +45,23 @@ Core exchange integration library. See also exchange-specific `CLAUDE.md` files 
 
 For exchange migrations that add first-class opening trigger/conditional orders,
 read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
+
+## DELEGATED handover
+
+`sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
+Bybit DELEGATED handover. Its standalone module needs no WASM, Node Buffer or
+browser base64 globals; the host supplies the usual secure random source for
+Noble. Call it only after the host's per-venue DELEGATED enablement check. It does
+not select signing modes, open sockets or change LOCAL/COSIGNED setup.
+Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
+context; the result contains only the attempt ID and padded-base64 encapsulation
+and ciphertext. Context fields preserve exact UTF-8 bytes and cannot contain
+the protocol's `|` separator. Optional passphrases preserve absence versus empty.
+The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
+one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
+fixtures exercise the same production sender. The shared fixture lives with
+the server tests for receiver interoperability; Rust consumption depends on
+the server handover implementation landing.
 
 ## Mirror CI invariants (don't "clean these up")
 
@@ -227,7 +248,8 @@ Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
-Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
+Effective public mode in delegated setup is resolved before custody checks,
+including keyless accounts with unused callbacks. It preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
@@ -536,6 +558,24 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+Owner fencing is optional and additive. Without `setWorkerOwner`, calls retain
+legacy bridge-wait and dispatch behavior, including calls queued before attachment.
+With the hook installed, forwarding captures the bridge subscription
+identity and the host owner binding at admission, before page-engine startup,
+and checks both again before dispatch. A removed or replaced bridge
+drops the pending call; an undispatched write rejects as `notSent`. Reattaching
+the same callback is a new subscription, even when the account name is reused.
+Hosts opting into fencing install
+`setWorkerOwner(() => ({ ownerId, generation }))`, reading the current login's
+authenticated principal (never an account label) and a monotonic, nonnegative
+safe-integer generation. Change the generation on retirement/replacement;
+return `undefined` after logout. An installed hook without a current owner fails
+closed; attaching the first listener cannot establish its earlier owner. An
+unchanged bound owner can bootstrap normally. Changing the provider itself also
+retires pending work.
+The direct source-order refresh and capability-adopted `fetchClosedPnl` use the
+same optional admission fence. Only the existing public candle read is permitted
+to retry across a replacement bridge.
 
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from

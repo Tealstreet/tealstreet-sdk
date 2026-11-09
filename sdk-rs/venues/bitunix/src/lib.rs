@@ -560,6 +560,11 @@ fn candle(k: &Kline, rest: bool) -> Candle {
     }
 }
 impl Venue for BitunixFutures {
+    fn command_failure_summary(error: &VenueError) -> Option<String> {
+        (error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+            .then(|| "The outcome of this Bitunix write is unknown. Check Open Orders".to_owned())
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }

@@ -19,7 +19,9 @@ it('admits Aster RemoteSigner and retains the undeclared-venue gate without call
   expect(deriveRemoteSigningPolicy('asterdex')?.enabled).toBe(true);
   expect(() => assertBetaAccount('asterdex', options)).not.toThrow();
   expect(() => assertBetaAccount('cryptocom', options)).not.toThrow();
-  expect(() => assertBetaAccount('kraken', options)).toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+  expect(() => assertBetaAccount('kraken', options)).not.toThrow();
+  expect(deriveRemoteSigningPolicy('krakenspot')).toBeUndefined();
+  expect(() => assertBetaAccount('krakenspot', options)).toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
   expect(remoteSigner.sign).not.toHaveBeenCalled();
   expect(remoteSignerAlgorithms('asterdex')).toEqual(['hmacSha256', 'secp256k1Digest']);
 });

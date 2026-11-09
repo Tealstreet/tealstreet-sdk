@@ -436,6 +436,7 @@ export interface RemoteSignerRequest {
       | 'base64'
       | 'hex-base64'
       | 'kraken-challenge'
+      | 'kraken-sha512'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
       | 'backpack-ed25519'
@@ -458,7 +459,8 @@ export interface RemoteSignerRequest {
       // the Stark digests from; `paradex-public` binds the Stark public key.
       | 'paradex-stark'
       | 'paradex-public'
-      | 'coinbase-jwt';
+      | 'coinbase-jwt'
+      | 'coinbase-jws';
     extraData?: unknown;
   };
 }
@@ -477,6 +479,7 @@ export interface RemoteSignerResponse {
 
 /**
  * `hmac-sha256`: `payload` is the exact string the venue HMACs.
+ * `coinbase-jws`: exact JWS input; return unpadded base64url of 64 signature bytes.
  * `stark`: `payload` is the 0x-hex typed-data message hash, and `signature` must be
  * the serialised `["<r>","<s>"]` the venue expects, or a stand-in for it.
  */
@@ -484,7 +487,8 @@ export type PayloadSignerRequest = {
   exchangeName: ExchangeName;
   key: string;
   payload: string;
-} & ({ scheme: 'hmac-sha256'; encoding: 'hex' | 'base64' } | { scheme: 'stark'; encoding: 'felt-pair' });
+} & ({ scheme: 'hmac-sha256'; encoding: 'hex' | 'base64' } | { scheme: 'stark'; encoding: 'felt-pair' }
+  | { scheme: 'coinbase-jws'; encoding: 'base64url'; algorithm: 'es256' | 'ed25519' });
 
 export interface PayloadSignerResult {
   signature: string;

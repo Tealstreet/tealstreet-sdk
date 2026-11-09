@@ -5,6 +5,14 @@ What Exchange through `Options::broker`. Both EVM mainnet and testnet use
 Orderly ED25519 keys; `application_id` is the account ID for private requests.
 The public-only default is Orderly's common WebSocket application ID.
 
+Private provider injection remains closed until Orderly's managed write
+migration. The registry refuses it with typed `Unsupported` and `NotSent`
+before engine construction or signing. Captured public `publicMode` intent
+takes precedence over the legacy `publicDataOnly` flag and discards injected
+provider/refs before validating unused signer material. Local key construction
+retains its native write path and private startup pending/complete tracking.
+Hosted RemoteSigner and PayloadSigner admission also remains closed.
+
 Broker-suffixed native contracts retain their suffix in SDK symbols, for
 example `PERP_XLM_USDC_mythos` becomes `XLMUSDC_mythos`. Private positions
 retain distinct cross/isolated IDs. A selected margin mode controls settings

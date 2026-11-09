@@ -132,6 +132,28 @@ describe('frame-fed main-thread mirror', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([false, true])('keeps the admitted owner before startup selects the local writer (switch=%s)', async (switchOwner) => {
+    const fake = fakeEngine();
+    const module = lastModule!;
+    let release!: (module: WasmEngineModule) => void;
+    const startup = new Promise<WasmEngineModule>((resolve) => { release = resolve; });
+    setWasmEngineLoader(() => startup);
+    const mirror = mirrorWith(fake);
+    exchange = mirror.exchange;
+    const owner = { ownerId: 'A', generation: 1 };
+    exchange.setWorkerOwner(() => owner);
+    const pending = exchange.placeOrder(order).catch((error: unknown) => error);
+    if (switchOwner) owner.ownerId = 'B';
+    release(module);
+    if (switchOwner) {
+      expect(await pending).toMatchObject({ command: 'placeOrder', outcome: 'notSent' });
+      expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toEqual([]);
+      expect(mirror.calls).toEqual([]);
+      await expect(exchange.placeOrder(order)).resolves.toEqual(['placed-1']);
+    } else expect(await pending).toEqual(['placed-1']);
+    expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toHaveLength(1);
+  });
+
   it('signs and sends a manual write on its own engine, never through the data source', async () => {
     const fake = fakeEngine();
     const mirror = mirrorWith(fake);
