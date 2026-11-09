@@ -15,7 +15,10 @@ identities are accepted.
 
 The managed request lifecycle holds the intent until signing completes, then
 emits an opaque `WebSocketWriteBinding` in the existing outbound envelope. The
-native transport reserves its single-use permit through the same
+binding retains a process-unique issuer stamp for its creating engine. Readiness
+and final claim reject a foreign binding before admission, even when a replacement
+engine repeats every request, socket and permit counter. HTTP wire tokens are unchanged.
+The native transport reserves its single-use permit through the same
 `Venue::http_release` registration, `http_release_veto`, pacing and write journal
 as HTTP mutations. Admission callbacks run before the physical handoff, outside
 the socket-state mutex. `WebSocketHandoff` revalidates the socket and uses its

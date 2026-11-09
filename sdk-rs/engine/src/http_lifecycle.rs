@@ -1783,7 +1783,9 @@ impl<V: Venue> Engine<V> {
                     token,
                     permit,
                     request,
-                    managed.websocket.is_some(),
+                    managed
+                        .websocket
+                        .map(|_| self.io.core.websocket_write_issuer),
                 );
                 // Const-folded: an undeclared venue compiles the domain hold out.
                 #[cfg(feature = "release-domains")]
@@ -2200,8 +2202,12 @@ impl<V: Venue> Engine<V> {
 
     /// The host checks its bound resource, calls this, and immediately invokes
     /// its transport API on Released, with no intervening await or actor hop.
-    pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
+    pub fn claim_http(&mut self, now: f64, mut permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
+        let issuer = permit.take_websocket_issuer();
+        if issuer != 0 && issuer != self.io.core.websocket_write_issuer {
+            return Err(Error::Revoked);
+        }
         if let Some(managed) = self
             .io
             .core
@@ -3150,7 +3156,7 @@ impl crate::engine::IoCore {
             token,
             permit,
             packet,
-            managed.websocket.is_some(),
+            managed.websocket.map(|_| self.websocket_write_issuer),
         ))
     }
 
@@ -3159,14 +3165,18 @@ impl crate::engine::IoCore {
         token: Preparation,
         permit: Permit,
         packet: HttpRequest,
-        websocket: bool,
+        websocket_issuer: Option<u64>,
     ) -> Action {
+        let permit = match websocket_issuer {
+            Some(issuer) => permit.with_websocket_issuer(issuer),
+            None => permit,
+        };
         let action = Box::new(HttpAction::Bind {
             preparation: token,
             permit,
             request: packet,
         });
-        if websocket {
+        if websocket_issuer.is_some() {
             websocket_write::outbound(action)
         } else {
             Action::ManagedHttp(action)

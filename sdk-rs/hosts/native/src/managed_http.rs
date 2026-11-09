@@ -62,15 +62,15 @@ impl<V: Venue, T: Transport> Host<V, T> {
         &mut self,
         binding: safe_cex_engine::WebSocketWriteBinding,
     ) {
+        let Some(socket) = self.engine.websocket_write_socket(&binding) else {
+            return;
+        };
         let preparation = binding.preparation();
         let request = preparation.attempt().request;
         let writer = self
-            .engine
-            .websocket_write_socket(&binding)
-            .and_then(|socket| {
-                self.sockets.get(&socket)?;
-                self.socket_writers.get(&socket).cloned()
-            });
+            .sockets
+            .get(&socket)
+            .and_then(|_| self.socket_writers.get(&socket).cloned());
         let Some(writer) = writer else {
             self.engine.http_preparation_failed(
                 (self.clock)(),

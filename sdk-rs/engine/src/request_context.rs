@@ -771,6 +771,8 @@ pub struct Permit {
     attempt: Attempt,
     preparation: u64,
     sequence: u64,
+    // Native WS envelope provenance; never part of an HTTP wire token.
+    websocket_issuer: u64,
 }
 
 /// Returned to asynchronous route/sign work and checked again on completion.
@@ -803,6 +805,15 @@ impl Preparation {
 }
 
 impl Permit {
+    pub(crate) fn with_websocket_issuer(mut self, issuer: u64) -> Self {
+        self.websocket_issuer = issuer;
+        self
+    }
+
+    pub(crate) fn take_websocket_issuer(&mut self) -> u64 {
+        std::mem::take(&mut self.websocket_issuer)
+    }
+
     pub fn attempt(self) -> Attempt {
         self.attempt
     }
@@ -827,6 +838,7 @@ impl Permit {
             attempt: token_attempt(parts[0], parts[1])?,
             preparation: parts[2],
             sequence: parts[3],
+            websocket_issuer: 0,
         })
     }
 }
@@ -1071,6 +1083,7 @@ impl Lifecycle {
             attempt: self.attempt,
             preparation: route.id,
             sequence: self.permits,
+            websocket_issuer: 0,
         };
         self.state = State::Permitted(route, permit);
         Ok(permit)

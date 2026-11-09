@@ -250,6 +250,70 @@ fn native_websocket_write_claims_at_physical_handoff_and_classifies_refusals() {
     }
 }
 
+#[test]
+fn foreign_websocket_binding_cannot_retire_the_current_hosts_repeated_counters() {
+    fn queued(
+        sent: Arc<Mutex<Vec<String>>>,
+    ) -> (
+        Host<Probe, Captured>,
+        safe_cex_engine::WebSocketWriteBinding,
+    ) {
+        let engine = safe_cex_engine::test_support::seeded_engine(Probe::default());
+        let mut host = Host::new(
+            engine,
+            Captured {
+                sent,
+                unsupported: false,
+                busy: false,
+                send_error: false,
+            },
+        );
+        host.clock = || 0.;
+        host.engine.start(0.);
+        host.execute(&mut |_| {});
+        host.dispatch(HostEvent::WsOpened(host.engine.venue().socket.unwrap()));
+        host.engine.handle(
+            0.,
+            Event::Command(Command::SetLeverage {
+                command: 71,
+                symbol: "BTC".into(),
+                leverage: 2.,
+                side: None,
+            }),
+        );
+        let binding = host
+            .engine
+            .drain_actions()
+            .find_map(safe_cex_engine::WebSocketWriteBinding::from_action)
+            .unwrap();
+        (host, binding)
+    }
+
+    let old_frames = Arc::new(Mutex::new(Vec::new()));
+    let (a, binding_a) = queued(old_frames.clone());
+    drop(a);
+    let frames = Arc::new(Mutex::new(Vec::new()));
+    let (mut b, binding_b) = queued(frames.clone());
+    assert_eq!(binding_a.preparation(), binding_b.preparation());
+    let socket_b = b.engine.venue().socket.unwrap();
+    b.execute_websocket_write(binding_a);
+    assert!(old_frames.lock().unwrap().is_empty());
+    assert!(frames.lock().unwrap().is_empty());
+    assert_eq!(b.engine.venue().releases, 0);
+    assert_eq!(b.engine.websocket_write_socket(&binding_b), Some(socket_b));
+    b.execute_websocket_write(binding_b);
+    assert_eq!(*frames.lock().unwrap(), ["setting"]);
+    assert_eq!(b.engine.venue().releases, 1);
+    let mut notices = Vec::new();
+    b.execute(&mut |notice| notices.push(notice));
+    assert!(
+        notices
+            .iter()
+            .all(|notice| !matches!(notice, Notice::CommandFailed { command: 71, .. })),
+        "foreign work must not fail B's command: {notices:?}"
+    );
+}
+
 async fn socket_handoff_probe(delayed_handshake: bool) -> (bool, usize, Vec<Notice>) {
     use futures_util::StreamExt;
     use tokio::net::TcpListener;

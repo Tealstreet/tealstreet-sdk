@@ -1911,6 +1911,7 @@ impl OrdersRefresh {
 
 struct IoCore {
     websocket_write_host: bool,
+    websocket_write_issuer: u64,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2214,6 +2215,7 @@ impl Default for IoCore {
     fn default() -> Self {
         Self {
             websocket_write_host: false,
+            websocket_write_issuer: 0,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,

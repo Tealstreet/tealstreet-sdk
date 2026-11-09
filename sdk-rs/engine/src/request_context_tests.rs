@@ -1242,6 +1242,7 @@ fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
         attempt,
         preparation: u64::MAX,
         sequence: u64::MAX,
+        websocket_issuer: 0,
     };
     assert_eq!(
         Preparation::from_wire(&preparation.to_wire()),

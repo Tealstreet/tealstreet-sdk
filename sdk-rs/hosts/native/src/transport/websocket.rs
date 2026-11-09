@@ -338,7 +338,7 @@ mod tests {
             loop {
                 tokio::select! {
                     Ok(()) = &mut wait_close => {
-                        socket.close(None).await.unwrap();
+                        tokio::time::timeout(Duration::from_secs(2), socket.close(None)).await.unwrap().unwrap();
                         break;
                     }
                     message = socket.next() => {
