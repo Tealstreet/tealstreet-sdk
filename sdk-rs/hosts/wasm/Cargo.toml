@@ -27,7 +27,7 @@ bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hoste
 text-ingress = []
 grvt = ["safe-cex-venues/grvt", "text-ingress", "dispatch-signing", "hosted-wallet"]
 polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
-coinbase = ["safe-cex-venues/coinbase", "text-ingress"]
+coinbase = ["safe-cex-venues/coinbase", "text-ingress", "dispatch-signing", "hosted-signing"]
 # The combined build isolates the startup subscription decoder.
 cold-subscriptions = []
 paradex = ["safe-cex-venues/paradex", "sign-meta", "dispatch-signing", "address-nonce", "hosted-wallet"]

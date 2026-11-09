@@ -62,13 +62,31 @@ the `init` payload into the handler closure and reused for
 `getMyExchangeWorker` / `deleteMyExchangeWorker` / dispose — so the key
 is whatever the `init` message carried.
 
-This is correct for the **browser** (one device = one tenant, account
-names unique, and the `ports`/`shared` machinery fans one worker out to
-multiple _tabs_ of the same user). It is **NOT safe for a multi-tenant
-host** that runs many clients through one process: two clients using the
-same account name collide — the second `init` overwrites the first, the
-first `ExchangeWorker`/exchange is orphaned (never disposed,
-`isDisposed` stays false), and its `tick` signs REST forever.
+Shared browser attachments capture the worker's `init.sessionKey`. Reusing a
+named account requires the same nonblank session key; a mismatched or missing
+identity gets a failed startup acknowledgement and warning before receiving a
+snapshot or joining the channel. Ports retained after failed startup keep that
+channel's session until they detach. Session keys are never logged or echoed.
+
+Each shared port is bound to the exact accepted worker and its own optional
+`instanceId`, so another tab's instance ID does not prevent same-session sharing.
+Unstamped inbound commands are accepted only on the initial binding. Changing
+the session, account, exchange or instance requires a nonempty instance ID never
+previously used on that port; subsequent commands must carry that exact ID.
+Missing or retired IDs refuse the rebind before disturbing the current worker.
+An identical accepted init retains its binding and generation, allowing pending
+exchange construction to finish starting its configured integration. Legacy
+callers can open a new port instead.
+Commands from detached or replaced bindings are dropped. A stale `dispose` may
+detach only its own port; it cannot dispose another session's worker. When the
+last port changes owner, the previous worker is disposed; other old-owner tabs
+keep their worker. Init generations also fence continuations after startup
+awaits, preventing an old init from starting its integration on a new account.
+
+Account names still must be unique in a **multi-tenant host** that runs many
+clients through one process. The shared-session fence does not change dedicated
+contexts' registry keys: a second same-name init can overwrite the first and
+orphan an exchange whose tick continues signing REST.
 
 **Any multi-tenant consumer (e.g. the hosted `exchange-server`) MUST
 pass a connection-scoped `accountName` into the `init` payload** (it does:

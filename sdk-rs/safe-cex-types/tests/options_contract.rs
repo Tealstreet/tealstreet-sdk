@@ -118,3 +118,33 @@ fn export_options_slice() {
         .unwrap();
     }
 }
+
+#[test]
+fn coinbase_jwt_algorithm_survives_canonical_options_and_account_config() {
+    for algorithm in ["es256", "edDsa"] {
+        let options =
+            format!(r#"{{"key":"fixture","secret":"","coinbaseJwtAlgorithm":"{algorithm}"}}"#);
+        let options: contract::ExchangeOptions = serde_json::from_str(&options).unwrap();
+        assert_eq!(
+            serde_json::to_value(options).unwrap()["coinbaseJwtAlgorithm"],
+            algorithm
+        );
+        let account = format!(
+            r#"{{"exchange":"coinbase","name":"fixture","apiKey":"","apiSecret":"","coinbaseJwtAlgorithm":"{algorithm}"}}"#
+        );
+        let account: contract::ExchangeAccountConfig = serde_json::from_str(&account).unwrap();
+        assert_eq!(
+            serde_json::to_value(account).unwrap()["coinbaseJwtAlgorithm"],
+            algorithm
+        );
+    }
+    for invalid in ["null", "17", r#""ed25519""#] {
+        let options =
+            format!(r#"{{"key":"fixture","secret":"","coinbaseJwtAlgorithm":{invalid}}}"#);
+        assert!(serde_json::from_str::<contract::ExchangeOptions>(&options).is_err());
+        let account = format!(
+            r#"{{"exchange":"coinbase","name":"fixture","apiKey":"","apiSecret":"","coinbaseJwtAlgorithm":{invalid}}}"#
+        );
+        assert!(serde_json::from_str::<contract::ExchangeAccountConfig>(&account).is_err());
+    }
+}

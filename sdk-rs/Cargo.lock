@@ -4191,6 +4191,7 @@ dependencies = [
  "p256",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
  "zeroize",
