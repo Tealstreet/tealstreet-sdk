@@ -16,7 +16,8 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s: admits KuCoin remote custody whi
   expect(deriveRemoteSigningPolicy(venue)).toMatchObject({ enabled: true, payloadSupported: false, signatureEncoding: 'base64' });
   expect(deriveRemoteSigningPolicy(venue)?.protectedHeaders).toEqual(deriveRemoteSigningPolicy('kucoin')?.protectedHeaders);
   expect(() => assertBetaAccount(venue, { remoteSigner })).not.toThrow();
-  for (const name of ['krakenspot', 'kraken'] as const) {
+  for (const name of ['krakenspot', 'mode'] as const) {
+    expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
     const prettyName = exchangeMetadata[name].prettyName;
     expect(() => assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner })).toThrow(
       `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
