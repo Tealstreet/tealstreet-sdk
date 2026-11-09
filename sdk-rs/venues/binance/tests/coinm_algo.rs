@@ -329,11 +329,12 @@ fn a_4120_batch_element_gets_the_same_refusal() {
         order(OrderType::Limit, OrderSide::Buy, 150.0, 9000.0),
     );
     let batch = h.take("/dapi/v1/batchOrders");
+    // TS binanceinverse.exchange.ts:919-924 emits three 50-contract rows.
     h.reply(
         batch.id,
         200,
         "",
-        r#"[{"code":-4120,"msg":"Order type not supported for this endpoint. Please use the Algo Order API endpoints instead."},{"code":-4120,"msg":"Order type not supported for this endpoint. Please use the Algo Order API endpoints instead."}]"#,
+        r#"[{"code":-4120,"msg":"Order type not supported for this endpoint. Please use the Algo Order API endpoints instead."},{"code":-4120,"msg":"Order type not supported for this endpoint. Please use the Algo Order API endpoints instead."},{"code":-4120,"msg":"Order type not supported for this endpoint. Please use the Algo Order API endpoints instead."}]"#,
     );
     let failure = &h.failures.iter().find(|(c, _)| *c == 10).unwrap().1;
     assert!(

@@ -6,7 +6,9 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { nanoid } from 'nanoid';
 
 import { deriveRemoteSigningPolicy } from './construction';
+import { inspectCoinbaseJws } from './coinbaseHostedSigning';
 
+const COINBASE_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['es256', 'ed25519']);
 const ED25519_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['ed25519']);
 const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 const KRAKEN_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha512']);
@@ -28,7 +30,7 @@ const paradex = (name: ExchangeName) => name === 'paradex';
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
+  (name === 'coinbase' || name === 'coinbasespot') ? COINBASE_ALGORITHMS : name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
     : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
@@ -293,6 +295,68 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     for (const key of passphrases.keys()) if (owned.has(key)) throw refused();
     if (!remoteSigner && !payloadSigner) throw refused();
   } catch { throw refused(); }
+
+  const signCoinbase = async (
+    operations: SignRequest['operations'],
+    receipt: SignReceipt,
+    signal: AbortSignal,
+  ): Promise<RemoteSignerResult> => {
+    const [present, sign] = operations;
+    const material = present?.kind === 'present' ? credentials.get(present.key) : undefined;
+    const entry = sign?.kind === 'sign' ? owned.get(sign.key) : undefined;
+    if (
+      operations.length !== 2 ||
+      present?.kind !== 'present' ||
+      sign?.kind !== 'sign' ||
+      !['es256', 'ed25519'].includes(sign.algorithm) ||
+      !entry?.primary ||
+      !material ||
+      sign.key !== entry.identity.signing ||
+      present.key !== entry.identity.credential ||
+      !Array.isArray(sign.payload) ||
+      sign.payload.length !== 1
+    )
+      throw refused();
+    const part = sign.payload[0];
+    if (
+      part.kind !== 'bytes' ||
+      !Array.isArray(part.bytes) ||
+      part.bytes.length < 1 ||
+      part.bytes.length > 16384 ||
+      part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
+    )
+      throw refused();
+    const toSign = decodeUtf8(Uint8Array.from(part.bytes));
+    const body = inspectCoinbaseJws(toSign, entry.identity.publicCredential, sign.algorithm as 'es256' | 'ed25519');
+    let encodedSignature: unknown;
+    if (remoteSigner) {
+      const id = nanoid();
+      const response = await guarded(signal, remoteSigner, () =>
+        remoteSigner.sign({
+          id,
+          type: 'ws-auth',
+          exchangeName,
+          ...(accountName === undefined ? {} : { accountName }),
+          wsAuth: { toSign, outputFormat: 'coinbase-jws' },
+        }),
+      );
+      if (!record(response) || response.id !== id || (response.error !== undefined && response.error !== ''))
+        throw refused();
+      encodedSignature = response.wsAuthSignature;
+    } else {
+      // A payload delegate authenticates REST only; it cannot become a WS signer.
+      if (!payloadSigner || typeof body.uri !== 'string') throw refused();
+      const response = await guarded(signal, undefined, () => payloadSigner.call(entry.receiver, { exchangeName, key: entry.identity.publicCredential, payload: toSign,
+        scheme: 'coinbase-jws', encoding: 'base64url', algorithm: sign.algorithm as 'es256' | 'ed25519' }));
+      if (!record(response) || headers(response.headers)?.length) throw refused();
+      encodedSignature = response.signature;
+    }
+    if (typeof encodedSignature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(encodedSignature)) throw refused();
+    const signature = atob(encodedSignature.replace(/-/g, '+').replace(/_/g, '/'));
+    const canonical = btoa(signature).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+    if (signature.length !== 64 || canonical !== encodedSignature) throw refused();
+    return { values: [material.bytes.slice(), Array.from(signature, (c) => c.charCodeAt(0))], receipt };
+  };
 
   const signKraken = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
     if (!remoteSigner) throw refused();
@@ -622,10 +686,12 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
           || BigInt(receipt.nonce) > 18_446_744_073_709_551_615n)) throw refused();
       if (!record(request.receipt) || Object.entries(receipt).some(([key, value]) =>
         exchangeName === 'kraken' && key === 'nonce' ? false :
-        !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)))) throw refused();
+        !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER
+          || (!((exchangeName === 'coinbase' || exchangeName === 'coinbasespot') && key === 'stampMs') && !Number.isInteger(value)))))) throw refused();
       if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       const operations = Array.from(request.operations);
+      if (exchangeName === 'coinbase' || exchangeName === 'coinbasespot') return await signCoinbase(operations, receipt, signal);
       if (exchangeName === 'kraken') return await signKraken(operations, receipt, signal);
       if (exchangeName === 'backpack') return await signBackpack(operations, receipt, signal);
       if (exchangeName === 'grvt') return await signGrvt(operations, receipt, signal);

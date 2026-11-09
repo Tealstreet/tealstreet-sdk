@@ -86,9 +86,11 @@ type OptionsEqual = Must<Equal<OldOptions, ExchangeOptions>>;
 type MissingField = Must<Equal<ExchangeOptions, Omit<ExchangeOptions, 'workerMirror'>>>;
 type AccountEqual = Must<Equal<OldAccount, ExchangeAccount>>;
 type ConfigEqual = Must<Equal<OldConfig, ExchangeAccountConfig>>;
-type HistoricalOptions = Must<Equal<LegacyExchangeOptions, ExchangeOptions>>;
+type HistoricalOptions = Must<Equal<LegacyExchangeOptions, Omit<ExchangeOptions, 'coinbaseJwtAlgorithm'>>>;
 type HistoricalAccount = Must<Equal<LegacyExchangeAccount, ExchangeAccount>>;
-type HistoricalConfig = Must<Equal<LegacyExchangeAccountConfig, ExchangeAccountConfig>>;
+type HistoricalConfig = Must<Equal<LegacyExchangeAccountConfig, Omit<ExchangeAccountConfig, 'coinbaseJwtAlgorithm'>>>;
+type CoinbaseOptions = Must<Equal<ExchangeOptions['coinbaseJwtAlgorithm'], 'es256' | 'edDsa' | undefined>>;
+type CoinbaseConfig = Must<Equal<ExchangeAccountConfig['coinbaseJwtAlgorithm'], 'es256' | 'edDsa' | undefined>>;
 type MetadataEqual = Must<Equal<ExchangeOptions['localSigner'], LocalSignerMetadata | undefined>>;
 type FeedEqual = Must<Equal<ExchangeOptions['publicFeed'], RustPublicFeedPolicy | undefined>>;
 declare const options: ExchangeOptions;
@@ -100,6 +102,9 @@ const feed: ExchangeOptions['publicFeed'] = { mode: 'shared', port: {} };
 options.key = 'changed';
 const config: ExchangeAccountConfig = { exchange: 'bybit', name: 'fixture', apiKey: '', apiSecret: '' };
 config.name = 'mutable';
+config.coinbaseJwtAlgorithm = 'edDsa';
+// @ts-expect-error The Coinbase algorithm option remains readonly.
+options.coinbaseJwtAlgorithm = 'es256';
 const account: ExchangeAccount = { userId: '', subId: null };
 // @ts-expect-error Account fields remain readonly.
 account.userId = 'changed';

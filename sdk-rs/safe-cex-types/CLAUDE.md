@@ -205,6 +205,10 @@ JSON syntax and surviving-value refusals remain separate negative cases.
 
 ExchangeOptions.polymarket carries the five runtime account fields consumed by the Polymarket constructor. Its typed ExchangeOptionsPolymarket record uses existing UTF-8 credential strings and native f64 signerType; do not coerce numeric signature modes or replace the venue retained UTF-16 Text record with it. The source root declaration lacks this opts-as-any extension, so the field is skipped only in generated static TS, never in native serialization or source projection.
 
+ExchangeOptions and ExchangeAccountConfig declare coinbaseJwtAlgorithm here for
+hosted CDP signing. Regenerate their public TypeScript declarations from options.rs;
+the optional algorithm is the closed union es256 | edDsa and rejects explicit null.
+
 Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
 
 DisplayedPosition decodes its flattened Position through the original MapAccess.

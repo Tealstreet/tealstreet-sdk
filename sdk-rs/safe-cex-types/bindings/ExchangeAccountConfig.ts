@@ -24,6 +24,10 @@ export type ExchangeAccountConfig = {
     subkeyAddress?: string;
     grvtSignerAddress?: string;
     grvtTradingAccountId?: string;
+    /**
+     * Hosted CDP key algorithm; local custody infers it from key material.
+     */
+    coinbaseJwtAlgorithm?: "es256" | "edDsa";
     tealstreetProxy?: boolean;
     tealstreetTunnel?: boolean;
     tealstreetWsRoute?: boolean;

@@ -97,7 +97,9 @@ it.each(matrixVenues)('$label resolves the complete public matrix before custody
   let privateControl = true;
   for (const callback of callbacks) {
     // Aster V3 resolves private only with a complete (synthetic) API-wallet context.
-    const options: ExchangeOptions = { key: `0x${'11'.repeat(20)}`,
+    const key = name === 'coinbase' || name === 'coinbasespot'
+      ? ['organizations', 'fixture', 'apiKeys', 'fixture'].join('/') : `0x${'11'.repeat(20)}`;
+    const options: ExchangeOptions = { key,
       secret: version === 'v3' ? `0x${'33'.repeat(32)}` : 'unused-private-material',
       passphrase: 'fixture-passphrase', apiKeyIndex: '2', applicationId: `0x${'22'.repeat(20)}`,
       paradexAddress: 'fixture-paradex-account', subkeyAddress: 'fixture-paradex-subkey',
@@ -282,7 +284,7 @@ const falsyCallbacks = callbackFields.flatMap((field) => [null, false, ''].map((
 it('covers every disabled-delegation beta venue', () => {
   expect(venues).toContain('cryptocom');
   expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
-    'apexomni', 'asterdex-v1', 'asterdex-v3', 'coinbase', 'coinbasespot', 'kodiakfi', 'krakenspot',
+    'apexomni', 'asterdex-v1', 'asterdex-v3', 'kodiakfi', 'krakenspot',
     'mexc', 'mode', 'what', 'woofi',
   ].sort());
 });
