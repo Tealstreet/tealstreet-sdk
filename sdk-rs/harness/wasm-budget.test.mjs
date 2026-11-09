@@ -1605,6 +1605,30 @@ test('#3377 master merge a4b99b8ded4 retains measured Phemex headroom', () => {
   assert.match(wasmBudgetError(cap + 1, 'venue', 'phemex'), /exceeds/);
 });
 
+test('#3362 (run 42485221909 at c224f7a9c4b) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['weex', 1_967_049, 1_977_344],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3362 fresh merge f10ca13c112 + master 05241cd0f41 retains measured wasm headroom', () => {
+  const measured = 1_980_557;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.weex;
+  assert.equal(minimumCap, 1_991_680);
+  assert.ok(cap >= minimumCap, `weex: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured, 'venue', 'weex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'weex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'weex'), /exceeds/);
+});
+
 test('#3280 (run 42422666520 at 2cfa45a3b1f) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['bybit', 2_270_273, 2_281_472],
