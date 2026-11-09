@@ -266,13 +266,25 @@ fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
         .map_or(options.public_data_only, |mode| mode.public_data_only)
 }
 
-// Public-only accounts with no declared public read credentials have no use for
-// private provider state. Resolve this before any family setup or validation.
+// Family setup and read-key validation retain their native refusal precedence.
+// The shared agent setup can discard raw material that public accounts never use.
+#[cfg(feature = "dispatch-signing")]
+fn public_custody_discard_allowed(venue: &str, options: &EngineOptions) -> bool {
+    construction::bridge(venue, options).dispatch_signing
+        && construction::read_credentials_policy(venue)
+            == construction::ReadCredentialsPolicy::Install
+        && match construction::signer_setup_mapping(venue) {
+            Some(construction::SetupMapping::Hyperliquid | construction::SetupMapping::Txflow) => {
+                true
+            }
+            None => options.read_credentials.is_none(),
+            _ => false,
+        }
+}
+
 #[cfg(feature = "dispatch-signing")]
 fn unused_public_custody(venue: &str, options: &EngineOptions) -> bool {
-    resolved_public_data_only(venue, options)
-        && construction::read_credentials_policy(venue)
-            != construction::ReadCredentialsPolicy::PublicRead
+    resolved_public_data_only(venue, options) && public_custody_discard_allowed(venue, options)
 }
 
 // A capsule carries credentials separately from the stripped outer options.
@@ -282,8 +294,7 @@ fn unused_public_custody(venue: &str, options: &EngineOptions) -> bool {
 #[cfg(feature = "dispatch-signing")]
 fn unused_local_capsule(venue: &str, options: &EngineOptions) -> bool {
     construction::public_regardless_of_local_setup(venue, options)
-        && construction::read_credentials_policy(venue)
-            != construction::ReadCredentialsPolicy::PublicRead
+        && public_custody_discard_allowed(venue, options)
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -308,13 +319,11 @@ fn discard_private_custody(options: &mut EngineOptions) {
     options.signing = None;
 }
 
-fn private_custody_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
-    // Unused signing flags cannot turn a resolved public account into private custody.
-    if resolved_public_data_only(venue, options) {
-        return Ok(());
-    }
-    #[cfg(feature = "polymarket")]
-    if venue == "polymarket" && (options.remote_signing || options.payload_signer) {
+#[cfg(feature = "polymarket")]
+fn polymarket_signing_rules(options: &EngineOptions) -> Result<(), VenueError> {
+    if !construction::signer_setup_public_data_only(options)
+        && (options.remote_signing || options.payload_signer)
+    {
         return Err(VenueError::new("Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply")
             .kind(ErrorKind::Unsupported)
             .outcome(safe_cex_engine::Outcome::NotSent));
@@ -1334,7 +1343,10 @@ pub fn build<T: Visit>(
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    private_custody_rules(venue, &options)?;
+    #[cfg(feature = "polymarket")]
+    if venue == "polymarket" {
+        polymarket_signing_rules(&options)?;
+    }
     payload_signing_rules(venue, &options, false)?;
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
@@ -1492,7 +1504,10 @@ pub fn build_with_signer<T: Visit>(
     } else {
         signer
     };
-    private_custody_rules(venue, &options)?;
+    #[cfg(feature = "polymarket")]
+    if venue == "polymarket" {
+        polymarket_signing_rules(&options)?;
+    }
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));

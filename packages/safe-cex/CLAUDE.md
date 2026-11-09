@@ -11,9 +11,10 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Resolved public-only delegated accounts discard unused callback and private setup
-configuration before validating custody. Native registry construction applies the
-same ordering before local capsule parsing and injected provider validation;
-declared PublicRead credentials retain their separate read-only policy.
+configuration before validating custody. Native registry construction retains family setup, read-key validation and
+refusal precedence before discarding unused custody. TxFlow and Hyperliquid public
+agent setup ignore unused private material; declared ValidateOnly and PublicRead
+credentials retain their separate policies.
 The WASM host derives `requiresExternalSigner` from nonempty submitted external
 refs and the provider retained after registry construction. Refs may be owned by
 the venue rather than `Engine::identities()`. Discarded public providers require

@@ -1,5 +1,5 @@
-#![cfg(any(feature = "txflow", feature = "polymarket", feature = "hyperliquid"))]
-//! Shared public-before-custody regression matrix (PR #3317 plus TxFlow).
+#![cfg(any(feature = "txflow", feature = "hyperliquid"))]
+//! Public agent accounts discard unused private custody.
 use safe_cex_engine::{Engine, Venue};
 use safe_cex_venues::{EngineOptions, Visit, build, build_with_signer};
 use serde_json::json;
@@ -17,8 +17,6 @@ fn public_construction_discards_unused_private_custody() {
     let venues = [
         #[cfg(feature = "txflow")]
         "txflow",
-        #[cfg(feature = "polymarket")]
-        "polymarket",
         #[cfg(feature = "hyperliquid")]
         "hyperliquid",
         #[cfg(feature = "hyperliquid")]
