@@ -3383,6 +3383,10 @@ pub(crate) mod tests {
         account.holders.lock().unwrap().signing
     }
 
+    pub(crate) fn fail_signer(registry: &Registry, account: &Arc<Account>) {
+        registry.signer_failed(account);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn algo_replies_reach_every_live_holder() {
         tokio::task::LocalSet::new()

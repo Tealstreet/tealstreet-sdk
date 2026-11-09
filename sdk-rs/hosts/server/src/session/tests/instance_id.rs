@@ -605,3 +605,247 @@ async fn retained_old_account_notices_never_take_a_replacements_instance_id() {
         })
         .await;
 }
+
+async fn stopped_reply(
+    session: &mut Session,
+    sent: &mut tokio::sync::mpsc::Receiver<String>,
+    op: &str,
+    instance_id: Option<&str>,
+) {
+    session
+        .handle(
+            &json!({"t":"msg","d":{"accountName":"acct","op":op,
+            "data":{"requestId":"stopped-probe","method":"fetchOrders","args":[]}}})
+            .to_string(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !session.joined.contains_key("acct"),
+        "the fallback must not rejoin"
+    );
+    let expected = match op {
+        "callMethod" => envelope::msg(
+            "acct",
+            "callMethod:done",
+            json!({
+            "requestId":"stopped-probe","success":false,"result":{
+                "name":"Error","message":"this account stopped and is restarting; reload if it does not return",
+                "outcome":"notSent"}}),
+        ),
+        "updatePositions" => envelope::msg(
+            "acct",
+            "updatePositions:done",
+            json!({"requestId":"stopped-probe","success":true}),
+        ),
+        _ => envelope::error(
+            Some("acct"),
+            &format!(
+                "{op} was not run: this account is not connected yet. Try again once it has loaded"
+            ),
+        ),
+    };
+    let frame = matching(sent, &expected).await;
+    let value: Value = serde_json::from_str(&frame).unwrap();
+    match instance_id.filter(|id| !id.is_empty()) {
+        Some(id) => assert_eq!(value["d"]["instanceId"], id, "{op}: {frame}"),
+        None => assert_eq!(frame, expected, "legacy fallback bytes: {op}"),
+    }
+    assert!(value.get("instanceId").is_none());
+}
+
+async fn signer_stopped_reply(op: &str) {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, mut session, mut sent) = fixture(Some("failed-signer")).await;
+            crate::accounts::tests::fail_signer(&session.registry, &account);
+            assert!(!session.registry.holds(&account, session.socket));
+            stopped_reply(&mut session, &mut sent, op, Some("failed-signer")).await;
+            session.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_method_reply_keeps_instance_id_after_signer_failure() {
+    signer_stopped_reply("callMethod").await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_update_positions_reply_keeps_instance_id_after_signer_failure() {
+    signer_stopped_reply("updatePositions").await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_algo_refusals_keep_instance_id_after_signer_failure() {
+    for op in ["chaser:start", "twap:start"] {
+        signer_stopped_reply(op).await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_replies_keep_instance_id_after_ping_forgets_the_account() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, mut session, mut sent) = fixture(Some("before-ping")).await;
+            session.registry.dispose(&account, Disposal::Replaced);
+            session.handle(r#"{"t":"ping"}"#).await.unwrap();
+            assert!(!session.joined.contains_key("acct"));
+            for op in [
+                "callMethod",
+                "updatePositions",
+                "chaser:start",
+                "twap:start",
+            ] {
+                stopped_reply(&mut session, &mut sent, op, Some("before-ping")).await;
+            }
+            session.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_replies_keep_instance_id_after_another_init_forgets_the_account() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, mut session, mut sent) = fixture(Some("before-other-init")).await;
+            session
+                .registry
+                .dispose(&account, Disposal::SettingsChanged);
+            let mut payload = init(Some("other-registration"));
+            payload.account_name = "other".into();
+            let other = crate::accounts::testing::trading_account(&session.registry, "u", &payload);
+            session.init(payload).await.unwrap();
+            assert!(!session.joined.contains_key("acct"));
+            for op in [
+                "callMethod",
+                "updatePositions",
+                "chaser:start",
+                "twap:start",
+            ] {
+                stopped_reply(&mut session, &mut sent, op, Some("before-other-init")).await;
+            }
+            session.close();
+            account.handle.dispose();
+            other.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_replies_without_instance_ids_preserve_legacy_bytes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for id in [None, Some("")] {
+                let (account, mut session, mut sent) = fixture(id).await;
+                crate::accounts::tests::fail_signer(&session.registry, &account);
+                session.handle(r#"{"t":"ping"}"#).await.unwrap();
+                for op in [
+                    "callMethod",
+                    "updatePositions",
+                    "chaser:start",
+                    "twap:start",
+                ] {
+                    stopped_reply(&mut session, &mut sent, op, id).await;
+                }
+                session.close();
+                account.handle.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_reply_context_is_replaced_on_reinit_and_removed_on_explicit_dispose() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (a, mut session, mut sent) = fixture(Some("registration-A")).await;
+            let old_out = session.account_out("acct");
+            session.registry.dispose(&a, Disposal::SettingsChanged);
+            session.handle(r#"{"t":"ping"}"#).await.unwrap();
+            let mut payload = init(Some("registration-B"));
+            payload.key = "synthetic-key-B".into();
+            let b = crate::accounts::testing::trading_account(&session.registry, "u", &payload);
+            session.init(payload).await.unwrap();
+            assert!(Arc::ptr_eq(&session.joined["acct"].account, &b));
+            let late = envelope::error(Some("acct"), "late-A");
+            old_out.send(late.clone());
+            let frame: Value = serde_json::from_str(&matching(&mut sent, &late).await).unwrap();
+            assert_eq!(frame["d"]["instanceId"], "registration-A");
+            session.registry.dispose(&b, Disposal::Replaced);
+            stopped_reply(
+                &mut session,
+                &mut sent,
+                "callMethod",
+                Some("registration-B"),
+            )
+            .await;
+            session
+                .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+                .await
+                .unwrap();
+            stopped_reply(&mut session, &mut sent, "callMethod", None).await;
+            session.close();
+            a.handle.dispose();
+            b.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopped_replies_remain_per_connection_during_deferred_disposal_and_user_switch() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (a, mut first, mut first_sent) = fixture(Some("device-A1")).await;
+            let registry = first.registry.clone();
+            let (mut second, mut second_sent) = user_session(registry.clone(), "u");
+            second.init(init(Some("device-A2"))).await.unwrap();
+            let (release, wait) = tokio::sync::oneshot::channel();
+            let source = a.clone();
+            let disposal_registry = registry.clone();
+            let disposal = tokio::spawn(async move {
+                wait.await.unwrap();
+                crate::accounts::tests::fail_signer(&disposal_registry, &source);
+            });
+            let (mut foreign, mut foreign_sent) = user_session(registry.clone(), "foreign");
+            let foreign_account = crate::accounts::testing::trading_account(
+                &registry, "foreign", &init(Some("foreign-B")));
+            foreign.init(init(Some("foreign-B"))).await.unwrap();
+            let mut replacement = init(Some("replacement-B"));
+            replacement.key = "synthetic-key-B".into();
+            let b = crate::accounts::testing::trading_account(&registry, "u", &replacement);
+            let (mut current, mut current_sent) = user_session(registry.clone(), "u");
+            current.init(replacement).await.unwrap();
+            while foreign_sent.try_recv().is_ok() {}
+            while current_sent.try_recv().is_ok() {}
+            release.send(()).unwrap();
+            disposal.await.unwrap();
+            assert!(registry.holds(&b, current.socket), "late A disposal cannot remove B");
+            assert!(registry.holds(&foreign_account, foreign.socket));
+            for sent in [&mut foreign_sent, &mut current_sent] {
+                while let Ok(frame) = sent.try_recv() {
+                    assert!(!frame.contains("Remote signing failed repeatedly"));
+                }
+            }
+            first.handle(r#"{"t":"ping"}"#).await.unwrap();
+            second.handle(r#"{"t":"ping"}"#).await.unwrap();
+            for op in ["callMethod", "updatePositions", "chaser:start", "twap:start"] {
+                stopped_reply(&mut first, &mut first_sent, op, Some("device-A1")).await;
+                stopped_reply(&mut second, &mut second_sent, op, Some("device-A2")).await;
+            }
+            for (session, sent, id) in [
+                (&mut current, &mut current_sent, "replacement-B"),
+                (&mut foreign, &mut foreign_sent, "foreign-B"),
+            ] {
+                session.handle(r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"live-control","method":"fetchOrders","args":[]}}}"#).await.unwrap();
+                let frame = method_reply(sent, "live-control").await;
+                assert_eq!(frame["d"]["instanceId"], id);
+                assert_eq!(frame["d"]["data"]["success"], true);
+            }
+            first.close(); second.close(); current.close(); foreign.close();
+            a.handle.dispose(); b.handle.dispose(); foreign_account.handle.dispose();
+        })
+        .await;
+}

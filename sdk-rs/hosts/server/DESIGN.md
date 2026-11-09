@@ -581,6 +581,10 @@ Each joined connection owns its reply output, so devices sharing one account
 receive their own IDs. Same-engine re-init and resume replace that connection's
 output before the new snapshot; queued frames and detached replies retain their
 captured output. Account-holder broadcasts stamp separately for each recipient.
+Native disposal keeps the connection's stopped-registration output for fallback
+method failures, position acknowledgements and algo refusals, including after a
+ping or another init cleans up the live join. It grants no account authority and
+is removed on a successful replacement join or explicit client disposal.
 Retained records capture their source account fingerprint before deferral and
 are stored separately by user, name and fingerprint. Replay selects the actually
 joined fingerprint before stamping the new holder's ID, so retired credentials
