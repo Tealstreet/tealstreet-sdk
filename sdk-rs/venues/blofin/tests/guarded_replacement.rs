@@ -595,3 +595,67 @@ fn wire_none_placed_envelope_never_authorizes_put_back() {
     assert!(writes(&h).is_empty(), "wire text cannot prove a refusal");
     assert_unknown_stop(&h);
 }
+
+#[test]
+fn partially_accepted_split_replacement_never_puts_back_the_old_remainder() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let instruments = INSTRUMENT
+        .replace("\"minSize\":\"0.1\"", "\"minSize\":\"1\"")
+        .replace("\"lotSize\":\"0.1\"", "\"lotSize\":\"1\"")
+        .replace("\"maxLimitSize\":\"1000\"", "\"maxLimitSize\":\"20\"")
+        .replace("\"maxMarketSize\":\"500\"", "\"maxMarketSize\":\"5\"");
+    let mut h = Harness::with_instruments(&instruments);
+    partly_filled(&mut h);
+    h.requests.clear();
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    let rows = body(&replacement);
+    // TS:2199-2220 rounds (6 - 1) / 2 to 3 and appends remainder 1.
+    assert_eq!(rows.as_array().unwrap().len(), 3);
+    assert_eq!(rows[0]["size"], "3");
+    assert_eq!(rows[1]["size"], "3");
+    assert_eq!(rows[2]["size"], "1");
+    h.respond(replacement, r#"{"code":"2","data":[{"orderId":"100","code":"0"},{"orderId":"0","code":"103003","msg":"refused"},{"orderId":"0","code":"103003","msg":"refused"}]}"#);
+    let error = failure(&h).expect("partial replacement");
+    let outcomes = error.elements.as_ref().expect("all replacement effects");
+    assert_eq!(outcomes.len(), 7);
+    assert!(
+        outcomes[4..]
+            .iter()
+            .all(|row| matches!(row.result, ElementResult::NotSent { error: None }))
+    );
+    assert_eq!(
+        outcomes[0].result,
+        ElementResult::Applied {
+            effect: AppliedEffect::Cancel,
+            target_order_id: Some("12".into()),
+            position_key: None,
+        }
+    );
+    assert_eq!(
+        outcomes[1].result,
+        ElementResult::Placed {
+            order_ids: vec!["100".into()]
+        }
+    );
+    assert!(
+        matches!(&outcomes[2].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        matches!(&outcomes[3].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert_eq!(
+        error.partial.as_ref().expect("accepted lot").order_ids,
+        ["100"]
+    );
+    assert_eq!(error.protection, None);
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        2,
+        "one cancel and one replacement; no put-back"
+    );
+    assert!(writes(&h).is_empty());
+}
