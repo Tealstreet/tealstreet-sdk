@@ -68,9 +68,6 @@ fn check_lots(variant: Variant, single: bool) {
                     let quantities = if variant.is_inverse() {
                         // KNOWN-ISSUE: legacy TS under-allocates (sum 2 of requested 5); kept for exact TS parity per Sam's decision
                         &["2"][..]
-                    } else if variant.is_spot() {
-                        // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for exact TS parity per Sam's decision
-                        &["1", "1", "1", "1"][..]
                     } else {
                         // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for exact TS parity per Sam's decision
                         &["1", "1", "1", "1"][..]
