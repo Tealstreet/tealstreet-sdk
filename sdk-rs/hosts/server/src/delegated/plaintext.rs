@@ -3,6 +3,12 @@ use super::{Credentials, Refused};
 use std::ops::Range;
 use zeroize::{Zeroize, Zeroizing};
 
+// The existing envelope limit is on padded base64, including the AEAD tag.
+pub(super) const MAX_PLAINTEXT: usize = (super::MAX_CIPHERTEXT / 4) * 3 - 16;
+
+#[cfg(test)]
+mod coverage;
+
 struct Input<'a> {
     bytes: &'a mut [u8],
     position: usize,
@@ -15,27 +21,36 @@ impl Drop for Input<'_> {
 }
 
 impl Input<'_> {
-    fn whitespace(&mut self) {
+    fn advance(&mut self, count: usize) -> Result<(), Refused> {
+        let position = self.position.checked_add(count).ok_or(Refused)?;
+        if position > self.bytes.len() {
+            return Err(Refused);
+        }
+        self.position = position;
+        Ok(())
+    }
+
+    fn whitespace(&mut self) -> Result<(), Refused> {
         while matches!(
             self.bytes.get(self.position),
             Some(b' ' | b'\n' | b'\r' | b'\t')
         ) {
-            self.position += 1;
+            self.advance(1)?;
         }
+        Ok(())
     }
 
     fn take(&mut self, byte: u8) -> Result<(), Refused> {
-        self.whitespace();
+        self.whitespace()?;
         if self.bytes.get(self.position) != Some(&byte) {
             return Err(Refused);
         }
-        self.position += 1;
-        Ok(())
+        self.advance(1)
     }
 
     fn next_byte(&mut self) -> Result<u8, Refused> {
         let byte = *self.bytes.get(self.position).ok_or(Refused)?;
-        self.position += 1;
+        self.advance(1)?;
         Ok(byte)
     }
 
@@ -79,8 +94,11 @@ impl Input<'_> {
                         let character = char::from_u32(code).ok_or(Refused)?;
                         let mut encoded = Zeroizing::new([0u8; 4]);
                         let text = character.encode_utf8(&mut *encoded);
-                        let end = written + text.len();
-                        self.bytes[written..end].copy_from_slice(text.as_bytes());
+                        let end = written.checked_add(text.len()).ok_or(Refused)?;
+                        self.bytes
+                            .get_mut(written..end)
+                            .ok_or(Refused)?
+                            .copy_from_slice(text.as_bytes());
                         written = end;
                         continue;
                     }
@@ -89,13 +107,13 @@ impl Input<'_> {
                 0..=31 => return Err(Refused),
                 byte => byte,
             };
-            self.bytes[written] = decoded;
-            written += 1;
+            *self.bytes.get_mut(written).ok_or(Refused)? = decoded;
+            written = written.checked_add(1).ok_or(Refused)?;
         }
     }
 
     fn text(&self, range: Range<usize>) -> Result<&str, Refused> {
-        std::str::from_utf8(&self.bytes[range]).map_err(|_| Refused)
+        std::str::from_utf8(self.bytes.get(range).ok_or(Refused)?).map_err(|_| Refused)
     }
 
     fn field(&mut self) -> Result<usize, Refused> {
@@ -111,48 +129,57 @@ impl Input<'_> {
 
 pub(super) fn parse(bytes: &mut [u8]) -> Result<Credentials, Refused> {
     let mut input = Input { bytes, position: 0 };
+    if input.bytes.len() > MAX_PLAINTEXT {
+        return Err(Refused);
+    }
     // RawValue validates JSON syntax without constructing decoded strings.
     // Subsequent string decoding writes only within this guarded input.
     serde_json::from_slice::<&serde_json::value::RawValue>(input.bytes).map_err(|_| Refused)?;
-    input.whitespace();
+    input.whitespace()?;
     let sequence = input.bytes.get(input.position) == Some(&b'[');
     let closing = if sequence { b']' } else { b'}' };
     input.take(if sequence { b'[' } else { b'{' })?;
     let mut fields: [Option<Zeroizing<String>>; 3] = [None, None, None];
     let mut seen = [false; 3];
-    let mut next_field = 0;
+    let mut next_field: usize = 0;
     loop {
-        input.whitespace();
+        input.whitespace()?;
         if input.bytes.get(input.position) == Some(&closing) {
-            input.position += 1;
+            input.advance(1)?;
             break;
         }
         let field = if sequence { next_field } else { input.field()? };
-        if field >= fields.len() || seen[field] {
+        let seen = seen.get_mut(field).ok_or(Refused)?;
+        if *seen {
             return Err(Refused);
         }
-        seen[field] = true;
-        next_field += 1;
+        *seen = true;
+        next_field = next_field.checked_add(1).ok_or(Refused)?;
         if !sequence {
             input.take(b':')?;
         }
-        input.whitespace();
-        if field == 2 && input.bytes.get(input.position..input.position + 4) == Some(b"null") {
-            input.position += 4;
+        input.whitespace()?;
+        if field == 2
+            && input
+                .bytes
+                .get(input.position..)
+                .is_some_and(|remaining| remaining.starts_with(b"null"))
+        {
+            input.advance(4)?;
         } else {
             let range = input.string()?;
             let mut value = Zeroizing::new(String::with_capacity(range.len()));
             value.push_str(input.text(range)?);
-            fields[field] = Some(value);
+            *fields.get_mut(field).ok_or(Refused)? = Some(value);
         }
-        input.whitespace();
+        input.whitespace()?;
         if input.bytes.get(input.position) == Some(&closing) {
-            input.position += 1;
+            input.advance(1)?;
             break;
         }
         input.take(b',')?;
     }
-    input.whitespace();
+    input.whitespace()?;
     if input.position != input.bytes.len() {
         return Err(Refused);
     }

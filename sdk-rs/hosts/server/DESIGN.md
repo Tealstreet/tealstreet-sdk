@@ -570,6 +570,7 @@ standard base64. Decrypted JSON contains `key`, `secret` and optional
 `passphrase`; its key must match the init key. The opener and parsed credential
 fields erase their owned buffers on drop. Handover parsing retains the JSON
 string contract, including escaped strings and optional or null `passphrase`.
+JSON input is limited to 12,272 bytes, consistent with the envelope limit.
 
 Opening and subsequent join verification run in a spawned task. The existing
 socket select loop handles its completion, while continuing ping, close and

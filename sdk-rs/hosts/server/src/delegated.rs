@@ -54,6 +54,9 @@ pub struct Credentials {
 impl<'de> Deserialize<'de> for Credentials {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        if raw.get().len() > plaintext::MAX_PLAINTEXT {
+            return Err(serde::de::Error::custom("invalid handover credentials"));
+        }
         let mut bytes = Zeroizing::new(Vec::with_capacity(raw.get().len()));
         bytes.extend_from_slice(raw.get().as_bytes());
         plaintext::parse(&mut bytes)

@@ -44,6 +44,7 @@ zeroize.workspace = true
 test-support = ["safe-cex-engine/test-support"]
 
 [dev-dependencies]
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 safe-cex-exchange-server = { path = ".", features = ["test-support"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["test-util"] }
