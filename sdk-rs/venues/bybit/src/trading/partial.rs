@@ -103,24 +103,67 @@ fn matches_partial_kind(row: &NativeStop, kind: OrderType) -> bool {
 }
 
 fn matches_original(row: &NativeStop, guard: &PartialStopGuard) -> bool {
+    original_mismatch(row, guard).is_none()
+}
+
+/// The first field that differs from the original, named for the proof diagnostic.
+fn original_mismatch(row: &NativeStop, guard: &PartialStopGuard) -> Option<&'static str> {
     let order = &guard.original;
     let limit = order
         .extra
         .as_ref()
         .and_then(|extra| extra.conditional_order_price);
-    row.order_id == order.id
-        && row.symbol == order.symbol
-        && row.side == super::side_text(order.side)
-        && equals(&row.qty, order.amount)
-        && equals(&row.cum_exec_qty, 0.0)
-        && equals(&row.trigger_price, order.price)
-        && order
-            .trigger_type
-            .is_some_and(|by| row.trigger_by == reference(by))
-        && row.order_type == if limit.is_some() { "Limit" } else { "Market" }
-        && equals(&row.price, limit.unwrap_or(0.0))
-        && row.position_idx == guard.position_idx
-        && matches_partial_kind(row, order.kind)
+    let checks = [
+        ("orderId", row.order_id == order.id),
+        ("symbol", row.symbol == order.symbol),
+        ("side", row.side == super::side_text(order.side)),
+        ("qty", equals(&row.qty, order.amount)),
+        ("cumExecQty", equals(&row.cum_exec_qty, 0.0)),
+        ("triggerPrice", equals(&row.trigger_price, order.price)),
+        (
+            "triggerBy",
+            order
+                .trigger_type
+                .is_some_and(|by| row.trigger_by == reference(by)),
+        ),
+        (
+            "orderType",
+            row.order_type == if limit.is_some() { "Limit" } else { "Market" },
+        ),
+        ("price", equals(&row.price, limit.unwrap_or(0.0))),
+        ("positionIdx", row.position_idx == guard.position_idx),
+        ("kind", matches_partial_kind(row, order.kind)),
+    ];
+    checks
+        .into_iter()
+        .find_map(|(field, matched)| (!matched).then_some(field))
+}
+
+/// A venue enum value for the proof diagnostic; anything else is never echoed.
+fn enum_token(raw: &str) -> &str {
+    if (1..=32).contains(&raw.len()) && raw.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        raw
+    } else {
+        "other"
+    }
+}
+
+/// Why a row failed the target check: a non-terminal status, the first mismatched field, or both.
+fn row_reason(prefix: &str, row: &NativeStop, guard: &PartialStopGuard) -> String {
+    let mut parts = Vec::new();
+    if !cancelled_terminal(&row.order_status) {
+        parts.push(format!("{prefix}-status={}", enum_token(&row.order_status)));
+    }
+    match original_mismatch(row, guard) {
+        Some("kind") => parts.push(format!(
+            "{prefix}-field=kind tpslMode={} stopOrderType={}",
+            enum_token(row.tpsl_mode.as_deref().unwrap_or("none")),
+            enum_token(row.stop_order_type.as_deref().unwrap_or("none"))
+        )),
+        Some(field) => parts.push(format!("{prefix}-field={field}")),
+        None => {}
+    }
+    parts.join(" ")
 }
 
 /// Missing native lineage or an incomplete peer census never authorizes put-back.
@@ -192,6 +235,34 @@ pub(super) enum Observation {
     Retry(Axis),
 }
 
+/// A failed proof read and the check that failed it: enum values only, never venue data.
+pub(super) struct ProofFailure {
+    pub(super) reason: String,
+}
+
+impl ProofFailure {
+    fn new(axis: Axis, check: impl std::fmt::Display) -> Self {
+        let axis = match axis {
+            Axis::Target => "target",
+            Axis::TargetHistory => "target-history",
+            Axis::Live => "live",
+            Axis::History => "history",
+        };
+        Self {
+            reason: format!("axis={axis} {check}"),
+        }
+    }
+
+    pub(super) fn error(&self) -> VenueError {
+        VenueError::new(format!(
+            "The protective cancel could not be confirmed from native orders; check Open Orders before retrying [proof: {}]",
+            self.reason
+        ))
+        .kind(ErrorKind::Network)
+        .outcome(Outcome::Unknown)
+    }
+}
+
 impl Flow {
     pub(super) fn history_proof(&mut self) -> Option<Planned> {
         let created = self
@@ -250,24 +321,24 @@ impl Flow {
         axis: Axis,
         response: &Response<'_>,
         now: f64,
-    ) -> Result<Observation, VenueError> {
-        let failed = || {
-            VenueError::new("The protective cancel could not be confirmed from native orders; check Open Orders before retrying")
-            .kind(ErrorKind::Network).outcome(Outcome::Unknown)
-        };
+    ) -> Result<Observation, ProofFailure> {
+        let failed = |check: &str| ProofFailure::new(axis, check);
         if response.status != 200 {
-            return Err(failed());
+            return Err(failed(&format!("http={}", response.status)));
         }
         let super::acknowledgement::Answer::Success {
             result: Some(raw), ..
-        } = super::acknowledgement::answer(response.body).map_err(|_| failed())?
+        } = super::acknowledgement::answer(response.body).map_err(|_| failed("envelope"))?
         else {
-            return Err(failed());
+            return Err(failed("envelope"));
         };
-        let mut page: Page = serde_json::from_str(raw.get()).map_err(|_| failed())?;
+        let mut page: Page = serde_json::from_str(raw.get()).map_err(|_| failed("decode"))?;
         self.observed_at = now;
-        if page.category != self.guard.category || page.list.len() > 50 {
-            return Err(failed());
+        if page.category != self.guard.category {
+            return Err(failed("category"));
+        }
+        if page.list.len() > 50 {
+            return Err(failed("len"));
         }
         if matches!(axis, Axis::Target | Axis::TargetHistory) {
             self.target_reads += 1;
@@ -279,8 +350,11 @@ impl Flow {
             if page.list.is_empty() && axis == Axis::Target && page.next_page_cursor.is_empty() {
                 return Ok(Observation::Retry(retry));
             }
-            if page.list.len() != 1 || !page.next_page_cursor.is_empty() {
-                return Err(failed());
+            if page.list.len() != 1 {
+                return Err(failed(&format!("target-len={}", page.list.len())));
+            }
+            if !page.next_page_cursor.is_empty() {
+                return Err(failed("target-cursor"));
             }
             let row = page.list.pop().unwrap();
             if axis == Axis::Target
@@ -290,17 +364,19 @@ impl Flow {
                 return Ok(Observation::Retry(retry));
             }
             if !cancelled_terminal(&row.order_status) || !matches_original(&row, &self.guard) {
-                return Err(failed());
+                return Err(failed(&row_reason("target", &row, &self.guard)));
             }
             self.terminal = Some(row);
         } else {
-            if page.list.iter().any(|row| {
-                row.symbol != self.guard.symbol
-                    || (row.order_id == self.guard.original.id
-                        && (!cancelled_terminal(&row.order_status)
-                            || !matches_original(row, &self.guard)))
+            if page.list.iter().any(|row| row.symbol != self.guard.symbol) {
+                return Err(failed("peer-symbol"));
+            }
+            if let Some(row) = page.list.iter().find(|row| {
+                row.order_id == self.guard.original.id
+                    && (!cancelled_terminal(&row.order_status)
+                        || !matches_original(row, &self.guard))
             }) {
-                return Err(failed());
+                return Err(failed(&row_reason("peer-target", row, &self.guard)));
             }
             self.complete &= page.next_page_cursor.is_empty();
             if axis == Axis::History {
