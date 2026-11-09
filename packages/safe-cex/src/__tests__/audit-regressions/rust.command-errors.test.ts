@@ -208,6 +208,54 @@ it.each([1, 0, 2])('retains Hyperliquid applied cancellation counts with an Unkn
   expect(r.commands.filter(({ op }) => op === 'cancelOrders')).toHaveLength(1);
 });
 
+it.each([false, true])('Bitunix applied cancel Unknown retains caller order and effects (unknownFirst=%s)', async (unknownFirst) => {
+  const ids = unknownFirst ? ['uncertain', 'confirmed'] : ['confirmed', 'uncertain'];
+  const failedIndex = unknownFirst ? 0 : 1;
+  const r = await fixture('bitunix');
+  const detail: VenueErrorDetail = {
+    message: 'Bitunix cancellation not acknowledged for every order; replacement was not placed; The outcome is unknown. Check Open Orders',
+    kind: 'network',
+    outcome: 'unknown',
+    venueCode: '10001',
+    venueMessage: 'Network Error',
+    partial: { orderIds: [], total: 2, failedIndex },
+    elements: ids.map((id, index) => id === 'confirmed'
+      ? { index, status: 'applied' as const, effect: 'cancel' as const, targetOrderId: id }
+      : { index, status: 'unknown' as const, error: {
+        message: 'Network Error', kind: 'network' as const, outcome: 'unknown' as const,
+        venueCode: '10001', venueMessage: 'Network Error',
+      } }),
+  };
+  r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
+  const targets = ids.map((id) => ({
+    ...order, id, status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  }));
+  const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ExchangeError);
+  expect(r.commands.filter(({ command }) => command !== undefined)).toEqual([
+    expect.objectContaining({ op: 'cancelOrders', ids }),
+  ]);
+  const expected = {
+    message: detail.message,
+    kind: 'network',
+    outcome: 'unknown',
+    venueCode: '10001',
+    venueMessage: 'Network Error',
+    partialOrderIds: [],
+    // This counts created IDs, not confirmed cancellation effects.
+    partialOrderCount: 0,
+    totalOrderCount: 2,
+    failedOrderIndex: failedIndex,
+    elements: detail.elements,
+    errorReported: true,
+  };
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+  expect(r.errors.mock.calls[0][0]).toBe(detail.message);
+  expect(r.errors.mock.calls[0][1].classified).toEqual({ kind: 'network', outcome: 'unknown', venueCode: '10001' });
+});
+
 it('keeps populated placement error output byte-identical to master 343e38cbe96', () => {
   const detail: VenueErrorDetail = {
     message: 'Second placement acknowledgement lost',
