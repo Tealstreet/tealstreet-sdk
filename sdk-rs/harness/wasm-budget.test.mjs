@@ -1241,6 +1241,27 @@ test('#3345 (run 42456627405 at ca5c784d486) retains measured wasm headroom', ()
   }
 });
 
+test('#3395 restage (run 42561995598 at merge c4b68c461e1f) retains current CI headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['asterdex', 2_187_368, 2_198_528],
+    ['bitunix', 1_916_290, 1_927_168],
+    ['bybit', 2_316_042, 2_326_528],
+    ['coinbase', 1_967_433, 1_978_368],
+    ['cryptocom', 1_792_792, 1_803_264],
+    ['mexc', 1_887_614, 1_898_496],
+    ['orderly', 1_758_659, 1_769_472],
+    ['phemex', 2_104_206, 2_114_560],
+    ['woo', 2_631_851, 2_642_944],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3306 (run 42481130823 at merge 680966203b3) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['apexomni', 2_045_121, 2_056_192],
