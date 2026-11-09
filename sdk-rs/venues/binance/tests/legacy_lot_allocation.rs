@@ -86,7 +86,7 @@ fn pin(amount: f64, max: f64, step: f64, min: f64, expected: &[&str], expected_s
 // binancespot.exchange.ts:535-547; binanceinverse.exchange.ts:919-924;
 // binancepm.exchange.ts:901-913. Verified by executing the TS allocator with safe-math.adjust.
 #[test]
-// KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+// KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
 fn uneven_26_max_5_step_1_matches_ts_exactly() {
     pin(
         26.0,
@@ -99,13 +99,13 @@ fn uneven_26_max_5_step_1_matches_ts_exactly() {
 }
 
 #[test]
-// KNOWN-ISSUE: legacy TS under-allocates (sum 20 of requested 22); kept for parity per Sam; decision pending
+// KNOWN-ISSUE: legacy TS under-allocates (sum 20 of requested 22); kept for exact TS parity per Sam's decision
 fn uneven_step_greater_than_one_matches_ts_exactly() {
     pin(22.0, 10.0, 2.0, 2.0, &["6", "6", "6", "2"], 20.0);
 }
 
 #[test]
-// KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+// KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
 fn uneven_remainder_below_minimum_still_matches_ts_exactly() {
     pin(12.0, 5.0, 1.0, 3.0, &["3", "3", "3", "2"], 11.0);
 }

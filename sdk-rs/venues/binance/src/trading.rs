@@ -1762,7 +1762,7 @@ impl BinanceFutures {
             } else if self.is_spot() {
                 (self.format_spot(cx, opts)?, Vec::new())
             } else if self.is_inverse() {
-                self.format_inverse(cx, opts)?
+                self.format_inverse(cx, opts, true)?
             } else {
                 self.format_order(cx, opts)?
             };
@@ -2181,12 +2181,10 @@ impl BinanceFutures {
                     "stopPrice",
                     number(positive_price(Some(trigger), market.precision.price)?),
                 );
-                for mut part in
-                    sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
-                {
-                    part.set("newClientOrderId", self.generated_id(cx)?);
-                    out.push(part);
-                }
+                // Attached protection keeps the whole intent quantity, independent of entry lots.
+                p.set("quantity", number(amount));
+                p.set("newClientOrderId", self.generated_id(cx)?);
+                out.push(p);
             }
         }
         Ok(out)
@@ -2198,6 +2196,7 @@ impl BinanceFutures {
         &self,
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
+        split_lots: bool,
     ) -> Result<(Vec<Params>, Vec<Params>), String> {
         if opts.kind == OrderType::Conditional {
             return Err("Binance COIN-M conditional orders require a supported stop type".into());
@@ -2294,8 +2293,11 @@ impl BinanceFutures {
         }
         let mut out = if close {
             vec![p]
-        } else {
+        } else if split_lots {
             sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
+        } else {
+            p.set("quantity", number(amount));
+            vec![p]
         };
         for p in &mut out {
             p.set("newClientOrderId", self.generated_id(cx)?);
@@ -2323,7 +2325,7 @@ impl BinanceFutures {
                 bracket.take_profit = None;
                 bracket.reduce_only = Some(true);
                 bracket.close = Some(false);
-                let (r, a) = self.format_inverse(cx, &bracket)?;
+                let (r, a) = self.format_inverse(cx, &bracket, false)?;
                 regular.extend(r);
                 algo.extend(a);
             }
