@@ -1404,7 +1404,7 @@ pub fn build_with_signer<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
-    signer: Option<safe_cex_engine::signing::Provider>,
+    mut signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
     #[cfg(feature = "polymarket")]
@@ -1414,6 +1414,20 @@ pub fn build_with_signer<T: Visit>(
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));
+    }
+    let orderly = cfg!(feature = "orderly")
+        && matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi");
+    if orderly && construction::signer_setup_public_data_only(&options) {
+        options.public_data_only = true;
+        options.signing = None;
+        signer = None;
+    }
+    if orderly && (options.signing.is_some() || signer.is_some()) {
+        return Err(
+            VenueError::new("Orderly injected private signing admission is closed")
+                .kind(ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
     }
     if (options.signing.is_some() || signer.is_some())
         && !construction::bridge(venue, &options).dispatch_signing

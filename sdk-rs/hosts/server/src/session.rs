@@ -1839,6 +1839,7 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         init.subaccount.is_some(),
         init.orderly_exchange_id.is_some(),
         init.grvt_trading_account_id.is_some(),
+        init.grvt_signer_address.is_some(),
         init.tealstreet_proxy.is_some(),
         init.tealstreet_tunnel.is_some(),
         init.tealstreet_ws_route.is_some(),

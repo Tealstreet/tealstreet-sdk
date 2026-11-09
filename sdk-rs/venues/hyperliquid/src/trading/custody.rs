@@ -39,7 +39,6 @@ pub(super) struct Custody {
     context: Option<Context>,
     ready: bool,
     wait: Option<ConditionWait>,
-    cancel_failure: Option<WritePlan>,
 }
 impl Custody {
     pub(super) fn owner(&self) -> safe_cex_engine::request_context::Owner {
@@ -99,6 +98,7 @@ impl Hyperliquid {
                 return;
             }
         };
+        job.journal = write_plan::Journal::new(&job.steps);
         let remaining = if job.amend_source.is_some() {
             remaining.min(AMEND_READ_MS as u32)
         } else {
@@ -132,7 +132,6 @@ impl Hyperliquid {
             context: None,
             ready,
             wait: None,
-            cancel_failure: None,
         });
         self.trading.queue.push_back(job);
         self.pump_trades(cx);
@@ -411,33 +410,18 @@ impl Hyperliquid {
         job: &Job,
         result: Result<String, VenueError>,
     ) {
+        let result = result.map_err(|error| {
+            let error = job.journal.failure(error);
+            job.journal.report_unknown(cx, job.command, &error.message);
+            error
+        });
         let custody = job.custody.as_ref().unwrap();
         if let Some(timer) = custody.intent_timer {
             cx.clear_timer(timer);
         }
         if let Some(plan) = &custody.plan {
             match result {
-                Err(mut error) => {
-                    if let Some(journal) = &custody.cancel_failure {
-                        let uncertain = journal
-                            .outcomes()
-                            .iter()
-                            .any(|row| matches!(row.result, ElementResult::Unknown { .. }));
-                        error = journal.attach(error);
-                        if uncertain {
-                            error.message = CANCEL_UNKNOWN.into();
-                            error.presents = true;
-                            cx.event(
-                                safe_cex_engine::Level::Warn,
-                                "order.outcome_unknown",
-                                CANCEL_UNKNOWN,
-                                vec![
-                                    ("commandId", job.command.into()),
-                                    ("outcome", "unknown".into()),
-                                ],
-                            );
-                        }
-                    }
+                Err(error) => {
                     let _ = match &job.stop_note {
                         Some(note) => cx.fail_plan_noted(plan, error, note),
                         None => cx.fail_plan(plan, error),
@@ -680,9 +664,16 @@ impl Hyperliquid {
     }
     pub(crate) fn unproven_trade_evidence(
         &self,
+        request: &Request,
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
+        if let Some(job) = self.trading.active.as_ref().filter(|job| {
+            job.command == request.command
+                && job.custody.as_ref().and_then(|c| c.context.as_ref()) == Some(&request.context)
+        }) {
+            job.journal.evidence(evidence);
+        }
         if let Ok(reply) = serde_json::from_str::<Reply<'_>>(response.body)
             && reply.status == "err"
             && let Ok(message) = serde_json::from_str::<String>(reply.response.get())
@@ -691,7 +682,7 @@ impl Hyperliquid {
         }
     }
     pub(super) fn report_trade_failure(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &Request,
         error: &ReplyError,
@@ -701,7 +692,7 @@ impl Hyperliquid {
             code: safe_cex_engine::classify::NativeCode::None,
             message: table_message(native_message.unwrap_or(&error.message)),
         };
-        cx.http_write_failure(
+        let fact = cx.classify_write(
             &request.context,
             if !error.uncertain
                 && (self.protective_replacement_active()
@@ -713,10 +704,152 @@ impl Hyperliquid {
             },
             Some(&native),
             error.message.clone(),
+        )?;
+        cx.http_write_fact(
+            &request.context,
+            safe_cex_engine::classify::WriteFact::Failed {
+                fact: fact.clone(),
+                known_effects: false,
+            },
             None,
-        )
-        .map(drop)
+        )?;
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal.record_failure(fact.error().clone());
+        }
+        Ok(())
     }
+    pub(super) fn settle_write_rows(
+        &mut self,
+        request: &Request,
+        statuses: &[Status],
+        status: Option<u16>,
+    ) {
+        use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
+        use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+        let Some(job) = self.trading.active.as_ref() else {
+            return;
+        };
+        if !job.journal.pending() {
+            return;
+        }
+        let idempotent_cancel = !self.spot;
+        let intent = match &request.effect {
+            Effect::Place(_) if request.order_reply == OrderReply::FullPosition => Intent::Setting,
+            Effect::Place(_) if job.amend_source.is_some() => Intent::Amend,
+            Effect::Place(_) => Intent::Place,
+            Effect::Cancel(_) if idempotent_cancel || job.protection.is_some() => Intent::Cancel,
+            Effect::Cancel(_) => Intent::Amend,
+            Effect::ScheduleCancel | Effect::Leverage { .. } => Intent::Setting,
+        };
+        let count = match &request.effect {
+            Effect::Place(records) => records.len(),
+            Effect::Cancel(orders) => orders.len(),
+            Effect::ScheduleCancel | Effect::Leverage { .. } => 1,
+        };
+        let Some(status) = status else {
+            if let Some(job) = self.trading.active.as_mut() {
+                job.journal.record_failure(unproven("Missing native reply"));
+            }
+            return;
+        };
+        let response = Response {
+            status,
+            headers: "",
+            body: "",
+        };
+        let applied = |effect, target_order_id, position_key| ElementResult::Applied {
+            effect,
+            target_order_id,
+            position_key,
+        };
+        let mut results = Vec::new();
+        for row in 0..count {
+            let status = if let Effect::Place(_) = &request.effect
+                && matches!(statuses, [Status::Error { .. }])
+            {
+                statuses.first()
+            } else {
+                statuses.get(row)
+            };
+            let result = match (&request.effect, status) {
+                (Effect::ScheduleCancel, _) => applied(AppliedEffect::Settings, None, None),
+                (Effect::Leverage { symbol, .. }, _) => {
+                    applied(AppliedEffect::Settings, None, Some(symbol.clone()))
+                }
+                (Effect::Cancel(orders), Some(Status::Text(text))) if text == "success" => {
+                    applied(AppliedEffect::Cancel, Some(orders[row].id.clone()), None)
+                }
+                (Effect::Cancel(orders), Some(Status::Error { error }))
+                    if idempotent_cancel && only_terminal_cancel(error) =>
+                {
+                    applied(AppliedEffect::Cancel, Some(orders[row].id.clone()), None)
+                }
+                (_, Some(Status::Error { error })) => {
+                    let native = Native {
+                        code: NativeCode::None,
+                        message: table_message(error),
+                    };
+                    let table = if self.protective_replacement_active()
+                        && statuses.iter().all(|status| matches!(status, Status::Error { error } if known_protective_refusal(error)))
+                    { &PROTECTIVE_REFUSAL } else { &BATCH };
+                    // Native batch rows use table.verdict, matching classify::batch.
+                    let error = Box::new(classify::error(
+                        table.verdict(&native, intent),
+                        intent,
+                        Released::Response(&response),
+                        Some(&native),
+                        error.clone(),
+                    ));
+                    if matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
+                        ElementResult::NotSent { error: Some(error) }
+                    } else {
+                        ElementResult::Unknown { error }
+                    }
+                }
+                (Effect::Place(_), Some(Status::Resting { resting })) => ElementResult::Placed {
+                    order_ids: vec![resting.oid.to_string()],
+                },
+                (Effect::Place(_), Some(Status::Filled { filled })) => ElementResult::Placed {
+                    order_ids: vec![filled.oid.to_string()],
+                },
+                (Effect::Place(records), Some(Status::Text(text)))
+                    if request.order_reply == OrderReply::FullPosition
+                        && text == "waitingForTrigger" =>
+                {
+                    applied(
+                        AppliedEffect::PositionTrigger,
+                        None,
+                        Some(records[row].order.symbol.clone()),
+                    )
+                }
+                (Effect::Place(_), Some(Status::Text(text)))
+                    if request.order_reply == OrderReply::Attached
+                        && row > 0
+                        && deferred_child(text) =>
+                {
+                    let parent = match statuses.first() {
+                        Some(Status::Resting { resting }) => Some(resting.oid.to_string()),
+                        Some(Status::Filled { filled }) => Some(filled.oid.to_string()),
+                        _ => None,
+                    };
+                    match parent {
+                        Some(parent) => applied(AppliedEffect::DeferredChild, Some(parent), None),
+                        None => ElementResult::Unknown {
+                            error: Box::new(unproven("Deferred child has no accepted parent")),
+                        },
+                    }
+                }
+                _ => ElementResult::Unknown {
+                    error: Box::new(unproven("Unknown Hyperliquid write status")),
+                },
+            };
+            results.push(result);
+        }
+        if let Some(job) = self.trading.active.as_mut() {
+            job.journal.settle(results);
+        }
+    }
+
     pub(super) fn report_trade_batch(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -757,6 +890,12 @@ impl Hyperliquid {
                 .any(|status| matches!(status, Status::Text(text) if deferred_child(text)))
         {
             return self.report_attached_order(cx, request, statuses, message);
+        }
+        if let Effect::Cancel(_) = &request.effect
+            && statuses.iter().all(|status| matches!(status, Status::Text(text) if text == "success")
+                || matches!(status, Status::Error { error } if idempotent_cancel && only_terminal_cancel(error)))
+        {
+            return cx.http_write_fact(&request.context, WriteFact::Accepted { order_ids: vec![] }, None).map(drop);
         }
         let ids: Vec<_> = statuses
             .iter()
@@ -870,14 +1009,15 @@ impl Hyperliquid {
                     result,
                     safe_cex_engine::request_context::WriteResult::Accepted { .. }
                 ) {
-                    let custody = self
+                    let job = self
                         .trading
                         .active
                         .as_mut()
-                        .filter(|job| job.command == request.command)
-                        .and_then(|job| job.custody.as_mut())
+                        .filter(|job| job.command == request.command && job.custody.is_some())
                         .ok_or(safe_cex_engine::request_context::Error::State)?;
-                    custody.cancel_failure = Some(journal);
+                    // Keep native cancellation proof in the command's one passive journal.
+                    // A later aggregate failure must not overwrite confirmed sibling rows.
+                    job.journal.settle_native(journal);
                 }
                 Ok(result)
             }

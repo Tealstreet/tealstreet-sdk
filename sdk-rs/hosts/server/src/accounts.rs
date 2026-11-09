@@ -381,12 +381,86 @@ struct Parked {
 
 type AccountEntries = HashMap<(String, String), Arc<Account>>;
 
+type PendingInits = Mutex<HashMap<(String, String), InitIncarnation>>;
+
+struct InitIncarnation {
+    fingerprint: String,
+    public_only: bool,
+    attempts: Vec<Arc<AtomicBool>>,
+}
+
+#[derive(Clone)]
+struct InitAuthority {
+    current: Arc<AtomicBool>,
+    lease: Option<crate::router_lease::Permit>,
+}
+
+impl InitAuthority {
+    fn check(&self) -> Result<(), String> {
+        if !self.current.load(Ordering::Acquire) {
+            return Err("Account init superseded; initialization stopped".into());
+        }
+        if self.lease.as_ref().is_some_and(|lease| !lease.allowed()) {
+            return Err("Router lease expired; initialization stopped".into());
+        }
+        Ok(())
+    }
+}
+
+struct InitAttempt<'a> {
+    pending: &'a PendingInits,
+    key: (String, String),
+    authority: InitAuthority,
+    published: bool,
+}
+
+impl InitAttempt<'_> {
+    fn forget(&self, pending: &mut HashMap<(String, String), InitIncarnation>) {
+        if let Some(incarnation) = pending.get_mut(&self.key) {
+            incarnation
+                .attempts
+                .retain(|current| !Arc::ptr_eq(current, &self.authority.current));
+            if incarnation.attempts.is_empty() {
+                pending.remove(&self.key);
+            }
+        }
+    }
+
+    fn publish(
+        &mut self,
+        accounts: &Mutex<HashMap<(String, String), Arc<Account>>>,
+        account: &Arc<Account>,
+    ) -> Result<Option<Arc<Account>>, String> {
+        // Serialize the final check and insertion with a newer init's admission.
+        let mut pending = self.pending.lock().unwrap();
+        self.authority.check()?;
+        let replaced = accounts
+            .lock()
+            .unwrap()
+            .insert(self.key.clone(), account.clone());
+        self.forget(&mut pending);
+        self.published = true;
+        Ok(replaced)
+    }
+}
+
+impl Drop for InitAttempt<'_> {
+    fn drop(&mut self) {
+        if !self.published {
+            self.authority.current.store(false, Ordering::Release);
+        }
+        let mut pending = self.pending.lock().unwrap();
+        self.forget(&mut pending);
+    }
+}
+
 pub struct Registry {
     pub public_topics: Arc<crate::public_topics::PublicTopics>,
     pub user_drains: crate::user_drain::Users,
     pub router_leases: Arc<crate::router_lease::Users>,
     pub interruptions: Arc<crate::interruption::Notices>,
     accounts: Arc<Mutex<AccountEntries>>,
+    pending_inits: PendingInits,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
     /// the server has not seen yet (no close frame) takes it over.
@@ -539,6 +613,12 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
         {
             options.insert(field.into(), value.clone().into());
         }
+    }
+    if init.exchange_name == "grvt"
+        && !public_only
+        && let Some(address) = init.grvt_signer_address.as_ref().filter(|v| !v.is_empty())
+    {
+        options.insert("grvtSignerAddress".into(), address.clone().into());
     }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
@@ -728,6 +808,7 @@ impl Registry {
             router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
             interruptions: Default::default(),
             accounts: Arc::default(),
+            pending_inits: Mutex::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
             threads,
@@ -884,6 +965,55 @@ impl Registry {
         ))
     }
 
+    fn begin_init(
+        &self,
+        user: &str,
+        name: &str,
+        public_only: bool,
+        fingerprint: &str,
+    ) -> Result<InitAttempt<'_>, String> {
+        let lease = if public_only {
+            None
+        } else {
+            match self.router_leases.get(user) {
+                Some(lease) => Some(lease.permit()),
+                None if !self.router_leases.enforced() => None,
+                None => return Err("Router lease unavailable; no account work was sent".into()),
+            }
+        };
+        let authority = InitAuthority {
+            current: Arc::new(AtomicBool::new(true)),
+            lease,
+        };
+        authority.check()?;
+        let key = (user.to_owned(), name.to_owned());
+        {
+            let mut pending = self.pending_inits.lock().unwrap();
+            let incarnation = pending
+                .entry(key.clone())
+                .or_insert_with(|| InitIncarnation {
+                    fingerprint: fingerprint.to_owned(),
+                    public_only,
+                    attempts: vec![],
+                });
+            if incarnation.fingerprint != fingerprint || incarnation.public_only != public_only {
+                for previous in &incarnation.attempts {
+                    previous.store(false, Ordering::Release);
+                }
+                incarnation.attempts.clear();
+                incarnation.fingerprint = fingerprint.to_owned();
+                incarnation.public_only = public_only;
+            }
+            incarnation.attempts.push(authority.current.clone());
+        }
+        Ok(InitAttempt {
+            pending: &self.pending_inits,
+            key,
+            authority,
+            published: false,
+        })
+    }
+
     /// The account this user's `init` names, built or reused. Reuse requires an
     /// identical fingerprint; otherwise the old account is disposed first, but
     /// never while another live socket holds it (see `rebuild_refusal`).
@@ -899,8 +1029,9 @@ impl Registry {
         if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
         }
-        let key = (user.to_owned(), init.account_name.clone());
         let fingerprint = init.fingerprint();
+        let mut attempt = self.begin_init(user, &init.account_name, public_only, &fingerprint)?;
+        let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
         if let Some(account) = existing {
             if account.fingerprint == fingerprint && account.is_public() == public_only {
@@ -941,9 +1072,17 @@ impl Registry {
                 token,
                 holder,
                 outbox.clone(),
+                &attempt.authority,
             )
             .await?;
         let account = Arc::new(account);
+        if let Err(error) = attempt.authority.check() {
+            account.handle.dispose();
+            if let Some(link) = &account.link {
+                link.mark_unavailable();
+            }
+            return Err(error);
+        }
         self.user_drains.track(
             user,
             &account.name,
@@ -970,9 +1109,18 @@ impl Registry {
                 }
             });
         }
-        let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
+        let replaced = match attempt.publish(&self.accounts, &account) {
+            Ok(replaced) => replaced,
+            Err(error) => {
+                account.handle.dispose();
+                if let Some(link) = &account.link {
+                    link.mark_unavailable();
+                }
+                return Err(error);
+            }
+        };
         if let Some(replaced) = replaced {
-            // A concurrent init of the same name won the race; the later build stands.
+            // Only current settings can publish; identical inits may still race.
             // Its holders go too, so the losing socket stops calling a stopped account.
             self.dispose_for(
                 &replaced,
@@ -994,8 +1142,10 @@ impl Registry {
         token: Option<(String, u64)>,
         socket: u64,
         outbox: Outbox,
+        authority: &InitAuthority,
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         self.pacer.admit().await;
+        authority.check()?;
         let venue = init.exchange_name.clone();
         let link = (!public_only).then(|| SignerLink::new(socket, outbox));
         let Prepared {
@@ -1031,19 +1181,7 @@ impl Registry {
         let running = Arc::new(crate::algos::Running::new(self.algos_ended.clone()));
         self.user_drains
             .track(user, &init.account_name, &running, std::sync::Weak::new());
-        let lease = if public_only {
-            None
-        } else {
-            match self.router_leases.get(user) {
-                Some(lease) => Some(lease.permit()),
-                None if !self.router_leases.enforced() => None,
-                None => return Err("Router lease unavailable; no account work was sent".into()),
-            }
-        };
-        if let Some(lease) = &lease {
-            if !lease.allowed() {
-                return Err("Router lease expired; no account work was sent".into());
-            }
+        if let Some(lease) = &authority.lease {
             running.attach_lease(lease.clone());
         }
         running.attach_restores(self.interruptions.account(user, &init.account_name));
@@ -1067,11 +1205,14 @@ impl Registry {
             config.interest_observer = Some(self.public_topics.observer(&venue));
         }
         let (spawned, receive) = tokio::sync::oneshot::channel();
+        let authority = authority.clone();
         let placed = self.threads.place(move |placement| {
-            let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
-            if let Some(lease) = lease {
-                transport = transport.with_io_guard(Arc::new(move || lease.allowed()));
+            if let Err(error) = authority.check() {
+                let _ = spawned.send(Err(error));
+                return;
             }
+            let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
+            transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
             let result =
                 safe_cex_native::spawn_venue_account(&venue, &options, transport, signer, config)
                     .map(|(handle, task)| {
@@ -2115,6 +2256,324 @@ pub mod testing {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    fn grant_init_owner(registry: &Registry, epoch: u64) {
+        let now = now_ms();
+        registry
+            .router_leases
+            .accept(&crate::router_lease::Heartbeat {
+                r#box: "01".into(),
+                issued_at: now,
+                users: vec![crate::router_lease::Assertion {
+                    user_id: "u".into(),
+                    owner_epoch: epoch,
+                    sequence: 1,
+                    not_after: now + 45_000,
+                }],
+            })
+            .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn paced_private_init_drops_its_retired_router_generation() {
+        use std::future::Future;
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        )
+        .with_router_lease(crate::router_lease::Config {
+            box_id: Some("01".into()),
+            enforce: true,
+            ..Default::default()
+        });
+        registry.pacer = crate::pacing::Pacer::new(1, Duration::ZERO);
+        let registry = Arc::new(registry);
+        grant_init_owner(&registry, 1);
+        let old_permit = registry.router_leases.get("u").unwrap().permit();
+        assert!(old_permit.allowed());
+        registry.pacer.admit().await;
+        let init = InitPayload {
+            account_name: "acct".into(),
+            exchange_name: "hyrotrader".into(),
+            ..Default::default()
+        };
+        let expected_control = prepare(&init, false, Some(SignerLink::new(8, Arc::new(|_| true))))
+            .err()
+            .unwrap();
+        let stale = registry.obtain("u", &init, false, 7, None, Arc::new(|_| true));
+        tokio::pin!(stale);
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(stale.as_mut().poll(cx).is_pending()))
+                .await
+        );
+        tokio::time::advance(Duration::from_secs(46)).await;
+        assert!(
+            !old_permit.allowed(),
+            "original authority is retired during pacing"
+        );
+        grant_init_owner(&registry, 2);
+        assert!(registry.router_leases.get("u").unwrap().permit().allowed());
+        assert!(
+            !old_permit.allowed(),
+            "fresh grant cannot revive original authority"
+        );
+        let error = stale.await.err().expect("stale init must be refused");
+        assert!(
+            error.contains("Router lease expired"),
+            "stale init adopted fresh authority and reached preparation: {error}"
+        );
+        let fresh = registry
+            .obtain("u", &init, false, 8, None, Arc::new(|_| true))
+            .await;
+        assert_eq!(
+            fresh.err().unwrap(),
+            expected_control,
+            "fresh-owner control reaches ordinary preparation"
+        );
+        assert_eq!(registry.account_count(), 0);
+        assert_eq!(
+            registry.threads.accounts(),
+            0,
+            "no account/private transport was created"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn paced_init_drops_after_newer_same_name_settings() {
+        use std::future::Future;
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        registry.pacer = crate::pacing::Pacer::new(1, Duration::ZERO);
+        let registry = Arc::new(registry);
+        registry.pacer.admit().await;
+        let old = InitPayload {
+            account_name: "acct".into(),
+            exchange_name: "hyrotrader".into(),
+            key: "synthetic-A".into(),
+            ..Default::default()
+        };
+        let new = InitPayload {
+            key: "synthetic-B".into(),
+            ..old.clone()
+        };
+        let stale = registry.obtain("u", &old, false, 7, None, Arc::new(|_| true));
+        tokio::pin!(stale);
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(stale.as_mut().poll(cx).is_pending()))
+                .await
+        );
+        let fresh = registry
+            .obtain("u", &new, false, 8, None, Arc::new(|_| true))
+            .await;
+        let expected = prepare(&new, false, Some(SignerLink::new(8, Arc::new(|_| true))))
+            .err()
+            .unwrap();
+        assert_eq!(
+            fresh.err().unwrap(),
+            expected,
+            "new settings reach ordinary preparation"
+        );
+        let error = stale.await.err().expect("superseded init must be refused");
+        assert!(
+            error.contains("superseded"),
+            "older settings resumed after a newer init: {error}"
+        );
+        assert_eq!(registry.account_count(), 0);
+        assert_eq!(registry.threads.accounts(), 0);
+    }
+
+    #[tokio::test]
+    async fn completed_init_cannot_publish_under_a_fresh_router_generation() {
+        use std::future::Future;
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = Arc::new(
+                    Registry::new(
+                        EngineThreads::start(1).unwrap(),
+                        Duration::from_millis(1),
+                        Duration::from_secs(60),
+                    )
+                    .with_router_lease(crate::router_lease::Config {
+                        box_id: Some("01".into()),
+                        enforce: true,
+                        ..Default::default()
+                    }),
+                );
+                grant_init_owner(&registry, 1);
+                let mut old = registry
+                    .begin_init("u", "acct", false, "synthetic-A")
+                    .unwrap();
+                let (old_account, _old_inbox) = held_account_with(
+                    Some(SignerLink::new(7, Arc::new(|_| true))),
+                    "synthetic-A".into(),
+                );
+                let (release, receive) = tokio::sync::oneshot::channel();
+                let completion = async {
+                    receive.await.unwrap();
+                    old.publish(&registry.accounts, &old_account)
+                };
+                tokio::pin!(completion);
+                assert!(
+                    std::future::poll_fn(|cx| std::task::Poll::Ready(
+                        completion.as_mut().poll(cx).is_pending()
+                    ))
+                    .await
+                );
+                grant_init_owner(&registry, 2);
+                let (fresh, _fresh_inbox) = held_account_with(
+                    Some(SignerLink::new(8, Arc::new(|_| true))),
+                    "synthetic-B".into(),
+                );
+                register(&registry, &fresh);
+                assert!(fresh.running.io_allowed(), "fresh B control is authorized");
+                release.send(()).unwrap();
+                let error = completion
+                    .await
+                    .err()
+                    .expect("old completion must be dropped");
+                assert!(error.contains("Router lease expired"));
+                assert!(Arc::ptr_eq(
+                    registry
+                        .accounts
+                        .lock()
+                        .unwrap()
+                        .get(&("u".into(), "acct".into()))
+                        .unwrap(),
+                    &fresh
+                ));
+                old_account.handle.dispose();
+                fresh.handle.dispose();
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn completed_init_cannot_overwrite_newer_settings_or_fence_a_published_control() {
+        use std::future::Future;
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let mut old = registry
+                    .begin_init("u", "acct", false, "synthetic-A")
+                    .unwrap();
+                let (old_account, _old_inbox) = held_account_with(
+                    Some(SignerLink::new(7, Arc::new(|_| true))),
+                    "synthetic-A".into(),
+                );
+                let (release, receive) = tokio::sync::oneshot::channel();
+                let completion = async {
+                    receive.await.unwrap();
+                    old.publish(&registry.accounts, &old_account)
+                };
+                tokio::pin!(completion);
+                assert!(
+                    std::future::poll_fn(|cx| std::task::Poll::Ready(
+                        completion.as_mut().poll(cx).is_pending()
+                    ))
+                    .await
+                );
+                let mut new = registry
+                    .begin_init("u", "acct", false, "synthetic-B")
+                    .unwrap();
+                let (fresh, _fresh_inbox) = held_account_with(
+                    Some(SignerLink::new(8, Arc::new(|_| true))),
+                    "synthetic-B".into(),
+                );
+                assert!(new.publish(&registry.accounts, &fresh).unwrap().is_none());
+                let next = registry
+                    .begin_init("u", "acct", false, "synthetic-B")
+                    .unwrap();
+                assert!(
+                    new.authority.check().is_ok(),
+                    "publishing detaches B from pending-init cancellation before returning"
+                );
+                drop(next);
+                release.send(()).unwrap();
+                let error = completion
+                    .await
+                    .err()
+                    .expect("old completion must be dropped");
+                assert!(error.contains("superseded"));
+                assert!(Arc::ptr_eq(
+                    registry
+                        .accounts
+                        .lock()
+                        .unwrap()
+                        .get(&("u".into(), "acct".into()))
+                        .unwrap(),
+                    &fresh
+                ));
+                old_account.handle.dispose();
+                fresh.handle.dispose();
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn queued_private_init_drops_its_original_router_generation_before_engine_start() {
+        use std::future::Future;
+        let registry = Arc::new(
+            Registry::new(
+                EngineThreads::start(1).unwrap(),
+                Duration::from_millis(1),
+                Duration::from_secs(60),
+            )
+            .with_router_lease(crate::router_lease::Config {
+                box_id: Some("01".into()),
+                enforce: true,
+                ..Default::default()
+            }),
+        );
+        grant_init_owner(&registry, 1);
+        let (release, blocker) = std::sync::mpsc::channel::<()>();
+        let (entered, receive) = tokio::sync::oneshot::channel();
+        assert!(registry.threads.place(move |_| {
+            let _ = entered.send(());
+            let _ = blocker.recv();
+        }));
+        receive.await.unwrap();
+        let init = InitPayload {
+            account_name: "acct".into(),
+            exchange_name: "bybit".into(),
+            key: "synthetic-A".into(),
+            ..Default::default()
+        };
+        let stale = registry.obtain("u", &init, false, 7, None, Arc::new(|_| true));
+        tokio::pin!(stale);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                assert!(
+                    std::future::poll_fn(|cx| std::task::Poll::Ready(
+                        stale.as_mut().poll(cx).is_pending()
+                    ))
+                    .await
+                );
+                if registry.threads.accounts() == 2 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("init really queues behind the held engine lane");
+        grant_init_owner(&registry, 2);
+        assert!(
+            registry.router_leases.get("u").unwrap().permit().allowed(),
+            "fresh B control is authorized"
+        );
+        release.send(()).unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(5), stale)
+            .await
+            .unwrap()
+            .err()
+            .unwrap();
+        assert!(error.contains("Router lease expired"));
+        assert_eq!(registry.account_count(), 0);
+    }
+
     #[tokio::test]
     async fn review_3086_box_force_is_unquieted_during_cleanup() {
         use std::future::Future;
