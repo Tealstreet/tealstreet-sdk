@@ -3265,7 +3265,10 @@ impl crate::engine::IoCore {
         managed.lifecycle.begin_signing().and_then(|_| {
             self.signing
                 .activate_managed(attempt, managed.lifecycle.deadline())
-                .map_err(|_| Error::State)
+                .map_err(|error| match error {
+                    crate::signing::SignError::Refused => Error::Revoked,
+                    _ => Error::State,
+                })
         })?;
         if was_waiting {
             self.actions.push(Action::SetTimer {
