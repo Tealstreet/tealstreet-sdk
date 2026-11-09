@@ -41,42 +41,41 @@ impl std::fmt::Debug for Sealed {
     }
 }
 
-/// Each field owns an erasing allocation, including on a partial JSON parse.
+/// Owned credential fields erase their allocations on drop.
 /// Intentionally neither Debug, Clone nor Serialize.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Credentials {
-    #[serde(deserialize_with = "credential")]
     pub key: Zeroizing<String>,
-    #[serde(deserialize_with = "credential")]
     pub secret: Zeroizing<String>,
-    #[serde(default, deserialize_with = "optional_credential")]
     pub passphrase: Option<Zeroizing<String>>,
 }
 
-fn credential<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Zeroizing<String>, D::Error> {
-    struct Text;
-    impl serde::de::Visitor<'_> for Text {
-        type Value = Zeroizing<String>;
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a string")
-        }
-        fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
-            Ok(Zeroizing::new(text.to_owned()))
-        }
-        fn visit_string<E: serde::de::Error>(self, text: String) -> Result<Self::Value, E> {
-            Ok(Zeroizing::new(text))
-        }
-    }
-    d.deserialize_string(Text)
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BorrowedCredentials<'a> {
+    #[serde(borrow)]
+    key: &'a str,
+    #[serde(borrow)]
+    secret: &'a str,
+    #[serde(default, borrow)]
+    passphrase: Option<&'a str>,
 }
 
-fn optional_credential<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Option<Zeroizing<String>>, D::Error> {
-    #[derive(Deserialize)]
-    struct Text(#[serde(deserialize_with = "credential")] Zeroizing<String>);
-    Ok(Option::<Text>::deserialize(d)?.map(|text| text.0))
+impl From<BorrowedCredentials<'_>> for Credentials {
+    fn from(fields: BorrowedCredentials<'_>) -> Self {
+        Self {
+            key: Zeroizing::new(fields.key.to_owned()),
+            secret: Zeroizing::new(fields.secret.to_owned()),
+            passphrase: fields
+                .passphrase
+                .map(|text| Zeroizing::new(text.to_owned())),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Credentials {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        BorrowedCredentials::deserialize(d).map(Self::from)
+    }
 }
 
 /// Deliberately contains no parser or crypto diagnostic or input fragment.
@@ -192,11 +191,16 @@ impl Opening {
         }
         let aad = format!("{}|{}|{exchange}|{key}", self.attempt.id, self.boot_id);
         let plaintext = open(&self.attempt.private[..], INFO, aad.as_bytes(), sealed)?;
-        let credentials: Credentials = serde_json::from_slice(&plaintext).map_err(|_| Refused)?;
-        if credentials.key.as_str() != key || key.is_empty() || credentials.secret.is_empty() {
+        // Handover strings use their literal JSON form.
+        if plaintext.contains(&b'\\') {
             return Err(Refused);
         }
-        Ok(credentials)
+        let fields: BorrowedCredentials<'_> =
+            serde_json::from_slice(&plaintext).map_err(|_| Refused)?;
+        if fields.key != key || key.is_empty() || fields.secret.is_empty() {
+            return Err(Refused);
+        }
+        Ok(fields.into())
     }
 }
 
@@ -471,6 +475,22 @@ pub(crate) mod tests {
                 _ => {}
             }
             assert!(opening.open(venue, key, &sealed, now).is_err(), "{change}");
+        }
+    }
+
+    #[test]
+    fn escaped_handover_fields_are_refused() {
+        for (field, plaintext) in [
+            ("secret", br#"{"key":"synthetic-key","secret":"synthetic-\u0073ecret"}"#.as_slice()),
+            ("key", br#"{"key":"synthetic-\u006bey","secret":"synthetic-secret"}"#.as_slice()),
+            ("passphrase", br#"{"key":"synthetic-key","secret":"synthetic-secret","passphrase":"synthetic-\u0070assphrase"}"#.as_slice()),
+            ("field name", br#"{"key":"synthetic-key","secr\u0065t":"synthetic-secret"}"#.as_slice()),
+        ] {
+            let mut owner = Handovers::default();
+            let offer = owner.issue("account", 100).unwrap();
+            let sealed = seal(&offer, "bybit", "synthetic-key", plaintext);
+            assert!(owner.take("account", &sealed, 101).unwrap().open("bybit", "synthetic-key", &sealed, 102).is_err(), "escaped {field} must be refused");
+            assert!(owner.take("account", &sealed, 103).is_err());
         }
     }
 

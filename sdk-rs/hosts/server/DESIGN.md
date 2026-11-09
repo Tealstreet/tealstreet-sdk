@@ -568,7 +568,9 @@ HKDF-SHA256 and ChaCha20-Poly1305. The application info is
 boot ID, exchange name and init key with `|`. `enc` and `ciphertext` are padded
 standard base64. Decrypted JSON contains `key`, `secret` and optional
 `passphrase`; its key must match the init key. The opener and parsed credential
-fields erase their owned buffers on drop.
+fields erase their owned buffers on drop. Credential fields are read as borrowed
+strings from the plaintext buffer before creating the owned credentials. Escaped
+JSON strings are refused with the usual unverified response.
 
 Opening and subsequent join verification run in a spawned task. The existing
 socket select loop handles its completion, while continuing ping, close and
