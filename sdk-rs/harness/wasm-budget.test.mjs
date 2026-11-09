@@ -1340,3 +1340,14 @@ test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', ()
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3317 restage (run 42556924627 at CI merge 80f6a26) retains current WOO headroom', () => {
+  const measured = 2_628_809;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_639_872);
+  const cap = WASM_VENUE_OVERRIDES.woo;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+});
