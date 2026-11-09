@@ -9,22 +9,33 @@ const fixture = vi.hoisted(() => ({
     context: Context;
     handlePayload: ReturnType<typeof vi.fn>;
     sendSnapshot: ReturnType<typeof vi.fn>;
-    exchange: { isDisposed: boolean };
+    exchange: { isDisposed: boolean } | undefined;
   }[],
   starts: new Map<string, Promise<boolean>>(),
+  constructions: new Map<string, Promise<void>>(),
   telegram: vi.fn(),
 }));
 
 vi.mock('./ExchangeWorker', () => ({
   ExchangeWorker: class {
-    exchange = { isDisposed: false };
+    exchange: { isDisposed: boolean } | undefined = { isDisposed: false };
+    disposed = false;
     isRecovering = false;
     store = { update: vi.fn() };
     owner: string;
-    start = vi.fn(() => fixture.starts.get(this.owner) ?? Promise.resolve(true));
+    start = vi.fn(async () => {
+      const construction = fixture.constructions.get(this.owner);
+      if (construction) {
+        await construction;
+        if (this.disposed) return false;
+        this.exchange = { isDisposed: false };
+      }
+      return fixture.starts.get(this.owner) ?? true;
+    });
     retryTimedOutStart = vi.fn(() => false);
     dispose = vi.fn(() => {
-      this.exchange.isDisposed = true;
+      this.disposed = true;
+      if (this.exchange) this.exchange.isDisposed = true;
     });
     handlePayload = vi.fn((payload: StoreWorkerPayload) => {
       if (payload.op === 'dispose') this.dispose();
@@ -41,6 +52,7 @@ vi.mock('./ExchangeWorker', () => ({
       readonly instanceId?: string,
     ) {
       this.owner = options.key;
+      if (fixture.constructions.has(this.owner)) this.exchange = undefined;
       fixture.workers.push(this);
     }
   },
@@ -89,9 +101,56 @@ beforeEach(() => {
   vi.resetModules();
   fixture.workers.length = 0;
   fixture.starts.clear();
+  fixture.constructions.clear();
 });
 
 describe('SharedWorker session ownership', () => {
+  it.each([undefined, 'A'])(
+    'preserves identical init completion before exchange construction: %s',
+    async (instanceId) => {
+      const { default: start } = await import('./store.webworker');
+      const a = port(start);
+      const construction = deferred<void>();
+      fixture.constructions.set('A', construction.promise);
+      const payload = { ...init('A'), instanceId };
+      payload.data.telegramBotToken = 'synthetic-A-token';
+      const pendingInit = a.send(payload);
+      expect(fixture.workers[0].exchange).toBeUndefined();
+      await a.send(structuredClone(payload));
+      expect(fixture.workers).toHaveLength(1);
+      expect(fixture.telegram).not.toHaveBeenCalled();
+      construction.resolve();
+      await pendingInit;
+      expect(fixture.workers[0].exchange?.isDisposed).toBe(false);
+      expect(fixture.telegram).toHaveBeenCalledExactlyOnceWith(fixture.workers[0].exchange, 'synthetic-A-token');
+      const command: StoreWorkerPayload = { op: 'chaser:start', instanceId, data: { id: 'A-chase' } };
+      await a.send(command);
+      expect(fixture.workers[0].handlePayload).toHaveBeenCalledExactlyOnceWith(command);
+    },
+  );
+
+  it('supersedes A init before exchange construction when the owner changes to B', async () => {
+    const { default: start } = await import('./store.webworker');
+    const a = port(start);
+    const construction = deferred<void>();
+    fixture.constructions.set('A', construction.promise);
+    const payload = init('A');
+    payload.data.telegramBotToken = 'synthetic-A-token';
+    const pendingInit = a.send(payload);
+    expect(fixture.workers[0].exchange).toBeUndefined();
+    const next = init('B');
+    next.data.telegramBotToken = 'synthetic-B-token';
+    await a.send(next);
+    construction.resolve();
+    await pendingInit;
+    expect(fixture.workers).toHaveLength(2);
+    expect(fixture.workers[0].handlePayload).toHaveBeenCalledExactlyOnceWith({ op: 'dispose' });
+    expect(fixture.telegram).toHaveBeenCalledExactlyOnceWith(fixture.workers[1].exchange, 'synthetic-B-token');
+    const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'B', data: { id: 'B-chase' } };
+    await a.send(command);
+    expect(fixture.workers[1].handlePayload).toHaveBeenCalledExactlyOnceWith(command);
+  });
+
   it.each([undefined, 'A'])('accepts unstamped commands on an unchanged initial attachment: %s', async (instanceId) => {
     const { default: start } = await import('./store.webworker');
     const a = port(start);
@@ -120,7 +179,7 @@ describe('SharedWorker session ownership', () => {
     const pending = release.promise.then(() => a.send(old));
     await a.send(init('B'));
     expect(fixture.workers).toHaveLength(2);
-    expect(fixture.workers[0].exchange.isDisposed).toBe(true);
+    expect(fixture.workers[0].exchange?.isDisposed).toBe(true);
     const current: StoreWorkerPayload = { op, instanceId: 'B', data: { id: 'B-chase' } };
     await a.send(current);
     expect(fixture.workers[1].handlePayload).toHaveBeenCalledExactlyOnceWith(current);
@@ -138,7 +197,7 @@ describe('SharedWorker session ownership', () => {
     await a.send({ ...init('B'), instanceId });
     expect(a.context.postMessage).toHaveBeenCalledWith({ op: 'start-status', data: false });
     expect(fixture.workers).toHaveLength(1);
-    expect(fixture.workers[0].exchange.isDisposed).toBe(false);
+    expect(fixture.workers[0].exchange?.isDisposed).toBe(false);
     const current: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'A', data: { id: 'A-chase' } };
     await a.send(current);
     expect(fixture.workers[0].handlePayload).toHaveBeenCalledExactlyOnceWith(current);
@@ -175,7 +234,7 @@ describe('SharedWorker session ownership', () => {
     pendingStart.resolve(true);
     await pendingInit;
     expect(fixture.workers).toHaveLength(2);
-    expect(fixture.workers[0].exchange.isDisposed).toBe(true);
+    expect(fixture.workers[0].exchange?.isDisposed).toBe(true);
     const late: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'A', data: { id: 'late-A' } };
     await a.send(late);
     expect(fixture.workers[1].handlePayload).not.toHaveBeenCalledWith(late);
@@ -254,7 +313,7 @@ describe('SharedWorker session ownership', () => {
       op: 'chaser:complete',
       data: { id: 'A-chase', filled: 7 },
     });
-    expect(workerA.exchange.isDisposed).toBe(false);
+    expect(workerA.exchange?.isDisposed).toBe(false);
   });
 
   it.each([undefined, '', null, 42])('refuses reuse without a verifiable session: %s', async (sessionKey) => {
@@ -279,7 +338,7 @@ describe('SharedWorker session ownership', () => {
     await b.send(init('B'));
     await b.send({ op: 'reinit', instanceId: 'B' });
     await b.send({ op: 'dispose', instanceId: 'B' });
-    expect(fixture.workers[0].exchange.isDisposed).toBe(false);
+    expect(fixture.workers[0].exchange?.isDisposed).toBe(false);
     const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'A', data: { id: 'A-chase' } };
     await a.send(command);
     expect(fixture.workers[0].handlePayload).toHaveBeenCalledExactlyOnceWith(command);
@@ -296,7 +355,7 @@ describe('SharedWorker session ownership', () => {
     await a.send({ op: 'chaser:start', instanceId: 'A', data: { id: 'late-A' } });
     await a.send({ op: 'reinit', instanceId: 'A' });
     expect(fixture.workers[1].handlePayload).not.toHaveBeenCalled();
-    expect(fixture.workers[1].exchange.isDisposed).toBe(false);
+    expect(fixture.workers[1].exchange?.isDisposed).toBe(false);
     const command: StoreWorkerPayload = { op: 'chaser:start', instanceId: 'B', data: { id: 'B-chase' } };
     await b.send(command);
     expect(fixture.workers[1].handlePayload).toHaveBeenCalledWith(command);

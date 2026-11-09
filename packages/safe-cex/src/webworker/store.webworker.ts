@@ -491,13 +491,15 @@ const start = (ctx: Worker, shared = false) => {
 
     switch (payload.op) {
       case 'init': {
+        let rebindsPort = false;
         if (shared) {
-          const rebindsPort =
+          rebindsPort = Boolean(
             _initPayload &&
             (accountName !== payload.data.accountName ||
               exchangeName !== payload.data.exchangeName ||
               _initPayload.data.sessionKey !== payload.data.sessionKey ||
-              sharedInstanceId !== payload.instanceId);
+              sharedInstanceId !== payload.instanceId),
+          );
           if (rebindsPort) {
             if (!payload.instanceId || sharedInstanceIds.has(payload.instanceId)) {
               ctx.postMessage({ op: 'start-status', data: false });
@@ -512,7 +514,8 @@ const start = (ctx: Worker, shared = false) => {
           }
           if (payload.instanceId) sharedInstanceIds.add(payload.instanceId);
         }
-        const generation = ++initGeneration;
+        // Reusing the same binding must not invalidate its pending startup.
+        const generation = shared && exchangeWorker && !rebindsPort ? initGeneration : ++initGeneration;
         await initExchangeWorker(payload);
         if (generation !== initGeneration) return;
 

@@ -74,7 +74,9 @@ Unstamped inbound commands are accepted only on the initial binding. Changing
 the session, account, exchange or instance requires a nonempty instance ID never
 previously used on that port; subsequent commands must carry that exact ID.
 Missing or retired IDs refuse the rebind before disturbing the current worker.
-An identical init retains its binding. Legacy callers can open a new port instead.
+An identical accepted init retains its binding and generation, allowing pending
+exchange construction to finish starting its configured integration. Legacy
+callers can open a new port instead.
 Commands from detached or replaced bindings are dropped. A stale `dispose` may
 detach only its own port; it cannot dispose another session's worker. When the
 last port changes owner, the previous worker is disposed; other old-owner tabs
