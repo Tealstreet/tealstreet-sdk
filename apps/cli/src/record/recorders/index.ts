@@ -1,4 +1,4 @@
-import { getStorageEpoch, assertStorageSession, onStorageOwnerChange } from '../../storage-context';
+import { captureStorageSession, onStorageOwnerChange } from '../../storage-context';
 /**
  * Recorder Factory
  *
@@ -39,7 +39,7 @@ export function createRecorder(options: RecordingOptions): BaseRecorder {
  * Returns { recorder, replaced: boolean }
  */
 export async function startRecorder(options: RecordingOptions): Promise<{ recorder: BaseRecorder; replaced: boolean }> {
-  const epoch = getStorageEpoch();
+  const ownerSession = captureStorageSession();
   const key = getRecorderKey(options.dataType, options.exchange, options.symbol);
   let replaced = false;
 
@@ -47,6 +47,7 @@ export async function startRecorder(options: RecordingOptions): Promise<{ record
   const existing = activeRecorders.get(key);
   if (existing && existing.isRunning()) {
     await existing.stop();
+    ownerSession.assertCurrent();
     activeRecorders.delete(key);
     replaced = true;
   }
@@ -55,7 +56,7 @@ export async function startRecorder(options: RecordingOptions): Promise<{ record
   const recorder = createRecorder(options);
   await recorder.start();
   try {
-    assertStorageSession(epoch);
+    ownerSession.assertCurrent();
   } catch (error) {
     await recorder.stop();
     throw error;
@@ -71,6 +72,7 @@ export async function startRecorder(options: RecordingOptions): Promise<{ record
  * Stop a specific recorder
  */
 export async function stopRecorder(dataType: DataType, exchange: string, symbol: string): Promise<boolean> {
+  const ownerSession = captureStorageSession();
   const key = getRecorderKey(dataType, exchange, symbol);
   const recorder = activeRecorders.get(key);
 
@@ -79,7 +81,8 @@ export async function stopRecorder(dataType: DataType, exchange: string, symbol:
   }
 
   await recorder.stop();
-  activeRecorders.delete(key);
+  ownerSession.assertCurrent();
+  if (activeRecorders.get(key) === recorder) activeRecorders.delete(key);
   return true;
 }
 
@@ -87,12 +90,14 @@ export async function stopRecorder(dataType: DataType, exchange: string, symbol:
  * Stop all recorders for an exchange
  */
 export async function stopExchangeRecorders(exchange: string): Promise<number> {
+  const ownerSession = captureStorageSession();
   let stopped = 0;
 
   for (const [key, recorder] of activeRecorders.entries()) {
     if (key.includes(`:${exchange}:`)) {
       await recorder.stop();
-      activeRecorders.delete(key);
+      ownerSession.assertCurrent();
+      if (activeRecorders.get(key) === recorder) activeRecorders.delete(key);
       stopped++;
     }
   }
