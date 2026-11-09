@@ -83,9 +83,11 @@ Subscription-targeted delivery is restricted to ports attached to that routing k
 
 Telegram starts once per exact `ExchangeWorker`, including identical same-port
 init, additional shared ports and startup retries. A replacement worker can start
-its own integration. Startup carries the original worker across the await and
-checks it is still the port's current worker before starting Telegram; a port
-rebound to another owner cannot start the old owner's integration on that account.
+its own integration. Startup carries the original worker and init owner across
+the await, checking its original registry entry and exact remaining shared-port
+attachments before starting Telegram. If the creating port moves to B while Q
+still serves A, A's integration starts once on A. Rebound ports do not count as
+surviving attachments, and A's token cannot configure B's integration.
 
 ## Files
 

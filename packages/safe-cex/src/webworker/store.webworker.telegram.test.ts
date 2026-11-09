@@ -3,9 +3,14 @@ import type { StoreWorkerPayload } from './StoreWorkerPayload';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({
-  workers: [] as { exchange: { isDisposed: boolean } | undefined }[],
+  workers: [] as {
+    exchange: { isDisposed: boolean } | undefined;
+    isRecovering: boolean;
+    onStartRetrySucceeded?: () => void;
+  }[],
   constructions: new Map<string, Promise<void>>(),
   starts: new Map<string, Promise<void>>(),
+  retries: new Set<string>(),
   telegram: vi.fn(),
 }));
 
@@ -14,6 +19,8 @@ vi.mock('./ExchangeWorker', () => ({
     exchange: { isDisposed: boolean } | undefined;
     store = { update: vi.fn() };
     disposed = false;
+    isRecovering = false;
+    onStartRetrySucceeded?: () => void;
     constructor(
       _context: Worker,
       readonly accountName: string,
@@ -26,9 +33,14 @@ vi.mock('./ExchangeWorker', () => ({
       if (this.disposed) return false;
       this.exchange ??= { isDisposed: false };
       await fixture.starts.get(this.accountName);
-      return !this.disposed;
+      return !this.disposed && !fixture.retries.has(this.accountName);
     }
-    retryTimedOutStart = () => false;
+    retryTimedOutStart() {
+      if (!fixture.retries.has(this.accountName)) return false;
+      this.isRecovering = true;
+      this.exchange = { isDisposed: true };
+      return true;
+    }
     sendSnapshot = vi.fn();
     dispose() {
       this.disposed = true;
@@ -51,14 +63,14 @@ vi.mock('./TelgramWorker', () => ({
   },
 }));
 
-function port(start: typeof import('./store.webworker').default) {
+function port(start: typeof import('./store.webworker').default, shared = true) {
   let listener: (event: { data: unknown }) => unknown = () => undefined;
   start(
     {
       postMessage: vi.fn(),
       addEventListener: (_event: string, callback: typeof listener) => (listener = callback),
     } as unknown as Worker,
-    true,
+    shared,
   );
   return { send: async (data: StoreWorkerPayload) => void (await listener({ data })) };
 }
@@ -90,6 +102,7 @@ beforeEach(() => {
   fixture.workers.length = 0;
   fixture.constructions.clear();
   fixture.starts.clear();
+  fixture.retries.clear();
 });
 
 describe('Telegram integration ownership', () => {
@@ -128,6 +141,87 @@ describe('Telegram integration ownership', () => {
     expect(fixture.telegram).toHaveBeenCalledExactlyOnceWith(fixture.workers[0].exchange, 'synthetic-A-token');
   });
 
+  it.each(['account', 'anonymous'] as const)(
+    'preserves deferred startup for a surviving shared %s owner',
+    async (mode) => {
+      const { default: start, exchangeWorkers, anonymousExchangeWorkers } = await import('./store.webworker');
+      const p = port(start);
+      const q = port(start);
+      const a = init(mode === 'account' ? 'A' : '', 'P-A');
+      const gate = deferred();
+      fixture.constructions.set(a.data.accountName, gate.promise);
+      const pending = p.send(a);
+      expect(fixture.workers[0].exchange).toBeUndefined();
+      const survivingInit = { ...a, instanceId: 'Q-A' };
+      await q.send(survivingInit);
+      await p.send({ op: 'dispose', instanceId: 'P-A' });
+      const b = init('B');
+      await p.send({ ...b, data: { ...b.data, telegramBotToken: undefined } });
+      const registryA = mode === 'account' ? exchangeWorkers.A : anonymousExchangeWorkers.binance;
+      expect(registryA).toBe(fixture.workers[0]);
+      expect(fixture.workers).toHaveLength(2);
+      expect(fixture.telegram).not.toHaveBeenCalled();
+      gate.resolve();
+      await pending;
+      expect(registryA.exchange?.isDisposed).toBe(false);
+      expect(fixture.telegram).toHaveBeenCalledExactlyOnceWith(registryA.exchange, a.data.telegramBotToken);
+      await q.send(structuredClone(survivingInit));
+      expect(fixture.telegram).toHaveBeenCalledTimes(1);
+      await p.send(b);
+      expect(fixture.telegram).toHaveBeenCalledTimes(2);
+      expect(fixture.telegram).toHaveBeenLastCalledWith(fixture.workers[1].exchange, 'synthetic-B-token');
+    },
+  );
+
+  it('does not count another port that has rebound during deferred construction', async () => {
+    const { default: start } = await import('./store.webworker');
+    const p = port(start);
+    const q = port(start);
+    const gate = deferred();
+    fixture.constructions.set('A', gate.promise);
+    const pending = p.send(init());
+    await q.send(init('A', 'Q-A'));
+    await p.send({ op: 'dispose', instanceId: 'A' });
+    for (const [client, owner] of [
+      [p, 'B'],
+      [q, 'C'],
+    ] as const) {
+      const next = init(owner);
+      await client.send({ ...next, data: { ...next.data, telegramBotToken: undefined } });
+    }
+    gate.resolve();
+    await pending;
+    expect(fixture.workers).toHaveLength(3);
+    expect(fixture.telegram).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('checks the surviving owner when startup retry completes: survivor=%s', async (survivor) => {
+    const { default: start } = await import('./store.webworker');
+    const p = port(start);
+    const q = port(start);
+    fixture.retries.add('A');
+    await p.send(init());
+    const workerA = fixture.workers[0];
+    expect(workerA.onStartRetrySucceeded).toBeTypeOf('function');
+    if (survivor) await q.send(init('A', 'Q-A'));
+    await p.send({ op: 'dispose', instanceId: 'A' });
+    const b = init('B');
+    await p.send({ ...b, data: { ...b.data, telegramBotToken: undefined } });
+    // Deliver even a canceled retry's saved callback to exercise the ownership guard.
+    workerA.exchange = { isDisposed: false };
+    workerA.isRecovering = false;
+    workerA.onStartRetrySucceeded!();
+    workerA.onStartRetrySucceeded!();
+    if (survivor) {
+      expect(fixture.telegram).toHaveBeenCalledExactlyOnceWith(workerA.exchange, 'synthetic-A-token');
+    } else {
+      expect(fixture.telegram).not.toHaveBeenCalled();
+    }
+    await p.send(b);
+    expect(fixture.telegram).toHaveBeenCalledTimes(survivor ? 2 : 1);
+    expect(fixture.telegram).toHaveBeenLastCalledWith(fixture.workers[1].exchange, 'synthetic-B-token');
+  });
+
   it('does not consume the start when the first init has no token', async () => {
     const { default: start } = await import('./store.webworker');
     const a = port(start);
@@ -150,19 +244,22 @@ describe('Telegram integration ownership', () => {
     expect(fixture.telegram).toHaveBeenLastCalledWith(fixture.workers[1].exchange, 'synthetic-A-token');
   });
 
-  it('drops A integration startup if the port changes to B during construction', async () => {
-    const { default: start } = await import('./store.webworker');
-    const a = port(start);
-    const gate = deferred();
-    fixture.constructions.set('A', gate.promise);
-    const pending = a.send(init());
-    const b = init('B');
-    await a.send({ ...b, data: { ...b.data, telegramBotToken: undefined } });
-    gate.resolve();
-    await pending;
-    expect(fixture.workers).toHaveLength(2);
-    expect(fixture.telegram).not.toHaveBeenCalled();
-    await a.send(b);
-    expect(fixture.telegram).toHaveBeenCalledExactlyOnceWith(fixture.workers[1].exchange, 'synthetic-B-token');
-  });
+  it.each([true, false])(
+    'drops A startup when its only port changes to B during construction: shared=%s',
+    async (shared) => {
+      const { default: start } = await import('./store.webworker');
+      const a = port(start, shared);
+      const gate = deferred();
+      fixture.constructions.set('A', gate.promise);
+      const pending = a.send(init());
+      const b = init('B');
+      await a.send({ ...b, data: { ...b.data, telegramBotToken: undefined } });
+      gate.resolve();
+      await pending;
+      expect(fixture.workers).toHaveLength(2);
+      expect(fixture.telegram).not.toHaveBeenCalled();
+      await a.send(b);
+      expect(fixture.telegram).toHaveBeenCalledExactlyOnceWith(fixture.workers[1].exchange, 'synthetic-B-token');
+    },
+  );
 });

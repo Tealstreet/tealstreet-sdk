@@ -20,6 +20,7 @@ import { isWorkerMessage, isWorkerRecord } from './workerMessage';
 export const anonymousExchangeWorkers: { [key: string]: ExchangeWorker } = {};
 export const exchangeWorkers: { [key: string]: ExchangeWorker } = {};
 const telegramStartedWorkers = new WeakSet<ExchangeWorker>();
+const sharedPortWorkers = new WeakMap<MessagePort | Worker, ExchangeWorker>();
 const ports: { [key: string]: (MessagePort | Worker)[] } = {};
 const portsBySubId: { [key: string]: MessagePort | Worker } = {};
 
@@ -48,6 +49,7 @@ export const registerWorkerConfigHandler = (handler: WorkerConfigHandler): void 
 
 function cleanupPortEverywhere(port: MessagePort | Worker): void {
   cleanupPortState(port);
+  sharedPortWorkers.delete(port);
 
   for (const key of Object.keys(ports)) {
     ports[key] = ports[key].filter((candidate) => candidate !== port);
@@ -200,9 +202,15 @@ const start = (ctx: Worker, shared = false) => {
   };
 
   const startTelegramWorker = (worker: ExchangeWorker, payload: StoreWorkerPayload) => {
+    const { accountName: ownerAccountName, exchangeName: ownerExchangeName } = payload.data;
+    const ownerRegistry = ownerAccountName ? exchangeWorkers : anonymousExchangeWorkers;
+    const ownerKey = ownerAccountName || ownerExchangeName;
+    const ownerPortKey = ownerAccountName ? `account:${ownerAccountName}` : `exchange:${ownerExchangeName}`;
     if (
       !payload.data.telegramBotToken ||
-      getMyExchangeWorker() !== worker ||
+      ownerRegistry[ownerKey] !== worker ||
+      (!shared && getMyExchangeWorker() !== worker) ||
+      (shared && !ports[ownerPortKey]?.some((port) => sharedPortWorkers.get(port) === worker)) ||
       !worker.exchange ||
       worker.exchange.isDisposed ||
       telegramStartedWorkers.has(worker)
@@ -252,6 +260,7 @@ const start = (ctx: Worker, shared = false) => {
       }
       const existingWorker = getMyExchangeWorker();
       if (existingWorker) {
+        sharedPortWorkers.set(ctx, existingWorker);
         // Check if the exchange is still alive (not disposed)
         if (existingWorker.isRecovering) {
           ctx.postMessage({ op: 'start-status', data: false });
@@ -304,6 +313,7 @@ const start = (ctx: Worker, shared = false) => {
       sessionKey,
       payload.instanceId,
     );
+    if (shared) sharedPortWorkers.set(ctx, exchangeWorker);
 
     if (accountName) {
       exchangeWorkers[accountName] = exchangeWorker;
@@ -477,6 +487,7 @@ const start = (ctx: Worker, shared = false) => {
           // Clean up throttle states for all ports being cleared
           for (const port of ports[portKey] || []) {
             cleanupPortState(port);
+            sharedPortWorkers.delete(port);
           }
           ports[portKey] = [];
         }
