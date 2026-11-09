@@ -998,3 +998,137 @@ async fn legacy_rebuild_refusal_suppression_and_changed_reasons_are_byte_exact()
         })
         .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn reviewer_refused_fresh_registration_does_not_reuse_a_stopped_registrations_id() {
+    tokio::task::LocalSet::new().run_until(async {
+        let (a, mut original, mut sent) = fixture(Some("old-registration-A")).await;
+        let registry = original.registry.clone();
+        let captured_a = original.account_out("acct");
+        crate::accounts::tests::fail_signer(&registry, &a);
+        original.handle(r#"{"t":"ping"}"#).await.unwrap();
+        assert!(!original.joined.contains_key("acct"));
+        let mut replacement = init(Some("replacement-B"));
+        replacement.key = "synthetic-key-B".into();
+        let b = crate::accounts::testing::trading_account(&registry, "u", &replacement);
+        let (mut other, mut other_sent) = user_session(registry, "u");
+        other.init(replacement).await.unwrap();
+        while sent.try_recv().is_ok() {}
+        let fresh = init(Some("fresh-registration-C"));
+        refused_registration(&mut original, &mut sent, &fresh, true).await;
+        for op in ["callMethod", "updatePositions", "chaser:start", "twap:start"] {
+            stopped_reply(&mut original, &mut sent, op, Some("fresh-registration-C")).await;
+        }
+        refused_registration(&mut original, &mut sent, &fresh, false).await;
+        stopped_reply(&mut original, &mut sent, "callMethod", Some("fresh-registration-C")).await;
+        let old_reply = envelope::error(Some("acct"), "already-captured-A");
+        captured_a.send(old_reply.clone());
+        let frame: Value = serde_json::from_str(&matching(&mut sent, &old_reply).await).unwrap();
+        assert_eq!(frame["d"]["instanceId"], "old-registration-A");
+        assert!(other.registry.holds(&b, other.socket));
+        other.handle(r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"live-B","method":"fetchOrders","args":[]}}}"#).await.unwrap();
+        let frame = method_reply(&mut other_sent, "live-B").await;
+        assert_eq!(frame["d"]["data"]["success"], true);
+        assert_eq!(frame["d"]["instanceId"], "replacement-B");
+        original.close(); other.close(); a.handle.dispose(); b.handle.dispose();
+    }).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn unsupported_fresh_registration_replaces_stopped_fallback_provenance() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, mut session, mut sent) = fixture(Some("old-A")).await;
+            crate::accounts::tests::fail_signer(&session.registry, &account);
+            session.handle(r#"{"t":"ping"}"#).await.unwrap();
+            let mut payload = init(Some("unsupported-C"));
+            payload.exchange_name = "bitmex".into();
+            session.init(payload).await.unwrap();
+            let frame: Value = serde_json::from_str(
+                &matching(&mut sent, &envelope::init_unsupported("acct", "bitmex")).await,
+            )
+            .unwrap();
+            assert_eq!(frame["d"]["instanceId"], "unsupported-C");
+            for op in [
+                "callMethod",
+                "updatePositions",
+                "chaser:start",
+                "twap:start",
+            ] {
+                stopped_reply(&mut session, &mut sent, op, Some("unsupported-C")).await;
+            }
+            session.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn refused_registration_without_id_removes_the_old_stopped_reply_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for id in [None, Some("")] {
+                let (a, mut session, mut sent) = fixture(Some("old-A")).await;
+                let registry = session.registry.clone();
+                crate::accounts::tests::fail_signer(&registry, &a);
+                session.handle(r#"{"t":"ping"}"#).await.unwrap();
+                let mut replacement = init(Some("replacement-B"));
+                replacement.key = "synthetic-key-B".into();
+                let b = crate::accounts::testing::trading_account(&registry, "u", &replacement);
+                let (mut other, _) = user_session(registry, "u");
+                other.init(replacement).await.unwrap();
+                while sent.try_recv().is_ok() {}
+                refused_registration(&mut session, &mut sent, &init(id), true).await;
+                for op in [
+                    "callMethod",
+                    "updatePositions",
+                    "chaser:start",
+                    "twap:start",
+                ] {
+                    stopped_reply(&mut session, &mut sent, op, id).await;
+                }
+                session.close();
+                other.close();
+                a.handle.dispose();
+                b.handle.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn disposal_after_a_refused_registration_cannot_restore_the_old_reply_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, mut original, mut sent) = fixture(Some("old-A")).await;
+            let (mut other, _) = user_session(original.registry.clone(), "u");
+            other.init(init(Some("holder-B"))).await.unwrap();
+            let mut fresh = init(Some("fresh-C"));
+            fresh.key = "synthetic-other-key".into();
+            let expected = envelope::init_refused(
+                "acct",
+                &original
+                    .registry
+                    .rebuild_refusal("u", &fresh, false, original.socket)
+                    .unwrap(),
+            );
+            original.init(fresh).await.unwrap();
+            let refusal: Value =
+                serde_json::from_str(&matching(&mut sent, &expected).await).unwrap();
+            assert_eq!(refusal["d"]["instanceId"], "fresh-C");
+            crate::accounts::tests::fail_signer(&original.registry, &account);
+            original.handle(r#"{"t":"ping"}"#).await.unwrap();
+            for op in [
+                "callMethod",
+                "updatePositions",
+                "chaser:start",
+                "twap:start",
+            ] {
+                stopped_reply(&mut original, &mut sent, op, Some("fresh-C")).await;
+            }
+            original.close();
+            other.close();
+            account.handle.dispose();
+        })
+        .await;
+}

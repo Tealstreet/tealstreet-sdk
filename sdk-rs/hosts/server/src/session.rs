@@ -89,8 +89,8 @@ pub struct Session {
     pub resume_id: String,
     out: Out,
     joined: HashMap<String, Joined>,
-    /// Reply provenance after native disposal; never authority to use an account.
-    stopped_outputs: HashMap<String, Out>,
+    /// Current fallback reply registration, independent of live account authority.
+    registration_outputs: HashMap<String, Out>,
     /// A held client's account has loaded: `(account name, client id)`.
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
@@ -203,7 +203,7 @@ impl Session {
             resume_id: crate::accounts::resume_id(),
             out,
             joined: HashMap::new(),
-            stopped_outputs: HashMap::new(),
+            registration_outputs: HashMap::new(),
             loaded,
             loaded_rx: Some(loaded_rx),
             dropped,
@@ -369,7 +369,7 @@ impl Session {
         self.joined
             .get(name)
             .map(|joined| &joined.out)
-            .or_else(|| self.stopped_outputs.get(name))
+            .or_else(|| self.registration_outputs.get(name))
             .cloned()
             .unwrap_or_else(|| self.out.clone())
     }
@@ -483,7 +483,7 @@ impl Session {
                     self.socket,
                     self.resume_id_prefix()
                 ));
-                self.stopped_outputs.remove(&account_name);
+                self.registration_outputs.remove(&account_name);
                 if let Some(joined) = self.joined.remove(&account_name) {
                     self.metrics.note_dispose();
                     self.leave(joined, Disposal::PageDisposed);
@@ -543,6 +543,8 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
+        self.registration_outputs
+            .insert(init.account_name.clone(), out.clone());
         Log::info(&format!(
             "init {} ({}) socket {} session {}",
             init.account_name,
@@ -664,7 +666,6 @@ impl Session {
         let name = account.name.clone();
         match self.client(&account, out.clone()).await {
             Ok(client) => {
-                self.stopped_outputs.remove(&name);
                 if let Some(algos) = &account.algos {
                     let _ = algos.send(crate::algos::AlgoInput::Joined);
                 }
@@ -797,7 +798,6 @@ impl Session {
             .collect();
         for name in gone {
             if let Some(joined) = self.joined.remove(&name) {
-                self.stopped_outputs.insert(name, joined.out.clone());
                 Self::leave_engine(joined);
             }
         }
