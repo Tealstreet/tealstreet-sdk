@@ -232,7 +232,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
   // measured 1,898,429 B; +10 KiB rounded up to KiB.
-  bitrue: 1_908_736,
+  // #3299 merged 2ca7125e8ab: local optimized web/node 1,901,720 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitrue.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
+  bitrue: 1_912_832,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
   bitunix: 1_927_168,
   blofin: 2_050_048,
@@ -279,7 +282,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 2_130_944,
   'lighter-robinhood': 2_130_944,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
-  mexc: 1_898_496,
+  // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
+  // #3299 restage run 42558057739 at 5dec79811311, jobs 128968431838/128968431872:
+  // MEXC measured 1,914,033 B; current CI size + 10 KiB, rounded up to KiB (rule 17).
+  // #3299 merged 2ca7125e8ab: local optimized web/node 1,920,015 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
+  mexc: 1_931_264,
   okx: 2_048_000,
   orderly: 1_771_520,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.

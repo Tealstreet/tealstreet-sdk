@@ -1628,3 +1628,54 @@ test('#3280 merged-head CI (run 42559068674 at 5492575dead5) retains measured wa
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
+
+test('#3299 (run 42432952035 at 9e6863a2b86) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['bybit', 2_270_312, 2_281_472],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3299 (run 42437005422 at 94211a4edff) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['mexc', 1_893_996, 1_904_640],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3299 restage (run 42558057739 at 5dec79811311) retains current measured wasm headroom', () => {
+  const measured = 1_914_033;
+  const minimumCap = 1_925_120;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.mexc;
+  assert.ok(cap >= minimumCap, `mexc: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured, 'venue', 'mexc'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
+});
+
+test('#3299 merged head 2ca7125e8ab retains measured MEXC and Bitrue headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['mexc', 1_920_015, 1_931_264],
+    ['bitrue', 1_901_720, 1_912_832],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
