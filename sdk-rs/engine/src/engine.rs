@@ -622,6 +622,13 @@ pub enum VenueAction {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     },
+    /// Generated reported closed-PnL rows; raw journal reads use FetchClosedPositions.
+    FetchClosedPnl {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        account: String,
+    },
     /// The venue's raw account balance payload as JSON, or `null` before one
     /// is read, for hosts that expose it as `balance.info`.
     FetchBalanceInfo,
@@ -7861,9 +7868,9 @@ impl<V: Venue> Engine<V> {
             if let Some(market) = self.store.market_index(symbol) {
                 // Recovering consumers may have missed the original invalidation frame.
                 if self.book(symbol).is_some() {
-                    book.write(market, &mut w);
+                    crate::book_output::write(book, market, &mut w);
                 } else {
-                    Book::default().write(market, &mut w);
+                    crate::book_output::write(&Book::default(), market, &mut w);
                 }
             }
         }
@@ -7987,11 +7994,11 @@ impl<V: Venue> Engine<V> {
                                 && &baseline.id == id
                                 && baseline.book.reset_generation() == book.reset_generation() =>
                         {
-                            book.write_delta(&baseline.book, market, &mut w);
+                            crate::book_output::write_delta(book, &baseline.book, market, &mut w);
                             baseline.book.clone_from(book);
                         }
                         baseline => {
-                            book.write(market, &mut w);
+                            crate::book_output::write(book, market, &mut w);
                             if let Some(baseline) = baseline {
                                 baseline.market = market;
                                 baseline.id.clone_from(id);
@@ -8010,10 +8017,10 @@ impl<V: Venue> Engine<V> {
                     }
                     continue;
                 }
-                book.write(market, &mut w);
+                crate::book_output::write(book, market, &mut w);
             } else {
                 // A lost sequence makes the old consumer book unusable immediately.
-                Book::default().write(market, &mut w);
+                crate::book_output::write(&Book::default(), market, &mut w);
                 #[cfg(feature = "book-deltas")]
                 self.book_baselines.remove(symbol);
             }
@@ -8027,42 +8034,9 @@ impl<V: Venue> Engine<V> {
                 Some((self.store.market_index(symbol)?, interval.as_str(), *candle))
             })
             .collect();
-        w.candles(&candles);
+        crate::candle_output::write(&mut w, &candles);
         let mut fills = std::mem::take(&mut self.io.core.fills);
-        if !fills.is_empty() {
-            w.begin_revision(section::FILLS, 2);
-            w.u32(fills.len() as u32);
-            let orders: Vec<u32> = fills.iter().map(|(f, _)| w.string(&f.order_id)).collect();
-            w.u32s(orders);
-            w.u32s(fills.iter().map(|(f, _)| {
-                self.store
-                    .market_index(&f.symbol)
-                    .unwrap_or(crate::wire::NONE)
-            }));
-            w.u32s(fills.iter().map(|(f, _)| f.side as u32));
-            w.pad();
-            for (f, _) in &fills {
-                w.f64s([f.price, f.amount]);
-            }
-            for (fill, _) in &fills {
-                let symbol = w.string(&fill.symbol);
-                w.u32(symbol);
-            }
-            for (fill, _) in &fills {
-                let id = w.optional_string(fill.id.as_deref());
-                w.u32(id);
-            }
-            w.pad();
-            w.f64s(fills.iter().map(|(_, financials)| {
-                financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
-            }));
-            w.f64s(
-                fills
-                    .iter()
-                    .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
-            );
-            w.end();
-        }
+        crate::fill_output::write_fills(&mut w, &fills, |symbol| self.store.market_index(symbol));
         let empty = w.is_empty();
         let frame = w.finish();
         #[cfg(feature = "book-deltas")]
@@ -8437,7 +8411,7 @@ mod streaming_tests {
     }
 
     #[test]
-    fn revision_two_fills_preserve_absent_identity_and_financial_values() {
+    fn revision_two_fills_emit_public_identity_and_absent_financial_values() {
         for financials in [
             None,
             Some(FillFinancials::default()),
@@ -8472,16 +8446,19 @@ mod streaming_tests {
                 expected.extend(value.to_le_bytes());
             }
             expected.extend(1u32.to_le_bytes()); // Stable raw symbol reference.
-            expected.extend(crate::wire::NONE.to_le_bytes()); // Missing execution identity.
+            expected.extend(0u32.to_le_bytes()); // Native-computed public event identity.
             expected.extend(f64::NAN.to_le_bytes());
             expected.extend(f64::NAN.to_le_bytes());
             assert_eq!(
                 fills, expected,
-                "revision two represents absent financials and identity explicitly"
+                "revision two represents public identity and absent financials explicitly"
             );
             assert_eq!(
                 crate::wire::fills(frame),
-                Some(vec![execution()]),
+                Some(vec![Fill {
+                    id: Some("9007199254740995".into()),
+                    ..execution()
+                }]),
                 "the native reader returns what the writer wrote"
             );
             assert!(engine.take_frame(1.).is_none(), "fill must flush once");
@@ -8534,7 +8511,7 @@ mod streaming_tests {
             .collect();
         assert_eq!(rows, [99., 1., 99., 1., 99., 1.]);
         assert_eq!(&fills[88..100], &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-        assert_eq!(&fills[100..112], &[255; 12]);
+        assert_eq!(&fills[100..112], &[0; 12]);
         let floats: Vec<_> = fills[112..]
             .as_chunks::<8>()
             .0

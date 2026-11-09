@@ -1,6 +1,5 @@
-import type { ClosedPnlEntry, IncomeRecord } from '../../types';
+import type { IncomeRecord } from '../../../types';
 
-import { PositionSide } from '../../types';
 
 /**
  * BloFin ledger and closed positions — two genuinely different endpoints.
@@ -31,7 +30,7 @@ const toNumber = (value: unknown) => {
 };
 
 export const mapBlofinFillToIncomeRecords = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   resolveSymbol: (instId: string) => string | undefined,
 ): IncomeRecord[] => {
   const timestamp = parseInt(String(row.ts ?? '0'), 10);
@@ -75,37 +74,4 @@ export const mapBlofinFillToIncomeRecords = (
   }
 
   return records;
-};
-
-export const mapBlofinClosedPosition = (
-  row: Record<string, any>,
-  resolveSymbol: (instId: string) => string | undefined,
-  accountName: string,
-): ClosedPnlEntry | null => {
-  const openTime = parseInt(String(row.createTime ?? '0'), 10);
-  const instId = String(row.instId ?? '');
-  if (!openTime || !instId) {
-    return null;
-  }
-
-  const closePrice = toNumber(row.closeAveragePrice);
-  const contracts = toNumber(row.closePositions);
-
-  return {
-    provenance: 'venue',
-    symbol: resolveSymbol(instId) || instId,
-    notional: contracts * closePrice,
-    contracts,
-    entryPrice: toNumber(row.openAveragePrice),
-    exitPrice: closePrice,
-    // Legacy field name; carries realized PnL. NET of `fee` on this endpoint.
-    unrealizedPnl: toNumber(row.realizedPnl),
-    side: String(row.positionSide ?? '').toLowerCase() === 'short' ? PositionSide.Short : PositionSide.Long,
-    // Charged fees arrive NEGATIVE here (opposite of the fills endpoint).
-    fees: Math.abs(toNumber(row.fee)),
-    time: openTime,
-    closedTime: parseInt(String(row.updateTime ?? '0'), 10) || openTime,
-    account: accountName,
-    leverage: toNumber(row.leverage),
-  };
 };

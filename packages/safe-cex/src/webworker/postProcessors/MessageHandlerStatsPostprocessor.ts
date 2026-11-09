@@ -4,7 +4,7 @@ import { ExchangeDependentPostprocessor } from './ExchangeDependentPostprocessor
 
 const websocketHasStats = (
   ws: { isInitialized: boolean; messageHandlersStats: MessageHandlersStats } | undefined,
-): boolean => {
+): ws is { isInitialized: boolean; messageHandlersStats: MessageHandlersStats } => {
   if (!ws) return false;
   if (ws.isInitialized) return true;
   for (const _k in ws.messageHandlersStats) return true;
@@ -31,17 +31,17 @@ export class MessageHandlerStatsPostprocessor extends ExchangeDependentPostproce
     // array on Bybit linear's stats just to ask "is anything here?").
     const ws = this._exchange;
 
-    if (websocketHasStats(ws.publicWebsocket as any)) {
-      store.messageHandlerStats.public = ws.publicWebsocket!.messageHandlersStats;
+    if (websocketHasStats(ws.publicWebsocket)) {
+      store.messageHandlerStats.public = ws.publicWebsocket.messageHandlersStats;
     }
-    if (websocketHasStats(ws.businessWebsocket as any)) {
-      store.messageHandlerStats.business = ws.businessWebsocket!.messageHandlersStats;
+    if (websocketHasStats(ws.businessWebsocket)) {
+      store.messageHandlerStats.business = ws.businessWebsocket.messageHandlersStats;
     }
-    if (websocketHasStats(ws.futuresWebsocket as any)) {
-      store.messageHandlerStats.futures = ws.futuresWebsocket!.messageHandlersStats;
+    if (websocketHasStats(ws.futuresWebsocket)) {
+      store.messageHandlerStats.futures = ws.futuresWebsocket.messageHandlersStats;
     }
-    if (websocketHasStats(ws.privateWebsocket as any)) {
-      store.messageHandlerStats.private = ws.privateWebsocket!.messageHandlersStats;
+    if (websocketHasStats(ws.privateWebsocket)) {
+      store.messageHandlerStats.private = ws.privateWebsocket.messageHandlersStats;
     }
 
     // BybitInverse maps publicInverseWebsocket → public
