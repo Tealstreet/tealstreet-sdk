@@ -1579,3 +1579,14 @@ test('#3372 (run 42484598496 at 44f62e31028) retains measured wasm headroom', ()
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3372 restage (optimized merge 41d4292d6f3) retains current Bybit headroom', () => {
+  const measured = 2_323_991;
+  const minimumCap = 2_334_720;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, 'Bybit retains the current measured size plus 10 KiB, rounded up');
+  assert.equal(wasmBudgetError(measured, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});

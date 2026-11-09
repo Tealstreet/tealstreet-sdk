@@ -233,7 +233,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   blofin: 2_050_048,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   // #3372 merge keeps max(PR 2,295,808, master 2,326,528); prior run 42484598496 measured 2,285,327 B.
-  bybit: 2_326_528,
+  // #3372 restage at merge 41d4292d6f3: build.sh --venue bybit, pinned Binaryen132, web/node 2,323,991 B.
+  // Current measured size + 10 KiB, rounded up to KiB; both parent provenance blocks retained.
+  bybit: 2_334_720,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   coinbase: 1_978_368,
   cryptocom: 1_803_264,
