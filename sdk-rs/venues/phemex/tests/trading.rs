@@ -527,19 +527,19 @@ fn assert_legacy_equal_lots(amount: f64, max: f64, step: f64, expected: &[&str],
 
 #[test]
 fn legacy_equal_lots_26_step_1() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
     assert_legacy_equal_lots(26., 5., 1., &["4", "4", "4", "4", "4", "4", "1"], 25.);
 }
 
 #[test]
 fn legacy_equal_lots_11_step_1() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
     assert_legacy_equal_lots(11., 5., 1., &["3", "3", "3", "1"], 10.);
 }
 
 #[test]
 fn legacy_equal_lots_12_step_1() {
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for parity per Sam; decision pending
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
     assert_legacy_equal_lots(12., 5., 1., &["3", "3", "3", "2"], 11.);
 }
 
