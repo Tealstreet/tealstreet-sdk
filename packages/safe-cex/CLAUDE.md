@@ -531,9 +531,19 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
 Before awaiting a ready worker bridge, forwarding captures its subscription
-identity and checks it again before dispatch. A removed or replaced bridge
+identity and the host owner binding at admission, before page-engine startup,
+and checks both again before dispatch. A removed or replaced bridge
 drops the pending call; an undispatched write rejects as `notSent`. Reattaching
 the same callback is a new subscription, even when the account name is reused.
+Hosts queuing calls before a bridge exists must first install
+`setWorkerOwner(() => ({ ownerId, generation }))`, reading the current login's
+authenticated principal (never an account label) and a monotonic, nonnegative
+safe-integer generation. Change the generation on retirement/replacement;
+return `undefined` after logout. An unbound unwired call fails closed; attaching
+the first listener cannot establish its earlier owner. An unchanged bound owner
+can bootstrap normally. Changing the provider itself also retires pending work.
+The direct source-order refresh uses the same admission fence. Only the existing
+public candle read is permitted to retry across a replacement bridge.
 
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from

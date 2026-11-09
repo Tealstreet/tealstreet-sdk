@@ -520,6 +520,14 @@ const SOCKET_HEALTH_SYNC_MS = 5_000;
 const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
 
 export class RustEngineExchange extends BaseExchange {
+  private workerOwnerSource?: () => { ownerId: string; generation: number } | undefined;
+
+  /** Hosts must bind their current login generation before queuing calls on an unwired mirror. */
+  setWorkerOwner = (source: () => { ownerId: string; generation: number } | undefined): void => {
+    if (typeof source !== 'function') throw new TypeError('Worker owner source must be a function');
+    this.workerOwnerSource = source;
+  };
+
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private readonly defaultHistoricalPositions = (this as BaseExchange).fetchHistoricalPositions;
   private host?: EngineHostType;
@@ -1314,13 +1322,12 @@ export class RustEngineExchange extends BaseExchange {
   /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
   refreshAccountOrders = async (symbols?: string[], cancelChecks?: { id: string; symbol: string }[]): Promise<void> => {
     if (this.routesToWorker) {
-      // Disposal while the bridge attaches retires the ask: nothing may start after cleanup.
-      await this.untilWorkerBridge();
-      if (this.isDisposed) return;
-      await (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(
-        'refreshAccountOrders',
-        ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []),
-      );
+      try {
+        await this.callWorker('refreshAccountOrders',
+          ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []));
+      } catch (error) {
+        if (!this.isDisposed) throw error;
+      }
       return;
     }
     try {
@@ -1832,16 +1839,50 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
-  private callWorker = async (method: string, ...args: unknown[]): Promise<unknown> => {
+  private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
+    this.callWorkerForOwner(this.captureWorkerAdmission(), method, ...args);
+
+  private workerOwnerChanged = (method: string, args: unknown[]): Error => {
+    const message = `${this.name} ${method} was not sent: the account worker changed or its owner is not bound`;
+    const clientOrderIds = workerCallClientOrderIds(method, args);
+    return Object.assign(new ExchangeError(message, {
+      message, kind: 'internal', ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'notSent' as const } : {}),
+    }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
+  };
+
+  private captureWorkerAdmission = (): ((method: string, args: unknown[]) => void) => {
+    const source = this.workerOwnerSource;
+    const readOwner = () => {
+      try { return source?.(); } catch { return undefined; }
+    };
+    const owner = readOwner();
+    const ownerId = owner?.ownerId;
+    const generation = owner?.generation;
+    const bound = typeof ownerId === 'string' && ownerId.length > 0 && typeof generation === 'number' &&
+      Number.isSafeInteger(generation) && generation >= 0;
+    const bridgeIsCurrent = this.emitter.hasListeners('callMethod')
+      ? this.emitter.captureListenerGuard('callMethod') : undefined;
+    return (method, args) => {
+      // This explicit public read alone may cross replacement bridges.
+      if (method === 'fetchOHLCV') return;
+      const current = readOwner();
+      if (this.isDisposed || source !== this.workerOwnerSource || (bridgeIsCurrent && !bridgeIsCurrent()) ||
+        (source ? !bound || current?.ownerId !== ownerId || current?.generation !== generation : !bridgeIsCurrent)) {
+        throw this.workerOwnerChanged(method, args);
+      }
+    };
+  };
+
+  private callWorkerForOwner = async (
+    admitted: (method: string, args: unknown[]) => void, method: string, ...args: unknown[]
+  ): Promise<unknown> => {
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
-    const bridgeIsCurrent = await this.untilWorkerBridge();
+    admitted(method, args);
+    const bridgeIsCurrent = await this.untilWorkerBridge(() => admitted(method, args));
+    admitted(method, args);
     if (this.isDisposed || !bridgeIsCurrent()) {
-      const message = `${this.name} ${method} was not sent: the account worker changed before dispatch`;
-      const clientOrderIds = workerCallClientOrderIds(method, args);
-      throw Object.assign(new ExchangeError(message, {
-        message, kind: 'internal', ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'notSent' as const } : {}),
-      }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
+      throw this.workerOwnerChanged(method, args);
     }
     const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
@@ -1882,9 +1923,10 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
-  private untilWorkerBridge = async (): Promise<() => boolean> => {
+  private untilWorkerBridge = async (assertCurrent?: () => void): Promise<() => boolean> => {
     const deadline = Date.now() + WORKER_BRIDGE_WAIT_MS;
     while (!this.emitter.hasListeners('callMethod')) {
+      assertCurrent?.();
       if (this.isDisposed) throw new Error(`${this.name} disposed before its worker bridge was wired`);
       if (Date.now() >= deadline) throw new Error(`${this.name} worker bridge was not wired`);
       await new Promise((resolve) => setTimeout(resolve, WORKER_BRIDGE_POLL_MS));
@@ -1932,8 +1974,9 @@ export class RustEngineExchange extends BaseExchange {
         if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
           return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
+        const admitted = this.captureWorkerAdmission();
         const viaWorker = () =>
-          this.callWorker(method, ...args).then(
+          this.callWorkerForOwner(admitted, method, ...args).then(
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
               method === 'updateOrder'
@@ -1948,7 +1991,10 @@ export class RustEngineExchange extends BaseExchange {
           );
         if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
         return this.untilFrameFedSettled(method).then(
-          () => (this.frameFed ? local(...args) : viaWorker()),
+          () => {
+            admitted(method, args);
+            return this.frameFed ? local(...args) : viaWorker();
+          },
           (error: unknown) => {
             this.reportCommandError(error);
             throw error;

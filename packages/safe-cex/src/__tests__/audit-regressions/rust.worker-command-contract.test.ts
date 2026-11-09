@@ -347,6 +347,163 @@ it('drops a write when a ready bridge callback is reattached for another owner',
   expect(ownerB.writes).toHaveBeenCalledOnce();
 });
 
+it.each(['never-wired', 'detached'] as const)('drops unbound writes queued without an owner (%s)', async (phase) => {
+  vi.useFakeTimers();
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const ownerA = vi.fn();
+  const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
+  });
+  if (phase === 'detached') {
+    exchange.on('callMethod', ownerA);
+    exchange.off('callMethod', ownerA);
+  }
+  const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+  exchange.on('callMethod', ownerB);
+  await vi.advanceTimersByTimeAsync(25);
+  expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
+  expect(ownerA).not.toHaveBeenCalled();
+  expect(ownerB).not.toHaveBeenCalled();
+});
+
+it.each(['same-owner', 'other-owner', 'new-generation', 'logout', 'new-provider'] as const)(
+  'checks a bound owner while the initial bridge attaches (%s)', async (transition) => {
+    vi.useFakeTimers();
+    const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
+    let owner: { ownerId: string; generation: number } | undefined = { ownerId: 'A', generation: 1 };
+    exchange.setWorkerOwner(() => owner);
+    const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+    if (transition === 'other-owner') owner!.ownerId = 'B';
+    if (transition === 'new-generation') owner!.generation = 2;
+    if (transition === 'logout') owner = undefined;
+    if (transition === 'new-provider') exchange.setWorkerOwner(() => owner);
+    const current = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'current-owner' });
+    });
+    exchange.on('callMethod', current);
+    await vi.advanceTimersByTimeAsync(25);
+    if (transition === 'same-owner') {
+      expect(await pending).toBe('current-owner');
+      expect(current).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        method: 'setLeverage', args: ['BTCUSDT', 3],
+      }));
+    } else {
+      expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
+      expect(current).not.toHaveBeenCalled();
+      if (transition !== 'logout') {
+        await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('current-owner');
+        expect(current).toHaveBeenCalledOnce();
+      }
+    }
+  },
+);
+
+it('keeps a bound owner through a detached bridge with unchanged bootstrap identity', async () => {
+  vi.useFakeTimers();
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
+  const first = vi.fn();
+  exchange.setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
+  exchange.on('callMethod', first);
+  exchange.off('callMethod', first);
+  const pending = exchange.setLeverage('BTCUSDT', 3);
+  const reattached = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-A' });
+  });
+  exchange.on('callMethod', reattached);
+  await vi.advanceTimersByTimeAsync(25);
+  await expect(pending).resolves.toBe('owner-A');
+  expect(first).not.toHaveBeenCalled();
+  expect(reattached).toHaveBeenCalledOnce();
+});
+
+it('drops a retired bound call at the next poll before the replacement bridge exists', async () => {
+  vi.useFakeTimers();
+  const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
+  let owner = { ownerId: 'A', generation: 1 };
+  exchange.setWorkerOwner(() => owner);
+  const settled = vi.fn();
+  const pending = exchange.setLeverage('BTCUSDT', 3).then(settled, settled);
+  owner = { ownerId: 'B', generation: 2 };
+  await vi.advanceTimersByTimeAsync(25);
+  expect(settled).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    command: 'setLeverage', outcome: 'notSent',
+  }));
+  await pending;
+  const current = vi.fn(({ requestId }: { requestId: string }) => {
+    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
+  });
+  exchange.on('callMethod', current);
+  await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('owner-B');
+  expect(current).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])('keeps the admitted owner through initial placement settling (keyed=%s)', async (keyed) => {
+  for (const switchOwner of [false, true]) {
+    let rejectStartup!: (error: Error) => void;
+    setWasmEngineLoader(() => new Promise<WasmEngineModule>((_resolve, reject) => { rejectStartup = reject; }));
+    const exchange = account(true, {
+      key: keyed ? 'fixture' : '', secret: keyed ? 'fixture' : '',
+      publicDataOnly: !keyed, workerMirror: true,
+    });
+    const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-A-order'] });
+    });
+    const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-B-order'] });
+    });
+    exchange.on('callMethod', ownerA);
+    const pending = exchange.placeOrders([{
+      symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100,
+      clientOrderId: 'admitted-A',
+    }]).catch((error: unknown) => error);
+    expect(ownerA).not.toHaveBeenCalled();
+    if (switchOwner) {
+      exchange.off('callMethod', ownerA);
+      exchange.on('callMethod', ownerB);
+    }
+    if (keyed) rejectStartup(new Error('controlled page-engine fallback'));
+    if (switchOwner) {
+      expect(await pending).toMatchObject({ command: 'placeOrders', outcome: 'notSent', clientOrderIds: ['admitted-A'] });
+      expect(ownerA).not.toHaveBeenCalled();
+      expect(ownerB).not.toHaveBeenCalled();
+      await expect(exchange.placeOrders([{
+        symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 2, price: 100,
+      }])).resolves.toEqual(['owner-B-order']);
+      expect(ownerB).toHaveBeenCalledOnce();
+    } else {
+      expect(await pending).toEqual(['owner-A-order']);
+      expect(ownerA).toHaveBeenCalledOnce();
+    }
+    exchange.dispose();
+  }
+});
+
+it('keeps the admitted owner through a source order refresh', async () => {
+  for (const switchOwner of [false, true]) {
+    const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
+    const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: undefined });
+    });
+    const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: undefined });
+    });
+    exchange.on('callMethod', ownerA);
+    const args = [['BTCUSDT'], [{ id: 'synthetic-A-order', symbol: 'BTCUSDT' }]] as const;
+    const pending = exchange.refreshAccountOrders([...args[0]], [...args[1]])
+      .then(() => 'dispatched', () => 'dropped');
+    if (switchOwner) {
+      exchange.off('callMethod', ownerA);
+      exchange.on('callMethod', ownerB);
+    }
+    expect(await pending).toBe(switchOwner ? 'dropped' : 'dispatched');
+    expect(ownerB).not.toHaveBeenCalled();
+    if (switchOwner) expect(ownerA).not.toHaveBeenCalled();
+    else expect(ownerA).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      method: 'refreshAccountOrders', args,
+    }));
+  }
+});
+
 it('retries a worker candle read once on the replacement bridge and ignores the old reply', async () => {
   vi.useFakeTimers();
   // Lighter explicitly fetches candles in the worker.

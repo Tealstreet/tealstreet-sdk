@@ -45,6 +45,7 @@ describe('main-thread Rust trading routing', () => {
     setWasmEngineLoader(loader);
     const store = new DefaultStore();
     main = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true }, store);
+    main.setWorkerOwner(() => ({ ownerId: 'warm-start-owner', generation: 1 }));
     const calls: string[] = [];
     const replies: Record<string, unknown> = {
       fetchEngineCapabilities: undefined,

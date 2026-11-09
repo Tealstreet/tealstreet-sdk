@@ -148,6 +148,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   refreshAccountSettings: 'worker',
   refreshAccountOrders: 'worker',
   ingestSourceFrame: 'mirror',
+  setWorkerOwner: 'mirror',
 };
 
 /** Each must reach the worker by name here (a swallowed local failure would otherwise pass). */
