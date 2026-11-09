@@ -59,7 +59,7 @@ export const BETA_VENUES = Object.freeze([
 export const isBetaVenue = (name: string): name is (typeof BETA_VENUES)[number] =>
   BETA_VENUES.some((venue) => venue === name);
 
-export const assertBetaVenue = (name: string): void => {
+export const assertBetaVenue: (name: string) => asserts name is (typeof BETA_VENUES)[number] = (name) => {
   if (!isBetaVenue(name)) {
     throw unsupportedVenueError(`${name} is unsupported in this build`);
   }

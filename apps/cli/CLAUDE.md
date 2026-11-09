@@ -419,7 +419,11 @@ epoch; never copy accounts or credentials from the previous user's config.
 Every command-producing queue in `repl.ts` uses `enqueueSessionWork` at enqueue
 time, including initial/recreated readline, hosted webhooks and armed triggers.
 Do not rely on starting a scope only when a pending command is dispatched.
-Footer runs enter their starting session, and every script host binding checks
+Use `captureStorageSession` for callbacks invoked outside ALS (timers, watchers,
+exchange events); check it on execution and after awaits before publishing results.
+Multi-account daemon startup binds each enable to that captured session and
+propagates owner cancellation instead of continuing the saved account list.
+Stale output and captures must not reach the new login. Footer runs enter their starting session, and every script host binding checks
 the epoch captured at construction. Local-only state uses a stable separate
 profile. Shared legacy-file claims belong to the physical source directory,
 not individual `CONFIG_FILE` profiles; competing owners require re-entry.

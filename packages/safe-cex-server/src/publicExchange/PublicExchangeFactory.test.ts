@@ -51,8 +51,10 @@ class MemoryRedis implements RedisLikeMarketCacheClient {
 const market = (id: string): Market =>
   ({
     id,
-    symbol: id,
-  }) as Market;
+    symbol: id, base: '', quote: '', active: true,
+    precision: { amount: 1, price: 1 },
+    limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
+  });
 
 describe('PublicExchangeFactory', () => {
   beforeEach(() => {
@@ -179,7 +181,7 @@ describe('PublicExchangeFactory', () => {
       ...market('BTC-30DEC26-100000-C'),
       info: { symbolType: '', instrumentKind: 'CALL', expiry: 1798588800, strike: 100000 },
       option: { underlying: 'BTC', expiry: 1798588800, strike: 100000, right: 'call', style: 'european', settlement: 'cash', settleAsset: 'USDC', premiumAsset: 'USDC' },
-    } as Market;
+    } satisfies Market;
     mockExchange.fetchMarkets.mockResolvedValueOnce([linear]).mockResolvedValueOnce([linear, option]);
     const defaultFactory = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust' } });
     const combinedOptions = { engine: 'rust' as const, enableInverseMarkets: true, enableOptionMarkets: true };
