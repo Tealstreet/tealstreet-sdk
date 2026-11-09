@@ -7,6 +7,36 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
+test('#3268 (run 42404306341 at fca7d275e3a) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['bitunix', 1863967, 1874944],
+    ['bybit', 2270429, 2281472],
+    ['kraken', 2136627, 2147328],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3268 (run 42422775913 at 1af9adc3527) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['cryptocom', 1_740_870, 1_752_064],
+    ['lighter', 2_093_401, 2_104_320],
+    ['paradex', 2_266_161, 2_277_376],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
   assert.equal(WASM_BUDGETS.combined, 17 * 1024 * 1024);
@@ -1324,26 +1354,9 @@ test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', ()
   }
 });
 
-test('#3268 (run 42404306341 at fca7d275e3a) retains measured wasm headroom', () => {
+test('#3373 (run 42483155921 at f62df98ad32) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
-    ['bitunix', 1863967, 1874944],
-    ['bybit', 2270429, 2281472],
-    ['kraken', 2136627, 2147328],
-  ]) {
-    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    const cap = WASM_VENUE_OVERRIDES[venue];
-    assert.ok(cap >= minimumCap);
-    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
-  }
-});
-
-test('#3268 (run 42422775913 at 1af9adc3527) retains measured wasm headroom', () => {
-  for (const [venue, measured, minimumCap] of [
-    ['cryptocom', 1_740_870, 1_752_064],
-    ['lighter', 2_093_401, 2_104_320],
-    ['paradex', 2_266_161, 2_277_376],
+    ['bitunix', 1_877_328, 1_888_256],
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     const cap = WASM_VENUE_OVERRIDES[venue];
