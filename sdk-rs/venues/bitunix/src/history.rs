@@ -33,10 +33,11 @@ enum Kind {
     Fills,
     Orders,
     Income,
-    /// Raw closed-position rows for the host's TS mappers (`FetchClosedPositions`).
+    /// Raw closed-position rows retained by the separate journal command.
     Positions,
 }
 pub struct Request {
+    output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     owner: ReadCursorHistory<MappedRow>,
     /// The command's own caller Read root; each page is one leg of it.
     root: ReadRoot,
@@ -386,10 +387,10 @@ impl BitunixFutures {
             } => (Kind::Income, symbol, None, from_ms, to_ms, usize::MAX),
             Query::PublicTrades { .. } | Query::OrderByClientId { .. } => unreachable!(),
         };
-        self.start_history(cx, command, kind, symbol, order_id, from, to, limit);
+        self.start_history(cx, command, kind, symbol, order_id, from, to, limit, None);
     }
     /// `FetchClosedPositions`: TS `fetchClosedPositionRows` over the reported
-    /// history-positions endpoint, rows passed through raw for the host mappers.
+    /// history-positions endpoint, with raw rows for the journal.
     pub(crate) fn closed_positions(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -397,6 +398,35 @@ impl BitunixFutures {
         symbol: Option<String>,
         from: Option<f64>,
         to: Option<f64>,
+    ) {
+        self.closed_read(cx, command, symbol, from, to, None);
+    }
+    pub(crate) fn closed_pnl(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: u32,
+        symbol: Option<String>,
+        from: Option<f64>,
+        to: Option<f64>,
+        account: String,
+    ) {
+        let output = safe_cex_engine::history_output::ClosedPnlOutput::new(
+            safe_cex_engine::ClosedPositionFormat::Bitunix,
+            account,
+            false,
+            symbol.clone(),
+            cx.store.markets(),
+        );
+        self.closed_read(cx, command, symbol, from, to, Some(output));
+    }
+    fn closed_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: u32,
+        symbol: Option<String>,
+        from: Option<f64>,
+        to: Option<f64>,
+        output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     ) {
         if !self.slots.has_primary() {
             let Ok(context) = cx.admit_http_command(local_read_policy()) else {
@@ -414,6 +444,7 @@ impl BitunixFutures {
             from,
             to,
             usize::MAX,
+            output,
         );
     }
     #[allow(clippy::too_many_arguments)]
@@ -427,6 +458,7 @@ impl BitunixFutures {
         from: Option<f64>,
         to: Option<f64>,
         limit: usize,
+        output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     ) {
         if kind == Kind::Fills && symbol.as_ref().is_none_or(|s| cx.store.market(s).is_none()) {
             let Ok(context) = cx.admit_http_command(local_read_policy()) else {
@@ -484,6 +516,7 @@ impl BitunixFutures {
             }
         };
         let read = Request {
+            output,
             owner: ReadCursorHistory::new(
                 completion,
                 walk,
@@ -971,7 +1004,11 @@ impl BitunixFutures {
     ) {
         read.release(cx);
         let Request {
-            owner, kind, limit, ..
+            owner,
+            kind,
+            limit,
+            output,
+            ..
         } = read;
         let _ = owner.finish_with(cx, result, move |mut rows| {
             // TS returns closed-position rows in page order; the host sorts mapped entries.
@@ -981,7 +1018,18 @@ impl BitunixFutures {
             if !matches!(kind, Kind::Income | Kind::Positions) {
                 rows.truncate(limit);
             }
-            encode(&rows)
+            if let Some(output) = output {
+                let raw: Vec<String> = rows
+                    .into_iter()
+                    .filter_map(|row| match row {
+                        MappedRow::Raw(row) => Some(row.get().to_owned()),
+                        _ => None,
+                    })
+                    .collect();
+                output.encode(&raw)
+            } else {
+                encode(&rows)
+            }
         });
     }
 }

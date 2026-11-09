@@ -101,6 +101,9 @@ nonces, Coinbase JWTs or other request-signing randomness. No provider or seed i
 serialized into account options or commands. Both raw WASM setters and native
 setters reject replacement after startup. Provider failures stop ID/signature
 creation before send; retry jitter alone uses the nominal delay on failure.
+Before startup, replacing or removing the signing provider retires its queued
+signing and unclaimed signed packets with `notSent`; old completions cannot
+release them. Reinstalling the same provider handle preserves pending work.
 
 Rust correctness and performance replays each install an isolated identity
 stream from the exact tape SHA-256. The landed Bitget SHA/domain/counter byte

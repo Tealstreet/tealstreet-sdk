@@ -1,4 +1,10 @@
-import { getStorageEpoch, assertStorageSession } from './storage-context';
+import {
+  getStorageEpoch,
+  assertStorageSession,
+  captureStorageSession,
+  isStorageSessionCurrent,
+  onStorageOwnerChange,
+} from './storage-context';
 import { warnAboutClockSkew } from './clock-skew-warning';
 import chalk from 'chalk';
 import { terminalText } from './console-glyphs';
@@ -35,6 +41,8 @@ import {
   setContextualProxyTokenProvider,
 } from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
+import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
+import { chaserOrderManagerInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
 import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
 import {
   defaultProxyRegion,
@@ -80,6 +88,9 @@ const getCreateExchangeFromAccount = async () => {
 export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
   let exchangeManager: ExchangeManager | null = null;
   let captureBuffer: string[] | null = null;
+  onStorageOwnerChange(() => {
+    captureBuffer = null;
+  });
   let getReadlineRef: (() => import('readline').Interface | null) | null = null;
   let isInMonitorRef: (() => boolean) | null = null;
 
@@ -275,12 +286,26 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     async startExchange(exchange: ExchangeLike): Promise<void> {
+      const session = captureStorageSession();
       if (exchange.start) {
         // Add timeout to prevent hanging on network issues. The timer is
         // cleared once the race settles — left armed it keeps the event loop
         // alive for its full duration after the work is done, which is the
         // class of leak that made one-shot commands hang.
-        const startPromise = exchange.start();
+        let disposed = false;
+        const disposeIfStale = () => {
+          if (!disposed && !session.isCurrent()) {
+            disposed = true;
+            exchange.dispose?.();
+          }
+        };
+        const startPromise = (async () => {
+          try {
+            await exchange.start?.();
+          } finally {
+            disposeIfStale();
+          }
+        })();
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
@@ -290,6 +315,10 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
         try {
           await Promise.race([startPromise, timeoutPromise]);
+          session.assertCurrent();
+        } catch (error) {
+          disposeIfStale();
+          throw error;
         } finally {
           if (timeoutId) clearTimeout(timeoutId);
         }
@@ -297,6 +326,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     async stopExchange(exchange: ExchangeLike): Promise<void> {
+      chaserOrderManagerInstance.cleanupExchange(exchange as Exchange);
       if (exchange.dispose) {
         exchange.dispose();
       }
@@ -319,6 +349,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     // listener's cmd:exec handler), print* methods route into the context's
     // sink instead so output streams as WS frames.
     print(lines: string[]): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) {
         for (const line of lines) ctx.printSink('print', line);
@@ -328,6 +359,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     printError(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('error', message);
       outputError(chalk.red(message));
@@ -337,12 +369,14 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     printSuccess(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('success', message);
       output(chalk.green(message));
     },
 
     printWarning(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('warn', message);
       outputWarn(chalk.yellow(message));
@@ -350,6 +384,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     printInfo(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('info', message);
       output(chalk.gray(message));
@@ -359,10 +394,13 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
      * Start capturing output - returns function to stop and get captured output
      */
     startCapture(): () => string {
-      captureBuffer = [];
+      const ownerSession = captureStorageSession();
+      const buffer: string[] = [];
+      captureBuffer = buffer;
       return () => {
-        const result = (captureBuffer || []).join('\n');
-        captureBuffer = null;
+        if (!ownerSession.isCurrent()) return '';
+        const result = buffer.join('\n');
+        if (captureBuffer === buffer) captureBuffer = null;
         return result;
       };
     },

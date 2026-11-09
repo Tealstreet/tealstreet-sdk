@@ -8,7 +8,8 @@ import {
   onStorageOwnerChange,
   runInStorageSession,
   enqueueSessionWork,
-  QueuedSessionCancelledError,
+  captureStorageSession,
+  StorageSessionCancelledError,
 } from './storage-context';
 import * as readline from 'readline';
 import * as fs from 'fs';
@@ -413,7 +414,7 @@ export function recreateReadline(): void {
         () => processCommand(trimmedLine),
         (message) => adapter.printInfo(message),
       ).catch((error) => {
-        if (!(error instanceof QueuedSessionCancelledError)) console.error(error);
+        if (!(error instanceof StorageSessionCancelledError)) console.error(error);
       });
     }
     commandQueue.then(() => {
@@ -1138,6 +1139,7 @@ function stopFooterScriptRefresh(): void {
  * then session commands from cli-core
  */
 async function processSingleCommand(command: string, captureTo?: string): Promise<void> {
+  const ownerSession = captureStorageSession();
   // Handle login command
   if (command === 'login') {
     await login();
@@ -1701,6 +1703,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     promptConfig,
     preprocessStore,
   );
+  ownerSession.assertCurrent();
 
   // TSBUG-107: durable write-op audit trail (off by default). Recorded
   // BEFORE the failure throw below so failed writes are logged too.
@@ -1888,6 +1891,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
                 origin: 'cli',
               },
               () => {
+                if (!ownerSession.isCurrent()) return;
                 // State updated callback - log progress
                 const state = twapInstance.state;
                 logger.info(`[TWAP] ${state.ordersExecuted}/${state.ordersCount} slices executed`);
@@ -1950,6 +1954,7 @@ async function processCommandInSession(
   commandString: string,
   options: { drainFinalInFlight?: boolean } = {},
 ): Promise<void> {
+  const ownerSession = captureStorageSession();
   // Per-call overrides from the listener's `cmd:exec` handler. When a
   // web tab dispatches a command with `account`/`symbol` set, scope the
   // run to those values instead of the REPL's long-lived session — so
@@ -2015,6 +2020,7 @@ async function processCommandInSession(
       if (step.awaitPrior && inFlight.length > 0) {
         await Promise.allSettled(inFlight.splice(0));
       }
+      ownerSession.assertCurrent();
       const p = runStep(step);
       if (step.block || step.retry !== undefined || step.captureTo !== undefined) {
         await p;
@@ -2116,6 +2122,7 @@ async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): P
 }
 
 function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, err: Error): void {
+  if (!isStorageSessionCurrent()) return;
   if (step.errorMode === 'continue') {
     adapter.printWarning(`(continue-on-error) ${err.message}`);
   } else if (!(err as Error & { alreadyReported?: boolean }).alreadyReported) {
@@ -2138,6 +2145,7 @@ function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, 
  *   writeback inside the runner sets the user var.
  */
 async function runScriptStep(command: string, step: import('@tealstreet/cli-core').PreprocessedStep): Promise<void> {
+  const ownerSession = captureStorageSession();
   const parsed = parseScriptInvocation(command);
   if (!parsed) {
     reportStepError(
@@ -2160,6 +2168,7 @@ async function runScriptStep(command: string, step: import('@tealstreet/cli-core
     }
   }
 
+  ownerSession.assertCurrent();
   const record = lookupScript(parsed.name);
   if (!record) {
     reportStepError(
@@ -2224,7 +2233,9 @@ async function runScriptStep(command: string, step: import('@tealstreet/cli-core
     }
     let lastErr: string | undefined;
     for (let attempt = 0; attempt <= step.retry; attempt++) {
+      ownerSession.assertCurrent();
       const result = await runOnce(attempt);
+      ownerSession.assertCurrent();
       if (result.ok) {
         recordInvocation(true);
         return;
@@ -2595,7 +2606,7 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     // A command that throws must not leave the queue rejected: every later
     // typed command and webhook would then fail without running.
     commandQueue = commandQueue.catch((err) => {
-      if (!(err instanceof QueuedSessionCancelledError)) {
+      if (!(err instanceof StorageSessionCancelledError)) {
         adapter.printError(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
@@ -2895,5 +2906,14 @@ onStorageOwnerChange(() => {
   connectionMonitor?.stop();
   networkMonitor?.stop();
   stopFooterScriptRefresh();
+  watchMessageBuffer.length = 0;
+  const config = loadConfig();
+  footerSegments = config.footer?.segments ? [...config.footer.segments] : [...DEFAULT_SEGMENTS];
+  disableFooter();
+  if (rlInstance && config.footer?.enabled !== false) {
+    setFooterRenderer(footerRenderer);
+    enableFooter(config.footer?.intervalMs);
+    startFooterScriptRefresh(config.footer?.intervalMs);
+  }
   if (rlInstance && 'history' in rlInstance) rlInstance.history = loadHistory();
 });
