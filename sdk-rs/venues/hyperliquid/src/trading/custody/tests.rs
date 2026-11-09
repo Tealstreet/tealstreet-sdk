@@ -30,6 +30,7 @@ impl Venue for RetirementProbe {
                 context: None,
                 ready: false,
                 wait: None,
+                cancel_failure: None,
             }),
             command,
             steps: VecDeque::new(),

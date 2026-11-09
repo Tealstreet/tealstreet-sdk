@@ -92,8 +92,8 @@ struct Run {
     queue: VecDeque<Leg>,
     active: Option<Active>,
     continue_on_error: bool,
-    /// Spot throws a native lot refusal after the current caller order finishes.
     stop_after_spot_order: bool,
+    deferred_error: Option<String>,
     ids: Vec<String>,
     error: Option<VenueError>,
     /// Live rows a cancel-all did not list. The stream can lag a venue-side
@@ -610,6 +610,7 @@ impl BybitLinear {
             active: None,
             continue_on_error: job.continue_on_error,
             stop_after_spot_order: false,
+            deferred_error: job.deferred_error,
             ids: Vec::new(),
             error: None,
             unlisted: Vec::new(),
@@ -720,7 +721,11 @@ impl BybitLinear {
                         .map_or_else(|| "[]".into(), |intent| intent.ids()),
                     None => serde_json::to_string(&run.ids).unwrap_or_default(),
                 };
-                let sealed = match run.error.take() {
+                let failure = run
+                    .error
+                    .take()
+                    .or_else(|| run.deferred_error.take().map(not_sent));
+                let sealed = match failure {
                     Some(error) => {
                         let error = run.failure(error);
                         cx.fail_plan(&run.plan, error).map(|()| false)

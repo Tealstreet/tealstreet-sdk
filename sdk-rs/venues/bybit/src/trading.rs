@@ -45,6 +45,8 @@ enum Call {
     PlaceLot {
         last: bool,
     },
+    /// Single-order bodies to place one by one if the venue refuses the
+    /// whole batch (a refusal places nothing, so this cannot double-place).
     PlaceBatch {
         fallback: Vec<(String, Vec<OrderIdentityReceipt>)>,
     },
@@ -225,6 +227,8 @@ struct Step {
 struct Job {
     steps: VecDeque<Step>,
     continue_on_error: bool,
+    /// A later caller's formatting refusal follows the already formatted prefix.
+    deferred_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -612,6 +616,9 @@ impl BybitLinear {
 
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
         self.check_ids(cx, orders)?;
+        if self.variant.is_spot() {
+            return self.plan_spot_place(cx, orders);
+        }
         let mut job = Job {
             continue_on_error: true,
             ..Job::default()
@@ -729,6 +736,50 @@ impl BybitLinear {
         Ok(job)
     }
 
+    fn plan_spot_place(
+        &self,
+        cx: &Cx<'_, Pending>,
+        orders: &[PlaceOrderOpts],
+    ) -> Result<Job, String> {
+        for opts in orders {
+            execution_params(opts, true, false)?;
+        }
+        let mut job = Job {
+            continue_on_error: true,
+            ..Job::default()
+        };
+        for opts in orders {
+            let formatted = if opts.kind == OrderType::TrailingStopLoss {
+                Err("Bybit spot has no trailing-position stops".into())
+            } else {
+                self.format_lots(cx, opts)
+            };
+            let lots = match formatted {
+                Ok(lots) => lots,
+                Err(error) if job.steps.is_empty() => return Err(error),
+                Err(error) => {
+                    job.deferred_error = Some(error);
+                    break;
+                }
+            };
+            let count = lots.len();
+            for (index, lot) in lots.into_iter().enumerate() {
+                job.steps.push_back(Step {
+                    delay_ms: 0.0,
+                    requests: vec![Planned {
+                        receipts: lot.receipts,
+                        path: "/v5/order/create",
+                        body: lot.single.finish(),
+                        call: Call::PlaceLot {
+                            last: index + 1 == count,
+                        },
+                    }],
+                });
+            }
+        }
+        Ok(job)
+    }
+
     pub(crate) fn hyro_stop(
         &self,
         cx: &Cx<'_, Pending>,
@@ -749,9 +800,9 @@ impl BybitLinear {
         Ok(None)
     }
 
-    /// Split oversized entries into create bodies. Each spot lot owns its TP/SL;
-    /// derivatives keep protection on the first lot and the TS remainder.
-    /// Refuse invalid lot plans before any entry in the batch can be dispatched.
+    /// Split entries with each product's legacy allocation and protection rules.
+    /// Derivatives validate the complete lot plan before dispatch; Spot preserves
+    /// its venue-first validation and protects the first main lot and remainder.
     pub(crate) fn format_lots(
         &self,
         cx: &Cx<'_, Pending>,
@@ -882,51 +933,40 @@ impl BybitLinear {
         if amount / max > 1000.0 {
             return Err("Order exceeds the safe split bound".into());
         }
-        if amount > max && num::adjust(max, p_amount) != max {
+        if !self.variant.is_spot() && amount > max && num::adjust(max, p_amount) != max {
             return Err("Market maximum quantity is not aligned to quantity precision".into());
         }
-        if self.variant.is_spot() {
-            let mut remaining = amount;
-            while remaining > max {
-                sizes.push(max);
-                remaining = num::adjust(remaining - max, p_amount);
-            }
-            sizes.push(remaining);
+        // Both TS products use equal main lots plus the rounded remainder.
+        let lots = if amount > max {
+            (amount / max).ceil() as usize
         } else {
-            // reference/bybit/bybit.exchange.ts:2718-2731 includes the rounded remainder
-            // after equal-sized lots, even when rounding changes their combined total.
-            let lots = if amount > max {
-                (amount / max).ceil() as usize
-            } else {
-                1
-            };
-            let rest = if amount > max {
-                num::adjust(amount % max, p_amount)
-            } else {
-                0.0
-            };
-            let lot_size = num::adjust((amount - rest) / lots as f64, p_amount);
-            sizes.resize(lots, lot_size);
-            if rest != 0.0 {
-                remainder_index = Some(sizes.len());
-                sizes.push(rest);
+            1
+        };
+        let rest = if amount > max {
+            num::adjust(amount % max, p_amount)
+        } else {
+            0.0
+        };
+        let lot_size = num::adjust((amount - rest) / lots as f64, p_amount);
+        sizes.resize(lots, lot_size);
+        if rest != 0.0 {
+            remainder_index = Some(sizes.len());
+            sizes.push(rest);
+        }
+        if !self.variant.is_spot() {
+            if sizes.iter().any(|qty| *qty < market.limits.amount.min) {
+                return Err("Order split contains a lot below the market minimum".into());
             }
-        }
-        if sizes.iter().any(|qty| *qty < market.limits.amount.min) {
-            return Err("Order split contains a lot below the market minimum".into());
-        }
-        if sizes.iter().any(|qty| {
-            !qty.is_finite() || *qty <= 0.0 || *qty > max || num::adjust(*qty, p_amount) != *qty
-        }) {
-            return Err(
-                "Order split contains a lot outside the maximum quantity or precision".into(),
-            );
-        }
-        if self.variant.is_spot() && num::adjust(sizes.iter().sum(), p_amount) != amount {
-            return Err("Order split quantities do not preserve the requested total".into());
+            if sizes.iter().any(|qty| {
+                !qty.is_finite() || *qty <= 0.0 || *qty > max || num::adjust(*qty, p_amount) != *qty
+            }) {
+                return Err(
+                    "Order split contains a lot outside the maximum quantity or precision".into(),
+                );
+            }
         }
         let lot = |qty: f64, first: bool, category: bool| {
-            let brackets = self.variant.is_spot() || first;
+            let brackets = first;
             let mut body = Body::new();
             if category {
                 body = body.str("category", self.category_for(&opts.symbol).as_str());

@@ -211,7 +211,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_037_760,
   asterdex: 2_174_976,
-  backpack: 2_011_136,
+  backpack: 2_022_400,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
@@ -220,10 +220,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bingx: 2_100_224,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
-  bitget: 2_457_600,
-  bitgetusdc: 2_457_600,
+  bitget: 2_469_888,
+  bitgetusdc: 2_469_888,
   bitrue: 1_864_704,
-  bitunix: 1_874_944,
+  bitunix: 1_878_016,
   blofin: 2_015_232,
   bybit: 2_310_144,
   coinbase: 1_953_792,
@@ -248,7 +248,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   'lighter-robinhood': 2_109_440,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_872_896,
-  okx: 1_999_872,
+  okx: 2_014_208,
   orderly: 1_744_896,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_282_496,

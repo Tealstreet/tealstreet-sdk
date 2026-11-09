@@ -519,6 +519,7 @@ impl BybitLinear {
             active: None,
             continue_on_error: false,
             stop_after_spot_order: false,
+            deferred_error: None,
             unlisted: Vec::new(),
             unlisted_read: None,
             unlisted_landed: None,

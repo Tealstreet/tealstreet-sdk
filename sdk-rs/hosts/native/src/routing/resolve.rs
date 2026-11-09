@@ -684,7 +684,7 @@ fn uses_tunnel(name: &str, o: &RoutingInputs) -> bool {
     match name {
         "paradex" => !public && !o.payload_signer,
         "hyperliquid" | "hyperliquidspot" | "kucoin" | "kucoinspot" => !public,
-        "bingx" => !public && o.tealstreet_tunnel != Some(false),
+        "bingx" | "bingxspot" => !public && o.tealstreet_tunnel != Some(false),
         "weex" | "grvt" | "blofin" | "mexc" => false,
         _ => o.tealstreet_tunnel.unwrap_or(false),
     }

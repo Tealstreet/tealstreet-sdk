@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 mod support;
+#[path = "support/unknown_exceptions.rs"]
+mod unknown_exceptions;
 use crate::support::*;
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice};
@@ -339,7 +341,9 @@ fn rounded_caller_amount_cannot_split_and_rejects_whole_batch() {
 }
 
 #[test]
-fn split_brackets_protect_each_accepted_lot_before_another_entry() {
+fn split_brackets_batch_all_entries_and_stop_after_the_first_child_failure() {
+    // TS okx.exchange.ts:1751-1763,2319-2339: entry prefix survives a first child refusal.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | trading.rs:669 per-lot TP/SL child validation
     let mut e = trading_engine();
     let out = place(
         &mut e,
@@ -347,29 +351,46 @@ fn split_brackets_protect_each_accepted_lot_before_another_entry() {
             r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":2001,"stopLoss":36000,"takeProfit":42000}"#,
         )],
     );
-    let a = http(&out);
-    assert_eq!(body(a).matches("\"sz\"").count(), 1);
-    assert!(body(a).contains("\"sz\":\"1000\""));
-    let out = ack(&mut e, a, false);
-    let stop = http(&out);
-    assert!(body(stop).contains("slTriggerPx"));
-    assert!(body(stop).contains("\"sz\":\"1000\""));
-    let out = ack(&mut e, stop, true);
-    assert!(body(http(&out)).contains("tpTriggerPx"));
-    let out = ack(&mut e, http(&out), true);
-    let second = http(&out);
-    assert!(matches!(second, Action::Http(r) if r.url.ends_with("/batch-orders")));
+    let entry = http(&out);
+    let payload: serde_json::Value = serde_json::from_str(body(entry)).expect("entry batch");
+    assert_eq!(
+        payload
+            .as_array()
+            .expect("batch")
+            .iter()
+            .map(|row| &row["sz"])
+            .collect::<Vec<_>>(),
+        vec![
+            &serde_json::json!("1000"),
+            &serde_json::json!("1000"),
+            &serde_json::json!("1")
+        ]
+    );
     reply(
         &mut e,
-        second,
-        r#"{"code":"1","msg":"All operations failed","data":[{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
-        7.0,
+        entry,
+        r#"{"code":"0","data":[{"ordId":"1","sCode":"0"},{"ordId":"2","sCode":"0"},{"ordId":"3","sCode":"0"}]}"#,
+        6.,
     );
-    let out = prepared(&mut e, 7.0);
+    let out = prepared(&mut e, 6.);
+    let stop = http(&out);
+    assert!(body(stop).contains("slTriggerPx"));
+    assert!(body(stop).contains("\"sz\":\"2001\""));
+    reply(
+        &mut e,
+        stop,
+        r#"{"code":"1","data":[{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
+        7.,
+    );
+    let out = prepared(&mut e, 7.);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    let results = terminals(&out, 1);
+    let [Err(error)] = results.as_slice() else {
+        panic!("failed terminal")
+    };
+    assert_eq!(
+        error.partial.as_ref().expect("entry prefix").order_ids,
+        ["1", "2", "3"]
     );
 }
 
@@ -455,10 +476,10 @@ fn oco_amend_keeps_sibling_stop_and_amends_only_selected_native_leg() {
 #[test]
 fn an_idempotent_cancel_51400_completes_without_an_error_and_reconciles() {
     use safe_cex_engine::model::*;
-    for (kind, ids, code) in [
-        (OrderType::Limit, vec!["1"], "1"),
-        (OrderType::Limit, vec!["1", "2"], "2"),
-        (OrderType::StopLoss, vec!["91_sl"], "0"),
+    for (kind, ids) in [
+        (OrderType::Limit, vec!["1"]),
+        (OrderType::Limit, vec!["1", "2"]),
+        (OrderType::StopLoss, vec!["91_sl"]),
     ] {
         let mut e = trading_engine();
         for id in &ids {
@@ -486,7 +507,7 @@ fn an_idempotent_cancel_51400_completes_without_an_error_and_reconciles() {
         reply(
             &mut e,
             http(&out),
-            &format!(r#"{{"code":"{code}","data":[{}]}}"#, rows.join(",")),
+            &format!(r#"{{"code":"0","data":[{}]}}"#, rows.join(",")),
             6.,
         );
         let out = prepared(&mut e, 6.);
@@ -570,8 +591,16 @@ fn an_idempotent_cancel_does_not_hide_a_sibling_failure() {
         assert!(
             out.iter().any(|a| match a {
                 Action::Notice(Notice::CommandError { message, .. }) => message.contains(failure),
-                Action::Notice(Notice::CommandFailed { error, .. }) =>
-                    error.message.contains(failure),
+                Action::Notice(Notice::CommandFailed { error, .. }) => {
+                    if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+                        assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
+                        assert_eq!(error.venue_code.as_deref(), Some(failure));
+                        assert_eq!(error.venue_message.as_deref(), Some("real failure"));
+                        true
+                    } else {
+                        error.message.contains(failure)
+                    }
+                }
                 _ => false,
             }),
             "{out:?}"
@@ -677,6 +706,8 @@ fn code_51400_is_not_success_for_a_placement_or_amendment() {
 
 #[test]
 fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
+    // TS okx.exchange.ts:1625-1629,2355-2363 continues code-0 row errors into the algo group.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | native cancellation runtime row refusal
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
     let mut ids = Vec::new();
@@ -697,10 +728,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         .map(|id| format!(r#"{{"ordId":"{id}","sCode":"0","sMsg":""}}"#))
         .collect();
     rows.push(r#"{"ordId":"19","sCode":"51000","sMsg":"Parameter error"}"#.into());
-    let mixed = format!(
-        r#"{{"code":"2","msg":"Bulk operation partially succeeded","data":[{}]}}"#,
-        rows.join(",")
-    );
+    let mixed = format!(r#"{{"code":"0","msg":"","data":[{}]}}"#, rows.join(","));
     reply(&mut e, http(&out), &mixed, 6.0);
     let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(
@@ -2651,7 +2679,7 @@ fn a_gone_cancel_row_asks_for_a_read_because_its_frame_may_never_come() {
     reply(
         &mut e,
         http(&out),
-        r#"{"code":"2","msg":"Bulk operation partially succeeded","data":[{"ordId":"1","sCode":"51400","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."},{"ordId":"2","sCode":"0","sMsg":""}]}"#,
+        r#"{"code":"0","msg":"","data":[{"ordId":"1","sCode":"51400","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."},{"ordId":"2","sCode":"0","sMsg":""}]}"#,
         6.0,
     );
     let out = prepared(&mut e, 6.0);
@@ -2755,7 +2783,7 @@ fn review_cancel_two_rows(data: &str) -> Vec<Action> {
     reply(
         &mut e,
         http(&out),
-        &format!(r#"{{"code":"2","data":{data}}}"#),
+        &format!(r#"{{"code":"0","data":{data}}}"#),
         6.,
     );
     prepared(&mut e, 6.)

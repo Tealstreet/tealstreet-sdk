@@ -1,3 +1,4 @@
+import { getStorageEpoch, assertStorageSession } from './storage-context';
 import { warnAboutClockSkew } from './clock-skew-warning';
 import chalk from 'chalk';
 import { terminalText } from './console-glyphs';
@@ -28,11 +29,17 @@ import type { ExchangeManager } from './exchange-manager';
 import { getAdapterContext } from './listener/adapter-context';
 import { logAccountRoute } from './account-log';
 // Static import for token management - must match what safe-cex uses internally
-import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
+import {
+  setProxyToken,
+  setTokenRefreshFunction,
+  setContextualProxyTokenProvider,
+} from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
-import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
-import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
+import {
+  defaultProxyRegion,
+  resolveAccountTransport,
+} from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
 import { BRAND } from './brand';
 
 // Default timeout for exchange operations (30 seconds)
@@ -81,7 +88,14 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
   // even when the user hasn't set tealstreetTunnel on their account, and the
   // HOW adapter polls getProxyToken() globally. Setting this once here means
   // HOW always sees the freshest token from config; login() also primes the
-  // in-memory cache so any in-flight retries pick up the new token immediately.
+  // in-memory cache; old-session requests remain fenced when the owner changes.
+  setContextualProxyTokenProvider(() => {
+    const epoch = getStorageEpoch();
+    return () => {
+      assertStorageSession(epoch);
+      return getProxyTokenFromConfig() || '';
+    };
+  });
   setTokenRefreshFunction(async () => getProxyTokenFromConfig() || '');
   const initialToken = getProxyTokenFromConfig();
   if (initialToken) {
@@ -207,13 +221,14 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     // Exchange management
     async createExchange(account: ExchangeAccountConfig): Promise<ExchangeLike> {
+      const ownerEpoch = getStorageEpoch();
       // Removed or unsupported venues (saved bitmex, breakoutprop) refuse typed
       // before any transport or login work, so only that account fails.
       assertBetaVenue(account.exchange);
       // Use safe-cex's single source of truth for transport resolution instead of
       // re-deriving it: tunnel/proxy may be forced on by metadata (enforceWsTunnel /
       // requiresCors) even when the user didn't enable it on the account.
-      const metadata = getExchangeMetadata(account.exchange as ExchangeName);
+      const metadata = getExchangeMetadata(account.exchange);
       const transport = resolveAccountTransport(account, metadata);
       const requiresAuth = Boolean(transport.tealstreetProxy || transport.tealstreetTunnel);
       const resolvedProxyRegion = account.proxyRegion || defaultProxyRegion(metadata);
@@ -247,9 +262,16 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       // Use the shared createExchangeFromAccount which handles all account fields
       // including tealstreetProxy, tealstreetTunnel, proxyRegion, etc.
       const createExchangeFromAccount = await getCreateExchangeFromAccount();
+      assertStorageSession(ownerEpoch);
       const exchange = await createExchangeFromAccount(account);
+      try {
+        assertStorageSession(ownerEpoch);
+      } catch (error) {
+        exchange.dispose();
+        throw error;
+      }
       exchange.on('clock-advice', warnAboutClockSkew);
-      return exchange as ExchangeLike;
+      return exchange;
     },
 
     async startExchange(exchange: ExchangeLike): Promise<void> {

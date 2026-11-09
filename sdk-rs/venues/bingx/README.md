@@ -1,5 +1,7 @@
 # BingX perpetual swaps
 
+The independent native/fixture-only `bingxspot` variant is described in [BingX Spot](SPOT.md).
+
 A typed sans-I/O venue for `safe-cex-engine`, supporting stablecoin-margined
 perpetual swaps. Public snapshots replace every supplied depth level; the
 internal public feed sends descending asks, which are sorted before delivery.

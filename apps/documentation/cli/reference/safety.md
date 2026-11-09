@@ -5,6 +5,8 @@ sidebar_position: 6
 
 # Safety
 
+Whitelist, fat-finger limits, simulation mode and budgets belong to the signed-in user. Review the new user’s settings after switching; session budget spend resets. See [user profiles and migration](../operations/config-files.md#login-logout-and-migration).
+
 Guards designed to keep an off-script command from doing damage.
 All of these are state that lives in the CLI, not the exchange.
 

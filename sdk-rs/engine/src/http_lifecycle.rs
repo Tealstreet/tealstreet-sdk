@@ -369,7 +369,6 @@ impl Managed {
         }
     }
 
-    #[cfg(feature = "http-plans")]
     pub(super) fn released_delivery(&self, delivery: &request_context_registry::Delivery) -> bool {
         self.delivery() == *delivery
             && self.lifecycle.release().is_some()
@@ -2768,6 +2767,12 @@ impl<V: Venue> Engine<V> {
                     },
                 );
                 if recorded.is_ok() {
+                    if self.io.core.unknown_outcome_telemetry.is_some() {
+                        self.io
+                            .core
+                            .request_contexts
+                            .remember_engine_unknown(&delivery, Some(response.status));
+                    }
                     self.venue
                         .observe_unproven_http_response(now, &pending.value, response);
                     #[cfg(feature = "http-plans")]

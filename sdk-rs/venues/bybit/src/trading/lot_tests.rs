@@ -69,7 +69,8 @@ fn check_lots(variant: Variant, single: bool) {
                         // KNOWN-ISSUE: legacy TS under-allocates (sum 2 of requested 5); kept for exact TS parity per Sam's decision
                         &["2"][..]
                     } else if variant.is_spot() {
-                        &["2", "2", "1"][..]
+                        // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for exact TS parity per Sam's decision
+                        &["1", "1", "1", "1"][..]
                     } else {
                         // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for exact TS parity per Sam's decision
                         &["1", "1", "1", "1"][..]
@@ -85,8 +86,7 @@ fn check_lots(variant: Variant, single: bool) {
                             sent.category.as_deref(),
                             single.then_some(venue.category_for(symbol).as_str()),
                         );
-                        let protected =
-                            variant.is_spot() || index == 0 || index == quantities.len() - 1;
+                        let protected = index == 0 || index == quantities.len() - 1;
                         assert_eq!(
                             sent.take_profit,
                             take_profit.filter(|_| protected).map(number),
@@ -99,23 +99,16 @@ fn check_lots(variant: Variant, single: bool) {
                         );
                         assert_eq!(
                             sent.tp_order_type.as_deref(),
-                            (variant.is_spot() && take_profit.is_some()).then_some("Market")
+                            (variant.is_spot() && protected && take_profit.is_some())
+                                .then_some("Market")
                         );
                         assert_eq!(
                             sent.sl_order_type.as_deref(),
-                            (variant.is_spot() && stop_loss.is_some()).then_some("Market")
+                            (variant.is_spot() && protected && stop_loss.is_some())
+                                .then_some("Market")
                         );
                     }
-                    assert_eq!(
-                        total,
-                        if variant.is_inverse() {
-                            2.
-                        } else if variant.is_spot() {
-                            5.
-                        } else {
-                            4.
-                        }
-                    );
+                    assert_eq!(total, if variant.is_inverse() { 2. } else { 4. });
                 },
             );
             seeded_engine(probe).start(1000.);
@@ -124,12 +117,12 @@ fn check_lots(variant: Variant, single: bool) {
 }
 
 #[test]
-fn split_spot_limit_keeps_protection_in_every_single_body() {
+fn split_spot_limit_protects_first_main_and_remainder_single_bodies() {
     check_lots(Variant::Spot, true);
 }
 
 #[test]
-fn split_spot_limit_keeps_protection_in_every_batch_body() {
+fn split_spot_limit_protects_first_main_and_remainder_batch_bodies() {
     check_lots(Variant::Spot, false);
 }
 
