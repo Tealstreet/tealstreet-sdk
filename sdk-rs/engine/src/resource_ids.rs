@@ -31,6 +31,10 @@ impl Default for ResourceIds {
     }
 }
 impl ResourceIds {
+    /// Read the issuance frontier without consuming or changing an identity.
+    pub(crate) fn next_unissued(&self) -> u64 {
+        self.next
+    }
     /// Pure preflight permits coordinated admission across separate namespaces.
     pub fn available(&self, count: u64) -> bool {
         !self.fatal

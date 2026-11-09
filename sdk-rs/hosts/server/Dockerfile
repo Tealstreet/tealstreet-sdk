@@ -13,6 +13,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/exchange-server /usr/local/bin/exchange-server
+# No writable runtime files; read-only rootfs settings are in DELEGATED_MEMORY.md.
 USER 65532:65532
 ENV TEALSTREET_PORT=23456
 EXPOSE 23456

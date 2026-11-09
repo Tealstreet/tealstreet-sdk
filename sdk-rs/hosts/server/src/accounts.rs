@@ -338,6 +338,12 @@ impl Account {
     pub fn sign_through_socket(&self, id: u64, outbox: Outbox, token: Option<(String, u64)>) {
         self.hold(id, Live { outbox, token });
     }
+
+    pub(crate) fn update_reply_outbox(&self, id: u64, outbox: Outbox) {
+        if let Some(Some(live)) = self.holders.lock().unwrap().by_id.get_mut(&id) {
+            live.outbox = outbox;
+        }
+    }
 }
 
 /// How an account's algo host reaches its sockets, without a cycle back to it.
@@ -539,8 +545,9 @@ struct StopRecord {
     told_other: bool,
 }
 
-/// Stop notices by (user, account).
-type Notices = Arc<Mutex<HashMap<(String, String), StopRecord>>>;
+/// Stop notices by (user, account, source fingerprint), even while unregistered.
+type NoticeKey = (String, String, String);
+type Notices = Arc<Mutex<HashMap<NoticeKey, StopRecord>>>;
 
 /// How long an undelivered stop notice waits for the account's next init.
 pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -601,6 +608,12 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
         {
             options.insert(field.into(), value.clone().into());
         }
+    }
+    if init.exchange_name == "grvt"
+        && !public_only
+        && let Some(address) = init.grvt_signer_address.as_ref().filter(|v| !v.is_empty())
+    {
+        options.insert("grvtSignerAddress".into(), address.clone().into());
     }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
@@ -1339,10 +1352,11 @@ impl Registry {
         &self,
         user: &str,
         name: &str,
+        fingerprint: &str,
         from: Option<&str>,
     ) -> Option<crate::algos::Kept> {
         let mut notices = self.notices.lock().unwrap();
-        let key = (user.to_owned(), name.to_owned());
+        let key = (user.to_owned(), name.to_owned(), fingerprint.to_owned());
         let record = notices.get_mut(&key)?;
         if record.at.elapsed() >= NOTICE_TTL {
             notices.remove(&key);
@@ -1361,7 +1375,11 @@ impl Registry {
     /// Where the algo host leaves a notice for a browser that is gone.
     pub(crate) fn keep_notice(&self, account: &Account, owner: &str) -> crate::algos::StopNotice {
         let notices = self.notices.clone();
-        let key = (account.user.clone(), account.name.clone());
+        let key = (
+            account.user.clone(),
+            account.name.clone(),
+            account.fingerprint.clone(),
+        );
         let owner = owner.to_owned();
         Box::new(move |kept| {
             let mut notices = notices.lock().unwrap();
@@ -3010,33 +3028,33 @@ pub(crate) mod tests {
                 let (account, _algos) = held_account();
                 (registry.keep_notice(&account, "owner"))("stopped".into());
                 assert_eq!(
-                    registry.take_notice("other", "acct", Some("owner")),
+                    registry.take_notice("other", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "never another user's"
                 );
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", None)
+                        .take_notice("u", "acct", &account.fingerprint, None)
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "a second device, or a reopened tab, is told"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("elsewhere")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("elsewhere")),
                     None,
                     "and a page load after it is not told again"
                 );
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", Some("owner"))
+                        .take_notice("u", "acct", &account.fingerprint, Some("owner"))
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "the device that owned the chase still is"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "once"
                 );
@@ -3044,7 +3062,7 @@ pub(crate) mod tests {
                 (registry.keep_notice(&account, "owner"))("second".into());
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", Some("owner"))
+                        .take_notice("u", "acct", &account.fingerprint, Some("owner"))
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("second"),
@@ -3053,7 +3071,7 @@ pub(crate) mod tests {
                 (registry.keep_notice(&account, "owner"))("stale".into());
                 tokio::time::sleep(NOTICE_TTL).await;
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "dropped after 24h"
                 );
@@ -3372,6 +3390,10 @@ pub(crate) mod tests {
 
     pub(crate) fn signing_holder(account: &Account) -> Option<u64> {
         account.holders.lock().unwrap().signing
+    }
+
+    pub(crate) fn fail_signer(registry: &Registry, account: &Arc<Account>) {
+        registry.signer_failed(account);
     }
 
     #[tokio::test(start_paused = true)]
