@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zeroize::Zeroizing;
 
+mod construction;
 mod plaintext;
+pub(crate) mod probe;
+pub(crate) use construction::fingerprint;
+pub use construction::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 
 pub const INFO: &[u8] = b"tealstreet/delegated-handover/v1";
 pub const HANDOVER_TTL_MS: u64 = 30_000;

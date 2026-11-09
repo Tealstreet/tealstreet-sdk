@@ -187,7 +187,7 @@ fn keyed_missing_callbacks_keep_adoption_and_configuration_refusals() {
 
 #[test]
 fn valid_provider_keeps_disabled_private_remote_signing_unsupported() {
-    for venue in ["apexomni", "mexc", "asterdex"] {
+    for venue in ["apexomni", "asterdex"] {
         let value = json!({"remoteSigning": true,
             "publicMode": {"requested": false, "remoteSigner": true},
             "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent"}}});
@@ -195,6 +195,30 @@ fn valid_provider_keeps_disabled_private_remote_signing_unsupported() {
             .expect_err("valid provider cannot enable unsupported private custody");
         assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
         assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
+    }
+}
+
+#[cfg(feature = "mexc")]
+#[test]
+fn valid_provider_admits_mexc_private_signing_after_hosted_adoption() {
+    for (flag, intent) in [
+        ("remoteSigning", "remoteSigner"),
+        ("payloadSigner", "payloadSigner"),
+    ] {
+        let mut value = json!({"publicMode": {"requested": false},
+            "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent"}}});
+        value[flag] = json!(true);
+        value["publicMode"][intent] = json!(true);
+        assert!(
+            build_with_signer(
+                "mexc",
+                options(value),
+                Some(safe_cex_engine::test_support::seeded_entropy(17)),
+                Some(Arc::new(NoIo)),
+                Mode
+            )
+            .expect("configured MEXC provider is admitted")
+        );
     }
 }
 
