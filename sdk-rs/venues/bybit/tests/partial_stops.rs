@@ -2,6 +2,9 @@
 //! Payloads follow Bybit V5 order, position and trading-stop wire records.
 mod support;
 
+#[path = "partial_stops/proof_terminal.rs"]
+mod proof_terminal;
+
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{Command, Event, HttpRequest};
 use safe_cex_venue_bybit::{Endpoints, Variant};

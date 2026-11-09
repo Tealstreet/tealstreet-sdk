@@ -97,6 +97,8 @@ brackets, triggers, reduce-only, close and venue-specific controls fail before
 any write. Caller IDs are preserved verbatim and must match `[A-Za-z0-9_]{1,40}`;
 placement uses `newClientOrderId`, lookup uses `clientOrderID`. Native order and
 trade IDs never pass through floating point.
+Private execution reports read the documented uppercase `C` client-order ID;
+lowercase `c` remains accepted for existing fixtures and compatible senders.
 
 Sean's parity decision uses the legacy BingX perp formatting and dispatch policy
 for Spot's supported ordinary orders; there is no historical Spot TS adapter.
@@ -114,12 +116,23 @@ cancellation still sends. Native engine write journals retain accepted IDs and
 refusals, delivered in the structured CommandFailed event. A genuine Unknown
 halts the action under the recorded stop-after-UNKNOWN parity exception, with
 "The outcome is unknown. Check Open Orders". No engine fence is bypassed and
-there is no per-venue outcome store or dependency on the draft WritePlan API.
+the venue's reporting-only WritePlan never controls dispatch or retries.
 Venue-authored Unknown terminals also emit one `order.outcome_unknown` diagnostic
 with command correlation, operation and outcome. It carries the same canonical
 text, without response bodies, signing material or raw native messages. The
 diagnostic is separate from the engine journal's terminal projection; late
 callbacks emit neither a second diagnostic nor another completion.
+Their indexed journal covers every prepared native payload: accepted placements
+retain native IDs, accepted cancellations record applied effects, the uncertain
+payload is Unknown, and untouched suffixes stay NotSent. The partial metadata
+retains the failed payload index and total prepared payload count.
+Spot explicitly supplies these logical counts. Identity-only fallbacks leave
+selected native counts and ID-less applied effects unchanged during projection.
+Error codes are decoded independently of success-order data. Empty error data
+(`null`, `{}`, `[]` or an empty `orders` array) does not erase a known refusal;
+nonempty arrays or unrecognized object fields remain Unknown. This includes
+execution quantities and order status even when the native order ID is absent
+or null; a contradictory error header cannot erase that execution evidence.
 
 KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. Transport-loss
 and HTTP 503 cases sealed before Spot decoding retain their Unknown outcome,
