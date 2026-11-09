@@ -10,7 +10,7 @@ use safe_cex_engine::capabilities::CancelAll;
 use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use safe_cex_remote_signer::Outbox;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
@@ -65,12 +65,19 @@ const MAX_SUBSCRIBERS_PER_KEY: u32 = 64;
 
 struct Joined {
     account: Arc<Account>,
+    out: Out,
     client: Client,
     old: Vec<Client>,
     next_command: u32,
     /// Book and candle subscribe commands this socket holds, by command text and count.
     /// The engine keeps one demand per client, so a re-snapshot replays each key once.
     subscriptions: HashMap<String, u32>,
+}
+
+#[derive(Default)]
+struct RefusalNotifications {
+    legacy_reason: Option<String>,
+    registered: HashSet<(String, String)>,
 }
 
 pub struct Session {
@@ -82,6 +89,8 @@ pub struct Session {
     pub resume_id: String,
     out: Out,
     joined: HashMap<String, Joined>,
+    /// Current fallback reply registration, independent of live account authority.
+    registration_outputs: HashMap<String, Out>,
     /// A held client's account has loaded: `(account name, client id)`.
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
@@ -92,9 +101,9 @@ pub struct Session {
     rejoined_at: HashMap<String, std::time::Instant>,
     /// Told when a resume of this session's id takes it over.
     taken_over: Arc<tokio::sync::Notify>,
-    /// The settings refusal last sent per account, so the client's backoff
-    /// retries show it once; cleared when that account's init succeeds.
-    refused: HashMap<String, String>,
+    /// Settings refusals already sent per account and registration, so backoff
+    /// retries are quiet; cleared before an init proceeds to account obtain.
+    refused: HashMap<String, RefusalNotifications>,
     /// Chart and book subscriptions that arrived before their account joined,
     /// applied at join: the page sends them whenever its chart asks.
     early: HashMap<String, Vec<Topic>>,
@@ -194,6 +203,7 @@ impl Session {
             resume_id: crate::accounts::resume_id(),
             out,
             joined: HashMap::new(),
+            registration_outputs: HashMap::new(),
             loaded,
             loaded_rx: Some(loaded_rx),
             dropped,
@@ -349,12 +359,19 @@ impl Session {
     }
 
     fn send(&self, text: String) {
-        let _ = self.out.send(text);
+        let out = envelope::account_name(&text)
+            .map(|name| self.account_out(&name))
+            .unwrap_or_else(|| self.out.clone());
+        let _ = out.send(text);
     }
 
-    fn outbox(&self) -> Outbox {
-        let out = self.out.clone();
-        Arc::new(move |text: String| out.send(text))
+    fn account_out(&self, name: &str) -> Out {
+        self.joined
+            .get(name)
+            .map(|joined| &joined.out)
+            .or_else(|| self.registration_outputs.get(name))
+            .cloned()
+            .unwrap_or_else(|| self.out.clone())
     }
 
     /// Called once after the upgrade, for `resumable=1` sockets.
@@ -376,9 +393,23 @@ impl Session {
             self.identity.user.clone(),
             self.identity.token.clone(),
         ) {
+            let outputs = Arc::new(Mutex::new(HashMap::<String, Out>::new()));
+            let (routes, socket_out) = (outputs.clone(), self.out.clone());
+            let outbox: Outbox = Arc::new(move |text| {
+                let Some(name) = envelope::account_name(&text) else {
+                    return socket_out.send(text);
+                };
+                let out = routes
+                    .lock()
+                    .unwrap()
+                    .entry(name)
+                    .or_insert_with(|| socket_out.awaiting_instance_id())
+                    .clone();
+                out.send(text)
+            });
             let mut accounts =
                 self.registry
-                    .resume(&from, &user, self.socket, token.clone(), &self.outbox());
+                    .resume(&from, &user, self.socket, token.clone(), &outbox);
             // Not parked yet: the old socket dropped without a close frame. Close it now.
             if accounts.is_empty()
                 && let Some(parked) = self.registry.take_over(&from, &user)
@@ -386,7 +417,7 @@ impl Session {
                 let _ = tokio::time::timeout(TAKEOVER_WAIT, parked).await;
                 accounts = self
                     .registry
-                    .resume(&from, &user, self.socket, token, &self.outbox());
+                    .resume(&from, &user, self.socket, token, &outbox);
             }
             resumed = !accounts.is_empty();
             // `init` is logged either way; this tells a resume from a rebuild.
@@ -397,7 +428,13 @@ impl Session {
             ));
             // The client re-inits each one; an identical init then keeps it.
             for account in accounts {
-                self.join(account).await;
+                let out = outputs
+                    .lock()
+                    .unwrap()
+                    .entry(account.name.clone())
+                    .or_insert_with(|| self.out.awaiting_instance_id())
+                    .clone();
+                self.join(account, out).await;
             }
         }
         if let Some(user) = &self.identity.user {
@@ -446,6 +483,7 @@ impl Session {
                     self.socket,
                     self.resume_id_prefix()
                 ));
+                self.registration_outputs.remove(&account_name);
                 if let Some(joined) = self.joined.remove(&account_name) {
                     self.metrics.note_dispose();
                     self.leave(joined, Disposal::PageDisposed);
@@ -490,10 +528,11 @@ impl Session {
     }
 
     async fn init(&mut self, init: InitPayload) -> Result<(), Close> {
+        let out = self.out.with_instance_id(init.instance_id.as_deref());
         let authenticated = self.identity.user.is_some();
         let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
         if !authenticated && let Some(reason) = unauthenticated_init_refusal(&init) {
-            self.send(envelope::error(Some(&init.account_name), reason));
+            out.send(envelope::error(Some(&init.account_name), reason));
             return Err(Close::Policy(reason));
         }
         if self.moved_by_drain() {
@@ -504,6 +543,8 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
+        self.registration_outputs
+            .insert(init.account_name.clone(), out.clone());
         Log::info(&format!(
             "init {} ({}) socket {} session {}",
             init.account_name,
@@ -515,7 +556,7 @@ impl Session {
         // dispose a live account with the same saved name.
         if !safe_cex_venues::supported(&init.exchange_name) {
             self.drop_early(&init.account_name, "unsupported venue");
-            self.send(envelope::init_unsupported(
+            out.send(envelope::init_unsupported(
                 &init.account_name,
                 &init.exchange_name,
             ));
@@ -526,15 +567,16 @@ impl Session {
             && joined.account.fingerprint == init.fingerprint()
         {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
-            self.resnapshot(&init.account_name).await;
-            let account = self.joined[&init.account_name].account.clone();
+            let joined = self.joined.get_mut(&init.account_name).unwrap();
+            let previous = std::mem::replace(&mut joined.out, out.clone());
+            let account = joined.account.clone();
             if account.link.is_some() {
-                account.sign_through_socket(
-                    self.socket,
-                    self.outbox(),
-                    self.identity.token.clone(),
-                );
+                account.sign_through_socket(self.socket, out.outbox(), self.identity.token.clone());
+            } else {
+                account.update_reply_outbox(self.socket, out.outbox());
             }
+            previous.finish_registration(&out);
+            self.resnapshot(&init.account_name).await;
             return Ok(());
         }
         // Another live socket holds it with other settings: keep both as they are.
@@ -542,20 +584,26 @@ impl Session {
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
         {
-            if first_refusal(&mut self.refused, &init.account_name, &refusal) {
-                self.send(envelope::init_refused(&init.account_name, &refusal));
+            if first_refusal(
+                &mut self.refused,
+                &init.account_name,
+                &refusal,
+                init.instance_id.as_deref(),
+            ) {
+                out.send(envelope::init_refused(&init.account_name, &refusal));
             }
             self.drop_early(&init.account_name, "init refused for other settings");
             return Ok(());
         }
         self.refused.remove(&init.account_name);
         if let Some(joined) = self.joined.remove(&init.account_name) {
+            joined.out.retire_registration();
             // New settings rebuild it. Unless another live socket keeps it, its algos stop
             // here and this page hears their finals; leaving first would tell no one.
             let disposal = Disposal::rebuild(joined.account.is_public(), public_only);
             if joined.account.live_holders_besides(self.socket).is_empty() {
                 self.registry
-                    .stop_for_new_settings(&joined.account, self.outbox(), disposal);
+                    .stop_for_new_settings(&joined.account, joined.out.outbox(), disposal);
                 Self::leave_engine(joined);
             } else {
                 self.leave(joined, disposal);
@@ -570,26 +618,29 @@ impl Session {
                 public_only,
                 self.socket,
                 token,
-                self.outbox(),
+                out.outbox(),
             )
             .await;
         match account {
             Ok(account) => {
                 self.metrics.note_init();
                 let private = !account.is_public();
-                self.join(account).await;
+                self.join(account, out.clone()).await;
                 if private && self.joined.contains_key(&init.account_name) {
                     self.registry
                         .interruptions
-                        .deliver(self.user(), &init.account_name, &self.out);
+                        .deliver(self.user(), &init.account_name, &out);
                 }
                 // Algos stopped while no browser was attached: say why.
                 // Chases that ended while it was gone are told as their replayed ends.
-                if let Some(kept) = self.registry.take_notice(
-                    self.user(),
-                    &init.account_name,
-                    self.identity.resume_from.as_deref(),
-                ) {
+                if self.joined.contains_key(&init.account_name)
+                    && let Some(kept) = self.registry.take_notice(
+                        self.user(),
+                        &init.account_name,
+                        &self.joined[&init.account_name].account.fingerprint,
+                        self.identity.resume_from.as_deref(),
+                    )
+                {
                     Log::info(&format!(
                         "algo stop notice {} to socket {}: {} ({} chase ends)",
                         init.account_name,
@@ -598,22 +649,22 @@ impl Session {
                         kept.ends.len()
                     ));
                     for frame in kept.frames(&init.account_name) {
-                        self.send(frame);
+                        out.send(frame);
                     }
                 }
             }
             Err(error) => {
                 Log::warn(&format!("init {} refused: {error}", init.account_name));
                 self.drop_early(&init.account_name, "init refused");
-                self.send(envelope::error(Some(&init.account_name), &error));
+                out.send(envelope::error(Some(&init.account_name), &error));
             }
         }
         Ok(())
     }
 
-    async fn join(&mut self, account: Arc<Account>) {
+    async fn join(&mut self, account: Arc<Account>, out: Out) {
         let name = account.name.clone();
-        match self.client(&account).await {
+        match self.client(&account, out.clone()).await {
             Ok(client) => {
                 if let Some(algos) = &account.algos {
                     let _ = algos.send(crate::algos::AlgoInput::Joined);
@@ -622,6 +673,7 @@ impl Session {
                     name.clone(),
                     Joined {
                         account,
+                        out,
                         client,
                         old: Vec::new(),
                         next_command: 0,
@@ -632,14 +684,14 @@ impl Session {
             }
             Err(error) => {
                 self.drop_early(&name, "account did not join");
-                self.account_stop_error(&account, error);
+                self.account_stop_error(&account, error, &out);
                 self.registry
                     .release(&account, self.socket, Disposal::JoinFailed);
             }
         }
     }
 
-    async fn client(&self, account: &Arc<Account>) -> Result<Client, &'static str> {
+    async fn client(&self, account: &Arc<Account>, out: Out) -> Result<Client, &'static str> {
         let id = self.registry.next_id();
         let link = account.handle.join(id, true).await?;
         let pending = Arc::new(Mutex::new(HashMap::new()));
@@ -654,7 +706,7 @@ impl Session {
             self.dropped.clone(),
             account.handle.clone(),
             account.name.clone(),
-            self.out.clone(),
+            out,
             pending.clone(),
             draining.clone(),
             hold,
@@ -671,10 +723,14 @@ impl Session {
     /// one stops forwarding frames and leaves once its replies are in. False when
     /// no new client could join.
     async fn resnapshot(&mut self, name: &str) -> bool {
-        let Some(account) = self.joined.get(name).map(|joined| joined.account.clone()) else {
+        let Some((account, out)) = self
+            .joined
+            .get(name)
+            .map(|joined| (joined.account.clone(), joined.out.clone()))
+        else {
             return false;
         };
-        match self.client(&account).await {
+        match self.client(&account, out.clone()).await {
             Ok(client) => {
                 let joined = self.joined.get_mut(name).unwrap();
                 // Before the old client leaves, so the venue never unsubscribes in between.
@@ -697,13 +753,13 @@ impl Session {
                 true
             }
             Err(error) => {
-                self.account_stop_error(&account, error);
+                self.account_stop_error(&account, error, &out);
                 false
             }
         }
     }
 
-    fn account_stop_error(&self, account: &Account, error: &str) {
+    fn account_stop_error(&self, account: &Account, error: &str, out: &Out) {
         // A latch alone is not evidence: an unrelated actor crash must still report.
         let frame = if error == "account stopped"
             && account.moving()
@@ -713,7 +769,7 @@ impl Session {
         } else {
             envelope::error(Some(&account.name), error)
         };
-        self.send(frame);
+        out.send(frame);
     }
 
     fn leave(&self, joined: Joined, disposal: Disposal) {
@@ -1100,7 +1156,7 @@ impl Session {
                     }
                     // Off the socket loop: the wait must not hold the signatures loading needs.
                     let (out, name, request_id) =
-                        (self.out.clone(), name.to_owned(), request_id.clone());
+                        (self.account_out(name), name.to_owned(), request_id.clone());
                     tokio::spawn(async move {
                         let refused =
                             match methods::until_nuke_can_see(&handle, mode, methods::READ_WAIT)
@@ -1159,7 +1215,7 @@ impl Session {
                             }
                         }
                     };
-                    let (handle, out) = (account.handle.clone(), self.out.clone());
+                    let (handle, out) = (account.handle.clone(), self.account_out(name));
                     let (name, request_id) = (name.to_owned(), request_id.clone());
                     tokio::spawn(async move {
                         let _permit = permit;
@@ -1243,6 +1299,7 @@ impl Session {
         } else {
             None
         };
+        let out = self.account_out(name);
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
@@ -1268,11 +1325,7 @@ impl Session {
             },
         );
         let (client, handle) = (joined.client.id, joined.account.handle.clone());
-        let (pending, out, name) = (
-            joined.client.pending.clone(),
-            self.out.clone(),
-            name.to_owned(),
-        );
+        let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
         let send = move || {
@@ -1368,12 +1421,24 @@ impl Session {
     }
 }
 
-/// True the first time `refusal` is the one for `account`; a changed refusal counts again.
-fn first_refusal(refused: &mut HashMap<String, String>, account: &str, refusal: &str) -> bool {
-    if refused.get(account).is_some_and(|sent| sent == refusal) {
+/// One notification per account, reason and registration; legacy retries retain
+/// master's last-reason suppression and existing cache clearing point.
+fn first_refusal(
+    refused: &mut HashMap<String, RefusalNotifications>,
+    account: &str,
+    refusal: &str,
+    instance_id: Option<&str>,
+) -> bool {
+    let notifications = refused.entry(account.to_owned()).or_default();
+    if let Some(instance_id) = instance_id.filter(|id| !id.is_empty()) {
+        return notifications
+            .registered
+            .insert((refusal.to_owned(), instance_id.to_owned()));
+    }
+    if notifications.legacy_reason.as_deref() == Some(refusal) {
         return false;
     }
-    refused.insert(account.to_owned(), refusal.to_owned());
+    notifications.legacy_reason = Some(refusal.to_owned());
     true
 }
 
@@ -1818,6 +1883,8 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 mod tests {
     use super::*;
 
+    mod instance_id;
+
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
     const WEB_TWAP: &str = r#"{"accountName":"acct","activeMarket":{"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true},"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"}"#;
 
@@ -1985,7 +2052,7 @@ mod tests {
                 assert_eq!(original.drain_close(), Some(Close::Moved));
                 original.close();
                 let (mut late, mut frames) = user_session(registry, "u");
-                late.join(account).await;
+                late.join(account, late.out.clone()).await;
                 let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                 assert_eq!(frame["d"]["data"], json!(["account stopped"]),
                     "{mode}: closing a draining session must not relabel an earlier actor crash: {frame}");
@@ -2027,7 +2094,7 @@ mod tests {
                     .await
                     .expect("the account really ended");
                     let (mut late, mut frames) = user_session(registry, "u");
-                    late.join(account).await;
+                    late.join(account, late.out.clone()).await;
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                     assert_eq!(frame["d"]["op"], "error");
                     assert_eq!(frame["d"]["data"][0], "account stopped");
@@ -3169,22 +3236,25 @@ mod tests {
     fn a_settings_refusal_is_sent_once_until_its_fields_change_or_it_resolves() {
         let mut refused = HashMap::new();
         let spot = "bear5 is open elsewhere with different settings (enableSpotMarkets)";
-        assert!(first_refusal(&mut refused, "bear5", spot));
+        assert!(first_refusal(&mut refused, "bear5", spot, None));
         for _ in 0..4 {
             assert!(
-                !first_refusal(&mut refused, "bear5", spot),
+                !first_refusal(&mut refused, "bear5", spot, None),
                 "a backoff retry is quiet"
             );
         }
-        assert!(first_refusal(&mut refused, "other", spot), "per account");
+        assert!(
+            first_refusal(&mut refused, "other", spot, None),
+            "per account"
+        );
         let both = "bear5 is open elsewhere with different settings (enableSpotMarkets, testnet)";
         assert!(
-            first_refusal(&mut refused, "bear5", both),
+            first_refusal(&mut refused, "bear5", both, None),
             "changed fields show again"
         );
         // A successful init clears it (Session::init), so a later refusal shows again.
         refused.remove("bear5");
-        assert!(first_refusal(&mut refused, "bear5", both));
+        assert!(first_refusal(&mut refused, "bear5", both, None));
     }
 
     /// Every Hosted init logged engine dropped client once: while startup was held the
