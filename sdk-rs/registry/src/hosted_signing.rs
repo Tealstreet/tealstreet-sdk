@@ -1082,6 +1082,14 @@ mod presentation_tests {
 mod input_parse_tests {
     use super::*;
 
+    #[cfg(not(feature = "apexomni"))]
+    #[test]
+    fn apexomni_codec_is_absent_without_venue_feature() {
+        assert!(
+            parse(r#"{"kind":"wsAuth","toSign":"x","outputFormat":"apexomni-batch"}"#).is_err()
+        );
+    }
+
     #[cfg(not(feature = "backpack"))]
     #[test]
     fn backpack_codec_is_absent_without_venue_feature() {
