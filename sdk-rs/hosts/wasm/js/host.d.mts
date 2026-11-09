@@ -325,7 +325,7 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'backpack-ed25519' | 'orderly-ed25519' | 'kucoin-batch' | 'kraken-sha512' | 'kraken-challenge' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'coinbase-jws' | 'backpack-ed25519' | 'orderly-ed25519' | 'kucoin-batch' | 'kraken-sha512' | 'kraken-challenge' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
@@ -525,6 +525,7 @@ export interface WasmEngineLike {
   requiresExternalSigner?(): boolean;
   useExternalSigner?(algorithmsJson?: string): void;
   hostedSigningClock?(now: number): string;
+  coinbaseSigningMetadata?(): string;
   prepareHostedSigning?(inputJson: string, now: number): string;
   localHostedSigning?(id: number, now: number): string;
   finishHostedSigning?(id: number, resultJson: string, now: number): string;
@@ -546,6 +547,7 @@ export class EngineHost {
    * once every setup task has settled (bound or refused). A no-op without a signer. */
   prepareAddressSetup(): Promise<void>;
   /** Sign compatibility bytes without startup, transport actions or account mutation. */
+  coinbaseSigningMetadata(): { keyName: string; algorithm: 'es256' | 'edDsa' };
   hostedSigningClock(): HostedSigningClock;
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
   /** Device answer for a keyless server's wallet ws-auth request, signed by the
