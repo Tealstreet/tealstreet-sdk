@@ -5,9 +5,64 @@ sidebar_position: 7
 
 # Config files
 
-Everything the CLI persists lives under **`~/.tealstreet/`**. All of it
-is plain text or SQLite — readable with `cat`, `jq`, or `sqlite3`. No
-binary blobs, no hidden state stores.
+CLI state belongs to the signed-in user. The default root is
+`~/.tealstreet/` (`~/.disrupt/` for Disrupt). Within it, files live under
+`profiles/<profile hash>/users/<user hash>/`. The profile hash separates
+brands, API origins and `CONFIG_FILE` profiles; the user hash separates
+account IDs, including tenant prefixes. `accounts` prints the active
+config directory, and `logs` uses the active user's log.
+
+The files below are relative to that user's directory. They are plain text
+or SQLite; directory permissions restrict access to the operating-system
+user. This is profile isolation, not encryption against someone using the
+same operating-system account.
+
+### Login, logout and migration
+
+Logging into B never relabels A's accounts, defaults, aliases, approvals,
+hooks or recording configuration. Returning to A restores A's profile.
+Logout removes the active profile's token, clears cached proxy tokens,
+disconnects exchanges and listeners, and cancels pending commands from the
+old login with a message. This includes queued exit/quit commands. In-flight
+scripts cannot make further adapter calls after their starting session ends. A new login reconnects the listener with that user's identity;
+browser approval is specific to that user.
+
+Changing login stops the old user's in-process chasers and removes them from
+chase listings before disconnecting exchanges. Late chase results are discarded;
+they do not appear in the next user's chase watch or one-shot command result.
+
+Pending account starts, retries, script captures, recorder completions and
+background update checks also stay bound to their starting login. Cross-trade
+startup stops its remaining account list on cancellation and disposes old
+connections without changing the new login's account activation flags. A switch
+discards their stale results, including when you switch back to the same user.
+The status bar clears, and the footer reloads the new user's saved settings.
+
+Each legacy config can identify the owner of its own accounts. Shared legacy
+files (hooks, browser approvals, vars, scripts and recordings) have one claim
+for their physical source directory across config profiles, brands and path
+aliases. They migrate only when the available ownership evidence is consistent;
+competing config owners or a conflicting alias-sync owner leave them unclaimed.
+Discovery checks config contents regardless of filename extension. Symlinks
+are inspected only within the source directory; links outside it, broken links
+and link loops leave shared ownership unproven and prevent shared migration.
+An explicitly selected `CONFIG_FILE` symlink migrates its accounts, defaults and
+login only when its target stays inside the source directory and ownership is
+consistent. An unsafe or competing target stays quarantined and requires
+re-entry; migration does not publish a completion marker after skipping it.
+If an earlier version left an empty profile with a completion marker, the CLI
+warns that re-entry is needed rather than overwriting that profile.
+Files without ownership
+evidence remain untouched and are never assigned to the next login: sign in
+and re-enter the accounts/settings you need. Original legacy files remain
+as backups; protect or remove those backups yourself when no longer needed.
+The CLI does not load them again after migration. SQLite migration uses a
+consistent snapshot, including committed WAL data.
+
+Signed-out work uses a persistent local-only profile. Accounts, defaults,
+vars and aliases created there remain available to later signed-out invocations.
+That local profile is separate from authenticated profiles and is never imported
+on login. Pre-upgrade files with no ownership evidence still require re-entry.
 
 ---
 
@@ -32,7 +87,7 @@ binary blobs, no hidden state stores.
 | `listener.json`        | `{ listenerId, createdAt }`                                                                                                                                                                                                                                                                                                                                                                                                  | Persistent. Identity for the loopback listener.                                                                                                      |
 | `trusted-clients.json` | `{ clients: TrustedClient[] }`                                                                                                                                                                                                                                                                                                                                                                                               | Persistent. Paired web clients.                                                                                                                      |
 | `hooks.json`           | `{ hooks: Hook[] }` &nbsp; **— contains plaintext secrets**                                                                                                                                                                                                                                                                                                                                                                  | Persistent.                                                                                                                                          |
-| `cli.log`              | Log lines                                                                                                                                                                                                                                                                                                                                                                                                                    | **Cleared on every CLI startup.**                                                                                                                    |
+| `cli.log`              | Log lines                                                                                                                                                                                                                                                                                                                                                                                                                    | Appended across CLI startups; `logs --clear` clears the active user's log.                                                                           |
 | `market-data.db`       | SQLite — orderbook snapshots + recording config                                                                                                                                                                                                                                                                                                                                                                              | Persistent. See [Recording](./recording.md).                                                                                                         |
 | `cli_history`          | Newline-separated commands (cap 1000)                                                                                                                                                                                                                                                                                                                                                                                        | Persistent.                                                                                                                                          |
 | `scripts/`             | Directory. One `.ts` file per script + a seeded `tsconfig.json`, `types.d.ts`, and `hello.ts` example.                                                                                                                                                                                                                                                                                                                       | Persistent. See [Scripts](#scripts) below.                                                                                                           |
@@ -60,10 +115,14 @@ If you want to round-trip your vars + aliases between machines, use
 
 Two environment variables relocate the state directory:
 
-| Variable                 | Effect                               |
-| ------------------------ | ------------------------------------ |
-| `TEALSTREET_CONFIG_DIR`  | Move the entire `~/.tealstreet/` dir |
-| `TEALSTREET_CONFIG_FILE` | Override just the main `config.json` |
+| Variable                 | Effect                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| `TEALSTREET_CONFIG_DIR`  | Set the root containing isolated profiles                                       |
+| `TEALSTREET_CONFIG_FILE` | Select a separate profile; also identifies its legacy main config for migration |
+
+With only `CONFIG_FILE` set, its parent directory is the profile root. Disrupt uses
+`DISRUPT_CONFIG_DIR` / `DISRUPT_CONFIG_FILE` (with the documented Tealstreet fallbacks);
+even identical overrides keep the brands separate.
 
 Useful for sandboxed test setups (`TEALSTREET_CONFIG_DIR=/tmp/ts-test
 tealstreet`) or for keeping multiple identity configs on one machine.
@@ -128,8 +187,9 @@ secrets. Treat both like credentials. Don't sync them through anything
 unencrypted. The CLI writes both, and `account export` output, as owner-only
 (`0600`).
 
-The rest of the directory (vars, aliases, whitelist, fatfingers, sim
-state, history, market-data.db) is safe to back up wholesale:
+Back up the root only to a trusted location: profiles, legacy backups, history
+and scripts may also contain sensitive information. Exclusions must cover
+the nested user directories:
 
 ```bash
 tar -czf tealstreet-backup.tar.gz \

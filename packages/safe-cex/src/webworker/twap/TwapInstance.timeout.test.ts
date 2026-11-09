@@ -17,7 +17,7 @@ const market: Market = {
     amount: { min: 0.001, max: 1000 },
     leverage: { min: 1, max: 100 },
   },
-} as Market;
+} satisfies Market;
 
 function makeExchange() {
   const ticker = { symbol: 'BTCUSDT', last: 50000, bid: 49995, ask: 50005 };

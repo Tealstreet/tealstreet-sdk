@@ -16,7 +16,8 @@ const setup = () => {
       precision: { price: 2, amount: 2 }, limits: { amount: { min: 5, max: 1000000 }, leverage: { min: 1, max: 1 } },
       info: { tokenId: id, conditionId: '0xcondition', tickSize: 0.01, negRisk: true, outcome: id === '111' ? 'Yes' : 'No' },
     } as Market)),
-    tickers: ['111', '222'].map((id) => ({ id, symbol: `cafe-${id}`, last: 0.5, bid: 0.4, ask: 0.6, mark: 0.5, index: 0.5 } as Ticker)),
+    tickers: ['111', '222'].map((id): Ticker => ({ id, symbol: `cafe-${id}`, last: 0.5, bid: 0.4, ask: 0.6, mark: 0.5, index: 0.5,
+      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 })),
   });
   const exchange = new PolymarketExchange('polymarket', { key: '', secret: '', publicDataOnly: true, tuning: { consoleLogging: false } }, store);
   cleanup.push(() => exchange.dispose());

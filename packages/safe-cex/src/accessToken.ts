@@ -53,6 +53,7 @@ const isBrowserContext = typeof window !== 'undefined' || typeof self !== 'undef
 
 // Legacy: direct access to current token (for synchronous access)
 export let currentProxyToken = '';
+let tokenGeneration = 0;
 
 // Sync the local variable with the client's cached token
 function syncToken() {
@@ -80,7 +81,10 @@ async function getContextualProxyToken(): Promise<string | null> {
     // retires that whole class of bug.
     // The literal, not `ProxyTokenUnavailableError.name`: a minifier renames the
     // class binding but not the string the constructor assigns.
-    if (err instanceof ProxyTokenUnavailableError || (err as { name?: unknown })?.name === PROXY_TOKEN_ERROR_NAME) {
+    if (
+      err instanceof ProxyTokenUnavailableError ||
+      (typeof err === 'object' && err !== null && 'name' in err && err.name === PROXY_TOKEN_ERROR_NAME)
+    ) {
       throw err;
     }
     // `err` is deliberately not logged or attached: a provider failure can
@@ -90,7 +94,9 @@ async function getContextualProxyToken(): Promise<string | null> {
 }
 
 export async function refreshProxyToken(): Promise<string> {
+  const generation = tokenGeneration;
   const contextualToken = await getContextualProxyToken();
+  if (generation !== tokenGeneration) throw new ProxyTokenUnavailableError('proxy token session changed');
   if (contextualToken) {
     return contextualToken;
   }
@@ -99,33 +105,21 @@ export async function refreshProxyToken(): Promise<string> {
 }
 
 async function refreshModuleProxyToken(): Promise<string> {
-  // If a custom refresh function is set (CLI), use it
-  if (customRefreshFn) {
-    try {
-      const newToken = await customRefreshFn();
-      if (newToken) {
-        currentProxyToken = newToken;
-        setToken(newToken);
-      }
-      return currentProxyToken;
-    } catch {
-      return currentProxyToken;
-    }
+  const generation = tokenGeneration;
+  let token = currentProxyToken;
+  const refresh = customRefreshFn;
+  try {
+    if (refresh) token = await refresh();
+    else if (isBrowserContext) token = await refreshProxyTokenFromClient();
+  } catch {
+    // Check the generation even on failure; returning the new user's global
+    // token to a request started by the old user would also cross sessions.
   }
-
-  // In browser context, use SharedWorker via client
-  if (isBrowserContext) {
-    try {
-      const token = await refreshProxyTokenFromClient();
-      currentProxyToken = token;
-      return token;
-    } catch (err) {
-      console.error('[accessToken] Failed to refresh via SharedWorker:', err);
-      return currentProxyToken;
-    }
+  if (generation !== tokenGeneration) throw new ProxyTokenUnavailableError('proxy token session changed');
+  if (token || !refresh) {
+    currentProxyToken = token;
+    setToken(token);
   }
-
-  // Node.js without custom function - return current token
   return currentProxyToken;
 }
 
@@ -134,7 +128,9 @@ async function refreshModuleProxyToken(): Promise<string> {
  * In browser, uses SharedWorker. In CLI, uses custom function.
  */
 export async function getProxyToken(): Promise<string> {
+  const generation = tokenGeneration;
   const contextualToken = await getContextualProxyToken();
+  if (generation !== tokenGeneration) throw new ProxyTokenUnavailableError('proxy token session changed');
   if (contextualToken) {
     return contextualToken;
   }
@@ -151,9 +147,11 @@ export async function getProxyToken(): Promise<string> {
   if (isBrowserContext) {
     try {
       const token = await getProxyTokenFromClient();
+      if (generation !== tokenGeneration) throw new ProxyTokenUnavailableError('proxy token session changed');
       currentProxyToken = token;
       return token;
     } catch (err) {
+      if (generation !== tokenGeneration) throw new ProxyTokenUnavailableError('proxy token session changed');
       console.error('[accessToken] Failed to get token via SharedWorker:', err);
       return currentProxyToken;
     }
@@ -167,6 +165,7 @@ export async function getProxyToken(): Promise<string> {
  * Used for initialization or when receiving token from external source.
  */
 export function setProxyToken(token: string) {
+  tokenGeneration++;
   currentProxyToken = token;
   setToken(token);
 }
@@ -193,7 +192,7 @@ export function setContextualProxyTokenProvider(fn: (() => (() => Promise<string
  * using it from work started outside that context (engine timers, sockets).
  */
 export function captureProxyTokenProvider(): ProxyTokenProvider | null {
-  return contextualTokenProviderFn?.() ?? null;
+  return scopedTokenProvider ?? contextualTokenProviderFn?.() ?? null;
 }
 
 /**

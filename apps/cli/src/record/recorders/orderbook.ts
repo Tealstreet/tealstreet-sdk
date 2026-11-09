@@ -1,3 +1,4 @@
+import { isStorageSessionCurrent, assertStorageSession } from '../../storage-context';
 /**
  * Orderbook Recorder
  *
@@ -5,6 +6,12 @@
  * Uses public WebSocket connection (no API credentials required).
  */
 
+/**
+ * Orderbook Recorder
+ *
+ * Records orderbook snapshots at configurable intervals.
+ * Uses public WebSocket connection (no API credentials required).
+ */
 import { createExchange } from '../../../../../packages/safe-cex/src/index';
 import type { BaseExchange } from '../../../../../packages/safe-cex/src/exchanges/base';
 import type { ExchangeName, OrderBook } from '../../../../../packages/safe-cex/src/types';
@@ -46,10 +53,12 @@ export class OrderbookRecorder extends BaseRecorder {
         publicDataOnly: true,
         testnet: false,
       });
+      this.ownerSession.assertCurrent();
 
       // Start the exchange (connects public WebSocket)
       await this.exchange_instance.start();
 
+      assertStorageSession(this.ownerEpoch);
       // Subscribe to orderbook updates
       this.unsubscribe = this.exchange_instance.listenOrderBook(this.symbol, (orderbook: OrderBook) => {
         this.onOrderbookUpdate(orderbook);
@@ -111,7 +120,7 @@ export class OrderbookRecorder extends BaseRecorder {
    * Handle orderbook update from exchange
    */
   private onOrderbookUpdate(orderbook: OrderBook): void {
-    if (!this.running) return;
+    if (!isStorageSessionCurrent(this.ownerEpoch) || !this.running) return;
 
     // Check if enough time has elapsed
     if (!this.shouldRecord()) {
