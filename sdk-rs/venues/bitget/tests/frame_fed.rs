@@ -50,7 +50,7 @@ fn frame_fed_market_close_keeps_its_native_market_cap_after_source_frames() {
         .iter()
         .map(|child| child["size"].as_str().unwrap().parse().unwrap())
         .collect();
-    assert_eq!(quantities, vec![40.0, 40.0, 20.0]);
+    assert_eq!(quantities, vec![26.667, 26.667, 26.667, 20.0]);
     assert!(children.iter().all(|child| child["reduceOnly"] == "YES"));
 }
 

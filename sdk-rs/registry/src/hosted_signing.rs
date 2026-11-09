@@ -11,6 +11,9 @@ mod apexomni;
 #[cfg(feature = "backpack")]
 mod backpack;
 
+#[cfg(feature = "orderly")]
+mod orderly;
+
 #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
 mod kucoin;
 
@@ -19,6 +22,9 @@ pub enum OutputFormat {
     #[cfg(feature = "apexomni")]
     #[serde(rename = "apexomni-batch")]
     ApexOmniBatch,
+    #[cfg(feature = "orderly")]
+    #[serde(rename = "orderly-ed25519")]
+    OrderlyEd25519,
     #[cfg(feature = "backpack")]
     #[serde(rename = "backpack-ed25519")]
     BackpackEd25519,
@@ -160,6 +166,10 @@ pub enum OutputKind {
     #[cfg(feature = "apexomni")]
     ApexOmni {
         contracts: usize,
+        ws: bool,
+    },
+    #[cfg(feature = "orderly")]
+    Orderly {
         ws: bool,
     },
     #[cfg(feature = "backpack")]
@@ -313,7 +323,7 @@ fn family(venue: &str) -> bool {
         || bybit
         || okx
         || bitget
-        || (cfg!(feature = "bingx") && venue == "bingx")
+        || (cfg!(feature = "bingx") && matches!(venue, "bingx" | "bingxspot"))
         || (cfg!(feature = "blofin") && venue == "blofin")
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "apexomni") && venue == "apexomni")
@@ -322,6 +332,7 @@ fn family(venue: &str) -> bool {
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "woo") && venue == "woo")
+        || (cfg!(feature = "cryptocom") && venue == "cryptocom")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
 
@@ -359,6 +370,37 @@ pub fn prepare(
         &input,
         Input::WsAuth {
             output_format: OutputFormat::ApexOmniBatch,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
+    #[cfg(feature = "orderly")]
+    if orderly::family(venue) {
+        return match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => orderly::prepare(
+                venue,
+                identities,
+                payload,
+                Some(SignReceipt {
+                    stamp_ms: Some(stamp_ms),
+                    ..Default::default()
+                }),
+            ),
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::OrderlyEd25519,
+            } => orderly::prepare(venue, identities, to_sign, None),
+            _ => Err(SignError::Unsupported),
+        };
+    }
+    #[cfg(feature = "orderly")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::OrderlyEd25519,
             ..
         }
     ) {
@@ -520,6 +562,10 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
     if let OutputKind::ApexOmni { contracts, ws } = kind {
         return apexomni::finish(contracts, ws, result);
     }
+    #[cfg(feature = "orderly")]
+    if let OutputKind::Orderly { ws } = kind {
+        return orderly::finish(ws, result);
+    }
     #[cfg(feature = "backpack")]
     if let OutputKind::Backpack { ws } = kind {
         return backpack::finish(ws, result);
@@ -572,6 +618,10 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         OutputKind::ApexOmni { .. } => unreachable!(),
         #[cfg(feature = "apexomni")]
         OutputKind::WsAuth(OutputFormat::ApexOmniBatch) => return Err(SignError::Unsupported),
+        #[cfg(feature = "orderly")]
+        OutputKind::Orderly { .. } | OutputKind::WsAuth(OutputFormat::OrderlyEd25519) => {
+            return Err(SignError::Unsupported);
+        }
         #[cfg(feature = "backpack")]
         OutputKind::Backpack { .. } => unreachable!(),
         #[cfg(feature = "backpack")]
@@ -972,6 +1022,11 @@ mod input_parse_tests {
             ));
         }
         for (format, input) in [
+            #[cfg(feature = "orderly")]
+            (
+                "orderly-ed25519",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"orderly-ed25519"}"#,
+            ),
             #[cfg(feature = "backpack")]
             (
                 "backpack-ed25519",
@@ -1012,6 +1067,8 @@ mod input_parse_tests {
                 match output_format {
                     #[cfg(feature = "apexomni")]
                     OutputFormat::ApexOmniBatch => "apexomni-batch",
+                    #[cfg(feature = "orderly")]
+                    OutputFormat::OrderlyEd25519 => "orderly-ed25519",
                     #[cfg(feature = "backpack")]
                     OutputFormat::BackpackEd25519 => "backpack-ed25519",
                     OutputFormat::KucoinBatch => "kucoin-batch",

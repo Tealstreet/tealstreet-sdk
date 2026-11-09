@@ -34,7 +34,7 @@ cd apps/cli
 yarn dev                     # run the REPL from source (= bun run src/index.ts)
 yarn typecheck               # tsc --noEmit
 yarn test                    # vitest
-yarn logs                    # tail ~/.tealstreet/cli.log
+yarn logs                    # tail the active user’s cli.log
 ```
 
 ### Build a local binary
@@ -58,8 +58,18 @@ The public `@tealstreet/cli` package is a thin installer/launcher. It does not
 ship CLI source; it downloads the matching binary from
 `https://github.com/Tealstreet/cli/releases` on install or first run.
 
-Config and runtime state live under `~/.tealstreet/` — see
+Config and runtime state are isolated by signed-in user and profile under
+`~/.tealstreet/profiles/<profile hash>/users/<user hash>/` (`~/.disrupt/` for Disrupt).
+Deferred commands, background writes and output stay bound to their starting login;
+switching users cancels their remaining work and reloads the footer for the new user.
+Cross-trade startup also cancels remaining account boots and disposes old connections.
+Login changes clear live exchanges and approvals; unknown-owner legacy files
+require re-entry. Signed-out local-only state persists separately and is never
+imported into an authenticated profile. See
 [`operations/config-files.md`](../documentation/cli/operations/config-files.md).
+An explicitly selected config symlink migrates only from a consistently owned
+target inside the source directory. Unsafe targets or an earlier skipped config
+require re-entry instead of silently completing migration.
 
 ## Architecture
 
@@ -71,7 +81,7 @@ High-level entry points:
 - `src/repl.ts` — interactive REPL (readline)
 - `src/listener/` — loopback `127.0.0.1:53219` WS + HTTP side-car for the web app
 - `src/commands/` — command implementations (shared logic in `@tealstreet/cli-core`)
-- `src/config.ts` — `~/.tealstreet/config.json` (accounts, listener kill-switches, footer layout)
+- `src/config.ts` + `src/storage-context.ts` — user-scoped `config.json` (accounts, listener kill-switches, footer layout)
 - `src/logger.ts` + `src/log-classify.ts` — console interception, severity taxonomy, operational-noise routing
 - `src/scroll-region.ts` + `src/status-line.ts` + `src/footer.ts` + `src/footer-segments.ts` — the pinned output surfaces (top alert bar + bottom status footer over one shared ANSI scroll region)
 - `src/audit-log.ts` — durable append-only write-op trail + command tracing (`audit` command)

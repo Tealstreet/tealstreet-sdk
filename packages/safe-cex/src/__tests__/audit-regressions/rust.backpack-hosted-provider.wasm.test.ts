@@ -163,11 +163,12 @@ it('actual WASM preserves WS/secondary signatures and refuses unknown device for
 });
 
 it('actual WASM failure/unavailability never falls back and keeps seed material out of logs/errors', async () => {
+  let available = true;
   const sign = vi.fn(async () => {
     throw new Error('fixture-secret fixture-seed');
   });
   const fallback = vi.fn();
-  const remoteSigner: RemoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
+  const remoteSigner: RemoteSigner = { sign, isAvailable: () => available, onAvailabilityChange: () => () => {} };
   const server = fixture({ secret: Buffer.alloc(32, 7).toString('base64'), remoteSigner, payloadSigner: fallback });
   const request: RemoteSignerRequest = {
     id: 'failure',
@@ -185,7 +186,7 @@ it('actual WASM failure/unavailability never falls back and keeps seed material 
   expect(sign).toHaveBeenCalledTimes(1);
   expect(fallback).not.toHaveBeenCalled();
   expect(server.io).not.toHaveBeenCalled();
-  remoteSigner.isAvailable = () => false;
+  available = false;
   const unavailable = await server.exchange.signHttpRequest(request);
   expect(unavailable.config).toBeUndefined();
   expect(unavailable.error).toBeTruthy();

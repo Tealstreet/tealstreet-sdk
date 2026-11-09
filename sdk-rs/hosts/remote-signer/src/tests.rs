@@ -11,6 +11,8 @@ use tokio::sync::mpsc;
 
 use super::*;
 
+mod grvt;
+
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 
 /// A device on the other end of the link: answers every sign-req with `answer`.
@@ -1013,3 +1015,5 @@ async fn a_timeout_on_a_socket_silent_since_the_send_is_a_suspension() {
         "a silent socket never trips the fatal streak"
     );
 }
+
+mod kucoin;

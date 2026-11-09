@@ -1,4 +1,4 @@
-import type { SignRequest } from '@tealstreet/safe-cex-wasm/host';
+import type { SignRequest, SigningIdentities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { RemoteSignerRequest } from '../../types';
 
 import { createHmac } from 'node:crypto';
@@ -47,7 +47,7 @@ it('declares Apex Omni RemoteSigner admission and the complete HMAC/zkLink capab
   expect(deriveRemoteSigningPolicy('apexomni')).toMatchObject({ enabled: true, payloadSupported: false });
   expect(remoteSignerAlgorithms('apexomni')).toEqual(['hmacSha256', 'zkLinkContract']);
   expect(() => assertBetaAccount('apexomni', { remoteSigner })).not.toThrow();
-  expect(() => assertBetaAccount('cryptocom', { remoteSigner })).toThrow();
+  expect(() => assertBetaAccount('polymarket', { remoteSigner })).toThrow();
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
@@ -106,4 +106,57 @@ it('cancels a delayed remote batch without accepting its late result', async () 
   const abort = new AbortController(); const pending = r.provider(work(true), { signal: abort.signal });
   abort.abort(); await expect(pending).rejects.toThrow('Remote signing canceled');
   finish({ id: '', wsAuthSignature: '{}' });
+});
+
+it('drops user A\'s deferred batch after disposal while user B signs with its own identity', async () => {
+  const answer = (request: RemoteSignerRequest, key: string) => ({ id: request.id,
+    wsAuthSignature: JSON.stringify({ credential: key, contracts: [zkSignature], signature: hmac(key) }) });
+  let finishA: (() => void) | undefined;
+  const signA = vi.fn((request: RemoteSignerRequest) => new Promise<ReturnType<typeof answer>>((resolve) => {
+    finishA = () => resolve(answer(request, 'user-a'));
+  }));
+  const signB = vi.fn(async (request: RemoteSignerRequest) => answer(request, 'user-b'));
+  const account = (key: string, sign: typeof signA | typeof signB) => {
+    const setup = new DelegatedSignerSetup('apexomni', { key, secret: '', passphrase: `${key}-pass`,
+      remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} } });
+    let identities: SigningIdentities = {};
+    class Capture {
+      constructor(_venue: string, json: string) { identities = JSON.parse(json).signing; }
+    }
+    setup.construct(Capture as unknown as new (venue: string, json: string) => WasmEngineLike, 'apexomni', '{}');
+    const primary = identities.primary;
+    if (!primary?.passphrase || !primary.extra?.zklinkSeed) throw new Error('Missing owned Apex refs');
+    const refs = new Map([[identity.credential, primary.credential], [identity.signing, primary.signing],
+      [identity.passphrase, primary.passphrase], [identity.extra.zklinkSeed, primary.extra.zklinkSeed]]);
+    const request = work(true);
+    for (const operation of request.operations) {
+      if (operation.kind === 'present' || operation.kind === 'sign')
+        operation.key = refs.get(operation.key) ?? operation.key;
+    }
+    return { setup, request };
+  };
+  const a = account('user-a', signA);
+  let b: ReturnType<typeof account> | undefined;
+  try {
+    const pendingA = a.setup.signer(a.request, context());
+    const canceledA = expect(pendingA).rejects.toThrow('Remote signing canceled');
+    expect(signA).toHaveBeenCalledOnce();
+    a.setup.dispose();
+    b = account('user-b', signB);
+    const resultB = await b.setup.signer(b.request, context());
+    await canceledA;
+    if (!finishA) throw new Error('User A did not defer');
+    finishA();
+    await Promise.resolve();
+    expect(resultB.values[1]).toEqual(bytes('user-b'));
+    expect(resultB.values[2]).toEqual(bytes('user-b-pass'));
+    expect(signB).toHaveBeenCalledOnce();
+    expect(signA).toHaveBeenCalledOnce();
+    await expect(b.setup.signer(a.request, context())).rejects.toThrow('Remote signing request refused');
+    await expect(a.setup.signer(a.request, context())).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(signB).toHaveBeenCalledOnce();
+  } finally {
+    a.setup.dispose();
+    b?.setup.dispose();
+  }
 });

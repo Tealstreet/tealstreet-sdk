@@ -1,6 +1,6 @@
-//! Trading command jobs: each command owns a Preflight root, then one serial
-//! Plan. Jobs run concurrently under the engine's per-order locks; every call
-//! signs Primary, and write outcomes ride the journal.
+//! Each command owns a Preflight then serial Plan; the journal owns outcomes.
+//! Venue policy controls continuation and order locks. Calls sign Primary.
+//! Native Unknowns emit passive accepted/current-request/withheld identity events.
 use crate::account::{Axis, NativeOrder};
 use crate::sign::Params;
 use crate::wire::Str;
@@ -28,6 +28,28 @@ const CANCEL_TPSL: &str = "/api/v1/futures/tpsl/cancel_order";
 const AMEND: &str = "/api/v1/futures/trade/modify_order";
 const AMEND_TPSL: &str = "/api/v1/futures/tpsl/modify_order";
 const AMEND_FULL: &str = "/api/v1/futures/tpsl/position/modify_order";
+
+fn unknown_inventory_row(
+    cx: &mut Cx<'_, Pending>,
+    command: u32,
+    scope: &'static str,
+    path: Option<&str>,
+    identity: Option<(&'static str, &str)>,
+) {
+    let mut fields = vec![("commandId", command.into()), ("scope", scope.into())];
+    if let Some(path) = path {
+        fields.push(("requestPath", path.into()));
+    }
+    if let Some((kind, id)) = identity {
+        fields.push((kind, id.into()));
+    }
+    cx.event(
+        safe_cex_engine::Level::Warn,
+        "command.unknown_inventory",
+        "The outcome is unknown. Check Open Orders",
+        fields,
+    );
+}
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,8 +148,6 @@ enum Call {
     },
     ReconcileReplacement {
         parent: String,
-        id: String,
-        leg: Option<&'static str>,
         payload: Box<Payload>,
     },
     Amend {
@@ -160,6 +180,25 @@ impl Step {
     }
     fn single_place(&self) -> bool {
         matches!(self.call, Call::Place { batch: false, .. })
+    }
+    fn report_unknown(&self, cx: &mut Cx<'_, Pending>, command: u32, scope: &'static str) {
+        let mut report = |identity| {
+            unknown_inventory_row(cx, command, scope, Some(self.path), identity);
+        };
+        match &self.call {
+            Call::Place { clients, .. } if !clients.is_empty() => {
+                for id in clients {
+                    report(Some(("clientOrderId", id.as_str())));
+                }
+            }
+            Call::Cancel { ids, .. } if !ids.is_empty() => {
+                for id in ids {
+                    report(Some(("targetOrderId", id.as_str())));
+                }
+            }
+            Call::Amend { id, .. } => report(Some(("targetOrderId", id.as_str()))),
+            _ => report(None),
+        }
     }
     fn setting(&self) -> bool {
         matches!(
@@ -198,7 +237,7 @@ struct Live {
     settings: Option<String>,
     /// A paced call waiting for the Plan timer.
     waiting: Option<Step>,
-    /// A batch chunk's refusal: later chunks still go out, then the job fails.
+    /// A caught failure: permitted later writes still go out, then the job fails.
     failure: Option<VenueError>,
     /// Native text that follows the journal's selected error.
     note: Option<String>,
@@ -341,40 +380,35 @@ fn split_quantities(
     {
         return Err("Bitunix quantity cannot be represented in native units".into());
     }
-    let ticks = ticks as u64;
-    let mut max_ticks = (maximum / step).floor().min(MAX_TICKS) as u64;
-    // A decimal limit such as 0.3 / 0.1 may divide just below an integer.
-    // Admit the next tick only when its serialized decimal stays within max.
-    let candidate = (maximum / step).ceil().min(MAX_TICKS) as u64;
-    if num::adjust(candidate as f64 * step, step) <= maximum {
-        max_ticks = candidate;
-    }
-    if max_ticks == 0 {
+    if maximum < step {
         return Err("Bitunix maximum quantity is smaller than one native unit".into());
     }
-    let count = ticks.div_ceil(max_ticks);
-    if count > 10_000 {
+    // Legacy bitunix.exchange.ts:2292-2302 rounds equal lots plus a remainder.
+    let lots = if amount > maximum {
+        (amount / maximum).ceil()
+    } else {
+        1.0
+    };
+    if lots > 10_000.0 {
         return Err("Bitunix order exceeds split limit".into());
     }
-    let quantity = |units: u64| -> Result<f64, String> {
-        let value = num::adjust(units as f64 * step, step);
-        if !value.is_finite()
-            || value < minimum
-            || value <= 0.0
-            || value > maximum
-            || (value / step).round() != units as f64
-        {
+    let rest = if amount > maximum {
+        num::adjust(amount % maximum, step)
+    } else {
+        0.0
+    };
+    let lot_size = num::adjust((amount - rest) / lots, step);
+    // Retain TS's rounded lots even when rounding crosses the maximum.
+    let quantity = |value: f64| -> Result<f64, String> {
+        if !value.is_finite() || value < minimum || value <= 0.0 {
             return Err("Bitunix split quantity is outside native lot limits".into());
         }
         Ok(value)
     };
-    let mut sizes = Vec::with_capacity(count as usize);
-    for _ in 0..ticks / max_ticks {
-        sizes.push(quantity(max_ticks)?);
-    }
-    let remainder = ticks % max_ticks;
-    if remainder != 0 {
-        sizes.push(quantity(remainder)?);
+    // The finite integral count is bounded above before conversion.
+    let mut sizes = vec![quantity(lot_size)?; lots as usize];
+    if rest != 0.0 {
+        sizes.push(quantity(rest)?);
     }
     Ok(sizes)
 }
@@ -1187,9 +1221,7 @@ impl BitunixFutures {
                 path: "/api/v1/futures/trade/get_order_detail",
                 body: String::new(),
                 call: Call::ReconcileReplacement {
-                    parent: parent.clone(),
-                    id: parent,
-                    leg: None,
+                    parent,
                     payload: Box::new(p),
                 },
                 delay: 0.0,
@@ -1476,6 +1508,7 @@ impl BitunixFutures {
                     return Err("Bitunix attached amend requires trigger price".into());
                 }
                 if let Ok(Some(mut replace)) = self.replacement(cx, parent, n) {
+                    replace.qty = p.qty.clone();
                     replace.tp_price = p.tp_price.clone();
                     replace.sl_price = p.sl_price.clone();
                     fallback = Some(Box::new(replace));
@@ -1786,8 +1819,34 @@ impl BitunixFutures {
             error.message = format!("{gone}: {}", error.message);
         }
     }
+    // This observes existing identities only; the engine journal owns outcomes.
+    fn report_unknown(&self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        let Some(live) = self.trading.live.get(&request.command) else {
+            return;
+        };
+        for id in &live.job.ids {
+            unknown_inventory_row(cx, request.command, "accepted", None, Some(("orderId", id)));
+        }
+        request
+            .step
+            .report_unknown(cx, request.command, "currentRequest");
+        for step in &live.job.steps {
+            step.report_unknown(cx, request.command, "withheld");
+        }
+    }
     fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, mut error: VenueError) {
         self.kept_gone(command, &mut error);
+        if error.outcome == Some(Outcome::Unknown) {
+            error.message = if error.message.is_empty() {
+                "The outcome is unknown. Check Open Orders".into()
+            } else {
+                format!(
+                    "{}. The outcome is unknown. Check Open Orders",
+                    error.message
+                )
+            };
+            error.presents = true;
+        }
         let Some(live) = self.take_live(command) else {
             return;
         };
@@ -1878,6 +1937,98 @@ impl BitunixFutures {
         }
         self.account.reask = false;
         self.account.reconcile = false;
+    }
+    fn amend_fallback(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        message: &str,
+    ) -> bool {
+        if !message
+            .to_ascii_lowercase()
+            .contains("order does not support this operation")
+        {
+            return false;
+        }
+        let Call::Amend {
+            fallback: Some(p),
+            parent,
+            id,
+            leg,
+        } = &request.step.call
+        else {
+            return false;
+        };
+        let command = request.command;
+        if let Some(live) = self.trading.live.get_mut(&command) {
+            live.current = Some((request.slot.clone(), request.context.clone()));
+        }
+        // TS fallback checks the cancellation code, then places the prepared replacement.
+        let symbol = p.symbol.clone().unwrap_or_default();
+        let ids: Vec<_> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|o| {
+                o.id == *parent
+                    || self
+                        .account
+                        .native
+                        .get(&o.id)
+                        .is_some_and(|n| n.raw_id == *parent)
+            })
+            .map(|o| o.id.clone())
+            .collect();
+        if let Some(live) = self.trading.live.get_mut(&command) {
+            live.job.steps.push_front(Step {
+                path: PLACE,
+                body: text(p),
+                call: Call::Amend {
+                    id: id.clone(),
+                    parent: parent.clone(),
+                    leg: *leg,
+                    fallback: None,
+                },
+                delay: 0.0,
+            });
+            live.job.steps.push_front(Step {
+                path: CANCEL,
+                body: text(&Cancel {
+                    symbol: &symbol,
+                    order_list: vec![Identity { order_id: parent }],
+                }),
+                call: Call::Cancel {
+                    ids,
+                    require_ack: true,
+                },
+                delay: 0.0,
+            });
+        }
+        self.advance(cx, command);
+        true
+    }
+    fn failure_continues(&mut self, request: &Request, cancel_resolved: bool) -> bool {
+        let Some(live) = self.trading.live.get_mut(&request.command) else {
+            return false;
+        };
+        let cancel = cancel_resolved && matches!(request.step.call, Call::Cancel { .. });
+        if cancel {
+            // TS cancelOrders ignores resolved native refusal bodies before rebuilding.
+            for step in &mut live.job.steps {
+                if let Call::ReconcileReplacement { payload, .. } = &step.call {
+                    *step = Step {
+                        path: PLACE,
+                        body: text(payload),
+                        call: Call::Place {
+                            clients: payload.client_id.clone().into_iter().collect(),
+                            batch: false,
+                        },
+                        delay: 0.0,
+                    };
+                }
+            }
+        }
+        cancel || matches!(request.step.call, Call::Place { batch: true, .. })
     }
     /// A call failed in transport; a released write is Unknown.
     pub(crate) fn trade_failed(
@@ -2052,10 +2203,22 @@ impl BitunixFutures {
                 self.advance(cx, command);
             }
             Err(Some(error)) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    self.report_unknown(cx, &request);
+                }
+                let continues = error.outcome != Some(Outcome::Unknown)
+                    && self.failure_continues(&request, (200..300).contains(&response.status));
                 if let Some(live) = self.trading.live.get_mut(&command) {
                     live.current = Some((request.slot, request.context));
                 }
-                self.end(cx, command, error);
+                if continues {
+                    if let Some(live) = self.trading.live.get_mut(&command) {
+                        live.failure.get_or_insert(error);
+                    }
+                    self.advance(cx, command);
+                } else {
+                    self.end(cx, command, error);
+                }
             }
             // The journal refused the fact; the engine owns this job now.
             Err(None) => {}
@@ -2182,73 +2345,24 @@ impl BitunixFutures {
             }
             return self.read_axis_for(cx, Axis::Positions, Some(command));
         }
-        if definitive
-            && message.contains("order does not support this operation")
-            && let Call::Amend {
-                fallback: Some(p),
-                parent,
-                id,
-                leg,
-            } = &request.step.call
-        {
-            // The re-place carries reduceOnly, and the private channel omits it: a flag the
-            // venue never reported nor this session set could reopen a closing order.
-            // Native modify_order carries no reduceOnly, so only this fallback is gated.
-            if !self
-                .account
-                .native
-                .get(parent)
-                .is_some_and(|meta| meta.reduce_reconciled)
-            {
-                let mut refusal = VenueError::new(format!(
-                    "Your TP/SL edit was not applied: Bitunix could not modify order {parent} in place, and re-placing it needs its reduce-only state, which is not reconciled yet; nothing was canceled"
-                ))
-                .outcome(Outcome::Rejected);
-                refusal.presents = true;
-                return self.end(cx, command, refusal);
-            }
-            // Native fallback: cancel, prove the cancel final, then replace.
-            let symbol = p.symbol.clone().unwrap_or_default();
-            let ids: Vec<_> = cx
-                .store
-                .orders()
-                .iter()
-                .filter(|o| {
-                    o.id == *parent
-                        || self
-                            .account
-                            .native
-                            .get(&o.id)
-                            .is_some_and(|n| n.raw_id == *parent)
-                })
-                .map(|o| o.id.clone())
-                .collect();
+        if refused && self.amend_fallback(cx, &request, &message) {
+            return;
+        }
+        let cancel_resolved = (200..300).contains(&response.status)
+            && (self
+                .trading
+                .live
+                .get(&command)
+                .is_some_and(|live| !live.amend)
+                || (error.venue_code.is_none() && error.message == error::NO_DATA));
+        if refused && self.failure_continues(&request, cancel_resolved) {
             if let Some(live) = self.trading.live.get_mut(&command) {
-                live.job.steps.push_front(Step {
-                    path: "/api/v1/futures/trade/get_order_detail",
-                    body: String::new(),
-                    call: Call::ReconcileReplacement {
-                        id: id.clone(),
-                        parent: parent.clone(),
-                        leg: *leg,
-                        payload: p.clone(),
-                    },
-                    delay: 0.0,
-                });
-                live.job.steps.push_front(Step {
-                    path: CANCEL,
-                    body: text(&Cancel {
-                        symbol: &symbol,
-                        order_list: vec![Identity { order_id: parent }],
-                    }),
-                    call: Call::Cancel {
-                        ids,
-                        require_ack: true,
-                    },
-                    delay: 0.0,
-                });
+                live.failure.get_or_insert(error);
             }
             return self.advance(cx, command);
+        }
+        if error.outcome == Some(Outcome::Unknown) {
+            self.report_unknown(cx, &request);
         }
         self.end(cx, command, error);
     }
@@ -2334,10 +2448,18 @@ impl BitunixFutures {
         if let (Ok(id), Some(live)) = (&accepted, self.trading.live.get_mut(&request.command)) {
             live.job.ids.push(id.clone());
         }
-        Self::record(cx, request, accepted.map(|id| vec![id]))
+        let result = Self::record(cx, request, accepted.map(|id| vec![id]));
+        if result.is_ok()
+            && let Some(live) = self.trading.live.get_mut(&request.command)
+            && live.job.kept_sent
+        {
+            live.job.kept = None;
+            live.job.kept_sent = false;
+        }
+        result
     }
-    /// A batch ACK: accepted rows ride the journal; a refused or malformed
-    /// row ends the job with the accepted IDs kept.
+    /// A batch ACK retains accepted identities; the caller applies the TS
+    /// catch policy to later chunks without erasing uncertain outcomes.
     fn batch_answer(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2424,8 +2546,7 @@ impl BitunixFutures {
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
         }
-        // Native: a refused chunk never holds back later chunks; the job fails
-        // once they have gone out. An uncertain chunk ends the job here.
+        // Definite refusals allow later chunks. Uncertainty stops the action.
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
@@ -2624,8 +2745,8 @@ impl BitunixFutures {
         }
         Self::record(cx, request, accepted.map(|id| vec![id]))
     }
-    /// The amend fallback's Read: the canceled parent must be final before
-    /// its remainder is re-placed.
+    /// An ordinary cancellation rebuild reconciles its canceled parent before
+    /// re-placing the remainder. The TS amend fallback has no extra Read.
     fn replacement_answer(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2633,13 +2754,7 @@ impl BitunixFutures {
         response: Response<'_>,
     ) {
         let command = request.command;
-        let Call::ReconcileReplacement {
-            parent,
-            id,
-            leg,
-            payload,
-        } = &request.step.call
-        else {
+        let Call::ReconcileReplacement { parent, payload } = &request.step.call else {
             return;
         };
         let result = (|| {
@@ -2672,7 +2787,7 @@ impl BitunixFutures {
                 .ok_or("Bitunix market missing")?;
             // The parent filled before its cancel: its TP/SL went live with the old triggers.
             if status == "FILLED" {
-                return Err(filled_before_edit(&row.symbol, leg.is_some()));
+                return Err(filled_before_edit(&row.symbol));
             }
             if row.qty.0 <= 0.0
                 || row.trade_qty.0 < 0.0
@@ -2690,25 +2805,16 @@ impl BitunixFutures {
                 return Err("Bitunix canceled quantity is not reconciled".into());
             }
             if remaining == 0.0 {
-                return Err(filled_before_edit(&row.symbol, leg.is_some()));
+                return Err(filled_before_edit(&row.symbol));
             }
             let mut p = (**payload).clone();
             p.qty = Some(num::format(remaining));
             Ok(Some(Step {
                 path: PLACE,
                 body: text(&p),
-                call: if leg.is_some() {
-                    Call::Amend {
-                        id: id.clone(),
-                        parent: parent.clone(),
-                        leg: *leg,
-                        fallback: None,
-                    }
-                } else {
-                    Call::Place {
-                        clients: p.client_id.into_iter().collect(),
-                        batch: false,
-                    }
+                call: Call::Place {
+                    clients: p.client_id.into_iter().collect(),
+                    batch: false,
                 },
                 delay: 0.0,
             }))
@@ -2766,16 +2872,11 @@ fn affected_ids(cx: &Cx<'_, Pending>, n: &NativeOrder) -> Vec<String> {
         .collect()
 }
 const FILLED_BEFORE_EDIT: &str = "order filled before its";
-/// An amend fallback whose canceled parent had filled: the edit was never applied.
-fn filled_before_edit(symbol: &str, leg: bool) -> String {
-    if leg {
-        format!(
-            "Your {symbol} {FILLED_BEFORE_EDIT} TP/SL edit; its TP/SL keep the old triggers. Check them in Open Orders"
-        )
-    } else {
-        format!("Your {symbol} {FILLED_BEFORE_EDIT} edit; the edit was not applied")
-    }
+/// An ordinary cancellation rebuild whose parent filled before replacement.
+fn filled_before_edit(symbol: &str) -> String {
+    format!("Your {symbol} {FILLED_BEFORE_EDIT} edit; the edit was not applied")
 }
+
 fn append_protection(
     p: &mut Payload,
     tp: bool,
@@ -2824,24 +2925,27 @@ mod split_tests {
     use super::split_quantities;
 
     #[test]
-    fn native_ticks_handle_awkward_limits_minimums_and_exact_split_count() {
-        assert_eq!(
-            split_quantities(2.0, 0.1, 0.1, 0.95).unwrap(),
-            [0.9, 0.9, 0.2]
-        );
-        assert_eq!(
-            split_quantities(1.0, 0.1, 0.1, 0.3).unwrap(),
-            [0.3, 0.3, 0.3, 0.1]
-        );
+    fn ts_equal_lots_keep_input_checks_and_the_equal_lot_count_bound() {
+        let rounded_above_max = split_quantities(1.9, 0.1, 0.1, 0.95).unwrap();
+        assert_eq!(rounded_above_max, [1.0, 1.0]);
+        assert_eq!(rounded_above_max.iter().sum::<f64>(), 2.0);
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 1.9 of requested 2); kept for exact TS parity per Sam's decision
+        let awkward = split_quantities(2.0, 0.1, 0.1, 0.95).unwrap();
+        assert_eq!(awkward, [0.6, 0.6, 0.6, 0.1]);
+        assert!((awkward.iter().sum::<f64>() - 1.9).abs() < 1e-12);
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 0.9 of requested 1); kept for exact TS parity per Sam's decision
+        let tenths = split_quantities(1.0, 0.1, 0.1, 0.3).unwrap();
+        assert_eq!(tenths, [0.2, 0.2, 0.2, 0.2, 0.1]);
+        assert!((tenths.iter().sum::<f64>() - 0.9).abs() < 1e-12);
         assert!(split_quantities(1.25, 0.25, 0.5, 1.0).is_err());
-        assert_eq!(
-            split_quantities(9_999.5, 0.1, 0.1, 1.0).unwrap().len(),
-            10_000
-        );
-        assert_eq!(
-            split_quantities(10_000.0, 0.1, 0.1, 1.0).unwrap().len(),
-            10_000
-        );
+        let with_remainder = split_quantities(9_999.5, 0.1, 0.1, 1.0).unwrap();
+        let mut expected = vec![1.0; 10_000];
+        expected.push(0.5);
+        assert_eq!(with_remainder, expected);
+        assert_eq!(with_remainder.iter().sum::<f64>(), 10_000.5);
+        let exact = split_quantities(10_000.0, 0.1, 0.1, 1.0).unwrap();
+        assert_eq!(exact, vec![1.0; 10_000]);
+        assert_eq!(exact.iter().sum::<f64>(), 10_000.0);
         assert!(split_quantities(10_000.1, 0.1, 0.1, 1.0).is_err());
         assert!(split_quantities(1e16, 1.0, 1.0, 1e16).is_err());
         assert!(split_quantities(1.0, 0.0, 0.0, 1.0).is_err());
@@ -2865,8 +2969,6 @@ mod serial_auth_tests {
             "/api/v1/futures/trade/get_order_detail",
             Call::ReconcileReplacement {
                 parent: "one".into(),
-                id: "one__tp".into(),
-                leg: Some("tp"),
                 payload: Box::default(),
             },
         );

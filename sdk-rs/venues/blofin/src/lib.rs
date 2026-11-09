@@ -514,6 +514,9 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -1114,6 +1117,12 @@ impl Venue for Blofin {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            safe_cex_engine::VenueAction::FetchClosedPnl {
+                symbol,
+                from_ms,
+                to_ms,
+                account,
+            } => self.start_closed_pnl(cx, command, symbol, from_ms, to_ms, account),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

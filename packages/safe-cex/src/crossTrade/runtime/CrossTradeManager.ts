@@ -10,7 +10,7 @@ import { getCopierSymbolFromMaster } from '../getCopierSymbolFromMaster';
 import { getCopierWeightRatio } from '../getCopierWeightRatio';
 import { getMasterSymbolFromCopier } from '../getMasterSymbolFromCopier';
 
-const debug = (...args: any[]) => console.log('[CrossTradeManager]', ...args);
+const debug = (...args: unknown[]) => console.log('[CrossTradeManager]', ...args);
 
 const FAILURE_THRESHOLD = 2;
 const FAILURE_MUTE_MS = 30_000;

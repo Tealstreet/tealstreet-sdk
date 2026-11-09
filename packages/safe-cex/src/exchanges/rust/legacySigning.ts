@@ -21,6 +21,7 @@ import { finishBlofinRequest, isBlofinUnsignedRequest, prepareBlofinRequest } fr
 import { createBybitRequestInterceptor, isBybitUnsignedSigningRequest } from '../bybit/bybit.signing';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site';
 import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
+import { finishCryptocomRequest, prepareCryptocomRequest } from './cryptocomHostedSigning';
 import { finishOkxRequest, isOkxPublicSigningRequest, isOkxUnsignedSigningRequest, prepareOkxRequest } from '../okx/okx.signing';
 
 const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'binanceoptions']);
@@ -184,12 +185,13 @@ export const signHostedHttp = async (
   const bingx = name === 'bingx';
   const phemex = name === 'phemex';
   const woo = name === 'woo';
+  const cryptocom = name === 'cryptocom';
   const blofin = name === 'blofin';
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo)
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo && !cryptocom)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
-  const unsigned = woo ? request.config.url?.includes('/public/') === true : phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
+  const unsigned = cryptocom ? request.config.url?.includes('/public/') === true : woo ? request.config.url?.includes('/public/') === true : phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : bitunix ? isBitunixUnsignedRequest(request.config.url)
@@ -243,7 +245,7 @@ export const signHostedHttp = async (
       'X-BX-APIKEY': credential,
       'X-SOURCE-KEY': 'Tealstreet',
       'Content-Type': 'application/json, charset=utf-8',
-    } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
+    } : cryptocom ? { 'Content-Type': 'application/json' } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
       'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
@@ -281,6 +283,17 @@ export const signHostedHttp = async (
     const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
     if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
     return finishBitunixRequest(prepared, credential, output.signature);
+  } : cryptocom ? async (config) => {
+    if (unsigned || !credential) {
+      let raw: unknown = config.data;
+      if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = undefined; } }
+      return { ...config, method: 'GET', data: undefined,
+        params: raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {} };
+    }
+    const prepared = prepareCryptocomRequest(config, credential, now());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    return finishCryptocomRequest(config, prepared, credential, output.signature, output.headers);
   } : woo ? async (config) => {
     if (config.url?.includes('/public/') || !credential) return config;
     const prepared = prepareWooRequest(config, now(), options.testnet);
@@ -313,7 +326,7 @@ export const signHostedHttp = async (
 };
 
 export const signHostedWsAuth = async (
-  host: EngineHost,
+  host: Pick<EngineHost, 'hostedSigning' | 'hostedWalletSigning'>,
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   const { toSign, outputFormat } = request.wsAuth ?? {};
@@ -323,7 +336,7 @@ export const signHostedWsAuth = async (
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
-    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'kucoin-batch' && outputFormat !== 'apexomni-batch')
+    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'orderly-ed25519' && outputFormat !== 'kucoin-batch' && outputFormat !== 'apexomni-batch')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');

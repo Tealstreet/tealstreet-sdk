@@ -197,7 +197,7 @@ describe('Rust-only beta construction', () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
     // Hyperliquid's, Lighter's and Paradex's structured remote signing is pinned in
     // their rust.*-remote-signing.wasm.test.ts.
-    const localOnly = ['kraken', 'krakenspot', 'cryptocom', 'asterdex'] as const;
+    const localOnly = ['kraken', 'krakenspot', 'asterdex'] as const;
     // #2262 enables Bitunix through the shared policy, without a beta override.
     const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
       ? localOnly
