@@ -13,8 +13,8 @@ const align8 = (n: number) => Math.ceil(n / 8) * 8;
 const fixture = ({ markets = true, metadata = true, positions = true, holdings = true, flags = 2, empty = false, orderOnly = false, book = '' } = {}) => {
   const strings = [tokenId, 'Yes', 'pUSD', '0xcondition', 'Will café open?', 'Exact description', '2026-12-31T00:00:00Z', 'cafe-open', 'order'];
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
-  const table = (kind: number, words: number[], columns: number[][]) => {
-    const bytes = new Uint8Array(align8(words.length * 4) + columns.reduce((n, column) => n + column.length * 8, 0));
+  const table = (kind: number, words: number[], columns: number[][], tail: number[] = []) => {
+    const bytes = new Uint8Array(align8(words.length * 4) + columns.reduce((n, column) => n + column.length * 8, 0) + tail.length * 4);
     const view = new DataView(bytes.buffer);
     words.forEach((word, i) => view.setUint32(i * 4, word, true));
     let offset = align8(words.length * 4);
@@ -22,6 +22,7 @@ const fixture = ({ markets = true, metadata = true, positions = true, holdings =
       view.setFloat64(offset, value, true);
       offset += 8;
     }
+    tail.forEach((value, i) => view.setUint32(offset + i * 4, value, true));
     sections.push({ kind, bytes });
   };
   if (!orderOnly) {
@@ -32,7 +33,7 @@ const fixture = ({ markets = true, metadata = true, positions = true, holdings =
     if (book === 'full') table(5, [0, 1, 1, 0], [[0.49, 2, 2, 0.51, 3, 3]]);
     if (book === 'delta') table(15, [0, 2, 1, 0], [[0.49, 0, 0.48, 4, 0.51, 5]]);
     if (positions) {
-      table(8, empty ? [0] : [1, 0, 0], [0.4, 6, 1, 2, NaN, 10, 0, NaN, NaN].map((value) => empty ? [] : [value]));
+      table(8, empty ? [0] : [1, 0, 0], [0.4, 6, 1, 2, NaN, 10, NaN, NaN, NaN, NaN, NaN].map((value) => empty ? [] : [value]), empty ? [] : [0, 0]);
       if (holdings) table(14, empty ? [0] : [1, 0, flags], []);
     }
   }
@@ -58,6 +59,7 @@ const fixture = ({ markets = true, metadata = true, positions = true, holdings =
   let offset = 16;
   for (const section of sections) {
     header.setUint16(offset, section.kind, true);
+    header.setUint16(offset + 2, section.kind === 8 ? 2 : 0, true);
     header.setUint32(offset + 4, section.bytes.length, true);
     new Uint8Array(buffer, offset + 8, section.bytes.length).set(section.bytes);
     offset += 8 + section.bytes.length;

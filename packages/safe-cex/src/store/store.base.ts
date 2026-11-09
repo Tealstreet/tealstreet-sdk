@@ -1,6 +1,7 @@
 import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import uniqBy from 'lodash/uniqBy';
+import { initialStoreData as defaultStore } from '../generated/StoreData';
 
 import { Market, Order, OrderStatus, Position, RequestOutcome, StoreData, Ticker, Writable } from '../types';
 import { clone } from '../utils/clone';
@@ -28,42 +29,7 @@ export const PACKED_TICKER_FIELDS = [
 
 type PackedTickerField = (typeof PACKED_TICKER_FIELDS)[number];
 
-export const defaultStore: StoreData = {
-  latency: null,
-  balance: { used: 0, free: 0, total: 0, upnl: 0 },
-  markets: [],
-  tickers: [],
-  positions: [],
-  displayedPositions: [],
-  displayedMargin: { longExposure: 0, shortExposure: 0, totalNotional: 0 },
-  ordersRisk: {},
-  activeChasers: [],
-  activeTWAPs: [],
-  orders: [],
-  messageHandlerStats: {},
-  requestStats: { ok: 0, rateLimit: 0, auth: 0, network: 0, other: 0 },
-  fetchedLeverage: {},
-  loaded: {
-    balance: false,
-    orders: false,
-    markets: false,
-    tickers: false,
-    positions: false,
-  },
-  options: {
-    isHedged: false,
-  },
-  updateIds: {
-    positions: 0,
-    orders: 0,
-  },
-  socketHealth: {
-    publicHealthy: false,
-    privateHealthy: false,
-    publicInitialized: false,
-    privateInitialized: false,
-  },
-};
+export { initialStoreData as defaultStore } from '../generated/StoreData';
 
 export class DefaultStore implements Store {
   private listeners = new Set<(data: StoreData, fromWorker?: boolean) => void>();
@@ -287,12 +253,12 @@ export class DefaultStore implements Store {
     return { packed };
   }
 
-  consumeTickerDeltas() {
+  consumeTickerDeltas(): Array<[number, Partial<Ticker>]> {
     if (this.pendingTickerDeltas.size === 0) {
-      return [] as Array<[number, Partial<Ticker>]>;
+      return [];
     }
     const deltas = Array.from(this.pendingTickerDeltas.entries()).map(
-      ([index, changes]) => [index, changes] as [number, Partial<Ticker>],
+      ([index, changes]): [number, Partial<Ticker>] => [index, changes],
     );
     this.pendingTickerDeltas.clear();
     return deltas;
@@ -301,7 +267,7 @@ export class DefaultStore implements Store {
   private stripTickerInfo = (ticker: Ticker): Ticker => {
     if (!ticker.info) return ticker;
     const { info: _info, ...tickerWithoutInfo } = ticker;
-    return tickerWithoutInfo as Ticker;
+    return tickerWithoutInfo;
   };
 
   private stripTickerInfoFromChanges = (changes: Partial<Ticker>): Partial<Ticker> => {
@@ -625,7 +591,7 @@ export class DefaultStore implements Store {
 
     // A worker's store already kept its terminal orders closed.
     if (!fromWorker && normalizedChanges.orders) {
-      const orders = this.keepTerminalOrdersClosed(normalizedChanges.orders as Order[]);
+      const orders = this.keepTerminalOrdersClosed(normalizedChanges.orders);
       if (orders !== normalizedChanges.orders) ensureMutableChanges().orders = orders;
     }
     Object.assign(this.state, normalizedChanges);
@@ -858,13 +824,7 @@ export class DefaultStore implements Store {
     this.notify();
   };
 
-  /**
-   * Creates an empty position from actual position.
-   *
-   * Use to mark position is closed when wiping any other position information is not desired.
-   *
-   * @param position
-   */
+  /** Preserve closed-symbol settings while clearing exposure and native sizing evidence. */
   createEmptyPositionFrom = (position: Position) => {
     return {
       ...position,
@@ -879,11 +839,7 @@ export class DefaultStore implements Store {
     };
   };
 
-  /**
-   * does the same thing as a function above but cleans up unannounced positions.
-   *
-   * @param positions
-   */
+  /** Merge full refreshes, retaining omitted symbols with zero exposure. */
   addOrUpdatePositionsFull = (positions: Position[]) => {
     const usedIds = new Set<string>();
     const positionIndexById =
