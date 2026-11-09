@@ -1282,7 +1282,6 @@ impl Venue for KucoinSpot {
                         e,
                         crate::wire::SPOT_RATE_CODES,
                     );
-                    cx.command_error(job.command, &error.message);
                     self.write_failed(cx, job, error);
                 } else {
                     cx.startup_read_refused(&crate::wire::write_failure(
@@ -1729,7 +1728,6 @@ impl Venue for KucoinSpot {
                     error.into(),
                     crate::wire::SPOT_RATE_CODES,
                 );
-                cx.command_error(j.command, &error.message);
                 self.write_failed(cx, j, error);
                 return;
             }

@@ -42,6 +42,10 @@ expose the same kind to web clients.
 | `warn`    | yellow  | `warn`         | terminal only     |
 | `error`   | red     | `error`        | terminal only     |
 
+Exchange output belongs to the login that connected the exchange. After switching
+users, delayed output and disposal notices from the previous login are discarded.
+Disabling an account within the same login still reports interrupted chases.
+
 Where each stream goes:
 
 - `logger.info / warn / error / debug` → `~/.tealstreet/cli.log` only — never
@@ -113,6 +117,10 @@ code, goes to stderr instead, and the background update notice is skipped. See
 [Machine-readable output](./commands.md#json) for which commands support it.
 
 ## Status bar + footer {#status-bar--footer}
+
+Changing login clears the old status and watch messages, stops its redraws and
+loads the new user's footer settings. Late exchange events, command output and
+webhook replies from the previous session are discarded.
 
 Two pinned single-line surfaces frame the scrolling output, both reserved via
 one shared ANSI scroll region (so they never fight each other or corrupt the

@@ -59,7 +59,8 @@ import { virtualClock } from '../../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
 import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './blofin.api';
-import { mapBlofinClosedPosition, mapBlofinFillToIncomeRecords } from '../../../exchanges/blofin/blofin.income';
+import { mapBlofinFillToIncomeRecords } from './blofin.income';
+import { mapBlofinClosedPosition } from './blofin.closed-pnl';
 import { mapBlofinHistoricalOrder } from './blofin.order-history';
 import {
   BROKER_ID,

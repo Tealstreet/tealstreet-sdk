@@ -306,9 +306,9 @@ fn malformed_option_stream_greeks_preserve_proven_position_and_frame_values() {
                 .find(|(kind, _)| *kind == safe_cex_engine::wire::section::POSITIONS)
                 .unwrap()
                 .1;
-            // One position: count/market/enums/padding + nine f64 columns,
+            // Revision 2: count/market/enums/padding + eleven f64 columns,
             // followed by its exact ID, matching the Greek metadata reference.
-            assert_eq!(&positions[88..92], &section[4..8]);
+            assert_eq!(&positions[104..108], &section[4..8]);
             let values: [f64; 4] = std::array::from_fn(|index| {
                 let at = 16 + index * 8;
                 f64::from_le_bytes(section[at..at + 8].try_into().unwrap())

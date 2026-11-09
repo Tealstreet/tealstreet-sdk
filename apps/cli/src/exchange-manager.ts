@@ -1,3 +1,4 @@
+import { getStorageOwner, getStorageEpoch, assertStorageSession, onStorageOwnerChange } from './storage-context';
 import type { ExchangeLike, CLIPlatformAdapter, ExchangeAccountConfig } from '@tealstreet/cli-core';
 import { ExchangeHealthMonitor, type HealthState } from '../../../packages/safe-cex/src/health/ExchangeHealthMonitor';
 
@@ -17,37 +18,47 @@ export interface RunningExchange {
 export class ExchangeManager {
   private exchanges: Map<string, RunningExchange> = new Map();
   private healthMonitors: Map<string, ExchangeHealthMonitor> = new Map();
-  private adapter: CLIPlatformAdapter;
+  private adapter: Pick<CLIPlatformAdapter, 'createExchange' | 'startExchange' | 'stopExchange' | 'updateAccount'>;
 
-  constructor(adapter: CLIPlatformAdapter) {
+  constructor(
+    adapter: Pick<CLIPlatformAdapter, 'createExchange' | 'startExchange' | 'stopExchange' | 'updateAccount'>,
+  ) {
     this.adapter = adapter;
+    onStorageOwnerChange(() => {
+      void this.stopAll().catch(() => {});
+    });
+  }
+
+  private key(name: string): string {
+    return JSON.stringify([getStorageOwner(), name]);
   }
 
   /**
    * Check if an account is currently connected
    */
   isConnected(accountName: string): boolean {
-    return this.exchanges.has(accountName);
+    return this.exchanges.has(this.key(accountName));
   }
 
   /**
    * Get a running exchange by account name
    */
   get(accountName: string): RunningExchange | undefined {
-    return this.exchanges.get(accountName);
+    return this.exchanges.get(this.key(accountName));
   }
 
   /**
    * Get the exchange instance for an account
    */
   getExchange(accountName: string): ExchangeLike | undefined {
-    return this.exchanges.get(accountName)?.exchange;
+    return this.exchanges.get(this.key(accountName))?.exchange;
   }
 
   /**
    * Get all running exchanges
    */
   getAll(): RunningExchange[] {
+    assertStorageSession();
     return Array.from(this.exchanges.values());
   }
 
@@ -55,7 +66,7 @@ export class ExchangeManager {
    * Get all account names that are connected
    */
   getConnectedAccountNames(): string[] {
-    return Array.from(this.exchanges.keys());
+    return this.getAll().map((running) => running.accountName);
   }
 
   /**
@@ -63,8 +74,8 @@ export class ExchangeManager {
    * Returns array of { name, exchange } objects
    */
   getConnectedAccounts(): Array<{ name: string; exchange: ExchangeLike }> {
-    return Array.from(this.exchanges.entries()).map(([name, running]) => ({
-      name,
+    return this.getAll().map((running) => ({
+      name: running.accountName,
       exchange: running.exchange,
     }));
   }
@@ -73,6 +84,7 @@ export class ExchangeManager {
    * Get count of connected exchanges
    */
   get size(): number {
+    assertStorageSession();
     return this.exchanges.size;
   }
 
@@ -80,16 +92,17 @@ export class ExchangeManager {
    * Get health monitor for an account
    */
   getHealthMonitor(accountName: string): ExchangeHealthMonitor | undefined {
-    return this.healthMonitors.get(accountName);
+    return this.healthMonitors.get(this.key(accountName));
   }
 
   /**
    * Get health states for all connected accounts
    */
   getAllHealthStates(): Map<string, HealthState> {
+    assertStorageSession();
     const states = new Map<string, HealthState>();
     for (const [name, monitor] of this.healthMonitors) {
-      states.set(name, monitor.getState());
+      states.set(JSON.parse(name)[1], monitor.getState());
     }
     return states;
   }
@@ -100,16 +113,23 @@ export class ExchangeManager {
    */
   async enable(account: ExchangeAccountConfig): Promise<ExchangeLike> {
     // Check if already connected
-    if (this.exchanges.has(account.name)) {
-      return this.exchanges.get(account.name)!.exchange;
-    }
+    const epoch = getStorageEpoch();
+    const existing = this.get(account.name);
+    if (existing) return existing.exchange;
 
     // Create and start the exchange
     const exchange = await this.adapter.createExchange(account);
-    await this.adapter.startExchange(exchange);
+    try {
+      assertStorageSession(epoch);
+      await this.adapter.startExchange(exchange);
+      assertStorageSession(epoch);
+    } catch (error) {
+      await this.adapter.stopExchange(exchange);
+      throw error;
+    }
 
     // Track it
-    this.exchanges.set(account.name, {
+    this.exchanges.set(this.key(account.name), {
       exchange,
       accountName: account.name,
       accountConfig: account,
@@ -128,19 +148,16 @@ export class ExchangeManager {
    * Disable an account - stop the exchange and remove from tracking
    */
   async disable(accountName: string): Promise<void> {
-    const running = this.exchanges.get(accountName);
+    const running = this.exchanges.get(this.key(accountName));
     if (!running) {
       return;
     }
 
-    // Stop the exchange
-    await this.adapter.stopExchange(running.exchange);
-
-    // Dispose health monitor
+    const epoch = getStorageEpoch();
+    this.exchanges.delete(this.key(accountName));
     this.disposeHealthMonitor(accountName);
-
-    // Remove from tracking
-    this.exchanges.delete(accountName);
+    await this.adapter.stopExchange(running.exchange);
+    assertStorageSession(epoch);
 
     // Update the active state in config
     this.adapter.updateAccount(accountName, { active: false });
@@ -150,31 +167,28 @@ export class ExchangeManager {
    * Stop all exchanges
    */
   async stopAll(): Promise<void> {
-    const stopPromises = Array.from(this.exchanges.values()).map(async (running) => {
-      await this.adapter.stopExchange(running.exchange);
-    });
-    await Promise.all(stopPromises);
+    assertStorageSession();
+    // Detach synchronously before awaiting disposal. A newly logged-in user's
+    // instances must never be cleared by completion of the previous stop.
+    const running = Array.from(this.exchanges.values());
     this.exchanges.clear();
-
-    // Dispose all health monitors
-    for (const [, monitor] of this.healthMonitors) {
-      monitor.dispose();
-    }
+    for (const monitor of this.healthMonitors.values()) monitor.dispose();
     this.healthMonitors.clear();
+    await Promise.all(running.map(({ exchange }) => this.adapter.stopExchange(exchange)));
   }
 
   /**
    * Register an already-running exchange (used when switching primary account)
    */
   register(accountName: string, exchange: ExchangeLike, accountConfig: ExchangeAccountConfig): void {
-    this.exchanges.set(accountName, {
+    this.exchanges.set(this.key(accountName), {
       exchange,
       accountName,
       accountConfig,
     });
 
     // Create health monitor if not already present
-    if (!this.healthMonitors.has(accountName)) {
+    if (!this.healthMonitors.has(this.key(accountName))) {
       this.createHealthMonitor(accountName, accountConfig.exchange);
     }
 
@@ -186,9 +200,9 @@ export class ExchangeManager {
    * Unregister an exchange without stopping it (used when switching primary account)
    */
   unregister(accountName: string): ExchangeLike | undefined {
-    const running = this.exchanges.get(accountName);
+    const running = this.exchanges.get(this.key(accountName));
     if (running) {
-      this.exchanges.delete(accountName);
+      this.exchanges.delete(this.key(accountName));
       this.disposeHealthMonitor(accountName);
       return running.exchange;
     }
@@ -201,17 +215,17 @@ export class ExchangeManager {
   private createHealthMonitor(accountName: string, exchangeName: string): void {
     this.disposeHealthMonitor(accountName);
     const monitor = new ExchangeHealthMonitor(exchangeName);
-    this.healthMonitors.set(accountName, monitor);
+    this.healthMonitors.set(this.key(accountName), monitor);
   }
 
   /**
    * Dispose a health monitor for an account
    */
   private disposeHealthMonitor(accountName: string): void {
-    const existing = this.healthMonitors.get(accountName);
+    const existing = this.healthMonitors.get(this.key(accountName));
     if (existing) {
       existing.dispose();
-      this.healthMonitors.delete(accountName);
+      this.healthMonitors.delete(this.key(accountName));
     }
   }
 }

@@ -3,6 +3,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -11,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const ROOT: &str = "/api/v3/brokerage/orders";
 const MAX_JOBS: usize = 100;
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 pub struct Request {
     command: CommandId,
@@ -48,10 +50,15 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     collect: bool,
+    placement_report: Option<PlacementReport>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
     /// An INTX amend's symbol: its replacement's refusal leaves the order gone.
     replaces: Option<String>,
+}
+struct PlacementReport {
+    plan: WritePlan,
+    next_index: usize,
 }
 #[derive(Default)]
 pub(crate) struct Trading {
@@ -531,6 +538,7 @@ impl Coinbase {
             steps: VecDeque::new(),
             ids: vec![],
             collect: false,
+            placement_report: None,
             effective: false,
             replaces: None,
         };
@@ -540,14 +548,27 @@ impl Coinbase {
                     return Err("Coinbase placement batch must contain 1 to 100 orders".into());
                 }
                 let mut ids = HashSet::new();
-                for opts in &orders {
+                let mut elements = Vec::with_capacity(orders.len());
+                for (index, opts) in orders.iter().enumerate() {
                     if let Some(id) = &opts.client_order_id
                         && !ids.insert(id)
                     {
                         return Err("Coinbase batch contains a duplicate caller ID".into());
                     }
-                    job.steps.push_back(self.prepare_create(cx, opts, None)?);
+                    let step = self.prepare_create(cx, opts, None)?;
+                    let Step::Place { payload, .. } = &step else {
+                        unreachable!("create preparation returns a placement");
+                    };
+                    elements.push(Element {
+                        index,
+                        client_order_id: Some(payload.client_order_id.clone()),
+                    });
+                    job.steps.push_back(step);
                 }
+                job.placement_report = Some(PlacementReport {
+                    plan: WritePlan::new(elements),
+                    next_index: 0,
+                });
                 job.collect = true;
             }
             Command::CancelOrders { ids, .. } => job.steps = cancel_steps(ids)?,
@@ -1412,9 +1433,60 @@ impl Coinbase {
             .as_ref()
             .is_some_and(|job| job.command == command)
         {
-            let job = self.trading.active.take().expect("active job");
+            let mut job = self.trading.active.take().expect("active job");
             self.trading.waiting = false;
             let mut error: VenueError = error.into();
+            if let Some(report) = &mut job.placement_report {
+                let rows = report.plan.outcomes();
+                let uncertain =
+                    !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent));
+                let result = if uncertain {
+                    error.venue_message = Some(error.message.clone().into_boxed_str());
+                    error.message = UNKNOWN_TEXT.into();
+                    error.outcome = Some(Outcome::Unknown);
+                    cx.event(
+                        Level::Warn,
+                        "order.outcome_unknown",
+                        UNKNOWN_TEXT,
+                        vec![
+                            ("command", command.into()),
+                            (
+                                "elementIndex",
+                                u32::try_from(report.next_index)
+                                    .expect("bounded batch")
+                                    .into(),
+                            ),
+                            (
+                                "clientOrderId",
+                                rows[report.next_index]
+                                    .element
+                                    .client_order_id
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .into(),
+                            ),
+                            (
+                                "placedCount",
+                                u32::try_from(job.ids.len()).expect("bounded batch").into(),
+                            ),
+                        ],
+                    );
+                    ElementResult::Unknown {
+                        error: Box::new(error.clone()),
+                    }
+                } else {
+                    ElementResult::NotSent {
+                        error: Some(Box::new(error.clone())),
+                    }
+                };
+                report
+                    .plan
+                    .record(report.next_index, result)
+                    .expect("prepared placement element");
+                error = report
+                    .plan
+                    .attach(error.partial(&job.ids, rows.len(), report.next_index));
+            }
             // The replacement was the last step, so an empty queue means it was sent.
             if job.effective
                 && job.ids.is_empty()
@@ -1542,6 +1614,18 @@ impl Coinbase {
                     job.effective = true;
                 }
                 if let Some(id) = id {
+                    if let Some(report) = &mut job.placement_report {
+                        report
+                            .plan
+                            .record(
+                                report.next_index,
+                                ElementResult::Placed {
+                                    order_ids: vec![id.clone()],
+                                },
+                            )
+                            .expect("prepared placement element");
+                        report.next_index += 1;
+                    }
                     job.ids.push(id);
                 }
                 self.trading_next(cx);
