@@ -75,6 +75,15 @@ It does not split or cap that size. A native `invalidSize` reply remains a
 definite venue refusal, as in TS `:514-529`.
 KNOWN-ISSUE: TS sends above-max; venue refuses.
 
+## Futures account history
+
+Kraken's [account-log schema](https://docs.kraken.com/api-reference/account-history/get-account-log)
+allows a null `contract` on account-level entries. Null, missing and empty
+contracts retain the existing empty-symbol income mapping, including transfers
+derived from reported old/new balances. They do not fail the streamed history
+page or discard later trade rows. Nonnullable ledger identity, asset, date and
+description fields remain strict; no economic values are invented for nulls.
+
 ## Kraken Spot hosted signing
 
 Kraken Spot remains local-only, with hosted/remote signing deferred and the existing
