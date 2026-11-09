@@ -1,4 +1,5 @@
 //! Single-use handovers on an authenticated hosted connection.
+use crate::delegated_memory::{CandidateCopy, DelegatedMemory};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use hpke::{
     Deserializable, OpModeR, aead::ChaCha20Poly1305, kdf::HkdfSha256, kem::X25519HkdfSha256,
@@ -108,6 +109,8 @@ impl Handovers {
         {
             return Err(Refused);
         }
+        // Callers resolve the Bybit opt-in before issuing an offer.
+        DelegatedMemory::prepare("bybit", true).map_err(|_| Refused)?;
         let mut private = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(private.as_mut()).map_err(|_| Refused)?;
         let mut id = [0u8; 16];
@@ -177,7 +180,7 @@ impl Opening {
         }
         let aad = format!("{}|{}|{exchange}|{key}", self.attempt.id, self.boot_id);
         let mut plaintext = open(&self.attempt.private[..], INFO, aad.as_bytes(), sealed)?;
-        let fields = plaintext::parse(&mut plaintext)?;
+        let fields = plaintext::parse(plaintext.as_bytes_mut())?;
         if fields.key.as_str() != key || key.is_empty() || fields.secret.is_empty() {
             return Err(Refused);
         }
@@ -190,12 +193,13 @@ fn open(
     info: &[u8],
     aad: &[u8],
     sealed: &Sealed,
-) -> Result<Zeroizing<Vec<u8>>, Refused> {
+) -> Result<CandidateCopy, Refused> {
     use hpke::aead::AeadTag;
     type Kem = X25519HkdfSha256;
     if sealed.enc.len() > 44 || sealed.ciphertext.len() > MAX_CIPHERTEXT {
         return Err(Refused);
     }
+    let memory = DelegatedMemory::prepare("bybit", true).map_err(|_| Refused)?;
     let enc = STANDARD.decode(&sealed.enc).map_err(|_| Refused)?;
     let enc = <Kem as hpke::Kem>::EncappedKey::from_bytes(&enc).map_err(|_| Refused)?;
     let private = <Kem as hpke::Kem>::PrivateKey::from_bytes(private).map_err(|_| Refused)?;
@@ -206,14 +210,20 @@ fn open(
         info,
     )
     .map_err(|_| Refused)?;
-    let mut plaintext = Zeroizing::new(STANDARD.decode(&sealed.ciphertext).map_err(|_| Refused)?);
-    let tag_start = plaintext.len().checked_sub(16).ok_or(Refused)?;
-    let tag =
-        AeadTag::<ChaCha20Poly1305>::from_bytes(&plaintext[tag_start..]).map_err(|_| Refused)?;
-    plaintext.truncate(tag_start);
-    receiver
-        .open_in_place_detached(plaintext.as_mut_slice(), aad, &tag)
+    let mut plaintext = memory
+        .zeroed(base64::decoded_len_estimate(sealed.ciphertext.len()))
         .map_err(|_| Refused)?;
+    let decoded = STANDARD
+        .decode_slice(&sealed.ciphertext, plaintext.as_bytes_mut())
+        .map_err(|_| Refused)?;
+    let tag_start = decoded.checked_sub(16).ok_or(Refused)?;
+    let bytes = plaintext.as_bytes_mut().get_mut(..decoded).ok_or(Refused)?;
+    let (body, tag) = bytes.split_at_mut(tag_start);
+    let tag = AeadTag::<ChaCha20Poly1305>::from_bytes(tag).map_err(|_| Refused)?;
+    receiver
+        .open_in_place_detached(body, aad, &tag)
+        .map_err(|_| Refused)?;
+    plaintext.truncate(tag_start);
     Ok(plaintext)
 }
 
@@ -368,7 +378,7 @@ pub(crate) mod tests {
                 &sealed
             )
             .unwrap()
-            .as_slice()
+            .as_bytes()
                 == hex(first["pt"].as_str().unwrap())
         );
     }

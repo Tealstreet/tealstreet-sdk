@@ -53,7 +53,8 @@ surfaces on the first call. Failed native startup is retried with a fresh accoun
 concurrent calls share the replacement startup. Keep shutdown reading
 `instance.exchange` at call time, since destructuring would retain the failed
 account. Rust accounts admit `EXCHANGE_SIGNER_HEADER` only for aliases whose
-shared construction policy enables PayloadSigner. Their trusted setup installs
+shared construction policy enables PayloadSigner and whose provider supports
+HMAC-SHA256. Coinbase JWS signers cannot use this proxy. Their trusted setup installs
 the existing JS callback as the injected provider and retains REST-only private
 feeds; generic options contain neither callback nor raw credentials. Other Rust
 families still reject it before issuing requests. Provider callbacks remain

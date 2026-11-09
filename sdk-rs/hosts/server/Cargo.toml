@@ -39,6 +39,9 @@ hpke = { version = "=0.13.0", default-features = false, features = ["std", "x255
 x25519-dalek = { version = "=2.0.1", default-features = false, features = ["static_secrets", "zeroize"] }
 zeroize.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.191"
+
 [features]
 # Test accounts and unsigned proxy tokens for the integration tests; never in the binary.
 test-support = ["safe-cex-engine/test-support"]

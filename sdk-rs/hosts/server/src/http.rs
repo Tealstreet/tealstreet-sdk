@@ -679,7 +679,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "edgePath": "/account",
             "rawPath": "/",
             "auth": "Tealstreet proxy JWT in the proxyToken query parameter",
-            "privateSigning": "browser-delegated remote signer; private keys never enter exchange-server",
+            "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,

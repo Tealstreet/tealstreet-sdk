@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "backpack")]
 mod backpack;
+#[cfg(feature = "coinbase")]
+mod coinbase;
 
 #[cfg(feature = "kraken")]
 mod kraken;
@@ -19,6 +21,9 @@ mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "coinbase")]
+    #[serde(rename = "coinbase-jws")]
+    CoinbaseJws,
     #[cfg(feature = "kraken")]
     #[serde(rename = "kraken-sha512")]
     KrakenSha512,
@@ -166,6 +171,8 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "coinbase")]
+    Coinbase,
     #[cfg(feature = "kraken")]
     Kraken {
         batch: bool,
@@ -327,6 +334,7 @@ fn family(venue: &str) -> bool {
         || bitget
         || (cfg!(feature = "bingx") && matches!(venue, "bingx" | "bingxspot"))
         || (cfg!(feature = "blofin") && venue == "blofin")
+        || (cfg!(feature = "coinbase") && matches!(venue, "coinbase" | "coinbasespot"))
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
         || (cfg!(feature = "kraken") && venue == "kraken")
@@ -334,6 +342,7 @@ fn family(venue: &str) -> bool {
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "woo") && venue == "woo")
+        || (cfg!(feature = "bitrue") && venue == "bitrue")
         || (cfg!(feature = "cryptocom") && venue == "cryptocom")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
@@ -343,6 +352,27 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "coinbase")]
+    {
+        if matches!(venue, "coinbase" | "coinbasespot") {
+            return match input {
+                Input::WsAuth {
+                    to_sign,
+                    output_format: OutputFormat::CoinbaseJws,
+                } => coinbase::prepare(identities, to_sign),
+                _ => Err(SignError::Unsupported),
+            };
+        }
+        if matches!(
+            &input,
+            Input::WsAuth {
+                output_format: OutputFormat::CoinbaseJws,
+                ..
+            }
+        ) {
+            return Err(SignError::Unsupported);
+        }
+    }
     #[cfg(feature = "kraken")]
     if venue == "kraken" {
         match input {
@@ -572,6 +602,10 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "coinbase")]
+    if let OutputKind::Coinbase = kind {
+        return coinbase::finish(result);
+    }
     #[cfg(feature = "kraken")]
     if let OutputKind::Kraken { batch } = kind {
         return kraken::finish(batch, result);
@@ -628,6 +662,10 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "coinbase")]
+        OutputKind::Coinbase | OutputKind::WsAuth(OutputFormat::CoinbaseJws) => {
+            return Err(SignError::Unsupported);
+        }
         #[cfg(feature = "kraken")]
         OutputKind::Kraken { .. } => unreachable!(),
         #[cfg(feature = "kraken")]
@@ -1087,6 +1125,8 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "coinbase")]
+                    OutputFormat::CoinbaseJws => "coinbase-jws",
                     #[cfg(feature = "kraken")]
                     OutputFormat::KrakenSha512 => "kraken-sha512",
                     #[cfg(feature = "kraken")]
