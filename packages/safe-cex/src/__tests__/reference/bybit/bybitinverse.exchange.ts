@@ -57,7 +57,7 @@ import { BaseExchange } from '../../../exchanges/base';
 import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './bybit.api';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange, type BybitIncomeContext } from './bybit.income';
-import { mapBybitClosedPnl } from '../../../exchanges/bybit/bybit.closed-pnl';
+import { mapBybitClosedPnl } from './bybit.closed-pnl';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
 import {
   BYBIT_RATE_LIMIT_TABLE as BYBITINVERSE_RATE_LIMIT_TABLE,

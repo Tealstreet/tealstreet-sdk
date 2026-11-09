@@ -162,6 +162,7 @@ const FORWARDED_WHOLE = new Set<string>([
   'fetchStpMode',
   'changeStpMode',
   'fetchOrderBook',
+  'fetchClosedPnl',
   // Answer from rails when they can; this record makes them read the venue, through the worker.
   'fetchLeverageForSymbol',
   'fetchSymbolMaxLeverage',

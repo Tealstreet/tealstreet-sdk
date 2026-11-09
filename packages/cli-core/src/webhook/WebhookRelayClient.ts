@@ -98,6 +98,7 @@ const unrefTimer = (timer: ReturnType<typeof setTimeout>) => {
 export class WebhookRelayClient {
   private socket: RelaySocket | null = null;
   private stopped = false;
+  private generation = 0;
   private reconnectMs = RECONNECT_BASE_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private currentToken: string | null = null;
@@ -120,18 +121,28 @@ export class WebhookRelayClient {
   constructor(private readonly opts: WebhookRelayOptions) {}
 
   start(): void {
+    this.generation++;
     this.stopped = false;
     this.connect();
   }
 
   stop(): void {
     this.stopped = true;
+    this.generation++;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     if (this.registerRetryTimer) clearTimeout(this.registerRetryTimer);
     this.registerRetryTimer = null;
     const socket = this.socket;
     this.socket = null;
+    this.registered = false;
+    this.claimedListenerId = null;
+    this.currentToken = null;
+    this.failAllWaiters();
+    this.unreportedResults.clear();
+    this.seen = [];
+    this.seenSet.clear();
+    this.confirming.clear();
     socket?.close();
     this.connection = 'off';
   }
@@ -150,6 +161,7 @@ export class WebhookRelayClient {
 
   private connect(): void {
     if (this.stopped) return;
+    const generation = this.generation;
     // A synchronous token (CLI config) connects synchronously; an async one
     // (the web app's token fetch) connects when it resolves.
     let pending: string | null | Promise<string | null>;
@@ -160,16 +172,16 @@ export class WebhookRelayClient {
     }
     if (pending instanceof Promise) {
       pending.then(
-        (token) => this.connectWith(token),
-        () => this.connectWith(null),
+        (token) => this.connectWith(token, generation),
+        () => this.connectWith(null, generation),
       );
       return;
     }
-    this.connectWith(pending);
+    this.connectWith(pending, generation);
   }
 
-  private connectWith(token: string | null): void {
-    if (this.stopped) return;
+  private connectWith(token: string | null, generation: number): void {
+    if (this.stopped || generation !== this.generation) return;
     if (!token || token === this.rejectedToken) {
       this.connection = 'unauthorized';
       this.scheduleReconnect(SIGNED_OUT_RETRY_MS);
@@ -180,11 +192,16 @@ export class WebhookRelayClient {
     const socket = create(this.opts.url ?? DEFAULT_NEWS_WS_URL);
     this.socket = socket;
     this.connection = 'connecting';
-    socket.onopen = () => this.sendFrame({ type: 'rpc.auth', token, source: this.opts.kind });
-    socket.onmessage = (event) => this.onMessage(event.data);
+    const isCurrent = () => !this.stopped && generation === this.generation && this.socket === socket;
+    socket.onopen = () => {
+      if (isCurrent()) this.sendFrame({ type: 'rpc.auth', token, source: this.opts.kind });
+    };
+    socket.onmessage = (event) => {
+      if (isCurrent()) this.onMessage(event.data);
+    };
     socket.onerror = () => {};
     socket.onclose = () => {
-      if (this.socket !== socket) return;
+      if (!isCurrent()) return;
       this.socket = null;
       this.failAllWaiters();
       this.registered = false;
@@ -201,8 +218,10 @@ export class WebhookRelayClient {
     if (this.stopped || this.reconnectTimer) return;
     const delay = fixedDelay ?? this.reconnectMs;
     if (fixedDelay === undefined) this.reconnectMs = Math.min(this.reconnectMs * 2, RECONNECT_MAX_MS);
+    const generation = this.generation;
     this.reconnectTimer = unrefTimer(
       setTimeout(() => {
+        if (this.stopped || generation !== this.generation) return;
         this.reconnectTimer = null;
         this.connect();
       }, delay),
@@ -365,8 +384,10 @@ export class WebhookRelayClient {
 
   private scheduleRegisterRetry(): void {
     if (this.registerRetryTimer || this.stopped) return;
+    const generation = this.generation;
     this.registerRetryTimer = unrefTimer(
       setTimeout(() => {
+        if (this.stopped || generation !== this.generation) return;
         this.registerRetryTimer = null;
         if (this.connection === 'connected' && !this.registered) this.register();
       }, REGISTER_RETRY_MS),
@@ -384,9 +405,11 @@ export class WebhookRelayClient {
   }
 
   private awaitReceivedAck(deliveryId: string): Promise<boolean> {
+    const generation = this.generation;
     return new Promise((resolve) => {
       const timer = unrefTimer(
         setTimeout(() => {
+          if (this.stopped || generation !== this.generation) return;
           this.ackWaiters.delete(deliveryId);
           resolve(false);
         }, ACK_TIMEOUT_MS),
@@ -396,6 +419,8 @@ export class WebhookRelayClient {
   }
 
   private async onDeliver(deliveryId: string, body: string, expiresAt?: number): Promise<void> {
+    const generation = this.generation;
+    const isCurrent = () => !this.stopped && generation === this.generation;
     // A replay and a live NOTIFY can both deliver one alert; the ack gate
     // would refuse the second anyway, this just skips the round trip. Only an
     // ACCEPTED alert is remembered: one whose confirmation was lost must be
@@ -415,7 +440,14 @@ export class WebhookRelayClient {
       }
       accepted = await ack;
     } finally {
-      this.confirming.delete(deliveryId);
+      if (generation === this.generation) this.confirming.delete(deliveryId);
+    }
+    if (!isCurrent()) {
+      if (accepted)
+        this.opts.notice.warn(
+          'Webhooks: login changed or listener stopped; cancelled an alert from the previous session.',
+        );
+      return;
     }
     if (!accepted) {
       this.opts.notice.warn(`Webhooks: skipped an alert the relay did not confirm (${deliveryId.slice(0, 8)}).`);
@@ -426,6 +458,7 @@ export class WebhookRelayClient {
     let output = '';
     let printedError = false;
     const printSink = (kind: WebhookPrintKind, text: string) => {
+      if (!isCurrent()) return;
       if (kind === 'error') printedError = true;
       if (output.length < MAX_OUTPUT_CHARS) output += `${text}\n`;
       this.opts.mirror?.(kind, text);
@@ -438,6 +471,7 @@ export class WebhookRelayClient {
       output += `${threw}\n`;
     }
     const status = threw || printedError ? 'failed' : 'done';
+    if (!isCurrent()) return;
     const recorded = output.slice(0, MAX_OUTPUT_CHARS);
     // Kept until the relay acknowledges it, and re-sent on the next register,
     // so a socket lost during the run does not leave the row `received`.
@@ -464,12 +498,14 @@ export class WebhookRelayClient {
   }
 
   requestState(): Promise<WebhookRelayState | null> {
+    const generation = this.generation;
     return new Promise((resolve) => {
       if (!this.sendFrame({ type: 'webhook.state' })) return resolve(null);
       const waiter: Pending<WebhookRelayState | null> = {
         resolve,
         timer: unrefTimer(
           setTimeout(() => {
+            if (this.stopped || generation !== this.generation) return;
             this.stateWaiters = this.stateWaiters.filter((w) => w !== waiter);
             resolve(null);
           }, REQUEST_TIMEOUT_MS),
@@ -480,12 +516,14 @@ export class WebhookRelayClient {
   }
 
   private requestClaim(type: 'webhook.claim' | 'webhook.release'): Promise<string> {
+    const generation = this.generation;
     return new Promise((resolve) => {
       if (!this.sendFrame({ type })) return resolve('disconnected');
       const waiter: Pending<string> = {
         resolve,
         timer: unrefTimer(
           setTimeout(() => {
+            if (this.stopped || generation !== this.generation) return;
             this.claimWaiters = this.claimWaiters.filter((w) => w !== waiter);
             resolve('timeout');
           }, REQUEST_TIMEOUT_MS),

@@ -1,4 +1,4 @@
-import { getStorageDir, onStorageOwnerChange } from './storage-context';
+import { getStorageDir, onStorageOwnerChange, assertStorageSession } from './storage-context';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'crypto';
 import {
@@ -159,6 +159,7 @@ function ensureDir(): void {
 
 /** Whether the audit log is currently on. Loaded once from disk, then cached. */
 export function isAuditEnabled(): boolean {
+  assertStorageSession();
   if (enabledCache !== undefined) return enabledCache;
   let enabled = false;
   if (existsSync(AUDIT_FLAG_FILE())) {
@@ -174,6 +175,7 @@ export function isAuditEnabled(): boolean {
 }
 
 export function setAuditEnabled(on: boolean): void {
+  assertStorageSession();
   enabledCache = !!on;
   try {
     ensureDir();

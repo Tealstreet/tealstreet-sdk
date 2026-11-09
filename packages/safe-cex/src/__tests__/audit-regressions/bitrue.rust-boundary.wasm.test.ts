@@ -1,16 +1,9 @@
-import { vi } from 'vitest';
-
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { OrderFillEvent } from '../../types';
 
 import { createHmac } from 'node:crypto';
 
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
@@ -18,6 +11,11 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType } from '../../types';
 import { prepareRecordedHttp } from '../support/managedHttp';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 it('preserves Bitrue private IDs, fill units, leverage and exact signed writes across the SDK wasm boundary', async () => {
   const symbol = 'E-BTC-USDT';
@@ -149,7 +147,8 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     expect(store.marketsBySymbol[symbol].limits.leverage.max).toBe(125);
     expect(main.store.marketsBySymbol[symbol].limits.leverage.max).toBe(125);
     expect(store.fetchedLeverage[symbol]?.buyLeverage).toBe(25);
-    const bracketRequest = requests.find((request) => new URL(request.url).pathname.endsWith('/leverageBracket'))!;
+    const bracketRequest = requests.find((request) => new URL(request.url).pathname.endsWith('/leverageBracket'));
+    if (bracketRequest === undefined) throw new Error('Expected the leverage bracket request');
     expect(bracketRequest.method).toBe('GET');
     expect(bracketRequest.url).toBe(`https://fapi.bitrue.com/fapi/v2/leverageBracket?contractName=${symbol}`);
     // Prove this goes through the engine cache, not BaseExchange's JS store.
@@ -170,7 +169,8 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
       found: false,
       definitive: false,
     });
-    const lookupRequest = requests.filter((request) => new URL(request.url).pathname.endsWith('/openOrders')).at(-1)!;
+    const lookupRequest = requests.filter((request) => new URL(request.url).pathname.endsWith('/openOrders')).at(-1);
+    if (lookupRequest === undefined) throw new Error('Expected the open orders request');
     expect(lookupRequest.url).toBe(`https://fapi.bitrue.com/fapi/v2/openOrders?contractName=${symbol}`);
     expect(lookupRequest.method).toBe('GET');
     expect(lookupRequest.headers['X-CH-APIKEY']).toBe('replay-key');
@@ -196,7 +196,9 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     );
     expect(writes).toHaveLength(2);
     expect(writes[0].body).toBe(writes[1].body);
-    expect(JSON.parse(writes[0].body!)).toMatchObject({
+    const placementBody = writes[0].body;
+    if (placementBody === undefined) throw new Error('Expected the placement body');
+    expect(JSON.parse(placementBody)).toMatchObject({
       clientOrderId: 'caller / punctuation',
       volume: '20',
       leverage: 25,
@@ -227,7 +229,9 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     // The replay and late event overlap execution ranges already delivered.
     const update = (nativeFilled: number, lastNativeFilled: number, executionPrice: number) => {
       cumulative = Math.max(cumulative, nativeFilled * 10);
-      privateSocket!.onMessage(
+      const socket = privateSocket;
+      if (socket === undefined) throw new Error('Expected the private socket');
+      socket.onMessage(
         `{"e":"ORDER_TRADE_UPDATE","E":${++now},"o":{"s":"E_BTCUSDT","i":${orderId},"S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","q":"100","z":"${nativeFilled}","l":"${lastNativeFilled}","p":"100","ap":"102","L":"${executionPrice}"}}`,
       );
     };

@@ -650,6 +650,19 @@ Use it instead of class identity or text. Unknown/pending/network/malformed
 checks stay ordinary failures. The command error allowlist retains only validated
 approval fields; the old class export stays available without prototype repair.
 
+## Native reported closed-PnL output
+
+`fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
+`history_output`. Bybit inverse sizes, OKX contract conversion, fee signs,
+account labels and newest-close ordering are native output policy. The four TS
+closed-PnL mappers live only under test references. `fetchClosedPositions`
+remains the raw journal contract; it is never a fallback for reported PnL.
+The capability-installed method forwards whole to the worker when bridged,
+including after capability adoption; it never commands a mirror-local engine.
+The Bitunix/Blofin income helpers and Bybit inverse helpers also live only in
+`__tests__/reference`; their remaining callers are replay oracles and tests.
+The production venue-file inventory removes them with the runtime imports.
+
 ## Reported closed-PnL read failures
 
 Rust `fetchClosedPnl` propagates the engine's typed read error, including through
@@ -1999,3 +2012,34 @@ starts no metadata command. UI callers also validate their account market bindin
 Bybit native receive-window corrections emit bybit.clock.corrected with numeric
 offsetMs only. Hosts without an explicit clock-advice listener keep the normal
 info log; CLI listeners replace it with one clock-sync warning per session.
+
+## Position type ownership (P1)
+
+`src/generated/Position.ts` and its enum/Greeks dependencies are generated from
+`sdk-rs/safe-cex-types`; `src/types.ts` imports/re-exports them for the existing
+public API. Run `corepack yarn types:generate`, then
+`corepack yarn generate:script-types`; never edit generated declarations or the
+script bundle. The Position-only compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/position-contract.cjs`.
+
+The native engine owns Position display normalization and native sizing extras.
+Positions use SCXF section revision 2 with eleven numeric columns and required
+ID/symbol references; the host refuses older Position sections. Deploy matching
+native/WASM and SDK artifacts together. Other section revisions are unchanged.
+Live position snapshots are authoritative; omitted rows are removed rather than
+retained as fabricated empty positions. NX must land its corresponding consumer
+and artifact changes before this cutover. See `docs/plans/TYPE_OWNERSHIP_P1.md`.
+
+Position enum-word bits 24 and 25 declare the presence of native contracts and
+native PnL columns. A present non-finite native size is rejected, never treated
+as absent (which could select an unsafe base-unit fallback).
+
+## Generated Store contracts (P1)
+
+StoreData, StoreOptions, StoreDataLoaded, StoreUpdateIds, FetchedLeverage and
+DisplayedMargin come from `sdk-rs/safe-cex-types/src/store_model.rs`. The scoped
+generator emits their modules and the initial Store value; never hand-edit them.
+Other models and host-owned capabilities retain their owning modules. Regenerate
+with `corepack yarn types:generate`; the scoped compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/store-contract.cjs`.
+Opaque legacy config members and userData are unknown and require narrowing.

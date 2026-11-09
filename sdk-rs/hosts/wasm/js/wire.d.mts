@@ -1,3 +1,6 @@
+import type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
+export type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
+export type { CoinBalance } from '../../../../packages/safe-cex/src/generated/CoinBalance.js';
 /** Reader for the engine's flush frame. See wire.mjs and docs/plans/RUST_REWRITE.md. */
 export const SECTION: {
   STRINGS: 1;
@@ -90,7 +93,7 @@ export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 
 export type OrderColumn = (typeof ORDER_COLUMNS)[number];
 export const POSITION_COLUMNS: readonly [
   'entryPrice', 'notional', 'leverage', 'unrealizedPnl', 'realizedPnl',
-  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate',
+  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate', 'contractsNative', 'unrealizedPnlNative',
 ];
 export type PositionColumn = (typeof POSITION_COLUMNS)[number];
 
@@ -221,18 +224,20 @@ export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Arra
   clientOrderId(i: number): string | undefined;
   parentId(i: number): string | undefined;
 };
-export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array; id(i: number): string | undefined; symbol?(i: number): string | undefined } & Columns<PositionColumn>;
-export interface CoinBalance { base: string; amount: number; notional: number }
-export interface CurrencyBalance {
-  used: number;
-  free: number;
-  total: number;
-  upnl: number;
-}
-export interface Balance extends CurrencyBalance {
-  coins?: Record<string, CoinBalance>;
-  currencies?: Record<string, CurrencyBalance>;
-}
+export type PositionTable = {
+  count: number;
+  market: Uint32Array;
+  enums: Uint32Array;
+  id(i: number): string;
+  symbol(i: number): string;
+  liquidationPrice: Array<number | null>;
+  realizedPnl: Array<number | undefined>;
+  marginSize: Array<number | undefined>;
+  lastUpdate: Array<number | undefined>;
+  contractsNative: Array<number | undefined>;
+  unrealizedPnlNative: Array<number | undefined>;
+} & Columns<'entryPrice' | 'notional' | 'leverage' | 'unrealizedPnl' | 'contracts'>;
+export type CurrencyBalance = { -readonly [K in 'used' | 'free' | 'total' | 'upnl']: Balance[K] };
 export interface Status {
   loaded: number;
   hedged: boolean;
