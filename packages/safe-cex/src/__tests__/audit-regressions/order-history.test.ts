@@ -18,7 +18,9 @@ import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 /** Shapes captured live: binance sheet row 2, blofin row 41. */
 const binanceOrder = (over: Record<string, any> = {}) => ({
   orderId: 101205954323,
-  symbol: 'DOGEUSDT',
+  symbol: 'DOGEUSDT', id: 'DOGE-USDT-SWAP', base: 'DOGE', active: true,
+  precision: { amount: 1, price: 0.00001 },
+  limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
   status: 'FILLED',
   price: '0.0717',
   avgPrice: '0.07169',
@@ -114,13 +116,15 @@ describe('blofin historical orders', () => {
 });
 
 /** OKX sheet row 13. One DOGE-USDT-SWAP contract is 1000 DOGE. */
-const okxMarket = {
-  symbol: 'DOGEUSDT',
+const okxMarket: Market = {
+  symbol: 'DOGEUSDT', id: 'DOGE-USDT-SWAP', base: 'DOGE', active: true,
+  precision: { amount: 1, price: 0.00001 },
+  limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
   contractSize: 1000,
   isInverse: false,
   quote: 'USDT',
   info: { ctValCcy: 'DOGE' },
-} as unknown as Market;
+};
 
 const okxToBase = (contracts: number, market: Market) => contracts * (market.contractSize || 1);
 

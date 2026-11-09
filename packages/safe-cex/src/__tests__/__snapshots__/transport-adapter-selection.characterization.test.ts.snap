@@ -525,6 +525,23 @@ exports[`transport adapter selection per exchange > bingx 1`] = `
 }
 `;
 
+exports[`transport adapter selection per exchange > bingxspot 1`] = `
+{
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
+}
+`;
+
 exports[`transport adapter selection per exchange > bitget 1`] = `
 {
   "private direct": {

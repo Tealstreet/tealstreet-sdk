@@ -78,3 +78,8 @@ test('engine.beta.web.mjs is generated from the table and imports only beta fami
   const imported = [...loader.matchAll(/import\('\.\.\/pkg\/web\/([a-z]+)\/safe_cex_wasm\.js'\)/g)].map((match) => match[1]);
   assert.deepEqual(imported, betaVenueFamilies);
 });
+
+test('BingX Spot belongs to the native family but stays outside beta admission until smoke', () => {
+  assert.equal(venueFamily('bingxspot'), 'bingx');
+  assert.throws(() => betaVenueFamily('bingxspot'), BetaVenueUnavailableError);
+});

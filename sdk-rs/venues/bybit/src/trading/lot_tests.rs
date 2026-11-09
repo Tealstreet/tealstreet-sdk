@@ -65,16 +65,23 @@ fn check_lots(variant: Variant, single: bool) {
                     opts.take_profit = take_profit;
                     opts.stop_loss = stop_loss;
                     let lots = venue.format_lots(cx, &opts).unwrap();
-                    assert_eq!(lots.len(), 3);
+                    assert_eq!(lots.len(), if variant.is_spot() { 4 } else { 3 });
                     for (index, lot) in lots.into_iter().enumerate() {
                         let body = if single { lot.single } else { lot.item }.finish();
                         let sent: CreateLot = serde_json::from_str(&body).unwrap();
-                        assert_eq!(sent.qty, if index == 2 { "1" } else { "2" });
+                        assert_eq!(
+                            sent.qty,
+                            if variant.is_spot() || index == 2 {
+                                "1"
+                            } else {
+                                "2"
+                            }
+                        );
                         assert_eq!(
                             sent.category.as_deref(),
                             single.then_some(venue.category_for(symbol).as_str()),
                         );
-                        let protected = variant.is_spot() || index == 0;
+                        let protected = index == 0 || (variant.is_spot() && index == 3);
                         assert_eq!(
                             sent.take_profit,
                             take_profit.filter(|_| protected).map(number),
@@ -87,11 +94,13 @@ fn check_lots(variant: Variant, single: bool) {
                         );
                         assert_eq!(
                             sent.tp_order_type.as_deref(),
-                            (variant.is_spot() && take_profit.is_some()).then_some("Market")
+                            (variant.is_spot() && protected && take_profit.is_some())
+                                .then_some("Market")
                         );
                         assert_eq!(
                             sent.sl_order_type.as_deref(),
-                            (variant.is_spot() && stop_loss.is_some()).then_some("Market")
+                            (variant.is_spot() && protected && stop_loss.is_some())
+                                .then_some("Market")
                         );
                     }
                 },
@@ -102,12 +111,12 @@ fn check_lots(variant: Variant, single: bool) {
 }
 
 #[test]
-fn split_spot_limit_keeps_protection_in_every_single_body() {
+fn split_spot_limit_protects_first_main_and_remainder_single_bodies() {
     check_lots(Variant::Spot, true);
 }
 
 #[test]
-fn split_spot_limit_keeps_protection_in_every_batch_body() {
+fn split_spot_limit_protects_first_main_and_remainder_batch_bodies() {
     check_lots(Variant::Spot, false);
 }
 

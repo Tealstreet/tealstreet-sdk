@@ -2286,14 +2286,12 @@ pub fn build_with_signer_in_context<T: Visit>(
             {
                 return Err(invalid("Engine signing provider is required"));
             }
-            let mut engine = Engine::new(
-                Bingx::new(BingxOptions {
-                    read_credentials: identities.secondary,
-                    public_data_only: options.public_data_only,
-                    credentials: identities.primary,
-                }),
-                entropy,
-            )?;
+            let venue_options = BingxOptions {
+                read_credentials: identities.secondary,
+                public_data_only: options.public_data_only,
+                credentials: identities.primary,
+            };
+            let mut engine = Engine::new(Bingx::new(venue_options), entropy)?;
             engine.set_signer(signer)?;
             finish(visitor, policy, startup, engine)
         }
@@ -2684,6 +2682,7 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     pub lighter_signer_provider: Option<String>,
     #[cfg(any(
+        feature = "bingx",
         feature = "grvt",
         feature = "coinbase",
         feature = "paradex",

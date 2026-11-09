@@ -393,7 +393,11 @@ per-user ownership within 10 s; socket reconnects do not reopen missing authorit
 
 After enforcement, each account holds generation-bound authority. A fresh newer
 assertion can authorize a rebuilt account, but cannot revive an old account's
-queued work. Missing/expired ownership rejects new account, order and algo starts
+queued work. Init captures this authority before reconnect pacing and carries it
+through the engine lane and final IO guard. A newer same-name init with different
+settings supersedes an unfinished build; publication checks both the captured
+authority and init incarnation, so late results cannot replace the current account.
+Missing/expired ownership rejects new account, order and algo starts
 with the typed `ServerDraining` refusal (`venueUnavailable`, `notSent`). The final
 native HTTP handoff and every WebSocket send also check authority, including
 prepared HTTP, messages queued behind a socket handshake, and algo continuations.

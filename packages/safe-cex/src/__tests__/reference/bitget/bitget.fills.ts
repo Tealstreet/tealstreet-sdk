@@ -219,7 +219,7 @@ export const mapBitgetFill = (row: Record<string, any>, deps: BitgetFillDeps): E
     realizedPnl: num(row?.profit),
     positionSide: leg.positionSide,
     maker: String(row?.tradeScope ?? '').toLowerCase() === 'maker',
-  } as Execution;
+  };
 };
 
 export const mapBitgetFills = (rows: Array<Record<string, any>>, deps: BitgetFillDeps): Execution[] => {
@@ -262,7 +262,7 @@ export const mapBitgetUtaFill = (row: Record<string, any>, deps: BitgetFillDeps)
     realizedPnl: optionalNum(row?.execPnl),
     positionSide: leg.positionSide,
     maker: row?.tradeScope ? String(row.tradeScope).toLowerCase() === 'maker' : undefined,
-  } as Execution;
+  };
 };
 
 export const mapBitgetUtaFills = (rows: Array<Record<string, any>>, deps: BitgetFillDeps): Execution[] => {

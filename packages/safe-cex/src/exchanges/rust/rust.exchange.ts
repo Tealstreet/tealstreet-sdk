@@ -97,11 +97,7 @@ import {
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
-import { mapBitunixClosedPosition } from '../bitunix/bitunix.income';
-import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
-import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
-import { isBybitInverseSymbol } from '../bybit/bybit.inverse';
 import {
   HYROTRADER_PROD_URL,
   HYROTRADER_PROD_WS_URL,
@@ -117,7 +113,6 @@ import {
 import { isKeylessRemoteSigned } from '../hostedSigningVenues';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
-import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
@@ -133,6 +128,7 @@ import {
   deriveSignerSetupPolicy,
 } from './construction';
 import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
+import { snapshotDelegatedSigningOptions, withoutDelegatedSigningSnapshot } from './delegatedSigningSnapshot';
 import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
@@ -853,8 +849,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    options = snapshotDelegatedSigningOptions(exchangeName, options);
     assertBetaAccount(exchangeName, options);
-    const accountOptions = options;
+    const accountOptions = withoutDelegatedSigningSnapshot(options);
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     // Coinbase drops its read egress with the key, as it always has (secondaryReadKeys.ts).
     if (
@@ -953,6 +950,7 @@ export class RustEngineExchange extends BaseExchange {
       const message = 'This Rust account has no REST-only PayloadSigner lifecycle';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
+    options = withoutDelegatedSigningSnapshot(options);
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };
@@ -1903,8 +1901,17 @@ export class RustEngineExchange extends BaseExchange {
     // Native account reads start an engine, so a mirror asks the worker's instead.
     // Journals are not forwarded: a mirror folds them itself from forwarded raw reads,
     // so the hosted server, which has no TS mappers, only serves those reads.
-    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS, ...RUST_FORWARDED_METHODS];
-    type Method = (typeof methods)[number];
+    type Method =
+      | (typeof WORKER_FORWARDED_METHODS)[number]
+      | (typeof NATIVE_ACCOUNT_READS)[number]
+      | (typeof RUST_FORWARDED_METHODS)[number]
+      | 'fetchClosedPnl';
+    const methods: Method[] = [
+      ...WORKER_FORWARDED_METHODS,
+      ...NATIVE_ACCOUNT_READS,
+      ...RUST_FORWARDED_METHODS,
+      'fetchClosedPnl',
+    ];
     type Args = Pick<WorkerMethodArguments, Method>;
     const install = <M extends Method>(
       method: M,
@@ -1925,9 +1932,7 @@ export class RustEngineExchange extends BaseExchange {
           this.callWorker(method, ...args).then(
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-              method === 'updateOrder'
-                ? decodeWorkerOrderIds(result)
-                : rowsFromAccountFrame(method, result, args[0]),
+              method === 'updateOrder' ? decodeWorkerOrderIds(result) : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
               // Never passed through `command` here, and the hosted server marks no failure as
               // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
@@ -3605,37 +3610,20 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Reported rows only, newest close first; failures propagate so refreshes keep their last result. */
   private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.routesToWorker) {
+      await this.untilWorkerBridge();
+      const { callMethodInWorker }: BaseExchange = this;
+      return callMethodInWorker.bind(this)('fetchClosedPnl', opts);
+    }
     if (this.isPublicDataOnly) return [];
     const ready = this.capabilitiesFor('fetchClosedPnl');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const format = capabilities.closedPositionFormat;
     // OKX/Blofin treat an empty symbol as account-wide; Bybit and Bitunix send it as given.
     const symbol = format === 'okx' || format === 'blofin' ? opts.symbol || undefined : opts.symbol;
-    const rows = await this.fetchClosedPositionRows({ ...opts, symbol });
-    const account = opts.accountName || '';
-    const entries: ClosedPnlEntry[] = [];
-    for (const row of rows) {
-      let entry: ClosedPnlEntry | null;
-      if (format === 'okx') {
-        const market = this.store.marketsBySymbol[opts.symbol] ?? this.store.marketsById[String(row.instId ?? '')];
-        entry = mapOkxClosedPosition(row, market, this.okxContractsToBase, account);
-      } else if (format === 'blofin') {
-        entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
-      } else if (format === 'bitunix') {
-        entry = mapBitunixClosedPosition(row, account);
-      } else {
-        entry = mapBybitClosedPnl(
-          row,
-          account,
-          capabilities.inverseClosedPositions || isBybitInverseSymbol(row.symbol),
-        );
-      }
-      if (entry) entries.push(entry);
-    }
-    return copyHistoryCompleteness(
-      rows,
-      entries.sort((a, b) => b.closedTime - a.closedTime),
-    );
+    return this.command<ClosedPnlEntry[]>({
+      op: 'fetchClosedPnl', symbol, from: opts.from, to: opts.to, account: opts.accountName || '',
+    });
   };
 
   /**
@@ -3667,10 +3655,11 @@ export class RustEngineExchange extends BaseExchange {
         ? [...listeners].find(([, listener]) => listener === callback)?.[0]
         : undefined) ?? ++this.nextBookListenerId;
     listeners.set(listenerId, callback);
+    const callbacks = listeners;
     if (first) this.bookDemand(symbol, true);
     return () => {
-      if (!listeners!.delete(listenerId)) return;
-      if (listeners!.size === 0 && this.bookListeners.get(symbol) === listeners) {
+      if (!callbacks.delete(listenerId)) return;
+      if (callbacks.size === 0 && this.bookListeners.get(symbol) === callbacks) {
         this.bookListeners.delete(symbol);
         this.bookDemand(symbol, false);
       }
@@ -3704,10 +3693,11 @@ export class RustEngineExchange extends BaseExchange {
       this.candleListeners.set(key, listeners);
     }
     listeners.add(callback);
+    const callbacks = listeners;
     if (first) this.candleDemand(opts.symbol, interval, true);
     return () => {
-      listeners!.delete(callback);
-      if (listeners!.size === 0 && this.candleListeners.get(key) === listeners) {
+      callbacks.delete(callback);
+      if (callbacks.size === 0 && this.candleListeners.get(key) === callbacks) {
         this.candleListeners.delete(key);
         this.candleDemand(opts.symbol, interval, false);
       }
