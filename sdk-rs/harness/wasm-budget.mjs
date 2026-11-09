@@ -227,7 +227,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_886_208,
   bitunix: 1_915_904,
   blofin: 2_049_024,
-  bybit: 2_320_384,
+  // #3280 at 5492575dead5, CI run 42559068674/job 128971581827:
+  // web/node 2,313,532 B; CI seal 1a8f231a376 has the same source tree.
+  // Current measured size + 10 KiB, rounded up to KiB.
+  bybit: 2_324_480,
   coinbase: 1_972_224,
   cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
