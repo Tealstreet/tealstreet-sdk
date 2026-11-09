@@ -1492,10 +1492,10 @@ test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', ()
   }
 });
 
-test('#3317 current CI (run 42601004776, artifact 13665434229 at 889e7de4824) retains WOO headroom', () => {
-  const measured = 2_634_628;
+test('#3317 current CI (run 42622329629, job 129178042670, artifact 13676298877 at 8e55e01469b) retains WOO headroom', () => {
+  const measured = 2_636_672;
   const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(minimumCap, 2_644_992);
+  assert.equal(minimumCap, 2_647_040);
   const cap = WASM_VENUE_OVERRIDES.woo;
   assert.ok(cap >= minimumCap);
   assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
