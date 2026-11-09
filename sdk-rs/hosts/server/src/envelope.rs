@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 pub struct InitPayload {
     pub account_name: String,
     pub exchange_name: String,
+    /// Reply provenance only; never an engine option or account fingerprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     #[serde(default, deserialize_with = "key")]
     pub key: String,
     #[serde(default, deserialize_with = "text")]
@@ -27,6 +30,8 @@ pub struct InitPayload {
     pub orderly_exchange_id: Option<String>,
     #[serde(default, deserialize_with = "text")]
     pub grvt_trading_account_id: Option<String>,
+    #[serde(default, deserialize_with = "text")]
+    pub grvt_signer_address: Option<String>,
     pub tealstreet_proxy: Option<bool>,
     pub tealstreet_tunnel: Option<bool>,
     pub tealstreet_ws_route: Option<bool>,
@@ -119,6 +124,27 @@ pub struct PingData {
 /// keys sorted, which put `d` ahead.
 fn envelope(t: &str, d: Value) -> String {
     format!(r#"{{"t":"{t}","d":{d}}}"#)
+}
+
+pub(crate) fn account_name(text: &str) -> Option<String> {
+    let frame: Value = serde_json::from_str(text).ok()?;
+    frame["d"]["accountName"].as_str().map(str::to_owned)
+}
+
+pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
+    let Ok(mut frame) = serde_json::from_str::<Value>(&text) else {
+        return text;
+    };
+    let kind = match frame["t"].as_str() {
+        Some("msg") => "msg",
+        Some("sign-req") => "sign-req",
+        _ => return text,
+    };
+    let Some(data) = frame["d"].as_object_mut() else {
+        return text;
+    };
+    data.insert("instanceId".into(), instance_id.into());
+    envelope(kind, frame["d"].take())
 }
 
 pub fn msg(account_name: &str, op: &str, data: Value) -> String {

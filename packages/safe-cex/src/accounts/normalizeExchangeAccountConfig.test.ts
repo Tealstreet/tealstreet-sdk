@@ -4,7 +4,7 @@ import { normalizeExchangeAccountConfig } from './normalizeExchangeAccountConfig
 
 vi.mock('../exchangeMetadata', () => ({
   getExchangeMetadata: vi.fn((exchange: string) => {
-    const metadataMap = {
+    const metadataMap: Record<string, { requiresCors: boolean; privateProxyRegions: Record<string, string[]> }> = {
       bybit: {
         requiresCors: false,
         privateProxyRegions: { SG: ['1.2.3.4'], JA: ['5.6.7.8'] },
@@ -21,8 +21,8 @@ vi.mock('../exchangeMetadata', () => ({
         requiresCors: true,
         privateProxyRegions: { JA: ['5.6.7.8'], SG: ['1.2.3.4'] },
       },
-    } as const;
-    return metadataMap[exchange as keyof typeof metadataMap] || metadataMap.bybit;
+    };
+    return metadataMap[exchange] || metadataMap.bybit;
   }),
 }));
 

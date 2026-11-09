@@ -1088,6 +1088,36 @@ const BingxMetadata: ExchangeMetadata = {
   },
 };
 
+// Native/fixture-only. SDK admission follows live-key transport smoke validation.
+const BingxSpotMetadata: ExchangeMetadata = {
+  ...defaultMetaData,
+  exchangeName: 'bingxspot',
+  prettyName: 'BingX Spot',
+  logo: BingxMetadata.logo,
+  lightLogo: BingxMetadata.lightLogo,
+  darkLogo: BingxMetadata.darkLogo,
+  refLink: BingxMetadata.refLink,
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
+  hasEmptyPositions: true,
+  positionModes: [PositionMode.OneWay],
+  marginTypes: [MarginType.Isolated],
+  hideMarginTypeSelector: true,
+  hidePositionModeSelector: true,
+  leverageSliderDisabled: true,
+  supportsPartialStops: false,
+  supportsInfinityStops: false,
+  supportsMaxCrossLeverage: false,
+  doesNotSupportOpenInterest: true,
+  requiresCors: true,
+  supportsTunnel: true,
+  enforceWsTunnel: true,
+  latencyDomain: 'open-api-ws.bingx.com',
+  candleApiCountLimit: 1440,
+  features: { kline: true, orderbook: true, orders: true, balance: true, positions: false },
+};
+
 const BitrueMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
@@ -2257,6 +2287,7 @@ export const exchangeMetadata: {
   grvt: GrvtMetadata,
   phemex: PhemexMetadata,
   bingx: BingxMetadata,
+  bingxspot: BingxSpotMetadata,
   bitrue: BitrueMetadata,
   blofin: BlofinMetadata,
   lighter: LighterMetadata,

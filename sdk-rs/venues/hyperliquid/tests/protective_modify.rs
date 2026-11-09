@@ -184,6 +184,7 @@ fn fallback_place(e: &mut Engine<Hyperliquid>, row: &Value) -> HttpRequest {
 
 #[test]
 fn definitive_fallback_refusal_restores_exact_original_once() {
+    // Protective put-back kept per Sam's decision, SPLIT_PLAN_INVARIANT.md exception 2.
     for refusal in [
         "Order has invalid price.",
         "Invalid TP/SL price.",
@@ -249,6 +250,15 @@ fn definitive_fallback_refusal_restores_exact_original_once() {
             errors[0].protection,
             Some(safe_cex_engine::error::Protection::Restored)
         );
+        let elements = errors[0].elements.as_ref().expect("recovery journal");
+        assert_eq!(elements.len(), 3);
+        use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+        assert!(matches!(&elements[0].result,
+            ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "9"));
+        assert!(matches!(&elements[1].result,
+            ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected)));
+        assert!(matches!(&elements[2].result,
+            ElementResult::Applied { effect: AppliedEffect::PositionTrigger, position_key: Some(symbol), .. } if symbol == "BTC-PERP"));
         assert!(
             !a.iter()
                 .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange"))),
@@ -273,7 +283,7 @@ fn definitive_fallback_refusal_restores_exact_original_once() {
     }
 }
 
-fn check_restore_failure(case: &str) {
+fn check_restore_failure(case: &str, retry_after_seconds: Option<f64>) {
     let row = order("Take Profit Market", "120", "0");
     let (mut e, _) = setup(&row);
     let replacement = fallback_place(&mut e, &row);
@@ -295,7 +305,21 @@ fn check_restore_failure(case: &str) {
             },
         );
     } else if case == "rate_limited" {
-        reply(&mut e, restore, 429, "Too many requests");
+        let headers = retry_after_seconds
+            .map(|seconds| format!("Retry-After: {seconds}"))
+            .unwrap_or_default();
+        let now = safe_cex_engine::test_support::dispatch_now(&e).max(1000.0);
+        e.handle(
+            now,
+            Event::HttpResponse {
+                request: restore.id,
+                response: safe_cex_engine::Response {
+                    status: 429,
+                    headers: &headers,
+                    body: "Too many requests",
+                },
+            },
+        );
     } else {
         reply(
             &mut e,
@@ -322,32 +346,25 @@ fn check_restore_failure(case: &str) {
     } else {
         assert_eq!(failure.protection, None, "{case}");
         assert_eq!(failure.outcome, Some(Outcome::Unknown));
-        if case == "rate_limited" {
-            assert!(failure.message.contains("unknown"), "{}", failure.message);
-            assert!(
-                failure.message.contains("Check Open Orders"),
-                "{}",
-                failure.message
-            );
-        } else {
-            assert!(
-                failure
-                    .message
-                    .contains("put-back's outcome is unknown. Check Open Orders"),
-                "{}",
-                failure.message
-            );
-        }
+        assert_eq!(failure.message, ENGINE_UNKNOWN_TEXT);
         assert!(
             !failure.message.contains("UNPROTECTED")
                 && !failure.message.contains("could not be restored")
         );
-        assert_eq!(
-            failure.kind,
-            Some(safe_cex_engine::ErrorKind::Rejected),
-            "serial root remains the earlier replacement refusal"
-        );
     }
+    assert_eq!(
+        failure.kind,
+        Some(if case == "rate_limited" {
+            safe_cex_engine::ErrorKind::RateLimited
+        } else {
+            safe_cex_engine::ErrorKind::Rejected
+        }),
+        "a later put-back 429 must retain its cooldown kind"
+    );
+    assert_eq!(
+        failure.retry_after_ms,
+        retry_after_seconds.map(|seconds| seconds * 1000.0)
+    );
     assert_eq!(
         a.iter()
             .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, .. })))
@@ -361,15 +378,17 @@ fn check_restore_failure(case: &str) {
 }
 #[test]
 fn definitive_restore_refusal_is_unprotected_without_retry() {
-    check_restore_failure("refused");
+    check_restore_failure("refused", None);
 }
 #[test]
 fn unknown_restore_is_uncertain_without_protection_or_retry() {
-    check_restore_failure("unknown");
+    check_restore_failure("unknown", None);
 }
 #[test]
 fn rate_limited_restore_is_uncertain_without_protection_or_retry() {
-    check_restore_failure("rate_limited");
+    for retry_after_seconds in [None, Some(30.0)] {
+        check_restore_failure("rate_limited", retry_after_seconds);
+    }
 }
 #[test]
 fn ambiguous_replacement_never_creates_a_second_protection() {

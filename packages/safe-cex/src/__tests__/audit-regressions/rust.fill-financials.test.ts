@@ -16,25 +16,6 @@ const market: Market = {
   limits: { amount: { min: 0.1, max: 1000 }, leverage: { min: 1, max: 100 } },
 };
 
-// Extend the independent legacy fixture, preserving every old fill byte.
-function fillFrame(financials?: [number, number]): ArrayBuffer {
-  const base = consumerFrame({ markets: [market] }, undefined, true);
-  if (!financials) return base;
-  const view = new DataView(base);
-  let at = 16;
-  while (view.getUint16(at, true) !== 11) at += 8 + view.getUint32(at + 4, true);
-  const size = view.getUint32(at + 4, true);
-  const end = at + 8 + size;
-  const buffer = new ArrayBuffer(base.byteLength + 16);
-  const bytes = new Uint8Array(buffer);
-  bytes.set(new Uint8Array(base, 0, end));
-  bytes.set(new Uint8Array(base, end), end + 16);
-  const extended = new DataView(buffer);
-  extended.setUint32(at + 4, size + 16, true);
-  financials.forEach((value, i) => extended.setFloat64(end + i * 8, value, true));
-  return buffer;
-}
-
 // Independent revision-1/2 fixture: no MARKETS needed because the symbol is explicit.
 function identifiedFillFrame(revision: 1 | 2, financials?: [number, number], id?: string): ArrayBuffer {
   const texts = ['order-1', 'BTCUSDT', ...(id !== undefined ? [id] : [])].map((value) => new TextEncoder().encode(value));
@@ -76,25 +57,34 @@ function identifiedFillFrame(revision: 1 | 2, financials?: [number, number], id?
 afterEach(() => vi.useRealTimers());
 
 describe('native fill and trigger metadata at the SDK boundary', () => {
-  it.each([1, 2] as const)('decodes revision %s identities with and without financials after transfer', (revision) => {
-    for (const financials of [undefined, [0, -0.25] as [number, number]]) {
-      for (const id of [undefined, '9007199254740997']) {
-        const original = identifiedFillFrame(revision, financials, id);
+  it('requires an explicit native fill ID after transfer', () => {
+    const financialCases: Array<[number, number] | undefined> = [undefined, [0, -0.25]];
+    const revisions: Array<1 | 2> = [1, 2];
+    for (const revision of revisions) {
+      for (const financials of financialCases) {
+        const original = identifiedFillFrame(revision, financials);
         const frame = new Frame(structuredClone(original, { transfer: [original] }));
         const applier = new FrameApplier(new DefaultStore());
         applier.apply(frame);
-        const fill = applier.fills(frame)[0];
-        expect(fill).toMatchObject({ id: revision === 2 ? id ?? 'order-1' : 'order-1', orderId: 'order-1', symbol: 'BTCUSDT' });
-        if (financials) expect(fill).toMatchObject({ realizedPnl: 0, fee: -0.25 });
-        else {
-          expect(fill).not.toHaveProperty('realizedPnl');
-          expect(fill).not.toHaveProperty('fee');
-        }
+        expect(() => applier.fills(frame)).toThrow('Fill identity requires a native event id');
+      }
+    }
+    for (const financials of financialCases) {
+      const original = identifiedFillFrame(2, financials, '9007199254740997');
+      const frame = new Frame(structuredClone(original, { transfer: [original] }));
+      const applier = new FrameApplier(new DefaultStore());
+      applier.apply(frame);
+      const fill = applier.fills(frame)[0];
+      expect(fill).toMatchObject({ id: '9007199254740997', orderId: 'order-1', symbol: 'BTCUSDT' });
+      if (financials) expect(fill).toMatchObject({ realizedPnl: 0, fee: -0.25 });
+      else {
+        expect(fill).not.toHaveProperty('realizedPnl');
+        expect(fill).not.toHaveProperty('fee');
       }
     }
   });
   it.each([false, true])('preserves fill identities and financial values after transfer=%s', (transfer) => {
-    const original = fillFrame([-3.5, -0.25]);
+    const original = identifiedFillFrame(2, [-3.5, -0.25], 'execution-1');
     const buffer = transfer ? structuredClone(original, { transfer: [original] }) : original;
     if (transfer) expect(original.byteLength).toBe(0);
     const store = new DefaultStore();
@@ -102,15 +92,16 @@ describe('native fill and trigger metadata at the SDK boundary', () => {
     const frame = new Frame(buffer);
     applier.apply(frame);
     expect(applier.fills(frame)).toEqual([{
-      id: 'order-1', orderId: 'order-1', symbol: 'BTCUSDT', side: OrderSide.Buy,
+      id: 'execution-1', orderId: 'order-1', symbol: 'BTCUSDT', side: OrderSide.Buy,
       price: 100, amount: 0.3, realizedPnl: -3.5, fee: -0.25,
     }]);
   });
 
-  it('retains financial zeroes while legacy frames leave missing values absent', () => {
+  it('retains financial zeroes, omits sentinels and refuses infinite financials', () => {
     const applier = new FrameApplier(new DefaultStore());
-    for (const values of [undefined, [0, 0] as [number, number], [NaN, Infinity] as [number, number]]) {
-      const frame = new Frame(fillFrame(values));
+    const cases: Array<[number, number] | undefined> = [undefined, [0, 0], [NaN, NaN]];
+    for (const values of cases) {
+      const frame = new Frame(identifiedFillFrame(2, values, 'execution-1'));
       applier.apply(frame);
       const fill = applier.fills(frame)[0];
       expect(fill.amount).toBe(0.3);
@@ -121,6 +112,8 @@ describe('native fill and trigger metadata at the SDK boundary', () => {
         expect(fill).not.toHaveProperty('fee');
       }
     }
+    const invalid = new Frame(identifiedFillFrame(2, [NaN, Infinity], 'execution-1'));
+    expect(() => applier.fills(invalid)).toThrow('Invalid Fill financial column');
   });
 
   it('preserves the generic trigger alongside conditional-order fields', () => {

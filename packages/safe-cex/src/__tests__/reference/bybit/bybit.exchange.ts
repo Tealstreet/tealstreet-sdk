@@ -18,8 +18,8 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { BaseExchange } from '../../../exchanges/base';
-import { mapBybitClosedPnl } from '../../../exchanges/bybit/bybit.closed-pnl';
-import { isBybitInverseSymbol, positionUpnlInQuote } from '../../../exchanges/bybit/bybit.inverse';
+import { mapBybitClosedPnl } from './bybit.closed-pnl';
+import { isBybitInverseSymbol, positionUpnlInQuote } from './bybit.inverse';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
 import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
 import {

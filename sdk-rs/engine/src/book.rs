@@ -1,6 +1,5 @@
 //! Price-sorted order book. Levels are (price, amount) pairs; cumulative totals
 //! are computed only when the book is written to a frame, not on every update.
-use crate::wire::{FrameWriter, section};
 #[cfg(feature = "book-deltas")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -132,42 +131,6 @@ impl Book {
         self.reset
     }
 
-    /// Absolute changed levels, with amount zero for deletions. Totals are
-    /// derived by the reader after merging these rows into its sorted book.
-    pub fn write_delta(&self, previous: &Self, market: u32, w: &mut FrameWriter<'_>) -> bool {
-        let mut bids = 0u32;
-        let mut asks = 0u32;
-        differences(&previous.bids, &self.bids, true, |_, _| bids += 1);
-        differences(&previous.asks, &self.asks, false, |_, _| asks += 1);
-        if bids == 0 && asks == 0 {
-            return false;
-        }
-        w.begin(section::BOOK_DELTA);
-        w.u32s([market, bids, asks, 0]);
-        differences(&previous.bids, &self.bids, true, |price, amount| {
-            w.f64s([price, amount]);
-        });
-        differences(&previous.asks, &self.asks, false, |price, amount| {
-            w.f64s([price, amount]);
-        });
-        w.end();
-        true
-    }
-
-    /// Write the full book as a `BOOK` section: rows of `[price, amount, total]`.
-    pub fn write(&self, market: u32, w: &mut FrameWriter<'_>) {
-        w.begin(section::BOOK);
-        w.u32s([market, self.bids.len() as u32, self.asks.len() as u32, 0]);
-        for levels in [&self.bids, &self.asks] {
-            let mut total = 0.0;
-            for &(price, amount) in levels.iter() {
-                total += amount;
-                w.f64s([price, amount, total]);
-            }
-        }
-        w.end();
-    }
-
     fn side_mut(&mut self, side: BookSide) -> &mut Vec<(f64, f64)> {
         match side {
             BookSide::Bids => &mut self.bids,
@@ -176,55 +139,10 @@ impl Book {
     }
 }
 
-fn differences(
-    previous: &[(f64, f64)],
-    current: &[(f64, f64)],
-    descending: bool,
-    mut changed: impl FnMut(f64, f64),
-) {
-    let (mut old, mut new) = (0, 0);
-    while old < previous.len() || new < current.len() {
-        match (previous.get(old), current.get(new)) {
-            (Some(&(old_price, old_amount)), Some(&(price, amount))) => {
-                let order = if descending {
-                    price.total_cmp(&old_price)
-                } else {
-                    old_price.total_cmp(&price)
-                };
-                match order {
-                    std::cmp::Ordering::Less => {
-                        changed(old_price, 0.0);
-                        old += 1;
-                    }
-                    std::cmp::Ordering::Greater => {
-                        changed(price, amount);
-                        new += 1;
-                    }
-                    std::cmp::Ordering::Equal => {
-                        if old_amount != amount {
-                            changed(price, amount);
-                        }
-                        old += 1;
-                        new += 1;
-                    }
-                }
-            }
-            (Some(&(price, _)), None) => {
-                changed(price, 0.0);
-                old += 1;
-            }
-            (None, Some(&(price, amount))) => {
-                changed(price, amount);
-                new += 1;
-            }
-            (None, None) => break,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::{FrameWriter, section};
 
     #[test]
     fn adopts_snapshot_allocation_and_removes_empty_levels() {
@@ -282,7 +200,12 @@ mod tests {
         actual.apply(BookSide::Bids, 18., 9.);
         actual.load_sorted(BookSide::Asks, []);
         let mut writer = FrameWriter::new(Vec::new(), 1.);
-        assert!(actual.write_delta(&previous, 7, &mut writer));
+        assert!(crate::book_output::write_delta(
+            &actual,
+            &previous,
+            7,
+            &mut writer
+        ));
         let frame = writer.finish();
         let (kind, payload) = crate::wire::sections(&frame).next().unwrap();
         assert_eq!(kind, section::BOOK_DELTA);
@@ -306,7 +229,7 @@ mod tests {
         assert_eq!(rebuilt.asks(), actual.asks());
         let full = |book: &Book| {
             let mut writer = FrameWriter::new(Vec::new(), 1.);
-            book.write(7, &mut writer);
+            crate::book_output::write(book, 7, &mut writer);
             writer.finish()
         };
         assert_eq!(
@@ -315,7 +238,12 @@ mod tests {
             "derived totals equal a full-book frame"
         );
         let mut writer = FrameWriter::new(Vec::new(), 2.);
-        assert!(!actual.write_delta(&actual, 7, &mut writer));
+        assert!(!crate::book_output::write_delta(
+            &actual,
+            &actual,
+            7,
+            &mut writer
+        ));
         assert!(writer.is_empty());
     }
 }

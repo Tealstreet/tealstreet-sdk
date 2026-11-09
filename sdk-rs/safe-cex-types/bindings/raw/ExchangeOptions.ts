@@ -12,11 +12,19 @@ signerAddress?: string,
 /**
  * @ts-mutable
  */
-privateKey?: string, }, paradexAddress?: string, subkeyAddress?: string, grvtSignerAddress?: string, grvtTradingAccountId?: string, starkPrivateKey?: string, vault?: string, applicationId?: string, apiKeyIndex?: string, hyperliquidBuilder?: { address: string, feeTenthsBps: number, }, testnet?: boolean, enableSpotMarkets?: boolean, enableOptionMarkets?: boolean, enableInverseMarkets?: boolean, bybitSiteId?: "BRA_BTL", publicDataOnly?: boolean, privateOnly?: boolean, tealstreetProxy?: boolean, tealstreetTunnel?: boolean, tealstreetWsRoute?: boolean, overrideProxyUrl?: string, proxyRegion?: string, omniKeySeed?: string, subaccount?: string, orderlyExchangeId?: string, tuning?: { activeTickerSymbols?: Array<string>, calculateUpnlFromRealtimeLastPrice?: boolean, dataUpdateThrottleMultiplier?: number, skipRendersWhenWindowIsHidden?: boolean, consoleLogging?: boolean, }, extra?: { 
+privateKey?: string, }, paradexAddress?: string, subkeyAddress?: string, grvtSignerAddress?: string, grvtTradingAccountId?: string, 
+/**
+ * Hosted CDP key algorithm; local custody infers it from key material.
+ */
+coinbaseJwtAlgorithm?: "es256" | "edDsa", starkPrivateKey?: string, vault?: string, applicationId?: string, apiKeyIndex?: string, hyperliquidBuilder?: { address: string, feeTenthsBps: number, }, testnet?: boolean, enableSpotMarkets?: boolean, enableOptionMarkets?: boolean, enableInverseMarkets?: boolean, bybitSiteId?: "BRA_BTL", publicDataOnly?: boolean, privateOnly?: boolean, tealstreetProxy?: boolean, tealstreetTunnel?: boolean, tealstreetWsRoute?: boolean, overrideProxyUrl?: string, proxyRegion?: string, omniKeySeed?: string, subaccount?: string, orderlyExchangeId?: string, tuning?: { activeTickerSymbols?: Array<string>, calculateUpnlFromRealtimeLastPrice?: boolean, dataUpdateThrottleMultiplier?: number, skipRendersWhenWindowIsHidden?: boolean, consoleLogging?: boolean, }, extra?: { 
 /**
  * @ts-mutable
  */
 tickInterval?: number, 
+/**
+ * @ts-mutable
+ */
+rustCommandTimeoutMs?: number, 
 /**
  * @ts-mutable
  */
@@ -56,7 +64,11 @@ hyrotraderMode?: "demo" | "production",
 /**
  * @ts-mutable
  */
-kucoinBroker?: { partner: string, brokerKey: string, brokerName: string, verify?: boolean, }, }, remoteSigner?: RemoteSigner, transport?: TransportProvider, payloadSigner?: PayloadSigner, hostedMode?: boolean, externalPublicData?: { 
+kucoinBroker?: { partner: string, brokerKey: string, brokerName: string, verify?: boolean, }, }, 
+/**
+ * Typed extension consumed by the Polymarket source constructor.
+ */
+polymarket?: { marketSlugs?: Array<string>, apiKey?: string, apiSecret?: string, apiPassphrase?: string, signerType?: 0 | 1 | 2 | 3, funderAddress?: string, }, remoteSigner?: RemoteSigner, transport?: TransportProvider, payloadSigner?: PayloadSigner, hostedMode?: boolean, externalPublicData?: { 
 /**
  * @ts-mutable
  */
@@ -80,4 +92,4 @@ type: "in-process",
 /**
  * @ts-mutable
  */
-source: PublicDataSource, }, };
+source: PublicDataSource, }, localSigner?: LocalSignerMetadata, hyperliquidFastBook?: boolean, callerReportsPlacementFailures?: boolean, workerMirror?: boolean, engine?: "rust", publicFeed?: RustPublicFeedPolicy, };

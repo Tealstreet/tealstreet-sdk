@@ -11,8 +11,11 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
+Bitrue (HMAC RemoteSigner and REST-only PayloadSigner; `sdk-rs/venues/bitrue/README.md`),
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
+Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures and Spot (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md` and `docs/plans/callers/kucoinspot-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
@@ -39,6 +42,23 @@ Core exchange integration library. See also exchange-specific `CLAUDE.md` files 
 
 For exchange migrations that add first-class opening trigger/conditional orders,
 read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
+
+## DELEGATED handover
+
+`sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
+Bybit DELEGATED handover. Its standalone module needs no WASM, Node Buffer or
+browser base64 globals; the host supplies the usual secure random source for
+Noble. Call it only after the host's per-venue DELEGATED enablement check. It does
+not select signing modes, open sockets or change LOCAL/COSIGNED setup.
+Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
+context; the result contains only the attempt ID and padded-base64 encapsulation
+and ciphertext. Context fields preserve exact UTF-8 bytes and cannot contain
+the protocol's `|` separator. Optional passphrases preserve absence versus empty.
+The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
+one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
+fixtures exercise the same production sender. The shared fixture lives with
+the server tests for receiver interoperability; Rust consumption depends on
+the server handover implementation landing.
 
 ## Mirror CI invariants (don't "clean these up")
 
@@ -207,14 +227,31 @@ Private WOO RemoteSigner setup refuses any configured secondary credentials with
 `unsupported` / `notSent` before native construction or callbacks: its HMAC wire
 cannot select the device's read-key slot. Remove the secondary credentials to
 use Hosted with the primary key, or use read keys in local browser mode.
+Crypto.com admits RemoteSigner and canonical HMAC PayloadSigner. Every signed
+REST envelope and `public/auth` uses provider custody; the hosted wire carries
+only `method + id + api_key + canonical params + nonce`. PayloadSigner keeps
+private REST reconciliation and writes but opens no private user socket.
+Crypto.com HTTP callback metadata follows its declared header policy in native
+dispatch and hosted capture; the HMAC remains in JSON `sig`. WS auth refuses
+callback result headers.
+Crypto.com Hosted secondary credentials refuse with `unsupported` / `notSent`;
+all native private POSTs retain primary selection. Subaccounts use their own
+API key/secret, with no separate wallet or cosigning protocol.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
-Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
+Effective public mode in delegated setup is resolved before custody checks,
+including keyless accounts with unused callbacks. It preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
+Construction snapshots outer signer fields and their methods together under one
+guard before mode resolution. Admission, asynchronous factories and signer setup
+share that immutable snapshot, preserving receivers without further caller reads.
+Its opaque construction token is stripped before generic options are retained.
+Throwing getters or Proxy traps refuse with a fixed, redacted `invalidInput` /
+`notSent` error before transport; caller errors are never retained.
 
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
@@ -514,6 +551,24 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+Owner fencing is optional and additive. Without `setWorkerOwner`, calls retain
+legacy bridge-wait and dispatch behavior, including calls queued before attachment.
+With the hook installed, forwarding captures the bridge subscription
+identity and the host owner binding at admission, before page-engine startup,
+and checks both again before dispatch. A removed or replaced bridge
+drops the pending call; an undispatched write rejects as `notSent`. Reattaching
+the same callback is a new subscription, even when the account name is reused.
+Hosts opting into fencing install
+`setWorkerOwner(() => ({ ownerId, generation }))`, reading the current login's
+authenticated principal (never an account label) and a monotonic, nonnegative
+safe-integer generation. Change the generation on retirement/replacement;
+return `undefined` after logout. An installed hook without a current owner fails
+closed; attaching the first listener cannot establish its earlier owner. An
+unchanged bound owner can bootstrap normally. Changing the provider itself also
+retires pending work.
+The direct source-order refresh and capability-adopted `fetchClosedPnl` use the
+same optional admission fence. Only the existing public candle read is permitted
+to retry across a replacement bridge.
 
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from
@@ -592,6 +647,14 @@ bridge-fixes plan; caller IDs alone do not establish complete attribution.
 Native rejections retain known partial-order results. SDK worker and outer CLI
 executor error boundaries copy an explicit allowlist of command fields, including IDs and
 partial counts, instead of flattening them or copying arbitrary error objects.
+Partial information with empty order IDs still exposes the attempted total and failed
+index when supplied, plus `partialOrderIds: []` and `partialOrderCount: 0`.
+That zero counts created IDs; applied cancellation effects remain in `elements`.
+Recorded `elements` retain each logical row's index, optional client order ID,
+placed IDs, applied effects with existing-target references, refusal or unknown
+detail through host errors and worker/CLI clones. Applied effects create no IDs;
+accepted partial IDs without row attribution remain unknown.
+Malformed arrays are discarded whole; nested errors copy only declared venue fields.
 Cancellation commands retain the caller's id, symbol and type alongside legacy
 ID dispatch; venue unknown-ID behavior is a separate native contract.
 
@@ -611,6 +674,19 @@ works for TS classes, native host errors and worker/hosted deserialization.
 Use it instead of class identity or text. Unknown/pending/network/malformed
 checks stay ordinary failures. The command error allowlist retains only validated
 approval fields; the old class export stays available without prototype repair.
+
+## Native reported closed-PnL output
+
+`fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
+`history_output`. Bybit inverse sizes, OKX contract conversion, fee signs,
+account labels and newest-close ordering are native output policy. The four TS
+closed-PnL mappers live only under test references. `fetchClosedPositions`
+remains the raw journal contract; it is never a fallback for reported PnL.
+The capability-installed method forwards whole to the worker when bridged,
+including after capability adoption; it never commands a mirror-local engine.
+The Bitunix/Blofin income helpers and Bybit inverse helpers also live only in
+`__tests__/reference`; their remaining callers are replay oracles and tests.
+The production venue-file inventory removes them with the runtime imports.
 
 ## Reported closed-PnL read failures
 
@@ -1961,3 +2037,34 @@ starts no metadata command. UI callers also validate their account market bindin
 Bybit native receive-window corrections emit bybit.clock.corrected with numeric
 offsetMs only. Hosts without an explicit clock-advice listener keep the normal
 info log; CLI listeners replace it with one clock-sync warning per session.
+
+## Position type ownership (P1)
+
+`src/generated/Position.ts` and its enum/Greeks dependencies are generated from
+`sdk-rs/safe-cex-types`; `src/types.ts` imports/re-exports them for the existing
+public API. Run `corepack yarn types:generate`, then
+`corepack yarn generate:script-types`; never edit generated declarations or the
+script bundle. The Position-only compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/position-contract.cjs`.
+
+The native engine owns Position display normalization and native sizing extras.
+Positions use SCXF section revision 2 with eleven numeric columns and required
+ID/symbol references; the host refuses older Position sections. Deploy matching
+native/WASM and SDK artifacts together. Other section revisions are unchanged.
+Live position snapshots are authoritative; omitted rows are removed rather than
+retained as fabricated empty positions. NX must land its corresponding consumer
+and artifact changes before this cutover. See `docs/plans/TYPE_OWNERSHIP_P1.md`.
+
+Position enum-word bits 24 and 25 declare the presence of native contracts and
+native PnL columns. A present non-finite native size is rejected, never treated
+as absent (which could select an unsafe base-unit fallback).
+
+## Generated Store contracts (P1)
+
+StoreData, StoreOptions, StoreDataLoaded, StoreUpdateIds, FetchedLeverage and
+DisplayedMargin come from `sdk-rs/safe-cex-types/src/store_model.rs`. The scoped
+generator emits their modules and the initial Store value; never hand-edit them.
+Other models and host-owned capabilities retain their owning modules. Regenerate
+with `corepack yarn types:generate`; the scoped compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/store-contract.cjs`.
+Opaque legacy config members and userData are unknown and require narrowing.

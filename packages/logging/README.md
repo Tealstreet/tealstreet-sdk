@@ -61,6 +61,29 @@ To control external logging:
 - In development: Set `NEXT_PUBLIC_FORCE_EXTERNAL_LOGGING=1` to enable Grafana logging
 - Set `NEXT_PUBLIC_FORCE_SENTRY=1` to enable Sentry error tracking in development
 
+### Ingest Token Ownership
+
+`startLoggingToGrafana(userId, username?)` returns the cleanup for that logging
+session. Call it on logout. Cleanup and user changes invalidate cached ingest
+tokens and pending token requests; a late response cannot authorize the next
+user's uploads. Uploads waiting on a token or compression stop when their session
+ends. Every buffered entry and pending batch retains its originating user and
+epoch. Cleanup or a user switch makes one best-effort flush of queued data using
+only that owner's already-held, valid ingest token; unavailable authorization,
+offline data and failed delivery are dropped without retry. Cookie-authenticated
+`/api/logs` cannot retain an old owner's authorization, so its old buffers are
+dropped. An in-flight batch cannot remove a newer user's queued work on completion.
+Restarting logging for the same active user preserves the queue and can reuse an
+unexpired token, and a stale cleanup cannot invalidate the current session.
+
+Intervals, visibility/online callbacks and upload drivers capture the same owner
+and epoch as their work; stale callbacks cannot flush a new owner's queue. Token
+reads, compression, retry backoff and HTTP responses recheck ownership before
+continuing. A final flush is the explicit exception: it retains its own captured
+authorization and entries, checks expiry after compression, and never reads a
+later owner's token. The two-user tests switch accounts while each deferral is
+pending, including while B's token is cached before A's final flush resumes.
+
 ### Web Worker Usage
 
 The debug logger works in Web Workers, but requires additional configuration since `process.env` is not available:

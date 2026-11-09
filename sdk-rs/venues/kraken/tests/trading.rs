@@ -1,4 +1,4 @@
-//! Native REST payload and response contracts from Kraken's Futures order docs.
+// Native REST payload and response contracts from Kraken's Futures order docs.
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice};
@@ -189,6 +189,74 @@ fn native_limit_precision_symbol_broker_fresh_ids_and_tif() {
         assert_eq!(done(&mut e).unwrap(), format!("[\"order-{i}\"]"));
     }
 }
+// TS: packages/safe-cex/src/__tests__/reference/kraken/kraken.exchange.ts:452-462,514-529.
+// KNOWN-ISSUE: TS sends above-max; venue refuses.
+#[test]
+fn legacy_above_max_sends_one_rounded_payload_and_surfaces_native_refusal() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (amount, maximum, step, expected) in [
+        (26.0, 5.0, 1.0, "26"),
+        (11.0, 5.0, 1.0, "11"),
+        (12.0, 5.0, 1.0, "12"),
+        (10.0, 5.0, 1.0, "10"),
+        (7.0, 3.0, 0.5, "7"),
+        (0.0264, 0.005, 0.001, "0.026"),
+        (5.6, 5.0, 1.0, "6"),
+    ] {
+        for (kind, native) in [
+            (OrderType::Limit, "lmt"),
+            (OrderType::Market, "mkt"),
+            (OrderType::StopLoss, "stp"),
+            (OrderType::TakeProfit, "take_profit"),
+            (OrderType::TrailingStopLoss, "trailing_stop"),
+        ] {
+            let (mut e, _) = ready();
+            e.store_mut().update_markets(|market| {
+                market.precision.amount = step;
+                market.limits.amount.min = step;
+                market.limits.amount.max = maximum;
+            });
+            let mut order = limit();
+            order.kind = kind;
+            order.amount = amount;
+            order.price = Some(90.0);
+            place(&mut e, vec![order]);
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1, "{amount}/{maximum}/{step}: {kind:?}");
+            let request = &writes[0];
+            assert_eq!(request.method, Method::Post);
+            assert!(request.url.ends_with("sendorder"));
+            assert_eq!(param(request, "size").as_deref(), Some(expected));
+            assert_eq!(param(request, "orderType").as_deref(), Some(native));
+            reply(
+                &mut e,
+                request,
+                200,
+                r#"{"result":"success","sendStatus":{"status":"invalidSize"}}"#,
+            );
+            let terminal = e.drain_plain().collect::<Vec<_>>();
+            assert!(!terminal.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(
+                !terminal
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+            );
+            let errors = terminal
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].kind, Some(ErrorKind::Rejected));
+            assert_eq!(errors[0].outcome, Some(Outcome::Rejected));
+            assert_eq!(errors[0].venue_code.as_deref(), Some("invalidSize"));
+            assert!(errors[0].legacy_text().contains("invalidSize"));
+        }
+    }
+}
+
 #[test]
 fn missing_or_rejected_semantic_ack_never_sends_bracket() {
     for body in [
@@ -934,11 +1002,22 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
         let r = http(&mut e, "sendorder");
         reply(&mut e, &r, status, &body);
         let [error] = failures(&mut e).try_into().unwrap();
-        assert_eq!(
-            ((error.kind, error.outcome), error.legacy_text().as_str()),
-            (classified, text),
-            "{status} {body}"
-        );
+        if body == r#"{"result":"success"}"# {
+            // Legacy leaves malformed ACK kind unspecified; managed custody types it Internal.
+            assert!(matches!(error.kind, None | Some(ErrorKind::Internal)));
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(error.legacy_text(), text);
+        } else if classified.1 == Some(Outcome::Unknown) && text.contains("Check Open Orders") {
+            // Managed custody uses the engine's ambiguity wording.
+            assert_eq!((error.kind, error.outcome), classified);
+            assert!(error.legacy_text().contains("Check Open Orders"));
+        } else {
+            assert_eq!(
+                ((error.kind, error.outcome), error.legacy_text().as_str()),
+                (classified, text),
+                "{status} {body}"
+            );
+        }
     }
     // Transport loss on a write is Unknown.
     let (mut e, _) = ready();
@@ -1214,28 +1293,137 @@ fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
 
 #[test]
 fn beta_mixed_cancel_keeps_confirmed_ids_and_unknown() {
-    let (mut e, _) = ready();
-    inject(&mut e, "a", OrderType::Limit, None);
-    inject(&mut e, "b", OrderType::Limit, None);
-    command(
-        &mut e,
-        Command::CancelOrders {
-            command: 81,
-            ids: vec!["a".into(), "b".into()],
-        },
-    );
-    let request = http(&mut e, "batchorder");
+    for factory in [ready, ready_provider] {
+        let (mut e, _) = factory();
+        inject(&mut e, "a", OrderType::Limit, None);
+        inject(&mut e, "b", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::CancelOrders {
+                command: 81,
+                ids: vec!["a".into(), "b".into()],
+            },
+        );
+        let request = http(&mut e, "batchorder");
+        reply(
+            &mut e,
+            &request,
+            200,
+            r#"{"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"marketSuspended","order_id":"b"}]}"#,
+        );
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(e.store().order("a").is_none());
+        assert!(e.store().order("b").is_some());
+    }
+}
+
+#[test]
+fn provider_partial_placement_keeps_unknown_and_fences_until_reconciled() {
+    let (mut e, _) = ready_provider();
+    place(&mut e, vec![limit(), limit()]);
+    let first = http(&mut e, "sendorder");
+    ack(&mut e, &first, "accepted", "placed");
+    let second = http(&mut e, "sendorder");
     reply(
         &mut e,
-        &request,
+        &second,
         200,
-        r#"{"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"marketSuspended","order_id":"b"}]}"#,
+        r#"{"result":"error","error":"insufficientFunds"}"#,
     );
-    let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+    let settled = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let error = settled
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .unwrap();
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert!(e.store().order("a").is_none());
-    assert!(e.store().order("b").is_some());
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
+    let read = settled
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("openorders") => Some(request.clone()),
+            _ => None,
+        })
+        .expect("partial placement must reconcile");
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 8,
+            orders: vec![limit()],
+        },
+    );
+    assert!(
+        !requests(&mut e)
+            .iter()
+            .any(|r| r.url.ends_with("sendorder"))
+    );
+    reply(&mut e, &read, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 9,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
+
+#[test]
+fn provider_native_refusals_keep_documented_status_and_effect_semantics() {
+    use safe_cex_engine::Outcome;
+    for status in [
+        "invalidOrderType",
+        "invalidSide",
+        "clientOrderIdTooLong",
+        "invalidDomainConfiguration",
+    ] {
+        let (mut e, _) = ready_provider();
+        place(&mut e, vec![limit()]);
+        let request = http(&mut e, "sendorder");
+        ack(&mut e, &request, "", status);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Rejected), "{status}");
+        assert_eq!(error.venue_code.as_deref(), Some(status));
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 8,
+                orders: vec![limit()],
+            },
+        );
+        http(&mut e, "sendorder");
+    }
+    for (status, expected) in [
+        ("invalidSize", Outcome::Rejected),
+        ("postWouldExecute", Outcome::Unknown),
+        ("iocWouldNotExecute", Outcome::Unknown),
+    ] {
+        let (mut e, _) = ready_provider();
+        inject(&mut e, "old", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 8,
+                id: "old".into(),
+                price: Some(101.),
+                amount: Some(0.2),
+            },
+        );
+        let request = http(&mut e, "editorder");
+        reply(
+            &mut e,
+            &request,
+            200,
+            &json!({"result":"success","editStatus":{"orderId":"old","status":status}}).to_string(),
+        );
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.outcome, Some(expected), "{status}");
+        assert_eq!(error.venue_code.as_deref(), Some(status));
+    }
 }
 
 #[test]

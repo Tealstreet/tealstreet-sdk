@@ -83,10 +83,10 @@ Exchange metadata has a dedicated `Rust / native metadata` CI check: run
 Regenerate its snapshot and typed records with `corepack yarn rust:metadata`
 from the repo root (`rust:metadata:check` verifies; both need `rustfmt` on PATH); readonly arrays
 retain their element enums and nested property records stay typed objects.
-The explicit 47-name roster includes Binance Options and excludes the retired
-SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Roster changes must update
-this independent fixture and the strict native enum, not replace equality checks
-with floors.
+The explicit 48-name roster includes Binance Options and fixture-only BingX Spot,
+and excludes the retired SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Roster
+changes must update this independent fixture and the strict native enum, not
+replace equality checks with floors.
 
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the
@@ -205,6 +205,10 @@ JSON syntax and surviving-value refusals remain separate negative cases.
 
 ExchangeOptions.polymarket carries the five runtime account fields consumed by the Polymarket constructor. Its typed ExchangeOptionsPolymarket record uses existing UTF-8 credential strings and native f64 signerType; do not coerce numeric signature modes or replace the venue retained UTF-16 Text record with it. The source root declaration lacks this opts-as-any extension, so the field is skipped only in generated static TS, never in native serialization or source projection.
 
+ExchangeOptions and ExchangeAccountConfig declare coinbaseJwtAlgorithm here for
+hosted CDP signing. Regenerate their public TypeScript declarations from options.rs;
+the optional algorithm is the closed union es256 | edDsa and rejects explicit null.
+
 Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
 
 DisplayedPosition decodes its flattened Position through the original MapAccess.
@@ -304,3 +308,26 @@ unmeasured, not zero; absent/non-numeric values still refuse. Native STATUS uses
 an explicit presence flag, with legacy positive samples retained.
 Their canonical fields retain the required-nullable deserialize metadata used by
 the private companions, so the strict metadata inventory remains exact.
+
+## Generated Position cutover
+
+`src/position.rs` owns Position, PositionExtra, PositionOption, their strict
+private codecs and the Position serializer; `lib.rs` only re-exports the contract.
+Keep Position edits in that module so later type slices do not touch shared codecs.
+Position now owns the SDK declaration (and PositionSide/PositionMode/MarginType/
+OptionGreeks dependencies), published by `generate.cjs` into
+`packages/safe-cex/src/generated`. `liquidation_price` is `Option<f64>` but the
+wire property is required and nullable, not optional. The private decoder uses
+an explicit required nullable field reader. Run the scoped compiler/freshness
+gate `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs` after generation.
+The legacy broad parity script still has unrelated missing capability-declaration
+coverage on this baseline; do not mistake it for the Position cutover gate.
+
+## Generated Store cutover
+
+`store_model.rs` owns StoreData and its five scalar dependencies and private
+strict codecs. `initial_store_data` owns unloaded Store defaults. The scoped
+`store` example exports only this slice to `bindings/store`; `store-generate.cjs`
+publishes six modules and the initial value without overwriting other slices.
+Composed model imports use their owning public generated identities. Opaque
+config/user data projects to unknown; its native retained/JSON policy is unchanged.

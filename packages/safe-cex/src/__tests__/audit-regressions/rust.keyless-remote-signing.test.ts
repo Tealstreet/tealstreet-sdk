@@ -19,7 +19,7 @@ const remoteSigner: RemoteSigner = {
 
 // exchange-server's hosted shape: the browser holds the secret and signs every request.
 const hosted = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions => ({
-  key: 'hosted-api-key',
+  key: ['organizations', 'fixture', 'apiKeys', 'hosted'].join('/'),
   secret: '',
   remoteSigner,
   privateOnly: true,
