@@ -19,6 +19,7 @@ import { isWorkerMessage, isWorkerRecord } from './workerMessage';
 
 export const anonymousExchangeWorkers: { [key: string]: ExchangeWorker } = {};
 export const exchangeWorkers: { [key: string]: ExchangeWorker } = {};
+const telegramStartedWorkers = new WeakSet<ExchangeWorker>();
 const ports: { [key: string]: (MessagePort | Worker)[] } = {};
 const portsBySubId: { [key: string]: MessagePort | Worker } = {};
 const sharedWorkerSessions = new WeakMap<ExchangeWorker, string | undefined>();
@@ -218,7 +219,21 @@ const start = (ctx: Worker, shared = false) => {
   };
 
   const startTelegramWorker = (worker: ExchangeWorker, payload: StoreWorkerPayload) => {
-    if (!payload.data.telegramBotToken) return;
+    const { accountName: ownerAccountName, exchangeName: ownerExchangeName } = payload.data;
+    const ownerRegistry = ownerAccountName ? exchangeWorkers : anonymousExchangeWorkers;
+    const ownerKey = ownerAccountName || ownerExchangeName;
+    const ownerPortKey = ownerAccountName ? `account:${ownerAccountName}` : `exchange:${ownerExchangeName}`;
+    if (
+      !payload.data.telegramBotToken ||
+      ownerRegistry[ownerKey] !== worker ||
+      (!shared && getMyExchangeWorker() !== worker) ||
+      (shared && !ports[ownerPortKey]?.some((port) => sharedPortWorkers.get(port) === worker)) ||
+      !worker.exchange ||
+      worker.exchange.isDisposed ||
+      telegramStartedWorkers.has(worker)
+    )
+      return;
+    telegramStartedWorkers.add(worker);
     new TelegramWorker(() => worker.exchange!, payload.data.telegramBotToken).start();
   };
 
@@ -306,7 +321,7 @@ const start = (ctx: Worker, shared = false) => {
         } else {
           ctx.postMessage({ op: 'start-status', data: true });
           existingWorker.sendSnapshot();
-          return;
+          return existingWorker;
         }
       }
       // Wrap postMessage to broadcast to all ports with per-port throttling
@@ -382,6 +397,7 @@ const start = (ctx: Worker, shared = false) => {
       exchangeWorker.dispose();
       return;
     }
+    return exchangeWorker;
   };
 
   ctx.addEventListener('message', async (event: MessageEvent<unknown>) => {
@@ -456,7 +472,7 @@ const start = (ctx: Worker, shared = false) => {
       return;
     }
 
-    let exchangeWorker = getMyExchangeWorker();
+    const exchangeWorker = getMyExchangeWorker();
 
     if (shared && payload.op !== 'init') {
       const target = getRegisteredWorker() ?? failedWorker;
@@ -522,14 +538,11 @@ const start = (ctx: Worker, shared = false) => {
         }
         // Reusing the same binding must not invalidate its pending startup.
         const generation = shared && exchangeWorker && !rebindsPort ? initGeneration : ++initGeneration;
-        await initExchangeWorker(payload);
-        if (generation !== initGeneration) return;
-
-        // re-get exchangeWorker after init
-        exchangeWorker = getMyExchangeWorker();
-
-        if (exchangeWorker?.exchange && !exchangeWorker.exchange.isDisposed)
-          startTelegramWorker(exchangeWorker, payload);
+        const initializedWorker = await initExchangeWorker(payload);
+        // Shared startup belongs to the worker, which may still serve another port.
+        // startTelegramWorker checks that original worker's registry and attachments.
+        if (!shared && generation !== initGeneration) return;
+        if (initializedWorker) startTelegramWorker(initializedWorker, payload);
         break;
       }
       case 'dispose':
@@ -569,6 +582,7 @@ const start = (ctx: Worker, shared = false) => {
           // Clean up throttle states for all ports being cleared
           for (const port of ports[portKey] || []) {
             cleanupPortState(port);
+            sharedPortWorkers.delete(port);
           }
           ports[portKey] = [];
           attachedSharedWorker = undefined;
