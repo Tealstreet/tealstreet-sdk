@@ -1286,3 +1286,132 @@ async fn delegated_mode_refusal_preserves_empty_id_bytes_after_a_tagged_join() {
 async fn delegated_mode_refusal_preserves_fresh_legacy_bytes() {
     delegated_mode_refusal_reply(false, None, None).await;
 }
+
+async fn queued_mode_refusal_retired_queue(
+    previous_id: Option<&str>,
+    requested_id: Option<&str>,
+    switch_user: bool,
+) {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let payload = init(requested_id);
+            let pair = || {
+                crate::delegated::DelegatedPair::new(
+                    payload.key.clone(),
+                    safe_cex_crypto::signer::Secret::new("synthetic-registration-fixture".into()),
+                    None,
+                )
+            };
+            let prepared = crate::delegated::prepare_delegated(&payload, pair())
+                .unwrap_or_else(|_| panic!("synthetic fixture prepares"));
+            let (mut account, _inbox) = crate::accounts::testing::account_on(
+                crate::accounts::testing::HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: Some(0.),
+                    ticker: true,
+                },
+                ("u", "acct", "bybit"),
+                Some(safe_cex_remote_signer::SignerLink::new(
+                    0,
+                    Arc::new(|_| true),
+                )),
+                crate::delegated::fingerprint(&payload),
+                Arc::default(),
+            );
+            let inner = Arc::get_mut(&mut account).unwrap();
+            inner.link = None;
+            inner.delegated = Some(prepared.resident);
+            crate::accounts::testing::register(&registry, &account);
+            let (mut session, mut sent) = user_session(registry.clone(), "u");
+            {
+                let previous = session.out.account("acct").with_instance_id(previous_id);
+                let held = registry
+                    .obtain_delegated(
+                        "u",
+                        &payload,
+                        session.socket,
+                        None,
+                        previous.outbox(),
+                        pair(),
+                    )
+                    .await
+                    .unwrap_or_else(|_| panic!("same-mode hold succeeds"));
+                session.join(held, previous).await;
+                assert!(session.joined.contains_key("acct"));
+                ready().await;
+                while sent.try_recv().is_ok() {}
+            }
+            session.init(payload).await.unwrap();
+            let stale = envelope::init_refused(
+                "acct",
+                "Account signing mode differs; account not attached",
+            );
+            let switched = switch_user.then(|| user_session(registry.clone(), "v"));
+            session
+                .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+                .await
+                .unwrap();
+            let mut retired_sent = None;
+            let (mut session, mut sent) = if let Some(next) = switched {
+                session.close();
+                retired_sent = Some(sent);
+                next
+            } else {
+                (session, sent)
+            };
+            let user = if switch_user { "v" } else { "u" };
+            let replacement_id = requested_id.map(|_| "replacement-B");
+            let replacement = init(replacement_id);
+            let current =
+                crate::accounts::testing::trading_account(&registry, user, &replacement);
+            session.init(replacement).await.unwrap();
+            assert!(Arc::ptr_eq(&session.joined["acct"].account, &current));
+            let control = envelope::error(Some("acct"), "current-generation-control");
+            current.notify(control.clone());
+            let mut delivered = false;
+            while let Ok(frame) = sent.try_recv() {
+                assert_ne!(
+                    without_id(&frame), without_id(&stale),
+                    "mode refusal queued before dispose must not reach the replacement account generation: {frame}",
+                );
+                if without_id(&frame) == without_id(&control) {
+                    let value: Value = serde_json::from_str(&frame).unwrap();
+                    assert_eq!(value["d"]["instanceId"].as_str(), replacement_id);
+                    delivered = true;
+                }
+            }
+            assert!(delivered, "current generation delivery control");
+            if let Some(mut retired) = retired_sent {
+                while let Ok(frame) = retired.try_recv() {
+                    assert_ne!(
+                        without_id(&frame), without_id(&stale),
+                        "the previous user's queued refusal must retire during login switch: {frame}",
+                    );
+                    assert_ne!(
+                        without_id(&frame), without_id(&control),
+                        "the replacement user's output must stay on its socket: {frame}",
+                    );
+                }
+            }
+            session.close();
+            registry.dispose(&current, Disposal::PageDisposed);
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn queued_mode_refusal_retires_before_legacy_replacement() {
+    queued_mode_refusal_retired_queue(None, None, false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn queued_mode_refusal_retires_before_tagged_replacement() {
+    queued_mode_refusal_retired_queue(Some("prior"), Some("refused-current"), false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn queued_mode_refusal_retires_during_user_switch() {
+    queued_mode_refusal_retired_queue(Some("prior"), Some("refused-current"), true).await;
+}

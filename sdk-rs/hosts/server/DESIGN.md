@@ -635,8 +635,9 @@ detached read, signer or frame pump can defer it. An accepted rebuilding init
 retires that generation before obtaining the replacement; dispose and orphan
 release retire it too. Both enqueue and socket dequeue check the captured
 generation and discard stale output, including delayed algo stop notices and
-already-queued frames. Repeated init and re-snapshot of the same account keep
-their generation. Other accounts and session envelopes are unaffected.
+already-queued frames and account-scoped init refusals, including signing-mode
+mismatches. Repeated init and re-snapshot of the same account keep their
+generation. Other accounts and session envelopes are unaffected.
 
 An optional string `init.instanceId` identifies the browser registration, not
 the account or its authority. It never enters engine options, fingerprints or
