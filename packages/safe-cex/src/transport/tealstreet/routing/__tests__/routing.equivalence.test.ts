@@ -23,6 +23,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   binancepm: 'https://papi.binance.com',
   binancespot: 'https://api.binance.com',
   bingx: 'https://open-api.bingx.com',
+  bingxspot: 'https://open-api.bingx.com',
   bitget: 'https://api.bitget.com',
   bitgetinverse: 'https://api.bitget.com',
   bitgetusdc: 'https://api.bitget.com',

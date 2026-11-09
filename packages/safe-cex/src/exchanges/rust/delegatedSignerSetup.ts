@@ -6,8 +6,11 @@ import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { nanoid } from 'nanoid';
 
 import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
-import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
+import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveEffectivePublicDataOnly, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
+import { capturedDelegatedCallbacks, snapshotDelegatedSigningOptions } from './delegatedSigningSnapshot';
+
+export { delegatedCallbacksWellFormed } from './delegatedSigningSnapshot';
 
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
 const invalid = (message = 'Invalid delegated signer setup'): never => {
@@ -47,14 +50,15 @@ export class DelegatedSignerSetup {
   readonly signerAlgorithms: readonly SignAlgorithm[];
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
+    options = snapshotDelegatedSigningOptions(name, options);
     this.#venue = name;
-    this.#publicOnly = options.publicDataOnly === true;
+    this.#publicOnly = resolveEffectivePublicDataOnly(name, options);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
     this.#publicMode = Object.freeze({ requested: options.publicDataOnly ?? null,
       ...this.intent, apiKeyIndexPresent: Boolean(options.apiKeyIndex) });
     this.usesPayloadSigner = !this.#publicOnly && selectDelegatedSigningMode(options) === 'payload';
     this.signerAlgorithms = this.#publicOnly ? [] : remoteSignerAlgorithms(name);
-    // Explicit public mode grants no signing authority. Do not validate or retain
+    // Effective public mode grants no signing authority. Do not validate or retain
     // callbacks, keys, passphrases or setup metadata that this account cannot use.
     if (this.#publicOnly) {
       this.#identities = Object.freeze({});
@@ -80,19 +84,18 @@ export class DelegatedSignerSetup {
       const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const remoteSigner = options.remoteSigner;
-    const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
+    const callbacks = capturedDelegatedCallbacks(options) ?? invalid();
+    const remoteSigner = callbacks.remoteSigner;
+    const payloadSigner = this.usesPayloadSigner ? callbacks.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
-    if ((this.intent.remoteSigner && (!remoteSigner || typeof remoteSigner.sign !== 'function'
-      || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function'))
-      || (this.intent.payloadSigner && typeof options.payloadSigner !== 'function')) invalid();
     const primary = publicCredential(options.key, primaryMetadata?.trimCredential === true);
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
-    // WOO's raw HMAC callback has no slot selector; never install unusable read refs.
-    if (name === 'woo' && remoteSigner && secondaryRequested) {
-      const message = 'WOO X secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser';
+    // Raw HMAC callbacks have no slot selector; never install unusable read refs.
+    if ((name === 'woo' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
+      const venue = name === 'woo' ? 'WOO X' : 'Crypto.com';
+      const message = `${venue} secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');

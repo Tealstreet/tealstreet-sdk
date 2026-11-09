@@ -189,6 +189,74 @@ fn native_limit_precision_symbol_broker_fresh_ids_and_tif() {
         assert_eq!(done(&mut e).unwrap(), format!("[\"order-{i}\"]"));
     }
 }
+// TS: packages/safe-cex/src/__tests__/reference/kraken/kraken.exchange.ts:452-462,514-529.
+// KNOWN-ISSUE: TS sends above-max; venue refuses.
+#[test]
+fn legacy_above_max_sends_one_rounded_payload_and_surfaces_native_refusal() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (amount, maximum, step, expected) in [
+        (26.0, 5.0, 1.0, "26"),
+        (11.0, 5.0, 1.0, "11"),
+        (12.0, 5.0, 1.0, "12"),
+        (10.0, 5.0, 1.0, "10"),
+        (7.0, 3.0, 0.5, "7"),
+        (0.0264, 0.005, 0.001, "0.026"),
+        (5.6, 5.0, 1.0, "6"),
+    ] {
+        for (kind, native) in [
+            (OrderType::Limit, "lmt"),
+            (OrderType::Market, "mkt"),
+            (OrderType::StopLoss, "stp"),
+            (OrderType::TakeProfit, "take_profit"),
+            (OrderType::TrailingStopLoss, "trailing_stop"),
+        ] {
+            let (mut e, _) = ready();
+            e.store_mut().update_markets(|market| {
+                market.precision.amount = step;
+                market.limits.amount.min = step;
+                market.limits.amount.max = maximum;
+            });
+            let mut order = limit();
+            order.kind = kind;
+            order.amount = amount;
+            order.price = Some(90.0);
+            place(&mut e, vec![order]);
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1, "{amount}/{maximum}/{step}: {kind:?}");
+            let request = &writes[0];
+            assert_eq!(request.method, Method::Post);
+            assert!(request.url.ends_with("sendorder"));
+            assert_eq!(param(request, "size").as_deref(), Some(expected));
+            assert_eq!(param(request, "orderType").as_deref(), Some(native));
+            reply(
+                &mut e,
+                request,
+                200,
+                r#"{"result":"success","sendStatus":{"status":"invalidSize"}}"#,
+            );
+            let terminal = e.drain_plain().collect::<Vec<_>>();
+            assert!(!terminal.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(
+                !terminal
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+            );
+            let errors = terminal
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].kind, Some(ErrorKind::Rejected));
+            assert_eq!(errors[0].outcome, Some(Outcome::Rejected));
+            assert_eq!(errors[0].venue_code.as_deref(), Some("invalidSize"));
+            assert!(errors[0].legacy_text().contains("invalidSize"));
+        }
+    }
+}
+
 #[test]
 fn missing_or_rejected_semantic_ack_never_sends_bracket() {
     for body in [

@@ -41,8 +41,10 @@ it('declares Futures remote custody and base64 setup without enabling Spot or Pa
   expect(remoteSignerAlgorithms('kraken')).toEqual(['hmacSha512']);
   expect(deriveSignerSetupPolicy('kraken').primary).toMatchObject({ secretEncoding: 'base64' });
   expect(deriveBridgeConstruction('kraken', { key: '', secret: '' })).toMatchObject({ dispatchSigning: true });
-  expect(() => assertBetaAccount('kraken', { remoteSigner })).not.toThrow();
-  expect(() => assertBetaAccount('krakenspot', { remoteSigner })).toThrow();
+  expect(() => assertBetaAccount('kraken', { key: 'fixture-key', remoteSigner })).not.toThrow();
+  expect(deriveRemoteSigningPolicy('krakenspot')).toBeUndefined();
+  expect(() => assertBetaAccount('krakenspot', { key: 'fixture-key', remoteSigner }))
+    .toThrow(/isn't available on the Hosted Server/);
   expect(
     () => new DelegatedSignerSetup('kraken', { key: 'fixture-key', secret: '', payloadSigner: vi.fn() }),
   ).toThrow();

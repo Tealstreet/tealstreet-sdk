@@ -25,7 +25,7 @@ fn direct_decimal_record_preserves_native_position_and_display_fields() {
         (value.position.unrealized_pnl, -4.125),
         (value.position.realized_pnl.unwrap(), 5.25),
         (value.position.contracts, 6.5),
-        (value.position.liquidation_price, 7.75),
+        (value.position.liquidation_price.unwrap(), 7.75),
         (value.position.margin_size.unwrap(), 8.875),
         (value.position.last_update.unwrap(), 9.125),
         (value.one_min_upnl.unwrap(), 10.25),
@@ -57,7 +57,7 @@ fn direct_negative_zero_record_keeps_sign_through_qualified_deserialize() {
     }
     assert_eq!(value.position.notional, 1.0);
     assert_eq!(value.position.leverage, 2.0);
-    assert_eq!(value.position.liquidation_price, 3.0);
+    assert_eq!(value.position.liquidation_price, Some(3.0));
 }
 
 #[test]
