@@ -2119,9 +2119,12 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let elements = fallback.elements.take();
+        // Identity-only fallbacks declare no logical counts. They must neither
+        // invent an empty partial result nor erase selected native counts.
         let plan_counts = elements
             .as_ref()
             .and(fallback.partial.as_ref())
+            .filter(|partial| partial.total.is_some() || partial.failed_index.is_some())
             .map(|partial| (partial.total, partial.failed_index));
         let presented = (fallback.protection.is_some() || fallback.presents)
             .then(|| (fallback.message.clone(), fallback.protection));

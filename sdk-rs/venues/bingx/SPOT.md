@@ -126,6 +126,8 @@ Their indexed journal covers every prepared native payload: accepted placements
 retain native IDs, accepted cancellations record applied effects, the uncertain
 payload is Unknown, and untouched suffixes stay NotSent. The partial metadata
 retains the failed payload index and total prepared payload count.
+Spot explicitly supplies these logical counts. Identity-only fallbacks leave
+selected native counts and ID-less applied effects unchanged during projection.
 Error codes are decoded independently of success-order data. Empty error data
 (`null`, `{}`, `[]` or an empty `orders` array) does not erase a known refusal;
 nonempty arrays or unrecognized object fields remain Unknown. This includes
