@@ -1088,6 +1088,7 @@ async fn a_timeout_on_a_socket_silent_since_the_send_is_a_suspension() {
     );
 }
 
+mod backpack;
 mod kucoin;
 mod orderly;
 
