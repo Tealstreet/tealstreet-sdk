@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 
 mod construction;
 mod plaintext;
+pub(crate) mod probe;
 pub(crate) use construction::fingerprint;
 pub use construction::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 

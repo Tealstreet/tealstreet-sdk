@@ -17,6 +17,9 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
+mod delegated_probe;
+pub(crate) use delegated_probe::ProbePermit;
+
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
 pub const PUBLIC_ACCOUNT: &str = "__pub_bybit";
 pub const PUBLIC_EXCHANGE: &str = "bybit";
@@ -391,6 +394,7 @@ struct InitIncarnation {
 struct InitAuthority {
     current: Arc<AtomicBool>,
     lease: Option<crate::router_lease::Permit>,
+    probe_lease: Option<crate::router_lease::Permit>,
 }
 
 impl InitAuthority {
@@ -400,6 +404,13 @@ impl InitAuthority {
         }
         if self.lease.as_ref().is_some_and(|lease| !lease.allowed()) {
             return Err("Router lease expired; initialization stopped".into());
+        }
+        if self
+            .probe_lease
+            .as_ref()
+            .is_some_and(|lease| !lease.allowed())
+        {
+            return Err("DELEGATED verification expired; initialization stopped".into());
         }
         Ok(())
     }
@@ -1020,6 +1031,7 @@ impl Registry {
         let authority = InitAuthority {
             current: Arc::new(AtomicBool::new(true)),
             lease,
+            probe_lease: None,
         };
         authority.check()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1062,7 +1074,7 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
     ) -> Result<Arc<Account>, String> {
-        self.obtain_with_pair(user, init, public_only, holder, token, outbox, None)
+        self.obtain_with_pair(user, init, public_only, holder, token, outbox, None, None)
             .await
     }
 
@@ -1078,7 +1090,7 @@ impl Registry {
         pair: DelegatedPair,
     ) -> Result<Arc<Account>, String> {
         pair.validate(init)?;
-        self.obtain_with_pair(user, init, false, holder, token, outbox, Some(pair))
+        self.obtain_with_pair(user, init, false, holder, token, outbox, Some(pair), None)
             .await
     }
 
@@ -1092,6 +1104,7 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
         pair: Option<DelegatedPair>,
+        proof: Option<ProbePermit>,
     ) -> Result<Arc<Account>, String> {
         if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
@@ -1106,9 +1119,22 @@ impl Registry {
             init.fingerprint()
         };
         let mut attempt = self.begin_init(user, &init.account_name, public_only, &fingerprint)?;
+        let probed = proof.is_some();
+        if let Some(proof) = proof {
+            proof
+                .check(user, init)
+                .map_err(|_| "DELEGATED verification expired".to_owned())?;
+            attempt.authority.probe_lease = proof.lease;
+        }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
         if let Some(account) = existing {
+            if probed && (account.fingerprint != fingerprint || account.is_public()) {
+                return Err("DELEGATED account settings differ; account not attached".into());
+            }
+            if probed {
+                attempt.authority.check()?;
+            }
             if !account.is_public() && account.delegated.is_some() != delegated {
                 return Err("Account signing mode differs; account not attached".into());
             }
@@ -2013,6 +2039,26 @@ pub fn resume_id() -> String {
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
     use super::*;
+
+    #[cfg(test)]
+    pub(crate) fn engine_count(registry: &Registry) -> usize {
+        registry.threads.accounts()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn probe_registry(plan: RoutingPlan) -> Arc<Registry> {
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        for user in ["alice", "bob"] {
+            registry
+                .construction_test_plans
+                .insert(user.into(), plan.clone());
+        }
+        Arc::new(registry)
+    }
 
     /// A private account of `user` named `name` on `venue`, held by no socket yet,
     /// and the inbox its algo host would read.

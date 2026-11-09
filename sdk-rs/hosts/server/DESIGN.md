@@ -583,12 +583,21 @@ the captured user, socket and init generation; dispose, another init, another
 key request or socket close retires pending work. Verification failure leaves
 any running account unchanged.
 
-The handover slice does not by itself attach an account: successful opening
-still returns an `initRefused` error of `kind:"unverified"`, with
-`transient:true`, until the venue-probe integration is present. A failed opening
-uses `transient:false`. Existing rebuild refusal, settings replacement and
-early-subscription handling remain on the existing COSIGNED init path. Fixed
-synthetic interoperability and RFC test data live in `tests/data/`.
+After opening, a temporary native Bybit account checks the supplied pair through
+the venue's normal private startup reads and is disposed before admission.
+An accepted pair starts a DELEGATED account when none exists, or joins the
+matching running DELEGATED account while retaining its existing signer. This
+does not compare secret material or replace an existing account's settings.
+The probe's router-lease generation remains attached through native construction
+and outbound IO. Its account is also disposed when the pending init is canceled.
+
+Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
+message. Auth kinds are permanent refusals; rate, network, timeout and venue
+availability failures are transient. Replies retain the init's registration ID;
+clients without one retain the original envelope bytes. Existing rebuild
+refusal, settings replacement and early-subscription handling remain on the
+existing COSIGNED init path. Fixed synthetic interoperability and RFC test data
+live in `tests/data/`.
 
 ## Frames (claude-19pt8s, web hosted client)
 
