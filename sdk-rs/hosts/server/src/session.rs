@@ -136,6 +136,12 @@ pub struct JoinCompletion {
     generation: u64,
     account_name: String,
     candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
+    probe: Option<ProbedInit>,
+}
+
+struct ProbedInit {
+    init: InitPayload,
+    permit: Result<crate::accounts::ProbePermit, crate::delegated::probe::ProbeRefusal>,
 }
 
 /// A chart or book subscription, by its page op.
@@ -356,10 +362,24 @@ impl Session {
         self.pending_verifications.remove(name);
     }
 
+    #[cfg(test)]
     fn start_verification<F>(&mut self, name: String, verify: F)
     where
         F: std::future::Future<
                 Output = Result<crate::delegated::Credentials, crate::delegated::Refused>,
+            > + Send
+            + 'static,
+    {
+        self.start_probe_verification(name, async move { (verify.await, None) });
+    }
+
+    fn start_probe_verification<F>(&mut self, name: String, verify: F)
+    where
+        F: std::future::Future<
+                Output = (
+                    Result<crate::delegated::Credentials, crate::delegated::Refused>,
+                    Option<ProbedInit>,
+                ),
             > + Send
             + 'static,
     {
@@ -372,7 +392,7 @@ impl Session {
         let completed = self.verified.clone();
         let out = self.handover_out(&name);
         let task = tokio::spawn(async move {
-            let candidate = verify.await;
+            let (candidate, probe) = verify.await;
             // A closed receiver drops the candidate and erases its fields.
             let _ = completed.send(JoinCompletion {
                 user,
@@ -380,6 +400,7 @@ impl Session {
                 generation,
                 account_name,
                 candidate,
+                probe,
             });
         });
         self.pending_verifications.insert(
@@ -414,8 +435,77 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
-        // Account attachment requires the private venue probe supplied by the
-        // verification slice. Opening alone never admits an account.
+        if let Some(probe) = completed.probe {
+            match (completed.candidate, probe.permit) {
+                (Ok(candidate), Ok(permit)) => {
+                    let account = self
+                        .registry
+                        .obtain_probed_delegated(
+                            self.user(),
+                            &probe.init,
+                            self.socket,
+                            self.identity.token.clone(),
+                            out.outbox(),
+                            candidate.pair(),
+                            permit,
+                        )
+                        .await;
+                    drop(candidate);
+                    match account {
+                        Ok(account) => {
+                            self.metrics.note_init();
+                            if let Some(joined) = self.joined.get_mut(&completed.account_name)
+                                && Arc::ptr_eq(&joined.account, &account)
+                            {
+                                let previous = std::mem::replace(&mut joined.out, out.clone());
+                                previous.finish_registration(&out);
+                                self.resnapshot(&completed.account_name).await;
+                            } else {
+                                if let Some(previous) = self.joined.remove(&completed.account_name)
+                                {
+                                    previous.out.retire_registration();
+                                    Self::leave_engine(previous);
+                                }
+                                self.join(account, out.clone()).await;
+                            }
+                            if self.joined.contains_key(&completed.account_name) {
+                                self.registry.interruptions.deliver(
+                                    self.user(),
+                                    &completed.account_name,
+                                    &out,
+                                );
+                                if let Some(kept) = self.registry.take_notice(
+                                    self.user(),
+                                    &completed.account_name,
+                                    &self.joined[&completed.account_name].account.fingerprint,
+                                    self.identity.resume_from.as_deref(),
+                                ) {
+                                    for frame in kept.frames(&completed.account_name) {
+                                        out.send(frame);
+                                    }
+                                }
+                            }
+                        }
+                        Err(refusal) => {
+                            self.drop_early(&completed.account_name, "verification refused");
+                            out.send(envelope::init_unverified(
+                                &completed.account_name,
+                                refusal.transient,
+                            ));
+                        }
+                    }
+                }
+                (_, permit) => {
+                    self.drop_early(&completed.account_name, "verification refused");
+                    out.send(envelope::init_unverified(
+                        &completed.account_name,
+                        permit.err().is_some_and(|refusal| refusal.transient),
+                    ));
+                }
+            }
+            return Ok(());
+        }
+        // Opening-only test completions do not carry venue verification.
         let transient = completed.candidate.is_ok();
         self.drop_early(&completed.account_name, "verification refused");
         out.send(envelope::init_unverified(
@@ -430,7 +520,10 @@ impl Session {
         if !crate::delegated::enabled(&init.exchange_name)
             || init.public_only == Some(true)
             || init.account_name.starts_with("__pub_")
-            || self.joined.contains_key(&init.account_name)
+            || self
+                .registry
+                .signing_mode_refusal(self.user(), &init, false, true)
+                .is_some()
             || self.pending_verifications.len() >= 64
         {
             self.handovers.forget(&init.account_name);
@@ -438,9 +531,67 @@ impl Session {
             self.refuse_handover(&init.account_name, false);
             return;
         }
-        self.open_handover(init);
+        self.open_probed_handover(init);
     }
 
+    fn open_probed_handover(&mut self, mut init: InitPayload) {
+        let permit = match self.registry.probe_permit(self.user(), &init) {
+            Ok(permit) => permit,
+            Err(refusal) => {
+                self.handovers.forget(&init.account_name);
+                self.drop_early(&init.account_name, "verification refused");
+                self.refuse_handover(&init.account_name, refusal.transient);
+                return;
+            }
+        };
+        let Some(sealed) = init.sealed.take() else {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "delegated init refused");
+            self.refuse_handover(&init.account_name, false);
+            return;
+        };
+        let opening =
+            match self
+                .handovers
+                .take(&init.account_name, &sealed, crate::accounts::now_ms())
+            {
+                Ok(opening) => opening,
+                Err(_) => {
+                    self.drop_early(&init.account_name, "delegated init refused");
+                    self.refuse_handover(&init.account_name, false);
+                    return;
+                }
+            };
+        let registry = self.registry.clone();
+        let user = self.user().to_owned();
+        let token = self.identity.token.clone();
+        self.start_probe_verification(init.account_name.clone(), async move {
+            let candidate = opening.open(
+                &init.exchange_name,
+                &init.key,
+                &sealed,
+                crate::accounts::now_ms(),
+            );
+            let probe = match candidate.as_ref() {
+                Ok(candidate) => Some(ProbedInit {
+                    permit: registry
+                        .probe_delegated(&user, &init, token, candidate, permit)
+                        .await,
+                    init,
+                }),
+                Err(_) => None,
+            };
+            let candidate = if probe.as_ref().is_some_and(|probe| probe.permit.is_err()) {
+                drop(candidate);
+                Err(crate::delegated::Refused)
+            } else {
+                candidate
+            };
+            (candidate, probe)
+        });
+    }
+
+    #[cfg(test)]
     fn open_handover(&mut self, mut init: InitPayload) {
         let Some(sealed) = init.sealed.take() else {
             self.handovers.forget(&init.account_name);
@@ -2142,6 +2293,8 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod delegated_probe;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
         serde_json::from_str(r#"{"key":"synthetic-key","secret":"synthetic-secret"}"#).unwrap()
