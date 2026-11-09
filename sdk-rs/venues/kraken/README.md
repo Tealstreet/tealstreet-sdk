@@ -1,5 +1,13 @@
 # Kraken venue adapters
 
+## Futures placement size parity
+
+Futures placement follows the legacy TS `kraken.exchange.ts:452-462`: round the
+amount to its step and send one payload, even above the market's amount maximum.
+It does not split or cap that size. A native `invalidSize` reply remains a
+definite venue refusal, as in TS `:514-529`.
+KNOWN-ISSUE: TS sends above-max; venue refuses.
+
 ## Kraken Spot hosted signing
 
 Kraken Spot remains local-only, with hosted/remote signing deferred and the existing

@@ -29,7 +29,9 @@ class MemoryRedis implements RedisLikeMarketCacheClient {
   }
 }
 
-const market = { id: 'BTCUSDT', symbol: 'BTCUSDT' } as Market;
+const market: Market = { id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
+  precision: { amount: 0.001, price: 0.1 },
+  limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } } };
 
 describe('publicExchange market cache', () => {
   it('writes bucket snapshots and latest pointers with TTL args', async () => {

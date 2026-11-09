@@ -201,6 +201,7 @@ pub struct TwapBook {
 #[derive(Debug)]
 struct Entry {
     instance: TwapInstance,
+    owner_id: Option<String>,
     /// False once removed from the TS manager; the entry lingers only while
     /// in-flight placements or slice timeouts can still act.
     managed: bool,
@@ -288,7 +289,7 @@ impl TwapBook {
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
-        self.add(instance);
+        self.add(instance, None);
         if let Some(instance) = self.managed_mut(&id) {
             instance.start(env, view, effects);
         }
@@ -395,10 +396,12 @@ impl TwapBook {
         for entry in self.managed_entries() {
             let instance = &entry.instance;
             if instance.state.status != TwapStatus::Completed {
-                result.insert(
-                    instance.id.clone(),
-                    serde_json::json!({ "options": instance.options, "state": instance.state }),
-                );
+                let mut row =
+                    serde_json::json!({ "options": instance.options, "state": instance.state });
+                if let Some(owner_id) = &entry.owner_id {
+                    row["ownerId"] = Value::String(owner_id.clone());
+                }
+                result.insert(instance.id.clone(), row);
             }
         }
         Value::Object(result)
@@ -486,9 +489,10 @@ impl TwapBook {
     }
 
     /// `Map.set`: a known id keeps its position and takes the new instance.
-    fn add(&mut self, instance: TwapInstance) {
+    fn add(&mut self, instance: TwapInstance, owner_id: Option<String>) {
         let entry = Entry {
             instance,
+            owner_id,
             managed: true,
         };
         match self
@@ -544,12 +548,10 @@ impl TwapBook {
             }
             let running = entry.state.status == TwapStatus::Running;
             let id = entry.id.clone();
-            self.add(TwapInstance::new(
-                entry.id,
-                entry.options,
-                Some(entry.state),
-                env,
-            ));
+            self.add(
+                TwapInstance::new(entry.id, entry.options, Some(entry.state), env),
+                entry.owner_id,
+            );
             if let Some(instance) = self.managed_mut(&id) {
                 // Persisted at once, so the host sees which rows it adopted.
                 instance.mark_state_changed();

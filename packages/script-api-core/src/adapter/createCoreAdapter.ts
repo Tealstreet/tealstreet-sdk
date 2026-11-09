@@ -232,7 +232,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
     getPositions: ({ account, symbol }): readonly Position[] =>
       bySymbol((host.getStore(account)?.positions as readonly Position[]) ?? EMPTY, symbol),
     getOrders: ({ account, symbol }): readonly Order[] =>
-      bySymbol(((host.getStore(account)?.orders as readonly Order[]) ?? EMPTY).filter(isNotTerminal), symbol),
+      bySymbol(((host.getStore(account)?.orders) ?? EMPTY).filter(isNotTerminal), symbol),
     getBalance: (account): Balance | undefined =>
       host.readBalance ? host.readBalance(account) : host.getStore(account)?.balance,
     getCombinedBalance: ({ accounts }): CombinedBalance => summarizeBalance(accounts),

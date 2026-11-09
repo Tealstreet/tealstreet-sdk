@@ -15,6 +15,9 @@ use safe_cex_engine::model::{
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 
+#[path = "chaser/two_owner_deferral.rs"]
+mod two_owner_deferral;
+
 type Responder = Box<dyn FnMut(&Command) -> Result<String, VenueError>>;
 
 /// Which commands go into a dead link.

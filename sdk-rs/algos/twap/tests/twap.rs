@@ -938,6 +938,45 @@ fn persisted(id: &str, status: &str, next_order_at: f64) -> Value {
 }
 
 #[test]
+fn restored_owner_round_trip_matches_the_worker_fixture() {
+    let expected: Value = serde_json::from_str(include_str!(
+        "../../../../packages/safe-cex/src/__tests__/fixtures/twap-owner-state.json"
+    ))
+    .unwrap();
+    let mut row = expected["retained-A"].clone();
+    row["id"] = json!("retained-A");
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let effects = book.handle("twap:state", &json!([row]), &mut env, &view);
+    assert_eq!(book.serialize_state(), expected);
+    assert_eq!(state_updates(&effects), vec![&expected]);
+    book.handle("twap:pause", &json!("retained-A"), &mut env, &view);
+    let mut row = book.serialize_state()["retained-A"].clone();
+    row["id"] = json!("retained-A");
+    let mut reloaded = TwapBook::new("test-account");
+    reloaded.handle("twap:state", &json!([row]), &mut env, &view);
+    assert_eq!(reloaded.serialize_state()["retained-A"]["ownerId"], "A");
+}
+
+#[test]
+fn native_legacy_untagged_rows_keep_their_persistence_shape() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    book.handle(
+        "twap:state",
+        &json!([persisted("legacy", "paused", 0.)]),
+        &mut env,
+        &view,
+    );
+    let snapshot = book.serialize_state();
+    assert!(snapshot["legacy"].get("ownerId").is_none());
+    assert_eq!(
+        snapshot["legacy"]["state"]["ordersSizes"],
+        json!([0.5, 0.5])
+    );
+}
+
+#[test]
 fn restore_resumes_running_twaps_and_skips_known_ids() {
     let (mut env, view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
