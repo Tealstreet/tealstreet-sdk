@@ -760,6 +760,10 @@ Account identity:
 - **Different users:** never share an account, even with equal names.
 - **Unauthenticated public:** `__pub_bybit` is a single shared, public-only bybit account.
 
+Label lookups use the connection's registered labels. A conflicting legacy
+label binding is refused without rebuilding either account. Algo broadcasts
+reach every registered label while counting each socket once.
+
 The identity digest is lowercase SHA-256 hex. Its input starts with the UTF-8
 bytes `tealstreet/identity/v1`, followed by three UTF-8 components: verified uid,
 scope, and canonical public key id. Each component is prefixed by its byte length

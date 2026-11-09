@@ -30,7 +30,7 @@ pub const PUBLIC_EXCHANGE: &str = "bybit";
 
 enum DelegatedSetup {
     Pair(DelegatedPair),
-    Resident(ResidentCopy),
+    Resident(Box<ResidentCopy>),
 }
 
 pub fn now_ms() -> u64 {
@@ -383,7 +383,15 @@ impl Account {
                 Some(live) => {
                     holding.live.push(*id);
                     if let Some(text) = &text {
-                        (live.outbox)(text.clone());
+                        if self.identity.is_some()
+                            && let Some(labels) = holders.labels.get(id)
+                        {
+                            for live in labels.values().flatten() {
+                                (live.outbox)(text.clone());
+                            }
+                        } else {
+                            (live.outbox)(text.clone());
+                        }
                     }
                 }
                 None => holding.parked = true,
@@ -1033,7 +1041,15 @@ impl Registry {
             Ok(name) => name,
             Err(error) => return Some(error),
         };
-        let account = accounts.get(&(user.to_owned(), name)).or_else(|| {
+        let keyed = accounts.get(&(user.to_owned(), name));
+        if keyed.is_some_and(|account| {
+            account.identity.is_some() != (!public_only && identity::enabled(init))
+        }) {
+            return Some(
+                "An existing account has a conflicting label. Rename it and try again.".into(),
+            );
+        }
+        let account = keyed.or_else(|| {
             if !public_only {
                 return None;
             }
@@ -1210,7 +1226,7 @@ impl Registry {
         }
         let setup = if let Some(resident) = &account.delegated {
             resident.reconfigure(init)?;
-            Some(DelegatedSetup::Resident(resident.clone()))
+            Some(DelegatedSetup::Resident(Box::new(resident.clone())))
         } else {
             prepare(init, false, Some(SignerLink::new(holder, outbox.clone())))?;
             None
@@ -1596,6 +1612,7 @@ impl Registry {
         let accounts = self.accounts.lock().unwrap();
         let account = accounts
             .get(&(user.to_owned(), name.to_owned()))
+            .filter(|account| account.identity.is_none())
             .cloned()
             .or_else(|| {
                 accounts

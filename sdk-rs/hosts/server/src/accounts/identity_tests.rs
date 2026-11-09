@@ -309,6 +309,124 @@ async fn labels_share_one_identity_and_release_independently() {
 }
 
 #[tokio::test]
+async fn identity_broadcast_reaches_each_label_once_and_counts_one_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let first = init();
+            let account = account(&registry, "u", &first);
+            let second = InitPayload {
+                account_name: "second label".into(),
+                ..first.clone()
+            };
+            let (a, mut a_sent, _) = crate::out::Out::channel(16);
+            let a = a
+                .with_account_label(&first.account_name)
+                .with_instance_id(Some("first-registration"));
+            let (b, mut b_sent, _) = crate::out::Out::channel(16);
+            let b = b
+                .with_account_label(&second.account_name)
+                .with_instance_id(Some("second-registration"));
+            for (init, out) in [(&first, a), (&second, b)] {
+                let joined = registry
+                    .obtain("u", init, false, 7, None, out.outbox())
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&joined, &account));
+            }
+            let update = crate::envelope::msg(&account.name, "store", json!({"activeChasers":[]}));
+            let holding = account.reach_live(Some(update.clone()));
+            assert_eq!(holding.live, [7]);
+            assert!(!holding.parked);
+            for (sent, label, id) in [
+                (
+                    &mut a_sent,
+                    first.account_name.as_str(),
+                    "first-registration",
+                ),
+                (
+                    &mut b_sent,
+                    second.account_name.as_str(),
+                    "second-registration",
+                ),
+            ] {
+                let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+                assert_eq!(frame["d"]["accountName"], label);
+                assert_eq!(frame["d"]["instanceId"], id);
+                assert!(sent.try_recv().is_err());
+            }
+            registry.release_label(&account, 7, &second.account_name, Disposal::PageDisposed);
+            assert_eq!(account.reach_live(Some(update)).live, [7]);
+            assert!(a_sent.try_recv().is_ok());
+            assert!(b_sent.try_recv().is_err());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn identity_cache_keys_do_not_override_another_accounts_wire_label() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let original = init();
+            let first = account(&registry, "u", &original);
+            let other = InitPayload {
+                account_name: "other account".into(),
+                key: "synthetic-key-B".into(),
+                ..original.clone()
+            };
+            let second = account(&registry, "u", &other);
+            let alias = InitPayload {
+                account_name: second.registry_name().to_owned(),
+                ..original
+            };
+            for init in [&alias, &other] {
+                registry
+                    .obtain("u", init, false, 7, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+            }
+            assert!(Arc::ptr_eq(
+                &registry.held("u", &alias.account_name, 7).unwrap(),
+                &first
+            ));
+            registry.release_label(&first, 7, &alias.account_name, Disposal::PageDisposed);
+            assert!(registry.held("u", &alias.account_name, 7).is_none());
+            assert!(Arc::ptr_eq(
+                &registry.held("u", &other.account_name, 7).unwrap(),
+                &second
+            ));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn mixed_rollout_name_collisions_refuse_without_rebuilding_either_mode() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for identified_first in [true, false] {
+                let registry = tests::registry();
+                let identified = init();
+                let legacy = InitPayload {
+                    account_name: identity::digest("u", &identified).unwrap().unwrap(),
+                    exchange_name: "bybitinverse".into(),
+                    ..identified.clone()
+                };
+                let (existing, proposed) = if identified_first {
+                    (&identified, &legacy)
+                } else {
+                    (&legacy, &identified)
+                };
+                let retained = account(&registry, "u", existing);
+                assert!(registry.rebuild_refusal("u", proposed, false, 7).is_some());
+                assert!(retained.handle.disposal_cause().is_none());
+                assert_eq!(registry.account_count(), 1);
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn equal_labels_keep_distinct_keys_and_users_separate() {
     tokio::task::LocalSet::new()
         .run_until(async {
