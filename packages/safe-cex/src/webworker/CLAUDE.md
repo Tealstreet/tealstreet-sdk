@@ -80,8 +80,10 @@ callers can open a new port instead.
 Commands from detached or replaced bindings are dropped. A stale `dispose` may
 detach only its own port; it cannot dispose another session's worker. When the
 last port changes owner, the previous worker is disposed; other old-owner tabs
-keep their worker. Init generations also fence continuations after startup
-awaits, preventing an old init from starting its integration on a new account.
+keep their worker. Dedicated init generations fence continuations after startup
+awaits. Shared startup retains its original worker and requires that worker's
+registry entry and a surviving attachment, even if the creating port has moved.
+An old init never starts its integration on a new account.
 
 Account names still must be unique in a **multi-tenant host** that runs many
 clients through one process. The shared-session fence does not change dedicated
@@ -98,6 +100,14 @@ Each shared worker's outbound proxy captures its original routing key and exact
 registry instance. Rebinding its creating port must not redirect a surviving
 worker's updates; replacing that registry instance drops its stale output.
 Subscription-targeted delivery is restricted to ports attached to that routing key.
+
+Telegram starts once per exact `ExchangeWorker`, including identical same-port
+init, additional shared ports and startup retries. A replacement worker can start
+its own integration. Startup carries the original worker and init owner across
+the await, checking its original registry entry and exact remaining shared-port
+attachments before starting Telegram. If the creating port moves to B while Q
+still serves A, A's integration starts once on A. Rebound ports do not count as
+surviving attachments, and A's token cannot configure B's integration.
 
 ## Files
 
