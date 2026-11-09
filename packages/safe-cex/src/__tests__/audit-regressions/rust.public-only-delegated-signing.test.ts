@@ -123,7 +123,9 @@ it.each(matrixVenues)('$label resolves the complete public matrix before custody
 });
 
 it('enumerates every declared venue outside the beta roster', () => {
-  expect(outsideBeta.sort()).toEqual(['bingxspot', 'bitrue', 'polymarket', 'txflow', 'weex']);
+  // #3297 admits Bitrue; its public/private controls run in the IN matrix above.
+  expect(venues).toContain('bitrue');
+  expect(outsideBeta.sort()).toEqual(['bingxspot', 'polymarket', 'txflow', 'weex']);
   expect(rules.venues.hyperliquidspot).toMatchObject({ canSign: [['secret', 'remoteSigner']] });
   expect(rules.venues.hyperliquidspot).not.toHaveProperty('privateEligible');
 });

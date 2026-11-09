@@ -10,7 +10,7 @@ import { signHttpCapture } from '../../utils/signHttpCapture';
 /** Preserve frozen native nonces; Kraken also permits REST requests without one.
  * This compatibility codec never creates a second nonce allocator beside Rust. */
 export const signKrakenHttp = async (
-  host: EngineHost,
+  host: Pick<EngineHost, 'hostedSigning' | 'hostedSigningClock'>,
   options: ExchangeOptions,
   primaryComplete: boolean,
   request: RemoteSignerRequest,

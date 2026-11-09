@@ -104,8 +104,8 @@ export class DelegatedSignerSetup {
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     // Raw HMAC callbacks have no slot selector; never install unusable read refs.
-    if ((name === 'woo' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
-      const venue = name === 'woo' ? 'WOO X' : 'Crypto.com';
+    if ((name === 'woo' || name === 'bitrue' || name === 'cryptocom') && remoteSigner && secondaryRequested) {
+      const venue = name === 'woo' ? 'WOO X' : name === 'bitrue' ? 'Bitrue' : 'Crypto.com';
       const message = `${venue} secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }

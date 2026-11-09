@@ -1426,6 +1426,58 @@ test('#3373 (run 42483155921 at f62df98ad32) retains measured wasm headroom', ()
   }
 });
 
+test('#3297 (run 42428983328 at 934311ce7af) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['bitrue', 1_876_650, 1_887_232],
+    ['bybit', 2_270_329, 2_281_472],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3297 (run 42449468684 at 93ba489bb3c) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['bitunix', 1_863_777, 1_874_944],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3297 (run 42457496953 at 4c117b1f686) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['polymarket', 1_611_838, 1_623_040],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3297 post-#3306 (run 42556682443 at e5ae4d9a8db) retains current measured Bitrue headroom', () => {
+  // WASM family job 128964311836 and replay job 128964312205 measured 1,895,658 B.
+  const measured = 1_895_658;
+  const minimumCap = 1_906_688;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bitrue;
+  assert.ok(cap >= minimumCap, 'Bitrue must retain current measured size plus 10 KiB, rounded up');
+  assert.equal(wasmBudgetError(measured, 'venue', 'bitrue'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bitrue'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bitrue'), /exceeds/);
+});
+
 test('#3344 restage (optimized head 2cc05051503) retains measured headroom for both aliases', () => {
   const measured = 2_225_418;
   const minimumCap = 2_236_416;
