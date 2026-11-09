@@ -214,7 +214,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // Current master dominates; retain both parents' measurement provenance
 // and the #3281 measured-headroom regression (run 42422693183, 5025f1670c7).
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 2_089_984,
+  // #3300 merge c4d663622c01: local optimized web/node 2,092,748 B; measured + 10 KiB rounded up.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue apexomni, twice -Oz.
+  apexomni: 2_103_296,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
   asterdex: 2_201_600,
   backpack: 2_040_832,

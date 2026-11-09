@@ -1794,3 +1794,14 @@ test('#3300 restage (run 42557412385 at CI merge 291f65994cda) retains measured 
   assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
+
+test('#3300 pinned master merge c4d663622c01 retains measured ApeX Omni headroom', () => {
+  const measured = 2_092_748;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.apexomni;
+  assert.equal(minimumCap, 2_103_296);
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'apexomni'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
+});
