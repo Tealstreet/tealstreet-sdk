@@ -14,6 +14,8 @@ sha2.workspace = true
 tokio = { version = "1.53.3", features = ["sync", "time"] }
 
 [dev-dependencies]
+safe-cex-crypto.workspace = true
+safe-cex-venues = { workspace = true, features = ["kucoin", "kucoinspot", "hosted-signing"] }
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }
 
 [lints]

@@ -9,6 +9,7 @@ export class BuyCommand extends BaseBuySellCommand {
   readonly description = 'Buy market or limit order';
   readonly aliases = ['b'];
   readonly examples = [
+    'buy $100 at 50000 stop 49500 tp 51000',
     'buy $100',
     'buy $100 reduce',
     'buy WIFUSDT $100',

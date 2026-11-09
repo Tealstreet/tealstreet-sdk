@@ -1411,6 +1411,7 @@ struct WriteAttempt {
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
+    record_sequence: u64,
     reports: RejectionReports,
     id_overflow: bool,
 }
@@ -1424,12 +1425,14 @@ struct WriteLeg {
 
 /// A Plan the engine sealed Unknown on an unproven reply after an earlier
 /// refusal: that refusal's words would misreport what stands.
-pub(crate) const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+pub const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
 
 /// Bounded evidence retained for the whole command, including prior retries.
 /// Registration order is logical planning order, never callback arrival order.
 pub struct CommandWrites {
     attempts: Vec<WriteAttempt>,
+    // Callback completion order is independent of logical registration order.
+    record_sequence: u64,
     legs: Vec<WriteLeg>,
     capacity: usize,
     sealed: bool,
@@ -1506,6 +1509,7 @@ impl CommandWrites {
         }
         Ok(Self {
             attempts: Vec::new(),
+            record_sequence: 0,
             legs: Vec::new(),
             capacity,
             sealed: false,
@@ -1546,6 +1550,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
@@ -1569,6 +1574,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
@@ -1896,7 +1902,9 @@ impl CommandWrites {
         let mut evidence = writer(self.evidence)?;
         capture(&mut evidence);
         let (budget, error, overflow) = evidence.finish();
+        self.record_sequence += 1;
         self.attempts[index].result = Some(WriteResult::Failed(error));
+        self.attempts[index].record_sequence = self.record_sequence;
         self.attempts[index].id_overflow = overflow;
         self.evidence = budget;
         Ok(())
@@ -1938,7 +1946,9 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let (budget, result, id_overflow) = self.evidence.result(result);
+        self.record_sequence += 1;
         attempt.result = Some(result);
+        attempt.record_sequence = self.record_sequence;
         attempt.id_overflow = id_overflow;
         attempt.reports = reports;
         self.evidence = budget;
@@ -2102,12 +2112,13 @@ impl CommandWrites {
 
     fn failure_projection(
         &self,
-        fallback: VenueError,
+        mut fallback: VenueError,
         note: Option<&str>,
     ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
         }
+        let elements = fallback.elements.take();
         let presented = (fallback.protection.is_some() || fallback.presents)
             .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
@@ -2161,6 +2172,26 @@ impl CommandWrites {
             ) => Some(error.clone()),
             _ => None,
         };
+        // Later failed attempts can carry a complete journal even when an
+        // earlier refusal still supplies the native error text.
+        let elements = elements.or_else(|| {
+            self.attempts
+                .iter()
+                .filter_map(|attempt| match &attempt.result {
+                    Some(
+                        WriteResult::Rejected(error)
+                        | WriteResult::KnownPartial(error)
+                        | WriteResult::PartialUnknown(error)
+                        | WriteResult::Failed(error),
+                    ) => error
+                        .elements
+                        .as_ref()
+                        .map(|elements| (attempt.record_sequence, elements)),
+                    _ => None,
+                })
+                .max_by_key(|(sequence, _)| *sequence)
+                .map(|(_, elements)| elements.clone())
+        });
         // Choose the terminal physical attempt of the earliest logical leg,
         // preferring legs that reached the venue. Callback order is irrelevant.
         let select = |sent_only: bool| {
@@ -2206,6 +2237,11 @@ impl CommandWrites {
                 error
             }
         };
+        // Native-error selection must retain the complete logical plan journal.
+        // Aggregate transport classification below remains engine-owned.
+        if elements.is_some() {
+            error.elements = elements;
+        }
         error.outcome = if self.inherited_uncertain {
             Some(Outcome::Unknown)
         } else if !any_released {
@@ -2539,7 +2575,7 @@ impl CommandWrites {
                             stream.refused += 1;
                             let bytes = error.message.len()
                                 + error.venue_code.as_ref().map_or(0, String::len)
-                                + error.venue_message.as_ref().map_or(0, String::len);
+                                + error.venue_message.as_deref().map_or(0, str::len);
                             if stream.retained_bytes + bytes <= evidence::RETAINED_TEXT_BYTES {
                                 stream.retained_bytes += bytes;
                                 stream.retained.push((
@@ -2595,3 +2631,7 @@ mod evidence_tests;
 #[cfg(test)]
 #[path = "request_context_replacement_tests.rs"]
 mod replacement_tests;
+
+#[cfg(test)]
+#[path = "request_context_write_plan_tests.rs"]
+mod write_plan_tests;

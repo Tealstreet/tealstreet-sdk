@@ -260,6 +260,18 @@ fn hex_of(value: &str, digits: usize) -> bool {
 }
 
 #[cfg(feature = "polymarket")]
+fn polymarket_signing_rules(options: &EngineOptions) -> Result<(), VenueError> {
+    if !construction::signer_setup_public_data_only(options)
+        && (options.remote_signing || options.payload_signer)
+    {
+        return Err(VenueError::new("Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply")
+            .kind(ErrorKind::Unsupported)
+            .outcome(safe_cex_engine::Outcome::NotSent));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "polymarket")]
 fn polymarket_rules(options: &EngineOptions) -> Result<(), VenueError> {
     if options.public_data_only {
         return Ok(());
@@ -1246,6 +1258,10 @@ pub fn build<T: Visit>(
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    #[cfg(feature = "polymarket")]
+    if venue == "polymarket" {
+        polymarket_signing_rules(&options)?;
+    }
     payload_signing_rules(venue, &options, false)?;
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
@@ -1391,6 +1407,10 @@ pub fn build_with_signer<T: Visit>(
     signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    #[cfg(feature = "polymarket")]
+    if venue == "polymarket" {
+        polymarket_signing_rules(&options)?;
+    }
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));
@@ -2118,14 +2138,12 @@ pub fn build_with_signer<T: Visit>(
             {
                 return Err(invalid("Engine signing provider is required"));
             }
-            let mut engine = Engine::new(
-                Bingx::new(BingxOptions {
-                    read_credentials: identities.secondary,
-                    public_data_only: options.public_data_only,
-                    credentials: identities.primary,
-                }),
-                entropy,
-            )?;
+            let venue_options = BingxOptions {
+                read_credentials: identities.secondary,
+                public_data_only: options.public_data_only,
+                credentials: identities.primary,
+            };
+            let mut engine = Engine::new(Bingx::new(venue_options), entropy)?;
             engine.set_signer(signer)?;
             finish(visitor, policy, startup, engine)
         }
@@ -2516,6 +2534,7 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     pub lighter_signer_provider: Option<String>,
     #[cfg(any(
+        feature = "bingx",
         feature = "grvt",
         feature = "coinbase",
         feature = "paradex",
@@ -2569,6 +2588,7 @@ pub struct EngineOptions {
         feature = "weex",
         feature = "hyperliquid",
         feature = "txflow",
+        feature = "polymarket",
         feature = "kraken",
         feature = "lighter",
         feature = "woo",

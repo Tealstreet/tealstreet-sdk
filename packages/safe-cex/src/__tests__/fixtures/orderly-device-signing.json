@@ -1,0 +1,48 @@
+{
+  "provenance": "Frozen with the retired TS/browser orderlySign noble Ed25519 oracle; synthetic 32-byte seed filled with 7; padded base64url, no seed on wire.",
+  "publicKey": "ed25519:GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+  "vectors": [
+    {
+      "name": "read",
+      "kind": "http",
+      "stampMs": 1700000000123,
+      "payload": "1700000000123GET/v1/orders?symbol=PERP_BTC_USDC&note=%C3%A9%2F%2B",
+      "signature": "MdH6qUqqYhbf0i-B-wRk_fQh4PmGtCwEU4yv86ZssjHssY5JOumSNs55OXhtUIn2G-3aoGAey3m4Z_wpqj5HCA=="
+    },
+    {
+      "name": "write",
+      "kind": "http",
+      "stampMs": 1700000000123,
+      "payload": "1700000000123POST/v1/order{\"symbol\":\"PERP_BTC_USDC\",\"side\":\"BUY\",\"order_tag\":\"TEALMODE\",\"memo\":\"é/+%\"}",
+      "signature": "cOpePOcNH0ySSMsfm5MDl-toqgdP63CCzQNMKp9Kar9TFHaFpW_ROZKdbJA4WY69kddcC50OVD0tfWdLyqYaDQ=="
+    },
+    {
+      "name": "cancel",
+      "kind": "http",
+      "stampMs": 1700000000123,
+      "payload": "1700000000123DELETE/v1/order?order_id=123&symbol=PERP_BTC_USDC",
+      "signature": "zbYpBh3BQgQhdUvkDxKYVgp9oxwHvsuZRzvV6oM0TsILyLPjti06HPxbwVEkoZjhAOqGu-vjrIIl24Yh-nNJDA=="
+    },
+    {
+      "name": "amend",
+      "kind": "http",
+      "stampMs": 1700000000123,
+      "payload": "1700000000123PUT/v1/order{\"order_id\":123,\"order_price\":123.5}",
+      "signature": "aApm_ykjruOV_2OArEXzVb4excX8_GwpvuUEqhmgcT_G7oeDsERevbWZHOmbL63lwGKPr2CRTI7Vm05NeaDfBg=="
+    },
+    {
+      "name": "ws-auth",
+      "kind": "wsAuth",
+      "stampMs": 1700000000123,
+      "payload": "1700000000123",
+      "signature": "WuQnLuVqlLgS1qKDNSIbnGhtn8_XE1OQNb_qgxL0Psa2Jnqnh8uEJCK7MpJ8RzysoafZfDZ5r2lK-ss1fJuwCw=="
+    },
+    {
+      "name": "corrected-clock",
+      "kind": "http",
+      "stampMs": 1700000001123,
+      "payload": "1700000001123GET/v1/orders?symbol=PERP_BTC_USDC&note=%C3%A9%2F%2B",
+      "signature": "sqrzDr5cm8sN6qA2iNwkZVinamgtpb_WY_eOBSTG-oxkQq54wRmSiKpeD6W_3WhtxJbriGuD64o9EPJyW6sZCw=="
+    }
+  ]
+}

@@ -237,9 +237,9 @@ fn exhausted_content_keeps_utf8_markers_and_all_native_outcomes() {
     let mut bytes = 0;
     for (_, error) in writes.rejections() {
         for text in [
-            &error.message,
-            error.venue_code.as_ref().unwrap(),
-            error.venue_message.as_ref().unwrap(),
+            error.message.as_str(),
+            error.venue_code.as_deref().unwrap(),
+            error.venue_message.as_deref().unwrap(),
         ] {
             assert!(text.len() <= 4_096);
             assert!(text.ends_with("[truncated]"));
