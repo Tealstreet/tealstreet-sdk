@@ -64,6 +64,15 @@ terminals, including native `500000` and transport failures, direct callers to
 Check Open Orders while retaining native diagnostics. An exhausted cancellation
 confirmation read emits its warning after adding the same uncertainty guidance.
 
+## Futures order size
+
+Futures placement follows the legacy `kucoin.exchange.ts:881-925` formatter:
+normalize the native contract count and send one payload, including above-max
+sizes. The venue enforces the maximum and its refusal reaches the caller.
+Minimum-size and positive-quantity checks retain their existing behavior.
+Recording tests in `tests/trading/allocation.rs` pin the single payload, its
+size and sum, and the surfaced native refusal.
+
 ## Hosted signing for Spot
 
 KuCoin Spot shares Futures' dispatch-time HMAC-SHA256 recipe: timestamp, method,

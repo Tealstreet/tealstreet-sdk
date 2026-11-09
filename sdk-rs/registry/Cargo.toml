@@ -61,16 +61,17 @@ mexc = ["dep:safe-cex-venue-mexc", "dispatch-signing", "hosted-signing", "dep:se
 bingx = ["dep:safe-cex-venue-bingx", "dispatch-signing", "hosted-signing"]
 weex = ["dep:safe-cex-venue-weex", "dispatch-signing"]
 phemex = ["dep:safe-cex-venue-phemex", "dispatch-signing", "hosted-signing"]
-cryptocom = ["dep:safe-cex-venue-cryptocom", "dispatch-signing"]
+cryptocom = ["dep:safe-cex-venue-cryptocom", "dispatch-signing", "hosted-signing"]
 binance = ["dep:safe-cex-venue-binance", "dispatch-signing", "hosted-signing"]
 kucoin = ["dep:safe-cex-venue-kucoin", "dispatch-signing", "hosted-signing", "dep:serde_json"]
 kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot", "dispatch-signing", "hosted-signing", "dep:serde_json"]
 bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing", "hosted-signing"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid", "address-nonce", "dep:serde_json", "hosted-wallet"]
 okx = ["dep:safe-cex-venue-okx", "dispatch-signing", "hosted-signing"]
-orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519"]
+orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519", "dep:serde_json", "dep:bs58"]
 
 [dependencies]
+bs58 = { version = "0.5", optional = true }
 serde_json = { workspace = true, optional = true }
 safe-cex-crypto = { workspace = true, optional = true }
 safe-cex-engine.workspace = true

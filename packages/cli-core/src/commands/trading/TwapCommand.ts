@@ -5,21 +5,24 @@ import { twapManager } from '@tealstreet/safe-cex/src/webworker/twap/TwapManager
 import { TwapStatus } from '@tealstreet/safe-cex/src/webworker/twap/TwapStatus';
 import { GREEN, RED, YELLOW, CYAN, RESET, DIM, BOLD } from './colors';
 import { formatPrice } from '@tealstreet/utils/src/formatting/formatPrice';
+import type { TwapTaskParams } from '../../types';
+
+type TwapChasePolicy = Pick<TwapTaskParams, 'useChaserOrders' | 'timeoutPct' | 'timeoutAction' | 'failAction'>;
 
 /**
  * Parse duration string to milliseconds
  * Supports: 30s, 5m, 1h, 2h30m, etc.
  */
 function parseDuration(duration: string): number {
-  const regex = /(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i;
+  const regex = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i;
   const match = duration.match(regex);
   if (!match || !match[0]) {
     throw new Error(`Invalid duration format: ${duration}. Use formats like: 30s, 5m, 1h, 1h30m`);
   }
 
-  const hours = parseInt(match[1] || '0', 10);
-  const minutes = parseInt(match[2] || '0', 10);
-  const seconds = parseInt(match[3] || '0', 10);
+  const hours = Number(match[1] || '0');
+  const minutes = Number(match[2] || '0');
+  const seconds = Number(match[3] || '0');
 
   if (hours === 0 && minutes === 0 && seconds === 0) {
     throw new Error(`Invalid duration format: ${duration}. Use formats like: 30s, 5m, 1h, 1h30m`);
@@ -79,16 +82,41 @@ export class TwapCommand extends TradingBaseCommand {
   readonly requiresConnection = true;
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
+    const sideIndex = ctx.args._[1]?.toLowerCase() === 'chase' ? 2 : 1;
+    if (['buy', 'sell'].includes(ctx.args._[sideIndex]?.toLowerCase())) {
+      this.assertUnambiguousOrderModifiers(
+        ctx,
+        sideIndex + 1,
+        ['into', 'over', 'reduce', 'chaser', 'timeout', 'fail'],
+        { into: 1, over: 1, timeout: 2, fail: 1 },
+      );
+      ctx = this.resolveLeadingSymbolSlot(ctx, sideIndex + 1);
+    }
     const args = this.getRawArgs(ctx);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [
+      ['timeout'],
+      ['fail'],
+      ['into', 'slices'],
+      ['over', 'duration'],
+      ['reduce'],
+      ['chaser'],
+    ]);
+    if (duplicate) return duplicate;
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     const subcommand = args[1]?.toLowerCase();
 
     // Handle list/stop subcommands — these don't write to the
     // exchange, so they bypass the simulation gate. (Stop is local
     // task management, not order placement.)
     if (subcommand === 'list') {
+      const invalid = this.refuseUnknownArgs(ctx, [1]);
+      if (invalid) return invalid;
       return this.handleList(ctx);
     }
     if (subcommand === 'stop') {
+      const invalid = this.refuseUnknownArgs(ctx, [1, 2]);
+      if (invalid) return invalid;
       return this.handleStop(ctx, args[2]);
     }
 
@@ -140,7 +168,7 @@ export class TwapCommand extends TradingBaseCommand {
       if (!pctArg || !/^\d+(?:\.\d+)?%$/.test(pctArg)) {
         return this.error(`twap chase timeout: expected '<pct%>' got '${pctArg}'`);
       }
-      timeoutPct = parseFloat(pctArg);
+      timeoutPct = Number(pctArg.slice(0, -1));
       if (timeoutPct <= 0 || timeoutPct > 100) {
         return this.error(`twap chase timeout: ${timeoutPct}% must be in (0, 100]`);
       }
@@ -178,23 +206,12 @@ export class TwapCommand extends TradingBaseCommand {
       args: { ...ctx.args, _: reframed },
     };
 
-    const innerResult = this.handleBuySell(innerCtx, side);
-
-    if (!innerResult.success) return innerResult;
-
-    // Patch the produced taskAction with the chaser policy fields. The
-    // 'chaser' flag is forced on because twap chase always uses
-    // chasers per slice.
-    if (innerResult.taskAction?.type === 'twap' && innerResult.taskAction.params) {
-      const params = innerResult.taskAction.params as { params?: Record<string, unknown> };
-      if (params.params) {
-        params.params.useChaserOrders = true;
-        params.params.timeoutPct = finalTimeoutPct;
-        params.params.timeoutAction = finalTimeoutAction;
-        params.params.failAction = finalFailAction;
-      }
-    }
-    return innerResult;
+    return this.handleBuySell(innerCtx, side, {
+      useChaserOrders: true,
+      timeoutPct: finalTimeoutPct,
+      timeoutAction: finalTimeoutAction,
+      failAction: finalFailAction,
+    });
   }
 
   /**
@@ -307,13 +324,32 @@ export class TwapCommand extends TradingBaseCommand {
   /**
    * Handle twap buy/sell command
    */
-  private handleBuySell(ctx: CommandContext, side: OrderSide): CommandResult {
+  private handleBuySell(ctx: CommandContext, side: OrderSide, chasePolicy?: TwapChasePolicy): CommandResult {
     const exchange = ctx.exchange;
     if (!exchange) {
       return this.error('Not connected to exchange');
     }
 
     const args = this.getRawArgs(ctx);
+
+    if (args[2]?.includes(',')) return this.error('twap supports only one symbol per command');
+    const leadingSymbols = this.validateSymbols(exchange, args[2] ? [args[2]] : []);
+    const leadingSymbol = leadingSymbols.length > 0;
+    const consumed = leadingSymbol ? [1, 2, 3] : [1, 2];
+    for (const keyword of ['into', 'over', 'chaser', 'reduce']) {
+      const index = args.indexOf(keyword);
+      if (index > 0) {
+        consumed.push(index);
+        if (['into', 'over'].includes(keyword) && args[index + 1] !== undefined) consumed.push(index + 1);
+      }
+    }
+    for (let i = 3; i < args.length; i++) {
+      if (/^(duration|slices)=/.test(args[i])) consumed.push(i);
+    }
+    const operandSlots = new Set([0, ...consumed]);
+    const symbolIndex = args.findIndex((_, index) => !operandSlots.has(index));
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, { allowSymbol: !leadingSymbol });
+    if (invalid) return invalid;
 
     // Parse options from args
     let duration: number | undefined;
@@ -328,15 +364,15 @@ export class TwapCommand extends TradingBaseCommand {
     // Positional form (spec, Phase 3): `into <n> over <minutes>`.
     const intoIdx = args.indexOf('into');
     if (intoIdx !== -1) {
-      const v = parseInt(args[intoIdx + 1], 10);
-      if (!Number.isFinite(v) || v <= 0) {
+      const v = this.parseOrderNumber(args[intoIdx + 1]);
+      if (!Number.isSafeInteger(v) || v <= 0) {
         return this.error(`twap: 'into' must be followed by a positive integer slice count`);
       }
       slices = v;
     }
     const overIdx = args.indexOf('over');
     if (overIdx !== -1) {
-      const v = parseFloat(args[overIdx + 1]);
+      const v = this.parseOrderNumber(args[overIdx + 1]);
       if (!Number.isFinite(v) || v <= 0) {
         return this.error(`twap: 'over' must be followed by a positive number of minutes`);
       }
@@ -348,7 +384,7 @@ export class TwapCommand extends TradingBaseCommand {
       if (arg.startsWith('duration=')) {
         duration = parseDuration(arg.slice(9));
       } else if (arg.startsWith('slices=')) {
-        slices = parseInt(arg.slice(7), 10);
+        slices = this.parseOrderNumber(arg.slice(7));
       } else if (arg === 'chaser') {
         useChaserOrders = true;
       } else if (arg === 'reduce') {
@@ -357,43 +393,18 @@ export class TwapCommand extends TradingBaseCommand {
     }
 
     // Validate required options
-    if (!duration) {
+    if (!Number.isFinite(duration) || !duration || duration <= 0) {
       return this.error('Duration is required. Usage: twap buy $100 duration=1h slices=10');
     }
-    if (!slices || slices < 1) {
-      slices = 10; // Default to 10 slices
+    if (slices === undefined) {
+      slices = 10;
+    } else if (!Number.isSafeInteger(slices) || slices < 1) {
+      return this.error('twap: slices must be a positive integer');
     }
 
-    // Find size and symbol from args
-    let sizeArg: string | undefined;
-    let symbol: string = ctx.symbol;
-
-    // Check for symbol at start: "twap buy SYMBOL $100 ..."
-    const symbolsAtStart = this.validateSymbols(exchange, args[2]?.split(',') || []);
-    if (symbolsAtStart.length > 0) {
-      symbol = symbolsAtStart[0];
-      sizeArg = args[3];
-    } else if (args[2] && this.looksLikeSize(args[2])) {
-      // "twap buy $100 ..."
-      sizeArg = args[2];
-      // Check for trailing symbol
-      for (let i = args.length - 1; i >= 3; i--) {
-        if (
-          args[i].startsWith('duration=') ||
-          args[i].startsWith('slices=') ||
-          args[i] === 'chaser' ||
-          args[i] === 'reduce'
-        )
-          continue;
-        const validated = this.validateSymbols(exchange, [args[i]]);
-        if (validated.length > 0) {
-          symbol = validated[0];
-          break;
-        }
-      }
-    } else {
-      return this.error('Size argument missing. Usage: twap buy $100 duration=1h slices=10');
-    }
+    const sizeArg = args[leadingSymbol ? 3 : 2];
+    const symbol =
+      leadingSymbols[0] ?? (symbolIndex > 0 ? this.validateSymbols(exchange, [args[symbolIndex]])[0] : ctx.symbol);
 
     if (!sizeArg || !this.looksLikeSize(sizeArg)) {
       return this.error('Size must be in USD format (e.g., $100). Usage: twap buy $100 duration=1h');
@@ -458,6 +469,7 @@ export class TwapCommand extends TradingBaseCommand {
             ordersExecuted: 0,
             useChaserOrders,
             reduceOnly,
+            ...chasePolicy,
           },
         },
       },

@@ -3,17 +3,34 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { configureHOW } from './config';
 import { RelayWebSocket } from './RelayWebSocket';
 
-class BrowserSocket extends EventTarget {
+class BrowserSocket extends EventTarget implements WebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readonly CONNECTING = 0;
+  readonly OPEN = 1;
+  readonly CLOSING = 2;
+  readonly CLOSED = 3;
   static instances: BrowserSocket[] = [];
-  readyState = 0;
+  readyState: WebSocket['readyState'] = 0;
   bufferedAmount = 0;
+  binaryType: BinaryType = 'blob';
+  readonly extensions = '';
+  readonly protocol = '';
+  readonly url: string;
+  onopen: WebSocket['onopen'] = null;
+  onclose: WebSocket['onclose'] = null;
+  onerror: WebSocket['onerror'] = null;
+  onmessage: WebSocket['onmessage'] = null;
   sent: string[] = [];
-  constructor() {
+  constructor(url: string | URL) {
     super();
+    this.url = String(url);
     BrowserSocket.instances.push(this);
   }
-  send(text: string) {
-    this.sent.push(text);
+  send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+    this.sent.push(String(data));
   }
   message(value: unknown) {
     this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) }));
@@ -57,20 +74,27 @@ async function connected(Socket: typeof BrowserSocket = NodeSocket) {
     'wss://relay.test/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
     [],
     undefined,
-    Socket as never,
+    Socket,
   );
   sockets.push(relay);
-  const inner = BrowserSocket.instances.at(-1)!;
+  const inner = BrowserSocket.instances.at(-1);
+  if (!inner) throw new Error('Expected a relay transport');
   inner.open();
   await vi.advanceTimersByTimeAsync(0);
   inner.message({ type: 'rpc.auth', status: 'success' });
   inner.message({ type: 'rpc.relay', status: 'open' });
   expect(relay.readyState).toBe(relay.OPEN);
-  return { relay, inner: inner as NodeSocket };
+  return { relay, inner };
+}
+
+async function connectedNode() {
+  const { relay, inner } = await connected(NodeSocket);
+  if (!(inner instanceof NodeSocket)) throw new Error('Expected a native ping transport');
+  return { relay, inner };
 }
 
 it('keeps a quiet Node relay alive with native ping/pong without sending tunnel RPC into the venue pipe', async () => {
-  const { relay, inner } = await connected();
+  const { relay, inner } = await connectedNode();
   const before = [...inner.sent];
   for (let i = 1; i <= 6; i++) {
     await vi.advanceTimersByTimeAsync(15_000);
@@ -86,7 +110,7 @@ it('keeps a quiet Node relay alive with native ping/pong without sending tunnel 
 });
 
 it('closes a half-open Node relay once after 45 seconds without a pong or venue message', async () => {
-  const { relay, inner } = await connected();
+  const { relay, inner } = await connectedNode();
   const close = vi.fn();
   const messages = vi.fn();
   relay.addEventListener('close', close);
@@ -102,7 +126,7 @@ it('closes a half-open Node relay once after 45 seconds without a pong or venue 
 });
 
 it('uses elapsed time after a delayed timer and never sends a stale ping', async () => {
-  const { relay, inner } = await connected();
+  const { relay, inner } = await connectedNode();
   vi.setSystemTime(Date.now() + 60_000);
   await vi.advanceTimersByTimeAsync(15_000);
   expect(relay.readyState).toBe(relay.CLOSED);
@@ -122,7 +146,7 @@ it('retains browser application framing and relies on the venue heartbeat when n
 });
 
 it.each(['pong', 'message'])('does not let a late %s revive a relay past its silence deadline', async (kind) => {
-  const { relay, inner } = await connected();
+  const { relay, inner } = await connectedNode();
   const message = vi.fn();
   relay.addEventListener('message', message);
   vi.setSystemTime(Date.now() + 45_000);
@@ -133,7 +157,7 @@ it.each(['pong', 'message'])('does not let a late %s revive a relay past its sil
 });
 
 it('retires before notifying errors so a reconnect handler cannot close the old transport twice', async () => {
-  const { relay, inner } = await connected();
+  const { relay, inner } = await connectedNode();
   inner.ping.mockImplementation(() => {
     throw new Error('fixture-private-transport-error');
   });
@@ -144,6 +168,8 @@ it('retires before notifying errors so a reconnect handler cannot close the old 
   expect(relay.readyState).toBe(relay.CLOSED);
   expect(inner.close).toHaveBeenCalledOnce();
   expect(errors).toHaveBeenCalledOnce();
-  expect((errors.mock.calls[0][0] as Event & { message: string }).message).toBe('relay heartbeat failed');
+  const event: unknown = errors.mock.calls[0]?.[0];
+  if (!(event instanceof Event) || !('message' in event)) throw new Error('Expected a relay error event');
+  expect(event.message).toBe('relay heartbeat failed');
   expect(inner.pongListeners.size).toBe(0);
 });

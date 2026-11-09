@@ -26,6 +26,7 @@ const CALL_MS: u32 = 20_000;
 /// Native wait for Classic/UTA account detection (scoped engine condition wait).
 const DETECTION_MS: u32 = 10_000;
 const DETECTION: &str = "Bitget account detection did not complete";
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 /// Bitget's native write codes: 40009 earns the one fresh resend; 40010, 40725,
 /// 45001 and the system, upgrade, busy and timeout codes prove nothing; the read side's key refusals keep their auth kind
@@ -207,6 +208,8 @@ struct Job {
     fallback: Option<VecDeque<Planned>>,
     rollback: Option<Planned>,
     error: Option<VenueError>,
+    /// A Classic batch refusal TS continues past, retained for reporting.
+    batch_error: Option<VenueError>,
     ids: Vec<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
@@ -738,6 +741,7 @@ impl BitgetFutures {
             fallback: None,
             rollback: None,
             error: None,
+            batch_error: None,
             ids: vec![],
             effective: false,
             replaces_stop: None,
@@ -1055,6 +1059,30 @@ impl BitgetFutures {
             error = original;
             job.note = note;
         }
+        if error.outcome == Some(Outcome::Unknown)
+            && job.live.as_ref().is_some_and(|call| !call.read())
+        {
+            let request = job.live.as_ref().map_or_else(String::new, |call| {
+                serde_json::to_string(&call.payload).expect("native order payload")
+            });
+            // A prior refusal may supply the journal's projected message.
+            // Keep the uncertainty visible even when that refusal wins selection.
+            let unknown = format!("{UNKNOWN_TEXT}; unconfirmed request {request}");
+            job.note = Some(match job.note.take() {
+                Some(note) => format!("{note}; {unknown}"),
+                None => unknown,
+            });
+            cx.event(
+                Level::Warn,
+                "order.outcome_unknown",
+                UNKNOWN_TEXT,
+                vec![
+                    ("command", job.id.into()),
+                    ("placedCount", (job.ids.len() as f64).into()),
+                    ("unknownRequest", request.into()),
+                ],
+            );
+        }
         // The cancel landed and nothing replaced it: lead with what the user must act on.
         if job.effective
             && job.ids.is_empty()
@@ -1132,7 +1160,7 @@ impl BitgetFutures {
         mut job: Job,
         current: Option<(&Slot, &Context)>,
     ) {
-        if let Some(error) = job.error.take() {
+        if let Some(error) = job.error.take().or_else(|| job.batch_error.take()) {
             return self.end(cx, job, current, error);
         }
         let ids = serde_json::to_string(&job.ids).expect("order ids");
@@ -1830,7 +1858,7 @@ impl BitgetFutures {
             if max <= 0.0 {
                 return Err("Bitget maximum size is smaller than one lot".into());
             }
-            let mut left = total;
+            let max = if cap.is_finite() { cap } else { max };
             let count = (total / max).ceil() as usize;
             if o.client_order_id.is_some() && count > 1 {
                 return Err("Bitget caller clientOrderId would split across native orders".into());
@@ -1838,9 +1866,15 @@ impl BitgetFutures {
             if count > 10_000 {
                 return Err("Bitget order exceeds the split bound".into());
             }
-            while left > 0.0 {
-                let size = left.min(max);
-                left = num::adjust(left - size, m.precision.amount);
+            // TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2059-2073,2127-2141.
+            // Both routes repeat the rounded equal lot, then append its rounded remainder.
+            let rest = if total > max {
+                num::adjust(total % max, m.precision.amount)
+            } else {
+                0.0
+            };
+            let size = num::adjust((total - rest) / count as f64, m.precision.amount);
+            for size in std::iter::repeat_n(size, count).chain((rest != 0.0).then_some(rest)) {
                 let payload = self.normal_payload(cx, o, size)?;
                 if self.account.uta {
                     calls.push(Planned {
@@ -3415,7 +3449,8 @@ impl BitgetFutures {
                         .is_ok_and(|reply| status == 200 && reply.code.0 == Some(0.0)))
                 || batch_unknown;
             if uncertain && !request.call.read() {
-                message.push_str("; outcome unknown, check Open Orders");
+                message.push_str("; ");
+                message.push_str(UNKNOWN_TEXT);
             }
             let native_unchanged = !uncertain
                 && explicit_rejection
@@ -3426,7 +3461,9 @@ impl BitgetFutures {
             let (_, _, native_unknown) =
                 self.record_once(cx, &request, native, answer, &message, &mut recorded);
             let mut error = match &parsed {
-                _ if unproven => VenueError::new(message).outcome(Outcome::Unknown),
+                _ if unproven || batch_unknown => {
+                    VenueError::new(message).outcome(Outcome::Unknown)
+                }
                 Ok(reply) if explicit_rejection => {
                     // The table's kind for the native code, else its documented
                     // status row; a 401/403/429 carries no code (`native_code`).
@@ -3470,6 +3507,21 @@ impl BitgetFutures {
                 job.error = Some(error);
                 job.calls.clear();
                 job.calls.push_back(rollback);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            // TS Classic batches throw on failureList or HTTP failure, but
+            // continue after a bare HTTP-200 business refusal. Keep its fact.
+            if status == 200
+                && explicit_rejection
+                && request.call.path == paths::BATCH_PLACE
+                && parsed.as_ref().is_ok_and(|reply| {
+                    reply
+                        .data
+                        .as_ref()
+                        .is_none_or(|data| data.failure_list.is_empty())
+                })
+            {
+                job.batch_error.get_or_insert(error);
                 return self.drive(cx, job, At::Data(&request.slot, &request.context));
             }
             if (native_unknown || error.outcome == Some(Outcome::Unknown))

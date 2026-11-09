@@ -335,6 +335,9 @@ const resolveAccountIndex = async (params: {
   return resolved;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
 const fetchAccountSnapshot = async (params: {
   accountIndex: bigint;
   baseUrl?: string;
@@ -347,35 +350,40 @@ const fetchAccountSnapshot = async (params: {
     testnet: params.testnet,
   });
 
-  const payload = await client.get<Record<string, unknown>>('/api/v1/account', {
+  const payload = await client.get<unknown>('/api/v1/account', {
     params: {
       by: 'index',
       value: params.accountIndex.toString(),
     },
   });
 
-  const account = Array.isArray((payload as any)?.accounts) ? (payload as any).accounts[0] : undefined;
-  if (!account || typeof account !== 'object') {
+  const account: unknown = isRecord(payload) && Array.isArray(payload.accounts) ? payload.accounts[0] : undefined;
+  if (!isRecord(account)) {
     throw new Error('Lighter account lookup returned no account');
   }
 
-  const approvedIntegratorsRaw = Array.isArray((account as any).approved_integrators)
-    ? ((account as any).approved_integrators as Array<Record<string, unknown>>)
+  const approvedIntegratorsRaw: unknown[] = Array.isArray(account.approved_integrators)
+    ? account.approved_integrators
     : [];
 
   return {
     accountIndex: params.accountIndex,
     accountTier: extractLighterAccountTierFromPayload(account),
-    l1Address: typeof (account as any).l1_address === 'string' ? (account as any).l1_address : undefined,
+    l1Address: typeof account.l1_address === 'string' ? account.l1_address : undefined,
     approvedIntegrators: approvedIntegratorsRaw
-      .map((item) => ({
-        accountIndex: toBigInt(item.account_index ?? item.index) ?? -1n,
-        approvalExpiry: toNumber(item.approval_expiry) ?? 0,
-        maxPerpsTakerFee: toNumber(item.max_perps_taker_fee) ?? 0,
-        maxPerpsMakerFee: toNumber(item.max_perps_maker_fee) ?? 0,
-        maxSpotTakerFee: toNumber(item.max_spot_taker_fee) ?? 0,
-        maxSpotMakerFee: toNumber(item.max_spot_maker_fee) ?? 0,
-      }))
+      .map((item) => {
+        if (!isRecord(item)) {
+          throw new Error('Lighter account lookup returned an invalid integrator');
+        }
+        return {
+          accountIndex: toBigInt(item.account_index ?? item.index) ?? -1n,
+          approvalExpiry: toNumber(item.approval_expiry) ?? 0,
+          maxPerpsTakerFee: toNumber(item.max_perps_taker_fee) ?? 0,
+          maxPerpsMakerFee: toNumber(item.max_perps_maker_fee) ?? 0,
+          maxSpotTakerFee: toNumber(item.max_spot_taker_fee) ?? 0,
+          maxSpotMakerFee: toNumber(item.max_spot_maker_fee) ?? 0,
+        };
+      })
       .filter((item) => item.accountIndex >= 0n),
   };
 };
@@ -634,8 +642,9 @@ export const signLighterApproveIntegratorWithBrowserWallet = async (params: {
   });
 
   try {
-    const accounts = (await window.ethereum.request({ method: 'eth_requestAccounts' })) as string[];
-    const signerAddress = String(accounts?.[0] ?? '');
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const selectedAccount: unknown = Array.isArray(accounts) ? accounts[0] : undefined;
+    const signerAddress = typeof selectedAccount === 'string' ? selectedAccount : '';
     if (!signerAddress) {
       return {
         success: false,
@@ -650,16 +659,16 @@ export const signLighterApproveIntegratorWithBrowserWallet = async (params: {
       };
     }
 
-    let l1Signature = (await window.ethereum.request({
+    let l1Signature = await window.ethereum.request({
       method: 'personal_sign',
       params: [message, signerAddress],
-    })) as string;
+    });
 
     if (typeof l1Signature !== 'string' || !l1Signature.startsWith('0x')) {
-      l1Signature = (await window.ethereum.request({
+      l1Signature = await window.ethereum.request({
         method: 'personal_sign',
         params: [signerAddress, message],
-      })) as string;
+      });
     }
 
     if (typeof l1Signature !== 'string' || !l1Signature.startsWith('0x')) {
