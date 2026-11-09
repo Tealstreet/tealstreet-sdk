@@ -587,7 +587,7 @@ impl Session {
             self.registry
                 .signing_mode_refusal(self.user(), &init, public_only, false)
         {
-            self.send(envelope::init_refused(&init.account_name, &refusal));
+            out.send(envelope::init_refused(&init.account_name, &refusal));
             self.drop_early(&init.account_name, "init refused for signing mode");
             return Ok(());
         }
