@@ -242,8 +242,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
   // Hyperliquid 2,184,857 B. CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
-  hyperliquid: 2_231_296,
-  hyperliquidspot: 2_231_296,
+  // #3344 run 42479985723 at 51005ee6d89 measured 2,210,524 B; floor 2,221,056 B.
+  // #3306 run 42481130823 at merge 680966203b3 measured 2,220,716 B; floor 2,231,296 B.
+  // Keep the larger parent cap for both Hyperliquid aliases.
+  // #3344 restage 2cc05051503: optimized web/node 2,225,418 B + 10 KiB, rounded up.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
+  // Master 05241cd0f4 changes no Hyperliquid build inputs; keep both parent provenance blocks.
+  // Current CI run 42565604601, merge ec8633c44e98: web/node 2,225,586 B + 10 KiB, rounded up.
+  hyperliquid: 2_236_416,
+  hyperliquidspot: 2_236_416,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   kraken: 2_172_928,
