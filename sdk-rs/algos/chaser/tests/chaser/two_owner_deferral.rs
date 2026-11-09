@@ -425,6 +425,15 @@ async fn owner_switch_drops_a_queued_changes_even_with_colliding_chase_and_order
         a.accept_placements();
         let (factory, cx) = start_owner(a.clone());
         settle(1100).await;
+        let watcher = {
+            let subscribers = a.subscribers.borrow();
+            assert_eq!(subscribers.len(), 1, "A's order watcher is subscribed");
+            subscribers[0].clone()
+        };
+        assert!(
+            !watcher.is_closed(),
+            "A's watcher is live before retirement"
+        );
         // Enqueue without yielding: A's watcher has not consumed these messages at the switch.
         a.set_ticker(150.0, 150.5);
         a.publish(Change {
@@ -443,14 +452,18 @@ async fn owner_switch_drops_a_queued_changes_even_with_colliding_chase_and_order
         });
         let (b, next, next_cx) = select_b();
         retire_a(&factory, &cx).await;
+        assert!(
+            watcher.is_closed(),
+            "retirement must drop A's watcher receiver and its queued changes"
+        );
         let emitted = a.emitted.borrow().len();
         assert_eq!(
             a.completes()[0]["filled"],
             0.0,
-            "the queued A fill was dropped"
+            "A's retirement completion has no fill"
         );
         a.set_ticker(175.0, 175.5);
-        a.publish(Change {
+        let late = Change {
             fills: vec![Fill {
                 id: Some("A-late-fill".into()),
                 side: OrderSide::Buy,
@@ -460,7 +473,11 @@ async fn owner_switch_drops_a_queued_changes_even_with_colliding_chase_and_order
                 amount: 1.0,
             }],
             ..Change::default()
-        });
+        };
+        assert!(
+            watcher.send(late).is_err(),
+            "the retired watcher cannot receive A's late fill"
+        );
         b_still_works(&b, &next, &next_cx).await;
         assert_eq!(a.placements().len(), 1);
         assert_eq!(a.emitted.borrow().len(), emitted);
