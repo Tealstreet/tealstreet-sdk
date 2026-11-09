@@ -4166,6 +4166,10 @@ pub trait Venue {
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
 
+    /// Finish retained queues outside another command's HTTP delivery.
+    /// Context validation and journal projection still govern every completion.
+    fn finish_deferred_commands(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
+
     /// The engine retired this tracked Read root at its deadline. `pending`
     /// holds the continuations of its outstanding requests, already discarded
     /// from transport. Drop them and any queued continuation for `owner`; the
@@ -5051,6 +5055,7 @@ impl<V: Venue> Engine<V> {
     }
 
     /// Trusted construction installs the provider handle; no key material enters the engine.
+    /// Replacing it retires queued signing and unclaimed signed packets.
     pub fn set_signer(
         &mut self,
         signer: Option<crate::signing::Provider>,
@@ -5063,6 +5068,14 @@ impl<V: Venue> Engine<V> {
         self.invalidate_address_setup()?;
         #[cfg(feature = "nonce-handoff")]
         self.invalidate_nonce_handoff();
+        let changed = match (&self.io.core.signer, &signer) {
+            (Some(previous), Some(next)) => !std::sync::Arc::ptr_eq(previous, next),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            self.io.core.signing.replace_provider();
+        }
         self.io.core.signer = signer;
         Ok(())
     }
@@ -6712,8 +6725,6 @@ impl<V: Venue> Engine<V> {
 
     #[inline(never)]
     fn finish_deferred_commands(&mut self, now: f64) {
-        #[cfg(not(feature = "order-locks"))]
-        let _ = now;
         // Deferred commands are engine-owned work, not part of the HTTP codec
         // whose callback just released the lock. Do not lend that codec's
         // attempt authority to an unrelated internal finalization.
@@ -6725,6 +6736,11 @@ impl<V: Venue> Engine<V> {
         let entry = self.io.core.command_entry.take();
         #[cfg(feature = "order-locks")]
         let order_response = self.io.core.order_response_token.take();
+        self.venue.finish_deferred_commands(&mut Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        });
         #[cfg(feature = "order-locks")]
         let ready = self.io.core.order_locks.ready();
         #[cfg(feature = "order-locks")]
@@ -7528,6 +7544,15 @@ impl<V: Venue> Engine<V> {
     #[inline(never)]
     fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
+        let revoked = self.io.core.signing.take_revoked();
+        if !revoked.is_empty() {
+            self.io.core.actions.retain(|action| !matches!(action,
+                Action::Sign { attempt, .. } if revoked.binary_search_by_key(&attempt.0, |id| id.0).is_ok()));
+        }
+        for attempt in revoked {
+            self.sign_completed(now, attempt, Err(crate::signing::SignError::Refused));
+            self.assert_live();
+        }
         for (outbound, error) in std::mem::take(&mut self.io.core.signing_admission) {
             self.sign_failed(now, outbound, error);
             self.assert_live();

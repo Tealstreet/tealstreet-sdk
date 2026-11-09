@@ -180,22 +180,24 @@ describe('factory and worker loaders', () => {
   const signed = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions =>
     ({ key: 'k', secret: '', payloadSigner, engine: 'rust', ...extra }) as ExchangeOptions;
 
-  it('createExchange builds Rust venues for declared Bybit and Binance payload signers', async () => {
+  it('createExchange builds Rust venues for declared Bybit, Binance and Bitrue payload signers', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
-    for (const name of ['bybit', 'binance'] as const) {
-      const exchange = await createExchange(name, signed());
-      try {
-        expect(exchange, name).toBeInstanceOf(RustEngineExchange);
-      } finally {
-        exchange.dispose();
+    for (const name of ['bybit', 'binance', 'bitrue'] as const) {
+      for (const options of [signed(), signed({ engine: undefined })]) {
+        const exchange = await createExchange(name, options);
+        try {
+          expect(exchange, name).toBeInstanceOf(RustEngineExchange);
+        } finally {
+          exchange.dispose();
+        }
       }
     }
   }, 60_000);
 
   it('OUT names refuse without constructing a hosted TS class', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
-    // Coinbase is beta-admitted; native delegated-signing refusal is covered above.
-    for (const name of ['bitrue'] as const) {
+    // Polymarket remains outside the beta roster, regardless of signer mode.
+    for (const name of ['polymarket'] as const) {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {

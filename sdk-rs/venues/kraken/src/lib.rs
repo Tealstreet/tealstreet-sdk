@@ -43,6 +43,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Signing(Box<Pending>, Context),
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
@@ -106,6 +107,7 @@ pub struct Kraken {
     live_tickers: safe_cex_engine::startup::LiveTickers,
     signer: Option<sign::Signer>,
     read_signer: Option<sign::Signer>,
+    identities: Option<safe_cex_engine::signing::Identities>,
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
@@ -146,6 +148,7 @@ impl Kraken {
             live_tickers: Default::default(),
             read_signer,
             signer,
+            identities: None,
             account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
@@ -170,6 +173,22 @@ impl Kraken {
         } else {
             "https://futures.kraken.com"
         }
+    }
+    /// Registry custody contains refs only; the direct constructor keeps its local API.
+    pub fn with_signing(
+        mut options: Options,
+        identities: safe_cex_engine::signing::Identities,
+    ) -> Self {
+        use safe_cex_crypto::secrets::EraseSecrets;
+        options.erase_secrets();
+        let mut venue = Self::new(options);
+        venue.identities = Some(identities);
+        venue
+    }
+    fn can_sign(&self) -> bool {
+        self.identities
+            .as_ref()
+            .map_or_else(|| self.signer.is_some(), |ids| ids.primary.is_some())
     }
     fn ws_url(&self) -> &'static str {
         if self.options.testnet {
@@ -539,6 +558,56 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        let pending = if let Pending::Signing(pending, _) = pending {
+            pending.as_ref()
+        } else {
+            pending
+        };
+        if !matches!(pending, Pending::Trade(_)) {
+            return;
+        }
+        #[derive(serde::Deserialize)]
+        struct Error<'a> {
+            error: Option<&'a str>,
+            status: Option<&'a str>,
+        }
+        if let Ok(error) = serde_json::from_str::<Error<'_>>(response.body)
+            && let Some(code) = error.error.or(error.status).filter(|code| !code.is_empty())
+        {
+            evidence.venue_code(code.split(':').next().unwrap_or(code).trim());
+            evidence.venue_message(code);
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        let pending = if let Pending::Signing(pending, _) = pending {
+            pending.as_ref()
+        } else {
+            pending
+        };
+        if !matches!(pending, Pending::Trade(_)) {
+            return Err(safe_cex_engine::request_context::Error::Invalid);
+        }
+        // Late responses confer no mutation authority; fenced account reads reconcile.
+        safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
+    fn discard_unproven_http_command(&mut self, owner: safe_cex_engine::request_context::Owner) {
+        self.discard_provider_trade(owner);
+    }
+    fn finish_deferred_commands(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.trading_finish_deferred(cx);
+    }
     fn http_plans() -> bool {
         false
     }
@@ -569,9 +638,35 @@ impl Venue for Kraken {
     }
 
     type Pending = Pending;
+    fn on_signing_receipt(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        _: safe_cex_engine::signing::SignReceipt,
+    ) {
+        if let safe_cex_engine::SigningTarget::Socket { socket } = target {
+            self.account_signing_released(socket);
+        }
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Pending::Signing(pending, context) = pending {
+            let _ = cx.finish_http_context(&context);
+            self.on_sign_error(cx, *pending, error);
+            return;
+        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
+            Pending::Trade(request) => self.trading_sign_failed(cx, request, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        });
+    }
     fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
         use safe_cex_engine::startup::Sections as S;
         match pending {
+            Pending::Signing(pending, _) => Self::startup_reads(pending),
             Pending::Markets { .. } => S::MARKETS,
             Pending::Tickers { .. } => S::TICKERS,
             Pending::Account(request) => request.startup_sections(),
@@ -794,6 +889,12 @@ impl Venue for Kraken {
         self.invalidate_books(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Signing(pending, context) = pending {
+            if cx.validate_http_context(context).is_ok() {
+                self.on_item(cx, pending, item);
+            }
+            return;
+        }
         if matches!(pending, Pending::Candles { .. }) && !self.candles_delivery(cx, pending) {
             return;
         }
@@ -803,6 +904,7 @@ impl Venue for Kraken {
             return;
         }
         match pending {
+            Pending::Signing(..) => unreachable!(),
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
             Pending::PublicTrades(r, child) => self.public_trades_item(cx, r, child, item),
@@ -933,6 +1035,13 @@ impl Venue for Kraken {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Signing(pending, context) = pending {
+            if cx.validate_http_context(&context).is_ok() {
+                self.on_response(cx, *pending, response);
+            }
+            let _ = cx.finish_http_context(&context);
+            return;
+        }
         let pending = match pending {
             Pending::Account(r) => {
                 self.account_http(cx, r, response);
@@ -1197,6 +1306,13 @@ impl Venue for Kraken {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Signing(pending, context) = pending {
+            if cx.validate_http_context(&context).is_ok() {
+                self.on_stream_error(cx, *pending, response);
+            }
+            let _ = cx.finish_http_context(&context);
+            return;
+        }
         match pending {
             Pending::History(request) => self.history_stream_error(cx, *request, response),
             Pending::Account(request) => self.account_http(cx, request, response),
@@ -1218,6 +1334,11 @@ impl Venue for Kraken {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
+        if let Pending::Signing(pending, context) = pending {
+            let _ = cx.finish_http_context(&context);
+            self.on_http_preparation_failed(cx, *pending, _reason, error);
+            return;
+        }
         cx.with_startup_request_failure(pending, error, |cx, pending, error| {
             if matches!(pending, Pending::Candles { .. }) {
                 self.candles_failed(cx, pending, error);
@@ -1237,6 +1358,11 @@ impl Venue for Kraken {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        if let Pending::Signing(pending, context) = pending {
+            let _ = cx.finish_http_context(&context);
+            self.on_http_failed(cx, *pending, error);
+            return;
+        }
         if matches!(pending, Pending::Candles { .. }) {
             self.candles_failed(cx, pending, error);
         } else {
@@ -1267,6 +1393,10 @@ impl Venue for Kraken {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Signing(pending, context) => {
+                let _ = cx.finish_http_context(&context);
+                self.on_request_failed(cx, *pending, error);
+            }
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Trade(r) => self.trading_failed(cx, r, error),
             Pending::History(r) => self.history_failed(cx, *r, error),

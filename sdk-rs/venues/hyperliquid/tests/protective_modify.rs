@@ -184,6 +184,7 @@ fn fallback_place(e: &mut Engine<Hyperliquid>, row: &Value) -> HttpRequest {
 
 #[test]
 fn definitive_fallback_refusal_restores_exact_original_once() {
+    // Protective put-back kept per Sam's decision, SPLIT_PLAN_INVARIANT.md exception 2.
     for refusal in [
         "Order has invalid price.",
         "Invalid TP/SL price.",
@@ -249,6 +250,15 @@ fn definitive_fallback_refusal_restores_exact_original_once() {
             errors[0].protection,
             Some(safe_cex_engine::error::Protection::Restored)
         );
+        let elements = errors[0].elements.as_ref().expect("recovery journal");
+        assert_eq!(elements.len(), 3);
+        use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+        assert!(matches!(&elements[0].result,
+            ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "9"));
+        assert!(matches!(&elements[1].result,
+            ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected)));
+        assert!(matches!(&elements[2].result,
+            ElementResult::Applied { effect: AppliedEffect::PositionTrigger, position_key: Some(symbol), .. } if symbol == "BTC-PERP"));
         assert!(
             !a.iter()
                 .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange"))),
@@ -336,22 +346,7 @@ fn check_restore_failure(case: &str, retry_after_seconds: Option<f64>) {
     } else {
         assert_eq!(failure.protection, None, "{case}");
         assert_eq!(failure.outcome, Some(Outcome::Unknown));
-        if case == "rate_limited" {
-            assert!(failure.message.contains("unknown"), "{}", failure.message);
-            assert!(
-                failure.message.contains("Check Open Orders"),
-                "{}",
-                failure.message
-            );
-        } else {
-            assert!(
-                failure
-                    .message
-                    .contains("put-back's outcome is unknown. Check Open Orders"),
-                "{}",
-                failure.message
-            );
-        }
+        assert_eq!(failure.message, ENGINE_UNKNOWN_TEXT);
         assert!(
             !failure.message.contains("UNPROTECTED")
                 && !failure.message.contains("could not be restored")
