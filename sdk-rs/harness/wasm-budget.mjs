@@ -227,7 +227,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitgetusdc: 2_492_416,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
-  bitrue: 1_906_688,
+  // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
+  // measured 1,898,429 B; +10 KiB rounded up to KiB.
+  bitrue: 1_908_736,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
   bitunix: 1_927_168,
   blofin: 2_049_024,
@@ -238,7 +240,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.
   // #3301 merge 42063dd9a97: CI run 42605138812, job 129119693578, artifact 13666589511
   // measured web/node 2,094,041 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
-  coinbase: 2_104_320,
+  // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
+  // measured 2,094,163 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
+  coinbase: 2_105_344,
   cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
