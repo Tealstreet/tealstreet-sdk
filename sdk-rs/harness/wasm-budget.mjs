@@ -282,9 +282,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
-  // #3317 merge: max(parent 2,639,872, master 2,642,944); prior run 42556924627 measured 2,628,809 B.
-  // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
-  woo: 2_642_944,
+  // #3317 at 889e7de4824: run 42601004776, job 129105700434, artifact 13665434229.
+  // CI WOO measured 2,634,628 B + 10 KiB, rounded up to KiB.
+  woo: 2_644_992,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
