@@ -849,3 +849,152 @@ async fn stopped_replies_remain_per_connection_during_deferred_disposal_and_user
         })
         .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn reviewer_fresh_registration_receives_its_own_rebuild_refusal() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, owner, _) = fixture(Some("existing-owner")).await;
+            let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
+            let mut payload = init(Some("registration-A"));
+            payload.key = "synthetic-different-credentials".into();
+            attempt.init(payload.clone()).await.unwrap();
+            let mut replies = Vec::new();
+            while let Ok(frame) = sent.try_recv() {
+                replies.push(serde_json::from_str::<Value>(&frame).unwrap());
+            }
+            assert!(
+                replies
+                    .iter()
+                    .any(|v| v["d"]["op"] == "error" && v["d"]["instanceId"] == "registration-A"),
+                "first refusal control: {replies:?}"
+            );
+            payload.instance_id = Some("registration-B".into());
+            attempt.init(payload).await.unwrap();
+            let mut replies = Vec::new();
+            while let Ok(frame) = sent.try_recv() {
+                replies.push(serde_json::from_str::<Value>(&frame).unwrap());
+            }
+            assert!(
+                replies
+                    .iter()
+                    .any(|v| v["d"]["op"] == "error" && v["d"]["instanceId"] == "registration-B"),
+                "fresh registration must receive its own refusal: {replies:?}"
+            );
+            attempt.close();
+            owner.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+async fn refused_registration(
+    attempt: &mut Session,
+    sent: &mut tokio::sync::mpsc::Receiver<String>,
+    payload: &InitPayload,
+    notify: bool,
+) {
+    let reason = attempt
+        .registry
+        .rebuild_refusal("u", payload, false, attempt.socket)
+        .expect("another live holder keeps its different settings");
+    let mut expected = envelope::init_refused("acct", &reason);
+    let id = payload.instance_id.as_deref().filter(|id| !id.is_empty());
+    if let Some(id) = id {
+        expected = envelope::with_instance_id(expected, id);
+    }
+    attempt.init(payload.clone()).await.unwrap();
+    let replies: Vec<_> = std::iter::from_fn(|| sent.try_recv().ok()).collect();
+    if notify {
+        assert_eq!(
+            replies,
+            vec![expected],
+            "one stamped refusal per registration click"
+        );
+    } else {
+        assert!(
+            replies.is_empty(),
+            "same registration retry must be silent: {replies:?}"
+        );
+    }
+    assert!(
+        !attempt.joined.contains_key("acct"),
+        "a refusal must never join"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn same_registration_rebuild_refusal_retries_stay_silent() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, owner, _) = fixture(Some("owner")).await;
+            let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
+            let mut payload = init(Some("one-click"));
+            payload.key = "synthetic-other-key".into();
+            refused_registration(&mut attempt, &mut sent, &payload, true).await;
+            for _ in 0..4 {
+                refused_registration(&mut attempt, &mut sent, &payload, false).await;
+            }
+            assert!(owner.registry.holds(&account, owner.socket));
+            attempt.close();
+            owner.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn interleaved_refused_registrations_each_receive_exactly_one_error() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, owner, _) = fixture(Some("owner")).await;
+            let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
+            let mut payload = init(None);
+            payload.key = "synthetic-other-key".into();
+            for (id, notify) in [
+                (None, true),
+                (Some("A"), true),
+                (Some("A"), false),
+                (Some("B"), true),
+                (Some("B"), false),
+                (Some("A"), false),
+                (None, false),
+                (Some(""), false),
+                (Some("B"), false),
+            ] {
+                payload.instance_id = id.map(str::to_owned);
+                refused_registration(&mut attempt, &mut sent, &payload, notify).await;
+            }
+            assert!(owner.registry.holds(&account, owner.socket));
+            assert!(Arc::ptr_eq(&account, &owner.joined["acct"].account));
+            attempt.close();
+            owner.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn legacy_rebuild_refusal_suppression_and_changed_reasons_are_byte_exact() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (account, owner, _) = fixture(None).await;
+            let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
+            let mut payload = init(None);
+            payload.key = "synthetic-other-key".into();
+            refused_registration(&mut attempt, &mut sent, &payload, true).await;
+            refused_registration(&mut attempt, &mut sent, &payload, false).await;
+            payload.testnet = Some(true);
+            refused_registration(&mut attempt, &mut sent, &payload, true).await;
+            refused_registration(&mut attempt, &mut sent, &payload, false).await;
+            payload.testnet = None;
+            refused_registration(&mut attempt, &mut sent, &payload, true).await;
+            payload.instance_id = Some("".into());
+            refused_registration(&mut attempt, &mut sent, &payload, false).await;
+            assert!(owner.registry.holds(&account, owner.socket));
+            attempt.close();
+            owner.close();
+            account.handle.dispose();
+        })
+        .await;
+}

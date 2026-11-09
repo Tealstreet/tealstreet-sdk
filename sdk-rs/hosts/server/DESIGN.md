@@ -577,6 +577,11 @@ rebuild comparisons. Account `msg` replies and remote `sign-req` frames echo it
 as `d.instanceId`, matching NX #9342's TypeScript reply envelope. Absent or empty
 IDs leave the original serialized bytes untouched.
 
+Rebuild refusals notify once per account, reason and registration ID, including
+when retries for registrations interleave. Without an ID, the legacy cache still
+notifies only when the last reason changes. Cache lifetime and clearing remain
+unchanged; this cache never changes fingerprints or rebuild admission.
+
 Each joined connection owns its reply output, so devices sharing one account
 receive their own IDs. Same-engine re-init and resume replace that connection's
 output before the new snapshot; queued frames and detached replies retain their

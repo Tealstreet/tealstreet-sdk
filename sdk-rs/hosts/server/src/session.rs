@@ -10,7 +10,7 @@ use safe_cex_engine::capabilities::CancelAll;
 use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use safe_cex_remote_signer::Outbox;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
@@ -74,6 +74,12 @@ struct Joined {
     subscriptions: HashMap<String, u32>,
 }
 
+#[derive(Default)]
+struct RefusalNotifications {
+    legacy_reason: Option<String>,
+    registered: HashSet<(String, String)>,
+}
+
 pub struct Session {
     user_socket: Option<crate::user_drain::Socket>,
     registry: Arc<Registry>,
@@ -95,9 +101,9 @@ pub struct Session {
     rejoined_at: HashMap<String, std::time::Instant>,
     /// Told when a resume of this session's id takes it over.
     taken_over: Arc<tokio::sync::Notify>,
-    /// The settings refusal last sent per account, so the client's backoff
-    /// retries show it once; cleared when that account's init succeeds.
-    refused: HashMap<String, String>,
+    /// Settings refusals already sent per account and registration, so backoff
+    /// retries are quiet; cleared before an init proceeds to account obtain.
+    refused: HashMap<String, RefusalNotifications>,
     /// Chart and book subscriptions that arrived before their account joined,
     /// applied at join: the page sends them whenever its chart asks.
     early: HashMap<String, Vec<Topic>>,
@@ -576,7 +582,12 @@ impl Session {
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
         {
-            if first_refusal(&mut self.refused, &init.account_name, &refusal) {
+            if first_refusal(
+                &mut self.refused,
+                &init.account_name,
+                &refusal,
+                init.instance_id.as_deref(),
+            ) {
                 out.send(envelope::init_refused(&init.account_name, &refusal));
             }
             self.drop_early(&init.account_name, "init refused for other settings");
@@ -1410,12 +1421,24 @@ impl Session {
     }
 }
 
-/// True the first time `refusal` is the one for `account`; a changed refusal counts again.
-fn first_refusal(refused: &mut HashMap<String, String>, account: &str, refusal: &str) -> bool {
-    if refused.get(account).is_some_and(|sent| sent == refusal) {
+/// One notification per account, reason and registration; legacy retries retain
+/// master's last-reason suppression and existing cache clearing point.
+fn first_refusal(
+    refused: &mut HashMap<String, RefusalNotifications>,
+    account: &str,
+    refusal: &str,
+    instance_id: Option<&str>,
+) -> bool {
+    let notifications = refused.entry(account.to_owned()).or_default();
+    if let Some(instance_id) = instance_id.filter(|id| !id.is_empty()) {
+        return notifications
+            .registered
+            .insert((refusal.to_owned(), instance_id.to_owned()));
+    }
+    if notifications.legacy_reason.as_deref() == Some(refusal) {
         return false;
     }
-    refused.insert(account.to_owned(), refusal.to_owned());
+    notifications.legacy_reason = Some(refusal.to_owned());
     true
 }
 
@@ -3213,22 +3236,25 @@ mod tests {
     fn a_settings_refusal_is_sent_once_until_its_fields_change_or_it_resolves() {
         let mut refused = HashMap::new();
         let spot = "bear5 is open elsewhere with different settings (enableSpotMarkets)";
-        assert!(first_refusal(&mut refused, "bear5", spot));
+        assert!(first_refusal(&mut refused, "bear5", spot, None));
         for _ in 0..4 {
             assert!(
-                !first_refusal(&mut refused, "bear5", spot),
+                !first_refusal(&mut refused, "bear5", spot, None),
                 "a backoff retry is quiet"
             );
         }
-        assert!(first_refusal(&mut refused, "other", spot), "per account");
+        assert!(
+            first_refusal(&mut refused, "other", spot, None),
+            "per account"
+        );
         let both = "bear5 is open elsewhere with different settings (enableSpotMarkets, testnet)";
         assert!(
-            first_refusal(&mut refused, "bear5", both),
+            first_refusal(&mut refused, "bear5", both, None),
             "changed fields show again"
         );
         // A successful init clears it (Session::init), so a later refusal shows again.
         refused.remove("bear5");
-        assert!(first_refusal(&mut refused, "bear5", both));
+        assert!(first_refusal(&mut refused, "bear5", both, None));
     }
 
     /// Every Hosted init logged engine dropped client once: while startup was held the
