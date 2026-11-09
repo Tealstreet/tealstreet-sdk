@@ -135,7 +135,7 @@ fn unknown_cancel_batch(unknown_index: usize) -> Vec<Action> {
         &mut e,
         socket,
         1501.,
-        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":10,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"},{"order":{"coin":"BTC","oid":11,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":10,"cloid":"0x11111111111111111111111111111111","side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"},{"order":{"coin":"BTC","oid":11,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
     );
     e.drain_plain().for_each(drop);
     e.handle(
@@ -271,6 +271,15 @@ fn cancel_batch_with_unknown_row_emits_one_independent_correlated_diagnostic() {
                 .fields
                 .iter()
                 .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+        );
+        assert!(events[0].fields.iter().any(|(key, value)| {
+            *key == "unknownIndices" && value.as_str() == Some(unknown_index.to_string().as_str())
+        }));
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(key, value)| { *key == "placedOrderIds" && value.as_str() == Some("") })
         );
         assert_eq!(
             actions

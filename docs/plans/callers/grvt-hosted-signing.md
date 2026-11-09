@@ -112,3 +112,33 @@ slice alone does not complete native hosted GRVT: server InitPayload still
 needs signer-address forwarding, caller compatibility and a real server/device
 round-trip proof in the subsequent slice. Keep activation frozen pending
 non-author review and the existing caller coordination.
+
+## Native server signer-address contract
+
+Private GRVT `/account` init retains optional `grvtSignerAddress` alongside
+`grvtTradingAccountId`. Both enter engine options and the account fingerprint;
+changing either requires a rebuilt account. Only GRVT consumes the signer
+address. Authenticated explicit-public accounts discard both fields before
+construction, while unauthenticated public Bybit init rejects signer metadata.
+The established text decoder still rejects object, array and boolean fields.
+
+Hosted private GRVT requires a valid configured address. Missing metadata from
+an old sender fails construction before transport; there is no inferred wallet
+or scalar fallback. Public/default and ordinary API-key-only local session
+construction remain available without wallet metadata. Native routing now
+recognizes the venue's mainnet/testnet REST origins; native cookie and account
+headers remain the session authority.
+
+Canned native-host tests exercise server preparation, remote-account erasure,
+registry construction and the real device wallet codec through `SignerLink`.
+They cover read readiness, private subscriptions, one verified order, corrupt
+proof refusal and an ambiguous write with no resend. The codec is checked
+against slice 1's independent public browser goldens on both networks.
+
+NEEDS-NX: the caller owner must prove serialization of `grvtSignerAddress` and
+routing to the matching device account/subaccount. The sender is outside this
+mirror and has not been verified here. Land the accepting server schema before
+requiring it from callers; older servers discard this field and refuse private
+GRVT construction. This deterministic host proof is not venue acceptance or a
+live-key smoke. Keep the matrix partial and activation frozen until caller
+compatibility, slice 3 qualification and non-author review are complete.

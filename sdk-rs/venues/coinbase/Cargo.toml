@@ -13,6 +13,7 @@ base64.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+safe-cex-venues = { path = "../../registry", default-features = false, features = ["coinbase"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 p256.workspace = true
 
