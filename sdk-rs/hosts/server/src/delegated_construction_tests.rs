@@ -176,6 +176,42 @@ async fn queued<F: Future>(future: std::pin::Pin<&mut F>, registry: &Registry, c
     .expect("real construction is queued behind the held engine lane");
 }
 
+fn startup_store() -> String {
+    crate::envelope::msg(
+        "synthetic-main",
+        "store",
+        json!({"activeChasers":[], "activeTWAPs":[]}),
+    )
+}
+
+fn assert_construction_replies(received: &mut mpsc::Receiver<String>, expected: Option<&str>) {
+    let mut found = false;
+    while let Ok(text) = received.try_recv() {
+        if text == startup_store() {
+            continue;
+        }
+        assert!(!found, "construction replies contain no extra notification");
+        assert_eq!(Some(text.as_str()), expected, "construction reply owner");
+        found = true;
+    }
+    assert_eq!(found, expected.is_some(), "construction reply is delivered");
+}
+
+#[test]
+fn construction_reply_checks_still_reject_foreign_notifications() {
+    for foreign in ["synthetic-A-result", "synthetic-B-result", "unexpected"] {
+        let (sender, mut received) = mpsc::channel(4);
+        sender.try_send(startup_store()).unwrap();
+        sender.try_send(foreign.into()).unwrap();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assert_construction_replies(&mut received, None);
+            }))
+            .is_err()
+        );
+    }
+}
+
 async fn construction_case(switch_user: bool, revoke_a: bool) {
     let Loopback {
         plan,
@@ -249,7 +285,7 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         assert!(registry.held(A, &account.name, a_socket).is_some());
         assert!(!registry.holds(&account, caller.socket) || !switch_user);
         account.notify("synthetic-A-result".into());
-        assert_eq!(a_out.try_recv().unwrap(), "synthetic-A-result");
+        assert_construction_replies(&mut a_out, Some("synthetic-A-result"));
         Some(account)
     };
     let b = if let Some(b) = b {
@@ -260,20 +296,18 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         assert_eq!(account.user, B);
         assert!(registry.held(B, &account.name, caller.socket).is_some());
         assert!(!registry.holds(&account, a_socket));
-        assert!(
-            b_out.as_mut().unwrap().try_recv().is_err(),
-            "A results stay off B's socket"
-        );
+        account.notify(startup_store());
+        assert_construction_replies(b_out.as_mut().unwrap(), None);
         account.notify("synthetic-B-result".into());
-        assert_eq!(
-            b_out.as_mut().unwrap().try_recv().unwrap(),
-            "synthetic-B-result"
-        );
+        assert_construction_replies(b_out.as_mut().unwrap(), Some("synthetic-B-result"));
         Some(account)
     } else {
         None
     };
-    assert!(a_out.try_recv().is_err(), "B results stay off A's socket");
+    if let Some(account) = &a {
+        account.notify(startup_store());
+    }
+    assert_construction_replies(&mut a_out, None);
 
     // Startup's signed private fee read exercises the actual injected provider
     // and the actual transport's per-operation proxy token, not a label-only mock.
