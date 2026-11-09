@@ -82,3 +82,27 @@ Physical transport loss remains Unknown and never replays a write.
 
 CI and maintainer review remain authoritative. Family budget changes, if needed,
 belong in a separate final commit using CI size plus 10 KiB.
+
+## Native hosted provider
+
+The native remote-signer selects a Backpack Ed25519 family instead of its HMAC
+fallback. It accepts only an owned credential presentation or an atomic owned
+`[Present, Sign Ed25519]` graph with one bounded, nonempty UTF-8 payload. It sends
+the existing primary-slot device descriptor without rebuilding the canonical
+payload, and preserves the original receipt. The reply must bind the installed
+public credential and contain exactly one canonical base64 64-byte signature;
+duplicate or unknown fields refuse before any result is published.
+
+`hosts/remote-signer/src/tests/backpack.rs` pins six signatures from the existing
+TypeScript `backpackHostedFixtures.signature` Node/OpenSSL oracle: account read,
+batch place and WS subscribe at two fixed timestamps. A real `SignerLink`
+round trip uses the existing registry device codec and compares every result
+byte with local signing. Refusal controls cover malformed graphs/replies,
+callback redaction, cancellation, timeout and socket ownership. Signer requests
+may move to a resumed socket; that is not an exchange write retry.
+
+This slice changes no admission flag, construction rule or venue capability
+manifest. Native Ed25519 capability ships with its operational provider branch.
+NEEDS-NX: caller tests using Backpack as a native Hosted refusal example need
+integration verification. Real server startup/all-endpoint proof remains a
+separate slice; native secondary custody and private PayloadSigner stay refused.
