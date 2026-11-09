@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zeroize::Zeroizing;
 
+mod plaintext;
+
 pub const INFO: &[u8] = b"tealstreet/delegated-handover/v1";
 pub const HANDOVER_TTL_MS: u64 = 30_000;
 const MAX_ATTEMPTS: usize = 64;
@@ -49,32 +51,13 @@ pub struct Credentials {
     pub passphrase: Option<Zeroizing<String>>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BorrowedCredentials<'a> {
-    #[serde(borrow)]
-    key: &'a str,
-    #[serde(borrow)]
-    secret: &'a str,
-    #[serde(default, borrow)]
-    passphrase: Option<&'a str>,
-}
-
-impl From<BorrowedCredentials<'_>> for Credentials {
-    fn from(fields: BorrowedCredentials<'_>) -> Self {
-        Self {
-            key: Zeroizing::new(fields.key.to_owned()),
-            secret: Zeroizing::new(fields.secret.to_owned()),
-            passphrase: fields
-                .passphrase
-                .map(|text| Zeroizing::new(text.to_owned())),
-        }
-    }
-}
-
 impl<'de> Deserialize<'de> for Credentials {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        BorrowedCredentials::deserialize(d).map(Self::from)
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        let mut bytes = Zeroizing::new(Vec::with_capacity(raw.get().len()));
+        bytes.extend_from_slice(raw.get().as_bytes());
+        plaintext::parse(&mut bytes)
+            .map_err(|_| serde::de::Error::custom("invalid handover credentials"))
     }
 }
 
@@ -190,17 +173,12 @@ impl Opening {
             return Err(Refused);
         }
         let aad = format!("{}|{}|{exchange}|{key}", self.attempt.id, self.boot_id);
-        let plaintext = open(&self.attempt.private[..], INFO, aad.as_bytes(), sealed)?;
-        // Handover strings use their literal JSON form.
-        if plaintext.contains(&b'\\') {
+        let mut plaintext = open(&self.attempt.private[..], INFO, aad.as_bytes(), sealed)?;
+        let fields = plaintext::parse(&mut plaintext)?;
+        if fields.key.as_str() != key || key.is_empty() || fields.secret.is_empty() {
             return Err(Refused);
         }
-        let fields: BorrowedCredentials<'_> =
-            serde_json::from_slice(&plaintext).map_err(|_| Refused)?;
-        if fields.key != key || key.is_empty() || fields.secret.is_empty() {
-            return Err(Refused);
-        }
-        Ok(fields.into())
+        Ok(fields)
     }
 }
 
@@ -479,7 +457,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn escaped_handover_fields_are_refused() {
+    fn escaped_handover_fields_keep_the_json_contract() {
         for (field, plaintext) in [
             ("secret", br#"{"key":"synthetic-key","secret":"synthetic-\u0073ecret"}"#.as_slice()),
             ("key", br#"{"key":"synthetic-\u006bey","secret":"synthetic-secret"}"#.as_slice()),
@@ -489,7 +467,14 @@ pub(crate) mod tests {
             let mut owner = Handovers::default();
             let offer = owner.issue("account", 100).unwrap();
             let sealed = seal(&offer, "bybit", "synthetic-key", plaintext);
-            assert!(owner.take("account", &sealed, 101).unwrap().open("bybit", "synthetic-key", &sealed, 102).is_err(), "escaped {field} must be refused");
+            let candidate = owner.take("account", &sealed, 101).unwrap().open("bybit", "synthetic-key", &sealed, 102);
+            assert!(candidate.is_ok(), "escaped {field} must be accepted");
+            let candidate = candidate.unwrap();
+            assert!(candidate.key.as_str() == "synthetic-key");
+            assert!(candidate.secret.as_str() == "synthetic-secret");
+            if field == "passphrase" {
+                assert!(candidate.passphrase.as_deref().map(String::as_str) == Some("synthetic-passphrase"));
+            }
             assert!(owner.take("account", &sealed, 103).is_err());
         }
     }
