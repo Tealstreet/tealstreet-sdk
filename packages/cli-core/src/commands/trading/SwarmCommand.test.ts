@@ -35,7 +35,7 @@ function bal(p: Partial<Balance> = {}): Balance {
     free: p.free ?? 1000,
     total: p.total ?? 1000,
     upnl: p.upnl ?? 0,
-  } as Balance;
+  };
 }
 
 function makeExchange(opts: { positions?: Position[]; balance?: Balance } = {}): ExchangeLike {
@@ -167,7 +167,7 @@ describe('SwarmCommand — argument parsing', () => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(['swarm', 'buy', '$100', 'into', '5', 'frizzle'], ex));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/unexpected token/);
+    expect(r.error).toMatch(/unknown argument/i);
   });
 });
 

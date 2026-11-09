@@ -9,11 +9,17 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "backpack")]
 mod backpack;
 
-#[cfg(feature = "kucoin")]
+#[cfg(feature = "orderly")]
+mod orderly;
+
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
 mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "orderly")]
+    #[serde(rename = "orderly-ed25519")]
+    OrderlyEd25519,
     #[cfg(feature = "backpack")]
     #[serde(rename = "backpack-ed25519")]
     BackpackEd25519,
@@ -152,11 +158,15 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "orderly")]
+    Orderly {
+        ws: bool,
+    },
     #[cfg(feature = "backpack")]
     Backpack {
         ws: bool,
     },
-    #[cfg(feature = "kucoin")]
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
     Kucoin {
         broker: bool,
         ws: bool,
@@ -179,7 +189,7 @@ impl OutputKind {
     /// Value count and MAC position of the captured work's result.
     fn layout(self) -> (usize, Option<usize>) {
         match self {
-            #[cfg(feature = "kucoin")]
+            #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
             Self::Kucoin { broker, .. } => (if broker { 4 } else { 3 }, Some(1)),
             Self::Credential => (1, None),
             Self::Http(policy) if policy.passphrase_header.is_some() => (3, Some(1)),
@@ -303,13 +313,15 @@ fn family(venue: &str) -> bool {
         || bybit
         || okx
         || bitget
-        || (cfg!(feature = "bingx") && venue == "bingx")
+        || (cfg!(feature = "bingx") && matches!(venue, "bingx" | "bingxspot"))
         || (cfg!(feature = "blofin") && venue == "blofin")
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
+        || (cfg!(feature = "kucoinspot") && venue == "kucoinspot")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "woo") && venue == "woo")
+        || (cfg!(feature = "cryptocom") && venue == "cryptocom")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
 
@@ -318,6 +330,37 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "orderly")]
+    if orderly::family(venue) {
+        return match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => orderly::prepare(
+                venue,
+                identities,
+                payload,
+                Some(SignReceipt {
+                    stamp_ms: Some(stamp_ms),
+                    ..Default::default()
+                }),
+            ),
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::OrderlyEd25519,
+            } => orderly::prepare(venue, identities, to_sign, None),
+            _ => Err(SignError::Unsupported),
+        };
+    }
+    #[cfg(feature = "orderly")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::OrderlyEd25519,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
     #[cfg(feature = "backpack")]
     if venue == "backpack" {
         match input {
@@ -342,13 +385,16 @@ pub fn prepare(
             Input::Credential {} => {}
         }
     }
-    #[cfg(feature = "kucoin")]
-    if venue == "kucoin" {
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+    if (cfg!(feature = "kucoin") && venue == "kucoin")
+        || (cfg!(feature = "kucoinspot") && venue == "kucoinspot")
+    {
         match input {
             Input::Http {
                 payload, stamp_ms, ..
             } => {
                 return kucoin::prepare(
+                    venue,
                     identities,
                     payload,
                     SignReceipt {
@@ -361,7 +407,7 @@ pub fn prepare(
             Input::WsAuth {
                 to_sign,
                 output_format: OutputFormat::KucoinBatch,
-            } => return kucoin::prepare(identities, to_sign, SignReceipt::default(), true),
+            } => return kucoin::prepare(venue, identities, to_sign, SignReceipt::default(), true),
             Input::WsAuth { .. } => return Err(SignError::Unsupported),
             Input::Credential {} => {}
         }
@@ -467,11 +513,15 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "orderly")]
+    if let OutputKind::Orderly { ws } = kind {
+        return orderly::finish(ws, result);
+    }
     #[cfg(feature = "backpack")]
     if let OutputKind::Backpack { ws } = kind {
         return backpack::finish(ws, result);
     }
-    #[cfg(feature = "kucoin")]
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
     if let OutputKind::Kucoin { broker, ws } = kind {
         return kucoin::finish(broker, ws, result);
     }
@@ -515,11 +565,15 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "orderly")]
+        OutputKind::Orderly { .. } | OutputKind::WsAuth(OutputFormat::OrderlyEd25519) => {
+            return Err(SignError::Unsupported);
+        }
         #[cfg(feature = "backpack")]
         OutputKind::Backpack { .. } => unreachable!(),
         #[cfg(feature = "backpack")]
         OutputKind::WsAuth(OutputFormat::BackpackEd25519) => return Err(SignError::Unsupported),
-        #[cfg(feature = "kucoin")]
+        #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
         OutputKind::Kucoin { .. } => unreachable!(),
         OutputKind::WsAuth(OutputFormat::KucoinBatch) => return Err(SignError::Unsupported),
         OutputKind::Credential => unreachable!(),
@@ -907,6 +961,11 @@ mod input_parse_tests {
             ));
         }
         for (format, input) in [
+            #[cfg(feature = "orderly")]
+            (
+                "orderly-ed25519",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"orderly-ed25519"}"#,
+            ),
             #[cfg(feature = "backpack")]
             (
                 "backpack-ed25519",
@@ -945,6 +1004,8 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "orderly")]
+                    OutputFormat::OrderlyEd25519 => "orderly-ed25519",
                     #[cfg(feature = "backpack")]
                     OutputFormat::BackpackEd25519 => "backpack-ed25519",
                     OutputFormat::KucoinBatch => "kucoin-batch",

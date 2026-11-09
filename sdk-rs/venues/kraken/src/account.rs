@@ -154,14 +154,17 @@ pub struct Account {
     pub(super) feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
     open: bool,
-    challenge: Option<String>,
     signed_challenge: Option<String>,
     waiting_challenge: bool,
     acks: HashSet<String>,
     payload_complete: bool,
     poll: Option<TimerId>,
     heal: Option<TimerId>,
-    seen_fills: RecentIds<8192>,
+    emitted_fills: RecentIds<8192>,
+    /// The first snapshot is history, not live executions. Keep it separate so
+    /// those identities never suppress a later live delivery.
+    startup_fill_history: RecentIds<8192>,
+    fill_history_initialized: bool,
     payloads: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
@@ -279,6 +282,25 @@ impl Stamp<'_> {
         }
     }
 }
+// Unusable liquidation metadata must not discard an otherwise valid position update.
+fn optional_liquidation_price<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum LiquidationPrice {
+        Number(
+            #[serde(deserialize_with = "safe_cex_engine::de::lenient_optional_number")] Option<f64>,
+        ),
+        Unusable(serde::de::IgnoredAny),
+    }
+
+    Ok(match LiquidationPrice::deserialize(deserializer)? {
+        LiquidationPrice::Number(value) => value,
+        LiquidationPrice::Unusable(_) => None,
+    })
+}
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PositionWire<'a> {
@@ -299,9 +321,9 @@ struct PositionWire<'a> {
     #[serde(
         default,
         alias = "liquidation_threshold",
-        deserialize_with = "wire::number"
+        deserialize_with = "optional_liquidation_price"
     )]
-    liquidation_price: f64,
+    liquidation_price: Option<f64>,
     #[serde(default, deserialize_with = "wire::optional_number")]
     max_fixed_leverage: Option<f64>,
 }
@@ -760,7 +782,7 @@ impl Kraken {
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return Control::Other;
         };
-        if msg.event == "pong" {
+        if msg.event == "pong" || msg.feed == "heartbeat" {
             return Control::Pong;
         }
         if refuses_private_feed(&msg) {
@@ -798,11 +820,11 @@ impl Kraken {
         self.account.snapshot_settings_revision = self.account.settings_write_revision;
         self.account.snapshot_positions_seen = false;
         self.account.waiting_challenge = true;
-        self.account.challenge = None;
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
         self.account.payload_complete = false;
+        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
         cx.send(
             socket,
             serde_json::to_string(
@@ -816,11 +838,13 @@ impl Kraken {
         if self.account.socket != Some(socket) {
             return false;
         }
+        // If startup's snapshot was lost, the replacement must recover fills
+        // instead of silently treating its executions as an initial baseline.
+        self.account.fill_history_initialized |= self.account.open;
         self.account.orders_revision += 1;
         self.account.positions_revision += 1;
         self.account.socket = None;
         self.account.open = false;
-        self.account.challenge = None;
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
@@ -874,7 +898,6 @@ impl Kraken {
                 return true;
             }
             self.account.waiting_challenge = false;
-            self.account.challenge = Some(msg.message.to_string());
             let Some(signer) = self.signer.as_ref() else {
                 self.account_disconnect(
                     cx,
@@ -887,8 +910,6 @@ impl Kraken {
             for feed in FEEDS {
                 cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
             }
-            // Kraken has no ping frame; this feed is its keepalive, every 10 s.
-            cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
             return true;
         }
         if refuses_private_feed(&msg) {
@@ -912,6 +933,9 @@ impl Kraken {
                     let decoded = json::each::<Execution<'_>>(raw.get(), |e| executions.push(e));
                     if decoded.is_ok() {
                         self.account.payloads.insert("fills".into(), cx.now);
+                        let snapshot = msg.feed == "fills_snapshot";
+                        let seed_history = snapshot && !self.account.fill_history_initialized;
+                        self.account.fill_history_initialized |= snapshot;
                         for e in executions {
                             if e.fill_id.is_empty()
                                 || e.order_id.is_empty()
@@ -921,12 +945,19 @@ impl Kraken {
                             {
                                 continue;
                             }
-                            if !self.account.seen_fills.insert(e.fill_id.to_string()) {
+                            // Timestamps cannot prove delivery: reconnect snapshots may
+                            // contain unseen executions at or before the last emitted fill.
+                            if self.account.emitted_fills.contains(&e.fill_id)
+                                || cx.store.market(&e.instrument).is_none()
+                                || (snapshot
+                                    && self.account.startup_fill_history.contains(&e.fill_id))
+                            {
                                 continue;
                             }
-                            if msg.feed == "fills_snapshot"
-                                || cx.store.market(&e.instrument).is_none()
-                            {
+                            if seed_history {
+                                self.account
+                                    .startup_fill_history
+                                    .insert(e.fill_id.to_string());
                                 continue;
                             }
                             if let (Some(remaining), Some(time), Some(mut order)) = (
@@ -964,6 +995,7 @@ impl Kraken {
                                 price: e.price,
                                 amount: e.qty,
                             });
+                            self.account.emitted_fills.insert(e.fill_id.to_string());
                         }
                         self.account_schedule_heal(cx);
                     }
@@ -1218,6 +1250,11 @@ impl Kraken {
             .positions()
             .iter()
             .find(|p| p.symbol == row.symbol && p.side == side);
+        let liquidation_price = if live {
+            row.liquidation_price
+        } else {
+            old.map(|p| p.liquidation_price)
+        };
         Some(Position {
             id: format!(
                 "{}:{}",
@@ -1243,11 +1280,9 @@ impl Kraken {
             unrealized_pnl: row.unrealized_pnl,
             realized_pnl: None,
             contracts: quantity.abs(),
-            liquidation_price: if live {
-                row.liquidation_price
-            } else {
-                old.map_or(0.0, |p| p.liquidation_price)
-            },
+            liquidation_price: liquidation_price
+                .filter(|price| price.is_finite() && *price > 0.0)
+                .unwrap_or(f64::NAN),
             margin_size: None,
             last_update: Some(cx.now),
         })
@@ -1753,15 +1788,15 @@ mod cache_tests {
     fn execution_identity_memory_is_bounded_without_forgetting_recent_duplicates() {
         let mut account = Account::new();
         for n in 0..20000 {
-            assert!(account.seen_fills.insert(format!("fill-{n}")));
+            assert!(account.emitted_fills.insert(format!("fill-{n}")));
         }
         assert!(
-            account.seen_fills.len() <= 8192,
+            account.emitted_fills.len() <= 8192,
             "execution identity cache grew without bound"
         );
-        assert!(account.seen_fills.contains("fill-19999"));
-        assert!(!account.seen_fills.insert("fill-19999".into()));
-        assert!(!account.seen_fills.contains("fill-0"));
+        assert!(account.emitted_fills.contains("fill-19999"));
+        assert!(!account.emitted_fills.insert("fill-19999".into()));
+        assert!(!account.emitted_fills.contains("fill-0"));
     }
     #[test]
     fn terminal_order_memory_is_bounded_without_forgetting_recent_fences() {

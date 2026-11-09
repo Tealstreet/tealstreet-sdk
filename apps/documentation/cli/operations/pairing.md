@@ -5,6 +5,8 @@ sidebar_position: 4
 
 # Pairing web and standalone
 
+Pairing belongs to the signed-in user. Switching users closes existing connections; pair the browser separately for the new user. See [user profiles and migration](./config-files.md#login-logout-and-migration).
+
 Pairing is the act of pointing the web CLI tab at a running standalone CLI
 so commands typed in the browser execute inside the standalone process.
 Under the hood it's the [listener](./listener.md) WS transport plus the
@@ -60,13 +62,13 @@ Once welcomed, the WS carries five conversation types. The full frame
 catalogue is in [Listener → wire frames](./listener.md#wire-frames); the
 flow at runtime looks like:
 
-| You do…                                | Frames on the wire                                                                                                                                                         |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Type a command in the web CLI          | Web sends `cmd:exec { id, command, account?, symbol? }`. Standalone dispatches as if typed at its own REPL.                                                                |
-| Standalone prints output for that run  | Each line streams back as `cmd:output { id, kind, text }` (`kind ∈ print \| success \| warn \| error \| info`).                                                            |
-| Standalone finishes the run            | `cmd:done { id, success, error? }`. Late frames from `;` / `&` chains may still arrive — match by `id`.                                                                    |
-| Web edits an account                   | Web sends `mutate:account { id, op, account?, name? }`; standalone replies `mutate:ack` or `mutate:err`. Account snapshot reflows via `state:accounts`.                    |
-| A webhook fires while you're paired    | Standalone publishes `cmd:output` + `cmd:done` on the `hook-output` topic. Same frame shape — paired clients see the run in real time.                                     |
+| You do…                               | Frames on the wire                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type a command in the web CLI         | Web sends `cmd:exec { id, command, account?, symbol? }`. Standalone dispatches as if typed at its own REPL.                                             |
+| Standalone prints output for that run | Each line streams back as `cmd:output { id, kind, text }` (`kind ∈ print \| success \| warn \| error \| info`).                                         |
+| Standalone finishes the run           | `cmd:done { id, success, error? }`. Late frames from `;` / `&` chains may still arrive — match by `id`.                                                 |
+| Web edits an account                  | Web sends `mutate:account { id, op, account?, name? }`; standalone replies `mutate:ack` or `mutate:err`. Account snapshot reflows via `state:accounts`. |
+| A webhook fires while you're paired   | Standalone publishes `cmd:output` + `cmd:done` on the `hook-output` topic. Same frame shape — paired clients see the run in real time.                  |
 
 `state:accounts` and `state:tasks` are pushed to subscribed clients on
 connect and after every mutation. Hooks are managed from the REPL only

@@ -4,6 +4,7 @@ import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
 import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { TwapWorkerContext } from './twap/TwapOwner';
 
 import throttle from 'lodash/throttle';
 
@@ -12,6 +13,7 @@ import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandO
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
+import { snapshotDelegatedSigningOptions } from '../exchanges/rust/delegatedSigningSnapshot';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { unsupportedVenueError } from '../unsupportedVenue';
@@ -104,7 +106,7 @@ export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
   private readonly _accountName: string;
   private readonly _options: ExchangeOptions;
-  private readonly _ctx: Worker;
+  private readonly _ctx: TwapWorkerContext;
   private readonly _settings: AppSettingsWorkerType;
   private readonly _metadata: ExchangeMetadataWorkerType;
   private readonly _sessionKey: string;
@@ -167,7 +169,7 @@ export class ExchangeWorker {
   private _sentryReportCooldowns = new Map<string, { lastReportedAt: number; suppressedCount: number }>();
 
   constructor(
-    ctx: Worker,
+    ctx: TwapWorkerContext,
     accountName: string,
     exchangeName: ExchangeName,
     options: ExchangeOptions,
@@ -179,6 +181,7 @@ export class ExchangeWorker {
     this._exchangeName = exchangeName;
     this._accountName = accountName;
     // The worker owns the account's engine; a forwarded mirror flag would stop it from running one.
+    options = snapshotDelegatedSigningOptions(exchangeName, options);
     const { workerMirror: _workerMirror, ...ownedOptions } = options;
     this._options = ownedOptions;
     this._ctx = ctx;
@@ -1325,7 +1328,9 @@ export class ExchangeWorker {
                 this._forwardLateReply(args[0], generation);
               }
             }
-          : Reflect.get(target, property),
+          : property === 'getTwapOwner' && target.getTwapOwner
+            ? () => (generation === this._generation && !this._stopped ? (target.getTwapOwner?.() ?? null) : null)
+            : Reflect.get(target, property),
     });
     this._handlers = this._handlerClasses.map(
       (Handler) =>

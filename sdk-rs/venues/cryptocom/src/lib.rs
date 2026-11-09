@@ -286,6 +286,9 @@ impl Cryptocom {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if channel == 1 && !cx.private_feed_policy().streaming() {
+            return;
+        }
         if self.sockets[channel].socket.is_some() {
             return;
         }

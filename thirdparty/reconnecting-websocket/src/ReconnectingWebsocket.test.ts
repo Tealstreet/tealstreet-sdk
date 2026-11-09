@@ -244,3 +244,65 @@ describe('ReconnectingWebSocket audited connect timeout', () => {
     expect(socket.timeoutConnecting()).toBe(false);
   });
 });
+
+describe('reconnect diagnostics', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    FakeWebSocket.made = [];
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it.each([false, true])(
+    'logs the resolved route without a function, query, credentials or frame contents (async=%s)',
+    async (asyncProvider) => {
+      const url = 'wss://fixture-user:fixture-password@example.test/feed?signature=fixture-signature#fixture-fragment';
+      const provider = vi.fn(asyncProvider ? async () => url : () => url);
+      const socket = new ReconnectingWebSocket(provider, ['fixture-protocol-token'], {
+        ...options,
+        debug: true,
+        startClosed: true,
+      });
+      try {
+        socket.reconnect(1000, 'fixture-reason?signature=fixture-reason-signature');
+        await vi.advanceTimersByTimeAsync(1);
+        expect(provider).toHaveBeenCalledTimes(1);
+        expect(FakeWebSocket.made[0].url).toBe(url);
+        FakeWebSocket.made[0].readyState = 1;
+        socket.send('{"signature":"fixture-frame-signature"}');
+        const logged = [...vi.mocked(console.log).mock.calls, ...vi.mocked(console.info).mock.calls]
+          .map((args) => JSON.stringify(args))
+          .join('\n');
+        expect(logged).toContain('wss://example.test/feed');
+        expect(logged).not.toContain(provider.toString());
+        expect(logged).not.toMatch(/fixture-|\?signature|=>/);
+      } finally {
+        socket.close();
+      }
+    },
+  );
+
+  it('uses a redacted placeholder when the provider fails, without logging its error', async () => {
+    const socket = new ReconnectingWebSocket(
+      async () => {
+        throw new Error('fixture-provider-signature');
+      },
+      [],
+      { ...options, startClosed: true },
+    );
+    try {
+      socket.reconnect();
+      await vi.advanceTimersByTimeAsync(1);
+      const logged = [...vi.mocked(console.log).mock.calls, ...vi.mocked(console.info).mock.calls]
+        .flat()
+        .map(String)
+        .join(' ');
+      expect(logged).toContain('[unavailable]');
+      expect(logged).not.toMatch(/fixture-provider-signature|=>/);
+      expect(FakeWebSocket.made).toHaveLength(0);
+    } finally {
+      socket.close();
+    }
+  });
+});
