@@ -2,7 +2,8 @@
 //! non-retried writes, each call bounded on its own.
 use crate::{Okx, Pending, sign, wire};
 use safe_cex_engine::classify::{
-    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict, WriteFact,
+    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Released, Row, SatisfiedIntent, Verdict,
+    WriteFact,
 };
 use safe_cex_engine::log::Level;
 use safe_cex_engine::model::*;
@@ -1846,6 +1847,7 @@ impl Okx {
                 error.elements = Some(Box::new(cancel_outcomes(
                     cx,
                     request.command,
+                    &response,
                     &acks,
                     &requested,
                 )));
@@ -2164,9 +2166,11 @@ pub(crate) fn trade_reconciliation(
 
 /// Passive outcomes for an identity-validated native cancellation batch.
 /// Indices match the batch's request rows and its partial.failed_index.
+/// Use the engine's released-write verdict, including rate-limit uncertainty.
 fn cancel_outcomes(
     cx: &mut Cx<'_, Pending>,
     command: CommandId,
+    response: &Response<'_>,
     acks: &[Ack<'_>],
     requested: &[Requested],
 ) -> ElementOutcomes {
@@ -2175,7 +2179,12 @@ fn cancel_outcomes(
             .zip(requested)
             .enumerate()
             .map(|(index, (ack, target))| {
-                let verdict = CODES.verdict(&native(ack.s_code, ack.s_msg), Intent::Cancel);
+                let verdict = safe_cex_engine::classify::verdict(
+                    &CODES,
+                    Intent::Cancel,
+                    Released::Response(response),
+                    Some(&native(ack.s_code, ack.s_msg)),
+                );
                 let result = if matches!(ack.s_code, "" | "0")
                     || verdict == Verdict::Satisfied(SatisfiedIntent::Cancel)
                 {

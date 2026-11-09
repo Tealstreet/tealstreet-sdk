@@ -3068,3 +3068,152 @@ fn cancel_batch_unknown_reporting_distinguishes_satisfied_and_refused_rows() {
         assert_eq!(elements[1]["error"]["venueCode"], "51412");
     }
 }
+
+fn rate_limited_cancel_row_uses_released_write_outcome(algo: bool, code: &str) {
+    use safe_cex_engine::model::{OrderStatus, OrderType};
+    use safe_cex_engine::{ErrorKind, Method, Outcome};
+
+    let mut e = trading_engine();
+    let (kind, ids, field, native_ids, endpoint) = if algo {
+        (
+            OrderType::StopLoss,
+            ["91_sl", "92_sl"],
+            "algoId",
+            ["91", "92"],
+            "/cancel-algos",
+        )
+    } else {
+        (
+            OrderType::Limit,
+            ["1", "2"],
+            "ordId",
+            ["1", "2"],
+            "/cancel-batch-orders",
+        )
+    };
+    for id in ids {
+        e.store_mut().upsert_order(stored(id, kind));
+    }
+    e.handle(
+        5.0,
+        Event::Command(Command::CancelOrders {
+            command: 402,
+            ids: ids.iter().map(|id| (*id).into()).collect(),
+        }),
+    );
+    let released = prepared(&mut e, 5.0);
+    let writes: Vec<_> = released
+        .iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        .collect();
+    assert_eq!(writes.len(), 1);
+    assert!(matches!(writes[0], Action::Http(r) if r.url.ends_with(endpoint)));
+    let request_rows: Vec<serde_json::Value> = serde_json::from_str(body(writes[0])).unwrap();
+    assert_eq!(request_rows.len(), 2);
+    for (row, id) in request_rows.iter().zip(native_ids) {
+        assert_eq!(row[field], id);
+    }
+    // Synthetic mixed ACKs exercise reporting, not proof of pre-acceptance refusal.
+    // OKX docs-v5/en/#overview-rate-limits documents 50061 for new/amend requests.
+    reply(
+        &mut e,
+        writes[0],
+        &format!(
+            r#"{{"code":"2","data":[{{"{field}":"{}","sCode":"0"}},{{"{field}":"{}","sCode":"{code}","sMsg":"Rate limit"}}]}}"#,
+            native_ids[0], native_ids[1]
+        ),
+        6.0,
+    );
+    let mut after = prepared(&mut e, 6.0);
+    let terminal = terminals(&after, 402);
+    assert_eq!(terminal.len(), 1);
+    let error = terminal[0]
+        .as_ref()
+        .expect_err("released rate-limited cancellation is Unknown");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some(code));
+    assert_eq!(error.venue_message.as_deref(), Some("Rate limit"));
+    assert!(
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    let partial = error.partial.as_ref().expect("indexed applied batch");
+    assert!(partial.order_ids.is_empty());
+    assert_eq!(partial.total, Some(2));
+    assert_eq!(partial.failed_index, Some(1));
+    let elements =
+        serde_json::to_value(error.elements.as_ref().expect("indexed outcomes")).unwrap();
+    assert_eq!(elements.as_array().unwrap().len(), 2);
+    assert_eq!(
+        elements[0],
+        serde_json::json!({
+            "index": 0, "status": "applied", "effect": "cancel", "targetOrderId": native_ids[0]
+        })
+    );
+    assert_eq!(elements[1]["index"], 1);
+    assert_eq!(elements[1]["status"], "unknown");
+    assert_eq!(elements[1]["error"]["outcome"], "unknown");
+    assert_eq!(elements[1]["error"]["kind"], "rateLimited");
+    assert_eq!(elements[1]["error"]["venueCode"], code);
+    assert!(
+        elements[1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    let events: Vec<_> = after
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].level, safe_cex_engine::log::Level::Warn);
+    assert!(events[0].fields.contains(&("command", 402_u32.into())));
+    assert!(events[0].fields.contains(&("index", 1_f64.into())));
+    assert!(
+        events[0]
+            .fields
+            .contains(&("targetOrderId", native_ids[1].to_owned().into()))
+    );
+    assert!(
+        events[0]
+            .fields
+            .contains(&("venueCode", code.to_owned().into()))
+    );
+    for id in ids {
+        assert_eq!(e.store().order(id).unwrap().status, OrderStatus::Canceling);
+    }
+    after.extend(fire_armed(&mut e, &after.clone(), 30_000.0));
+    assert!(
+        !after
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+    );
+    assert_eq!(terminals(&after, 402).len(), 1);
+}
+
+#[test]
+fn regular_rate_limited_cancel_50011_keeps_engine_and_row_unknown() {
+    rate_limited_cancel_row_uses_released_write_outcome(false, "50011");
+}
+
+#[test]
+fn regular_rate_limited_cancel_50061_keeps_engine_and_row_unknown() {
+    rate_limited_cancel_row_uses_released_write_outcome(false, "50061");
+}
+
+#[test]
+fn algo_rate_limited_cancel_50011_keeps_engine_and_row_unknown() {
+    rate_limited_cancel_row_uses_released_write_outcome(true, "50011");
+}
+
+#[test]
+fn algo_rate_limited_cancel_50061_keeps_engine_and_row_unknown() {
+    rate_limited_cancel_row_uses_released_write_outcome(true, "50061");
+}
