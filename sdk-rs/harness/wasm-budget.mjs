@@ -230,7 +230,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_906_688,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
   bitunix: 1_927_168,
-  blofin: 2_049_024,
+  blofin: 2_050_048,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   bybit: 2_326_528,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
@@ -239,7 +239,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
-  grvt: 1_985_536,
+  grvt: 1_986_560,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -264,12 +264,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kraken: 2_244_608,
   krakenspot: 2_244_608,
   kucoin: 1_872_896,
-  kucoinspot: 2_440_192,
-  lighter: 2_124_800,
-  'lighter-robinhood': 2_124_800,
+  kucoinspot: 2_444_288,
+  lighter: 2_130_944,
+  'lighter-robinhood': 2_130_944,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_898_496,
-  okx: 2_045_952,
+  okx: 2_048_000,
   orderly: 1_771_520,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_300_928,
