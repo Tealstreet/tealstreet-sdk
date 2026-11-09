@@ -545,6 +545,26 @@ impl Session {
             .send(envelope::init_unverified(name, transient));
     }
 
+    /// Exercise the trusted construction entry point from this authenticated
+    /// socket without enabling a new socket operation.
+    #[cfg(test)]
+    pub(crate) fn delegated_test_build(
+        &self,
+        init: InitPayload,
+        pair: crate::delegated::DelegatedPair,
+    ) -> impl std::future::Future<Output = Result<Arc<Account>, String>> + use<> {
+        let registry = self.registry.clone();
+        let identity = self.identity.clone();
+        let socket = self.socket;
+        let outbox = self.out.outbox();
+        async move {
+            let user = identity.user.ok_or("Authenticated user required")?;
+            registry
+                .obtain_delegated(&user, &init, socket, identity.token, outbox, pair)
+                .await
+        }
+    }
+
     /// Called once after the upgrade, for `resumable=1` sockets.
     pub async fn open(&mut self) {
         if !self.identity.resumable {
@@ -751,6 +771,14 @@ impl Session {
             return Ok(());
         }
         self.forget_disposed();
+        if let Some(refusal) =
+            self.registry
+                .signing_mode_refusal(self.user(), &init, public_only, false)
+        {
+            self.send(envelope::init_refused(&init.account_name, &refusal));
+            self.drop_early(&init.account_name, "init refused for signing mode");
+            return Ok(());
+        }
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
         {
