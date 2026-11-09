@@ -100,6 +100,67 @@ fn assert_projection(
 }
 
 #[test]
+fn identity_only_fallback_does_not_invent_partial_counts_after_an_applied_prefix() {
+    for native_ids in [&[][..], &["native-prefix"][..]] {
+        let mut writes = CommandWrites::new(3).unwrap();
+        let mut plan = journal(3);
+        plan.record(
+            0,
+            if native_ids.is_empty() {
+                ElementResult::Applied {
+                    effect: AppliedEffect::PositionTrigger,
+                    target_order_id: None,
+                    position_key: Some("BTCUSDT".into()),
+                }
+            } else {
+                placed(native_ids[0])
+            },
+        )
+        .unwrap();
+        accepted(&mut writes, 1, native_ids);
+        refuse(&mut writes, &mut plan, 2, 1, "margin");
+        // A pending client identity is not a native order ID or caller-leg counts.
+        let fallback = plan
+            .attach(VenueError::new("later refusal").partial_ids(&["client-only-trigger".into()]));
+        let error = assert_projection(&mut writes, &plan, fallback);
+        assert_eq!(error.outcome, None);
+        assert_eq!(error.venue_code.as_deref(), Some("margin"));
+        if native_ids.is_empty() {
+            assert!(error.partial.is_none(), "{error:?}");
+            assert_eq!(error.legacy_text(), "definite refusal");
+        } else {
+            let partial = error.partial.as_ref().unwrap();
+            assert_eq!(partial.order_ids, native_ids);
+            assert_eq!((partial.total, partial.failed_index), (None, None));
+        }
+    }
+}
+
+#[test]
+fn identity_only_fallback_preserves_selected_native_partial_counts() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    let mut plan = journal(2);
+    let native = refusal("margin").partial(&["native-prefix".into()], 2, 1);
+    plan.record(0, placed("native-prefix")).unwrap();
+    plan.record(
+        1,
+        ElementResult::NotSent {
+            error: Some(Box::new(native.clone())),
+        },
+    )
+    .unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(RequestId(1), WriteResult::KnownPartial(native))
+        .unwrap();
+    let fallback = plan.attach(VenueError::new("terminal").partial_ids(&["native-prefix".into()]));
+    let error = assert_projection(&mut writes, &plan, fallback);
+    let partial = error.partial.unwrap();
+    assert_eq!(partial.order_ids, ["native-prefix"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+}
+
+#[test]
 fn definite_refusal_then_unknown_keeps_every_fact() {
     for gateway in [false, true] {
         let mut writes = CommandWrites::new(4).unwrap();
