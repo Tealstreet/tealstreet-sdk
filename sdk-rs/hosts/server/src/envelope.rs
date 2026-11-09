@@ -2,12 +2,17 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// Non-secret account fields the browser sends; there is never an API secret.
+/// Account settings and an optional encrypted handover; no plaintext API secret.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitPayload {
     pub account_name: String,
     pub exchange_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_mode: Option<String>,
+    /// Consumed on this connection; never included in serialized settings.
+    #[serde(default, skip_serializing)]
+    pub sealed: Option<crate::delegated::Sealed>,
     #[serde(default, deserialize_with = "key")]
     pub key: String,
     #[serde(default, deserialize_with = "text")]
@@ -130,6 +135,13 @@ pub fn msg(account_name: &str, op: &str, data: Value) -> String {
     )
 }
 
+pub fn delegated_key(account_name: &str, offer: &crate::delegated::KeyOffer) -> String {
+    let mut data = serde_json::to_value(offer).expect("public offer serializes");
+    data["op"] = "delegated-key".into();
+    data["accountName"] = account_name.into();
+    envelope("msg", data)
+}
+
 pub fn frame(account_name: &str, seq: u64, snapshot: bool, scxf: &[u8]) -> String {
     use base64::Engine as _;
     envelope(
@@ -204,6 +216,15 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
             "accountName": account_name,
             "data": [message, {"forceToast": true, "initRefused": true}],
         }),
+    )
+}
+
+pub fn init_unverified(account_name: &str, transient: bool) -> String {
+    envelope(
+        "msg",
+        json!({"op":"error", "accountName":account_name,
+            "data":["Could not verify your key; account not attached",
+                {"forceToast":true, "initRefused":true, "kind":"unverified", "transient":transient}]}),
     )
 }
 

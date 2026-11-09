@@ -32,6 +32,12 @@ base64.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# RFC 9180 handover. Only X25519 is enabled; use the crate's base-mode
+# implementation rather than maintaining a separate key schedule here.
+hpke = { version = "=0.13.0", default-features = false, features = ["std", "x25519"] }
+# hpke disables dalek defaults: explicitly retain secret erasure on drop.
+x25519-dalek = { version = "=2.0.1", default-features = false, features = ["static_secrets", "zeroize"] }
+zeroize.workspace = true
 
 [features]
 # Test accounts and unsigned proxy tokens for the integration tests; never in the binary.
