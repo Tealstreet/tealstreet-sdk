@@ -170,8 +170,8 @@ The same field policy declares primary required-for-private passphrases and
 required secondary passphrases with primary fallback for OKX and Bitget aliases
 and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
-explicit empty never inherits. Public mode bypasses only the primary requirement,
-while secondary validation stays active. Shared publicMode intent takes precedence
+explicit empty never inherits. Local signer setup in public mode bypasses only
+the primary requirement, while secondary validation stays active. Shared publicMode intent takes precedence
 over legacy publicDataOnly, including null/omitted requested. This declaration does
 not enable signing for an unmigrated family.
 Normalization and required-material validation occur before opaque identities are installed, and SDK cached
@@ -228,6 +228,14 @@ Private WOO RemoteSigner setup refuses any configured secondary credentials with
 `unsupported` / `notSent` before native construction or callbacks: its HMAC wire
 cannot select the device's read-key slot. Remove the secondary credentials to
 use Hosted with the primary key, or use read keys in local browser mode.
+ApeX Omni admits RemoteSigner through `apexomni-batch`: device-held OmniKey
+contracts precede base64-text-key HMAC signing. Origins retain their API
+passphrase in Present-only provider custody; the secret and OmniKey stay on the
+device. Private PayloadSigner and secondary read keys refuse before I/O.
+ApeX HTTP POST captures sign sorted semantic form fields, decoding serialized
+form/multipart bodies while preserving transport bytes and existing zkLink signatures.
+See `docs/plans/callers/apexomni-hosted-signing.md` for the wire and parity contract.
+
 Crypto.com admits RemoteSigner and canonical HMAC PayloadSigner. Every signed
 REST envelope and `public/auth` uses provider custody; the hosted wire carries
 only `method + id + api_key + canonical params + nonce`. PayloadSigner keeps
@@ -247,6 +255,10 @@ including keyless accounts with unused callbacks. It preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
+ApeX uses this shared early return for saved-key and keyless accounts explicitly
+requesting public mode. Captured public mode cannot be changed by later
+construction input; no separate ApeX public-mode guard is installed.
+
 Construction snapshots outer signer fields and their methods together under one
 guard before mode resolution. Admission, asynchronous factories and signer setup
 share that immutable snapshot, preserving receivers without further caller reads.
