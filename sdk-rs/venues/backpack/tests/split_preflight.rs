@@ -54,7 +54,12 @@ fn submit(engine: &mut Driver, orders: Vec<Value>) -> Result {
 }
 
 fn assert_placement_sequence(engine: &mut Driver, quantities: &[Vec<&str>]) -> Result {
+    assert_placement_sequence_sum(engine, quantities).map(|_| ())
+}
+
+fn assert_placement_sequence_sum(engine: &mut Driver, quantities: &[Vec<&str>]) -> Result<f64> {
     let mut expected_ids = vec![];
+    let mut sent_sum = 0.;
     for (step, expected) in quantities.iter().enumerate() {
         let packets = requests(engine);
         assert_eq!(packets.len(), 1, "step {step}: exactly one legacy write");
@@ -75,6 +80,10 @@ fn assert_placement_sequence(engine: &mut Driver, quantities: &[Vec<&str>]) -> R
         for (index, (row, quantity)) in rows.iter().zip(expected).enumerate() {
             let sent = row.get("quantity").or_else(|| row.get("triggerQuantity"));
             assert_eq!(sent, Some(&json!(quantity)), "step {step} row {index}");
+            sent_sum += sent
+                .and_then(Value::as_str)
+                .ok_or("missing quantity")?
+                .parse::<f64>()?;
             let id = format!("placed-{step}-{index}");
             expected_ids.push(id.clone());
             acknowledgements.push(json!({
@@ -104,7 +113,7 @@ fn assert_placement_sequence(engine: &mut Driver, quantities: &[Vec<&str>]) -> R
         })
         .ok_or("missing placement completion")?;
     assert_eq!(serde_json::from_str::<Vec<String>>(result)?, expected_ids);
-    Ok(())
+    Ok(sent_sum)
 }
 
 #[test]
@@ -154,10 +163,14 @@ fn rounded_bracket_quantity_follows_legacy_ts() -> Result {
 #[test]
 fn rounded_last_row_below_min_follows_legacy_ts() -> Result {
     // TS reference/backpack/backpack.exchange.ts:746-779,918-925 formats without rounded bounds.
-    // KNOWN-ISSUE: a rounded last row can be below the minimum after the valid pair was placed.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 1 of requested 1.04); kept for exact TS parity per Sam's decision
     let mut engine = constrained(0.14, 1.);
-    submit(&mut engine, vec![limit(0.4), limit(0.5), limit(0.14)])?;
-    assert_placement_sequence(&mut engine, &[vec!["0.4", "0.5"], vec!["0.1"]])
+    let amounts = [0.4, 0.5, 0.14];
+    assert_eq!(amounts.iter().sum::<f64>(), 1.04);
+    submit(&mut engine, amounts.into_iter().map(limit).collect())?;
+    let sent_sum = assert_placement_sequence_sum(&mut engine, &[vec!["0.4", "0.5"], vec!["0.1"]])?;
+    assert_eq!(sent_sum, 1.);
+    Ok(())
 }
 
 #[test]

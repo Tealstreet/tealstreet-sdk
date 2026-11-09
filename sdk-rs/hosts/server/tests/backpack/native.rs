@@ -8,13 +8,13 @@ use safe_cex_native::{
 use std::{fmt, time::Duration};
 use tokio::sync::mpsc;
 
-enum Observed {
+pub(super) enum Observed {
     Http(HttpRequest, Events),
     Socket(Option<SocketChannel>),
     Ws(String),
     Loaded(bool),
 }
-struct Recorder(mpsc::UnboundedSender<Observed>);
+pub(super) struct Recorder(pub(super) mpsc::UnboundedSender<Observed>);
 struct Prepared {
     request: HttpRequest,
     out: mpsc::UnboundedSender<Observed>,

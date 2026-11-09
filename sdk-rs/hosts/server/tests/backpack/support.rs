@@ -82,6 +82,11 @@ impl Device {
         Ok((remote, prepared.options))
     }
     pub fn answer(&mut self, frame: &str) -> Result<()> {
+        let response = self.response(frame)?;
+        assert!(self.link.resolve(7, response));
+        Ok(())
+    }
+    pub fn response(&mut self, frame: &str) -> Result<Value> {
         let envelope: Value = serde_json::from_str(frame)?;
         assert_eq!(envelope["t"], "sign-req");
         let request = &envelope["d"];
@@ -96,11 +101,7 @@ impl Device {
         let payload = decoded["payload"].as_str().ok_or("missing payload")?;
         self.payloads.push(payload.into());
         if self.refuse {
-            assert!(self.link.resolve(
-                7,
-                json!({"id":request["id"],"error":"SYNTHETIC-DEVICE-ERROR"})
-            ));
-            return Ok(());
+            return Ok(json!({"id":request["id"],"error":"SYNTHETIC-DEVICE-ERROR"}));
         }
         let (work, output) = hosted_signing::prepare(
             "backpack",
@@ -116,11 +117,7 @@ impl Device {
         let decoded: Value = serde_json::from_str(&output)?;
         let signature = decoded["signature"].as_str().ok_or("missing signature")?;
         self.signatures.push(signature.into());
-        assert!(
-            self.link
-                .resolve(7, json!({"id":request["id"], "wsAuthSignature":output}))
-        );
-        Ok(())
+        Ok(json!({"id":request["id"], "wsAuthSignature":output}))
     }
     pub async fn sign(
         &mut self,

@@ -1,5 +1,9 @@
 #[path = "backpack/native.rs"]
 mod native;
+#[path = "backpack/owners.rs"]
+mod owners;
+#[path = "support/mod.rs"]
+mod sessions;
 #[path = "backpack/support.rs"]
 mod support;
 use safe_cex_engine::signing::{Algorithm, Capability, SignError};
