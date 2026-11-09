@@ -140,6 +140,7 @@ struct State {
     stopped: bool,
     stop_reason: String,
     current: Vec<String>,
+    orders_released: bool,
     ever: Vec<String>,
     filled_by: HashMap<String, f64>,
     /// Fill events per order: the same fills a row's `filled` reports.
@@ -157,6 +158,7 @@ struct State {
     outcome_told: bool,
     /// A stop cancel ended without proof the order is gone.
     order_may_be_open: bool,
+    placement_unknown: bool,
     last_partial_fill_at: Option<Instant>,
 }
 
@@ -389,7 +391,12 @@ impl Chase {
     }
 
     pub fn order_may_be_open(&self) -> bool {
-        self.state.borrow().order_may_be_open
+        let state = self.state.borrow();
+        state.order_may_be_open || state.placement_unknown
+    }
+
+    pub fn set_placement_unknown(&self, unknown: bool) {
+        self.state.borrow_mut().placement_unknown = unknown;
     }
 
     pub fn outcome_told(&self) -> bool {
@@ -418,7 +425,15 @@ impl Chase {
                 state.ever.push(id.clone());
             }
         }
-        state.current = ids;
+        if !state.orders_released {
+            state.current = ids;
+        }
+    }
+
+    pub fn release_orders(&self) {
+        let mut state = self.state.borrow_mut();
+        state.orders_released = true;
+        state.current.clear();
     }
 
     /// True once per order, for the task that will cancel it.
