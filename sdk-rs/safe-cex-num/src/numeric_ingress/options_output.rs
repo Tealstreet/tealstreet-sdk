@@ -15,7 +15,13 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsPolymarket {
 
 impl JsNumberOutput for safe_cex_types::ExchangeOptions {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, polymarket, remote_signer, transport, payload_signer, hosted_mode, external_public_data, local_signer, hyperliquid_fast_book, caller_reports_placement_failures, worker_mirror, engine, public_feed });
+        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, coinbase_jwt_algorithm, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, polymarket, remote_signer, transport, payload_signer, hosted_mode, external_public_data, local_signer, hyperliquid_fast_book, caller_reports_placement_failures, worker_mirror, engine, public_feed });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::options::CoinbaseJwtAlgorithm {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Es256, EdDsa });
     }
 }
 
@@ -38,6 +44,34 @@ impl JsNumberOutput for safe_cex_types::RustPublicFeedCapability {
 #[cfg(test)]
 mod tests {
     use crate::numeric_ingress::js_from_str;
+
+    #[test]
+    fn coinbase_algorithms_preserve_native_values_across_numeric_ingress() {
+        use crate::numeric_ingress::{js_from_value, js_from_value_ref};
+        use safe_cex_types::{ExchangeOptions, options::CoinbaseJwtAlgorithm};
+
+        for (algorithm, expected) in [
+            ("es256", CoinbaseJwtAlgorithm::Es256),
+            ("edDsa", CoinbaseJwtAlgorithm::EdDsa),
+        ] {
+            let json = format!(
+                r#"{{"key":"fixture","secret":"","coinbaseJwtAlgorithm":"{algorithm}","workerMirror":false,"extra":{{"tickInterval":-0}}}}"#
+            );
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            for options in [
+                js_from_str::<ExchangeOptions>(&json).unwrap(),
+                js_from_value(value.clone()).unwrap(),
+                js_from_value_ref(&value).unwrap(),
+            ] {
+                assert_eq!(options.coinbase_jwt_algorithm.as_ref(), Some(&expected));
+                assert_eq!(options.worker_mirror, Some(false));
+                assert_eq!(
+                    options.extra.unwrap().tick_interval.unwrap().to_bits(),
+                    (-0.0_f64).to_bits()
+                );
+            }
+        }
+    }
 
     #[test]
     fn option_controls_retain_native_number_bits_and_false_values() {

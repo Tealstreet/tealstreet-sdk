@@ -20,6 +20,7 @@ vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
 });
 
 const WALLET = '0x1111111111111111111111111111111111111111';
+const COINBASE_KEY = ['organizations', 'fixture', 'apiKeys', 'fixture'].join('/');
 const PRIVATE_KEY = `0x${'22'.repeat(32)}`;
 const running: RustEngineExchange[] = [];
 
@@ -79,12 +80,20 @@ it('Polymarket private accounts need a wallet private key', () =>
 it('Orderly private accounts need an application id', () =>
   startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
-it('native private construction checks callback provider availability before unsupported custody and I/O', () =>
-  startRejects(
-    'coinbase',
-    { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    'Delegated signing requires a configured callback provider',
-  ));
+it('native private construction checks callback provider availability before unsupported custody and I/O', async () => {
+  const { WasmEngine } = await loadNodeEngine();
+  expect(
+    () =>
+      new WasmEngine(
+        'txflow',
+        JSON.stringify({
+          key: 'key',
+          remoteSigning: true,
+          payloadSigner: true,
+        }),
+      ),
+  ).toThrow('Delegated signing requires a configured callback provider');
+});
 
 it.each([
   'binance',
@@ -95,6 +104,8 @@ it.each([
   'bybitinverse',
   'bybitspot',
   'bybitdemo',
+  'coinbase',
+  'coinbasespot',
 ] as const)(
   'compiled %s admits owned PayloadSigner setup before startup without local credentials or I/O',
   async (name) => {
@@ -112,11 +123,12 @@ it.each([
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
     }));
+    const key = name === 'coinbase' || name === 'coinbasespot' ? COINBASE_KEY : 'owned-public';
     for (const secret of ['', 'unused-local']) {
       const exchange = new RustEngineExchange(
         name,
         {
-          key: 'owned-public',
+          key,
           secret,
           payloadSigner: () => {
             calls++;
@@ -225,16 +237,7 @@ it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
     ),
 );
 
-it.each([
-  'hyperliquid',
-  'hyperliquidspot',
-  'txflow',
-  'coinbase',
-  'coinbasespot',
-  'polymarket',
-  'lighter',
-  'lighter-robinhood',
-] as const)(
+it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
   'compiled native payload refusal on %s keeps startup and validation classification before I/O',
   async (name) => {
     setWasmEngineLoader(loadNodeEngine);
@@ -285,7 +288,7 @@ it.each([
       const exchange = new RustEngineExchange(name, options, new DefaultStore());
       running.push(exchange);
       // Retained fixtures bypass SDK admission; callback intent alone installs no native provider.
-      const missingProvider = name === 'txflow' || name === 'coinbase' || name === 'coinbasespot';
+      const missingProvider = name === 'txflow';
       const kind = missingProvider ? 'invalidInput' : 'unsupported';
       const message = missingProvider
         ? 'Delegated signing requires a configured callback provider'
@@ -300,7 +303,7 @@ it.each([
   },
 );
 
-it.each(['txflow', 'coinbase', 'coinbasespot'] as const)(
+it.each(['txflow'] as const)(
   'compiled native %s distinguishes missing providers from unsupported payload custody',
   async (name) => {
     const { WasmEngine } = await loadNodeEngine();

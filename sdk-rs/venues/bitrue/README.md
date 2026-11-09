@@ -16,6 +16,67 @@ Each private recovery POSTs a fresh futures listen key. Session generations
 fence late responses and cancel old keepalives. Public reconnects retain
 subscription ownership, retire pending socket reads, and invalidate books.
 
+## Hosted and delegated signing
+
+Bitrue futures uses HMAC-SHA256, rendered as lowercase hex, over the exact
+`timestamp_ms + METHOD + path_and_query + serialized_body` bytes. It has no
+signed nonce. The receive window defaults to 20,000 ms and clamps to
+1–60,000 ms; `recvWindow` is a header outside the signed payload. The engine
+freezes each dispatch timestamp and rejects stale signing completions.
+
+Local and hosted construction install opaque identities into the same native
+dispatch recipes. Only the provider owns the signing material. RemoteSigner
+receives the canonical payload through the existing `ws-auth` / `hex` envelope;
+no secret or opaque signing ref crosses that wire. Browser `signHttpRequest`
+uses a standalone codec backed by native hosted capture, including requests to
+the separate `fapiws-auth.bitrue.com` origin. It preserves serialized bodies and
+query bytes; absolute request URLs retain their origin through the hosted
+signing adapter, while only path/query enter the HMAC. It cannot fall back to a
+local key on the server. Callback errors are redacted. Authentication,
+receive-window, content-type and broker headers
+cannot be replaced by callback metadata.
+
+The signed endpoint inventory is catalogue `GET /fapi/v1/contracts`; account
+and positions `GET /fapi/v2/account`; ordinary/protective orders and terminal
+proofs `GET/POST /fapi/v2/order`, `POST /fapi/v2/cancel` and
+`GET /fapi/v2/openOrders`; leverage reads/writes
+`GET /fapi/v2/leverageBracket`, `POST /fapi/v2/level_edit`; and execution history
+`GET /fapi/v2/myTrades`. Cancel-all, amendment and protection restore reuse
+these native recipes. Public WebSocket traffic remains unsigned.
+
+Private WebSocket authentication is signed HTTP:
+`POST https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey`, followed by
+the token-authenticated socket URL above. The 30-minute refresh signs
+`PUT` to that same path plus the listen key. RemoteSigner supports this entire
+streaming lifecycle; there is no independent socket-login MAC.
+Hosted HTTP parity also covers explicit listen-key `DELETE` requests without
+changing their authentication origin or path.
+
+PayloadSigner accepts the canonical HMAC payload and selects a primary or
+secondary API key explicitly. It follows the shared REST-only account policy:
+account/order polling and writes remain enabled, while listen-key acquisition,
+private sockets and keepalives are suppressed. Secondary local keys remain
+supported. RemoteSigner's raw HMAC envelope has no device slot selector, so
+secondary RemoteSigner setup refuses before I/O with `unsupported` / `notSent`
+and an actionable explanation. This adapter delegates API-key custody; it does
+not introduce an agent-wallet or EIP-712 signing mode.
+
+`construction-rules.json` declares `remoteSigning.enabled`, `payloadSupported`
+and `payloadRestOnly`. Bitrue is included in both SDK and Wasm beta rosters;
+the existing beta release roster guard counts its additional family. Measured
+cap-only follow-ups in this PR are recorded in `sdk-rs/harness/wasm-budget.test.mjs`.
+NX's derived refusal list
+follows the SDK declaration on import; no separate NX implementation is needed.
+
+Independent HMAC vectors cover every signed route plus listen-key creation and
+refresh. The native fixture provider compares actual dispatched graphs and
+signature bytes with hosted capture across the existing account, history,
+ordinary/protective trading, recovery and failure tests. Actual Wasm tests
+compare local/device and keyless/server wires at fixed and corrected clocks,
+exercise private startup and REST-only startup, and reject malformed or failed
+callbacks without network or local fallback. These tests use synthetic fixture
+credentials and no live exchange calls.
+
 ## Legacy TS allocation parity
 
 The splitter emits equal rounded lots plus a separately rounded modulo tail,

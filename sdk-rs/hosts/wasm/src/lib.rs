@@ -778,6 +778,8 @@ fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
 pub struct WasmEngine {
     dispatch_signing: bool,
     external_signer: bool,
+    #[cfg(feature = "coinbase")]
+    coinbase_binding: Option<String>,
     construction: String,
     inner: Box<dyn AnyEngine>,
     #[cfg(feature = "hosted-signing")]
@@ -803,6 +805,13 @@ fn hosted_error(error: safe_cex_engine::signing::SignError) -> js_sys::Error {
 #[cfg(feature = "hosted-signing")]
 #[wasm_bindgen]
 impl WasmEngine {
+    #[cfg(feature = "coinbase")]
+    #[wasm_bindgen(js_name = coinbaseSigningMetadata)]
+    pub fn coinbase_signing_metadata(&self) -> Result<String, js_sys::Error> {
+        self.coinbase_binding
+            .clone()
+            .ok_or_else(|| hosted_error(safe_cex_engine::signing::SignError::Unavailable))
+    }
     /// Clock capture only: does not start the venue or emit any action.
     #[wasm_bindgen(js_name = hostedSigningClock)]
     pub fn hosted_signing_clock(&self, now: f64) -> Result<String, js_sys::Error> {
@@ -866,6 +875,17 @@ impl WasmEngine {
         }
         let (work, kind) = safe_cex_venues::hosted_signing::prepare(venue, identities, input)
             .map_err(hosted_error)?;
+        #[cfg(feature = "coinbase")]
+        if matches!(kind, safe_cex_venues::hosted_signing::OutputKind::Coinbase) {
+            let age = protocol_now
+                - work
+                    .receipt
+                    .stamp_ms
+                    .ok_or_else(|| hosted_error(SignError::InvalidRequest))?;
+            if !age.is_finite() || !(-30_000. ..=30_000.).contains(&age) {
+                return Err(hosted_error(SignError::InvalidRequest));
+            }
+        }
         let prepared = self
             .hosted_captures
             .prepare_with_policy(
@@ -1067,6 +1087,13 @@ impl WasmEngine {
                 })
             })
             .flatten();
+        #[cfg(feature = "coinbase")]
+        let coinbase_binding = options
+            .coinbase_signing
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| js_sys::Error::new("Invalid Coinbase public signing binding"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
         let inner = safe_cex_venues::build_with_signer_in_context(
@@ -1085,6 +1112,8 @@ impl WasmEngine {
             external_signer,
             #[cfg(feature = "hosted-signing")]
             hosted_identity,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -1632,6 +1661,8 @@ impl WasmEngine {
             inner,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -2767,6 +2798,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -3057,6 +3090,8 @@ mod tests {
                 dispatch_signing: false,
                 #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
+                #[cfg(feature = "coinbase")]
+                coinbase_binding: None,
                 #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
                 #[cfg(feature = "hosted-wallet")]
@@ -3089,6 +3124,8 @@ mod tests {
                 dispatch_signing: false,
                 #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
+                #[cfg(feature = "coinbase")]
+                coinbase_binding: None,
                 #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
                 #[cfg(feature = "hosted-wallet")]
@@ -3118,6 +3155,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -3152,6 +3191,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -3166,6 +3207,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]

@@ -133,7 +133,66 @@ fn keyless_catalogue_and_hosted_admission_remain_distinct() {
             .collect::<Vec<_>>(),
         ["Content-Type", "X-Referer"]
     );
-    assert!(!safe_cex_venues::remote_signing_policy("bitrue").enabled);
+    let policy = safe_cex_venues::remote_signing_policy("bitrue");
+    assert!(policy.enabled && policy.payload_supported && policy.payload_rest_only);
+    assert!(!policy.private_feed(true).streaming());
+    assert!(policy.private_feed(false).streaming());
+}
+
+#[test]
+fn private_payload_signing_requires_an_injected_provider_before_construction() {
+    use safe_cex_crypto::signer::LocalSigner;
+    struct MustNotConstruct;
+    impl Visit for MustNotConstruct {
+        type Output = ();
+        fn visit<V: Venue + 'static>(self, _: Engine<V>) {
+            panic!("missing delegated provider must refuse before constructing an engine");
+        }
+    }
+
+    let (provider, identities) = LocalSigner::from_json(
+        r#"{"primary":{"key":"fixture-key","secret":"fixture-material"}}"#.into(),
+    )
+    .unwrap();
+    let options = || {
+        let mut options: EngineOptions = serde_json::from_str(
+            r#"{"payloadSigner":true,"remoteSigning":true,"publicMode":{"requested":false,"payloadSigner":true}}"#,
+        )
+        .unwrap();
+        options.signing = Some(identities.clone());
+        options
+    };
+    let error =
+        build_with_signer("bitrue", options(), entropy(), None, MustNotConstruct).unwrap_err();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Delegated signing requires a configured callback provider"
+    );
+
+    let error = build("bitrue", options(), entropy(), MustNotConstruct).unwrap_err();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Delegated signing requires a configured callback provider"
+    );
+
+    let requests = build_with_signer(
+        "bitrue",
+        options(),
+        entropy(),
+        Some(std::sync::Arc::new(provider)),
+        Catalogue,
+    )
+    .unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0]
+            .headers
+            .contains(&("X-CH-APIKEY", "fixture-key".into()))
+    );
 }
 
 #[test]

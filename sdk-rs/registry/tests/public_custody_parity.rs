@@ -301,6 +301,9 @@ fn disabled_private_payload_checks_callback_configuration_before_admission() {
                             error.message,
                             if injected {
                                 match venue {
+                                    "coinbase" | "coinbasespot" => format!(
+                                        "Rust {venue} payloadSigner requires a configured injected signing provider"
+                                    ),
                                     "kraken" => {
                                         "Rust kraken has no REST-only PayloadSigner lifecycle"
                                             .to_owned()

@@ -2789,8 +2789,12 @@ impl<V: Venue> Engine<V> {
                             .request_contexts
                             .remember_engine_unknown(&delivery, Some(response.status));
                     }
-                    self.venue
-                        .observe_unproven_http_response(now, &pending.value, response);
+                    self.venue.observe_unproven_http_response(
+                        now,
+                        self.io.core.protocol_clock.at(now),
+                        &pending.value,
+                        response,
+                    );
                     #[cfg(feature = "http-plans")]
                     let plan = self
                         .io
@@ -3584,6 +3588,7 @@ mod tests {
         fn observe_unproven_http_response(
             &mut self,
             now: f64,
+            _: f64,
             _: &Pending,
             response: Response<'_>,
         ) {
