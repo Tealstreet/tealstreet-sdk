@@ -223,7 +223,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
   binance: 2_274_304,
-  bingx: 2_127_872,
+  // #3351 at b8510350a534: CI run 42623783872, job 129183038368, artifact 13678031884.
+  // Web/node measured 2,128,759 B; +10 KiB rounded up to KiB.
+  bingx: 2_139_136,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   bitget: 2_492_416,
@@ -272,8 +274,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3304 refusal ordering at 0b7e6ccf60f3ac4c202ffb595a2b6185b1f5fb1e: web/node 2,234,008 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue kraken;
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132. Measured + 10 KiB rounded up to KiB.
-  kraken: 2_244_608,
-  krakenspot: 2_244_608,
+  // #3351 at b8510350a534: CI run 42623783872, job 129183037755, artifact 13677876986.
+  // Web/node measured 2,245,642 B; +10 KiB rounded up to KiB, shared with Kraken Spot.
+  kraken: 2_256_896,
+  krakenspot: 2_256_896,
   kucoin: 1_872_896,
   kucoinspot: 2_462_720,
   lighter: 2_137_088,
