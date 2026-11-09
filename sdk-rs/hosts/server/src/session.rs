@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 
+mod order_frames;
+
 /// Who connected, as verified before the upgrade.
 #[derive(Clone)]
 pub struct Identity {
@@ -792,6 +794,18 @@ impl Session {
         };
         let authenticated = self.identity.user.is_some();
         match message {
+            Inbound::OrderSubmit(submit) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                self.order_submit(submit).await;
+            }
+            Inbound::OrderCancelQueued(cancel) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                self.order_cancel_queued(cancel);
+            }
             Inbound::Init(init) => self.init(*init).await?,
             Inbound::Msg(msg) => {
                 if !authenticated
@@ -1448,6 +1462,10 @@ impl Session {
     }
 
     async fn call(&mut self, name: &str, data: Value) {
+        self.call_inner(name, data, None).await;
+    }
+
+    async fn call_inner(&mut self, name: &str, data: Value, order_frame: Option<u64>) {
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
         let method = data
             .get("method")
@@ -1458,12 +1476,13 @@ impl Session {
             Some(Value::Array(args)) => args.clone(),
             None | Some(Value::Null) => Vec::new(),
             Some(_) => {
-                self.reply_failure(
+                self.call_failure(
                     name,
                     &request_id,
                     "TypeError",
                     "args must be an array",
                     None,
+                    order_frame,
                 );
                 return;
             }
@@ -1507,7 +1526,7 @@ impl Session {
                 account.is_public(),
             )
         };
-        let plans = match plans {
+        let mut plans = match plans {
             Ok(plans) => plans,
             Err(refused) => {
                 if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
@@ -1517,10 +1536,27 @@ impl Session {
                     let detail = json!({"name": refused.name, "message": refused.message});
                     crate::audit::log(&who, &origin, &fields, crate::audit::result(&Err(detail)));
                 }
-                self.reply_failure(name, &request_id, refused.name, &refused.message, None);
+                self.call_failure(
+                    name,
+                    &request_id,
+                    refused.name,
+                    &refused.message,
+                    None,
+                    order_frame,
+                );
                 return;
             }
         };
+        if let Some(seq) = order_frame {
+            for plan in &mut plans {
+                if let Plan::Command { reply, .. } = plan {
+                    *reply = methods::Reply::Intent {
+                        client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
+                        seq,
+                    };
+                }
+            }
+        }
         let group = (plans.len() > 1).then(|| {
             Arc::new(Mutex::new(Group {
                 remaining: plans.len(),
@@ -1689,13 +1725,18 @@ impl Session {
         reply: methods::Reply,
         after_load: bool,
     ) {
+        let order_frame = match &reply {
+            methods::Reply::Intent { seq, .. } => Some(*seq),
+            _ => None,
+        };
         if !self.joined[name].account.running.io_allowed() {
-            self.reply_failure(
+            self.call_failure(
                 name,
                 request_id,
                 "ServerDraining",
                 "Router lease expired; no new work was sent",
                 Some("notSent"),
+                order_frame,
             );
             return;
         }
@@ -1706,12 +1747,13 @@ impl Session {
             match pool.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
                 Err(_) => {
-                    self.reply_failure(
+                    self.call_failure(
                         name,
                         request_id,
                         "Error",
                         "too many account reads in flight; retry shortly",
                         None,
+                        order_frame,
                     );
                     return;
                 }
@@ -1723,7 +1765,14 @@ impl Session {
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
-            self.reply_failure(name, request_id, "Error", "command IDs exhausted", None);
+            self.call_failure(
+                name,
+                request_id,
+                "Error",
+                "command IDs exhausted",
+                None,
+                order_frame,
+            );
             return;
         };
         joined.next_command = id;
@@ -1936,10 +1985,25 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             }
         }
     };
+    if let methods::Reply::Intent {
+        client_order_id,
+        seq,
+    } = &pending.reply
+    {
+        order_frames::settle_intent(
+            out,
+            name,
+            &pending.request_id,
+            client_order_id,
+            *seq,
+            outcome,
+        );
+        return;
+    }
     let data = match outcome {
         Ok(result) => {
             let result = match pending.reply {
-                methods::Reply::Result => result,
+                methods::Reply::Result | methods::Reply::Intent { .. } => result,
                 methods::Reply::Unit => Value::Null,
                 methods::Reply::OrderIds => methods::worker_order_ids(result),
                 methods::Reply::Placed { client_order_id } => {

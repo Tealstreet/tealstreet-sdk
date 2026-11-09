@@ -45,3 +45,15 @@ passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
+
+## DELEGATED order frames
+
+Bybit DELEGATED `order.submit` messages use the existing method translation,
+native command completion and order audit, with the intent UUIDv7 as both request
+ID and client order ID. Other modes keep `callMethod` unchanged. Pending joins
+and elapsed ages of ten seconds or more refuse without a write. New replies
+use the existing instanceId registration helper. The NX router must durably
+record submits before forwarding and expose acknowledgements only after commit;
+the server supplies no dedupe ledger or queued-order storage. `order.cancelQueued`
+is a router operation and never becomes a venue cancellation. The interception
+contract is documented in `docs/plans/callers/delegated-order-frames.md`.

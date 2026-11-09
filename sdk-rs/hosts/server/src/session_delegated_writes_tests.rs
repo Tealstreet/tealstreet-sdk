@@ -11,9 +11,14 @@ use safe_cex_remote_signer::SignerLink;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+#[cfg(feature = "delegated-order-frames")]
+#[path = "session_order_frames_tests.rs"]
+mod order_frames;
+
 #[derive(Clone, Default)]
 struct Tape {
     writes: Arc<Mutex<Vec<String>>>,
+    client_order_ids: Arc<Mutex<Vec<String>>>,
     hold: bool,
     expected_key: Option<String>,
     waiting: Arc<Mutex<Vec<(RequestId, Events)>>>,
@@ -77,6 +82,18 @@ impl Transport for Tape {
             || path.contains("/v5/order/amend")
             || path.contains("/v5/order/cancel");
         if mutation {
+            if path.contains("/create") {
+                let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                let rows = body
+                    .get("request")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_else(|| vec![body]);
+                self.client_order_ids.lock().unwrap().extend(
+                    rows.iter()
+                        .map(|row| row["orderLinkId"].as_str().unwrap_or_default().to_owned()),
+                );
+            }
             assert!(
                 request
                     .headers

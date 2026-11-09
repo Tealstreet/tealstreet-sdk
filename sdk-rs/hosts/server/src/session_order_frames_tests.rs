@@ -1,0 +1,206 @@
+use super::*;
+
+fn intent(age: u64) -> String {
+    let epoch = crate::accounts::now_ms().saturating_sub(age);
+    let hex = format!("{epoch:012x}");
+    format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..])
+}
+
+async fn submit(session: &mut Session, age: u64, registration: Option<&str>) -> String {
+    let id = intent(age);
+    let params = placement();
+    let fingerprint =
+        crate::order_contract::fingerprint("synthetic-main", &id, &params, 1).unwrap();
+    session.handle(&json!({"t":"order.submit","d":{"accountName":"synthetic-main","instanceId":registration,
+        "intentId":id,"params":params,"seq":1,"ageMs":age,"fingerprint":fingerprint}}).to_string()).await.unwrap();
+    id
+}
+
+async fn order_frame(sent: &mut mpsc::Receiver<String>, op: &str) -> Value {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["t"] == op {
+                return frame;
+            }
+        }
+        panic!("missing order frame")
+    })
+    .await
+    .expect("bounded order reply")
+}
+
+#[tokio::test]
+async fn order_frames_use_the_existing_native_call_and_registration() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for id in [Some("current-registration"), None] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account = delegated_account(&registry, "A", "bybit", tape.clone());
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                session.joined.get_mut("synthetic-main").unwrap().out =
+                    session.out.with_instance_id(id);
+                assert!(session.resnapshot("synthetic-main").await);
+                let key = submit(&mut session, 0, id).await;
+                {
+                    let pending = session.joined["synthetic-main"]
+                        .client
+                        .pending
+                        .lock()
+                        .unwrap();
+                    let command = pending
+                        .values()
+                        .next()
+                        .expect("existing call pipeline records command");
+                    assert_eq!(command.request_id, key);
+                    assert!(command.audit.is_some());
+                }
+                let ack = order_frame(&mut sent, "order.ack").await;
+                assert_eq!(ack["d"]["intentId"], key);
+                assert_eq!(ack["d"]["received"], true);
+                assert_eq!(ack["d"]["seq"], 1);
+                let outcome = order_frame(&mut sent, "order.outcome").await;
+                assert_eq!(outcome["d"]["intentId"], key);
+                assert_eq!(outcome["d"]["outcome"], "placed");
+                assert_eq!(outcome["d"]["venueOrderId"], "native-one");
+                assert_eq!(outcome["d"]["clientOrderId"], key);
+                for frame in [ack, outcome] {
+                    assert_eq!(frame["d"]["instanceId"].as_str(), id);
+                }
+                assert_eq!(*tape.writes.lock().unwrap(), vec!["create"]);
+                assert_eq!(*tape.client_order_ids.lock().unwrap(), vec![key]);
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn order_frames_refuse_expired_or_unjoined_submits_without_a_write() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            submit(&mut session, 10_000, None).await;
+            let refused = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(refused["d"]["outcome"], "refused");
+            assert_eq!(refused["d"]["error"]["outcome"], "notSent");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn order_frames_refuse_pending_missing_modes_and_mismatched_client_ids() {
+    tokio::task::LocalSet::new().run_until(async {
+        for case in ["pending", "missing", "flag", "client-id", "intent", "sequence", "binding", "fingerprint", "key-age"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let venue = if case == "flag" { "bybitspot" } else { "bybit" };
+            let account = delegated_account(&registry, "A", venue, tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            if case == "pending" {
+                session.registration_outputs.insert("synthetic-main".into(), session.out.with_instance_id(Some("pending-registration")));
+                session.start_verification("synthetic-main".into(), std::future::pending());
+            }
+            if case == "missing" {
+                let old = session.joined.remove("synthetic-main").unwrap();
+                Session::leave_engine(old);
+            }
+            let key = intent(0);
+            let mut data = json!({"intentId":key,"params":placement(),"seq":1,"ageMs":0,"accountName":"synthetic-main","instanceId":if case == "pending" {Some("pending-registration")} else {None},"fingerprint":crate::order_contract::fingerprint("synthetic-main",&key,&placement(),1).unwrap()});
+            if case == "client-id" { data["params"]["clientOrderId"] = "another-client-id".into(); }
+            if case == "intent" { data["intentId"] = "invalid".into(); }
+            if case == "sequence" { data["seq"] = 0.into(); }
+            if case == "binding" { data["instanceId"] = "another-registration".into(); }
+            if case == "fingerprint" { data["params"]["amount"] = json!(0.002); }
+            if case == "key-age" {
+                let old = intent(10_001);
+                data["intentId"] = old.clone().into();
+                data["fingerprint"] = crate::order_contract::fingerprint("synthetic-main", &old, &placement(), 1).unwrap().into();
+                data["ageMs"] = 0.into();
+            }
+            session.handle(&json!({"t":"order.submit","d":data}).to_string()).await.unwrap();
+            let ack = order_frame(&mut sent, "order.ack").await;
+            assert_eq!(ack["d"]["received"], false);
+            let refusal = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(refusal["d"]["error"]["outcome"], "notSent");
+            if case == "pending" { assert_eq!(refusal["d"]["instanceId"], "pending-registration"); }
+            assert!(tape.writes.lock().unwrap().is_empty());
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn order_frames_delayed_unknown_remains_on_its_original_users_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let a_tape = Tape {
+                hold: true,
+                ..Default::default()
+            };
+            let a = delegated_account(&registry, "A", "bybit", a_tape.clone());
+            let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
+            alice.joined.get_mut("synthetic-main").unwrap().out =
+                alice.out.with_instance_id(Some("alice"));
+            assert!(alice.resnapshot("synthetic-main").await);
+            submit(&mut alice, 0, Some("alice")).await;
+            let _ = order_frame(&mut a_sent, "order.ack").await;
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while a_tape.waiting.lock().unwrap().is_empty() {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let b_tape = Tape::default();
+            let b = delegated_account(&registry, "B", "bybit", b_tape.clone());
+            let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+            bob.joined.get_mut("synthetic-main").unwrap().out =
+                bob.out.with_instance_id(Some("bob"));
+            assert!(bob.resnapshot("synthetic-main").await);
+            a_tape.finish_unknown();
+            let unknown = order_frame(&mut a_sent, "order.outcome").await;
+            assert_eq!(unknown["d"]["outcome"], "unknown");
+            assert_eq!(unknown["d"]["instanceId"], "alice");
+            submit(&mut bob, 0, Some("bob")).await;
+            assert_eq!(
+                order_frame(&mut b_sent, "order.ack").await["d"]["instanceId"],
+                "bob"
+            );
+            let placed = order_frame(&mut b_sent, "order.outcome").await;
+            assert_eq!(placed["d"]["instanceId"], "bob");
+            assert_eq!(placed["d"]["outcome"], "placed");
+            assert_eq!(*a_tape.writes.lock().unwrap(), vec!["create"]);
+            assert_eq!(*b_tape.writes.lock().unwrap(), vec!["create"]);
+            alice.close();
+            bob.close();
+            registry.dispose(&a, Disposal::PageDisposed);
+            registry.dispose(&b, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn order_frames_cancel_queued_never_cancels_a_venue_order() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = crate::accounts::tests::registry();
+        let tape = Tape::default();
+        let account = delegated_account(&registry, "A", "bybit", tape.clone());
+        let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+        session.handle(&json!({"t":"order.cancelQueued","d":{"accountName":"synthetic-main","intentId":intent(0),"seq":1,"fingerprint":"a".repeat(64)}}).to_string()).await.unwrap();
+        assert_eq!(order_frame(&mut sent, "order.outcome").await["d"]["outcome"], "unknown");
+        assert!(tape.writes.lock().unwrap().is_empty());
+        session.close();
+        registry.dispose(&account, Disposal::PageDisposed);
+    }).await;
+}

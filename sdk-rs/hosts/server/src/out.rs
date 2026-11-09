@@ -11,6 +11,7 @@ pub struct Out {
     overflow: Arc<Notify>,
     instance_id: Option<Arc<str>>,
     pending_signs: Option<Arc<Mutex<PendingSigns>>>,
+    order_sequences: Arc<Mutex<std::collections::HashMap<String, u64>>>,
 }
 
 enum PendingSigns {
@@ -29,6 +30,7 @@ impl Out {
                 overflow: overflow.clone(),
                 instance_id: None,
                 pending_signs: None,
+                order_sequences: Arc::default(),
             },
             rx,
             overflow,
@@ -41,6 +43,25 @@ impl Out {
             pending_signs: None,
             ..self.clone()
         }
+    }
+
+    pub(crate) fn order_binding(&self, instance_id: Option<&str>) -> bool {
+        instance_id.is_none_or(|id| !id.is_empty() && id.len() <= 128)
+            && self.instance_id.as_deref() == instance_id
+    }
+
+    pub(crate) fn order_outcome(&self, name: &str, mut data: serde_json::Value) -> bool {
+        let mut sequences = self.order_sequences.lock().unwrap();
+        let current = sequences.entry(name.to_owned()).or_default();
+        let Some(next) = current
+            .checked_add(1)
+            .filter(|next| *next <= 9_007_199_254_740_991)
+        else {
+            return false;
+        };
+        *current = next;
+        data["outcomeSeq"] = next.into();
+        self.send(crate::envelope::order_frame("order.outcome", name, data))
     }
 
     /// A resumed signer can reconnect before init supplies the new registration.
