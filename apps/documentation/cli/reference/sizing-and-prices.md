@@ -9,6 +9,12 @@ The grammar that fills `<size>` and `<price>` slots in every trading command.
 
 ---
 
+Order arguments must all belong to the command's grammar. Extra words or
+numbers refuse the command before a write. For entry brackets, use
+`buy $100 at 50000 stop 49500 tp 51000` (or the corresponding `sell` form).
+`stop PRICE` and `tp PRICE` use the price forms below; `sl=PRICE` and
+`tp=PRICE` are refused with a hint.
+
 ## Size
 
 | Form     | Meaning                                                |

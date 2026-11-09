@@ -356,6 +356,11 @@ fn edit_bracket_of_limit_filled(filled: f64) -> String {
     stop.id = "1__stop_loss".into();
     stop.parent_id = Some("1".into());
     stop.kind = OrderType::StopLoss;
+    stop.side = limit.side.opposite();
+    stop.price = 80.0;
+    stop.extra
+        .get_or_insert_with(OrderExtra::default)
+        .sl_trigger_type = Some(StopTriggerType::LastPrice);
     h.engine.store_mut().upsert_order(limit);
     h.engine.store_mut().upsert_order(stop);
     h.command(Command::AmendOrder {
@@ -378,7 +383,7 @@ fn edit_bracket_of_limit_filled(filled: f64) -> String {
         };
         let body = if request.1.contains("cancel") {
             r#"{"code":"00000","data":{"successList":[{"orderId":"1"}],"failureList":[],"orderId":"1"}}"#
-        } else if request.1.contains("place") {
+        } else if request.1.contains("place") || request.1.contains("modify-order") {
             r#"{"code":"40808","msg":"refused","data":null}"#
         } else {
             r#"{"code":"00000","data":[]}"#

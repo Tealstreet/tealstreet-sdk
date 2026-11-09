@@ -208,58 +208,85 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
 // Later master caps win per family; shared-family siblings remain equal.
 // #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
+// #3306 CI3 run 42490856791, merge 331730698740: Bitunix 1,905,582 B; OKX 2,035,284 B.
+// CI bytes plus 10 KiB rounded up to KiB; never below either incoming parent cap.
+// #3281 merge: max(c0dcbcb72ab, 494136fced9) for every parent cap.
+// Master dominates #3281 floors from run 42422693183 at 5025f1670c7;
+// keep its measured-headroom regression and all current master provenance.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 2_024_448,
-  asterdex: 2_161_664,
-  backpack: 2_011_136,
+  apexomni: 2_056_192,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
+  asterdex: 2_198_528,
+  backpack: 2_036_736,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
-  binance: 2_236_416,
-  bingx: 2_085_888,
-  bitget: 2_434_048,
-  bitgetusdc: 2_434_048,
-  bitrue: 1_851_392,
-  bitunix: 1_874_944,
-  blofin: 2_001_920,
-  bybit: 2_281_472,
-  coinbase: 1_953_792,
-  cryptocom: 1_740_800,
+  binance: 2_274_304,
+  bingx: 2_127_872,
+  // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
+  // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
+  bitget: 2_492_416,
+  bitgetusdc: 2_492_416,
+  bitrue: 1_886_208,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
+  bitunix: 1_927_168,
+  blofin: 2_049_024,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
+  bybit: 2_326_528,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
+  coinbase: 1_978_368,
+  cryptocom: 1_803_264,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
-  grvt: 1_954_816,
+  grvt: 1_985_536,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
   // Hyperliquid 2,184,857 B. CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
-  hyperliquid: 2_195_456,
-  hyperliquidspot: 2_195_456,
+  // #3344 run 42479985723 at 51005ee6d89 measured 2,210,524 B; floor 2,221,056 B.
+  // #3306 run 42481130823 at merge 680966203b3 measured 2,220,716 B; floor 2,231,296 B.
+  // Keep the larger parent cap for both Hyperliquid aliases.
+  // #3344 restage 2cc05051503: optimized web/node 2,225,418 B + 10 KiB, rounded up.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
+  // Master 05241cd0f4 changes no Hyperliquid build inputs; keep both parent provenance blocks.
+  // Current CI run 42565604601, merge ec8633c44e98: web/node 2,225,586 B + 10 KiB, rounded up.
+  hyperliquid: 2_236_416,
+  hyperliquidspot: 2_236_416,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
-  kraken: 2_147_328,
-  krakenspot: 2_147_328,
-  kucoin: 1_838_080,
-  kucoinspot: 2_357_248,
-  lighter: 2_104_320,
-  'lighter-robinhood': 2_104_320,
+  // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:
+  // family job 128970669128, replay jobs 128970669384/128970669374: node/web 2,228,472 B.
+  // Current CI size plus 10 KiB, rounded up to KiB; both aliases share the compiled family.
+  // #3304 refusal ordering at 0b7e6ccf60f3ac4c202ffb595a2b6185b1f5fb1e: web/node 2,234,008 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue kraken;
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132. Measured + 10 KiB rounded up to KiB.
+  kraken: 2_244_608,
+  krakenspot: 2_244_608,
+  kucoin: 1_872_896,
+  kucoinspot: 2_440_192,
+  lighter: 2_124_800,
+  'lighter-robinhood': 2_124_800,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
-  mexc: 1_872_896,
-  okx: 1_986_560,
-  orderly: 1_744_896,
+  mexc: 1_898_496,
+  okx: 2_045_952,
+  orderly: 1_771_520,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
-  paradex: 2_266_112,
+  paradex: 2_300_928,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
-  phemex: 2_091_008,
-  polymarket: 1_611_776,
-  txflow: 1_852_416,
-  weex: 1_948_672,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,104,206 B + 10 KiB, rounded up.
+  phemex: 2_114_560,
+  polymarket: 1_652_736,
+  // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
+  txflow: 1_934_336,
+  weex: 1_981_440,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
-  woo: 2_589_696,
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
+  woo: 2_642_944,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

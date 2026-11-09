@@ -1,15 +1,17 @@
 import { writeFileSync } from 'fs';
 import { resolve } from 'path';
-import { homedir } from 'os';
-import { join } from 'path';
+import { getStoragePath } from '../../storage-context';
+
 import { BaseCommand, CommandCategory } from '@tealstreet/cli-core';
 // NewCommandResult is the BaseCommand-aligned shape; the public `CommandResult`
 // export from `@tealstreet/cli-core` still points at the legacy result type and
 // is incompatible with `BaseCommand.execute`. Tracked as cross-package drift.
+// NewCommandResult is the BaseCommand-aligned shape; the public `CommandResult`
+// export from `@tealstreet/cli-core` still points at the legacy result type and
+// is incompatible with `BaseCommand.execute`. Tracked as cross-package drift.
 import type { CommandContext, NewCommandResult as CommandResult } from '@tealstreet/cli-core';
-import { BRAND } from '../../brand';
 
-const DEFAULT_PATH = join(homedir(), BRAND.configDirName, 'cli-export.json');
+const DEFAULT_PATH = () => getStoragePath('cli-export.json');
 const FORMAT_VERSION = 1;
 
 /**
@@ -32,7 +34,7 @@ export class ExportCommand extends BaseCommand {
       return this.error('export: preprocess store unavailable');
     }
     const target = this.getArg(ctx, 1);
-    const path = target ? resolve(target) : DEFAULT_PATH;
+    const path = target ? resolve(target) : DEFAULT_PATH();
     const payload = {
       version: FORMAT_VERSION,
       vars: ctx.preprocessStore.getVars(),
@@ -42,7 +44,7 @@ export class ExportCommand extends BaseCommand {
     try {
       writeFileSync(path, JSON.stringify(payload, null, 2) + '\n', 'utf-8');
     } catch (e) {
-      return this.error(`Failed to write ${path}: ${(e as Error).message}`);
+      return this.error(`Failed to write ${path}: ${e instanceof Error ? e.message : String(e)}`);
     }
     const varCount = Object.keys(payload.vars).length;
     const aliasCount = Object.keys(payload.aliases).length;

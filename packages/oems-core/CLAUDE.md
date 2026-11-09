@@ -234,6 +234,10 @@ fabricate one.
 consumer may send back. Everything else in the context is for READING, and
 widening an address is a security change, not a convenience.
 
+`OemsPositionRef.liquidationPrice` is nullable. Bounding preserves unknown as
+null and converts nonpositive or non-finite thresholds to null; the prompt
+describes this as unknown, never zero or proof that liquidation is impossible.
+
 `positionMode` rides every position for the same class of reason: in `hedged`
 mode `(account, symbol)` addresses two positions, and a reduce that omits the
 side is ambiguous rather than merely imprecise. `isSpot`, `isInverse` and

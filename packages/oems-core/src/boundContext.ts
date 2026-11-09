@@ -45,9 +45,8 @@ const clip = (value: unknown, max: number): string => (typeof value === 'string'
 
 const clipName = (value: unknown): string => clip(value, OEMS_CONTEXT_LIMITS.stringChars);
 
-/** Non-finite numbers are zeroed rather than dropped: `JSON.stringify` turns
- *  `NaN` and `Infinity` into `null`, which reads to a model as "unknown" on a
- *  field that is never optional. */
+/** Required nonnullable numbers use zero for invalid input. Liquidation prices
+ *  are nullable and preserve unknown separately below. */
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
 const boundAccount = (account: OemsAccountRef): OemsAccountRef => ({
@@ -68,7 +67,12 @@ const boundPosition = (position: OemsPositionRef): OemsPositionRef => ({
   markPrice: num(position.markPrice),
   notional: num(position.notional),
   unrealizedPnl: num(position.unrealizedPnl),
-  liquidationPrice: num(position.liquidationPrice),
+  liquidationPrice:
+    typeof position.liquidationPrice === 'number' &&
+    Number.isFinite(position.liquidationPrice) &&
+    position.liquidationPrice > 0
+      ? position.liquidationPrice
+      : null,
   leverage: num(position.leverage),
   positionMode: position.positionMode === 'hedged' ? 'hedged' : 'one-way',
 });
@@ -139,7 +143,7 @@ const take = <T>(list: readonly T[] | undefined, max: number, map: (item: T) => 
  */
 const droppedCount = (before: unknown, after: readonly unknown[], carried: number | undefined): number | undefined => {
   const dropped = Math.max(0, (Array.isArray(before) ? before.length : 0) - after.length);
-  const merged = Math.max(dropped, Number.isFinite(carried) ? (carried as number) : 0);
+  const merged = Math.max(dropped, typeof carried === 'number' && Number.isFinite(carried) ? carried : 0);
   return merged > 0 ? merged : undefined;
 };
 

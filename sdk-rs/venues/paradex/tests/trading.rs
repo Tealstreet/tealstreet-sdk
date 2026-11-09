@@ -396,26 +396,25 @@ fn logged_child_rejection(h: &Harness, expected: &str) -> bool {
     })
 }
 #[test]
-fn partial_bracket_failure_returns_the_accepted_entry_and_does_not_replay_it() {
+fn partial_bracket_failure_skips_the_remaining_child_and_does_not_replay_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     bracket_entry(&mut h, 10, None);
     let tp = h.take("/orders");
     h.respond(tp, 400, r#"{"error":"REJECTED"}"#);
-    let sl = h.take("/orders");
-    let payload: Payload = serde_json::from_str(sl.body.as_deref().unwrap()).unwrap();
-    assert_eq!(payload.kind, "STOP_LOSS_MARKET");
-    assert_eq!(payload.flags, Some(vec!["REDUCE_ONLY".into()]));
-    h.respond(sl, 200, r#"{"id":"sl"}"#);
     assert!(h.pending.is_empty());
     // The entry stands, but a refused leg leaves it unprotected: the command fails.
     assert!(h.result(10).is_err());
     assert!(logged_child_rejection(
         &h,
-        "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED; still placing the stop-loss"
+        "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED"
     ));
 }
 #[test]
 fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
+    // Legacy TS: paradex.exchange.ts:1817-1896,1949-1965 keeps TP and continues entries.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     let mut next = opts(OrderType::Market);
     next.client_order_id = Some("next".into());
@@ -434,7 +433,7 @@ fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
     assert!(h.result(11).is_err());
     assert!(logged_child_rejection(
         &h,
-        "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED; no other leg remains to send"
+        "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED"
     ));
 }
 #[test]
@@ -509,7 +508,7 @@ fn placement_continues_after_a_rejection_and_retains_earlier_and_later_ids() {
 }
 
 #[test]
-fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
+fn a_refused_entry_skips_its_children_and_an_unknown_entry_stops_the_action() {
     for ambiguous in [false, true] {
         let mut h = private();
         let mut bracket = opts(OrderType::Market);
@@ -536,30 +535,28 @@ fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
                 r#"{"error":"REJECTED","message":"entry refused"}"#,
             );
         }
-        let next = h.take("/orders");
-        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
-        assert_eq!(payload.kind, "MARKET");
-        assert_eq!(payload.client_id.as_deref(), Some("next"));
-        h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
         if ambiguous {
-            // Nothing is resent; the Unknown outcome only queues the fence's read.
+            after_failure_no_more_writes(&h);
             reconcile_read_only(&mut h);
-        }
-        assert!(h.pending.is_empty());
-        if ambiguous {
-            // A lost entry may have been accepted: never success, and the
-            // accepted next order stays visible.
             let error = failed(&h, 71);
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-            assert_eq!(error.partial.unwrap().order_ids, ["accepted-next"]);
+            assert!(error.partial.is_none());
         } else {
+            let next = take_method(&mut h, Method::Post, "/orders");
+            let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload.kind, "MARKET");
+            assert_eq!(payload.client_id.as_deref(), Some("next"));
+            h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
             assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
         }
+        assert!(h.pending.is_empty());
     }
 }
 
 #[test]
 fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     bracket_entry(&mut h, 12, None);
     let tp = h.take("/orders");
@@ -571,13 +568,11 @@ fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
         },
     );
     h.collect();
-    // The sibling stop-loss is still placed.
-    let sl = h.take("/orders");
-    h.respond(sl, 200, r#"{"id":"sl"}"#);
+    // TS paradex.exchange.ts:1817-1896 skips SL after TP transport loss.
     reconcile_read_only(&mut h);
     let error = failed(&h, 12);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert_eq!(error.partial.unwrap().order_ids, ["entry", "sl"]);
+    assert_eq!(error.partial.unwrap().order_ids, ["entry"]);
 }
 
 /// After an Unknown write the only pending request is the fence's order read.
@@ -588,7 +583,8 @@ fn reconcile_read_only(h: &mut Harness) {
 }
 
 fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
-    h.actions
+    let error = h
+        .actions
         .iter()
         .rev()
         .find_map(|a| match a {
@@ -599,11 +595,15 @@ fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
             }
             _ => None,
         })
-        .expect("command failed")
+        .expect("command failed");
+    if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    }
+    error
 }
 
 #[test]
-fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients() {
+fn a_mixed_native_batch_fails_with_correlated_successes_and_missing_clients() {
     let mut h = private();
     let orders = ["first", "second", "third"].map(|id| {
         let mut order = opts(OrderType::Limit);
@@ -612,7 +612,12 @@ fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients
     });
     place(&mut h, 72, orders.into());
     h.reply("/orders/batch", r#"{"orders":[{"id":"three","client_id":"third"},{"id":"one","client_id":"first"}],"errors":[{"error":"INVALID_PRICE","message":"outside price bands"}]}"#);
-    assert_eq!(h.result(72), Ok("[\"one\",\"three\"]"));
+    assert_batch_refusal(
+        &h,
+        72,
+        vec!["one".into(), "three".into()],
+        "outside price bands",
+    );
     assert!(h.actions.iter().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
         if message.contains("second") && message.contains("outside price bands"))));
@@ -1947,10 +1952,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         let request = h.take("/orders");
         h.respond(request, status, body);
         if matches!(status, 408 | 429 | 500..) {
-            assert_eq!(
-                h.result(8),
-                Err("Paradex write outcome is unknown. Check Open Orders")
-            );
+            assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
             assert_eq!(h.failures[0].venue_message.as_deref(), Some(text));
         } else {
             assert_eq!(h.result(8), Err(text), "{status} {body}");
@@ -1964,10 +1966,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     let request = h.take("/orders");
     h.respond(request, 200, "{}");
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
-    assert_eq!(
-        h.result(8),
-        Err("Paradex write outcome is unknown. Check Open Orders")
-    );
+    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
     assert!(h.failures[0].venue_message.is_some());
     // Transport loss on a write is Unknown.
     let mut h = private();
@@ -1985,10 +1984,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
-    assert_eq!(
-        h.result(8),
-        Err("Paradex write outcome is unknown. Check Open Orders")
-    );
+    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
     assert_eq!(h.failures[0].venue_message.as_deref(), Some("reset"));
     // Unsupported controls were never sent.
     for command in [
@@ -2054,7 +2050,10 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
     let mut second = opts(OrderType::Market);
     second.client_order_id = Some("second".into());
     place(&mut h, 73, vec![opts(OrderType::Market), second]);
-    for unknown in [unknown_first, !unknown_first] {
+    for unknown in [unknown_first, !unknown_first]
+        .into_iter()
+        .take(if unknown_first { 1 } else { 2 })
+    {
         let request = take_method(&mut h, Method::Post, "/orders");
         if unknown && malformed {
             h.respond(request, 200, "{}");
@@ -2096,7 +2095,11 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
         text.contains("unknown") && text.contains("check open orders"),
         "{error:?}"
     );
-    assert!(text.contains("definitive refusal"), "{text}");
+    assert_eq!(
+        text.contains("definitive refusal"),
+        !unknown_first,
+        "{text}"
+    );
     assert!(!error.message.contains(diagnostic), "{error:?}");
     assert!(
         !h.pending.iter().any(|r| r.method != Method::Get),
@@ -2106,14 +2109,14 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
 }
 
 #[test]
-fn aggregation_retains_first_unknown_diagnostics_when_both_legs_are_uncertain() {
+fn the_first_unknown_diagnostic_is_retained_and_the_next_leg_is_withheld() {
     use safe_cex_engine::{ErrorKind, Outcome};
     for transport_first in [false, true] {
         let mut h = private();
         let mut second = opts(OrderType::Market);
         second.client_order_id = Some("second".into());
         place(&mut h, 73, vec![opts(OrderType::Market), second]);
-        for transport in [transport_first, !transport_first] {
+        for transport in [transport_first, !transport_first].into_iter().take(1) {
             let request = take_method(&mut h, Method::Post, "/orders");
             if transport {
                 h.e.handle(
@@ -2151,7 +2154,10 @@ fn aggregation_normalizes_transport_unknown_warning() {
         let mut second = opts(OrderType::Market);
         second.client_order_id = Some("second".into());
         place(&mut h, 73, vec![opts(OrderType::Market), second]);
-        for lost in [lost_first, !lost_first] {
+        for lost in [lost_first, !lost_first]
+            .into_iter()
+            .take(if lost_first { 1 } else { 2 })
+        {
             let request = take_method(&mut h, Method::Post, "/orders");
             if lost {
                 h.e.handle(
@@ -2179,7 +2185,7 @@ fn aggregation_normalizes_transport_unknown_warning() {
             text.contains("unknown") && text.contains("check open orders"),
             "{error:?}"
         );
-        assert!(text.contains("definitive refusal"), "{text}");
+        assert_eq!(text.contains("definitive refusal"), !lost_first, "{text}");
         assert!(!text.contains("connection reset"), "{text}");
         assert!(
             !h.pending.iter().any(|r| r.method != Method::Get),
@@ -2197,7 +2203,10 @@ fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
             let mut second = opts(OrderType::Market);
             second.client_order_id = Some("second".into());
             place(&mut h, 73, vec![opts(OrderType::Market), second]);
-            for ambiguous in [ambiguous_first, !ambiguous_first] {
+            for ambiguous in [ambiguous_first, !ambiguous_first]
+                .into_iter()
+                .take(if ambiguous_first { 1 } else { 2 })
+            {
                 let request = take_method(&mut h, Method::Post, "/orders");
                 if ambiguous {
                     h.respond(request, status, body);
@@ -2217,9 +2226,10 @@ fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
                 text.contains("unknown") && text.contains("check open orders"),
                 "{error:?}"
             );
-            assert!(
+            assert_eq!(
                 text.contains("definitive refusal"),
-                "the independent known failure stays visible: {text}"
+                !ambiguous_first,
+                "only an already-attempted refusal stays visible: {text}"
             );
             assert!(
                 !h.pending.iter().any(|r| r.method != Method::Get),
@@ -3178,4 +3188,527 @@ fn a_terminal_proof_cannot_override_an_observed_fill_or_a_new_cancel() {
         assert_eq!(order_posts(&h), 0, "{observed}");
         expire_cancel_proof(&mut h);
     }
+}
+
+fn parity_market_limits(h: &mut Harness, min: f64) {
+    let mut markets = h.e.store().markets().to_vec();
+    let market = markets
+        .iter_mut()
+        .find(|m| m.symbol == "BTC-USD-PERP")
+        .unwrap();
+    market.limits.amount.min = min;
+    market.limits.amount.max = 5.0;
+    market.precision.amount = 0.1;
+    market.precision.price = 0.1;
+    h.e.store_mut().set_markets(markets);
+}
+
+fn parity_ack_batch(h: &mut Harness, request: safe_cex_engine::HttpRequest, prefix: &str) {
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let response: Vec<_> = rows.iter().enumerate().map(|(index, row)| {
+        serde_json::json!({"id":format!("{prefix}-{index}"),"client_id":row["client_id"]})
+    }).collect();
+    h.respond(
+        request,
+        200,
+        &serde_json::json!({"orders":response}).to_string(),
+    );
+}
+
+fn assert_batch_refusal(h: &Harness, command: u32, accepted: Vec<String>, message: &str) {
+    use safe_cex_engine::{Notice, Outcome};
+    let failures: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failures.len(),
+        1,
+        "batch refusal must fail the command: {:?}",
+        h.result(command)
+    );
+    let error = failures[0];
+    assert!(error.message.contains(message), "{error:?}");
+    assert_eq!(
+        error.partial.as_ref().map(|partial| &partial.order_ids),
+        Some(&accepted)
+    );
+    assert_eq!(
+        error.outcome, None,
+        "accepted prefix plus definite refusal is a known partial failure"
+    );
+    assert!(!h.actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command
+    )));
+    assert!(!h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(Outcome::Unknown)
+    )));
+    assert!(!h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+    )));
+}
+
+#[test]
+fn parity_later_native_rule_violations_reach_the_venue_after_the_first_batch() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1574-1593,1683-1713,1949-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    for (amount, price) in [
+        (0.5, 100.0),
+        (1.05, 100.0),
+        (6.0, 100.0),
+        (1.0, 100.05),
+        (0.01, 100.0),
+    ] {
+        let mut h = private();
+        parity_market_limits(&mut h, 1.0);
+        h.receipt_trace.clear();
+        let mut good = opts(OrderType::Limit);
+        good.client_order_id = None;
+        let mut orders = vec![good.clone(); 10];
+        let mut last = good;
+        last.amount = amount;
+        last.price = Some(price);
+        orders.push(last);
+        place(&mut h, 91, orders);
+        let first = h.take("/orders/batch");
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+        assert_eq!(rows.len(), 10);
+        parity_ack_batch(&mut h, first, "accepted");
+        let last = h.take("/orders/batch");
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(last.body.as_deref().unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["size"], amount.to_string());
+        assert_eq!(rows[0]["price"], price.to_string());
+        h.respond(
+            last,
+            400,
+            r#"{"error":"VALIDATION","message":"venue refused final row"}"#,
+        );
+        assert_batch_refusal(
+            &h,
+            91,
+            (0..10).map(|index| format!("accepted-{index}")).collect(),
+            "venue refused final row",
+        );
+        assert!(h.actions.iter().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Error, message, ..
+            })) if message.contains("venue refused final row"))));
+        assert_eq!(
+            h.receipt_trace
+                .iter()
+                .filter(|entry| matches!(entry, ReceiptTrace::Http(_)))
+                .count(),
+            2
+        );
+        assert!(
+            h.pending
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
+    }
+}
+
+#[test]
+fn parity_an_off_tick_child_is_submitted_after_its_parent() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1414-1422,1856-1875.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
+    let mut h = private();
+    parity_market_limits(&mut h, 1.0);
+    h.receipt_trace.clear();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    order.stop_loss = Some(90.05);
+    place(&mut h, 91, vec![order]);
+    let parent = h.take("/orders");
+    let payload: Payload = serde_json::from_str(parent.body.as_deref().unwrap()).unwrap();
+    h.respond(
+        parent,
+        200,
+        &serde_json::json!({"id":"parent","client_id":payload.client_id}).to_string(),
+    );
+    let child = h.take("/orders");
+    let payload: Payload = serde_json::from_str(child.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.trigger_price.as_deref(), Some("90.05"));
+    h.respond(child, 400, r#"{"error":"VALIDATION","message":"off tick"}"#);
+    assert!(h.result(91).is_err());
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|entry| matches!(entry, ReceiptTrace::Http(_)))
+            .count(),
+        2
+    );
+    assert!(
+        h.pending
+            .iter()
+            .all(|request| request.method == Method::Get)
+    );
+}
+
+#[test]
+fn parity_replacement_and_exact_put_back_have_no_new_native_minimum_gate() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:2067-2106; historical 31d7fda4:1394-1438.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
+    let mut h = with_untriggered_stop();
+    parity_market_limits(&mut h, 3.0);
+    h.command(Command::AmendOrder {
+        command: 91,
+        id: "123".into(),
+        price: Some(91.0),
+        amount: Some(0.5),
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let replacement = h.take("/orders");
+    let payload: Payload = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.size.as_deref(), Some("0.5"));
+    h.respond(
+        replacement,
+        400,
+        r#"{"error":"VALIDATION","message":"refused"}"#,
+    );
+    let restore = h.take("/orders");
+    let payload: Payload = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.size.as_deref(), Some("2"));
+    assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+    h.respond(
+        restore,
+        201,
+        &serde_json::json!({"id":"restored","client_id":payload.client_id}).to_string(),
+    );
+    assert_eq!(
+        failed(&h, 91).protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert_eq!(order_posts(&h), 0);
+}
+
+#[test]
+fn parity_all_valid_batches_still_submit_each_row_once() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1949-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    let mut h = private();
+    h.receipt_trace.clear();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    place(&mut h, 91, vec![order; 11]);
+    let first = h.take("/orders/batch");
+    parity_ack_batch(&mut h, first, "first");
+    let last = h.take("/orders/batch");
+    parity_ack_batch(&mut h, last, "last");
+    let ids: Vec<String> = serde_json::from_str(h.result(91).unwrap()).unwrap();
+    assert_eq!(ids.len(), 11);
+    assert_eq!(
+        ids.iter().collect::<std::collections::HashSet<_>>().len(),
+        11
+    );
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|entry| matches!(entry, ReceiptTrace::Http(_)))
+            .count(),
+        2
+    );
+    assert!(h.pending.is_empty());
+}
+
+fn after_failure_no_more_writes(h: &Harness) {
+    assert!(
+        h.pending.iter().all(|r| r.method == Method::Get),
+        "{:?}",
+        h.pending
+    );
+}
+
+fn after_failure_refuse(h: &mut Harness, request: safe_cex_engine::HttpRequest, lost: bool) {
+    if lost {
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "fixture transport loss",
+            },
+        );
+        h.collect();
+    } else {
+        h.respond(
+            request,
+            400,
+            r#"{"error":"VALIDATION","message":"fixture refusal"}"#,
+        );
+    }
+}
+
+#[test]
+fn after_failure_native_batch_stops_later_chunks_and_serial_entries() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1942-1958.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    // TS paradex.exchange.ts:1942-1958 awaits flush outside the per-entry catch.
+    for lost in [false, true] {
+        let mut h = private();
+        h.receipt_trace.clear();
+        let mut order = opts(OrderType::Limit);
+        order.client_order_id = None;
+        let mut orders = vec![order; 21];
+        let mut serial = opts(OrderType::Market);
+        serial.client_order_id = Some("unsent-serial".into());
+        orders.push(serial);
+        place(&mut h, 91, orders);
+        let first = h.take("/orders/batch");
+        parity_ack_batch(&mut h, first, "first");
+        let second = h.take("/orders/batch");
+        after_failure_refuse(&mut h, second, lost);
+        after_failure_no_more_writes(&h);
+        assert_eq!(
+            h.receipt_trace
+                .iter()
+                .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+                .count(),
+            if lost { 3 } else { 2 }
+        );
+    }
+}
+
+#[test]
+fn after_failure_serial_entry_continues_only_after_definite_refusal() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1958-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    // TS paradex.exchange.ts:1414-1431,1958-1965 catches one entry, then continues the loop.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut entry = opts(OrderType::Market);
+        entry.client_order_id = None;
+        entry.take_profit = Some(110.);
+        entry.stop_loss = Some(90.);
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("next".into());
+        place(&mut h, 91, vec![entry, next]);
+        let first = h.take("/orders");
+        after_failure_refuse(&mut h, first, lost);
+        if lost {
+            after_failure_no_more_writes(&h);
+            assert_eq!(
+                failed(&h, 91).outcome,
+                Some(safe_cex_engine::Outcome::Unknown)
+            );
+            continue;
+        }
+        let next = take_method(&mut h, Method::Post, "/orders");
+        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "MARKET");
+        assert_eq!(payload.client_id.as_deref(), Some("next"));
+        h.respond(next, 200, r#"{"id":"next","client_id":"next"}"#);
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn after_failure_take_profit_skips_stop_loss_and_continues_only_after_refusal() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
+    // TS paradex.exchange.ts:1817-1896 has one try for TP+SL; 1949-1965 continues entries.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("next".into());
+        bracket_entry(&mut h, 91, Some(next));
+        let tp = h.take("/orders");
+        let payload: Payload = serde_json::from_str(tp.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "TAKE_PROFIT_MARKET");
+        after_failure_refuse(&mut h, tp, lost);
+        if lost {
+            after_failure_no_more_writes(&h);
+            assert_eq!(
+                failed(&h, 91).outcome,
+                Some(safe_cex_engine::Outcome::Unknown)
+            );
+            continue;
+        }
+        let next = take_method(&mut h, Method::Post, "/orders");
+        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "MARKET");
+        assert_eq!(payload.client_id.as_deref(), Some("next"));
+        h.respond(next, 200, r#"{"id":"next","client_id":"next"}"#);
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn after_failure_protective_cancel_or_exact_restore_is_terminal() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:2105-2113; historical 31d7fda4:1427-1438.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
+    // Keep the existing Rust exact put-back per the lead's explicit no-removal instruction.
+    for cancel_failure in [true, false] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 91);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        if cancel_failure {
+            after_failure_refuse(&mut h, cancel, false);
+        } else {
+            h.respond(cancel, 204, "");
+            confirm_stop_cancel(&mut h);
+            let replacement = h.take("/orders");
+            after_failure_refuse(&mut h, replacement, false);
+            let restore = h.take("/orders");
+            let payload: Payload = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload.size.as_deref(), Some("2"));
+            assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+            after_failure_refuse(&mut h, restore, false);
+        }
+        assert!(h.result(91).is_err());
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn pin_native_batch_row_refusal_keeps_accepted_rows_but_stops_the_next_chunk() {
+    // Legacy TS: paradex.exchange.ts:1772-1780,1942-1958 throws on a per-row batch error.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    let mut h = private();
+    h.receipt_trace.clear();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    place(&mut h, 91, vec![order; 11]);
+    let batch = h.take("/orders/batch");
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(batch.body.as_deref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 10);
+    let accepted: Vec<_> = rows[..9].iter().enumerate().map(|(i,row)| serde_json::json!({"id":format!("accepted-{i}"),"client_id":row["client_id"]})).collect();
+    h.respond(batch, 200, &serde_json::json!({"orders":accepted,"errors":[{"error":"INVALID_PRICE","message":"last row refused"}]}).to_string());
+    assert_batch_refusal(
+        &h,
+        91,
+        (0..9).map(|index| format!("accepted-{index}")).collect(),
+        "INVALID_PRICE",
+    );
+    after_failure_no_more_writes(&h);
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn pin_native_amend_refusal_stops_without_replacing_or_restoring() {
+    // Legacy TS: paradex.exchange.ts:2099-2113 PUT failure is rethrown without a fallback.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
+    let (mut h, _) = amendment_account(AMEND_ROW);
+    h.receipt_trace.clear();
+    amend(&mut h, 91, Some(101.), Some(3.));
+    let request = take_method(&mut h, Method::Put, "/orders/123");
+    after_failure_refuse(&mut h, request, false);
+    assert!(h.result(91).is_err());
+    after_failure_no_more_writes(&h);
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn unknown_exception_serial_entry_halts_the_action_with_accepted_ids() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at paradex.exchange.ts:1958-1965.
+    for lost in [false, true] {
+        let mut h = private();
+        let orders = ["accepted", "uncertain", "unsent"].map(|id| {
+            let mut order = opts(OrderType::Market);
+            order.client_order_id = Some(id.into());
+            order
+        });
+        place(&mut h, 91, orders.into());
+        h.reply("/orders", r#"{"id":"accepted-id","client_id":"accepted"}"#);
+        let second = take_method(&mut h, Method::Post, "/orders");
+        if lost {
+            after_failure_refuse(&mut h, second, true);
+        } else {
+            h.respond(second, 200, "{}");
+        }
+        after_failure_no_more_writes(&h);
+        let error = failed(&h, 91);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted-id"]);
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        unknown_exception_journal_and_telemetry(&h);
+    }
+}
+
+#[test]
+fn unknown_exception_child_halts_later_children_and_independent_entries() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at paradex.exchange.ts:1844-1850,1879-1898,1949-1965.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("unsent".into());
+        bracket_entry(&mut h, 91, Some(next));
+        let tp = take_method(&mut h, Method::Post, "/orders");
+        if lost {
+            after_failure_refuse(&mut h, tp, true);
+        } else {
+            h.respond(tp, 200, "{}");
+        }
+        after_failure_no_more_writes(&h);
+        let error = failed(&h, 91);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["entry"]);
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        unknown_exception_journal_and_telemetry(&h);
+    }
+}
+
+fn unknown_exception_journal_and_telemetry(h: &Harness) {
+    let error = failed(h, 91);
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    let event = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "order.outcome_unknown" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("Unknown journal telemetry");
+    assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(
+        event
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    );
+    let report = event
+        .fields
+        .iter()
+        .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten())
+        .expect("journal snapshot");
+    let report: serde_json::Value = serde_json::from_str(report).unwrap();
+    assert_eq!(
+        report["placed"],
+        serde_json::json!(error.partial.as_ref().unwrap().order_ids)
+    );
+    let unknown = report["unknown"].as_array().unwrap();
+    assert_eq!(unknown.len(), 1);
+    assert!(error.message.contains(unknown[0].as_str().unwrap()));
+    assert!(!report["notSent"].as_array().unwrap().is_empty());
 }

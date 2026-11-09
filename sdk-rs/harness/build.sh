@@ -54,6 +54,10 @@ family_args() {
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
+  elif [[ $family == txflow ]]; then
+    # Only the public-stream decode crate takes throughput defaults: the TxFlow
+    # CPU gate measures that path; the venue crate keeps its size profile.
+    build_args+=(--config 'profile.release.package.safe-cex-txflow-public-wire.opt-level=3')
   elif [[ $family == bitget ]]; then
     # Engine at s: steady CPU clears the 1.10x gate with margin; z measured 1.07-1.21x.
     build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level="s"')
@@ -88,14 +92,15 @@ optimize() {
 # CommonJS inside an ESM package.
 bind() {
   wasm-bindgen --remove-name-section --remove-producers-section --target web --out-dir "$1" \
-    target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+    "$target_dir/wasm32-unknown-unknown/release/safe_cex_wasm.wasm"
   wasm-bindgen --remove-name-section --remove-producers-section --target nodejs --out-dir "$2" \
-    target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+    "$target_dir/wasm32-unknown-unknown/release/safe_cex_wasm.wasm"
   optimize "$1/safe_cex_wasm_bg.wasm"
   optimize "$2/safe_cex_wasm_bg.wasm"
   echo '{"type":"commonjs"}' > "$2/package.json"
 }
 cd "$(dirname "$0")/.."
+target_dir="${CARGO_TARGET_DIR:-target}"
 # macOS strips DYLD_* from inherited environments; rust-lld needs the toolchain's libLLVM.
 if [[ $(uname) == Darwin ]]; then
   export DYLD_LIBRARY_PATH="$(rustc --print sysroot)/lib"

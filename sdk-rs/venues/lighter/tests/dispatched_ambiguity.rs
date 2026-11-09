@@ -206,11 +206,10 @@ fn nonce_retry_stale_refusal(status: u16, code: u64, unknown: bool) {
         status,
         &format!(r#"{{"code":{code},"message":"retry response"}}"#),
         unknown,
-        "unknown",
     );
 }
 
-fn nonce_retry_stale_refusal_body(status: u16, body: &str, unknown: bool, wording: &str) {
+fn nonce_retry_stale_refusal_body(status: u16, body: &str, unknown: bool) {
     let mut opts = options();
     opts.testnet = true;
     let (mut e, _, _) = ready_feeds(opts, true);
@@ -275,7 +274,7 @@ fn nonce_retry_stale_refusal_body(status: u16, body: &str, unknown: bool, wordin
     if unknown {
         let text = error.message.to_ascii_lowercase();
         assert!(
-            text.contains(wording) && text.contains("check open orders"),
+            text.contains("unknown") && text.contains("check open orders"),
             "{error:?}"
         );
         assert!(!text.contains("invalid nonce"), "stale refusal: {error:?}");
@@ -354,6 +353,6 @@ fn stale_refusal_nonce_retry_definitive_response_stays_rejected() {
 #[test]
 fn stale_refusal_after_nonce_retry_malformed_reply_is_replaced_by_uncertainty() {
     for body in ["<html>", r#"{"code":200,"tx_hash":true}"#] {
-        nonce_retry_stale_refusal_body(200, body, true, "uncertain");
+        nonce_retry_stale_refusal_body(200, body, true);
     }
 }

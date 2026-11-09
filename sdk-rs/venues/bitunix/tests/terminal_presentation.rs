@@ -116,15 +116,7 @@ fn begin(path: &str) -> (TestEngine, HttpRequest, f64, usize) {
                 r#"{"code":0,"data":{"successList":[{"orderId":"one"},{"orderId":"one__tp"},{"orderId":"one__sl"}],"failureList":[]}}"#,
             );
             write = requests(&mut e).remove(0);
-            assert_eq!(write.method, Method::Get);
-            assert!(write.url.contains("get_order_detail"));
-            respond(
-                &mut e,
-                &write,
-                now,
-                r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"1","status":"CANCELED","orderType":"LIMIT","side":"SELL"}}"#,
-            );
-            write = requests(&mut e).remove(0);
+            assert_eq!(write.method, Method::Post);
             assert!(write.url.ends_with("place_order"));
         }
     }
@@ -227,7 +219,40 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
                 ),
                 _ => respond(&mut e, &write, now, &body),
             }
-            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+            let mut actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+            let continued_after_refusal =
+                path == "cancel after amend refusal" && answer == "refused rows";
+            if continued_after_refusal {
+                // Master continues after resolved cancel-row refusals. Settle its
+                // one trailing write before checking terminal publication;
+                // Unknown cases must never enter this branch.
+                assert_eq!(
+                    actions
+                        .iter()
+                        .filter(|action| matches!(action,
+                    Action::Http(request) if request.method != Method::Get))
+                        .count(),
+                    1
+                );
+                let index = actions
+                    .iter()
+                    .position(|action| {
+                        matches!(action,
+                    Action::Http(request) if request.method == Method::Post)
+                    })
+                    .expect("one approved trailing put-back");
+                let Action::Http(kept) = actions.remove(index) else {
+                    unreachable!()
+                };
+                assert!(kept.url.ends_with("place_order"));
+                respond(
+                    &mut e,
+                    &kept,
+                    now,
+                    r#"{"code":0,"data":{"orderId":"kept"}}"#,
+                );
+                actions.extend(safe_cex_engine::test_support::prepared_actions(&mut e, now));
+            }
             let errors: Vec<_> = actions
                 .iter()
                 .filter_map(|a| match a {
@@ -238,7 +263,7 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
             assert_eq!(errors.len(), 1, "{path}/{answer}: {actions:?}");
             let error = errors[0];
             let expected = if answer == "refused" || answer == "refused rows" {
-                if path == "place after amend refusal" {
+                if path == "place after amend refusal" || continued_after_refusal {
                     None
                 } else if answer == "refused" && path.contains("batch place") {
                     Some(Outcome::Unknown)

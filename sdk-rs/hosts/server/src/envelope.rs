@@ -27,6 +27,8 @@ pub struct InitPayload {
     pub orderly_exchange_id: Option<String>,
     #[serde(default, deserialize_with = "text")]
     pub grvt_trading_account_id: Option<String>,
+    #[serde(default, deserialize_with = "text")]
+    pub grvt_signer_address: Option<String>,
     pub tealstreet_proxy: Option<bool>,
     pub tealstreet_tunnel: Option<bool>,
     pub tealstreet_ws_route: Option<bool>,
@@ -202,6 +204,24 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
             "accountName": account_name,
             "data": [message, {"forceToast": true, "initRefused": true}],
         }),
+    )
+}
+
+/// Retired or unavailable venues refuse before routing, signing or engine work.
+pub fn init_unsupported(account_name: &str, venue: &str) -> String {
+    let error = safe_cex_venues::unsupported_venue(venue);
+    msg(
+        account_name,
+        "error",
+        json!([
+            error.message,
+            {
+                "forceToast": true,
+                "initRefused": true,
+                "kind": error.kind,
+                "outcome": error.outcome
+            }
+        ]),
     )
 }
 

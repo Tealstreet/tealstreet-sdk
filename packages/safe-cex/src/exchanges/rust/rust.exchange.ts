@@ -1,3 +1,4 @@
+import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
 import type {
   AccountAuthResult,
   AlgoStopAllResult,
@@ -49,7 +50,7 @@ import type {
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, WorkerForwardedMethod } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
+import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { ChaseEnd } from './algoControlWatch';
 import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
@@ -96,11 +97,7 @@ import {
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
-import { mapBitunixClosedPosition } from '../bitunix/bitunix.income';
-import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
-import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
-import { isBybitInverseSymbol } from '../bybit/bybit.inverse';
 import {
   HYROTRADER_PROD_URL,
   HYROTRADER_PROD_WS_URL,
@@ -116,7 +113,6 @@ import {
 import { isKeylessRemoteSigned } from '../hostedSigningVenues';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
-import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
@@ -132,6 +128,7 @@ import {
   deriveSignerSetupPolicy,
 } from './construction';
 import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
+import { snapshotDelegatedSigningOptions, withoutDelegatedSigningSnapshot } from './delegatedSigningSnapshot';
 import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
@@ -518,6 +515,14 @@ const SOCKET_HEALTH_SYNC_MS = 5_000;
 const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
 
 export class RustEngineExchange extends BaseExchange {
+  private workerOwnerSource?: () => { ownerId: string; generation: number } | undefined;
+
+  /** Optional owner fencing; hosts without a binding retain legacy bridge dispatch behavior. */
+  setWorkerOwner = (source: () => { ownerId: string; generation: number } | undefined): void => {
+    if (typeof source !== 'function') throw new TypeError('Worker owner source must be a function');
+    this.workerOwnerSource = source;
+  };
+
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private readonly defaultHistoricalPositions = (this as BaseExchange).fetchHistoricalPositions;
   private host?: EngineHostType;
@@ -852,8 +857,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    options = snapshotDelegatedSigningOptions(exchangeName, options);
     assertBetaAccount(exchangeName, options);
-    const accountOptions = options;
+    const accountOptions = withoutDelegatedSigningSnapshot(options);
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     // Coinbase drops its read egress with the key, as it always has (secondaryReadKeys.ts).
     if (
@@ -952,6 +958,7 @@ export class RustEngineExchange extends BaseExchange {
       const message = 'This Rust account has no REST-only PayloadSigner lifecycle';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
+    options = withoutDelegatedSigningSnapshot(options);
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };
@@ -1310,13 +1317,22 @@ export class RustEngineExchange extends BaseExchange {
   /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
   refreshAccountOrders = async (symbols?: string[], cancelChecks?: { id: string; symbol: string }[]): Promise<void> => {
     if (this.routesToWorker) {
-      // Disposal while the bridge attaches retires the ask: nothing may start after cleanup.
-      await this.untilWorkerBridge();
-      if (this.isDisposed) return;
-      await (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(
-        'refreshAccountOrders',
-        ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []),
-      );
+      if (!this.workerOwnerSource) {
+        // Preserve the legacy refresh's disposal no-op as well as its bridge wait.
+        await this.untilWorkerBridge();
+        if (this.isDisposed) return;
+        await (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(
+          'refreshAccountOrders',
+          ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []),
+        );
+        return;
+      }
+      try {
+        await this.callWorker('refreshAccountOrders',
+          ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []));
+      } catch (error) {
+        if (!this.isDisposed) throw error;
+      }
       return;
     }
     try {
@@ -1828,10 +1844,52 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
-  private callWorker = async (method: string, ...args: unknown[]): Promise<unknown> => {
+  private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
+    this.callWorkerForOwner(this.captureWorkerAdmission(), method, ...args);
+
+  private workerOwnerChanged = (method: string, args: unknown[]): Error => {
+    const message = `${this.name} ${method} was not sent: the account worker changed or its owner is not bound`;
+    const clientOrderIds = workerCallClientOrderIds(method, args);
+    return Object.assign(new ExchangeError(message, {
+      message, kind: 'internal', ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'notSent' as const } : {}),
+    }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
+  };
+
+  private captureWorkerAdmission = (): ((method: string, args: unknown[]) => void) | undefined => {
+    const source = this.workerOwnerSource;
+    if (!source) return undefined;
+    const readOwner = () => {
+      try { return source(); } catch { return undefined; }
+    };
+    const owner = readOwner();
+    const ownerId = owner?.ownerId;
+    const generation = owner?.generation;
+    const bound = typeof ownerId === 'string' && ownerId.length > 0 && typeof generation === 'number' &&
+      Number.isSafeInteger(generation) && generation >= 0;
+    const bridgeIsCurrent = this.emitter.hasListeners('callMethod')
+      ? this.emitter.captureListenerGuard('callMethod') : undefined;
+    return (method, args) => {
+      // This explicit public read alone may cross replacement bridges.
+      if (method === 'fetchOHLCV') return;
+      const current = readOwner();
+      if (this.isDisposed || source !== this.workerOwnerSource || (bridgeIsCurrent && !bridgeIsCurrent()) ||
+        !bound || current?.ownerId !== ownerId || current?.generation !== generation) {
+        throw this.workerOwnerChanged(method, args);
+      }
+    };
+  };
+
+  private callWorkerForOwner = async (
+    admitted: ((method: string, args: unknown[]) => void) | undefined, method: string, ...args: unknown[]
+  ): Promise<unknown> => {
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
-    await this.untilWorkerBridge();
+    admitted?.(method, args);
+    const bridgeIsCurrent = await this.untilWorkerBridge(admitted && (() => admitted(method, args)));
+    admitted?.(method, args);
+    if (admitted && (this.isDisposed || !bridgeIsCurrent())) {
+      throw this.workerOwnerChanged(method, args);
+    }
     const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
   };
@@ -1871,13 +1929,15 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
-  private untilWorkerBridge = async (): Promise<void> => {
+  private untilWorkerBridge = async (assertCurrent?: () => void): Promise<() => boolean> => {
     const deadline = Date.now() + WORKER_BRIDGE_WAIT_MS;
     while (!this.emitter.hasListeners('callMethod')) {
+      assertCurrent?.();
       if (this.isDisposed) throw new Error(`${this.name} disposed before its worker bridge was wired`);
       if (Date.now() >= deadline) throw new Error(`${this.name} worker bridge was not wired`);
       await new Promise((resolve) => setTimeout(resolve, WORKER_BRIDGE_POLL_MS));
     }
+    return this.emitter.captureListenerGuard('callMethod');
   };
 
   private refuseOnMirror() {
@@ -1902,27 +1962,39 @@ export class RustEngineExchange extends BaseExchange {
     // Native account reads start an engine, so a mirror asks the worker's instead.
     // Journals are not forwarded: a mirror folds them itself from forwarded raw reads,
     // so the hosted server, which has no TS mappers, only serves those reads.
-    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS, ...RUST_FORWARDED_METHODS];
-    const members = this as unknown as Record<string, unknown>;
-    for (const method of methods) {
+    type Method =
+      | (typeof WORKER_FORWARDED_METHODS)[number]
+      | (typeof NATIVE_ACCOUNT_READS)[number]
+      | (typeof RUST_FORWARDED_METHODS)[number]
+      | 'fetchClosedPnl';
+    const methods: Method[] = [
+      ...WORKER_FORWARDED_METHODS,
+      ...NATIVE_ACCOUNT_READS,
+      ...RUST_FORWARDED_METHODS,
+      'fetchClosedPnl',
+    ];
+    type Args = Pick<WorkerMethodArguments, Method>;
+    const install = <M extends Method>(
+      method: M,
+      members: { [K in Method]: (...args: Args[K]) => Promise<unknown> },
+    ) => {
       // A capability-defined method this venue lacks stays absent, never a forwarder.
-      if (inert.has(method) || typeof members[method] !== 'function') continue;
-      const local = members[method] as (...args: unknown[]) => Promise<unknown>;
+      if (inert.has(method) || typeof members[method] !== 'function') return;
+      const local = members[method];
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
-      const route = (...args: unknown[]) => {
+      const route = (...args: Args[M]): Promise<unknown> => {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
         if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
-          return this.fetchPageCandles(args[0] as OHLCVOptions);
+          return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
+        const admitted = this.captureWorkerAdmission();
         const viaWorker = () =>
-          this.callWorker(method, ...args).then(
+          this.callWorkerForOwner(admitted, method, ...args).then(
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-              method === 'updateOrder'
-                ? decodeWorkerOrderIds(result as WorkerOrderIds)
-                : rowsFromAccountFrame(method, result, args[0]),
+              method === 'updateOrder' ? decodeWorkerOrderIds(result) : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
               // Never passed through `command` here, and the hosted server marks no failure as
               // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
@@ -1932,17 +2004,22 @@ export class RustEngineExchange extends BaseExchange {
           );
         if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
         return this.untilFrameFedSettled(method).then(
-          () => (this.frameFed ? local(...args) : viaWorker()),
+          () => {
+            admitted?.(method, args);
+            return this.frameFed ? local(...args) : viaWorker();
+          },
           (error: unknown) => {
             this.reportCommandError(error);
             throw error;
           },
         );
       };
-      members[method] = FRAME_FED_WRITES.has(method)
-        ? (...args: unknown[]) => this.trackWrite(() => route(...args))
+      const forwarded = FRAME_FED_WRITES.has(method)
+        ? (...args: Args[M]) => this.trackWrite(() => route(...args))
         : route;
-    }
+      Object.assign(members, { [method]: forwarded });
+    };
+    for (const method of methods) install(method, this);
   }
 
   private writesInFlight = 0;
@@ -3598,37 +3675,18 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Reported rows only, newest close first; failures propagate so refreshes keep their last result. */
   private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.routesToWorker) {
+      return (await this.callWorker('fetchClosedPnl', opts)) as ClosedPnlEntry[];
+    }
     if (this.isPublicDataOnly) return [];
     const ready = this.capabilitiesFor('fetchClosedPnl');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const format = capabilities.closedPositionFormat;
     // OKX/Blofin treat an empty symbol as account-wide; Bybit and Bitunix send it as given.
     const symbol = format === 'okx' || format === 'blofin' ? opts.symbol || undefined : opts.symbol;
-    const rows = await this.fetchClosedPositionRows({ ...opts, symbol });
-    const account = opts.accountName || '';
-    const entries: ClosedPnlEntry[] = [];
-    for (const row of rows) {
-      let entry: ClosedPnlEntry | null;
-      if (format === 'okx') {
-        const market = this.store.marketsBySymbol[opts.symbol] ?? this.store.marketsById[String(row.instId ?? '')];
-        entry = mapOkxClosedPosition(row, market, this.okxContractsToBase, account);
-      } else if (format === 'blofin') {
-        entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
-      } else if (format === 'bitunix') {
-        entry = mapBitunixClosedPosition(row, account);
-      } else {
-        entry = mapBybitClosedPnl(
-          row,
-          account,
-          capabilities.inverseClosedPositions || isBybitInverseSymbol(row.symbol),
-        );
-      }
-      if (entry) entries.push(entry);
-    }
-    return copyHistoryCompleteness(
-      rows,
-      entries.sort((a, b) => b.closedTime - a.closedTime),
-    );
+    return this.command<ClosedPnlEntry[]>({
+      op: 'fetchClosedPnl', symbol, from: opts.from, to: opts.to, account: opts.accountName || '',
+    });
   };
 
   /**
@@ -3660,10 +3718,11 @@ export class RustEngineExchange extends BaseExchange {
         ? [...listeners].find(([, listener]) => listener === callback)?.[0]
         : undefined) ?? ++this.nextBookListenerId;
     listeners.set(listenerId, callback);
+    const callbacks = listeners;
     if (first) this.bookDemand(symbol, true);
     return () => {
-      if (!listeners!.delete(listenerId)) return;
-      if (listeners!.size === 0 && this.bookListeners.get(symbol) === listeners) {
+      if (!callbacks.delete(listenerId)) return;
+      if (callbacks.size === 0 && this.bookListeners.get(symbol) === callbacks) {
         this.bookListeners.delete(symbol);
         this.bookDemand(symbol, false);
       }
@@ -3697,10 +3756,11 @@ export class RustEngineExchange extends BaseExchange {
       this.candleListeners.set(key, listeners);
     }
     listeners.add(callback);
+    const callbacks = listeners;
     if (first) this.candleDemand(opts.symbol, interval, true);
     return () => {
-      listeners!.delete(callback);
-      if (listeners!.size === 0 && this.candleListeners.get(key) === listeners) {
+      callbacks.delete(callback);
+      if (callbacks.size === 0 && this.candleListeners.get(key) === callbacks) {
         this.candleListeners.delete(key);
         this.candleDemand(opts.symbol, interval, false);
       }

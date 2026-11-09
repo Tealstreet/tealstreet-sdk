@@ -6,6 +6,12 @@ description: Run the Tealstreet cross-trade copier as a CLI daemon instead of a 
 
 # Cross-trade engine
 
+Cross-trade configuration and its running heartbeat belong to the signed-in user. Switching users stops the previous user’s in-process daemon. Its pending status callbacks are discarded, and its login-change stop event is omitted from the new user’s audit log. See [user profiles and migration](./config-files.md#login-logout-and-migration).
+
+If login changes while accounts are starting, startup cancels the remaining
+account list and disposes the old login's created connections. It does not
+activate matching accounts in the new login, even after switching back.
+
 Cross-trade mirrors a master account's positions onto one or more copier
 accounts in near-real-time. By default it runs inside the browser leader
 tab. Power users can run the same engine as a CLI daemon instead — useful

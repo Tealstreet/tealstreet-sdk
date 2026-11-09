@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Market, Order, OrderSide, OrderStatus, OrderType, Position, PositionSide, Ticker } from '../types';
+import {
+  MarginType,
+  Market,
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderType,
+  Position,
+  PositionMode,
+  PositionSide,
+  Ticker,
+} from '../types';
 import { DefaultStore, defaultStore } from './store.base';
 import { stubStore } from './store.stub';
 
@@ -67,6 +78,11 @@ describe('DefaultStore', () => {
   });
 
   describe('initial state', () => {
+    it('uses unknown liquidation prices in store shape defaults', () => {
+      expect(stubStore.positions[0].liquidationPrice).toBeNull();
+      expect(stubStore.displayedPositions[0].liquidationPrice).toBeNull();
+    });
+
     it('should initialize with default values', () => {
       expect(store.latency).toBeNull();
       expect(store.balance).toEqual({ used: 0, free: 0, total: 0, upnl: 0 });
@@ -467,7 +483,7 @@ describe('DefaultStore', () => {
         expect(emptyPosition.entryPrice).toBe(0);
         expect(emptyPosition.notional).toBe(0);
         expect(emptyPosition.unrealizedPnl).toBe(0);
-        expect(emptyPosition.liquidationPrice).toBe(0);
+        expect(emptyPosition.liquidationPrice).toBeNull();
       });
 
       it('should preserve position id and symbol', () => {
@@ -479,6 +495,16 @@ describe('DefaultStore', () => {
     });
 
     describe('addOrUpdatePositionsFull', () => {
+      it('retains unknown liquidation as null when an omitted position closes', () => {
+        store.addOrUpdatePosition(createPosition({ liquidationPrice: null }));
+        for (let refresh = 0; refresh < 2; refresh++) {
+          store.addOrUpdatePositionsFull([]);
+          expect(store.positions).toHaveLength(1);
+          expect(store.positions[0]).toMatchObject({ contracts: 0, liquidationPrice: null });
+          expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+        }
+      });
+
       it('should update provided positions and empty others', () => {
         store.addOrUpdatePosition(createPosition({ id: 'pos-1' }));
         store.addOrUpdatePosition(createPosition({ id: 'pos-2', contracts: 2 }));
@@ -488,6 +514,71 @@ describe('DefaultStore', () => {
         const pos2 = store.positions.find((p) => p.id === 'pos-2');
         expect(pos1?.contracts).toBe(5);
         expect(pos2?.contracts).toBe(0); // emptied because not in the update
+      });
+
+      it('retains closed-symbol settings with zero exposure after an empty full refresh', () => {
+        store.addOrUpdatePosition(
+          createPosition({
+            id: 'closed',
+            leverage: 20,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.Hedged,
+            liquidationPrice: 45000,
+          }),
+        );
+        const version = store.updateIds.positions;
+        store.addOrUpdatePositionsFull([]);
+        expect(store.positions).toEqual([
+          createPosition({
+            id: 'closed',
+            leverage: 20,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.Hedged,
+            entryPrice: 0,
+            notional: 0,
+            unrealizedPnl: 0,
+            contracts: 0,
+            liquidationPrice: null,
+            marginSize: 0,
+            info: undefined,
+            extra: undefined,
+          }),
+        ]);
+        expect(store.updateIds.positions).toBe(version + 1);
+        expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+      });
+
+      it('merges matching rows in place and retains their omitted optional settings', () => {
+        store.addOrUpdatePosition(
+          createPosition({ marginType: MarginType.Isolated, positionMode: PositionMode.Hedged }),
+        );
+        const retained = store.positions[0];
+        store.addOrUpdatePositionsFull([createPosition({ contracts: 5, liquidationPrice: null })]);
+        expect(store.positions[0]).toBe(retained);
+        expect(retained).toEqual(
+          createPosition({
+            contracts: 5,
+            liquidationPrice: null,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.Hedged,
+          }),
+        );
+      });
+
+      it('adds producer rows while retaining omitted rows with unknown liquidation', () => {
+        store.addOrUpdatePosition(createPosition({ id: 'old' }));
+        const row = createPosition({ id: 'current', contracts: 5, liquidationPrice: null });
+        store.addOrUpdatePositionsFull([row]);
+        expect(store.positions.map((position) => position.id)).toEqual(['old', 'current']);
+        expect(store.positions[0].contracts).toBe(0);
+        expect(store.positions[0].leverage).toBe(10);
+        expect(store.positions[1]).toEqual(row);
+        expect(store.positions[1]).not.toBe(row);
+        expect(
+          JSON.parse(JSON.stringify(store.serialize())).positions.every(
+            (position: Position) => position.liquidationPrice === null,
+          ),
+        ).toBe(true);
       });
     });
   });

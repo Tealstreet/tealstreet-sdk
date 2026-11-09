@@ -13,6 +13,7 @@ import type { ExchangeName, ExchangeOptions, PublicExchangeOptions } from './typ
 import { getExchangeMetadata } from './exchangeMetadata';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
 import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
+import { snapshotDelegatedSigningOptions } from './exchanges/rust/delegatedSigningSnapshot';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
 import { unsupportedVenueError } from './unsupportedVenue';
@@ -88,6 +89,7 @@ export const createExchange = async (
   options: ExchangeOptions,
   store?: Store,
 ): Promise<BaseExchange> => {
+  options = snapshotDelegatedSigningOptions(exchangeName, options);
   assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
   // Rejected venues never start the clock, load WASM or construct transports.
@@ -379,3 +381,5 @@ export type {
   CandleCacheRangeLookup,
   CandleCacheSparseChunk,
 } from './candleCache';
+
+export type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';

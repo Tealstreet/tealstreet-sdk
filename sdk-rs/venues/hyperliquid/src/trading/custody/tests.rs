@@ -34,6 +34,7 @@ impl Venue for RetirementProbe {
             command,
             steps: VecDeque::new(),
             ids: Vec::new(),
+            journal: Default::default(),
             replacement: None,
             amend_source: None,
             amend_filled: false,

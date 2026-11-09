@@ -535,7 +535,9 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
             let policy = safe_cex_venues::remote_signing_policy(venue);
-            let expected = if policy.enabled && !policy.payload_supported {
+            let expected = if venue == "polymarket" {
+                "Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply".into()
+            } else if policy.enabled && !policy.payload_supported {
                 format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
             } else if policy.enabled {
                 format!(
@@ -770,10 +772,6 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             "hyperliquidspot",
             "Hyperliquid requires its primary signing provider",
         ),
-        (
-            "orderly",
-            "Injected signing is not supported for this venue yet",
-        ),
     ] {
         assert_eq!(
             rejected(
@@ -783,6 +781,16 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             expected
         );
     }
+    let error = construct(
+        "orderly",
+        r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#,
+    ).expect_err("Orderly private injection stays closed");
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Orderly injected private signing admission is closed"
+    );
 }
 
 #[test]

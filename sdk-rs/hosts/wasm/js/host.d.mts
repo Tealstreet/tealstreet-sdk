@@ -108,8 +108,18 @@ export interface VenueErrorDetail {
   /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
   protection?: 'restored' | 'unprotected';
   partial?: { orderIds: string[]; total?: number; failedIndex?: number };
+  /** Complete logical outcomes of a validated multi-write plan, in dispatch order. */
+  elements?: ({ index: number; clientOrderId?: string } & (
+    | { status: 'placed'; orderIds: string[] }
+    | { status: 'applied'; effect: 'cancel' | 'amend' | 'tradingStop' | 'settings' | 'deferredChild' | 'positionTrigger'; targetOrderId?: string; positionKey?: string }
+    | { status: 'notSent'; error?: VenueErrorDetail }
+    | { status: 'unknown'; error: VenueErrorDetail }
+  ))[];
   builderAuthorization?: BuilderAuthorizationDetail;
 }
+
+/** Validate and clone indexed write outcomes; malformed arrays return undefined. */
+export function writePlanElementsOf(value: unknown): VenueErrorDetail['elements'];
 
 export interface EngineHandlers {
   /** Called once after a WASM trap makes this host terminal and releases its I/O. */
@@ -218,6 +228,7 @@ export class ExchangeError extends Error {
   readonly partialOrderCount?: number;
   readonly totalOrderCount?: number;
   readonly failedOrderIndex?: number;
+  readonly elements?: VenueErrorDetail['elements'];
   readonly receiptKey?: string;
   readonly commandId?: number;
   readonly orderIdentities?: readonly OrderIdentityReceipt[];
@@ -314,7 +325,7 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'backpack-ed25519' | 'kucoin-batch' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'backpack-ed25519' | 'orderly-ed25519' | 'kucoin-batch' | 'kraken-sha512' | 'kraken-challenge' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;

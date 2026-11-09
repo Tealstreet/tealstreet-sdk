@@ -511,6 +511,16 @@ impl Session {
             self.socket,
             self.resume_id_prefix()
         ));
+        // Refuse before routing can erase the classification or a rebuild can
+        // dispose a live account with the same saved name.
+        if !safe_cex_venues::supported(&init.exchange_name) {
+            self.drop_early(&init.account_name, "unsupported venue");
+            self.send(envelope::init_unsupported(
+                &init.account_name,
+                &init.exchange_name,
+            ));
+            return Ok(());
+        }
         self.forget_disposed();
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
@@ -1786,6 +1796,7 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         init.subaccount.is_some(),
         init.orderly_exchange_id.is_some(),
         init.grvt_trading_account_id.is_some(),
+        init.grvt_signer_address.is_some(),
         init.tealstreet_proxy.is_some(),
         init.tealstreet_tunnel.is_some(),
         init.tealstreet_ws_route.is_some(),

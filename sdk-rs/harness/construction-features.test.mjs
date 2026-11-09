@@ -106,3 +106,11 @@ test('feature guard follows transitive local features, without borrowing combine
   checkFeatures(graph, 'wallet', { setupMapping: 'asterdex' });
   assert.throws(() => checkFeatures(graph, 'bare', { bridge: { dispatchSigning: true } }), /dispatch-signing/);
 });
+
+test('KuCoin Spot admits remote batch custody with its own isolated signing codec', () => {
+  const rule = rules.venues.kucoinspot;
+  assert.equal(rule.remoteSigning?.enabled, true);
+  assert.equal(rule.remoteSigning?.payloadSupported, false);
+  assert.deepEqual(rule.remoteSigning, rules.venues.kucoin.remoteSigning);
+  checkFeatures(features, 'kucoinspot', rule);
+});

@@ -544,11 +544,14 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
-    for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    for (const column of POSITION_COLUMNS) {
+      if (column !== 'contractsNative' && column !== 'unrealizedPnlNative') row[column] = positions[column][i];
+    }
     const greekIndex = positionGreeks && Array.from({ length: positionGreeks.count }, (_, index) => index).find((index) => positionGreeks.positionId(index) === positions.id(i));
     if (greekIndex !== undefined) row.option = { greeks: { delta: positionGreeks.delta[greekIndex], gamma: positionGreeks.gamma[greekIndex], vega: positionGreeks.vega[greekIndex], theta: positionGreeks.theta[greekIndex], units: positionGreeks.units(greekIndex) } };
-    if (venue.coinNativeAmounts) row.extra = { contractsNative: row.notional / markets.contractSize[positions.market[i]], unrealizedPnlNative: row.unrealizedPnl };
-    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
+    if (positions.contractsNative[i] !== undefined || positions.unrealizedPnlNative[i] !== undefined) {
+      row.extra = { contractsNative: positions.contractsNative[i], unrealizedPnlNative: positions.unrealizedPnlNative[i] };
+    }
     positionRows.push(row);
   }
   const settingRows = [];
