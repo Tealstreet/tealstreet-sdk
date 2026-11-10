@@ -611,6 +611,28 @@ describe('DELEGATED host-neutral outbox', () => {
     expect([...a.rows.values()].filter((row) => row.owner === 'alice')).toMatchObject([{ state: 'unknown' }]);
     bob.close();
   });
+  it.each(routerReplies.boxReceipts)('pins the box receipt predicate: $name', async (test) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    await box.enqueue(params);
+    await expect(box.receive(c, test.frame)).resolves.toBeUndefined();
+    expect(box.entries()[0].state).toBe(test.outboxState);
+    box.close();
+  });
+  it('does not send before socket admission even with both capabilities advertised', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const pending = box.connect({ ...f.connection(), ready: false });
+    const id = await box.enqueue(params);
+    await box.flush(pending);
+    await box.receive(pending, response(id, 'order.ack', { received: true }));
+    expect(f.writes).toEqual([]);
+    expect(box.entries()[0].state).toBe('queued');
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
   it.each(routerReplies.cases)('accepts frozen router replies: $name', async (test) => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -632,7 +654,7 @@ describe('DELEGATED host-neutral outbox', () => {
       } else {
         expect(reply).toEqual({
           t: 'msg',
-          d: { op: 'error', accountName: 'main', data: ['order ledger unavailable'] },
+          d: { op: 'error', accountName: 'main', data: ['not sent: invalid order binding'] },
         });
       }
       await box.receive(c, JSON.stringify(reply));

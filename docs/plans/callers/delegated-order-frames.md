@@ -6,6 +6,9 @@ Bybit order per submit. LOCAL and COSIGNED retain their existing call protocol.
 The frozen frame fixture is
 `sdk-rs/hosts/server/tests/data/delegated-orders-v1.json`; synthetic router replies
 are in `sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json`.
+The router integration pins NX #9404 at `9f52873b76`
+(`9f52873b76a64b4258ac38f51e70cd29a1e85941`): frame shapes, socket
+renumbering, capability names and the reply semantics below.
 
 ## DESIGN
 
@@ -23,7 +26,9 @@ Hosts copy the box's `delegatedOrderFramesV1` and the router's
 Missing or false flags disable submits, queued cancellations and receipt handling;
 durable queued work remains subject to its original expiry. Discovery changes
 require a new captured ticket; mutating a discovery object cannot enable an old
-connection. A pending socket or any account/mode/venue/registration mismatch
+connection. The router also guards socket admission until its durable-object
+ledger is active; capability discovery alone does not make an upgrade ready.
+A pending socket or any account/mode/venue/registration mismatch
 receives a visible refusal.
 
 Every request carries the account label and that connection's current
@@ -80,12 +85,12 @@ that exact UUIDv7 as `orderLinkId` (36 characters, lowercase hex and hyphens);
 `requestId` is the same intent ID. A conflicting caller clientOrderId refuses.
 Existing validation still requires one native order.
 
-The server and NX check the key's own timestamp against their current time:
-future timestamps refuse, and an initial submit at age 10,000 ms or more receives
-`not sent: expired`. A client-supplied small age cannot renew an old key.
+The box checks the key's own timestamp against its current time: future
+timestamps refuse, and an initial submit at age 10,000 ms or more receives
+`not sent: expired`. NX likewise declines to forward inadmissible keys, but
+answers an unrecorded key `unknown`: absence cannot prove it was never sent
+through an earlier route. A client-supplied small age cannot renew an old key.
 `ageMs` additionally carries elapsed monotonic time and must be in [0, 10000).
-A previously unrecorded expired key receives that refusal without creating a
-long-lived tombstone; NX stores no tombstones beyond its ledger TTL.
 
 The fingerprint is lowercase SHA-256 hex of UTF-8 bytes consisting of the domain
 `tealstreet/delegated-order/v1`, one NUL byte, then canonical JSON of exactly
@@ -95,8 +100,9 @@ numbers use ECMAScript JSON serialization with negative zero normalized to zero.
 Unsafe integers and nesting deeper than 32 refuse. The connection ID and elapsed
 age are excluded, so reconnect and retry do not change the business fingerprint.
 The SDK validates the fingerprint against the payload. NX must compare it with
-the existing durable claim: the same key with a different payload is refused,
-never answered with an old payload's result. Shared golden tests pin the hash,
+the existing durable claim: the same key with a different payload is never
+forwarded again or answered with the old payload's result. NX answers unknown
+with an intent-conflict message. Shared golden tests pin the hash,
 key encoding, frame shapes and Bybit ID mapping.
 
 ### NX durable interception and the crash boundary
@@ -106,7 +112,15 @@ Before forwarding a first submit, NX resolves the authenticated identity and
 registration, validates key time/size/fingerprint, and durably claims that identity
 and intent. It does not forward a duplicate claim. It exposes `order.ack` only
 after the durable commit and retains the native `order.outcome` for duplicates.
-A conflicting fingerprint refuses before any second forward.
+A conflicting fingerprint answers unknown before any second forward.
+
+When ledger coverage begins or changes, the router guards initial admission.
+An unrecorded key that may predate coverage, including keys encountered during
+the coverage quarantine, answers unknown and is never re-forwarded on retry.
+A failed ledger read/write, missing expired record or recorded cancellation
+also proves no absence. Only evidence of the box's own refusal (or a key that
+could never be a valid order key) permits a not-sent reply. The SDK accepts
+these unknown results without resubmitting or labeling them not sent.
 
 A durable claim without an acknowledgement after a DO or box interruption stays
 UNCERTAIN internally and is never re-forwarded. The four frames define no
@@ -130,11 +144,13 @@ nulls. The synthetic router fixture pins these cases:
 | Situation | Replies | Outbox result |
 | --- | --- | --- |
 | Claimed intent whose handoff/result cannot be proven | `unknown`, venue ID null, intent UUID as client ID, error `{message: "Order result is not yet known", outcome: "unknown"}`; an ACK is not required | Unknown; never resubmit |
-| Submit refused before dispatch | ACK `received: false`, then `refused`, both IDs null, error `{message: "not sent: order ledger unavailable", outcome: "notSent"}` (other validation refusals use their reason) | Not sent |
-| Queue cancellation before dispatch, including a repeated cancellation | ACK `received: false`, then `refused`, both IDs null, error `{message: "not sent: canceled", outcome: "notSent"}` | Not sent; cancellation settled |
+| Recorded box refusal before venue dispatch | Replay ACK `received: false` and/or the recorded `refused` outcome, both IDs null, error `{message: "not sent: expired", outcome: "notSent"}` (the reason follows the box) | Not sent |
+| Unrecorded cancellation before dispatch, including a repeated cancellation | The same `unknown` shape above; recording the cancellation blocks submission but is not proof of no prior placement | Unknown; cancellation settled |
 | Queue cancellation after dispatch | Replay stored ACK/result when present, or await a live receipt; if the handoff can no longer be proven, the same `unknown` shape above | Stored result or unknown; no venue cancellation |
-| Queue cancellation for an unretained expired key | The same `unknown` shape above | Unknown; no venue cancellation |
-| Queue cancellation whose persistence fails | Ordinary `{t: "msg", d: {op: "error", accountName, data: ["order ledger unavailable"]}}`, without an order receipt | Keep cancellation pending for retry |
+| Unrecorded expired/pre-coverage key, coverage quarantine, or ledger persistence failure | The same `unknown` shape above, without a fabricated ACK `received: false` | Unknown; never resubmit |
+| Same key with another fingerprint | Unknown with message `Intent key already used for a different order` | Unknown; never resubmit |
+| Malformed box receipt naming a forwarded intent | Unknown with message `Order receipt was malformed` | Unknown; never resubmit |
+| Ordinary malformed/unbindable request error | Ordinary `{t: "msg", d: {op: "error", accountName, data: [message]}}`, without an order receipt | Keep cancellation pending for retry |
 
 A replayed placement retains the stored venue ID and intent UUID as client ID,
 with `error: null`. Unknown does not mean not sent. A router queue cancellation
@@ -142,6 +158,14 @@ never creates an outcome named `canceled`, a new acknowledgement kind, or a fift
 order frame. Ordinary malformed/unbindable request errors likewise remain ordinary
 error messages, not fabricated order receipts. Hosts must not clear pending queue
 cancellation merely on receipt of such an ordinary error.
+
+The router decodes box JSON before classifying it, including escaped kind names
+and reordered fields. Every receipt the outbox can consume is intercepted or
+classified malformed, never forwarded around the ledger. Placed results need a
+nonempty venue ID; client IDs are null or the matching intent UUID. Malformed,
+oversized and unknown order kinds are not trusted receipts. The fixture pins
+valid and hostile encodings against the SDK predicate; receipt kinds and outcome
+kinds must be literal strings, never values coerced through user data.
 
 ### Host-neutral outbox
 

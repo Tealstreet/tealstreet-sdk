@@ -74,6 +74,10 @@ Router outcomes may be renumbered per client socket, including stored replays.
 Receipt ordering is checked per intent within that ticket, so one intent's higher
 number cannot hide another's deferred replay. Replacement tickets reset receipt
 ordering and old tickets cannot update the replacement connection.
+The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations,
+coverage uncertainty and ledger failures answer unknown, never prove not sent.
+Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
+string coercion. Capability discovery still requires completed socket admission.
 Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
 intents are never submitted again. Unacknowledged intents expire after ten
 monotonic seconds, including time spent waiting for persistence or admission.

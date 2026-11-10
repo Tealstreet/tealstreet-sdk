@@ -261,7 +261,7 @@ export class DelegatedOutbox {
           return;
         }
       }
-      if (!record(parsed) || !['order.ack', 'order.outcome'].includes(String(parsed.t)) || !record(parsed.d)) return;
+      if (!record(parsed) || (parsed.t !== 'order.ack' && parsed.t !== 'order.outcome') || !record(parsed.d)) return;
       const d = parsed.d;
       if (d.accountName !== this.scope.accountName || d.instanceId !== connection.instanceId) return;
       const size = utf8ToBytes(JSON.stringify(parsed)).length;
@@ -273,7 +273,10 @@ export class DelegatedOutbox {
       if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
         if (!['queued', 'notSent', 'canceled'].includes(row.state)) return;
         row.state = data.received ? 'acknowledged' : 'notSent';
-      } else if (parsed.t === 'order.outcome' && ['placed', 'refused', 'unknown'].includes(String(data.outcome))) {
+      } else if (
+        parsed.t === 'order.outcome' &&
+        (data.outcome === 'placed' || data.outcome === 'refused' || data.outcome === 'unknown')
+      ) {
         if (data.clientOrderId !== null && data.clientOrderId !== row.intentId) return;
         // Router counters describe delivery on this captured socket, not the
         // business result. Another intent's live/replayed result is no fence.
