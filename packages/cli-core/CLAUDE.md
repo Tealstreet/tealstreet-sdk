@@ -282,6 +282,8 @@ Position percentages for close-like commands use shared `roundPercentageCloseSiz
 under 100% floors to the native step and refuses a zero result with size/step;
 100% preserves the full native size. Explicit notional/native amounts keep their
 separate preserve-or-refuse policy. CLI's existing over-100% close cap remains.
+Both single-position and global closes validate the requested native amount
+before capping it at the position size, so the cap cannot hide an invalid step.
 
 ## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
 
