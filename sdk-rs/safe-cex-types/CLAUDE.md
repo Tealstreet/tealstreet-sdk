@@ -336,3 +336,10 @@ strict codecs. `initial_store_data` owns unloaded Store defaults. The scoped
 publishes six modules and the initial value without overwriting other slices.
 Composed model imports use their owning public generated identities. Opaque
 config/user data projects to unknown; its native retained/JSON policy is unchanged.
+
+`PositionSettings` is the Store slice's separate last-reported settings record.
+`StoreData.positionSettings` is generated as a map keyed by exact position ID;
+its default is empty and old snapshots decode without it. The private record
+codec preserves required identity/leverage and optional margin/mode without
+adding exposure fields. Regenerate with the scoped `store` example and
+`store-generate.cjs`; Position and its display contract are unchanged.
