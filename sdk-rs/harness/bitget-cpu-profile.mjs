@@ -70,30 +70,13 @@ for (let trial = 0; trial < 4; trial++) for (const label of ['current', 'pr3426'
     throw new Error('Profile replay left incomplete transport work');
   trials.push({ label, trial, frames: result.frames, metrics: result.metrics, transportReceipt: result.transportReceipt });
 }
-// Names are advisory unless optimized non-custom sections match production exactly.
-function codeHash(path) {
-  const bytes = readFileSync(path), sections = [bytes.subarray(0, 8)];
-  let cursor = 8;
-  while (cursor < bytes.length) {
-    const start = cursor, id = bytes[cursor++];
-    let size = 0, shift = 0, byte;
-    do { byte = bytes[cursor++]; size += (byte & 127) * 2 ** shift; shift += 7; } while (byte & 128);
-    cursor += size;
-    if (id !== 0) sections.push(bytes.subarray(start, cursor));
-  }
-  return createHash('sha256').update(Buffer.concat(sections)).digest('hex');
-}
+// Follow source names through the unmodified production passes. Never retain
+// debug names in an optimized input: that can change Binaryen's layout.
 for (const [label, files] of Object.entries(labels)) {
-  const named = `${out}/${label}-named`; mkdirSync(named);
-  tool('wasm-bindgen', ['--target', 'nodejs', '--remove-producers-section', '--out-name', 'safe_cex_wasm', '--out-dir', named, files.raw]);
-  const path = `${named}/safe_cex_wasm_bg.wasm`;
-  for (let pass = 0; pass < 2; pass++) tool('wasm-opt', ['-Oz', '-g', '--enable-bulk-memory', '--enable-bulk-memory-opt',
-    '--enable-mutable-globals', '--enable-sign-ext', '--enable-nontrapping-float-to-int', '--enable-reference-types',
-    '--enable-multivalue', path, '-o', path]);
-  const productionCode = codeHash(`${files.directory}/safe_cex_wasm_bg.wasm`);
-  if (codeHash(path) !== productionCode) throw new Error(`${label} named code differs from production`);
-  writeFileSync(`${out}/${label}.function-map.txt`, tool('wasm-opt', ['--print-function-map', path, '-o', `${named}/mapped.wasm`]));
-  seals[label].functionMapCodeHash = productionCode;
+  const named = `${out}/${label}-map`;
+  tool('python3', ['sdk-rs/harness/bitget-profile-names.py', '--raw', files.raw,
+    '--production', `${files.directory}/safe_cex_wasm_bg.wasm`, '--out', named]);
+  seals[label].functionMapProof = JSON.parse(readFileSync(`${named}/proof.json`));
 }
 writeFileSync(`${out}/profiles.json`, JSON.stringify({ diagnosticOnly: true, runId: process.env.GITHUB_RUN_ID,
   node: sha(process.execPath), tape: sha(tape), priorAnchorQ: certificate.anchor.q, seals, trials }, null, 2));

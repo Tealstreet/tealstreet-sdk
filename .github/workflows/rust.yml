@@ -1629,16 +1629,25 @@ jobs:
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Build and archive current Bitget composition
+        id: profile_build
         run: |
           bash sdk-rs/harness/build.sh --venue bitget
           node sdk-rs/harness/ci-wasm.mjs --venue bitget --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Profile current and pinned prior Bitget modules separately
         run: node sdk-rs/harness/bitget-cpu-profile.mjs --out '${{ runner.temp }}/bitget-cpu-profile'
+      - name: Native quote allocation regression (no timing measurement)
+        if: always() && steps.profile_build.outcome == 'success'
+        run: cargo test --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-bitget --test ticker_allocations -j2
       - name: Retain diagnostic profiles and module proofs
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: bitget-cpu-profile
-          path: ${{ runner.temp }}/bitget-cpu-profile/
+          path: |
+            ${{ runner.temp }}/bitget-cpu-profile/*.cpuprofile
+            ${{ runner.temp }}/bitget-cpu-profile/*.json
+            ${{ runner.temp }}/bitget-cpu-profile/*.log
+            ${{ runner.temp }}/bitget-cpu-profile/*-map/*.json
+            ${{ runner.temp }}/bitget-cpu-profile/*-map/*.map
           retention-days: 7
           if-no-files-found: error
