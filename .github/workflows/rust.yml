@@ -1593,6 +1593,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/sdk-rs/target
       WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
+      SAFE_CEX_TYPESCRIPT_PATH: ${{ github.workspace }}/node_modules/typescript
       ESBUILD_WORKER_THREADS: '0'
       GH_TOKEN: ${{ github.token }}
     steps:
