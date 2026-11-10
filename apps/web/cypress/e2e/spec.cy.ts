@@ -2296,12 +2296,11 @@ const getAddAccountInput = (field: string, options: Partial<Cypress.Timeoutable>
 };
 
 const selectExchangeInAddAccountFlow = (exchange: string) => {
-  cy.get(`[data-testid=exchange-select-${exchange}]`, { timeout: 10000 }).scrollIntoView().should('be.visible').click();
+  const selector = `[data-testid=exchange-select-${exchange}]`;
+  cy.get(selector, { timeout: 10000 }).scrollIntoView().should('be.visible').click();
 
-  cy.get('body').then(($body) => {
-    if ($body.find('[data-testid=add-account-name-input]:visible').length > 0) return;
-    cy.contains('button', tradeEn['next']).should('be.enabled').click();
-  });
+  // The whitelist walkthrough also has Next; use the selected tile's dialog.
+  cy.get(selector).closest('[role="dialog"]').contains('button', tradeEn['next']).should('be.enabled').click();
 };
 
 const enableTealstreetProxyIfRendered = () => {
@@ -2876,7 +2875,7 @@ describe(
           cy.get('button[title="Account"]').first().click();
           cy.wait(300);
           cy.contains('.ant-dropdown-menu-item, [role=menuitem]', /^Api Keys$/i).click();
-          cy.contains('button', 'Add Account').should('be.visible').click();
+          cy.get('[role="dialog"]:visible').contains('button', 'Add Account').should('be.visible').click();
 
           selectExchangeInAddAccountFlow('paradex');
 
@@ -2887,7 +2886,7 @@ describe(
           getAddAccountInput('api-key').clear().type(corruptKey(account.apiKey));
           getAddAccountInput('subkey-address').clear().type(account.subkeyAddress);
           getAddAccountInput('paradex-address').clear().type(account.paradexAddress);
-          cy.contains('button', tradeEn['done']).click();
+          getAddAccountInput('name').closest('[role="dialog"]').contains('button', tradeEn['done']).click();
 
           cy.window({ log: false, timeout: 15000 })
             .should((win) => {
@@ -3196,16 +3195,14 @@ describe(
         // AccountsSettings renders a hardcoded "Add Account"; the old
         // "Add new key" label is gone and its trade.add-new-key string is
         // now unreferenced.
-        cy.contains('button', 'Add Account').should('be.visible').click();
+        cy.get('[role="dialog"]:visible').contains('button', 'Add Account').should('be.visible').click();
 
-        // Step 1 — Exchange selection. The current flow selects a tile first
-        // and advances with Next; the helper also tolerates older auto-advance
-        // builds when this spec targets an already-deployed lane.
+        // Step 1 — Select a tile, then advance with Next in the account dialog.
         selectExchangeInAddAccountFlow(exchange);
 
         // For Hyperliquid, default UI shows auto setup wizard — switch to manual form
         if (isHyperliquid) {
-          cy.contains('button', tradeEn['manual-setup']).click();
+          cy.get('[role="dialog"]:visible').contains('button', tradeEn['manual-setup']).click();
           getAddAccountInput('name', { timeout: 5000 }).should('be.visible');
         }
 
@@ -3221,7 +3218,7 @@ describe(
         }
 
         // Submit the form
-        cy.contains('button', tradeEn['done']).click();
+        getAddAccountInput('name').closest('[role="dialog"]').contains('button', tradeEn['done']).click();
 
         // Assert: account appears in localStorage. Credential validation can
         // stay in-flight for several seconds after Done is clicked.
@@ -3248,14 +3245,14 @@ describe(
         // AccountsSettings renders a hardcoded "Add Account"; the old
         // "Add new key" label is gone and its trade.add-new-key string is
         // now unreferenced.
-        cy.contains('button', 'Add Account').should('be.visible').click();
+        cy.get('[role="dialog"]:visible').contains('button', 'Add Account').should('be.visible').click();
 
         // Step 1 — Exchange selection.
         selectExchangeInAddAccountFlow(exchange);
 
         // For Hyperliquid, switch to manual form again
         if (isHyperliquid) {
-          cy.contains('button', tradeEn['manual-setup']).click();
+          cy.get('[role="dialog"]:visible').contains('button', tradeEn['manual-setup']).click();
           getAddAccountInput('name', { timeout: 5000 }).should('be.visible');
         }
 
@@ -3272,7 +3269,7 @@ describe(
           if (isAuthFailureText(err.message)) return false;
           return true;
         });
-        cy.contains('button', tradeEn['done']).click();
+        getAddAccountInput('name').closest('[role="dialog"]').contains('button', tradeEn['done']).click();
 
         // The form now pre-validates credentials against the exchange before
         // saving (see useAccountForm.ts `handleFinish` → `validateAccount`).

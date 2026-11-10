@@ -302,6 +302,9 @@ with the `Next` button; do not assume clicking `exchange-select-*` opens the
 credential form by itself. After clicking `Done`, assert that the account was
 persisted with a retrying check; credential validation can keep the button busy
 for several seconds before persistence.
+Scope account actions to their dialog: the IP-whitelist walkthrough also renders
+Next and Done earlier on the page. Resolve the picker's dialog from its exchange
+tile, and the credential form's dialog from its name input.
 The Tealstreet proxy checkbox is a conditional transport control. If a Cypress
 account has `tealstreetProxy` but the current add-account UI does not render the
 checkbox, continue with the form defaults and let credential validation prove the
