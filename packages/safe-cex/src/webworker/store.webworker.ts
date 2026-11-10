@@ -1,5 +1,6 @@
 import { setConnectionVisibility } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import { ExchangeName } from '../types';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../utils/wsDiagnostics';
@@ -438,7 +439,7 @@ const start = (ctx: Worker, shared = false) => {
         try {
           handler(cfg as Record<string, unknown>);
         } catch (e) {
-          console.error('[store.webworker] __workerConfig host handler threw', e);
+          diagnosticConsole.error('[store.webworker] __workerConfig host handler threw', e);
         }
       }
       if ('perfFixture' in cfg) {
@@ -497,7 +498,7 @@ const start = (ctx: Worker, shared = false) => {
     ) {
       if (!hasLoggedInstanceMismatch) {
         hasLoggedInstanceMismatch = true;
-        console.warn(
+        diagnosticConsole.warn(
           '[StoreWebWorker] Instance ID mismatch detected; dropping stale messages for this worker lifecycle',
           {
             expectedInstanceId: exchangeWorker.instanceId,
@@ -571,9 +572,9 @@ const start = (ctx: Worker, shared = false) => {
         // Force dispose: immediately dispose existing exchange without timeout
         // The web app will send a subsequent 'init' message to create a fresh exchange
         // This avoids the 10s dispose timeout that would cause race conditions
-        console.log(`[Worker] 🔄 reinit (force dispose) received for ${accountName || exchangeName}`);
+        diagnosticConsole.log(`[Worker] 🔄 reinit (force dispose) received for ${accountName || exchangeName}`);
         if (exchangeWorker) {
-          console.log(`[Worker] 🗑️ Force disposing existing exchange`);
+          diagnosticConsole.log(`[Worker] 🗑️ Force disposing existing exchange`);
           deleteMyExchangeWorker();
           exchangeWorker.handlePayload({ op: 'dispose' });
         }
@@ -588,7 +589,7 @@ const start = (ctx: Worker, shared = false) => {
           attachedSharedWorker = undefined;
           failedWorker = undefined;
         }
-        console.log(`[Worker] ✓ Exchange disposed, ready for fresh init`);
+        diagnosticConsole.log(`[Worker] ✓ Exchange disposed, ready for fresh init`);
         break;
       case 'sendSnapshot':
         // CLI serve mode: send full store snapshot to all connected sessions
@@ -673,7 +674,7 @@ if (typeof self !== 'undefined' && !self.document) {
           if (somePort) {
             somePort.postMessage(msg);
           } else {
-            console.error('[Worker] No ports available to send error message', msg);
+            diagnosticConsole.error('[Worker] No ports available to send error message', msg);
           }
         }
       };
@@ -700,7 +701,7 @@ if (typeof self !== 'undefined' && !self.document) {
         ],
       });
     } catch (e) {
-      console.error('[Worker] Failed to send error to main thread:', e);
+      diagnosticConsole.error('[Worker] Failed to send error to main thread:', e);
     }
   });
 
@@ -741,7 +742,7 @@ if (typeof self !== 'undefined' && !self.document) {
         } else {
           const somePort = Object.values(ports).flat()[0];
           if (somePort) somePort.postMessage(msg);
-          else console.error('[Worker] No ports available to send rejection', msg);
+          else diagnosticConsole.error('[Worker] No ports available to send rejection', msg);
         }
       };
 
@@ -765,7 +766,7 @@ if (typeof self !== 'undefined' && !self.document) {
         ],
       });
     } catch (e) {
-      console.error('[Worker] Failed to forward unhandled rejection:', e);
+      diagnosticConsole.error('[Worker] Failed to forward unhandled rejection:', e);
     }
   });
 

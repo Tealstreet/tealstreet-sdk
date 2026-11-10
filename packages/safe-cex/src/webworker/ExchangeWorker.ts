@@ -17,6 +17,7 @@ import { snapshotDelegatedSigningOptions } from '../exchanges/rust/delegatedSign
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { unsupportedVenueError } from '../unsupportedVenue';
+import { diagnosticConsole, diagnosticText, redactDiagnosticData } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
@@ -204,7 +205,7 @@ export class ExchangeWorker {
     this._ctx.postMessage({
       op: 'log',
       data: [
-        JSON.stringify({
+        diagnosticText({
           level,
           message,
           context: { exchange: this._exchangeName, account: this._accountName, ...context },
@@ -261,40 +262,42 @@ export class ExchangeWorker {
           };
 
     try {
-      this._ctx.postMessage({
-        op: 'error',
-        data: [
-          message,
-          {
-            sendToSentry: effectiveSendToSentry,
-            suppressConsoleLog,
-            classified: classifiedError(error),
-            sentryData: {
-              error: serializableError,
-              tags: {
-                source: 'webworker',
-                module: 'ExchangeWorker',
-                exchange: this._exchangeName,
-                account: this._accountName,
-                // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
-                ...exchangeErrorTags(error),
-                tunnel_port: tunnelLanePort(),
-                ...splitExtra.sentryTags,
-                ...workerSentryControl.tags,
-              },
-              extra: {
-                ...splitExtra.extra,
-                ...splitExtra.sentryExtra,
-                ...workerSentryControl.extra,
-                ...(suppressedRepeatedReports > 0 ? { suppressedRepeatedReports } : {}),
+      this._ctx.postMessage(
+        redactDiagnosticData({
+          op: 'error',
+          data: [
+            message,
+            {
+              sendToSentry: effectiveSendToSentry,
+              suppressConsoleLog,
+              classified: classifiedError(error),
+              sentryData: {
+                error: serializableError,
+                tags: {
+                  source: 'webworker',
+                  module: 'ExchangeWorker',
+                  exchange: this._exchangeName,
+                  account: this._accountName,
+                  // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
+                  ...exchangeErrorTags(error),
+                  tunnel_port: tunnelLanePort(),
+                  ...splitExtra.sentryTags,
+                  ...workerSentryControl.tags,
+                },
+                extra: {
+                  ...splitExtra.extra,
+                  ...splitExtra.sentryExtra,
+                  ...workerSentryControl.extra,
+                  ...(suppressedRepeatedReports > 0 ? { suppressedRepeatedReports } : {}),
+                },
               },
             },
-          },
-        ],
-      });
+          ],
+        }),
+      );
     } catch (e) {
       // Fallback if postMessage fails
-      console.error('[ExchangeWorker] Failed to send error to main thread:', message, error, e);
+      diagnosticConsole.error('[ExchangeWorker] Failed to send error to main thread:', message, error, e);
     }
   }
 
@@ -449,7 +452,7 @@ export class ExchangeWorker {
           isErrorReported(e) &&
           !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
       ) {
-        console.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
+        diagnosticConsole.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
         return false;
       }
       const detail = e instanceof Error && e.message ? `: ${e.message}` : '';

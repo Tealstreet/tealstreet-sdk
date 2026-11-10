@@ -229,6 +229,9 @@ ordinary synchronization retains its local-UTC fallback and five-minute cadence.
 
 ## Files
 
+- `diagnosticRedaction.ts` — detached copies for console, log events, telemetry
+  and retained diagnostics. Never use it to transform live command or market
+  messages; ordinary IDs and timestamps remain diagnostic context.
 - `httpFailure.ts` — `getHttpFailure` / `appendHttpFailure` / `describeHttpFailure`.
   The HOW adapter resolves non-2xx tunnel frames without axios' `settle()`, so a
   venue interceptor's SUCCESS handler receives the failure with its status
