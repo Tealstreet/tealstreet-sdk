@@ -266,6 +266,9 @@ export class DelegatedOutbox {
   private readonly sent = new Map<string, Readonly<OutboxConnection>>();
   private readonly canceled = new Map<string, Readonly<OutboxConnection>>();
   private readonly durable = new Set<string>();
+  // Identity durability survives a failed later state update. This is never
+  // no-handoff evidence and cannot make an intent replayable.
+  private readonly persistedIntentKeys = new Set<string>();
   // Only current, durably completed rows can release capacity or retire.
   private readonly completedIntents = new Map<string, DelegatedIntent>();
   private connection?: Readonly<OutboxConnection>;
@@ -460,7 +463,7 @@ export class DelegatedOutbox {
         // replay state. Serialize behind the original put and keep its brands.
         return this.serial(async () => {
           if (!this.active) throw new Error('Outbox is closed or full');
-          if (!this.durable.has(existing.intentId)) throw new DelegatedIntentError('intentNotDurable');
+          if (!this.persistedIntentKeys.has(existing.intentId)) throw new DelegatedIntentError('intentNotDurable');
           existing.callerSuppliedIntentId = true;
           await this.persist(existing);
           return existing.intentId;
@@ -939,6 +942,7 @@ export class DelegatedOutbox {
     this.normalizeNotSent(row);
     const saved = clone(row);
     await this.options.storage.put(this.scope, saved);
+    this.persistedIntentKeys.add(row.intentId);
     // A synchronous deadline/cancellation can change memory during this await.
     if (JSON.stringify(saved) === JSON.stringify(row)) this.durable.add(row.intentId);
     else this.durable.delete(row.intentId);
@@ -980,6 +984,7 @@ export class DelegatedOutbox {
       this.stopTimer(row.intentId);
       this.intents.delete(row.intentId);
       this.durable.delete(row.intentId);
+      this.persistedIntentKeys.delete(row.intentId);
       this.completedIntents.delete(row.intentId);
       this.outcomeSequences.delete(row.intentId);
     }

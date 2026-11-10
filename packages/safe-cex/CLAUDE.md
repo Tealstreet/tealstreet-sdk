@@ -141,7 +141,9 @@ Both entry points accept optional `{intentId}` with a canonical caller UUIDv7.
 Identical retries are durable identity lookups: preserve sequence, canonical
 payload/fingerprint, deadline and handoff evidence, and never submit again.
 Different action/targets or placement family rejects `intentConflict`; a failed
-original put rejects an identity retry as `intentNotDurable`. The additive
+original put rejects an identity retry as `intentNotDurable`. A later state-put
+failure never erases the original identity's durability or authorizes replay.
+The additive
 `callerSuppliedIntentId: true` reservation survives completed-history retirement
 and restore under the same 1,056-record bound. `enqueueAction` shares placement's
 not-sent and replay evidence constructors; no direct not-sent assignment is

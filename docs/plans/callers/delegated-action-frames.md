@@ -175,6 +175,8 @@ An identical retry serializes behind persistence and returns the original ID,
 sequence, fingerprint and deadline without sending or changing handoff/replay
 state. Changed action/targets/parameters or protocol family rejects as
 intentConflict. A failed original put cannot be acknowledged by a retry.
+A failed later state update does not erase the original identity's durability;
+lookup can repair that metadata without resubmitting or granting replay proof.
 The additive persisted `callerSuppliedIntentId?: true` reservation survives
 completed-history compaction and restore, including adoption of an existing SDK
 key. It remains subject to the existing 1,056-record total bound; exhaustion

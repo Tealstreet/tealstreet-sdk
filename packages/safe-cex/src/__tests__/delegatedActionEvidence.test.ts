@@ -319,6 +319,30 @@ describe('action writes share the handoff evidence model', () => {
       box.close();
     },
   );
+  it.each([
+    'delegatedOrderFramesV1',
+    'delegatedOrderLedgerV1',
+    'delegatedOrderActionsV1',
+    'delegatedOrderActionLedgerV1',
+  ] as const)('retains handoff uncertainty when replacement loses %s', async (flag) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection());
+    const id = await box.enqueueAction(cancel);
+    const replacement = f.connection();
+    replacement.capabilities[flag] = false;
+    const ticket = box.connect(replacement);
+    await box.flush(ticket);
+    await box.receive(ticket, receipt(box, id, 'refused'));
+    expect(box.entries()[0].state).toBe('unknown');
+    f.advance(10_000);
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0].state).toBe('unknown');
+    expect(f.writes).toHaveLength(1);
+    restored.close();
+  });
   it('indexes applied action history and recovers completed capacity', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -419,6 +443,24 @@ describe('caller-owned action identity', () => {
     await expect(box.enqueueAction(cancel, { intentId: id })).rejects.toThrow('offline');
     await expect(box.enqueueAction(cancel, { intentId: id })).rejects.toMatchObject({ code: 'intentNotDurable' });
     expect(f.writes).toHaveLength(0);
+    box.close();
+  });
+  it('retains a durable caller identity after a later state put fails', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection());
+    const id = key(75);
+    await box.enqueueAction(cancel, { intentId: id });
+    const put = f.options.storage.put;
+    f.options.storage.put = async () => {
+      throw new Error('state offline');
+    };
+    await expect(box.cancel(id)).rejects.toThrow('state offline');
+    f.options.storage.put = put;
+    expect(await box.enqueueAction(cancel, { intentId: id })).toBe(id);
+    expect(box.entries()[0]).toMatchObject({ state: 'unknown', cancelPending: true });
+    expect(box.entries()[0]).not.toHaveProperty('noHandoffEvidence');
+    expect(f.writes).toHaveLength(1);
     box.close();
   });
   it('retains completed caller reservations through history compaction and restore', async () => {
