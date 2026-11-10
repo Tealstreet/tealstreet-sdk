@@ -97,6 +97,8 @@ The native dispatch adapter and the SDK's hosted HTTP capture formatter both
 apply attribution, including single and batch creates, attached TP/SL, plan
 orders and position TP/SL. The declared native-header policy protects `source`
 from callback overrides.
+Native protection for this broker header compiles only with the `mexc` feature;
+unrelated families retain their prior compiled construction metadata.
 
 This crate implements perpetual futures. MEXC's broker protocol uses the same
 header and broker ID for spot and futures; this change adds no spot adapter.
