@@ -292,7 +292,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3299 merged 2ca7125e8ab: local optimized web/node 1,920,015 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
-  mexc: 1_931_264,
+  // #3433 head 99eed37c13cc: fresh optimized web/node 1,927,409 B + 10 KiB, rounded up to KiB.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 (two -Oz passes).
+  mexc: 1_938_432,
   okx: 2_053_120,
   orderly: 1_773_568,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
