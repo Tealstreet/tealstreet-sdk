@@ -187,14 +187,50 @@ fn keyed_missing_callbacks_keep_adoption_and_configuration_refusals() {
 
 #[test]
 fn valid_provider_keeps_disabled_private_remote_signing_unsupported() {
-    for venue in ["apexomni", "asterdex"] {
+    let value = json!({"remoteSigning": true,
+        "publicMode": {"requested": false, "remoteSigner": true},
+        "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent"}}});
+    let error = build_with_signer("asterdex", options(value), None, Some(Arc::new(NoIo)), Mode)
+        .expect_err("valid provider cannot enable unsupported private custody");
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+}
+
+#[cfg(feature = "apexomni")]
+#[test]
+fn valid_provider_admits_apexomni_private_signing_after_hosted_adoption() {
+    use safe_cex_venues::{ConstructionContext, build_with_signer_in_context};
+
+    // Master #3300 enabled RemoteSigner custody. A valid provider must now
+    // construct a private engine, rather than use the disabled-family refusal.
+    for context in [ConstructionContext::Client, ConstructionContext::Hosted] {
         let value = json!({"remoteSigning": true,
             "publicMode": {"requested": false, "remoteSigner": true},
-            "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent"}}});
-        let error = build_with_signer(venue, options(value), None, Some(Arc::new(NoIo)), Mode)
-            .expect_err("valid provider cannot enable unsupported private custody");
-        assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
-        assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
+            "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent",
+                "passphrase": "opaque-passphrase", "extra": {"zklinkSeed": "opaque-zklink"}}}});
+        let error = build_with_signer_in_context(
+            context,
+            "apexomni",
+            options(value.clone()),
+            None,
+            Some(Arc::new(NoIo)),
+            Mode,
+        )
+        .expect_err("admitted custody still requires engine entropy");
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput), "{context:?}");
+        assert_eq!(error.message, "Engine entropy providers are required");
+        assert!(
+            build_with_signer_in_context(
+                context,
+                "apexomni",
+                options(value),
+                Some(safe_cex_engine::test_support::seeded_entropy(17)),
+                Some(Arc::new(NoIo)),
+                Mode,
+            )
+            .expect("configured ApexOmni provider is admitted"),
+            "{context:?}: RemoteSigner admission must keep private startup"
+        );
     }
 }
 
