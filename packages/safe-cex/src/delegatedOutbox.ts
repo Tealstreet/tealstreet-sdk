@@ -289,7 +289,13 @@ export class DelegatedOutbox {
     return this.serial(async () => {
       if (!this.current(connection)) return;
       let parsed: unknown = frame;
+      let wireSize: number | undefined;
       if (typeof parsed === 'string') {
+        // Bound the actual received bytes before parsing can discard whitespace
+        // or normalize escaped text. ACKs get their smaller bound below.
+        if (parsed.length > DELEGATED_OUTCOME_MAX) return;
+        wireSize = utf8ToBytes(parsed).length;
+        if (wireSize > DELEGATED_OUTCOME_MAX) return;
         try {
           parsed = JSON.parse(parsed);
         } catch {
@@ -306,7 +312,7 @@ export class DelegatedOutbox {
         return;
       const d = parsed.d;
       if (d.accountName !== this.scope.accountName || d.instanceId !== connection.instanceId) return;
-      const size = utf8ToBytes(JSON.stringify(parsed)).length;
+      const size = wireSize ?? utf8ToBytes(JSON.stringify(parsed)).length;
       if (
         size > (parsed.t === 'order.ack' || parsed.t === 'order.actionAck' ? DELEGATED_ACK_MAX : DELEGATED_OUTCOME_MAX)
       )
