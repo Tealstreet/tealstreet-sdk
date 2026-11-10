@@ -356,13 +356,44 @@ describe('DELEGATED host-neutral outbox', () => {
       restored.close();
     },
   );
-  it.each(['throw', 'closed', 'declined'] as const)('expires a never-forwarded %s send as notSent', async (kind) => {
+  it.each([false, true])('fences a throwing send as unknown (physical handoff: %s)', async (handedOff) => {
+    const f = fixture();
+    const changes: DelegatedIntent[] = [];
+    f.options.changed = (row) => changes.push(row);
+    const box = await DelegatedOutbox.open(f.options);
+    let attempts = 0;
+    const connection = box.connect({
+      ...f.connection(),
+      send: (frame) => {
+        attempts++;
+        if (handedOff) f.writes.push(frame);
+        throw new Error('connection lost');
+      },
+    });
+    const id = await box.enqueue(params);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    expect(changes.at(-1)?.state).toBe('unknown');
+    expect([...f.rows.values()][0]).toMatchObject({ state: 'unknown' });
+    expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
+    expect([...f.rows.values()][0]).not.toHaveProperty('notSentEvidence');
+    await box.flush(connection);
+    f.advance(60_000);
+    await box.flush(box.connect(f.connection()));
+    expect(box.entries()[0].state).toBe('unknown');
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0].state).toBe('unknown');
+    expect(attempts).toBe(1);
+    expect(f.writes).toHaveLength(handedOff ? 1 : 0);
+    restored.close();
+  });
+  it.each(['closed', 'declined'] as const)('expires a never-forwarded %s send as notSent', async (kind) => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     const c = box.connect({
       ...f.connection(),
       send: () => {
-        if (kind === 'throw') throw new Error('socket closed before send');
         return false;
       },
     });
@@ -420,15 +451,18 @@ describe('DELEGATED host-neutral outbox', () => {
       ...f.connection(),
       send: (text) => {
         cancellation = box.cancel(JSON.parse(text).d.intentId);
-        if (kind === 'throw') throw new Error('closed before handoff');
+        if (kind === 'throw') throw new Error('connection lost');
         return false;
       },
     });
     await box.enqueue(params);
     await cancellation;
-    expect(box.entries()[0]).toMatchObject({ state: 'canceled', cancelPending: false });
+    expect(box.entries()[0]).toMatchObject({
+      state: kind === 'throw' ? 'unknown' : 'canceled',
+      cancelPending: kind === 'throw',
+    });
     await box.flush(box.connect(f.connection()));
-    expect(f.writes).toEqual([]);
+    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(kind === 'throw' ? ['order.cancelQueued'] : []);
     box.close();
   });
   it('keeps delayed unknown-expiry storage and timers with Alice across a Bob login', async () => {
