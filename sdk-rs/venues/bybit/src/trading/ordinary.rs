@@ -1101,7 +1101,9 @@ impl BybitLinear {
         let plan = run.plan.clone();
         match decision {
             Decision::ProofPoll(axis) => {
-                let planned = run.partial.as_ref().unwrap().proof(axis);
+                let flow = run.partial.as_ref().unwrap();
+                let planned = flow.proof(axis);
+                let delay_ms = flow.poll_delay_ms(axis);
                 run.queue.push_front(Leg {
                     planned,
                     intent: LegIntent::Command,
@@ -1112,7 +1114,7 @@ impl BybitLinear {
                         &plan,
                         &active.slot,
                         &active.context,
-                        100,
+                        delay_ms,
                         partial_call(Operation::Read, 1),
                     )
                     .is_err()

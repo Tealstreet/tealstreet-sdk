@@ -29,7 +29,25 @@ pub fn enabled(venue: &str) -> bool {
         ))
         .expect("construction rules parse")
     });
+    #[cfg(test)]
+    let declaration = TEST_DECLARATION.try_with(Clone::clone).ok();
+    #[cfg(test)]
+    let rules = declaration.as_ref().unwrap_or(rules);
     venue == "bybit" && rules["venues"][venue]["delegated"]["enabled"] == true
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    static TEST_DECLARATION: serde_json::Value;
+}
+
+/// Supply declaration data for one test task, retaining the normal flag lookup.
+#[cfg(test)]
+pub(crate) async fn with_test_declaration<T>(
+    declaration: serde_json::Value,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    TEST_DECLARATION.scope(declaration, work).await
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
