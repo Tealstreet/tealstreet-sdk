@@ -38,6 +38,12 @@ export default function ProxyFleetIps({ exchange }: { exchange?: string }) {
       )}
       <p>Current Tealstreet fleet</p>
       {list(groups.fleet, 'Tealstreet proxy fleet IP addresses')}
+      {groups.extras.length > 0 && (
+        <>
+          <p>Additional venue addresses</p>
+          {list(groups.extras, 'Additional venue IP addresses')}
+        </>
+      )}
     </div>
   );
 }

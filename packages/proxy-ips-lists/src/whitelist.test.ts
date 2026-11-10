@@ -34,9 +34,13 @@ it('a venue with no AWS list copies only the fleet', () => {
   expect(whitelistIpGroups('polymarket').copy).toEqual(privateProxyIpsVultrTokyo);
 });
 
-it('does not add retired Bitunix or declared WS extras to the account-copy list', () => {
-  expect(whitelistIpGroups('bitunix').copy).toEqual(privateProxyIpsVultrTokyo);
-  expect(whitelistIpGroups('bitunix').extras).toEqual([]);
+it('keeps the live Bitunix passthrough extras, but no retired WS proxy extras', () => {
+  expect(whitelistIpGroups('bitunix').copy).toEqual([
+    ...privateProxyIpsVultrTokyo,
+    '72.46.86.143',
+    '202.182.126.32',
+  ]);
+  expect(whitelistIpGroups('bitunix').extras).toEqual(['72.46.86.143', '202.182.126.32']);
   exchangesRequireWsIp.push('bybit');
   try {
     expect(whitelistIpGroups('bybit').copy).toEqual(privateProxyIpsVultrTokyo);
@@ -48,6 +52,7 @@ it('does not add retired Bitunix or declared WS extras to the account-copy list'
 
 it('MEXC copies the same fleet-only list; retired AWS addresses no longer make caps relevant', () => {
   const groups = whitelistIpGroups('mexc');
+  expect(privateProxyIpsVultrTokyo.length).toBeLessThanOrEqual(10);
   expect(groups.limit).toBeUndefined();
   expect(groups.legacyOptional).toBe(false);
   expect(groups.copy).toEqual(privateProxyIpsVultrTokyo);

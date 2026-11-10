@@ -79,9 +79,10 @@ Not in `vercel.json`. Set in Vercel **Project Settings → Functions**:
 
 - **Whitelist IPs use shared display data.** Connect guides render
   `src/components/ProxyFleetIps.tsx`, using the display policy in
-  `packages/proxy-ips-lists/src/whitelist.ts`: only the current fleet is shown
-  and copied. The retired AWS addresses must not reappear in the docs or account
-  setup copy. Do not paste lists or use screenshots as data. Web's
+  `packages/proxy-ips-lists/src/whitelist.ts`: the current fleet is shown and
+  copied, with Bitunix's live passthrough IPs as the only venue-specific extras.
+  The retired AWS addresses must not reappear in the docs or account setup copy.
+  Do not paste lists or use screenshots as data. Web's
   `newEgressIps.test.ts` pins the fleet against infra.
 
 - **CLI section ships from `apps/cli/CLAUDE.md`'s doc-sync table.** When CLI behavior changes, the matching `apps/documentation/cli/**` doc updates in the same commit. The table lives in `apps/cli/CLAUDE.md` — that's the source of truth for which doc pairs with which code surface, do not duplicate it here.
