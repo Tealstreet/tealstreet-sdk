@@ -450,6 +450,7 @@ describe('DELEGATED host-neutral outbox', () => {
     box.connect({
       ...f.connection(),
       send: (text) => {
+        if (JSON.parse(text).t !== 'order.submit') return false;
         cancellation = box.cancel(JSON.parse(text).d.intentId);
         if (kind === 'throw') throw new Error('connection lost');
         return false;

@@ -94,7 +94,7 @@ export interface OutboxConnection extends OutboxScope {
     delegatedOrderLedgerV1?: boolean;
   };
   instanceId?: string;
-  /** True only for physical handoff; false/throw means neither sent nor buffered for a later connection. */
+  /** True for handoff; false proves no send/buffering; a throw leaves handoff unknown. */
   send(frame: string): boolean;
 }
 
@@ -602,13 +602,15 @@ export class DelegatedOutbox {
     delete row.noHandoffEvidence;
     row.state = 'sending';
     this.sent.set(row.intentId, connection);
-    let handedOff = false;
+    let handedOff: boolean | undefined;
     try {
       handedOff = connection.send(frame);
     } catch {
-      // The adapter contract guarantees a throw means no physical handoff.
+      // Failure after entering the adapter cannot prove that no bytes left.
+      unprovenNotSent(row);
+      this.stopTimer(row.intentId);
     }
-    if (!handedOff) {
+    if (handedOff === false) {
       if (noHandoff) {
         row.state = row.cancelPending ? 'canceled' : 'queued';
         row.cancelPending = false;
@@ -619,7 +621,7 @@ export class DelegatedOutbox {
     }
     this.changed(row);
     this.arm(row);
-    if (!handedOff && this.expired(row)) this.expire(row);
+    if (handedOff === false && this.expired(row)) this.expire(row);
     // Keep the write-ahead sending record on storage failure after handoff.
     await this.persist(row).catch(() => undefined);
   }
