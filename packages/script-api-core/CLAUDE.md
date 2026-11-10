@@ -336,3 +336,12 @@ or a maximum of native and derived quantities.
 
 `resolveOemsPlan` only routed to this verb when `contractSize === 1 && !isInverse`,
 which is the shape of a workaround for a bug nobody had written down.
+
+
+## Percentage closes
+
+`ClosePositionOpts.percent` is mutually exclusive with explicit native `amount`.
+`roundPercentageCloseSize` floors a known native quantity below 100%, refusing
+zero with a visible size/step error; 100% keeps the full native size. CoreAdapter
+and CLI share the rule, and MCP delegates its close tool to CoreAdapter. Explicit
+amounts and amendments keep preserve-or-refuse; unknown native sizes refuse.

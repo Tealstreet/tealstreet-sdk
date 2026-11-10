@@ -75,3 +75,29 @@ CoreAdapter's actual placement and close path. No authenticated requests occur.
 
 Source: <https://contract.mexc.com/api/v1/contract/detail?symbol=DOGE_USDT>;
 [contract field definitions](https://mexcdevelop.github.io/apidocs/contract_v1_en/#get-the-contract-information).
+
+## Percentage-close policy: option (a)
+
+CLI, CoreAdapter and MCP position percentages below 100 floor to the venue's
+native step after deriving a known native position quantity. For DOGE_USDT, 50% of 261 contracts requests 130.5 and
+sends exactly 130 for both long and short positions. A 0.1% request computes
+0.261 and refuses before sending: the visible error names 0.261, the floored
+zero, and native step 1. A 100% close keeps all 261 native contracts. Unknown
+native position evidence still refuses. Explicit native amounts and amendments
+keep preserve-or-refuse, so an explicit 130.5 is not rounded into a close.
+
+CLI position percentages, CoreAdapter `closePosition({ percent })`, and MCP
+`close_position` use the shared `roundPercentageCloseSize` rule. `percent` and
+explicit native `amount` are mutually exclusive. MCP takes a fresh position
+snapshot and delegates closing to CoreAdapter; discovery requires both trading
+and position-read capabilities. No new Rust venue method or capability frame
+is needed.
+
+TS/Rust parity note: the TS reference `safe-cex/utils/safe-math.ts::adjust` and
+MEXC's Rust `regular_body` native-volume formatter use nearest-step rounding.
+With a correctly normalized native step of 1, nearest rounding would turn
+130.5 into 131. The maintainer-approved percentage policy intentionally floors
+the derived partial-close quantity to 130 before dispatch. Rust receives an
+already aligned native amount and formats that same 130. Full closes, explicit
+amounts, amendments and unknown evidence retain their stated contracts; this
+policy does not change Rust's formatter or native wire units.

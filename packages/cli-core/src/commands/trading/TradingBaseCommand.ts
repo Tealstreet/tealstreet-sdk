@@ -9,6 +9,7 @@ import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNati
 import { nativeCloseSize, prepareCliAmendPrice } from '../../order/prepareCliOrder';
 import type { Market } from '@tealstreet/safe-cex/src/types';
 import { nativeAmountRules } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
+import { roundPercentageCloseSize } from '@tealstreet/script-api-core/src/order/orderPricing';
 
 // Preserve MEXC's original native intent until shared preparation can validate it.
 const roundParsedSize = (exchange: ExchangeLike, market: Market | undefined, raw: number): number =>
@@ -238,7 +239,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
         // NATIVE contracts. `position.contracts` is base and differs by
         // `contractSize`, so `close 50%` on an OKX-shaped market asked for a
         // multiple of the position rather than half of it.
-        return roundParsedSize(exchange, market, (nativeCloseSize(exchange, position) * pct) / 100);
+        const full = nativeCloseSize(exchange, position);
+        return defaultPercentScope === 'position'
+          ? roundPercentageCloseSize(full, Math.min(pct, 100), market, exchange.name)
+          : roundParsedSize(exchange, market, (full * pct) / 100);
       }
 
       // balance scope

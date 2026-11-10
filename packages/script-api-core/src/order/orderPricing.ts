@@ -76,6 +76,31 @@ export const roundMarketCloseSize = (rawSize: number, market: Market, exchangeNa
   return roundCloseSize(rawSize, nativeAmountRules(market, exchangeName).step);
 };
 
+/** Percentage intent floors partial closes; a full close retains its exact native size. */
+export const roundPercentageCloseSize = (
+  fullNative: number | null,
+  percent: number,
+  market: NativeAmountMarket,
+  exchangeName?: string,
+): number => {
+  if (fullNative === null || !Number.isFinite(fullNative) || fullNative <= 0) {
+    throw new ScriptValidationError(`Native position size is unknown or non-positive for '${market.symbol}'`);
+  }
+  if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
+    throw new ScriptValidationError(`Invalid close percentage ${percent}; expected more than 0 and at most 100`);
+  }
+  if (percent === 100) return fullNative;
+  const { step } = nativeAmountRules(market, exchangeName);
+  const requested = fullNative * (percent / 100);
+  const amount = roundToNearestMultipleDown(requested, step);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ScriptValidationError(
+      `Percentage close size ${requested} floors to 0 at native step ${step} for '${market.symbol}'`,
+    );
+  }
+  return amount;
+};
+
 /**
  * Sizing for a market order — `createMarketOrder` and the script adapter's
  * reduce-only branch. It never applies `shouldRoundSizeDown`, which is the

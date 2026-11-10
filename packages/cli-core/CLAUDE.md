@@ -278,6 +278,11 @@ or agreement signing occurs during preflight.
 placement. Position percentages use the same wrapper, so neither full nor
 percentage closes can turn unknown evidence into a guessed quantity.
 
+Position percentages for close-like commands use shared `roundPercentageCloseSize`:
+under 100% floors to the native step and refuses a zero result with size/step;
+100% preserves the full native size. Explicit notional/native amounts keep their
+separate preserve-or-refuse policy. CLI's existing over-100% close cap remains.
+
 ## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
 
 `TradingBaseCommand.notionalToSize` (and the `%bal` path beside it) must divide

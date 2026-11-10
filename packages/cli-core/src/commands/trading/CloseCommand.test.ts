@@ -109,7 +109,7 @@ describe('MEXC close sizing before shared order preparation', () => {
     expect(exchange.placeOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: 130 }));
   });
 
-  it('refuses an off-step percent close before pre-rounding can hide it', async () => {
+  it('floors a partial percent close to the native step per policy option (a)', async () => {
     const market = {
       id: 'DOGE_USDT',
       symbol: 'DOGEUSDT',
@@ -130,10 +130,9 @@ describe('MEXC close sizing before shared order preparation', () => {
         tickers: [{ symbol: market.symbol, last: 0.1 }],
       },
     } as never);
-    await expect(
-      new CloseCommand().execute(createMockContext(['close', '50%'], exchange, market.symbol)),
-    ).rejects.toThrow(/lot step/);
-    expect(exchange.placeOrder).not.toHaveBeenCalled();
+    const result = await new CloseCommand().execute(createMockContext(['close', '50%'], exchange, market.symbol));
+    expect(result.success).toBe(true);
+    expect(exchange.placeOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: 130 }));
   });
 });
 

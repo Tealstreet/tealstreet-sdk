@@ -140,6 +140,7 @@ export {
   assertCloseLikeOrderAmount,
   isStopLikeOrderType,
   roundMarketCloseSize,
+  roundPercentageCloseSize,
   roundMarketOrderSize,
   roundOrderPrice,
   roundOrderSize,

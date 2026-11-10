@@ -31,6 +31,7 @@ import {
   assertCloseLikeOrderAmount,
   assertMinimumPrice,
   roundMarketCloseSize,
+  roundPercentageCloseSize,
   roundOrderPrice,
   roundOrderSizeToNearest,
 } from '../order/orderPricing';
@@ -415,6 +416,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       const summary = `closePosition ${opts.symbol}${opts.side ? ` ${opts.side}` : ''}`;
       const orderIds: string[] = [];
       try {
+        if (opts.amount !== undefined && opts.percent !== undefined) {
+          throw new ScriptValidationError('Set only one of close amount and percent');
+        }
         const candidates = ((host.getStore(account)?.positions ?? []) as Position[]).filter(
           (position) => position.symbol === opts.symbol && (!opts.side || position.side === opts.side),
         );
@@ -427,7 +431,10 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           // position on a Bybit inverse market. `opts.amount` is already
           // native by contract; only the fallback needed converting.
           const exchange = requireExchange(account);
-          const amount = opts.amount ?? nativePositionSize(position, market);
+          const amount =
+            opts.percent !== undefined
+              ? roundPercentageCloseSize(nativePositionSize(position, market), opts.percent, market, exchange.name)
+              : (opts.amount ?? nativePositionSize(position, market));
           if (amount === null)
             throw new ScriptValidationError(
               `closePosition: native size is unknown for '${opts.symbol}'; refresh the position before closing`,
