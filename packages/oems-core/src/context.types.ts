@@ -119,8 +119,8 @@ export interface OemsPositionRef extends OemsPositionAddress {
    *  mark price of its own. */
   readonly markPrice: number;
   /** The venue's own number. Not `contracts × markPrice`, which is wrong on an
-   *  inverse contract. */
-  readonly notional: number;
+   *  inverse contract. Null when unavailable; a known zero stays zero. */
+  readonly notional: number | null;
   readonly unrealizedPnl: number;
   /** Null when the venue has no usable liquidation threshold. */
   readonly liquidationPrice: number | null;
@@ -141,8 +141,9 @@ export interface OemsOrderRef extends OemsOrderAddress {
   readonly filled: number;
   readonly remaining: number;
   /** `remaining` in the venue's own units — the unit an amend's `amount` is
-   *  in. Same distinction as `OemsPositionRef.nativeContracts`. */
-  readonly nativeRemaining: number;
+   *  in. Same distinction as `OemsPositionRef.nativeContracts`. Null when
+   *  unavailable; a known zero stays zero. */
+  readonly nativeRemaining: number | null;
   readonly price: number;
   readonly reduceOnly: boolean;
 }
