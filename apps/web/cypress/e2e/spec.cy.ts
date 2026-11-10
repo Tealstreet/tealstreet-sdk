@@ -476,31 +476,22 @@ const clickOrdersTab = (tabTestId: string) => {
   cy.get(`[data-testid=${tabTestId}]`).click({ force: true });
 };
 
-// Close every open position across every account by placing opposite-side
-// market reduceOnly orders directly via the controller. Same code path the
-// "Close All Positions" UI button uses (closeAllPositions → createMarketOrder),
-// but bypasses the popconfirm + Yes-click race that the UI introduces.
-// `store.positions[].contracts` is in BASE units, but placeOrder expects the
-// venue's NATIVE size — on contract-denominated venues formatCreateOrder does
-// adjust(amount, precision.amount) against a lot size in contracts. Passing base
-// straight through made okx's 0.0001 BTC (= 0.01 contracts, lotSz 0.01) adjust to
-// 0: "Order amount must be finite and positive after adjustment", so the position
-// could never be flattened and blocked the suite permanently. blofin has the same
-// shape and only survived because oversizing is clamped by reduceOnly.
-// Mirrors apps/web/src/utils/position/getPositionNativeSize.ts — keep in sync.
-const nativeCloseSize = (exch: any, symbol: string, side: string, contracts: number): number => {
-  const pos = exch?.store?.displayedPositions?.find((p: any) => p.symbol === symbol && p.side === side);
-  const market = pos?.market ?? exch?.store?.marketsBySymbol?.[symbol];
-  const fromExtra = Math.abs(Number(pos?.extra?.contractsNative || 0));
-  const base = Math.abs(pos?.contracts ?? contracts);
-  if (!market) return fromExtra || base;
+type NativeClosePosition = {
+  symbol: string;
+  side: string;
+  extra?: { contractsNative?: unknown };
+};
 
-  const contractSize = market.contractSize || 1;
-  // Inverse sizes come off notional; fall back to base so a missing live
-  // position can't silently resolve to 0 and skip the close.
-  const fromPosition = market.isInverse ? Math.abs(pos?.notional || 0) / contractSize || base : base / contractSize;
-
-  return adjust(Math.max(fromExtra, fromPosition), market.precision.amount);
+// Close orders require the exact native placement size. Base units, notional and
+// market precision cannot establish an unknown native size (NX #9405).
+const nativeCloseSize = (
+  exch: { store?: { displayedPositions?: readonly NativeClosePosition[] } },
+  symbol: string,
+  side: string,
+): number | undefined => {
+  const native = exch.store?.displayedPositions?.find((p) => p.symbol === symbol && p.side === side)?.extra
+    ?.contractsNative;
+  return typeof native === 'number' && Number.isFinite(native) && native > 0 ? native : undefined;
 };
 
 const recoverHostedSymbolPositionsForE2E = () => {
@@ -820,9 +811,11 @@ const closeAllPositionsViaController = () => {
             const exch = typeof exchanges.get === 'function' ? exchanges.get(acct) : (exchanges as any)[acct];
             if (!exch || typeof exch.placeOrder !== 'function') return;
 
-            const amount = nativeCloseSize(exch, symbol, side, contracts);
-            if (!(amount > 0)) {
-              logs.push(`[flatten] ${acct}:${symbol} skipped — size ${contracts} adjusts to ${amount}, cannot reduce`);
+            const amount = nativeCloseSize(exch, symbol, side);
+            if (amount === undefined) {
+              logs.push(
+                `[flatten] ${acct}:${symbol} skipped — exact native size is unknown or invalid; no close order sent`,
+              );
               return;
             }
             if (amount !== contracts) {
@@ -1950,9 +1943,11 @@ const closePositionWithMarketOrderForE2E = (positionSide: PositionSide) => {
       throw new Error(`Paradex e2e market close failed: no ${positionSide} ${symbol} position found`);
     }
 
-    const amount = nativeCloseSize(exch, symbol, position.side, position.contracts);
-    if (!(amount > 0)) {
-      throw new Error(`Paradex e2e market close failed: position size ${position.contracts} adjusted to ${amount}`);
+    const amount = nativeCloseSize(exch, symbol, position.side);
+    if (amount === undefined) {
+      throw new Error(
+        `Paradex e2e market close failed: exact native size is unknown or invalid for ${positionSide} ${symbol}; no close order sent`,
+      );
     }
 
     const side = positionSide === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy;

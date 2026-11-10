@@ -185,7 +185,7 @@ fn startup_store() -> String {
 }
 
 fn assert_construction_replies(
-    received: &mut mpsc::Receiver<String>,
+    received: &mut crate::out::Receiver,
     expected: Option<&str>,
     admitted: bool,
 ) {
@@ -204,9 +204,9 @@ fn assert_construction_replies(
 #[test]
 fn construction_reply_checks_still_reject_foreign_notifications() {
     for foreign in ["synthetic-A-result", "synthetic-B-result", "unexpected"] {
-        let (sender, mut received) = mpsc::channel(4);
-        sender.try_send(startup_store()).unwrap();
-        sender.try_send(foreign.into()).unwrap();
+        let (sender, mut received, _) = Out::channel(4);
+        assert!(sender.send(startup_store()));
+        assert!(sender.send(foreign.into()));
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 assert_construction_replies(&mut received, None, true);
@@ -219,10 +219,10 @@ fn construction_reply_checks_still_reject_foreign_notifications() {
 #[test]
 fn construction_reply_checks_allow_startup_for_admitted_owner() {
     for expected in [None, Some("synthetic-A-result")] {
-        let (sender, mut received) = mpsc::channel(4);
-        sender.try_send(startup_store()).unwrap();
+        let (sender, mut received, _) = Out::channel(4);
+        assert!(sender.send(startup_store()));
         if let Some(reply) = expected {
-            sender.try_send(reply.into()).unwrap();
+            assert!(sender.send(reply.into()));
         }
         assert_construction_replies(&mut received, expected, true);
     }
@@ -230,8 +230,8 @@ fn construction_reply_checks_allow_startup_for_admitted_owner() {
 
 #[test]
 fn construction_reply_checks_reject_startup_for_never_admitted_owner() {
-    let (sender, mut received) = mpsc::channel(4);
-    sender.try_send(startup_store()).unwrap();
+    let (sender, mut received, _) = Out::channel(4);
+    assert!(sender.send(startup_store()));
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             assert_construction_replies(&mut received, None, false);
@@ -243,7 +243,7 @@ fn construction_reply_checks_reject_startup_for_never_admitted_owner() {
 
 #[test]
 fn construction_reply_checks_allow_empty_outbox_for_never_admitted_owner() {
-    let (_sender, mut received) = mpsc::channel(4);
+    let (_sender, mut received, _) = Out::channel(4);
     assert_construction_replies(&mut received, None, false);
 }
 
