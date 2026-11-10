@@ -53,6 +53,7 @@ pub struct Envelope<'a> {
     pub id: Option<i64>,
 }
 
+// Stream-first frames decode typed bodies without a separate raw-body scan.
 pub enum FastAggregate<'a> {
     Tickers(Vec<TickerEvent<'a>>),
     Marks(Vec<MarkEvent<'a>>),

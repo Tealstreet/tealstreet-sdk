@@ -3153,7 +3153,7 @@ impl Venue for BybitLinear {
         _: bool,
         text: &str,
     ) -> Control {
-        if is_pong(text) {
+        if text.contains(r#""op":"pong""#) || text.contains(r#""ret_msg":"pong""#) {
             Control::Pong
         } else {
             Control::Other

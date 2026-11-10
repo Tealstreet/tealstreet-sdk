@@ -1215,20 +1215,9 @@ pub struct RecentTrade<'a> {
 
 /// Value of a frame's top-level `"topic"`, found without parsing the frame.
 pub fn topic(text: &str) -> Option<&str> {
-    let value = text
-        .strip_prefix("{\"topic\":\"")
-        .or_else(|| text.find("\"topic\":\"").map(|start| &text[start + 9..]))?;
-    let end = value.find('"')?;
-    Some(&value[..end])
-}
-
-pub fn is_pong(text: &str) -> bool {
-    text.match_indices('p').any(|(index, _)| {
-        let bytes = text.as_bytes();
-        bytes[index..].starts_with(b"pong\"")
-            && (bytes[..index].ends_with(b"\"op\":\"")
-                || bytes[..index].ends_with(b"\"ret_msg\":\""))
-    })
+    let start = text.find("\"topic\":\"")? + 9;
+    let end = text[start..].find('"')? + start;
+    Some(&text[start..end])
 }
 
 #[cfg(test)]
@@ -1238,45 +1227,6 @@ mod row_parity_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pong_scan_keeps_exact_control_literal_semantics() {
-        for prefix in ["", "{", "😀", r#"{"topic":"publicTrade.BTCUSDT","data":""#] {
-            for field in ["op", "ret_msg", "other", "op "] {
-                for value in ["pong", "ping", "pongx", "", "😀pong"] {
-                    for suffix in ["", "}", "😀", r#","op":"pong"}"#, r#",\"op\":\"pong\"}"#] {
-                        let text = format!("{prefix}\"{field}\":\"{value}\"{suffix}");
-                        let previous =
-                            text.contains(r#""op":"pong""#) || text.contains(r#""ret_msg":"pong""#);
-                        assert_eq!(is_pong(&text), previous, "{text}");
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn topic_prefix_and_general_search_keep_the_same_first_match() {
-        for (text, expected) in [
-            (r#"{"topic":"tickers.BTCUSDT"}"#, Some("tickers.BTCUSDT")),
-            (
-                r#" {"type":"delta","topic":"orderbook.1000.BTCUSDT"}"#,
-                Some("orderbook.1000.BTCUSDT"),
-            ),
-            (
-                r#"{"other":{"topic":"inner"},"topic":"outer"}"#,
-                Some("inner"),
-            ),
-            (r#"{"topic":"a\"b"}"#, Some("a\\")),
-            (r#"{"topic":""}"#, Some("")),
-            (r#"{"topic":"😀.ETH"}"#, Some("😀.ETH")),
-            (r#"{"topic" : "tickers.BTCUSDT"}"#, None),
-            (r#"{"topic":"unterminated}"#, None),
-            (r#"{"type":"pong"}"#, None),
-        ] {
-            assert_eq!(topic(text), expected, "{text}");
-        }
-    }
 
     #[test]
     fn short_unsigned_integer_float_matches_standard_parser_bitwise() {
