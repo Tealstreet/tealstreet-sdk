@@ -6,6 +6,8 @@ pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod delegated;
+#[cfg(test)]
+mod delegated_e2e_io;
 pub mod delegated_memory;
 pub mod envelope;
 pub mod http;

@@ -78,7 +78,7 @@ struct RunningAccount {
     holders: Vec<u64>,
     subscriptions: HashMap<String, u32>,
     counts: (usize, usize),
-    _sent: tokio::sync::mpsc::Receiver<String>,
+    _sent: crate::out::Receiver,
 }
 
 impl RunningAccount {
