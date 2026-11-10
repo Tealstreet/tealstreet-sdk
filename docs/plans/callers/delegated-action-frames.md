@@ -33,6 +33,9 @@ orders. nuke stops account algos and uses the existing native account nuke path:
 cancel all orders plus close all positions, awaiting every leg. It must never be
 implemented as cancelQueued, a placement shim, or a browser-side second write.
 Placement remains enqueue(params); these four actions use enqueueAction(action).
+`enqueueAction` returns `Promise<string>` with the durable intent ID, like
+`enqueue`. Observe `changed` / `entries()` for its typed result and state; an ACK
+is not a completed action.
 
 ## New versioned frames
 
