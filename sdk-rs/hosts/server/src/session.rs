@@ -5399,3 +5399,7 @@ mod delegated_writes_tests;
 #[cfg(test)]
 #[path = "session/cosigned_admission_test_support.rs"]
 mod cosigned_admission_test_support;
+
+#[cfg(test)]
+#[path = "session/tests/delegated_e2e.rs"]
+mod delegated_e2e;
