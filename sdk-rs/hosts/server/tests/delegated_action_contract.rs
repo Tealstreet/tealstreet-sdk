@@ -15,10 +15,11 @@ fn action_frames_decode_the_shared_versioned_contract() {
     }
 }
 #[test]
-fn action_capability_requires_the_existing_compiled_admission_gate() {
+fn action_capability_requires_compiled_and_startup_admission() {
+    let startup = std::env::var("TEALSTREET_DELEGATED_ORDER_FRAMES").as_deref() == Ok("1");
     assert_eq!(
         http::capabilities_json()["transports"]["accountWorkerWebSocket"]["delegatedOrderActionsV1"],
-        order_contract::enabled()
+        order_contract::enabled() && startup
     );
 }
 

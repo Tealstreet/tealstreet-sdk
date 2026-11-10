@@ -293,3 +293,92 @@ async fn action_fix_nuke_owner_is_checked_between_native_legs() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn action_fix_invalid_queue_cancel_does_not_invent_a_not_sent_proof() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let payload = json!({"kind":"cancel","order":{"id":"resting-order","symbol":"BTCUSDT"}});
+            let id = action(&mut session, payload.clone(), 1, false).await;
+            let applied = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(applied["d"]["outcome"], "applied");
+            let fingerprint = crate::order_contract::action_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            let cancel = json!({"t":"order.actionCancelQueued","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"fingerprint":fingerprint}});
+            session.handle(&cancel.to_string()).await.unwrap();
+            let valid = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(valid["d"]["outcome"], "unknown");
+
+            // Losing action admission after dispatch proves nothing about the
+            // original action. A still-bound queue cancellation stays unknown.
+            session.start_verification("synthetic-main".into(), std::future::pending());
+            session.handle(&cancel.to_string()).await.unwrap();
+            let pending = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(pending["d"]["outcome"], "unknown");
+            for (field, value) in [
+                ("version", json!(2)), ("fingerprint", json!("bad")),
+                ("instanceId", json!("stale")), ("seq", json!(0)),
+            ] {
+                let mut invalid = cancel.clone();
+                invalid["d"][field] = value;
+                session.handle(&invalid.to_string()).await.unwrap();
+                let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+                    .map(|text| serde_json::from_str(&text).unwrap()).collect();
+                assert!(frames.iter().any(|frame| frame["t"] == "msg" && frame["d"]["op"] == "error"), "{field}: {frames:?}");
+                assert!(frames.iter().all(|frame| frame["t"] != "order.actionAck" && frame["t"] != "order.actionOutcome"), "no business receipt for invalid {field}: {frames:?}");
+            }
+            session.handle(&cancel.to_string()).await.unwrap();
+            let after = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(after["d"]["outcome"], "unknown");
+            assert_eq!(after["d"]["outcomeSeq"].as_u64(), pending["d"]["outcomeSeq"].as_u64().map(|seq| seq + 1));
+            assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn action_frames_use_the_captured_startup_runtime_gate() {
+    const PROBE: &str = "TEALSTREET_TEST_ACTION_RUNTIME";
+    if std::env::var(PROBE).is_err() {
+        for value in ["0", "1"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "session::delegated_writes_tests::action_frames::action_frames_use_the_captured_startup_runtime_gate", "--nocapture"])
+                .env("TEALSTREET_DELEGATED_ORDER_FRAMES", value).env(PROBE, value).output().unwrap();
+            assert!(
+                output.status.success(),
+                "startup {value}: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        }
+        return;
+    }
+    let enabled = std::env::var(PROBE).as_deref() == Ok("1");
+    tokio::task::LocalSet::new().run_until(async {
+        for payload in [
+            json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}}),
+            json!({"kind":"cancel","order":{"id":"resting-order","symbol":"BTCUSDT"}}),
+            json!({"kind":"cancelAll"}), json!({"kind":"nuke"}),
+        ] {
+            let registry = crate::accounts::tests::registry(); let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined_without_runtime_opt_in(registry.clone(), "A", account.clone()).await;
+            assert_eq!(session.order_frames_enabled, enabled);
+            let caps = crate::http::capabilities_json();
+            assert_eq!(caps["transports"]["accountWorkerWebSocket"]["delegatedOrderActionsV1"], enabled);
+            action(&mut session, payload, 1, false).await;
+            let ack = action_frame(&mut sent, "order.actionAck").await;
+            assert_eq!(ack["d"]["received"], enabled);
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["outcome"], if enabled {"applied"} else {"refused"});
+            if !enabled { assert_eq!(result["d"]["error"]["outcome"], "notSent"); assert!(tape.writes.lock().unwrap().is_empty()); }
+            assert_eq!(session.order_frames_enabled, enabled);
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}

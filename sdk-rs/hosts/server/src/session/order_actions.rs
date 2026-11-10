@@ -78,13 +78,16 @@ impl Session {
         {
             out.send(envelope::error(
                 Some(&cancel.account_name),
-                "not sent: invalid action binding",
+                "Invalid action queue cancellation binding",
             ));
             return;
         }
         let id = Value::String(cancel.intent_id);
         if cancel.version != 1
-            || !self.order_admitted(&cancel.account_name, cancel.instance_id.as_deref())
+            || !self
+                .joined
+                .get(&cancel.account_name)
+                .is_some_and(|joined| joined.out.order_binding(cancel.instance_id.as_deref()))
             || crate::order_contract::key_time(id.as_str().unwrap_or_default()).is_none()
             || cancel.seq == 0
             || cancel.seq > 9_007_199_254_740_991
@@ -94,15 +97,16 @@ impl Session {
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         {
-            order_actions::refuse(
-                &out,
-                &cancel.account_name,
-                &id,
-                cancel.seq,
-                "not sent: invalid action queue cancellation",
-            );
+            // Reject this frame, not the original business action. A malformed
+            // queue-cancel supplies no whole-intent no-handoff evidence.
+            out.send(envelope::error(
+                Some(&cancel.account_name),
+                "Invalid action queue cancellation",
+            ));
             return;
         }
+        // This router-only operation never dispatches venue work. A still-bound
+        // cancellation stays uncertain even if write admission has since changed.
         order_actions::settle(
             &out,
             &cancel.account_name,

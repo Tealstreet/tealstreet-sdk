@@ -69,7 +69,9 @@ signals reconnect without wrapping the counter.
 
 The additive `order.action` family dispatches amend, venue cancel, cancel-all and
 nuke on the admitted Bybit DELEGATED account. `delegatedOrderActionsV1` follows
-the existing feature/Bybit gate; hosts also require the router's separate
+the existing feature/Bybit gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
+activation. Each session captures activation at creation; changes require the
+existing box drain/restart and fresh admission. Hosts also require the router's separate
 `delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
 bind UUIDv7 identity, version, action kind and target IDs in a separate canonical
 fingerprint domain. Placement's four frames and fingerprints are unchanged.
@@ -89,5 +91,7 @@ Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
 Receipt counters share the existing registration lifecycle and size bounds.
 `order.actionCancelQueued` belongs to the router and never issues a venue cancel.
+Rejecting that frame uses the ordinary error envelope: it supplies no proof
+about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
