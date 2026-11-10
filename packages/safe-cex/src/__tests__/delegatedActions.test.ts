@@ -81,8 +81,8 @@ describe('DELEGATED versioned actions', () => {
     f.options.clock.now = () => 10_000;
     f.timers[0]();
     await box.flush(c);
-    expect(box.entries()[0]).toMatchObject({ state: 'unknown', cancelPending: true });
-    expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.action', 'order.actionCancelQueued']);
+    expect(box.entries()[0]).toMatchObject({ state: 'unknown', cancelPending: false });
+    expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.action']);
     box.close();
   });
   it('does not label a handed-off action canceled before the router proves it unsent', async () => {
@@ -187,7 +187,7 @@ describe('DELEGATED versioned actions', () => {
       outcome(id, actions[3]),
     ])
       await box.receive(c, bad);
-    expect(box.entries()[0].state).toBe('queued');
+    expect(box.entries()[0].state).toBe('sending');
     box.close();
   });
   it('cancels only the action queue and restores an ambiguous handoff as unknown', async () => {

@@ -137,6 +137,16 @@ as the existing two placement/ledger flags and completed DELEGATED admission.
 The action-specific fingerprint includes its version, kind, target IDs/symbols
 and update values in a distinct canonical domain. UUIDv7 intent IDs use the same
 router dedupe namespace across both families; never reuse one for another action.
+Both entry points accept optional `{intentId}` with a canonical caller UUIDv7.
+Identical retries are durable identity lookups: preserve sequence, canonical
+payload/fingerprint, deadline and handoff evidence, and never submit again.
+Different action/targets or placement family rejects `intentConflict`; a failed
+original put rejects an identity retry as `intentNotDurable`. The additive
+`callerSuppliedIntentId: true` reservation survives completed-history retirement
+and restore under the same 1,056-record bound. `enqueueAction` shares placement's
+not-sent and replay evidence constructors; no direct not-sent assignment is
+permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
+action unknown; queue cancellation is explicit, never a venue cancel.
 
 Action outcomes are typed `applied`, proven `refused/notSent`, or `unknown`.
 Partial, interrupted and unproven results stay unknown and never become

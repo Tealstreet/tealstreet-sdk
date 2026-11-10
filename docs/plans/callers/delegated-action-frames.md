@@ -26,7 +26,10 @@ pin and lane fingerprint gate requirements before implementing that exception.
 ## Capability and admission
 
 The box advertises transports.accountWorkerWebSocket.delegatedOrderActionsV1.
-It is true only with delegated-order-frames compiled and DELEGATED_BYBIT enabled.
+It is true only with delegated-order-frames compiled, DELEGATED_BYBIT enabled,
+and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` at process startup. It defaults off;
+activation changes require a box drain/restart and fresh admission, as placement
+does. Each session captures its activation at creation.
 The action-aware router advertises
 transports.accountWorkerWebSocket.delegatedOrderActionLedgerV1. This is a NEW
 router attestation; delegatedOrderLedgerV1 alone does not attest action support.
@@ -139,11 +142,41 @@ No action is automatically re-forwarded after an ACK or any unknown outcome.
 
 ## Compatibility / persistence
 
-Existing placement frames, fingerprint, capability names and persisted version-1
-rows remain unchanged. Action rows use persisted version 2 with the exact action
+Existing placement frames, fingerprint and capability names remain unchanged.
+Persisted version-1 rows remain readable under the common evidence migration. Action rows use persisted version 2 with the exact action
 and action fingerprint; checkpoint/put/compact scope and atomic retirement
 semantics remain unchanged. Applied results are terminal and eligible for the
 same bounded history; unknown/acknowledged remain retained. Deferred storage work
 captures immutable owner/account/ticket, rechecks before send and has a two-owner
 switch-during-deferral regression. Shared synthetic TS/Rust fixtures pin all new
 frame shapes, action hashes, target identity and typed outcomes.
+
+## SDK evidence and caller identity
+
+Actions use the same evidence constructors as placements. Only
+`markDelegatedNotSent(intent, evidence)` constructs a not-sent result: local
+proof that the whole intent never handed off, or an authoritative admitted-router
+refusal. An action ACK(false), or refused outcome with result:null and
+error.outcome:notSent, is normalized into that existing bound proof schema.
+Restore validates its owner/account/UUID/sequence/fingerprint binding and reissues
+the runtime brand. Legacy or mismatched claims remain unknown. A rejected
+queue-cancel produces an ordinary frame error; it provides no evidence about the
+original action and cannot emit an action ACK(false) or refused outcome.
+
+Physical handoff is sending; disconnect, close, replacement or its deadline
+preserves unknown and never replays it. Deadline expiry follows the common
+outbox lifecycle; queue cancellation is an explicit host request. A declined
+first send may retry only through `markDelegatedReplayable` with persisted,
+whole-intent no-handoff proof. Uncertainty never acquires that proof.
+
+`enqueueAction(action, {intentId})` optionally accepts the caller's canonical
+UUIDv7, following placement's `enqueue(params, {intentId})` identity contract.
+An identical retry serializes behind persistence and returns the original ID,
+sequence, fingerprint and deadline without sending or changing handoff/replay
+state. Changed action/targets/parameters or protocol family rejects as
+intentConflict. A failed original put cannot be acknowledged by a retry.
+The additive persisted `callerSuppliedIntentId?: true` reservation survives
+completed-history compaction and restore, including adoption of an existing SDK
+key. It remains subject to the existing 1,056-record total bound; exhaustion
+refuses new keys rather than forgetting reservations. Frame shapes, fingerprints
+and the storage methods/checkpoint atomicity are unchanged.

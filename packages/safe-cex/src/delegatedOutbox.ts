@@ -53,6 +53,7 @@ export interface DelegatedIntent extends OutboxScope {
   result?: DelegatedActionResult;
   fingerprint: string;
   intentId: string;
+  callerSuppliedIntentId?: true;
   seq: number;
   params: Record<string, unknown>;
   clockEpoch: string;
@@ -241,6 +242,23 @@ export function markDelegatedReplayable(
   return true;
 }
 
+export interface EnqueueOptions {
+  intentId: string;
+}
+
+export class DelegatedIntentError extends Error {
+  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable') {
+    super(
+      {
+        invalidIntentId: 'Caller intent id must be a canonical UUIDv7',
+        intentConflict: 'Intent id is already bound to different parameters',
+        intentNotDurable: 'Original intent was not persisted; it cannot be submitted again',
+      }[code],
+    );
+    this.name = 'DelegatedIntentError';
+  }
+}
+
 export class DelegatedOutbox {
   private readonly scope: Readonly<OutboxScope>;
   private readonly intents = new Map<string, DelegatedIntent>();
@@ -283,6 +301,7 @@ export class DelegatedOutbox {
         typeof row.params !== 'object' ||
         Array.isArray(row.params) ||
         typeof row.cancelPending !== 'boolean' ||
+        (row.callerSuppliedIntentId !== undefined && row.callerSuppliedIntentId !== true) ||
         (row.retentionExpired !== undefined && (row.retentionExpired !== true || row.state !== 'unknown')) ||
         box.intents.has(row.intentId)
       )
@@ -301,7 +320,7 @@ export class DelegatedOutbox {
       if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
       box.sequence = Math.max(box.sequence, row.seq);
       // JSON cannot carry the private runtime brand. Validate and reissue it.
-      if (row.state === 'notSent') {
+      if (row.state === 'notSent' || row.state === 'refused') {
         const proof = storedNotSentEvidence(row);
         if (proof) markDelegatedNotSent(row, proof);
         else unprovenNotSent(row);
@@ -401,26 +420,57 @@ export class DelegatedOutbox {
     });
   }
 
-  enqueueAction(action: DelegatedAction): Promise<string> {
+  enqueueAction(action: DelegatedAction, options?: EnqueueOptions): Promise<string> {
     if (!isDelegatedAction(action)) return Promise.reject(new Error('Invalid delegated action'));
     try {
-      return this.enqueueIntent({}, clone(action));
+      return this.enqueueIntent({}, clone(action), options);
     } catch (error) {
       return Promise.reject(error);
     }
   }
 
-  enqueue(params: Record<string, unknown>): Promise<string> {
-    return this.enqueueIntent(params);
+  async enqueue(params: Record<string, unknown>, options?: EnqueueOptions): Promise<string> {
+    return this.enqueueIntent(params, undefined, options);
   }
 
-  private enqueueIntent(params: Record<string, unknown>, action?: DelegatedAction): Promise<string> {
+  private enqueueIntent(
+    params: Record<string, unknown>,
+    action?: DelegatedAction,
+    options?: EnqueueOptions,
+  ): Promise<string> {
     const createdAt = this.options.clock.now();
-    if (!this.active || this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
-      return Promise.reject(new Error('Outbox is closed or full'));
+    if (!this.active) return Promise.reject(new Error('Outbox is closed or full'));
     if (!params || Array.isArray(params) || typeof params !== 'object' || params.clientOrderId !== undefined)
       return Promise.reject(new Error('Outbox owns the client order id'));
-    const intentId = createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
+    if (options !== undefined) {
+      try {
+        if (typeof options?.intentId !== 'string') throw new Error('Invalid key');
+        delegatedIntentTime(options.intentId);
+      } catch {
+        return Promise.reject(new DelegatedIntentError('invalidIntentId'));
+      }
+      const existing = this.intents.get(options.intentId);
+      if (existing) {
+        const fingerprint = action
+          ? delegatedActionFingerprint(this.scope.accountName, existing.intentId, action, existing.seq)
+          : delegatedIntentFingerprint(this.scope.accountName, existing.intentId, params, existing.seq);
+        if (!!existing.action !== !!action || existing.fingerprint !== fingerprint)
+          return Promise.reject(new DelegatedIntentError('intentConflict'));
+        // Retry is an identity lookup, never evidence for changing handoff or
+        // replay state. Serialize behind the original put and keep its brands.
+        return this.serial(async () => {
+          if (!this.active) throw new Error('Outbox is closed or full');
+          if (!this.durable.has(existing.intentId)) throw new DelegatedIntentError('intentNotDurable');
+          existing.callerSuppliedIntentId = true;
+          await this.persist(existing);
+          return existing.intentId;
+        });
+      }
+    }
+    if (this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
+      return Promise.reject(new Error('Outbox is closed or full'));
+    const intentId =
+      options?.intentId ?? createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
     if (this.intents.has(intentId) || !Number.isSafeInteger(this.sequence + 1))
       return Promise.reject(new Error('Intent id or sequence exhausted'));
     const row: DelegatedIntent = {
@@ -431,6 +481,7 @@ export class DelegatedOutbox {
         ? delegatedActionFingerprint(this.scope.accountName, intentId, action, this.sequence + 1)
         : delegatedIntentFingerprint(this.scope.accountName, intentId, params, this.sequence + 1),
       intentId,
+      ...(options ? { callerSuppliedIntentId: true as const } : {}),
       seq: ++this.sequence,
       params: clone(params),
       clockEpoch: this.options.clock.epoch,
@@ -543,7 +594,9 @@ export class DelegatedOutbox {
         )
           return;
         this.outcomeSequences.set(row.intentId, Number(data.outcomeSeq));
-        row.state = data.outcome;
+        // A refusal without admitted no-forwarding evidence is uncertainty,
+        // never a terminal result. Only the constructor below can prove it.
+        row.state = data.outcome === 'refused' ? 'unknown' : data.outcome;
         delete row.retentionExpired;
         if (record(data.error) && typeof data.error.message === 'string') {
           row.error = { message: data.error.message };
@@ -572,12 +625,11 @@ export class DelegatedOutbox {
   private actionReceipt(row: DelegatedIntent, kind: unknown, data: Record<string, unknown>): boolean {
     if (data.version !== 1 || !row.action) return false;
     if (kind === 'order.actionAck' && typeof data.received === 'boolean') {
-      if (
-        !['queued', 'notSent', 'canceled'].includes(row.state) &&
-        !(row.state === 'unknown' && row.cancelPending && !data.received)
-      )
-        return false;
-      row.state = data.received ? 'acknowledged' : 'notSent';
+      if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return false;
+      if (row.retentionExpired && data.received) return false;
+      if (data.received) row.state = 'acknowledged';
+      else markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
+      delete row.retentionExpired;
       return true;
     }
     if (
@@ -599,12 +651,24 @@ export class DelegatedOutbox {
         [...data.error.message].length > 512
       )
         return false;
-      if (data.outcome === 'refused' && data.error.outcome === 'notSent') row.state = 'notSent';
-      else if (data.outcome === 'unknown' && data.error.outcome === 'unknown') row.state = 'unknown';
-      else return false;
+      if (data.outcome === 'refused' && data.error.outcome === 'notSent') {
+        row.error = { message: data.error.message };
+        // result:null plus this admitted router refusal proves the whole action
+        // was not handed off. Normalize it to the shared intent evidence shape.
+        markDelegatedNotSent(row, {
+          kind: 'routerRefusal',
+          receipt: 'outcome',
+          outcome: 'refused',
+          errorOutcome: 'notSent',
+          venueOrderId: null,
+        });
+      } else if (data.outcome === 'unknown' && data.error.outcome === 'unknown') {
+        row.state = 'unknown';
+        row.error = { message: data.error.message, outcome: 'unknown' };
+      } else return false;
       delete row.result;
-      row.error = { message: data.error.message, outcome: data.error.outcome };
     }
+    delete row.retentionExpired;
     this.outcomeSequences.set(row.intentId, Number(data.outcomeSeq));
     return true;
   }
@@ -812,12 +876,10 @@ export class DelegatedOutbox {
 
   private expire(row: DelegatedIntent): void {
     if (!this.active || !['queued', 'sending', 'acknowledged'].includes(row.state)) return;
-    const handedOff = row.state === 'sending' || row.state === 'acknowledged';
     const proof = this.replayable(row) ? storedNoHandoffEvidence(row) : undefined;
     if (proof) markDelegatedNotSent(row, proof);
     else unprovenNotSent(row);
-    row.cancelPending = !!row.action && handedOff;
-    if (row.cancelPending) row.error = { message: 'Action awaits router confirmation', outcome: 'unknown' };
+    row.cancelPending = false;
     this.stopTimer(row.intentId);
     this.changed(row);
     this.arm(row);
@@ -825,12 +887,10 @@ export class DelegatedOutbox {
   }
 
   private saveExpired(row: DelegatedIntent): void {
-    // Capture row/scope/connection now; deferred work never changes its owner.
-    const connection = this.connection;
+    // Capture row/scope now; deferred persistence can never change its owner.
     void this.serial(async () => {
       if (!this.active) return;
       await this.persist(row);
-      if (row.action && row.cancelPending && connection) await this.sendCancellation(row, connection);
       if (this.active) await this.compact();
     }).catch(() => {
       /* The in-memory state and write-ahead record still prevent a replay. */
@@ -846,6 +906,8 @@ export class DelegatedOutbox {
   private normalizeNotSent(row: DelegatedIntent): void {
     if (row.state === 'queued') {
       if (!this.replayable(row)) unprovenNotSent(row);
+    } else if (row.state === 'refused') {
+      unprovenNotSent(row);
     } else if (row.state === 'notSent') {
       const marked = row as DelegatedIntent & { readonly [delegatedNotSentBrand]?: true };
       if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row)) delete row.noHandoffEvidence;
@@ -898,7 +960,9 @@ export class DelegatedOutbox {
   }
   private async compact(): Promise<void> {
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
-    const completed = [...this.completedIntents.values()];
+    // Caller keys remain reserved across completed-history retirement.
+    const completed = [...this.completedIntents.values()].filter((row) => !row.callerSuppliedIntentId);
+    if (completed.length <= COMPLETED_HISTORY) return;
     let insertionOrder: Map<string, number> | undefined;
     completed.sort((a, b) => {
       if (a.seq !== b.seq) return a.seq - b.seq;
