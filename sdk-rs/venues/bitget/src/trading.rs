@@ -2329,11 +2329,15 @@ impl BitgetFutures {
         at: f64,
     ) {
         if last.is_some() || mark.is_some() {
-            self.trading
-                .references
-                .entry(symbol.into())
-                .or_default()
-                .update(last, mark, at);
+            if let Some(quote) = self.trading.references.get_mut(symbol) {
+                quote.update(last, mark, at);
+            } else {
+                self.trading
+                    .references
+                    .entry(symbol.into())
+                    .or_default()
+                    .update(last, mark, at);
+            }
         }
     }
 

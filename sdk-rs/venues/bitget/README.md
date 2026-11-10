@@ -30,6 +30,10 @@ the old socket and invalidates older HTTP generations. REST snapshots preserve
 newer WebSocket state, terminal orders and recently opened orders. Failed reads
 never commit empty account state.
 
+Repeated public quotes update the protective reference cache through a borrowed
+symbol lookup. Only the first observation owns a new key; quote values, update
+times and protective freshness checks retain their existing semantics.
+
 Classic and UTA normal orders use the legacy TS allocation: round the requested amount,
 repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
 remainder. Per-lot rounding can change the submitted total. Batch chunks retain
