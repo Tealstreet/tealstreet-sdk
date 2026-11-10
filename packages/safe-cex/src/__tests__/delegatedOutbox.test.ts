@@ -405,11 +405,10 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toEqual([]);
     box.close();
   });
-  it.each([false, undefined, null, 0, ''])('preserves no-handoff proof for a falsy return (%s)', async (result) => {
+  it('preserves no-handoff proof only for an explicit false return', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
-    // JS host adapters can return falsy values even though the TS contract is boolean.
-    box.connect({ ...f.connection(), send: () => result as false });
+    box.connect({ ...f.connection(), send: () => false });
     const id = await box.enqueue(params);
     expect([...f.rows.values()][0]).toHaveProperty('noHandoffEvidence.source', 'adapter');
     f.advance(10_000);
@@ -421,6 +420,37 @@ describe('DELEGATED host-neutral outbox', () => {
     await restored.flush(restored.connect(f.connection()));
     expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'notSent' });
     expect(f.writes).toEqual([]);
+    restored.close();
+  });
+  it.each([undefined, null, 0, ''])('fences a non-boolean return (%s) as unknown after a physical write', async (result) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    let attempts = 0;
+    const connection = box.connect({
+      ...f.connection(),
+      send: (frame) => {
+        attempts++;
+        f.writes.push(frame);
+        // Exercise an invalid JS adapter return without widening the TS contract.
+        return result as unknown as boolean;
+      },
+    });
+    const id = await box.enqueue(params);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    expect([...f.rows.values()][0]).toMatchObject({ state: 'unknown' });
+    expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
+    expect([...f.rows.values()][0]).not.toHaveProperty('notSentEvidence');
+    await box.flush(connection);
+    box.close();
+    // Reload before the original deadline in the same epoch: time cannot fence a replay for us.
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    f.advance(60_000);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0].state).toBe('unknown');
+    expect(attempts).toBe(1);
+    expect(f.writes).toHaveLength(1);
     restored.close();
   });
   it('expires unknown retention explicitly after 24 hours and recovers capacity durably', async () => {

@@ -233,11 +233,12 @@ refused and becomes unknown.
 At ten monotonic seconds from creation, its deadline observer marks queued,
 never-forwarded work not sent, even while storage is waiting, and marks in-flight
 or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
-send adapter must return true only for a physical handoff; a falsy return positively
-guarantees neither handoff nor buffering for a later connection. A throw is
-ambiguous and immediately becomes unknown with no replay proof, even before the
-deadline; reconnect and restore cannot submit it again. An adapter that can
-positively prove it never transmitted or buffered the intent may return a falsy value.
+send adapter must return true only for a physical handoff; only an explicit false
+positively guarantees neither handoff nor buffering for a later connection.
+A throw or any other non-true return is ambiguous and immediately becomes unknown
+with no replay proof, even before the deadline; reconnect and restore cannot
+submit it again. An adapter that can positively prove it never transmitted or
+buffered the intent may return false.
 Cancellation or expiry during a declined first send remains terminal; a legacy
 pending cancellation restores as unknown. A queue cancellation after handoff remains
 unknown until an authoritative receipt proves non-forwarding. Persisted `sending`

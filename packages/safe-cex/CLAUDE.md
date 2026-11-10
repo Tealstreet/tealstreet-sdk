@@ -85,10 +85,10 @@ in-flight or acknowledged intent becomes `unknown`. Direct close also changes
 those retained entries to unknown immediately while fencing later work and callbacks.
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send
-adapter returns true only after socket handoff; a falsy return must guarantee neither a
-handoff nor buffering for a later connection. A thrown send supplies no such
-evidence: it becomes unknown immediately, loses its replay proof, and is never
-automatically submitted again, including after reconnect or restore.
+adapter returns true only after socket handoff; only an explicit false guarantees
+neither handoff nor buffering for a later connection. A throw or any other non-true
+return supplies no such evidence: it becomes unknown immediately, loses its replay
+proof, and is never automatically submitted again, including after reconnect or restore.
 Queue cancellation after handoff remains unknown until a router
 receipt positively establishes non-forwarding. Legacy pending cancellations restore
 as unknown. Cancellation or expiry during a declined first send remains terminal
