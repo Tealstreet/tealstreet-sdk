@@ -56,6 +56,10 @@ pub struct Envelope<'a> {
 pub enum FastAggregate<'a> {
     Tickers(Vec<TickerEvent<'a>>),
     Marks(Vec<MarkEvent<'a>>),
+    Depth {
+        stream: Str<'a>,
+        event: PartialDepth<'a>,
+    },
 }
 
 impl<'a> FastAggregate<'a> {
@@ -114,6 +118,12 @@ impl<'de> Deserialize<'de> for FastAggregate<'de> {
                                 Some("!ticker@arr") => FastAggregate::Tickers(map.next_value()?),
                                 Some("!markPrice@arr@1s" | "!markPrice@arr") => {
                                     FastAggregate::Marks(map.next_value()?)
+                                }
+                                Some(value) if super::is_partial_stream(value) => {
+                                    FastAggregate::Depth {
+                                        stream: stream.as_ref().unwrap().clone(),
+                                        event: map.next_value()?,
+                                    }
                                 }
                                 _ => {
                                     return Err(serde::de::Error::custom(
@@ -297,6 +307,20 @@ mod aggregate_tests {
             };
             assert_eq!(rows[0].p.as_deref(), Some("100"));
             assert_eq!(rows[0].funding_time, Some(2.0));
+        }
+    }
+
+    #[test]
+    fn stream_first_partial_depth_uses_typed_single_pass_decoding() {
+        for stream in [
+            "btcusdt@depth5",
+            "ethusdt@depth10@250ms",
+            "btcusdt@depth20@100ms",
+        ] {
+            let text = format!(
+                r#"{{"stream":"{stream}","data":{{"s":"BTCUSDT","u":2,"b":[["100","1"]],"a":[["101","2"]]}}}}"#
+            );
+            assert!(FastAggregate::decode(&text).is_some(), "{stream}");
         }
     }
 

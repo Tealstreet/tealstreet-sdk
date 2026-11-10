@@ -232,10 +232,7 @@ export class Frame {
   }
 
   first(kind) {
-    for (let i = 0; i < this.sections.length; i++) {
-      const section = this.sections[i];
-      if (section.kind === kind) return section;
-    }
+    for (const section of this.sections) if (section.kind === kind) return section;
   }
 
   string(index) {
