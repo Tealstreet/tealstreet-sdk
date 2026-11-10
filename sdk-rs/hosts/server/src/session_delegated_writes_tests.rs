@@ -24,6 +24,7 @@ struct Tape {
     writes: Arc<Mutex<Vec<String>>>,
     client_order_ids: Arc<Mutex<Vec<String>>>,
     hold: bool,
+    close_unknown: bool,
     closed_positions: Arc<std::sync::atomic::AtomicBool>,
     defer_positions: Arc<std::sync::atomic::AtomicBool>,
     held_positions: Arc<Mutex<Vec<(RequestId, Events)>>>,
@@ -143,6 +144,14 @@ impl Transport for Tape {
                     || payload["request"]
                         .as_array()
                         .is_some_and(|rows| rows.iter().any(|row| row["reduceOnly"] == true));
+                if closes && self.close_unknown {
+                    answer(
+                        &events,
+                        request.id,
+                        json!({"retCode":0,"retMsg":"OK","result":{}}).to_string(),
+                    );
+                    return;
+                }
                 if closes {
                     self.closed_positions
                         .store(true, std::sync::atomic::Ordering::SeqCst);

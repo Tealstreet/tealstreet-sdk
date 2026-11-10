@@ -205,3 +205,28 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn a_partial_native_nuke_is_unknown_after_its_cancel_leg_completed() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape {
+                close_unknown: true,
+                ..Default::default()
+            };
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            action(&mut session, json!({"kind":"nuke"}), 1, false).await;
+            let reply = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(reply["d"]["outcome"], "unknown");
+            assert_eq!(reply["d"]["error"]["outcome"], "unknown");
+            assert!(reply["d"]["result"].is_null());
+            let writes = tape.writes.lock().unwrap().clone();
+            assert!(writes.iter().any(|op| op == "cancel"));
+            assert!(writes.iter().any(|op| op == "create"));
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
