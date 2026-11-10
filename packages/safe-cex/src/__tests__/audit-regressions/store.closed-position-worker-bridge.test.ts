@@ -32,6 +32,7 @@ const order = {
   filled: 0,
   remaining: 2,
   reduceOnly: false,
+  lastUpdate: 1_700_000_000_000,
 };
 const cleanups: Array<() => void> = [];
 
@@ -41,7 +42,15 @@ const bridge = (hostedMode: boolean) => {
   // Retain the pre-clone object so a wire event can land between the omit
   // decision and structured cloning, as in the documented race.
   const ctx = { postMessage: (message: unknown) => pending.push(message) } as unknown as Worker;
-  const worker = new ExchangeWorker(ctx, 'account-A', 'bybit', { hostedMode }, {} as any, {} as any, 'session-A');
+  const worker = new ExchangeWorker(
+    ctx,
+    'account-A',
+    'bybit',
+    { key: '', secret: '', hostedMode },
+    {} as any,
+    {} as any,
+    'session-A',
+  );
   const main = new DefaultStore();
   const fetchPositions = vi.fn().mockResolvedValue([]);
   const exchange = { store: worker.store, isDisposed: false, fetchPositions } as unknown as Exchange;
@@ -120,7 +129,7 @@ describe.each([false, true])('closed-position worker bridge (hosted=%s)', (hoste
     b.worker.store.update({ orders: [order], positions: [position()] });
     b.flush();
     const before = { ...b.main.updateIds };
-    b.worker.store.notify();
+    b.worker.store.update({ balance: { ...b.worker.store.balance } });
     vi.advanceTimersByTime(250);
     const omitted = b.pending.find((m) => m.op === 'store').data;
     expect(omitted).not.toHaveProperty('positions');
@@ -138,7 +147,7 @@ describe.each([false, true])('closed-position worker bridge (hosted=%s)', (hoste
     expect(b.main.orders[0].status).toBe(OrderStatus.Canceled);
     expect(b.main.updateIds).toEqual(b.worker.store.updateIds);
     // Future unchanged payloads may omit arrays only at those same IDs.
-    b.worker.store.notify();
+    b.worker.store.update({ balance: { ...b.worker.store.balance } });
     b.flush();
     expect(b.main.positions).toEqual([]);
     expect(b.main.orders[0].status).toBe(OrderStatus.Canceled);
