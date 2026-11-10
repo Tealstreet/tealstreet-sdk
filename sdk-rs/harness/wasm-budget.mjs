@@ -241,10 +241,19 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
   bitrue: 1_912_832,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
-  bitunix: 1_930_240,
-  blofin: 2_072_576,
+  // Nullable history output: local optimized web/node 1,927,088 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue bitunix; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
+  bitunix: 1_937_408,
+  // Nullable history output: local optimized web/node 2,070,435 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue blofin; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
+  blofin: 2_080_768,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
-  bybit: 2_330_624,
+  // Nullable history output: local optimized web/node 2,329,857 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue bybit; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
+  bybit: 2_340_864,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
   // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.
@@ -293,7 +302,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
   mexc: 1_931_264,
-  okx: 2_053_120,
+  // Nullable history output: local optimized web/node 2,052,533 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue okx; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
+  okx: 2_063_360,
   orderly: 1_773_568,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_306_048,

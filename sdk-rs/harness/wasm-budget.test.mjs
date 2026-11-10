@@ -1844,3 +1844,22 @@ test('#3300 pinned master merge c4d663622c01 retains measured ApeX Omni headroom
   assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
+
+
+test('nullable history output retains current measured family headroom', () => {
+  // Pinned local build.sh --venue FAMILY: Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  for (const [venue, measured, minimumCap] of [
+    ['bybit', 2_329_857, 2_340_864],
+    ['okx', 2_052_533, 2_063_360],
+    ['blofin', 2_070_435, 2_080_768],
+    ['bitunix', 1_927_088, 1_937_408],
+
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
