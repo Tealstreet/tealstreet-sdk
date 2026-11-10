@@ -27,6 +27,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
   // throttled callbacks fire at different phases of the same data stream.
   // In dedicated worker mode this is a no-op (one session = one subId per symbol).
   private _subsBySymbol = new Map<string, SymbolSub>();
+  private _disposed = false;
 
   private _sendOrderBookUpdate = (data: { symbol: string; subId: string }, o: OrderBook) => {
     this._ctx.postMessage({ op: 'listenOrderBook', data: { ...data, orderbook: o } });
@@ -46,6 +47,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
   };
 
   handle(payload: StoreWorkerPayload): void {
+    if (this._disposed) return;
     switch (payload.op) {
       case 'subscribeOrderBook': {
         // Markets not loaded yet — buffer for later
@@ -81,6 +83,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         const subIds = new Set([subId]);
         const unsub =
           this._exchange.listenOrderBook(symbol, f, (signal) => {
+            if (this._disposed) return;
             f.cancel();
             for (const subId of subIds) {
               const data: StoreWorkerOrderBookFrameRejection = {
@@ -91,6 +94,17 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
               this._ctx.postMessage({ op: 'listenOrderBook:rejected', data });
             }
           }) || (() => {});
+
+        if (this._disposed) {
+          subIds.clear();
+          f.cancel();
+          try {
+            unsub();
+          } catch {
+            /* Continue disposal even if source cleanup throws. */
+          }
+          return;
+        }
 
         this._subsBySymbol.set(symbol, {
           unsub,
@@ -126,6 +140,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
     }
   }
   dispose() {
+    this._disposed = true;
     super.dispose();
     for (const sub of this._subsBySymbol.values()) {
       sub.subIds.clear();

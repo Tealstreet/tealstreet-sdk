@@ -967,6 +967,65 @@ describe('direct public-data rejection observers', () => {
   beforeEach(() => vi.spyOn(console, 'error').mockImplementation(() => {}));
   afterEach(() => vi.restoreAllMocks());
 
+  it.each([
+    ['book', 'after registration'],
+    ['candle', 'after registration'],
+    ['book', 'during registration'],
+    ['candle', 'during registration'],
+    ['book', 'during release'],
+    ['candle', 'during release'],
+  ] as const)('retires the %s handler subscription after synchronous disposal (%s)', (kind, rejectionAt) => {
+    const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    installHost(source, vi.fn());
+    receive(source, fixture({ fills: 0 }));
+    let handler: OrderBookSubscriptionsHandler | OHLCVSubscriptionsHandler;
+    const messages: Array<{ op: string }> = [];
+    const context = {
+      postMessage(message: { op: string }) {
+        messages.push(message);
+        if (message.op.endsWith(':rejected')) handler.dispose();
+      },
+    } as unknown as Worker;
+    const release = vi.fn();
+    const rejectDuringRegistration = (stop: () => void) => {
+      receive(source, new ArrayBuffer(0));
+      if (rejectionAt === 'during registration') receive(source, new ArrayBuffer(0));
+      return () => {
+        release();
+        if (rejectionAt === 'during release') receive(source, new ArrayBuffer(0));
+        stop();
+      };
+    };
+    if (kind === 'book') {
+      const original = source.listenOrderBook;
+      vi.spyOn(source, 'listenOrderBook').mockImplementation((...args) => rejectDuringRegistration(original(...args)));
+      handler = new OrderBookSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never);
+    } else {
+      const original = source.listenOHLCV;
+      vi.spyOn(source, 'listenOHLCV').mockImplementation((...args) => rejectDuringRegistration(original(...args)));
+      handler = new OHLCVSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never);
+    }
+    try {
+      handler.handle({
+        op: kind === 'book' ? 'subscribeOrderBook' : 'subscribeOHLCV',
+        data: { symbol: 'BTCUSDT', interval: '1m', subId: 'synthetic-sub' },
+      });
+      const afterDisposal = messages.length;
+      const releasedAtDisposal = release.mock.calls.length;
+      receive(source, new ArrayBuffer(0));
+      expect({ released: releasedAtDisposal, extraMessages: messages.length - afterDisposal }).toEqual({
+        released: 1,
+        extraMessages: 0,
+      });
+      expect(messages.filter((message) => message.op.endsWith(':rejected'))).toHaveLength(1);
+      handler.dispose();
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      handler.dispose();
+      source.dispose();
+    }
+  });
+
   it.each(['book', 'candle'] as const)(
     'releases the %s source handle exactly once during registration disposal',
     (kind) => {

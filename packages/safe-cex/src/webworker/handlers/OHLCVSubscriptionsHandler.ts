@@ -24,6 +24,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
   // another exchange listener that never gets cleaned up.
   // In dedicated worker mode this is a no-op (one session = one subId per symbol+interval).
   private _subsByKey = new Map<string, SymbolIntervalSub>();
+  private _disposed = false;
 
   private _sendCandleUpdate = (sub: SymbolIntervalSub, c: Candle) => {
     for (const [subId, data] of sub.payloadDataBySubId) {
@@ -36,6 +37,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
   }
 
   handle(payload: StoreWorkerPayload): void {
+    if (this._disposed) return;
     switch (payload.op) {
       case 'subscribeOHLCV': {
         // Markets not loaded yet — buffer for later
@@ -98,6 +100,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
             f(c);
           },
           (signal) => {
+            if (this._disposed) return;
             f.cancel();
             for (const subId of sub.subIds) {
               const data: StoreWorkerOHLCVFrameRejection = {
@@ -110,6 +113,18 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
           },
         );
         sub.unsub = ohlcvSub || (() => {});
+
+        if (this._disposed) {
+          sub.subIds.clear();
+          sub.payloadDataBySubId.clear();
+          f.cancel();
+          try {
+            sub.unsub();
+          } catch {
+            /* Continue disposal even if source cleanup throws. */
+          }
+          return;
+        }
 
         this._subsByKey.set(key, sub);
         repairIfReset();
@@ -143,6 +158,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
     }
   }
   dispose() {
+    this._disposed = true;
     super.dispose();
     for (const sub of this._subsByKey.values()) {
       sub.subIds.clear();
