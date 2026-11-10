@@ -1747,22 +1747,23 @@ export class BlofinExchange extends BaseExchange {
       const positionId = createPositionId(market.symbol, side, positionMode);
       const existingPosition = this.store.positions.find((sp) => sp.id === positionId);
 
-      // Preserve a previously-known leverage when the payload omits it (or sends 0/NaN).
-      // Blofin occasionally pushes partial position events without a usable `leverage`,
-      // and writing 0 here causes the place-order % slider to jitter via the React fallback.
+      // Partial events can omit leverage. A confirmed flat-account update is
+      // newer than the last closed row; live/wire values remain authoritative.
       const parsedLeverage = parseFloat(p.leverage);
-      let leverage = Number.isFinite(parsedLeverage) && parsedLeverage > 0 ? parsedLeverage : 0;
-      const existingSettings = existingPosition ?? this.store.positionSettings?.[positionId];
-      if (!leverage) {
-        if (existingSettings && existingSettings.leverage > 0) {
-          leverage = existingSettings.leverage;
-        } else {
-          const fetched = this.store.fetchedLeverage[market.symbol];
-          if (fetched && !fetched.isFetching) {
-            leverage = side === PositionSide.Long ? fetched.buyLeverage : fetched.sellLeverage;
-          }
-        }
-      }
+      const fetched = this.store.fetchedLeverage[market.symbol];
+      const confirmedLeverage =
+        fetched && !fetched.isFetching
+          ? side === PositionSide.Long
+            ? fetched.buyLeverage
+            : fetched.sellLeverage
+          : undefined;
+      const leverage =
+        [
+          parsedLeverage,
+          existingPosition?.leverage,
+          confirmedLeverage,
+          this.store.positionSettings?.[positionId]?.leverage,
+        ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? Number.NaN;
       const parsedLiquidationPrice = parseFloat(p.liquidationPrice);
       const liquidationPrice = Number.isFinite(parsedLiquidationPrice)
         ? parsedLiquidationPrice

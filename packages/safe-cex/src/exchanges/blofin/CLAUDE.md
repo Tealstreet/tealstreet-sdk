@@ -696,8 +696,9 @@ Blofin occasionally pushes partial position events without a usable `leverage` f
 
 1. `parseFloat(p.leverage)` if finite and `> 0`.
 2. Otherwise, look up the existing position by `id` (built via `createPositionId(symbol, side, positionMode)`) and reuse its leverage if `> 0`.
-3. Otherwise, fall back to `store.fetchedLeverage[symbol]` (per-side in hedged mode) when present and not `isFetching`.
-4. Otherwise, leave at `0` (preserves the original "no leverage available" semantics).
+3. Otherwise, use a finite positive `store.fetchedLeverage[symbol]` rail (per-side in hedged mode) when present and not `isFetching`. A successful `setLeverage` while flat updates this confirmed setting, so it takes precedence over the closed cache.
+4. Otherwise, use a finite positive `store.positionSettings[positionId].leverage` for the exact ID.
+5. Otherwise, keep leverage unavailable (`NaN` in the numeric Position field), rather than inventing `0`.
 
 `mapPositions` applies the same preserve-on-blank rule to
 `liquidationPrice`: numeric values (including explicit `0`) are accepted,
@@ -705,7 +706,7 @@ but blank/missing fields reuse the existing position's liquidation price.
 
 #### `tick` uses `addOrUpdatePositionsFull` (preserves leverage on closed symbols)
 
-The 10-second `tick` previously did a wholesale `store.update({ positions })` with the result of `fetchPositions()`. Because that REST call only returns OPEN positions, every tick wiped the empty position records the WS layer (`handlePositionTopic`) intentionally keeps around — destroying their preserved leverage and again causing the % slider to fall back to `1x` between tick and the next WS update.
+The 10-second `tick` previously did a wholesale `store.update({ positions })` with the result of `fetchPositions()`. That REST call only returns OPEN positions, so it discarded the historical empty records carrying last-reported leverage. Settings now live separately from exposure.
 
 `tick` now calls `this.store.addOrUpdatePositionsFull(positions)` (matching the WS handler's semantics). Closed-symbol rows are removed from `positions`; `createEmptyPositionFrom` projects their reported `leverage`, `marginType`, `side`, `positionMode`, `id`, and `symbol` into `store.positionSettings` instead. Flat-symbol consumers must use that settings map or `fetchedLeverage`, and the retained TS reference mapper uses the settings map when a reopened row omits leverage.
 
