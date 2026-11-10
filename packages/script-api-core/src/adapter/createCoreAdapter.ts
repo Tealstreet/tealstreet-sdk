@@ -388,7 +388,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           rounded.price = price;
         }
         if ('amount' in update && update.amount !== undefined) {
-          const amount = roundOrderSizeToNearest(update.amount, market);
+          const amount = roundOrderSizeToNearest(update.amount, market, host.getExchange(account)?.name);
           if (!Number.isFinite(amount) || amount < 0) {
             throw new ScriptValidationError(`updateOrder: invalid amount for '${order.symbol}': ${update.amount}`);
           }
@@ -424,11 +424,16 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           // thousandfold on OKX's `DOGE-USDT-SWAP` and a fraction of the
           // position on a Bybit inverse market. `opts.amount` is already
           // native by contract; only the fallback needed converting.
-          const closeAmount = roundMarketCloseSize(opts.amount ?? nativePositionSize(position, market), market);
+          const exchange = requireExchange(account);
+          const closeAmount = roundMarketCloseSize(
+            opts.amount ?? nativePositionSize(position, market),
+            market,
+            exchange.name,
+          );
           if (!Number.isFinite(closeAmount) || closeAmount <= 0) {
             throw new ScriptValidationError(`closePosition: non-positive size for '${opts.symbol}'`);
           }
-          const placeOrder = requireMethod(requireExchange(account), 'placeOrder', account);
+          const placeOrder = requireMethod(exchange, 'placeOrder', account);
           const ids = await placeOrder({
             symbol: opts.symbol,
             side: position.side === 'long' ? 'sell' : 'buy',

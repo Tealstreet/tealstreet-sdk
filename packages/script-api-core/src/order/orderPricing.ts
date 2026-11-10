@@ -4,7 +4,8 @@ import { roundToNearestMultiple, roundToNearestMultipleDown } from '@tealstreet/
 import { roundCloseSize, roundMarketOrderSize as roundMarketOrderSizeToStep } from './rounding';
 import { exchangeMetadata, getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { OrderType as OrderTypes } from '@tealstreet/safe-cex/src/types';
-import { DEFAULT_AMOUNT_PRECISION, DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
+import { DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
+import { assertNativeReduceAmount, nativeAmountRules } from './nativeAmountRules';
 import { ScriptValidationError } from './ScriptValidationError';
 import { shouldRoundSizeDown } from './shouldRoundSizeDown';
 
@@ -51,28 +52,28 @@ export const assertMinimumPrice = (price: number, market: Market): void => {
   }
 };
 
-const amountStep = (market: Market): number => market.precision.amount || DEFAULT_AMOUNT_PRECISION;
-
 export const roundOrderSize = (rawSize: number, market: Market, exchangeName?: string): number =>
   shouldRoundSizeDown(market, exchangeName)
-    ? roundToNearestMultipleDown(rawSize, amountStep(market))
-    : roundToNearestMultiple(rawSize, amountStep(market));
+    ? roundToNearestMultipleDown(rawSize, nativeAmountRules(market, exchangeName).step)
+    : roundToNearestMultiple(rawSize, nativeAmountRules(market, exchangeName).step);
 
 /**
  * Plain round-to-nearest sizing with **no** `shouldRoundSizeDown` branch.
  * This is the rule `updateOrder` uses — an amend must not silently truncate
  * a resting order's size on the venues where placement rounds down.
  */
-export const roundOrderSizeToNearest = (rawSize: number, market: Market): number =>
-  roundToNearestMultiple(rawSize, amountStep(market));
+export const roundOrderSizeToNearest = (rawSize: number, market: Market, exchangeName?: string): number =>
+  roundToNearestMultiple(rawSize, nativeAmountRules(market, exchangeName).step);
 
 /**
  * Sizing rule for reduce-only market closes: round to nearest, and fall back
  * to the raw size when rounding collapses to zero so a residual position
  * smaller than one lot step can still be closed.
  */
-export const roundMarketCloseSize = (rawSize: number, market: Market): number =>
-  roundCloseSize(rawSize, amountStep(market));
+export const roundMarketCloseSize = (rawSize: number, market: Market, exchangeName?: string): number => {
+  assertNativeReduceAmount(rawSize, market, exchangeName);
+  return roundCloseSize(rawSize, nativeAmountRules(market, exchangeName).step);
+};
 
 /**
  * Sizing for a market order — `createMarketOrder` and the script adapter's
@@ -82,8 +83,13 @@ export const roundMarketCloseSize = (rawSize: number, market: Market): number =>
 export const roundMarketOrderSize = (
   rawSize: number,
   market: Market,
-  opts: { readonly reduceOnly?: boolean } = {},
-): number => roundMarketOrderSizeToStep(rawSize, amountStep(market), { reduceOnly: opts.reduceOnly });
+  opts: { readonly reduceOnly?: boolean; readonly exchangeName?: string } = {},
+): number => {
+  if (opts.reduceOnly) assertNativeReduceAmount(rawSize, market, opts.exchangeName);
+  return roundMarketOrderSizeToStep(rawSize, nativeAmountRules(market, opts.exchangeName).step, {
+    reduceOnly: opts.reduceOnly,
+  });
+};
 
 const STOP_LIKE_ORDER_TYPES: ReadonlySet<OrderType> = new Set([
   OrderTypes.StopLoss,
