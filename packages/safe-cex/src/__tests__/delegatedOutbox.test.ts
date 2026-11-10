@@ -405,6 +405,24 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toEqual([]);
     box.close();
   });
+  it.each([false, undefined, null, 0, ''])('preserves no-handoff proof for a falsy return (%s)', async (result) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    // JS host adapters can return falsy values even though the TS contract is boolean.
+    box.connect({ ...f.connection(), send: () => result as false });
+    const id = await box.enqueue(params);
+    expect([...f.rows.values()][0]).toHaveProperty('noHandoffEvidence.source', 'adapter');
+    f.advance(10_000);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'notSent' });
+    await box.flush(box.connect(f.connection()));
+    expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'notSent' });
+    expect(f.writes).toEqual([]);
+    restored.close();
+  });
   it('expires unknown retention explicitly after 24 hours and recovers capacity durably', async () => {
     const f = fixture();
     const expired: DelegatedIntent[] = [];

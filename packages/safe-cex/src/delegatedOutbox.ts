@@ -94,7 +94,7 @@ export interface OutboxConnection extends OutboxScope {
     delegatedOrderLedgerV1?: boolean;
   };
   instanceId?: string;
-  /** True for handoff; false proves no send/buffering; a throw leaves handoff unknown. */
+  /** True only for handoff; only a falsy return proves no send/buffering; a throw proves neither. */
   send(frame: string): boolean;
 }
 
@@ -597,20 +597,19 @@ export class DelegatedOutbox {
     }
     // Set in-flight before invoking the synchronous adapter: a reentrant
     // deadline/disconnect must already treat this handoff as ambiguous.
-    const noHandoff = storedNoHandoffEvidence(row);
+    let noHandoff = storedNoHandoffEvidence(row);
     delete row.notSentEvidence;
     delete row.noHandoffEvidence;
     row.state = 'sending';
     this.sent.set(row.intentId, connection);
-    let handedOff: boolean | undefined;
+    let handedOff = false;
     try {
       handedOff = connection.send(frame);
     } catch {
       // Failure after entering the adapter cannot prove that no bytes left.
-      unprovenNotSent(row);
-      this.stopTimer(row.intentId);
+      noHandoff = undefined;
     }
-    if (handedOff === false) {
+    if (!handedOff) {
       if (noHandoff) {
         row.state = row.cancelPending ? 'canceled' : 'queued';
         row.cancelPending = false;
@@ -621,7 +620,7 @@ export class DelegatedOutbox {
     }
     this.changed(row);
     this.arm(row);
-    if (handedOff === false && this.expired(row)) this.expire(row);
+    if (!handedOff && this.expired(row)) this.expire(row);
     // Keep the write-ahead sending record on storage failure after handoff.
     await this.persist(row).catch(() => undefined);
   }
