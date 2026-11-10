@@ -1036,6 +1036,15 @@ describe('Rust native current-account reads', () => {
     expect(r.exchange.isNuking).toBe(false);
   });
 
+  it('refuses a nuke close when native/derived size evidence disagrees', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [{ ...position(), extra: { contractsNative: 10 } }] });
+    await expect(r.exchange.nukePositions()).rejects.toThrow(/invalid close size|unknown/i);
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
   it('reports nonfinite native sizing inputs without dispatching that close', async () => {
     const r = fixture();
     await r.start();

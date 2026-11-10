@@ -1186,9 +1186,16 @@ only defined on linear markets.
 `safe-cex/src/utils/nativePositionSize.ts` is the single definition;
 `script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
 Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
-use it. Its own comment records that the copies HAD drifted
-before they were merged. One function in the shared layer, adapters either
-side.
+use it. The helper returns `number | null`: coherent native evidence wins, absent
+native uses derived size, and conflicting/unavailable quantities remain unknown.
+No per-field freshness signal exists; close/reduce consumers refuse a conflict
+rather than selecting either value by magnitude. CrossTrade validates canonical
+quantities in both reconciliation passes. Unknown master/copier rows remain
+present and refuse automatic sizing; known-flat rows remain distinct. Matched
+reductions compare exposures projected from canonical native quantities, and
+lot-rounded reductions are capped at the known copier quantity. The missing-
+position pass also refuses unknown opposite-side rows, since an entry could
+reduce them. Market, LimitSlippage and Chase forward these validated amounts.
 
 ### 4. Break-even — NOT trustworthy, and the order paths are off it
 
