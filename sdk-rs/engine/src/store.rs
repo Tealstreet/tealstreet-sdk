@@ -586,6 +586,18 @@ impl Store {
 
     /// Mutate a row of the current ticker table; rebuild cached indexes on replacement.
     pub fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
+        self.update_ticker_with_observations_at(index, 0, update);
+    }
+
+    /// Update a known ticker and record explicitly reported fields at the same clock.
+    /// Equivalent to update_ticker_at followed by observe_ticker_fields, without
+    /// another symbol lookup or recording a changed reference timestamp twice.
+    pub fn update_ticker_with_observations_at(
+        &mut self,
+        index: u32,
+        observed: u16,
+        update: impl FnOnce(&mut Ticker),
+    ) {
         let Some(ticker) = self.tickers.get_mut(index as usize) else {
             return;
         };
@@ -605,11 +617,14 @@ impl Store {
                 mask |= 1 << bit;
             }
         }
+        let seen = mask | observed;
+        if seen != 0 {
+            self.mark_references_seen(index, seen);
+            self.mark_observations_seen(index, seen);
+        }
         if mask == 0 {
             return;
         }
-        self.mark_references_seen(index, mask);
-        self.mark_observations_seen(index, mask);
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {
@@ -2632,6 +2647,54 @@ mod tests {
             by_index.take_pending().ticker_deltas
         );
         assert_eq!(by_index.tickers()[1].last, 7.);
+    }
+
+    #[test]
+    fn indexed_observed_updates_preserve_receipts_revisions_and_wire_bytes() {
+        fn frame(store: &mut Store) -> Vec<u8> {
+            let pending = store.take_pending();
+            let mut writer = FrameWriter::new(Vec::new(), 0.0);
+            store.write(&pending, &mut writer);
+            writer.finish()
+        }
+        for export in [false, true] {
+            let mut separate = Store::default();
+            let mut combined = Store::default();
+            for store in [&mut separate, &mut combined] {
+                store.export_ticker_observations = export;
+                store.set_tickers(vec![ticker("C"), ticker("A"), ticker("B")]);
+                store.take_pending();
+            }
+            // Includes changed values, unchanged receipts, omitted references,
+            // signed zero, multiple row orderings and observations without a delta.
+            for (time, index, last, mark, observed) in [
+                (1.0, 1, 7.0, 8.0, (1 << 2) | (1 << 3)),
+                (2.0, 1, 7.0, 8.0, 1 << 2),
+                (3.0, 2, -0.0, 9.0, 1 << 3),
+                (4.0, 1, 10.0, 8.0, 0),
+                (5.0, 2, 0.0, 9.0, 1 << 4),
+                (6.0, 1, 10.0, 8.0, 0),
+            ] {
+                separate.set_clock(time);
+                combined.set_clock(time);
+                let symbol = separate.tickers()[index as usize].symbol.clone();
+                let update = |row: &mut Ticker| {
+                    row.last = last;
+                    row.mark = mark;
+                };
+                separate.update_ticker_at(index, update);
+                separate.observe_ticker_fields(&symbol, observed);
+                combined.update_ticker_with_observations_at(index, observed, update);
+                assert_eq!(separate.ticker_seen_at, combined.ticker_seen_at);
+                assert_eq!(separate.ticker_observed_at, combined.ticker_observed_at);
+                assert_eq!(separate.ticker_revision, combined.ticker_revision);
+                assert_eq!(frame(&mut separate), frame(&mut combined));
+            }
+            combined.update_ticker_with_observations_at(u32::MAX, u16::MAX, |_| {
+                panic!("invalid row reached closure")
+            });
+            assert_eq!(frame(&mut separate), frame(&mut combined));
+        }
     }
 
     #[test]
