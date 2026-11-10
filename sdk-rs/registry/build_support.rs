@@ -283,15 +283,20 @@ fn rule(value: &Rule) -> String {
         None => "None".into(),
     };
     let bridge = &value.bridge;
-    let helpers = match &bridge.helpers {
-        None => "None".to_owned(),
-        Some(helpers) => format!(
-            "Some(HelperCapabilities {{ resolve_leverage_context: {:?}, fetch_algo_orders: {:?} }})",
-            helpers.resolve_leverage_context, helpers.fetch_algo_orders
-        ),
+    let helpers = if cfg!(any(feature = "phemex", feature = "okx")) {
+        let value = match &bridge.helpers {
+            None => "None".to_owned(),
+            Some(helpers) => format!(
+                "Some(HelperCapabilities {{ resolve_leverage_context: {:?}, fetch_algo_orders: {:?} }})",
+                helpers.resolve_leverage_context, helpers.fetch_algo_orders
+            ),
+        };
+        format!(", helpers: {value}")
+    } else {
+        String::new()
     };
     let bridge = format!(
-        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?}, helpers: {helpers} }}",
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?}{helpers} }}",
         bridge.spot,
         bridge.demo,
         bridge.primary_credentials_only,

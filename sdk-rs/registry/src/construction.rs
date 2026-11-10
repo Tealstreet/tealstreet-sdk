@@ -1,9 +1,8 @@
 //! Synchronous SDK and native construction share these declarative conditions.
+use crate::EngineOptions;
 use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy, SetupFieldPolicy};
 use safe_cex_engine::signing_policy::{RemoteSigningPolicy, SignatureEncoding};
 use serde::{Deserialize, Serialize};
-
-use crate::EngineOptions;
 
 type Conditions = &'static [&'static [Input]];
 
@@ -57,17 +56,8 @@ struct BridgeRule {
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
     read_credentials: ReadCredentialsPolicy,
+    #[cfg(any(feature = "phemex", feature = "okx"))]
     helpers: Option<HelperCapabilities>,
-}
-
-/// Optional SDK helpers available from the shared declaration before startup.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HelperCapabilities {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolve_leverage_context: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fetch_algo_orders: Option<bool>,
 }
 
 /// What trusted setup does with a family's read key (declared, never inferred).
@@ -81,12 +71,6 @@ pub enum ReadCredentialsPolicy {
     ValidateOnly,
     /// Also usable without a primary in public-only mode, for Read roles only.
     PublicRead,
-}
-
-impl ReadCredentialsPolicy {
-    fn is_install(&self) -> bool {
-        *self == Self::Install
-    }
 }
 
 enum DemoRule {
@@ -109,6 +93,7 @@ pub struct BridgeConstruction {
     /// Omitted when `Install`, so undeclared families keep their exact record.
     #[serde(skip_serializing_if = "ReadCredentialsPolicy::is_install")]
     pub read_credentials: ReadCredentialsPolicy,
+    #[cfg(any(feature = "phemex", feature = "okx"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub helpers: Option<HelperCapabilities>,
 }
@@ -142,6 +127,7 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
         isolated_book_subscriptions: rule.isolated_book_subscriptions,
         dispatch_signing: rule.dispatch_signing,
         read_credentials: rule.read_credentials,
+        #[cfg(any(feature = "phemex", feature = "okx"))]
         helpers: rule.helpers,
     }
 }
@@ -289,6 +275,25 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
         public_data_only,
         explicit_private_error,
     })
+}
+
+// Keep helper definitions after existing functions so unrelated families retain
+// their panic locations as well as their layout and certified compiled bytes.
+#[cfg(any(feature = "phemex", feature = "okx"))]
+/// Optional SDK helpers available from the shared declaration before startup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelperCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolve_leverage_context: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetch_algo_orders: Option<bool>,
+}
+
+impl ReadCredentialsPolicy {
+    fn is_install(&self) -> bool {
+        *self == Self::Install
+    }
 }
 
 /// Test-only declaration for one family, since no shipped row declares a policy.

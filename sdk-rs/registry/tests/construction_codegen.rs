@@ -236,6 +236,7 @@ fn seconds_timestamp_wire_requires_exactly_one_declared_method_path_suffix() {
 }
 
 #[test]
+#[cfg(any(feature = "phemex", feature = "okx"))]
 fn helper_capabilities_compile_as_one_typed_shared_declaration() {
     for (key, field) in [
         ("resolveLeverageContext", "resolve_leverage_context"),
@@ -260,4 +261,16 @@ fn helper_capability_typos_and_non_boolean_values_fail_closed() {
         let json = serde_json::json!({"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":helpers}}}}).to_string();
         assert!(build_support::generate(&json).is_err());
     }
+}
+
+#[test]
+#[cfg(not(any(feature = "phemex", feature = "okx")))]
+fn helper_metadata_is_omitted_without_helper_families() {
+    let json = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":{"resolveLeverageContext":true}}}}}"#;
+    let output = build_support::generate(json).unwrap();
+    assert!(
+        !output.contains("helpers:"),
+        "helper storage changes unrelated families"
+    );
+    assert!(!output.contains("HelperCapabilities"));
 }
