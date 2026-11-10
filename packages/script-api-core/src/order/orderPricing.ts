@@ -1,4 +1,4 @@
-import type { ExchangeName, Market, OrderType } from '@tealstreet/safe-cex/src/types';
+import type { ExchangeName, Market, OrderType, PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 
 import { roundToNearestMultiple, roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { roundCloseSize, roundMarketOrderSize as roundMarketOrderSizeToStep } from './rounding';
@@ -118,6 +118,20 @@ export const isStopLikeOrderType = (type: OrderType): boolean => STOP_LIKE_ORDER
  */
 export const venueSupportsInfinityStops = (exchangeName: ExchangeName): boolean =>
   getExchangeMetadata(exchangeName).supportsInfinityStops;
+
+/** Protective kinds close by nature, even when the caller omits reduceOnly. */
+export const assertCloseLikeOrderAmount = (
+  amount: number,
+  order: Pick<PlaceOrderOpts, 'type' | 'reduceOnly' | 'close'>,
+  market: Market,
+  exchangeName?: string,
+): void => {
+  if (exchangeName !== 'mexc') return;
+  const protective = isStopLikeOrderType(order.type);
+  if (!protective && !order.reduceOnly && !order.close) return;
+  if (amount === 0 && protective && venueSupportsInfinityStops(exchangeName)) return;
+  assertNativeReduceAmount(amount, market, exchangeName);
+};
 
 /**
  * Whether the venue wants reduce-only orders shrunk against what is already

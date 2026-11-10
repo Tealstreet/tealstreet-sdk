@@ -2,8 +2,8 @@ import type { ExchangeName, Market, Order, PlaceOrderOpts, Position, Ticker } fr
 
 import { OrderType } from '@tealstreet/safe-cex/src/types';
 import { downSizeReduceOrder } from './downSizeReduceOrder';
-import { assertNativeReduceAmount } from './nativeAmountRules';
 import {
+  assertCloseLikeOrderAmount,
   assertMinimumPrice,
   isStopLikeOrderType,
   roundMarketOrderSize,
@@ -61,9 +61,7 @@ export const prepareOrder = <T extends { symbol: string; type: OrderType; amount
   { market, exchangeName }: OrderPolicyContext,
 ): PlaceOrderOpts => {
   const reduceOnly = (opts as { reduceOnly?: boolean }).reduceOnly === true;
-  if (reduceOnly && !(opts.amount === 0 && isStopLikeOrderType(opts.type))) {
-    assertNativeReduceAmount(opts.amount, market, exchangeName);
-  }
+  assertCloseLikeOrderAmount(opts.amount, opts, market, exchangeName);
   const isReduceOnlyMarket = reduceOnly && opts.type === OrderType.Market;
   const amount = isReduceOnlyMarket
     ? roundMarketOrderSize(opts.amount, market, { reduceOnly: true, exchangeName })

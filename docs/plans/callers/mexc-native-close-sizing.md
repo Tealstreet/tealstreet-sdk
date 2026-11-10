@@ -15,6 +15,13 @@ above a known maximum, or a clamp that would silently shrink it. Missing unit
 metadata refuses; an absent maximum remains unknown. Other venue rules retain
 their existing behavior, including native-sized OKX precision.
 
+Preserve-or-refuse covers TP/SL kinds even without `reduceOnly`, explicit close
+orders, and amendments of reducing/protective orders. The requested amount is
+checked before rounding and before either amendment send boundary. Only an
+explicit zero on an eligible full-position stop receives the infinity exception;
+a positive off-step quantity cannot round into it. Price-only amendments keep
+their amount omitted.
+
 `prepareOrder` and `clampReduceOnlyOrder` already take `exchangeName`; the shared
 CoreAdapter supplies it for placements, closes and amendments. Direct host calls
 must also carry it:
@@ -25,6 +32,11 @@ roundMarketOrderSize(nativeAmount, market, { reduceOnly: true, exchangeName: exc
 roundOrderSizeToNearest(nativeAmount, market, exchange.name);
 downSizeReduceOrder(market, order, positions, restingOrders, price, { exchangeName: exchange.name });
 ```
+
+Before rounding a reducing/protective amendment, direct hosts must call the same
+`assertCloseLikeOrderAmount(requestedNativeAmount, existingOrder, market, exchange.name)`
+guard that CoreAdapter uses. Its classification includes the stored order kind
+and does not require the caller to repeat a protective order's reducing flag.
 
 NX's web order helpers must pass this context when consuming these functions.
 No host-local arithmetic or fallback contract size is needed. A missing native

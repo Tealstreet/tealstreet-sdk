@@ -28,6 +28,7 @@ import { OrderStatus } from '@tealstreet/safe-cex/src/types';
 
 import { clampReduceOnlyOrder, prepareOrder } from '../order/prepareOrder';
 import {
+  assertCloseLikeOrderAmount,
   assertMinimumPrice,
   roundMarketCloseSize,
   roundOrderPrice,
@@ -388,7 +389,8 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           rounded.price = price;
         }
         if ('amount' in update && update.amount !== undefined) {
-          const amount = roundOrderSizeToNearest(update.amount, market, host.getExchange(account)?.name);
+          assertCloseLikeOrderAmount(update.amount, order, market, exchange.name);
+          const amount = roundOrderSizeToNearest(update.amount, market, exchange.name);
           if (!Number.isFinite(amount) || amount < 0) {
             throw new ScriptValidationError(`updateOrder: invalid amount for '${order.symbol}': ${update.amount}`);
           }

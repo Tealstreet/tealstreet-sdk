@@ -35,6 +35,7 @@ const position = (native: number): Position => ({
   positionMode: PositionMode.OneWay,
   extra: { contractsNative: native },
 });
+
 const close = (amount: number, type = OrderType.Market): PlaceOrderOpts => ({
   symbol: market.symbol,
   side: OrderSide.Sell,
@@ -197,5 +198,137 @@ describe('MEXC native close quantities through real pricing and downsizing', () 
   it('preserves an intentional zero-sized full-position stop', () => {
     const stop = prepareOrder({ ...close(0, OrderType.StopLoss), stopLoss: price }, { market, exchangeName: 'mexc' });
     expect(stop.amount).toBe(0);
+  });
+});
+
+describe('MEXC intrinsic protection and amendment quantities', () => {
+  const protectionTypes = [OrderType.StopLoss, OrderType.TakeProfit] as const;
+  const fixture = (order?: Order, hosted = false, exchangeName = 'mexc') => {
+    const placeOrder = vi.fn(async () => ['placed']);
+    const updateOrder = vi.fn(async () => undefined);
+    const submitOrderAmend = vi.fn(async () => undefined);
+    const selected = exchangeName === 'mexc' ? market : { ...market, precision: { ...market.precision, amount: 1 } };
+    const store = { markets: [selected], positions: [position(130)], orders: order ? [order] : [], tickers: [] };
+    const host = {
+      getExchange: () => ({ name: exchangeName, placeOrder, updateOrder, store }),
+      getStore: () => store,
+      findMarket: () => selected,
+      ...(hosted ? { submitOrderAmend } : {}),
+    } as unknown as HostBindings;
+    return {
+      adapter: createCoreAdapter(host),
+      placeOrder,
+      updateOrder,
+      submitOrderAmend,
+      send: hosted ? submitOrderAmend : updateOrder,
+    };
+  };
+  const resting = (type: OrderType): Order =>
+    ({
+      id: 'resting',
+      symbol: market.symbol,
+      side: OrderSide.Sell,
+      type,
+      status: OrderStatus.Open,
+      amount: 13_000,
+      remaining: 13_000,
+      filled: 0,
+      price,
+      ...(type === OrderType.Limit ? { reduceOnly: true } : {}),
+    }) as Order;
+
+  it.each(
+    protectionTypes.flatMap((type) =>
+      [undefined, false].flatMap((reduceOnly) => [130.4, 0.4, 445_001].map((amount) => ({ type, reduceOnly, amount }))),
+    ),
+  )(
+    'refuses a sized $type of $amount with reduceOnly=$reduceOnly before placement',
+    async ({ type, reduceOnly, amount }) => {
+      const { adapter, placeOrder } = fixture();
+      await expect(adapter.placeOrder({ ...close(amount, type), reduceOnly } as never, 'fixture')).rejects.toThrow();
+      expect(placeOrder).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(
+    protectionTypes.flatMap((type) =>
+      [undefined, false].flatMap((reduceOnly) => [130, 0].map((amount) => ({ type, reduceOnly, amount }))),
+    ),
+  )('preserves explicit $type quantity $amount with reduceOnly=$reduceOnly', async ({ type, reduceOnly, amount }) => {
+    const { adapter, placeOrder } = fixture();
+    await adapter.placeOrder({ ...close(amount, type), reduceOnly } as never, 'fixture');
+    expect(placeOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount }));
+  });
+
+  it('refuses an off-step explicit close even without reduceOnly', async () => {
+    const { adapter, placeOrder } = fixture();
+    await expect(
+      adapter.placeOrder({ ...close(130.4), reduceOnly: undefined, close: true } as never, 'fixture'),
+    ).rejects.toThrow();
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  const amendmentTypes = [OrderType.Limit, ...protectionTypes, OrderType.TrailingStopLoss];
+  it.each(
+    [false, true].flatMap((hosted) =>
+      amendmentTypes.flatMap((type) => [130.4, 0.4, 445_001].map((amount) => ({ hosted, type, amount }))),
+    ),
+  )(
+    'refuses $type amendment $amount before either send boundary (hosted=$hosted)',
+    async ({ hosted, type, amount }) => {
+      const { adapter, updateOrder, submitOrderAmend } = fixture(resting(type), hosted);
+      await expect(adapter.updateOrder('resting', { update: { amount } }, 'fixture')).rejects.toThrow();
+      expect(updateOrder).not.toHaveBeenCalled();
+      expect(submitOrderAmend).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true].flatMap((hosted) => amendmentTypes.map((type) => ({ hosted, type }))))(
+    'preserves valid 130-contract $type amendment (hosted=$hosted)',
+    async ({ hosted, type }) => {
+      const { adapter, send } = fixture(resting(type), hosted);
+      await adapter.updateOrder('resting', { update: { amount: 130 } }, 'fixture');
+      expect(send).toHaveBeenCalledExactlyOnceWith(
+        ...(hosted
+          ? ['fixture', expect.objectContaining({ update: { amount: 130 } })]
+          : [expect.objectContaining({ update: { amount: 130 } })]),
+      );
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((hosted) =>
+      [...protectionTypes, OrderType.TrailingStopLoss].map((type) => ({ hosted, type })),
+    ),
+  )(
+    'keeps an explicitly requested zero-sized full-position $type amendment (hosted=$hosted)',
+    async ({ hosted, type }) => {
+      const { adapter, send } = fixture(resting(type), hosted);
+      await adapter.updateOrder('resting', { update: { amount: 0 } }, 'fixture');
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0].at(-1)).toMatchObject({ update: { amount: 0 } });
+    },
+  );
+
+  it.each([false, true])('refuses zero on a reduce-only limit amendment (hosted=%s)', async (hosted) => {
+    const { adapter, updateOrder, submitOrderAmend } = fixture(resting(OrderType.Limit), hosted);
+    await expect(adapter.updateOrder('resting', { update: { amount: 0 } }, 'fixture')).rejects.toThrow();
+    expect(updateOrder).not.toHaveBeenCalled();
+    expect(submitOrderAmend).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('keeps price-only protective amendments sized as omitted (hosted=%s)', async (hosted) => {
+    const { adapter, send } = fixture(resting(OrderType.StopLoss), hosted);
+    await adapter.updateOrder('resting', { update: { price: 0.2 } }, 'fixture');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0].at(-1)).toMatchObject({ update: { price: 0.2 } });
+    expect(send.mock.calls[0].at(-1)).not.toHaveProperty('update.amount');
+  });
+
+  it.each([false, true])('retains other venues amendment rounding (hosted=%s)', async (hosted) => {
+    const { adapter, send } = fixture(resting(OrderType.Limit), hosted, 'binance');
+    await adapter.updateOrder('resting', { update: { amount: 130.4 } }, 'fixture');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0].at(-1)).toMatchObject({ update: { amount: 130 } });
   });
 });
