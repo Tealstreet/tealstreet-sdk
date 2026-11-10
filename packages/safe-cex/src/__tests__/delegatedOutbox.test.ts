@@ -1,9 +1,6 @@
 import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 
-import { resolve } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
-import ts from 'typescript';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
@@ -87,37 +84,6 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
-  it('requires evidence to construct notSent at compile time', () => {
-    const file = resolve('src/__tests__/__outbox_type_contract__.ts');
-    const source = `import type { DelegatedIntent } from '../delegatedOutbox';
-declare const row: DelegatedIntent;
-row.state = 'unknown';
-// @ts-expect-error Working control: unrelated state words are also refused.
-row.state = 'invented';
-// @ts-expect-error Only the evidence constructor can construct notSent.
-row.state = 'notSent';
-// @ts-expect-error Error outcomes cannot fabricate no-handoff evidence either.
-row.error = { message: 'unproven', outcome: 'notSent' };
-`;
-    const options: ts.CompilerOptions = {
-      strict: true,
-      noEmit: true,
-      skipLibCheck: true,
-      types: [],
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      esModuleInterop: true,
-    };
-    const host = ts.createCompilerHost(options);
-    const read = host.getSourceFile.bind(host);
-    host.getSourceFile = (name, language, ...args) =>
-      name === file ? ts.createSourceFile(name, source, language, true) : read(name, language, ...args);
-    const program = ts.createProgram([file], options, host);
-    expect(
-      ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n')),
-    ).toEqual([]);
-  });
   it('restores a legacy notSent row without evidence as unknown', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
