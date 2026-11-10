@@ -30,7 +30,7 @@ import { OEMS_PLAN_SCHEMA_VERSION } from './planSchema';
 
 /** Bump on ANY edit to `INSTRUCTIONS`. Together with the schema version it is
  *  the `prompt_cache_key`, so a stale value would serve the old contract. */
-export const OEMS_PROMPT_VERSION = 7;
+export const OEMS_PROMPT_VERSION = 8;
 
 /**
  * How many times ONE turn may come back for more data.

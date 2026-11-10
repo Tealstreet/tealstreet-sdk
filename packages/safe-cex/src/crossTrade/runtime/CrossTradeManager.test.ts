@@ -1,10 +1,12 @@
-import type { Market } from '../../types';
+import type { Exchange } from '../../exchanges/base';
+import type { Market, Position } from '../../types';
 import type { CrossTradeCopier } from '../types';
 import type { CrossTradePlaceOrderFn } from './CrossTradeManager';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { OrderSide } from '../../types';
+import { OrderSide, PositionSide } from '../../types';
+import { loop } from '../../utils/loop';
 
 vi.mock('../../utils/loop', () => ({
   loop: vi.fn(),
@@ -275,5 +277,92 @@ describe('CrossTradeManager.start / stop lifecycle', () => {
     expect(firstLoop.isDisposed).toBe(true);
     expect(manager._loop).not.toBe(firstLoop);
     manager.stop();
+  });
+});
+
+describe('CrossTradeManager orphan position sizing', () => {
+  const auditOrphan = async (positionOverrides: Partial<Position>, marketOverrides: Partial<Market> = {}) => {
+    const { CrossTradeManager } = await import('./CrossTradeManager');
+    const copier = makeCopier();
+    const market = makeMarket({ contractSize: 1000, ...marketOverrides });
+    const position: Position = {
+      id: 'orphan-position',
+      symbol: market.symbol,
+      side: PositionSide.Long,
+      contracts: 2000,
+      notional: 200_000,
+      entryPrice: 100,
+      leverage: 1,
+      unrealizedPnl: 0,
+      liquidationPrice: null,
+      ...positionOverrides,
+    };
+    const exchange = (positions: Position[]): Exchange =>
+      ({
+        name: 'bybit',
+        store: {
+          loaded: { positions: true },
+          positions,
+          markets: [market],
+          tickers: [{ symbol: market.symbol, last: 100 }],
+        },
+      }) as unknown as Exchange;
+    const masterExchange = exchange([]);
+    const copierExchange = exchange([position]);
+    const placeOrder = vi.fn().mockResolvedValue({ id: 'close-order' });
+    const manager = new CrossTradeManager({
+      getExchange: (account) => (account === 'master' ? masterExchange : copierExchange),
+      placeOrder,
+    });
+    manager.start([
+      {
+        enabled: true,
+        masterAccount: 'master',
+        masterSymbol: market.symbol,
+        masterWeight: 1,
+        copiers: [copier],
+      },
+    ]);
+    try {
+      expect(loop).toHaveBeenCalledOnce();
+      const [tick] = vi.mocked(loop).mock.calls[0];
+      await tick();
+    } finally {
+      manager.stop();
+    }
+    return { copier, market, placeOrder };
+  };
+
+  it.each([1, 3])('refuses an automatic close with conflicting native quantity %s', async (contractsNative) => {
+    const { placeOrder } = await auditOrphan({ extra: { contractsNative } });
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('converts absent native evidence from base to native contracts', async () => {
+    const { copier, market, placeOrder } = await auditOrphan({});
+    expect(placeOrder).toHaveBeenCalledExactlyOnceWith(copier, market, 100, 'copier1', OrderSide.Sell, 2, true);
+  });
+
+  it('derives inverse closes from quote notional when native evidence is absent', async () => {
+    const { copier, market, placeOrder } = await auditOrphan(
+      { contracts: 2, notional: 600, side: PositionSide.Short },
+      { contractSize: 100, isInverse: true },
+    );
+    expect(placeOrder).toHaveBeenCalledExactlyOnceWith(copier, market, 100, 'copier1', OrderSide.Buy, 6, true);
+  });
+
+  it('uses coherent native evidence for the reduce-only orphan close', async () => {
+    const { copier, market, placeOrder } = await auditOrphan({ extra: { contractsNative: 2 } });
+    expect(placeOrder).toHaveBeenCalledExactlyOnceWith(copier, market, 100, 'copier1', OrderSide.Sell, 2, true);
+  });
+
+  it('refuses an inverse close when neither native nor derived quantity is known', async () => {
+    const { placeOrder } = await auditOrphan({ contracts: 2, notional: NaN }, { isInverse: true });
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('refuses invalid present native evidence instead of guessing from base', async () => {
+    const { placeOrder } = await auditOrphan({ extra: { contractsNative: NaN } });
+    expect(placeOrder).not.toHaveBeenCalled();
   });
 });

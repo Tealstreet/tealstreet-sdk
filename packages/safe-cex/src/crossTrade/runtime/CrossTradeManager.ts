@@ -4,6 +4,7 @@ import type { CrossTradeConfig, CrossTradeCopier } from '../types';
 
 import { OrderSide, PositionSide } from '../../types';
 import { loop } from '../../utils/loop';
+import { nativePositionSize } from '../../utils/nativePositionSize';
 import { convertFromBaseSizeToNative } from '../../utils/sizing';
 import { convertSymbol } from '../../utils/symbolConverter';
 import { getCopierSymbolFromMaster } from '../getCopierSymbolFromMaster';
@@ -220,6 +221,12 @@ export class CrossTradeManager {
 
       // close the copier position if not open in master
       if (!foundMasterPosition) {
+        const amount = nativePositionSize(copierPosition, copierMarket);
+        if (amount === null) {
+          debug('Skipping orphan close with unknown native size', copierPosition.symbol);
+          return;
+        }
+        if (amount === 0) return;
         // no master position, close copier position
         return this._safePlaceOrder(
           copier,
@@ -228,7 +235,7 @@ export class CrossTradeManager {
           orderPrice,
           copierAccount,
           copierPosition.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
-          Math.abs(copierPosition.extra?.contractsNative || copierPosition.contracts),
+          amount,
           true,
         );
       } else {
