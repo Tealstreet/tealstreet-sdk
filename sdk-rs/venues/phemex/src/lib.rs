@@ -4,6 +4,7 @@ mod account_wire;
 mod history;
 mod identity;
 mod income;
+mod leverage;
 mod public_candles;
 mod public_reads;
 mod public_trades;
@@ -207,6 +208,10 @@ impl PhemexPerpetuals {
     fn command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
+            return;
+        }
+        if let Command::FetchLeverage { symbol, .. } = command {
+            self.fetch_leverage(cx, symbol);
             return;
         }
         let Some(command) = self.trade_command(cx, command) else {
