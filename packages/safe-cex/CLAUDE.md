@@ -61,6 +61,72 @@ fixtures exercise the same production sender. The shared fixture lives with
 the server tests for receiver interoperability; Rust consumption depends on
 the server handover implementation landing.
 
+## DELEGATED order outbox
+
+`DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
+submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
+`delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
+missing/false flags disable writes and receipts. Hosts inject scoped persistence,
+secure randomness, a monotonic clock with a stable epoch, deadline scheduling
+and an admitted socket connection. Close the outbox on logout; pass the captured connection ticket to flush and receive.
+Router outcomes may be renumbered per client socket, including stored replays.
+Receipt ordering is checked per intent within that ticket, so one intent's higher
+number cannot hide another's deferred replay. Replacement tickets reset receipt
+ordering and old tickets cannot update the replacement connection.
+The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations,
+coverage uncertainty and ledger failures answer unknown, never prove not sent.
+Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
+string coercion. Capability discovery still requires completed socket admission.
+Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
+an intent `sending` in memory; sending, acknowledged and unknown intents are never
+submitted again. At ten monotonic seconds from creation (including persistence
+and admission waits), a never-forwarded queued intent becomes `notSent`; an
+in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+those retained entries to unknown immediately while fencing later work and callbacks.
+Disconnect/replacement makes
+in-flight and acknowledged intents unknown immediately. The synchronous send
+adapter returns true only after socket handoff; false or a throw must guarantee
+neither a handoff nor buffering for a later connection. Queue cancellation after handoff remains unknown until a router
+receipt positively establishes non-forwarding. Legacy pending cancellations restore
+as unknown. Cancellation or expiry during a declined first send remains terminal
+and is published; a declined retry cannot erase a previous handoff.
+`notSent` is a branded state, constructed only by the exported
+`markDelegatedNotSent(intent, evidence)`. It requires positive evidence for the
+whole intent: a locally known never-attempted intent, a declined adapter handoff
+with no earlier possible handoff, or an admitted authoritative router refusal.
+A failed reconnect attempt cannot prove an earlier handoff did not occur.
+The private runtime brand is read only by the outbox; plain state writes cannot
+manufacture the result. JSON stores the evidence kind and its owner/account,
+intent ID, sequence and fingerprint binding. Restore validates that evidence and
+reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
+including their unsupported error outcome. No-evidence clock-epoch/deadline
+expiry of a restored queued record is also unknown rather than proof of no send.
+Restored ambiguous handoffs are unknown. Once enqueue persistence succeeds, temporary unavailability while
+preparing handoff retains that queued intent and its ID for retry. The NX router
+supplies durable deduplication and queue cancellation;
+see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
+signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
+
+The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
+records. Unknown work, including pending queue cancellation, is retained for 24
+hours from its UUIDv7 Unix creation time, using the injected Unix clock across
+reloads (clock rollback can extend retention). At expiry it remains `unknown`,
+gains `retentionExpired: true`, stops pending queue cancellation, and emits the
+normal `changed` notification. Hosts must surface this as expired, unresolved
+history and reconcile via ordinary orders/history; expiry proves nothing about
+the venue outcome. Only after that explicit expiry state is durable may it join
+the latest-32 completed history and retire. Expiry never enables resubmission or
+changes an unknown to `notSent`; a late positive router refusal can still prove
+non-forwarding. Storage failure keeps the row for a later flush retry.
+Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
+listed retired intent IDs in that scope and advance its durable sequence using
+the maximum of old/new values. Preserve all other records. `load` returns an
+`OutboxSnapshot` with sequence progress and records (legacy record arrays are
+accepted for migration). `put` preserves checkpoint metadata. Compaction failure
+keeps records until a later flush retries. Unrelated retirement failure never
+rejects enqueue or hides its durable intent ID after handoff. Close the old
+outbox before replacing it with a new writer for the same scope.
+
 ## Mirror CI invariants (don't "clean these up")
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean
@@ -457,6 +523,11 @@ carry JSON `venueError` detail, which the bridge wraps as `ExchangeError` to
 preserve `unsupported`/`notSent` through startup and account validation.
 
 ## Rust engine capabilities
+
+Optional SDK helpers needed before engine startup are declared under
+`bridge.helpers` in `construction-rules.json`. The native generated construction
+record and synchronous SDK record share that declaration. Install and dispatch
+those helpers from their declared flags, never from a venue-name check.
 
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
@@ -1164,9 +1235,16 @@ only defined on linear markets.
 `safe-cex/src/utils/nativePositionSize.ts` is the single definition;
 `script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
 Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
-use it. Its own comment records that the copies HAD drifted
-before they were merged. One function in the shared layer, adapters either
-side.
+use it. The helper returns `number | null`: coherent native evidence wins, absent
+native uses derived size, and conflicting/unavailable quantities remain unknown.
+No per-field freshness signal exists; close/reduce consumers refuse a conflict
+rather than selecting either value by magnitude. CrossTrade validates canonical
+quantities in both reconciliation passes. Unknown master/copier rows remain
+present and refuse automatic sizing; known-flat rows remain distinct. Matched
+reductions compare exposures projected from canonical native quantities, and
+lot-rounded reductions are capped at the known copier quantity. The missing-
+position pass also refuses unknown opposite-side rows, since an entry could
+reduce them. Market, LimitSlippage and Chase forward these validated amounts.
 
 ### 4. Break-even — NOT trustworthy, and the order paths are off it
 
@@ -1878,7 +1956,7 @@ consuming app's CLAUDE.md for the capture playbook.
 worker op handled by `src/webworker/handlers/UpdatePositionsHandler.ts`.
 Account-wide refreshes (`symbols` omitted) must use
 `store.addOrUpdatePositionsFull(positions)`, including empty arrays, so
-positions omitted by the exchange are zeroed/cleared. Symbol-scoped refreshes
+positions omitted by the exchange are removed. Last reported per-ID leverage/margin/mode survives separately in the generated `positionSettings` map. Symbol-scoped refreshes
 remain partial and use `addOrUpdatePositions(positions)` when rows are
 returned. Do not replace this with a main-thread `fetchPositions()` + direct
 store write from the web app; the worker owns live exchange state and its

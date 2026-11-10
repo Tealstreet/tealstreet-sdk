@@ -3,6 +3,7 @@ import { roundToDefaultPrecision } from '@tealstreet/math/src/roundToDefaultPrec
 import { roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { Market } from '../types';
 import { diagnosticConsole } from './diagnosticRedaction';
+import { nativeAmountRules } from './nativeAmountRules';
 import { adjust } from './safe-math';
 
 export const convertFromQuoteSizeToNative = (quoteSize: number, market: Market, price: number): number => {
@@ -15,7 +16,14 @@ export const convertFromQuoteSizeToNative = (quoteSize: number, market: Market, 
   return adjust(baseSize / contractSize, market.precision.amount);
 };
 
-export const convertFromBaseSizeToNative = (baseSize: number, market: Market, price: number): number => {
+export const convertFromBaseSizeToNative = (
+  baseSize: number,
+  market: Market,
+  price: number,
+  exchangeName?: string,
+): number => {
+  const rules = nativeAmountRules(market, exchangeName);
+  if (rules.basePerContract !== undefined) return baseSize / rules.basePerContract;
   const contractSize = market.contractSize || 1;
   // linear are already sized in base
   if (!market.isInverse) {

@@ -28,6 +28,28 @@ export {
 
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
+
+export { DelegatedOutbox, createDelegatedIntentId, markDelegatedNotSent } from './delegatedOutbox';
+export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
+export type {
+  DelegatedOrderBinding,
+  DelegatedOrderSubmitFrame,
+  DelegatedOrderAckFrame,
+  DelegatedOrderOutcomeFrame,
+  DelegatedOrderCancelQueuedFrame,
+} from './delegatedOrderFrames';
+export type {
+  DelegatedIntent,
+  DelegatedNotSentEvidence,
+  StoredDelegatedNotSentEvidence,
+  IntentState,
+  OutboxConnection,
+  OutboxOptions,
+  OutboxScope,
+  OutboxStorage,
+  OutboxSnapshot,
+  OutboxCompaction,
+} from './delegatedOutbox';
 export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
 export { describeStoppedAlgos, nukeWarning } from './nukeResult';
 export type { HistoryCompleteness, HistoricalRows } from './historyCompleteness';
