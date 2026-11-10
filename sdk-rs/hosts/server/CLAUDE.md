@@ -60,5 +60,6 @@ contract is documented in `docs/plans/callers/delegated-order-frames.md`.
 
 Receipt sequencing belongs to each registration output and is shared by its
 clones. Replacing or retiring that registration also retires its order receipts;
-existing method/signing envelopes retain their lifecycle. Sequence exhaustion
+successful same-resident re-verification follows the same replacement lifecycle.
+Existing method/signing envelopes retain their lifecycle. Sequence exhaustion
 signals reconnect without wrapping the counter.

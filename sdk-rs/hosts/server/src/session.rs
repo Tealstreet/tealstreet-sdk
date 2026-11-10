@@ -460,6 +460,7 @@ impl Session {
                                 && Arc::ptr_eq(&joined.account, &account)
                             {
                                 let previous = std::mem::replace(&mut joined.out, out.clone());
+                                previous.retire_order_receipts();
                                 previous.finish_registration(&out);
                                 self.resnapshot(&completed.account_name).await;
                             } else {

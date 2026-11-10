@@ -224,7 +224,10 @@ export class DelegatedOutbox {
         throw error;
       }
       if (connection) await this.sendIntent(row, connection);
-      await this.compact();
+      await this.compact().catch(() => {
+        // Keep retirement pending for a later flush without hiding the durable
+        // intent ID after a successful physical handoff.
+      });
       return intentId;
     });
   }

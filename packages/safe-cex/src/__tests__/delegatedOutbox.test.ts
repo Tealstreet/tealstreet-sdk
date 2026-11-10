@@ -83,6 +83,44 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  it('returns the durable physically-sent intent even when unrelated retirement fails', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const compact = f.options.storage.compact;
+    try {
+      f.options.storage.compact = async () => {
+        throw new Error('synthetic retirement unavailable');
+      };
+      for (let n = 0; n < 32; n++) {
+        await box.cancel(await box.enqueue(params));
+        f.advance(1);
+      }
+      const last = await box.enqueue(params);
+      await expect(box.cancel(last)).rejects.toThrow('retirement');
+      f.advance(1);
+      expect(box.entries()).toHaveLength(33);
+      const connection = box.connect(f.connection());
+      const result = await box.enqueue(params).then(
+        (id) => ({ id, error: undefined as string | undefined }),
+        (error) => ({ id: undefined, error: String(error) }),
+      );
+      expect(f.writes).toHaveLength(1);
+      const sent = JSON.parse(f.writes[0]);
+      expect([...f.rows.values()].some((row) => row.intentId === sent.d.intentId)).toBe(true);
+      expect(result.error, 'an accepted handoff must return its original intent ID').toBeUndefined();
+      expect(result.id).toBe(sent.d.intentId);
+      expect(box.entries()).toHaveLength(34);
+      expect(f.rows.size).toBe(34);
+      f.options.storage.compact = compact;
+      await box.flush(connection);
+      expect(box.entries()).toHaveLength(33);
+      expect(f.rows.size).toBe(33);
+      expect(f.writes).toHaveLength(1);
+      expect(box.entries().find((row) => row.intentId === result.id)?.state).toBe('queued');
+    } finally {
+      box.close();
+    }
+  });
   it('distinguishes a declined handoff from a prior successful handoff on cancellation', async () => {
     for (const handedOff of [false, true]) {
       const f = fixture();

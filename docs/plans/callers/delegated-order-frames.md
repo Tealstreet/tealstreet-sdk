@@ -135,4 +135,6 @@ retirement. `put` upserts one record without changing that checkpoint. `load`
 returns `{version:1, sequence, intents}`; legacy intent arrays are accepted and
 compacted on restore. The next sequence exceeds both the checkpoint and every
 loaded record. If compaction fails, memory retains the records and flush retries
-later. Hosts use one active outbox per scope and close it before replacing it.
+later. Enqueue returns its durable intent ID independently of unrelated retirement,
+including after a physical handoff. Hosts use one active outbox per scope and
+close it before replacing it.

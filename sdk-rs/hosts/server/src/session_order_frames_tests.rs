@@ -278,3 +278,103 @@ async fn order_frames_cancel_queued_never_cancels_a_venue_order() {
         registry.dispose(&account, Disposal::PageDisposed);
     }).await;
 }
+
+#[tokio::test]
+async fn order_frames_successful_reverification_drops_previous_deferred_completion() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let a_tape = Tape {
+                hold: true,
+                ..Default::default()
+            };
+            let a = delegated_account(&registry, "A", "bybit", a_tape.clone());
+            let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
+            alice.joined.get_mut("synthetic-main").unwrap().out =
+                alice.out.with_instance_id(Some("alice-old"));
+            assert!(alice.resnapshot("synthetic-main").await);
+            submit(&mut alice, 0, Some("alice-old")).await;
+            order_frame(&mut a_sent, "order.ack").await;
+            let pending = alice.joined["synthetic-main"].client.pending.clone();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while a_tape.waiting.lock().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            let mut admitted = init("bybit");
+            admitted.key = "synthetic-key-A".into();
+            admitted.instance_id = Some("alice-new".into());
+            admitted.signing_mode = Some("delegated".into());
+            assert_eq!(crate::delegated::fingerprint(&admitted), a.fingerprint);
+            let permit = registry.probe_permit("A", &admitted).unwrap();
+            let candidate: crate::delegated::Credentials = serde_json::from_str(
+                r#"{"key":"synthetic-key-A","secret":"synthetic-signing-fixture-A"}"#,
+            )
+            .unwrap();
+            alice.registration_outputs.insert(
+                "synthetic-main".into(),
+                alice.out.with_instance_id(Some("alice-new")),
+            );
+            let mut verified = alice.take_verified();
+            alice.start_probe_verification("synthetic-main".into(), async move {
+                (
+                    Ok(candidate),
+                    Some(ProbedInit {
+                        init: admitted,
+                        permit: Ok(permit),
+                    }),
+                )
+            });
+            let completion = tokio::time::timeout(Duration::from_secs(2), verified.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            alice.verification_completed(completion).await.unwrap();
+            assert!(Arc::ptr_eq(&alice.joined["synthetic-main"].account, &a));
+            assert!(
+                alice.joined["synthetic-main"]
+                    .out
+                    .order_binding(Some("alice-new"))
+            );
+            let b_tape = Tape::default();
+            let b = delegated_account(&registry, "B", "bybit", b_tape.clone());
+            let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+            bob.joined.get_mut("synthetic-main").unwrap().out =
+                bob.out.with_instance_id(Some("bob"));
+            assert!(bob.resnapshot("synthetic-main").await);
+            a_tape.finish_unknown();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while !pending.lock().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            let b_id = submit(&mut bob, 0, Some("bob")).await;
+            order_frame(&mut b_sent, "order.ack").await;
+            let placed = order_frame(&mut b_sent, "order.outcome").await;
+            assert_eq!(placed["d"]["instanceId"], "bob");
+            assert_eq!(placed["d"]["intentId"], b_id);
+            assert_eq!(placed["d"]["outcome"], "placed");
+            while let Ok(text) = a_sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert_ne!(
+                    frame["t"], "order.outcome",
+                    "retired registration has no late receipt"
+                );
+            }
+            while let Ok(text) = b_sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert_ne!(frame["t"], "order.outcome", "B has only its own completion");
+            }
+            assert_eq!(*a_tape.writes.lock().unwrap(), vec!["create"]);
+            assert_eq!(*b_tape.writes.lock().unwrap(), vec!["create"]);
+            alice.close();
+            bob.close();
+            registry.dispose(&a, Disposal::PageDisposed);
+            registry.dispose(&b, Disposal::PageDisposed);
+        })
+        .await;
+}

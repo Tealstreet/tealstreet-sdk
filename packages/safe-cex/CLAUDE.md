@@ -84,8 +84,9 @@ listed retired intent IDs in that scope and advance its durable sequence using
 the maximum of old/new values. Preserve all other records. `load` returns an
 `OutboxSnapshot` with sequence progress and records (legacy record arrays are
 accepted for migration). `put` preserves checkpoint metadata. Compaction failure
-keeps records until a later flush retries; close the old outbox before replacing
-it with a new writer for the same scope.
+keeps records until a later flush retries. Unrelated retirement failure never
+rejects enqueue or hides its durable intent ID after handoff. Close the old
+outbox before replacing it with a new writer for the same scope.
 
 ## Mirror CI invariants (don't "clean these up")
 
