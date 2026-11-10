@@ -1,12 +1,13 @@
 import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 
+import type { OutboxOptions as LegacyOutboxOptions } from './fixtures/delegatedOutbox.7232375420';
+
 import { describe, expect, it } from 'vitest';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
 import { createDelegatedIntentId, DelegatedOutbox, markDelegatedNotSent } from '../delegatedOutbox';
 import { DelegatedOutbox as LegacyOutbox } from './fixtures/delegatedOutbox.7232375420';
-import type { OutboxOptions as LegacyOutboxOptions } from './fixtures/delegatedOutbox.7232375420';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
 function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
@@ -97,13 +98,45 @@ describe('DELEGATED host-neutral outbox', () => {
     await old.flush(declined);
     const saved = [...f.rows.values()][0];
     expect(saved).toMatchObject({ intentId: id, state: 'queued', clockEpoch: 'boot-A', createdAt: 0 });
-    expect(saved).not.toHaveProperty('replayEvidence');
+    expect(saved).not.toHaveProperty('noHandoffEvidence');
     expect(saved).not.toHaveProperty('notSentEvidence');
     old.close();
     const restored = await DelegatedOutbox.open(f.options);
     await restored.flush(restored.connect(f.connection()));
     expect(f.writes).toHaveLength(1);
     expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    restored.close();
+  });
+  it('restores a proven never-sent queued row and sends it exactly once', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const id = await box.enqueue(params);
+    expect([...f.rows.values()][0]).toMatchObject({
+      state: 'queued',
+      noHandoffEvidence: { kind: 'noHandoff', source: 'local', attempted: false, intentId: id, seq: 1 },
+    });
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'queued' });
+    const c = restored.connect(f.connection());
+    await restored.flush(c);
+    await restored.flush(c);
+    expect(f.writes).toHaveLength(1);
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'sending' });
+    expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
+    restored.close();
+  });
+  it('restores a legacy queued row without persisted proof as unknown without sending', async () => {
+    const f = fixture();
+    const box = await LegacyOutbox.open(f.options as unknown as LegacyOutboxOptions);
+    const id = await box.enqueue(params);
+    expect([...f.rows.values()][0]).toMatchObject({ intentId: id, state: 'queued', clockEpoch: 'boot-A' });
+    expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    await restored.flush(restored.connect(f.connection()));
+    expect(f.writes).toHaveLength(0);
     restored.close();
   });
   it.each(['notSent', 'canceled'] as const)(
