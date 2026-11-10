@@ -476,6 +476,8 @@ still provides a full safety snapshot.
 The retained TS USD-M stream mapper restores omitted leverage/margin from live
 rows, then confirmed `fetchedLeverage`, then `positionSettings` for the exact
 position ID. Closed settings never supply exposure or an old liquidation price.
+The closed cache is consulted only without a live row; it cannot revive an
+explicitly unknown live setting.
 An unreported leverage stays unavailable (`NaN` in the numeric Position field),
 margin type stays absent, and an unknown liquidation price is `null` until REST
 repair. Unknown zero-size stream events still create no position.

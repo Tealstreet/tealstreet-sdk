@@ -697,7 +697,7 @@ Blofin occasionally pushes partial position events without a usable `leverage` f
 1. `parseFloat(p.leverage)` if finite and `> 0`.
 2. Otherwise, look up the existing position by `id` (built via `createPositionId(symbol, side, positionMode)`) and reuse its leverage if `> 0`.
 3. Otherwise, use a finite positive `store.fetchedLeverage[symbol]` rail (per-side in hedged mode) when present and not `isFetching`. A successful `setLeverage` while flat updates this confirmed setting, so it takes precedence over the closed cache.
-4. Otherwise, use a finite positive `store.positionSettings[positionId].leverage` for the exact ID.
+4. If there is no live row, use a finite positive `store.positionSettings[positionId].leverage` for the exact ID. An explicitly unknown live value does not revive the closed cache.
 5. Otherwise, keep leverage unavailable (`NaN` in the numeric Position field), rather than inventing `0`.
 
 `mapPositions` applies the same preserve-on-blank rule to

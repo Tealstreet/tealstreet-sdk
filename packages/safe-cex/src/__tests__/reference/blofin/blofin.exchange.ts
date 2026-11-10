@@ -1762,7 +1762,7 @@ export class BlofinExchange extends BaseExchange {
           parsedLeverage,
           existingPosition?.leverage,
           confirmedLeverage,
-          this.store.positionSettings?.[positionId]?.leverage,
+          existingPosition ? undefined : this.store.positionSettings?.[positionId]?.leverage,
         ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? Number.NaN;
       const parsedLiquidationPrice = parseFloat(p.liquidationPrice);
       const liquidationPrice = Number.isFinite(parsedLiquidationPrice)

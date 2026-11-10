@@ -321,7 +321,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         const eventSide = POSITION_SIDE[p.ps] || (signedContracts >= 0 ? PositionSide.Long : PositionSide.Short);
         const id = createPositionId(symbol, eventSide, positionMode);
         const position = this.parent.store.positions.find((candidate) => candidate.id === id);
-        const closedSettings = this.store.positionSettings?.[id];
+        const closedSettings = position ? undefined : this.store.positionSettings?.[id];
         const fetched = this.store.fetchedLeverage?.[symbol];
         const confirmed = fetched && !fetched.isFetching ? fetched : undefined;
         const side = signedContracts === 0 && position ? position.side : eventSide;

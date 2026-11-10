@@ -180,4 +180,26 @@ describe('retained adapters reopen without fabricated settings', () => {
     expect(store.positions[0].leverage).toBeNaN();
     expect(store.positions[0].marginType).toBeUndefined();
   });
+
+  it('BloFin does not revive a closed leverage over an explicitly unknown live value', () => {
+    const { store, exchange } = blofin();
+    try {
+      store.addOrUpdatePositionsFull(exchange.mapPositions([rawBlofin] as any));
+      store.updatePosition({ id: 'BTCUSDT' }, { leverage: Number.NaN });
+      expect(store.positionSettings.BTCUSDT.leverage).toBe(50);
+      expect(exchange.mapPositions([{ ...rawBlofin, leverage: '' }] as any)[0].leverage).toBeNaN();
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('Binance does not revive closed settings over explicitly unknown live values', () => {
+    const { store, reopen } = binance();
+    store.addOrUpdatePositionsFull([position()]);
+    store.updatePosition({ id: 'BTCUSDT' }, { leverage: Number.NaN, marginType: undefined, liquidationPrice: null });
+    expect(store.positionSettings.BTCUSDT.leverage).toBe(17);
+    reopen();
+    expect(store.positions[0].leverage).toBeNaN();
+    expect(store.positions[0].marginType).toBeUndefined();
+  });
 });
