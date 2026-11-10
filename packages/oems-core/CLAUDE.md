@@ -298,7 +298,9 @@ Consequences that look like bugs and are not:
   ones, and the preview cannot know that.
 - **Every `amount` is in the venue's own units** — what `market.amountStep`
   is quoted in, what `createMarketOrder` expects, and why the context carries
-  `nativeContracts` / `nativeRemaining` alongside the base figures. The schema
+  `nativeContracts` / `nativeRemaining` alongside the base figures. Unknown
+  position native quantity stays null through context bounding and serialization;
+  both close/reduce resolution and the plain-linear fast path refuse it. The schema
   says so to the model; a plan that sizes off `contracts` on an OKX-style
   market is off by a hundredfold.
 - **`minAmount` / `maxAmount` are checked only when `contractSize === 1`.**

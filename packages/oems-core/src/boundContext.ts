@@ -45,8 +45,8 @@ const clip = (value: unknown, max: number): string => (typeof value === 'string'
 
 const clipName = (value: unknown): string => clip(value, OEMS_CONTEXT_LIMITS.stringChars);
 
-/** Required nonnullable numbers use zero for invalid input. Liquidation prices
- *  are nullable and preserve unknown separately below. */
+/** Required nonnullable numbers use zero for invalid input. Native quantities
+ *  and liquidation prices preserve unknown separately below. */
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
 const boundAccount = (account: OemsAccountRef): OemsAccountRef => ({
@@ -62,7 +62,10 @@ const boundPosition = (position: OemsPositionRef): OemsPositionRef => ({
   symbol: clipName(position.symbol),
   side: position.side === 'short' ? 'short' : 'long',
   contracts: num(position.contracts),
-  nativeContracts: num(position.nativeContracts),
+  nativeContracts:
+    typeof position.nativeContracts === 'number' && Number.isFinite(position.nativeContracts)
+      ? position.nativeContracts
+      : null,
   entryPrice: num(position.entryPrice),
   markPrice: num(position.markPrice),
   notional: num(position.notional),
