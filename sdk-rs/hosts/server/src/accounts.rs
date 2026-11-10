@@ -703,6 +703,10 @@ pub(crate) fn routing_plan(init: &InitPayload, public_only: bool) -> Result<Rout
         resolve::account_transport(venue, &transport_flags).map_err(|error| error.to_string())?;
     // The Brazil site has its own host and `x-site-id` header.
     inputs.bybit_site_id = init.bybit_site_id.clone().filter(|site| !site.is_empty());
+    // WOO's private relay embeds the same public application ID as its engine.
+    if venue == "woo" {
+        inputs.application_id = init.application_id.clone().filter(|id| !id.is_empty());
+    }
     if public_only {
         inputs.public_data_only = Some(true);
         inputs.has_key = false;
@@ -3966,6 +3970,68 @@ pub(crate) mod tests {
                 assert!(algos.try_recv().is_err(), "never disposed");
             })
             .await;
+    }
+
+    #[test]
+    fn woo_hosted_routing_resolves_before_loading_on_both_environments() {
+        for testnet in [false, true] {
+            for public_only in [false, true] {
+                for (proxy, tunnel) in [(false, false), (true, false), (false, true)] {
+                    let init = InitPayload {
+                        account_name: "fixture-woo".into(),
+                        exchange_name: "woo".into(),
+                        key: "fixture-key".into(),
+                        application_id: Some("fixture-app".into()),
+                        testnet: Some(testnet),
+                        tealstreet_proxy: Some(proxy),
+                        tealstreet_tunnel: Some(tunnel),
+                        ..InitPayload::default()
+                    };
+                    let plan = routing_plan(&init, public_only).unwrap();
+                    assert!(plan.ws.public.host.is_none());
+                    if testnet || !(proxy || tunnel) {
+                        assert!(plan.ws.private.host.is_none());
+                    } else {
+                        let relay =
+                            reqwest::Url::parse(plan.ws.private.host.as_ref().unwrap()).unwrap();
+                        assert_eq!(
+                            relay
+                                .query_pairs()
+                                .find(|(key, _)| key == "ts-relay")
+                                .unwrap()
+                                .1,
+                            "wss://wss.woox.io/v2/ws/private/stream/fixture-app"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn woo_hosted_relay_suffix_matches_the_engine_application_id() {
+        for application_id in [None, Some(""), Some("fixture-app")] {
+            let init = InitPayload {
+                account_name: "fixture-woo".into(),
+                exchange_name: "woo".into(),
+                key: "fixture-key".into(),
+                application_id: application_id.map(str::to_owned),
+                tealstreet_proxy: Some(true),
+                ..InitPayload::default()
+            };
+            let options = engine_options(&init, false);
+            let suffix = options["applicationId"].as_str().unwrap_or("undefined");
+            let plan = routing_plan(&init, false).unwrap();
+            let relay = reqwest::Url::parse(plan.ws.private.host.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                relay
+                    .query_pairs()
+                    .find(|(key, _)| key == "ts-relay")
+                    .unwrap()
+                    .1,
+                format!("wss://wss.woox.io/v2/ws/private/stream/{suffix}")
+            );
+        }
     }
 
     #[test]
