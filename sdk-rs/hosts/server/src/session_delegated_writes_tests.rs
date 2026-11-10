@@ -339,6 +339,16 @@ async fn joined(
     user: &str,
     account: Arc<Account>,
 ) -> (Session, crate::out::Receiver) {
+    let (mut session, sent) = joined_without_runtime_opt_in(registry, user, account).await;
+    session.order_frames_enabled = crate::order_contract::enabled();
+    (session, sent)
+}
+
+async fn joined_without_runtime_opt_in(
+    registry: Arc<Registry>,
+    user: &str,
+    account: Arc<Account>,
+) -> (Session, crate::out::Receiver) {
     let (out, sent, _) = Out::channel(256);
     let mut session = Session::new(
         registry,

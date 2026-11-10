@@ -5,6 +5,7 @@ import type { CrossTradePlaceOrderFn } from './CrossTradeManager';
 
 import { DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
 import { OrderSide, OrderType } from '../../types';
+import { assertNativeReduceAmount } from '../../utils/nativeAmountRules';
 import { adjust } from '../../utils/safe-math';
 
 const debug = (...args: any[]) => console.log('[CrossTradeManager]', ...args);
@@ -20,6 +21,16 @@ export const createCrossTradePlaceOrder = (deps: CrossTradePlaceOrderDeps): Cros
     const symbol = market.symbol;
     const exchange = deps.getExchange(account);
     if (!exchange) return;
+
+    if (reduceOnly) {
+      try {
+        assertNativeReduceAmount(amount, market, exchange.name);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        exchange.emitter.emit('warning', `Cross Trade: ${message}`);
+        throw error;
+      }
+    }
 
     if (copier.execution === 'Chase') {
       // Scan only the copier's own exchange — a duplicate-chaser check

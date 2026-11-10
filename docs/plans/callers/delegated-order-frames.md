@@ -20,11 +20,19 @@ placement-only and `order.cancelQueued` remains a router queue operation.
 
 The server advertises `transports.accountWorkerWebSocket.delegatedOrderFramesV1`
 in `capabilities_json`. It is false by default and true only in a build with the
-`delegated-order-frames` Cargo feature and the existing Bybit DELEGATED flag.
+`delegated-order-frames` Cargo feature, the existing Bybit DELEGATED flag, and
+`TEALSTREET_DELEGATED_ORDER_FRAMES=1` in the process environment. The production
+image compiles support and defaults the runtime switch to `0`; unset/empty also
+means off, and other values refuse startup. Change the container environment and
+use the existing drain/restart procedure with the same image to toggle it. It is
+not hot-reloaded. Both advertisement and order admission use that runtime control.
+
+
 Hosts enable the outbox only when **both** that box advertisement and the
 router-owned `transports.accountWorkerWebSocket.delegatedOrderLedgerV1` are
 explicitly true. The latter attests that the routing hop provides the durable
 ledger; an older pass-through router omits it. Neither flag implies the other.
+The box never supplies the ledger flag. Read fresh capabilities for each connection.
 Hosts copy the box's `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` into the admitted outbox connection's `capabilities`.
 Missing or false flags disable submits, queued cancellations and receipt handling;
@@ -42,6 +50,36 @@ change the intent's business fingerprint. Account labels are at most 256 UTF-8
 bytes and registration IDs at most 128 bytes. Legacy registrations without IDs
 remain supported only when both sides omit the ID; LOCAL/COSIGNED envelopes are
 unchanged.
+
+### Rolling activation
+
+1. Run the new image on every box with
+   `TEALSTREET_DELEGATED_ORDER_FRAMES=0`. Check each box's own capability endpoint:
+   `delegatedOrderFramesV1` must be false. A region endpoint samples only one box.
+2. Deploy the router with its ledger on using a full deployment, keeping one
+   ledger setting and epoch across the deployment. Allow the 300-second Durable
+   Object adoption window and verify successful routed socket admission before
+   enabling frames. Capability discovery alone does not establish socket readiness.
+3. Set `TEALSTREET_DELEGATED_ORDER_FRAMES=1` and drain/restart every box with the
+   same image. Verify every box's capability, then both capabilities through the
+   router. Re-admit accounts and repeat delegated handover after the restart;
+   memory-only key copies do not survive it.
+4. Discover capabilities again on each new connection. Follow the router's
+   per-user initial coverage interval: it is independent of the global
+   adoption wait, and unresolved results stay unknown rather than being resubmitted.
+
+The box accepts inbound routed sockets; it does not establish a connection to the
+router. The hosted client owns retries on a 503 upgrade or 1013 close. Hosted
+adapters use bounded backoff with a randomized base delay, retaining the retry
+count across short opens. A 1013 close follows normal backoff, without an
+immediate-move exception. Dropping the old client on logout retires its pending
+retry work.
+
+For rollback, first set the box switch to `0`, drain/restart and verify the false
+capability on **every box** before turning off the router ledger or changing its
+route. Use the router operator's rollout runbook for route restoration and
+adoption windows, and schedule box restarts around running account work.
+The frame switch does not turn off legacy calls or already-running algorithms.
 
 ### Frozen four-frame JSON contract
 
@@ -162,6 +200,9 @@ never creates an outcome named `canceled`, a new acknowledgement kind, or a fift
 order frame. Ordinary malformed/unbindable request errors likewise remain ordinary
 error messages, not fabricated order receipts. Hosts must not clear pending queue
 cancellation merely on receipt of such an ordinary error.
+Ignored box receipts preserve the current state (`sending` after physical handoff).
+An ordinary request error likewise leaves a handed-off cancellation `unknown`
+with `cancelPending: true`; only an authoritative receipt settles that request.
 
 The router decodes box JSON before classifying it, including escaped kind names
 and reordered fields. Every receipt the outbox can consume is intercepted or
@@ -179,14 +220,35 @@ after admission and capability discovery. Pass the captured ticket to `flush`
 and `receive`, and close the outbox on logout or removal. Deferred storage work
 can neither send through a replaced socket nor switch to another owner.
 
-The outbox persists before handoff and resends the same unacknowledged intent
-across reconnects within ten monotonic seconds. Its deadline observer marks
-not-sent state even while storage is waiting, and physical handoff rechecks the
-cap. Persisted `sending` records restore as unknown, including when saving a
-later result failed. A queued record from a different monotonic epoch becomes
-not sent rather than inferring elapsed time from wall time. Queue cancellation
+The outbox persists before handoff and marks the row `sending` at the physical
+socket boundary. It never resubmits sending, acknowledged or unknown work.
+Disconnect or connection replacement changes sending/acknowledged rows to unknown;
+late receipts can still resolve those rows on the current admitted connection.
+Direct `close()` immediately exposes those retained rows as unknown and fences
+all later receipts, callbacks and socket work.
+Only `markDelegatedNotSent(intent, evidence)` can construct a `notSent` state.
+Its positive no-handoff or authoritative-refusal evidence is stored with its
+kind and exact scope/intent/sequence/fingerprint binding. The private runtime
+brand is never serialized: restore validates the stored evidence before
+reissuing it. A legacy, missing or mismatched proof restores as unknown and
+cannot enable a replay. Callers must retain the existing changed/persist and
+retention handling after this constructor, including when a local claim is
+refused and becomes unknown.
+At ten monotonic seconds from creation, its deadline observer marks queued,
+never-forwarded work not sent, even while storage is waiting, and marks in-flight
+or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+send adapter must return true only for a physical handoff; false or a throw
+positively guarantees neither handoff nor buffering for a later connection.
+Cancellation or expiry during a declined first send remains terminal; a legacy
+pending cancellation restores as unknown. A queue cancellation after handoff remains
+unknown until an authoritative receipt proves non-forwarding. Persisted `sending`
+records restore as unknown, including when saving a later result failed. A queued
+record from a different monotonic epoch becomes unknown rather than inferring
+elapsed time from wall time. Queue cancellation
 can be persisted and resent; order submission cannot resume after acknowledgement
 or unknown. Rendering, consent and router ledger storage remain host concerns.
+Legacy `notSent`/`canceled` records with pending router cancellation also restore
+as unknown; their local labels do not establish a final delivery result.
 Once the initial queued record is durable, temporary unavailability while preparing
 handoff keeps enqueue successful with that same intent ID; retry preserves it.
 
@@ -195,7 +257,16 @@ handoff keeps enqueue successful with that same intent ID; retry preserves it.
 Pending work is limited to 1,024 records; at most 32 completed records are kept
 for recent history. Placed, refused, not-sent and canceled records can retire only
 after their state is durable and no queue cancellation is pending. Acknowledged
-and unknown records remain retained and never become resendable through pruning.
+work becomes unknown at the command deadline or disconnect. Unknown rows remain
+unresolved for 24 hours from UUIDv7 Unix creation time, evaluated against the
+injected Unix clock on timers and reload (a clock rollback extends retention).
+Expiry emits `changed` with `state: "unknown", retentionExpired: true`, clears any
+pending queue cancellation, and persists that explicit expired-history marker.
+Hosts surface expired unresolved history and use ordinary order state/history for
+reconciliation. Expired unknowns join the latest-32 completed history only after
+the expiry marker is durable. Compaction never changes their outcome to not sent
+or makes their identity resendable. Storage failure retains them until flush can
+retry. A later authoritative result may still resolve a retained history row.
 
 Adapters provide `compact(scope, {version:1, sequence, retiredIntentIds})` as one
 atomic transaction. It deletes only those IDs for that owner/account and advances

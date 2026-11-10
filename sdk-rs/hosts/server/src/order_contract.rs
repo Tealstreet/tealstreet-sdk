@@ -11,6 +11,11 @@ pub fn enabled() -> bool {
     cfg!(feature = "delegated-order-frames") && crate::delegated::enabled("bybit")
 }
 
+/// The compiled protocol and venue opt-in are separate from rollout activation.
+pub fn runtime_enabled() -> bool {
+    enabled() && crate::config::delegated_order_frames_from_env().unwrap_or(false)
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OrderSubmit {

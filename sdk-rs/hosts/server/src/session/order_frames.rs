@@ -5,7 +5,8 @@ use crate::order_contract::{self, CancelQueued, OrderSubmit};
 impl Session {
     pub(super) fn order_admitted(&mut self, name: &str, instance: Option<&str>) -> bool {
         self.forget_disposed();
-        order_contract::enabled()
+        self.order_frames_enabled
+            && order_contract::enabled()
             && !self.pending_verifications.contains_key(name)
             && self.joined.get(name).is_some_and(|joined| {
                 joined.account.delegated.is_some()

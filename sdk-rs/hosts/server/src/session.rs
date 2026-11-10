@@ -117,6 +117,8 @@ pub struct Session {
     early: HashMap<String, Vec<Topic>>,
     /// Moved off a draining box: its accounts are released, never parked here.
     moved: bool,
+    /// Captured at connection creation; deployments drain/restart to change it.
+    order_frames_enabled: bool,
     handovers: crate::delegated::Handovers,
     pending_verifications: HashMap<String, PendingVerification>,
     next_verification: u64,
@@ -265,6 +267,7 @@ impl Session {
             refused: HashMap::new(),
             early: HashMap::new(),
             moved: false,
+            order_frames_enabled: crate::order_contract::runtime_enabled(),
             handovers: crate::delegated::Handovers::default(),
             pending_verifications: HashMap::new(),
             next_verification: 0,

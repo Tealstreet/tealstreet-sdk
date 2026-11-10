@@ -68,8 +68,7 @@ submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
 missing/false flags disable writes and receipts. Hosts inject scoped persistence,
 secure randomness, a monotonic clock with a stable epoch, deadline scheduling
-and an admitted socket connection. Close
-the outbox on logout; pass the captured connection ticket to flush and receive.
+and an admitted socket connection. Close the outbox on logout; pass the captured connection ticket to flush and receive.
 Router outcomes may be renumbered per client socket, including stored replays.
 Receipt ordering is checked per intent within that ticket, so one intent's higher
 number cannot hide another's deferred replay. Replacement tickets reset receipt
@@ -78,18 +77,47 @@ The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations
 coverage uncertainty and ledger failures answer unknown, never prove not sent.
 Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
 string coercion. Capability discovery still requires completed socket admission.
-Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
-intents are never submitted again. Unacknowledged intents expire after ten
-monotonic seconds, including time spent waiting for persistence or admission.
-Restored ambiguous handoffs are unknown; queued records from another clock epoch
-are not sent. Once enqueue persistence succeeds, temporary unavailability while
+Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
+an intent `sending` in memory; sending, acknowledged and unknown intents are never
+submitted again. At ten monotonic seconds from creation (including persistence
+and admission waits), a never-forwarded queued intent becomes `notSent`; an
+in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+those retained entries to unknown immediately while fencing later work and callbacks.
+Disconnect/replacement makes
+in-flight and acknowledged intents unknown immediately. The synchronous send
+adapter returns true only after socket handoff; false or a throw must guarantee
+neither a handoff nor buffering for a later connection. Queue cancellation after handoff remains unknown until a router
+receipt positively establishes non-forwarding. Legacy pending cancellations restore
+as unknown. Cancellation or expiry during a declined first send remains terminal
+and is published; a declined retry cannot erase a previous handoff.
+`notSent` is a branded state, constructed only by the exported
+`markDelegatedNotSent(intent, evidence)`. It requires positive evidence for the
+whole intent: a locally known never-attempted intent, a declined adapter handoff
+with no earlier possible handoff, or an admitted authoritative router refusal.
+A failed reconnect attempt cannot prove an earlier handoff did not occur.
+The private runtime brand is read only by the outbox; plain state writes cannot
+manufacture the result. JSON stores the evidence kind and its owner/account,
+intent ID, sequence and fingerprint binding. Restore validates that evidence and
+reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
+including their unsupported error outcome. No-evidence clock-epoch/deadline
+expiry of a restored queued record is also unknown rather than proof of no send.
+Restored ambiguous handoffs are unknown. Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
 supplies durable deduplication and queue cancellation;
 see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
 signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
 
 The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
-records. Acknowledged/unknown work and pending queue cancellations remain retained.
+records. Unknown work, including pending queue cancellation, is retained for 24
+hours from its UUIDv7 Unix creation time, using the injected Unix clock across
+reloads (clock rollback can extend retention). At expiry it remains `unknown`,
+gains `retentionExpired: true`, stops pending queue cancellation, and emits the
+normal `changed` notification. Hosts must surface this as expired, unresolved
+history and reconcile via ordinary orders/history; expiry proves nothing about
+the venue outcome. Only after that explicit expiry state is durable may it join
+the latest-32 completed history and retire. Expiry never enables resubmission or
+changes an unknown to `notSent`; a late positive router refusal can still prove
+non-forwarding. Storage failure keeps the row for a later flush retry.
 Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
 listed retired intent IDs in that scope and advance its durable sequence using
 the maximum of old/new values. Preserve all other records. `load` returns an
@@ -1944,7 +1972,7 @@ consuming app's CLAUDE.md for the capture playbook.
 worker op handled by `src/webworker/handlers/UpdatePositionsHandler.ts`.
 Account-wide refreshes (`symbols` omitted) must use
 `store.addOrUpdatePositionsFull(positions)`, including empty arrays, so
-positions omitted by the exchange are zeroed/cleared. Symbol-scoped refreshes
+positions omitted by the exchange are removed. Last reported per-ID leverage/margin/mode survives separately in the generated `positionSettings` map. Symbol-scoped refreshes
 remain partial and use `addOrUpdatePositions(positions)` when rows are
 returned. Do not replace this with a main-thread `fetchPositions()` + direct
 store write from the web app; the worker owns live exchange state and its

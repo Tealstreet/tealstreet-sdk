@@ -29,7 +29,7 @@ export {
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
 
-export { DelegatedOutbox, createDelegatedIntentId } from './delegatedOutbox';
+export { DelegatedOutbox, createDelegatedIntentId, markDelegatedNotSent } from './delegatedOutbox';
 export { delegatedActionFingerprint } from './delegatedActions';
 export type {
   DelegatedAction,
@@ -50,6 +50,8 @@ export type {
 } from './delegatedOrderFrames';
 export type {
   DelegatedIntent,
+  DelegatedNotSentEvidence,
+  StoredDelegatedNotSentEvidence,
   IntentState,
   OutboxConnection,
   OutboxOptions,

@@ -78,7 +78,22 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
+| `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for Bybit `order.*` frames: `0` disables, `1` enables only with compiled protocol support and the venue declaration; other nonempty values refuse startup |
 | `EXCHANGE_ALERT_SLACK_WEBHOOK_URL`, `EXCHANGE_ALERT_CRITICAL_SLACK_WEBHOOK_URL` | unset | Deferred past cutover. Accepted and ignored |
+
+The production image compiles the `delegated-order-frames` feature but keeps its
+runtime switch off. Change the container environment and drain/restart the same
+image to change activation; this is not a hot-reload control. A restart drops
+sockets and memory-only delegated copies, so accounts require fresh admission
+and handover. Existing LOCAL/COSIGNED calls and the delegated legacy method path
+are independent of this order-frame switch.
+
+`GET /capabilities` and `/account/capabilities` expose
+`transports.accountWorkerWebSocket.delegatedOrderFramesV1` from that same runtime
+control. The box never advertises `delegatedOrderLedgerV1`; only the router owns
+that capability. Hosts must discover both per connection before passing a ticket
+to the outbox. See [order-frame activation](../../../docs/plans/callers/delegated-order-frames.md#rolling-activation)
+for deployment ordering and rollback.
 
 `TEALSTREET_WORKERS`, `TEALSTREET_GATEWAY_PORT` and `TEALSTREET_HEALTH_PORT`
 belong to the Bun gateway and have no meaning here. One process serves all
