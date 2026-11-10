@@ -967,6 +967,102 @@ describe('direct public-data rejection observers', () => {
   beforeEach(() => vi.spyOn(console, 'error').mockImplementation(() => {}));
   afterEach(() => vi.restoreAllMocks());
 
+  it.each(['book', 'candle'] as const)(
+    'releases the %s source handle exactly once during registration disposal',
+    (kind) => {
+      const parent = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+      const release = vi.fn();
+      const source = {
+        store: parent.store,
+        listenOrderBook: (_symbol: string, _data: unknown, rejected?: (signal: OrderBookFrameRejection) => void) => {
+          rejected?.({ stream: 'orderBook', symbol: 'BTCUSDT', error: new Error('synthetic book refusal') });
+          return release;
+        },
+        listenOHLCV: (_opts: unknown, _data: unknown, rejected?: (signal: OHLCVFrameRejection) => void) => {
+          rejected?.({
+            stream: 'ohlcv',
+            symbol: 'BTCUSDT',
+            interval: '1m',
+            error: new Error('synthetic candle refusal'),
+          });
+          return release;
+        },
+      };
+      const provider = new InProcessPublicDataProvider(parent, source);
+      parent.externalPublicDataProvider = provider;
+      const observed = vi.fn(() => parent.dispose());
+      try {
+        const stop =
+          kind === 'book'
+            ? parent.listenOrderBook('BTCUSDT', () => {}, observed)
+            : parent.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, () => {}, observed);
+        expect(observed).toHaveBeenCalledTimes(1);
+        expect(parent.isDisposed).toBe(true);
+        expect(release).toHaveBeenCalledTimes(1);
+        stop();
+        stop();
+        provider.dispose();
+        expect(release).toHaveBeenCalledTimes(1);
+      } finally {
+        parent.dispose();
+      }
+    },
+  );
+
+  it.each(['book', 'candle'] as const)(
+    'ends native %s data and rejection delivery after registration disposal',
+    (kind) => {
+      const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+      const parent = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+      const peerData = vi.fn();
+      const peerRejections = vi.fn();
+      const stopPeer =
+        kind === 'book'
+          ? source.listenOrderBook('BTCUSDT', peerData, peerRejections)
+          : source.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, peerData, peerRejections);
+      const provider = new InProcessPublicDataProvider(parent, {
+        store: source.store,
+        listenOrderBook: (...args: Parameters<typeof source.listenOrderBook>) => {
+          const stop = source.listenOrderBook(...args);
+          receive(source, new ArrayBuffer(0));
+          return stop;
+        },
+        listenOHLCV: (...args: Parameters<typeof source.listenOHLCV>) => {
+          const stop = source.listenOHLCV(...args);
+          receive(source, new ArrayBuffer(0));
+          return stop;
+        },
+      });
+      parent.externalPublicDataProvider = provider;
+      const observed = vi.fn(() => parent.dispose());
+      const data = vi.fn();
+      let stop = () => {};
+      try {
+        stop =
+          kind === 'book'
+            ? parent.listenOrderBook('BTCUSDT', data, observed)
+            : parent.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, data, observed);
+        expect(parent.isDisposed).toBe(true);
+        expect(observed).toHaveBeenCalledTimes(1);
+        receive(source, new ArrayBuffer(0));
+        expect(observed).toHaveBeenCalledTimes(1);
+        expect(peerRejections).toHaveBeenCalledTimes(2);
+        receive(source, fixture({ fills: 0 }));
+        expect(data).not.toHaveBeenCalled();
+        expect(peerData).toHaveBeenCalledTimes(1);
+        stop();
+        stop();
+        receive(source, new ArrayBuffer(0));
+        expect(observed).toHaveBeenCalledTimes(1);
+      } finally {
+        stop();
+        stopPeer();
+        parent.dispose();
+        source.dispose();
+      }
+    },
+  );
+
   it.each(['book', 'candle', 'envelope', 'identity'] as const)(
     'scopes native %s failures and keeps two-argument data delivery',
     (failure) => {
@@ -1098,7 +1194,7 @@ describe('direct public-data rejection observers', () => {
     const candles = vi.fn();
     const stop = main.listenOrderBookWebworker('BTCUSDT', data, book);
     main.listenOrderBookWebworker('BTCUSDT', () => {}, secondBook);
-    main.listenOHLCVWebworker({ symbol: 'BTCUSDT', interval: '1m' }, candles, candle);
+    const stopCandle = main.listenOHLCVWebworker({ symbol: 'BTCUSDT', interval: '1m' }, candles, candle);
     try {
       receive(source, fixture({ fills: 0 }));
       expect(data).toHaveBeenCalledTimes(1);
@@ -1130,6 +1226,20 @@ describe('direct public-data rejection observers', () => {
       receive(source, new ArrayBuffer(0));
       expect(book).toHaveBeenCalledTimes(1);
       expect(secondBook).toHaveBeenCalledTimes(2);
+      expect(candle).toHaveBeenCalledTimes(2);
+      stopCandle();
+      stopCandle();
+      receive(source, new ArrayBuffer(0));
+      expect(candle).toHaveBeenCalledTimes(2);
+      expect(secondBook).toHaveBeenCalledTimes(3);
+      const queuedRejections = messages.filter((message) => message.op.endsWith(':rejected'));
+      for (const message of queuedRejections) main.emitter.emit(message.op, message.data);
+      expect(book).toHaveBeenCalledTimes(1);
+      expect(candle).toHaveBeenCalledTimes(2);
+      main.dispose();
+      const beforeDisposal = secondBook.mock.calls.length;
+      for (const message of queuedRejections) main.emitter.emit(message.op, message.data);
+      expect(secondBook).toHaveBeenCalledTimes(beforeDisposal);
       bookHandler.dispose();
       candleHandler.dispose();
       const before = messages.length;

@@ -148,6 +148,7 @@ export class InProcessPublicDataProvider {
       if (this.subscriptions.delete(stop)) unsubscribe();
     };
     this.subscriptions.add(stop);
+    if (this.isDisposed) stop();
     return stop;
   }
 
