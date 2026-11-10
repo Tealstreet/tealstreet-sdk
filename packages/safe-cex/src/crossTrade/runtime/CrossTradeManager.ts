@@ -293,7 +293,7 @@ export class CrossTradeManager {
         if (!copierWeightRatio) return;
 
         const sizeDiff = masterSizeInCopierBase * copierWeightRatio - copierSizeInBase;
-        const sizeDiffNative = convertFromBaseSizeToNative(sizeDiff, copierMarket, referencePrice);
+        const sizeDiffNative = convertFromBaseSizeToNative(sizeDiff, copierMarket, referencePrice, copierExchangeName);
 
         if (
           Number.isFinite(sizeDiffNative) &&
@@ -443,6 +443,7 @@ export class CrossTradeManager {
           masterSizeInCopierBase * copierWeightRatio,
           copierMarket,
           referencePrice,
+          copierExchangeName,
         );
         if (!Number.isFinite(copierSizeNative) || copierSizeNative <= 0) return;
 

@@ -79,8 +79,13 @@ coverage uncertainty and ledger failures answer unknown, never prove not sent.
 Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
 string coercion. Capability discovery still requires completed socket admission.
 Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
-intents are never submitted again. Unacknowledged intents expire after ten
-monotonic seconds, including time spent waiting for persistence or admission.
+intents are never submitted again. After ten monotonic seconds, including time
+spent waiting for persistence or admission, an intent never handed off is not sent;
+an unresolved physical handoff is unknown. A physical handoff is shown as sending
+until its receipt or deadline. Queue cancellation also preserves uncertainty after
+a handoff. Legacy pending cancellations restore as unknown, never as proof of no send.
+Cancellation or expiry inside a declined first send remains terminal and is
+published to observers; declining a retry cannot erase an earlier handoff's uncertainty.
 Restored ambiguous handoffs are unknown; queued records from another clock epoch
 are not sent. Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
