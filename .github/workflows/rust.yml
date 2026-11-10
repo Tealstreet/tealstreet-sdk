@@ -1381,9 +1381,24 @@ jobs:
 
 
 
-      - name: Temporary raw CPU A/A and profiles
+      - name: Check out the frozen raw CPU comparison source
         if: always() && github.event_name == 'pull_request' && github.head_ref == 'fix/raw-cpu-asterdex-hyrotrader' && (matrix.venue == 'asterdex' || matrix.venue == 'bybit')
-        run: node sdk-rs/harness/raw-cpu-investigation.mjs --suite '${{ matrix.venue }}' --out '${{ runner.temp }}/raw-cpu-investigation'
+        uses: actions/checkout@v7
+        with:
+          ref: bc87b21681820879c9d30923fccf565c62ed6070
+          path: .raw-cpu-baseline
+          persist-credentials: false
+      - name: Download its sealed CI engine
+        if: always() && github.event_name == 'pull_request' && github.head_ref == 'fix/raw-cpu-asterdex-hyrotrader' && (matrix.venue == 'asterdex' || matrix.venue == 'bybit')
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-wasm-${{ matrix.venue }}
+          path: ${{ runner.temp }}/raw-cpu-baseline-wasm
+          run-id: 42777309672
+          github-token: ${{ github.token }}
+      - name: Temporary raw CPU before/after and profiles
+        if: always() && github.event_name == 'pull_request' && github.head_ref == 'fix/raw-cpu-asterdex-hyrotrader' && (matrix.venue == 'asterdex' || matrix.venue == 'bybit')
+        run: node sdk-rs/harness/raw-cpu-investigation.mjs --suite '${{ matrix.venue }}' --out '${{ runner.temp }}/raw-cpu-investigation' --baseline .raw-cpu-baseline --baseline-wasm '${{ runner.temp }}/raw-cpu-baseline-wasm'
       - name: Retain temporary raw CPU investigation
         if: always() && github.event_name == 'pull_request' && github.head_ref == 'fix/raw-cpu-asterdex-hyrotrader' && (matrix.venue == 'asterdex' || matrix.venue == 'bybit')
         uses: actions/upload-artifact@v7
