@@ -14,6 +14,7 @@ import { getExchangeMetadata } from './exchangeMetadata';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
 import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { snapshotDelegatedSigningOptions } from './exchanges/rust/delegatedSigningSnapshot';
+import { validateSigningMode } from './signingMode';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
 import { unsupportedVenueError } from './unsupportedVenue';
@@ -29,7 +30,7 @@ export {
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
 
-export { DelegatedOutbox, createDelegatedIntentId } from './delegatedOutbox';
+export { DelegatedOutbox, DelegatedIntentError, createDelegatedIntentId } from './delegatedOutbox';
 export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
 export type {
   DelegatedOrderBinding,
@@ -47,6 +48,7 @@ export type {
   OutboxStorage,
   OutboxSnapshot,
   OutboxCompaction,
+  EnqueueOptions,
 } from './delegatedOutbox';
 export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
 export { describeStoppedAlgos, nukeWarning } from './nukeResult';
@@ -113,6 +115,7 @@ export const createExchange = async (
   store?: Store,
 ): Promise<BaseExchange> => {
   options = snapshotDelegatedSigningOptions(exchangeName, options);
+  validateSigningMode(options.signingMode);
   assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
   // Rejected venues never start the clock, load WASM or construct transports.

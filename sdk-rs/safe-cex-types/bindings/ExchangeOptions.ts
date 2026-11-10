@@ -3,6 +3,10 @@ import type { LocalSignerMetadata, PayloadSigner, PublicDataSource, RemoteSigner
 export type ExchangeOptions = {
     readonly key: string;
     readonly secret: string;
+    /**
+     * Account-worker mode; absent keeps existing signing selection.
+     */
+    readonly signingMode?: "local" | "cosigned" | "delegated";
     readonly passphrase?: string;
     readonly secondary_key?: string;
     readonly secondary_secret?: string;

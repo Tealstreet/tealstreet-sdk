@@ -209,6 +209,11 @@ ExchangeOptions and ExchangeAccountConfig declare coinbaseJwtAlgorithm here for
 hosted CDP signing. Regenerate their public TypeScript declarations from options.rs;
 the optional algorithm is the closed union es256 | edDsa and rejects explicit null.
 
+Both canonical account models also declare optional signingMode with the existing
+account-worker literals local | cosigned | delegated. Absence preserves legacy
+selection; explicit null and unknown literals refuse decoding. Regenerate the
+public declarations from options.rs; signingMode is metadata, not new authority.
+
 Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
 
 DisplayedPosition decodes its flattened Position through the original MapAccess.

@@ -21,6 +21,8 @@ export interface DelegatedIntent extends OutboxScope {
   version: 1;
   fingerprint: string;
   intentId: string;
+  /** Caller keys remain reserved after their completed history ages. */
+  callerSuppliedIntentId?: true;
   seq: number;
   params: Record<string, unknown>;
   clockEpoch: string;
@@ -82,6 +84,23 @@ const STATES: IntentState[] = [
 ];
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+export interface EnqueueOptions {
+  intentId: string;
+}
+
+export class DelegatedIntentError extends Error {
+  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable') {
+    super(
+      {
+        invalidIntentId: 'Caller intent id must be a canonical UUIDv7',
+        intentConflict: 'Intent id is already bound to different parameters',
+        intentNotDurable: 'Original intent was not persisted; it cannot be submitted again',
+      }[code],
+    );
+    this.name = 'DelegatedIntentError';
+  }
+}
+
 export class DelegatedOutbox {
   private readonly scope: Readonly<OutboxScope>;
   private readonly intents = new Map<string, DelegatedIntent>();
@@ -123,6 +142,7 @@ export class DelegatedOutbox {
         typeof row.params !== 'object' ||
         Array.isArray(row.params) ||
         typeof row.cancelPending !== 'boolean' ||
+        (row.callerSuppliedIntentId !== undefined && row.callerSuppliedIntentId !== true) ||
         box.intents.has(row.intentId)
       )
         throw new Error('Invalid persisted intent');
@@ -190,13 +210,42 @@ export class DelegatedOutbox {
     return [...this.intents.values()].map((row) => clone(row));
   }
 
-  enqueue(params: Record<string, unknown>): Promise<string> {
+  async enqueue(params: Record<string, unknown>, options?: EnqueueOptions): Promise<string> {
     const createdAt = this.options.clock.now();
-    if (!this.active || this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
-      return Promise.reject(new Error('Outbox is closed or full'));
+    if (!this.active) throw new Error('Outbox is closed or full');
     if (!params || Array.isArray(params) || typeof params !== 'object' || params.clientOrderId !== undefined)
-      return Promise.reject(new Error('Outbox owns the client order id'));
-    const intentId = createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
+      throw new Error('Outbox owns the client order id');
+    if (options !== undefined) {
+      try {
+        if (typeof options?.intentId !== 'string') throw new Error('Invalid key');
+        delegatedIntentTime(options.intentId);
+      } catch {
+        throw new DelegatedIntentError('invalidIntentId');
+      }
+      const existing = this.intents.get(options.intentId);
+      if (existing) {
+        if (
+          existing.fingerprint !==
+          delegatedIntentFingerprint(this.scope.accountName, existing.intentId, params, existing.seq)
+        )
+          throw new DelegatedIntentError('intentConflict');
+        // Serialize behind the original put: a retry must not report durability
+        // before that write commits, or turn its failure into another submission.
+        return this.serial(async () => {
+          if (!this.active) throw new Error('Outbox is closed or full');
+          if (!this.durable.has(existing.intentId)) throw new DelegatedIntentError('intentNotDurable');
+          // Persist the reservation even when a preceding promotion put failed.
+          // An in-memory flag alone must not acknowledge a durable caller key.
+          existing.callerSuppliedIntentId = true;
+          await this.persist(existing);
+          return existing.intentId;
+        });
+      }
+    }
+    if (this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
+      throw new Error('Outbox is closed or full');
+    const intentId =
+      options?.intentId ?? createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
     if (this.intents.has(intentId) || !Number.isSafeInteger(this.sequence + 1))
       return Promise.reject(new Error('Intent id or sequence exhausted'));
     const row: DelegatedIntent = {
@@ -204,7 +253,8 @@ export class DelegatedOutbox {
       version: 1,
       fingerprint: delegatedIntentFingerprint(this.scope.accountName, intentId, params, this.sequence + 1),
       intentId,
-      seq: ++this.sequence,
+      ...(options ? { callerSuppliedIntentId: true as const } : {}),
+      seq: this.sequence + 1,
       params: clone(params),
       clockEpoch: this.options.clock.epoch,
       createdAt,
@@ -215,6 +265,7 @@ export class DelegatedOutbox {
       return Promise.reject(new Error('Invalid monotonic clock'));
     if (JSON.stringify(row.params).length > 60 * 1024)
       return Promise.reject(new Error('Order parameters are too large'));
+    this.sequence = row.seq;
     this.intents.set(intentId, row);
     this.arm(row);
     this.changed(row);
@@ -478,7 +529,7 @@ export class DelegatedOutbox {
   }
   private async compact(): Promise<void> {
     const completed = [...this.intents.values()]
-      .filter((row) => this.durable.has(row.intentId) && this.completed(row))
+      .filter((row) => this.durable.has(row.intentId) && this.completed(row) && !row.callerSuppliedIntentId)
       .sort((a, b) => a.seq - b.seq);
     const retired = completed.slice(0, Math.max(0, completed.length - COMPLETED_HISTORY));
     if (!retired.length) return;
