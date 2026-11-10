@@ -1381,19 +1381,6 @@ jobs:
 
 
 
-
-      - name: Temporary Hyro WASM tiering controls
-        if: always() && github.event_name == 'pull_request' && github.head_ref == 'fix/raw-cpu-asterdex-hyrotrader' && matrix.venue == 'bybit'
-        run: node sdk-rs/harness/raw-cpu-investigation.mjs --suite bybit --out '${{ runner.temp }}/raw-cpu-investigation'
-      - name: Retain temporary Hyro WASM tiering controls
-        if: always() && github.event_name == 'pull_request' && github.head_ref == 'fix/raw-cpu-asterdex-hyrotrader' && matrix.venue == 'bybit'
-        uses: actions/upload-artifact@v7
-        with:
-          name: raw-cpu-tiering-bybit
-          path: ${{ runner.temp }}/raw-cpu-investigation/
-          retention-days: 3
-          if-no-files-found: error
-
   bitget-paired:
     name: Rust / Bitget counterbalanced steady CPU
     needs: selection
