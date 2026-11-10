@@ -1,4 +1,5 @@
 import type { ExchangeName, Market, OrderType, PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
+import type { NativeAmountMarket } from './nativeAmountRules';
 
 import { roundToNearestMultiple, roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { roundCloseSize, roundMarketOrderSize as roundMarketOrderSizeToStep } from './rounding';
@@ -123,7 +124,7 @@ export const venueSupportsInfinityStops = (exchangeName: ExchangeName): boolean 
 export const assertCloseLikeOrderAmount = (
   amount: number,
   order: Pick<PlaceOrderOpts, 'type' | 'reduceOnly' | 'close'>,
-  market: Market,
+  market: NativeAmountMarket,
   exchangeName?: string,
 ): void => {
   if (exchangeName !== 'mexc') return;

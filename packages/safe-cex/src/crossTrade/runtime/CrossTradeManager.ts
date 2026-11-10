@@ -263,7 +263,7 @@ export class CrossTradeManager {
         if (!copierWeightRatio) return;
 
         const sizeDiff = masterSizeInCopierBase * copierWeightRatio - copierSizeInBase;
-        const sizeDiffNative = convertFromBaseSizeToNative(sizeDiff, copierMarket, referencePrice);
+        const sizeDiffNative = convertFromBaseSizeToNative(sizeDiff, copierMarket, referencePrice, copierExchangeName);
 
         if (
           sizeDiffNative !== 0 &&
@@ -394,6 +394,7 @@ export class CrossTradeManager {
           masterSizeInCopierBase * copierWeightRatio,
           copierMarket,
           referencePrice,
+          copierExchangeName,
         );
 
         const nonHedgeModeSide = masterPosition.side === PositionSide.Long ? OrderSide.Buy : OrderSide.Sell;

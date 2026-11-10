@@ -8,6 +8,14 @@ import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
 import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
+import type { Market } from '@tealstreet/safe-cex/src/types';
+import { nativeAmountRules } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
+
+// Preserve MEXC's original native intent until shared preparation can validate it.
+const roundParsedSize = (exchange: ExchangeLike, market: Market | undefined, raw: number): number =>
+  market && nativeAmountRules(market, exchange.name).basePerContract !== undefined
+    ? raw
+    : adjust(raw, amountPrecisionOf(market));
 
 class OrderArgumentError extends Error {
   override name = 'OrderArgumentError';
@@ -231,7 +239,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
         // NATIVE contracts. `position.contracts` is base and differs by
         // `contractSize`, so `close 50%` on an OKX-shaped market asked for a
         // multiple of the position rather than half of it.
-        return adjust((nativePositionSize(position, market) * pct) / 100, amountPrecisionOf(market));
+        return roundParsedSize(exchange, market, (nativePositionSize(position, market) * pct) / 100);
       }
 
       // balance scope
@@ -250,7 +258,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       // explanation in `notionalToSize`.
       if (market.isInverse) {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-        return adjust(notional / contractSize, amountPrecisionOf(market));
+        return roundParsedSize(exchange, market, notional / contractSize);
       }
       const conversionPrice =
         price === undefined
@@ -260,7 +268,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
         throw new Error(`Price not available for ${symbol}`);
       }
       // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return adjust(baseToNativeContracts(market, notional / conversionPrice), amountPrecisionOf(market));
+      return roundParsedSize(exchange, market, baseToNativeContracts(market, notional / conversionPrice));
     }
 
     if (this.looksLikeSize(trimmed)) {
@@ -297,11 +305,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
    */
   protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number, price?: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
-    const amountPrecision = amountPrecisionOf(market);
 
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-      return adjust(notional / contractSize, amountPrecision);
+      return roundParsedSize(exchange, market, notional / contractSize);
     }
 
     // Use the same validated tick-rounded price that order preparation sends.
@@ -316,7 +323,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     // on its linear swaps (1000 DOGE, 0.01 BTC), so the base amount has to be
     // divided by it to get the native contract count.
     const baseAmount = notional / conversionPrice;
-    return adjust(baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), amountPrecision);
+    return roundParsedSize(exchange, market, baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount));
   }
 
   /**

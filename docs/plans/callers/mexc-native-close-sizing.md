@@ -38,6 +38,29 @@ Before rounding a reducing/protective amendment, direct hosts must call the same
 guard that CoreAdapter uses. Its classification includes the stored order kind
 and does not require the caller to repeat a protective order's reducing flag.
 
+## Runtime callers covered
+
+| Caller                                                              | Native quantity handling                                                                                |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| CoreAdapter placement, protection, close and amend                  | Checks the requested amount before rounding and both amendment boundaries.                              |
+| MCP `amend_order`                                                   | Carries the fetched order and venue through the shared guard and rounding rule.                         |
+| CLI position/balance percentages and notional sizing                | Leaves MEXC's derived native intent unrounded until shared preparation validates it.                    |
+| CLI swarm                                                           | Validates the requested total before fragmentation and uses a native lot step for slices.               |
+| OEMS close, reduce, placement, protection and amend                 | Uses the shared guard before any amount rounding, including remaining-to-total amendments.              |
+| Copy-trade delta conversion and Market/LimitSlippage/Chase dispatch | Preserves the unrounded native count and refuses invalid reductions before placement or chaser changes. |
+
+The SDK owns the common unit-rule leaf; script-api-core adapts its refusals to
+`ScriptValidationError`. SDK copy-trade reuses that leaf without depending on
+script-api-core. Price rounding, display arithmetic and retained reference
+adapters do not change.
+
+OEMS `amountStep` is declared native, unlike MEXC's base-sized Market precision.
+Snapshot producers must populate it with `nativeAmountRules(market, exchange.name).step`.
+The resolver refuses incompatible/off-step declarations rather than converting
+130 into 100. It preserves unknown amount/remaining fields as refusals; it does
+not replace them with zero. NX's snapshot and direct-helper adoption remains a
+consumer requirement.
+
 NX's web order helpers must pass this context when consuming these functions.
 No host-local arithmetic or fallback contract size is needed. A missing native
 quantity must remain absent or be refused, rather than being changed to zero

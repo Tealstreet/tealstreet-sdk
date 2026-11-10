@@ -14,7 +14,10 @@ import { z } from 'zod';
 import { prepareCliAmendPrice, prepareCliOrder } from '@tealstreet/cli-core/src/order/prepareCliOrder';
 import { copyHistoryCompleteness } from '@tealstreet/safe-cex/src/historyCompleteness';
 import { CAPABILITY_METHODS } from '@tealstreet/safe-cex/src/exchanges/base';
-import { roundOrderSizeToNearest } from '@tealstreet/script-api-core/src/order/orderPricing';
+import {
+  assertCloseLikeOrderAmount,
+  roundOrderSizeToNearest,
+} from '@tealstreet/script-api-core/src/order/orderPricing';
 
 type Shape = z.ZodRawShape;
 
@@ -70,10 +73,12 @@ const openOrders = async (exchange: Exchange, ids: string[]): Promise<Order[]> =
 };
 
 /** The amend size rule, refusing a size that rounds to nothing rather than amending to zero. */
-const prepareAmendAmount = (exchange: Exchange, symbol: string, amount: number): number => {
+const prepareAmendAmount = (exchange: Exchange, order: Order, amount: number): number => {
+  const { symbol } = order;
   const market = exchange.store.markets.find((m) => m.symbol === symbol);
   if (!market) throw new Error(`Market not found for ${symbol}`);
-  const rounded = roundOrderSizeToNearest(amount, market);
+  assertCloseLikeOrderAmount(amount, order, market, exchange.name);
+  const rounded = roundOrderSizeToNearest(amount, market, exchange.name);
   if (!Number.isFinite(rounded) || rounded <= 0) {
     throw new Error(`amount ${amount} rounds to ${rounded} for '${symbol}' — below the venue lot size`);
   }
@@ -302,7 +307,7 @@ export const tools: Tool[] = [
       const update =
         price !== undefined
           ? { price: prepareCliAmendPrice(exchange as unknown as ExchangeLike, order.symbol, price) }
-          : { amount: prepareAmendAmount(exchange, order.symbol, amount!) };
+          : { amount: prepareAmendAmount(exchange, order, amount!) };
       return exchange.updateOrder({ order, update });
     },
   }),
