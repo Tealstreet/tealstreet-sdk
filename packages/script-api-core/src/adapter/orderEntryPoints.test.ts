@@ -70,7 +70,8 @@ const placesAnOrder = (source: string): boolean => {
       ) {
         const receiver = binding.initializer.expression;
         const invokedReceiver = node.arguments[0];
-        found =
+        // Sibling visits must never erase an earlier order send.
+        found ||=
           ts.isIdentifier(receiver) &&
           ts.isIdentifier(invokedReceiver) &&
           receiver.text === invokedReceiver.text &&
@@ -245,6 +246,29 @@ describe('the set of order entry points is closed', () => {
       false,
     );
     expect(placesAnOrder('const placeOrder = exchange.placeOrder; await placeOrder.call(exchange, order);')).toBe(true);
+  });
+
+  it.each([
+    [
+      'different identifier receiver',
+      'const send = exchange.placeOrder;',
+      'send.call(exchange, order)',
+      'send.call(other, order)',
+    ],
+    [
+      'property receiver',
+      'const send = exchange.placeOrder; const nested = ctx.exchange.placeOrder;',
+      'send.call(exchange, order)',
+      'nested.call(ctx.exchange, order)',
+    ],
+  ])('preserves a real send among rejected siblings: %s', (_name, declarations, realSend, rejectedSend) => {
+    for (const calls of [
+      [realSend, rejectedSend],
+      [rejectedSend, realSend],
+    ]) {
+      const source = `${declarations} await Promise.all([${calls.join(', ')}]);`;
+      expect(placesAnOrder(source), source).toBe(true);
+    }
   });
 
   it('requires the captured method, matching receiver, payload and lexical binding', () => {
