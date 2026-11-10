@@ -512,6 +512,11 @@ preserve `unsupported`/`notSent` through startup and account validation.
 
 ## Rust engine capabilities
 
+Optional SDK helpers needed before engine startup are declared under
+`bridge.helpers` in `construction-rules.json`. The native generated construction
+record and synchronous SDK record share that declaration. Install and dispatch
+those helpers from their declared flags, never from a venue-name check.
+
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
