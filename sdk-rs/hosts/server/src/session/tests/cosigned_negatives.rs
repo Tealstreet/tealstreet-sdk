@@ -84,7 +84,7 @@ fn init(id: Option<&str>) -> InitPayload {
     }
 }
 
-fn candidate(f: &Fixture, user: &str) -> (Session, tokio::sync::mpsc::Receiver<String>) {
+fn candidate(f: &Fixture, user: &str) -> (Session, crate::out::Receiver) {
     let (mut session, sent) = user_session(f.registry.clone(), user);
     session.cosigned_admission_test = true;
     session.identity.resumable = false;
@@ -93,7 +93,7 @@ fn candidate(f: &Fixture, user: &str) -> (Session, tokio::sync::mpsc::Receiver<S
 
 async fn complete(
     session: &mut Session,
-    sent: &mut tokio::sync::mpsc::Receiver<String>,
+    sent: &mut crate::out::Receiver,
     done: &mut tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>,
     device: &mut Device,
     answer: Answer,
@@ -123,7 +123,7 @@ struct Resident {
     holders: Vec<u64>,
     subscriptions: HashMap<String, u32>,
     counts: (usize, usize),
-    _sent: tokio::sync::mpsc::Receiver<String>,
+    _sent: crate::out::Receiver,
 }
 
 impl Resident {
@@ -209,12 +209,7 @@ impl Drop for Resident {
     }
 }
 
-fn refused(
-    f: &Fixture,
-    session: &Session,
-    sent: &mut tokio::sync::mpsc::Receiver<String>,
-    id: Option<&str>,
-) {
+fn refused(f: &Fixture, session: &Session, sent: &mut crate::out::Receiver, id: Option<&str>) {
     let raw = envelope::init_unverified("acct", false);
     let expected = id.filter(|s| !s.is_empty()).map_or_else(
         || raw.clone(),
