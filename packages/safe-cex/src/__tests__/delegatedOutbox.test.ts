@@ -1,6 +1,7 @@
 import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
@@ -84,6 +85,48 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  it('requires evidence to construct notSent at compile time', () => {
+    const file = new URL('./__outbox_type_contract__.ts', import.meta.url).pathname;
+    const source = `import type { DelegatedIntent } from '../delegatedOutbox';
+declare const row: DelegatedIntent;
+row.state = 'unknown';
+// @ts-expect-error Only the evidence constructor can construct notSent.
+row.state = 'notSent';
+// @ts-expect-error Error outcomes cannot fabricate no-handoff evidence either.
+row.error = { message: 'unproven', outcome: 'notSent' };
+`;
+    const options: ts.CompilerOptions = {
+      strict: true,
+      noEmit: true,
+      skipLibCheck: true,
+      types: [],
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      esModuleInterop: true,
+    };
+    const host = ts.createCompilerHost(options);
+    const read = host.getSourceFile.bind(host);
+    host.getSourceFile = (name, language, ...args) =>
+      name === file ? ts.createSourceFile(name, source, language, true) : read(name, language, ...args);
+    const program = ts.createProgram([file], options, host);
+    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'))).toEqual([]);
+  });
+  it('restores a legacy notSent row without evidence as unknown', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const id = await box.enqueue(params);
+    box.close();
+    const [key, saved] = [...f.rows][0];
+    // Simulate JSON written by an old build, outside the current type boundary.
+    f.rows.set(key, JSON.parse(JSON.stringify({ ...saved, state: 'notSent', error: { message: 'unproven', outcome: 'notSent' } })));
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    expect(restored.entries()[0].error?.outcome).not.toBe('notSent');
+    expect(f.writes).toEqual([]);
+    restored.close();
+  });
   it('marks physical handoff in flight and turns its deadline into unknown', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
