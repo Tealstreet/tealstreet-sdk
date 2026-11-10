@@ -214,6 +214,11 @@ fn http_setting_failures_distinguish_transport_status_from_vendor_evidence() {
                     error.legacy_text().contains("Check Open Orders"),
                     "{error:?}"
                 );
+                assert!(matches!(
+                    &error.elements.as_ref().unwrap()[0].result,
+                    safe_cex_engine::write_plan::ElementResult::Unknown { error }
+                        if error.message == "The outcome is unknown. Check Open Orders"
+                ));
             }
             assert!(!h.pending.iter().any(|r| r.method == Method::Post));
         }

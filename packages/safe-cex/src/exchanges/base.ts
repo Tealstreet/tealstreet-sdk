@@ -2608,6 +2608,7 @@ export class BaseExchange implements Exchange {
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
       case 'coinbase-jws':
       case 'backpack-ed25519':
+      case 'apexomni-batch':
       case 'kraken-sha512':
       case 'orderly-ed25519':
       case 'grvt-order':

@@ -74,7 +74,10 @@ Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
 
 Classic TPSL rows explicitly marked `orderType=market` with an absent or blank
 `executePrice` retain market execution in REST, WebSocket and version-2 source
-frames. Native TPSL amendments send `executePrice="0"`, the documented market
+frames. This includes the documented `psl`, `ptp`, `sl` and `tp`
+[WebSocket plan aliases](https://bitgetlimited.github.io/apidoc/en/mix/#websocket-plantype),
+normalized to their position-level or sized TPSL kind. Native TPSL amendments
+send `executePrice="0"`, the documented market
 form, while preserving the order identity, quantity and trigger reference.
 Unknown or malformed execution evidence stays refused; it never borrows a live
 price. Version-1 frames still lack this evidence and require re-placing the stop.

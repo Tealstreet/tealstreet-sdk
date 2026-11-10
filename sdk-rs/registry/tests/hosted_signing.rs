@@ -251,6 +251,7 @@ fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
     for venue in [
         #[cfg(not(feature = "mexc"))]
         "mexc",
+        #[cfg(not(feature = "apexomni"))]
         "apexomni",
         #[cfg(not(feature = "bitrue"))]
         "bitrue",

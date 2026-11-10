@@ -170,8 +170,8 @@ The same field policy declares primary required-for-private passphrases and
 required secondary passphrases with primary fallback for OKX and Bitget aliases
 and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
-explicit empty never inherits. Public mode bypasses only the primary requirement,
-while secondary validation stays active. Shared publicMode intent takes precedence
+explicit empty never inherits. Local signer setup in public mode bypasses only
+the primary requirement, while secondary validation stays active. Shared publicMode intent takes precedence
 over legacy publicDataOnly, including null/omitted requested. This declaration does
 not enable signing for an unmigrated family.
 
@@ -235,6 +235,14 @@ Private WOO RemoteSigner setup refuses any configured secondary credentials with
 `unsupported` / `notSent` before native construction or callbacks: its HMAC wire
 cannot select the device's read-key slot. Remove the secondary credentials to
 use Hosted with the primary key, or use read keys in local browser mode.
+ApeX Omni admits RemoteSigner through `apexomni-batch`: device-held OmniKey
+contracts precede base64-text-key HMAC signing. Origins retain their API
+passphrase in Present-only provider custody; the secret and OmniKey stay on the
+device. Private PayloadSigner and secondary read keys refuse before I/O.
+ApeX HTTP POST captures sign sorted semantic form fields, decoding serialized
+form/multipart bodies while preserving transport bytes and existing zkLink signatures.
+See `docs/plans/callers/apexomni-hosted-signing.md` for the wire and parity contract.
+
 Crypto.com admits RemoteSigner and canonical HMAC PayloadSigner. Every signed
 REST envelope and `public/auth` uses provider custody; the hosted wire carries
 only `method + id + api_key + canonical params + nonce`. PayloadSigner keeps
@@ -254,6 +262,10 @@ including keyless accounts with unused callbacks. It preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
+ApeX uses this shared early return for saved-key and keyless accounts explicitly
+requesting public mode. Captured public mode cannot be changed by later
+construction input; no separate ApeX public-mode guard is installed.
+
 Construction snapshots outer signer fields and their methods together under one
 guard before mode resolution. Admission, asynchronous factories and signer setup
 share that immutable snapshot, preserving receivers without further caller reads.
@@ -1425,8 +1437,13 @@ Its test also requires each advertised route to select an existing backend; comm
 are not routes. Remove retired DNS names from both files together, or
 `engine.ts` can select an HTTP fallback the fleet cannot serve. WEEX remains
 HTTP-only (no HOW); adding its fleet route does not enable the venue or change
-that transport policy. Lighter's `testnet-api.lighter.xyz` does not resolve and
-is intentionally absent; do not introduce another dead backend to cover it.
+that transport policy. Lighter's `testnet-api.lighter.xyz` was documented as retired
+and previously excluded. The SDK inventory now includes every fixed REST base
+declared by the venue crates, including that testnet URL; the source-derived
+coverage test includes production, demo/testnet and auxiliary APIs. Configured
+HyroTrader endpoints are caller-owned rather than fixed venue bases. SDK coverage
+does not prove endpoint reachability: HAProxy config and the fleet rollout remain
+a human step, including resolving the retired Lighter endpoint before routing it.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned family (bybit when tunnelling), whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
