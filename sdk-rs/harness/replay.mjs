@@ -19,7 +19,7 @@ import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { captureReplayState, finalizeReplay } from './replay-finalize.mjs';
 import { credentialValues, findNoticeLeaks } from './notice-leaks.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
-import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
+import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, captureTsSettings, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -790,16 +790,9 @@ async function runTs() {
             } : {}),
           },
           orders: receiver.orders.map((o) => ({ ...o })),
-          // Zero-size placeholders carry each market's leverage and margin type.
           positions: receiver.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
           flatPositionPnl: flatPositionPnl(receiver.positions),
-          settings: venue.tsSettings?.(exchange, store) ?? [
-            ...new Map(
-              receiver.positions
-                .filter((p) => p.leverage > 0)
-                .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
-            ).values(),
-          ],
+          settings: venue.tsSettings?.(exchange, store) ?? captureTsSettings(receiver),
           fills: executions.map(captureTsFill),
         }
       : undefined;

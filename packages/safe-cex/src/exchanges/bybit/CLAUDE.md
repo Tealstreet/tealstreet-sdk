@@ -795,7 +795,7 @@ attempt that was reverted:
   `positionIdx === 0` through `POSITION_SIDE[p.side] || PositionSide.Long`, and
   `POSITION_SIDE` maps only `Buy`/`Sell`, so a flat frame becomes a phantom
   `BTCUSD:long:oneway` row while the real short keeps stale contracts. Only
-  `addOrUpdatePositionsFull` zeroes unannounced rows, and nothing dedupes the
+  `addOrUpdatePositionsFull` removes unannounced rows while retaining settings separately, and nothing dedupes the
   phantom away — its id differs from the real row's, so `auditPositions()` would
   not remove it even with `removeDupes` on. Linear has
   `dedupePositionsById` for its documented `seq: -1` placeholder rows; inverse
