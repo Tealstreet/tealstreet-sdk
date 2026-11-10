@@ -3063,7 +3063,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('invalid close size');
     }
     const amount = nativePositionSize(position, market);
-    if (!Number.isFinite(amount) || amount < 0) throw new Error('invalid close size');
+    if (amount === null || !Number.isFinite(amount) || amount < 0) throw new Error('invalid close size');
     if (amount === 0) return undefined;
     return {
       symbol: position.symbol,

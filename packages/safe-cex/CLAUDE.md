@@ -64,9 +64,19 @@ the server handover implementation landing.
 ## DELEGATED order outbox
 
 `DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
-submits, gated on the advertised delegatedOrderFramesV1 capability. Hosts inject scoped persistence, secure randomness, a monotonic clock
-with a stable epoch, deadline scheduling and an admitted socket connection. Close
-the outbox on logout; pass the captured connection ticket to flush and receive.
+submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
+`delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
+missing/false flags disable writes and receipts. Hosts inject scoped persistence,
+secure randomness, a monotonic clock with a stable epoch, deadline scheduling
+and an admitted socket connection. Close the outbox on logout; pass the captured connection ticket to flush and receive.
+Router outcomes may be renumbered per client socket, including stored replays.
+Receipt ordering is checked per intent within that ticket, so one intent's higher
+number cannot hide another's deferred replay. Replacement tickets reset receipt
+ordering and old tickets cannot update the replacement connection.
+The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations,
+coverage uncertainty and ledger failures answer unknown, never prove not sent.
+Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
+string coercion. Capability discovery still requires completed socket admission.
 Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
 an intent `sending` in memory; sending, acknowledged and unknown intents are never
 submitted again. At ten monotonic seconds from creation (including persistence
@@ -1201,9 +1211,16 @@ only defined on linear markets.
 `safe-cex/src/utils/nativePositionSize.ts` is the single definition;
 `script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
 Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
-use it. Its own comment records that the copies HAD drifted
-before they were merged. One function in the shared layer, adapters either
-side.
+use it. The helper returns `number | null`: coherent native evidence wins, absent
+native uses derived size, and conflicting/unavailable quantities remain unknown.
+No per-field freshness signal exists; close/reduce consumers refuse a conflict
+rather than selecting either value by magnitude. CrossTrade validates canonical
+quantities in both reconciliation passes. Unknown master/copier rows remain
+present and refuse automatic sizing; known-flat rows remain distinct. Matched
+reductions compare exposures projected from canonical native quantities, and
+lot-rounded reductions are capped at the known copier quantity. The missing-
+position pass also refuses unknown opposite-side rows, since an entry could
+reduce them. Market, LimitSlippage and Chase forward these validated amounts.
 
 ### 4. Break-even — NOT trustworthy, and the order paths are off it
 

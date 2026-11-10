@@ -3,6 +3,7 @@ import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions
 import { describe, expect, it } from 'vitest';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
+import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
 import { createDelegatedIntentId, DelegatedOutbox } from '../delegatedOutbox';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
@@ -52,7 +53,7 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
     venue: 'bybit',
     signingMode: 'delegated',
     ready: true,
-    capabilities: { delegatedOrderFramesV1: true },
+    capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
     instanceId,
     send(frame) {
       writes.push(frame);
@@ -532,7 +533,7 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(box.entries()[0].state).toBe('placed');
     box.close();
   });
-  it('requires the advertised capability, bounds receipts and checks per-account outcome sequencing', async () => {
+  it('requires the advertised capability, bounds receipts and checks per-intent outcome sequencing', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     box.connect({ ...f.connection(), capabilities: { delegatedOrderFramesV1: false } });
@@ -555,6 +556,333 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(box.entries()[0].state).toBe('unknown');
     await box.flush(box.connect(f.connection()));
     expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])('gates writes and receipts on box frames=%s AND router ledger=%s', async (frames, ledger) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const advertised = {
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: frames, delegatedOrderLedgerV1: ledger },
+    };
+    const c = box.connect(advertised);
+    const id = await box.enqueue(params);
+    await box.flush(c);
+    expect(f.writes).toHaveLength(frames && ledger ? 1 : 0);
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcome: 'placed', clientOrderId: id, venueOrderId: 'router-order' }),
+    );
+    expect(box.entries()[0].state).toBe(frames && ledger ? 'placed' : 'queued');
+    box.close();
+  });
+  it("accepts a router replay without comparing another intent's outcome sequence", async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const replayed = await box.enqueue(params);
+    const live = await box.enqueue(params);
+    // Hosts may deliver an independent live result before a deferred replay.
+    await box.receive(
+      c,
+      response(live, 'order.outcome', {
+        seq: 2,
+        outcomeSeq: 42,
+        outcome: 'placed',
+        clientOrderId: live,
+        venueOrderId: 'live-order',
+      }),
+    );
+    await box.receive(
+      c,
+      response(replayed, 'order.outcome', {
+        outcomeSeq: 41,
+        outcome: 'placed',
+        clientOrderId: replayed,
+        venueOrderId: 'replayed-order',
+      }),
+    );
+    expect(box.entries().map((row) => [row.intentId, row.state, row.venueOrderId])).toEqual([
+      [replayed, 'placed', 'replayed-order'],
+      [live, 'placed', 'live-order'],
+    ]);
+    // A stale result for the same intent is still discarded.
+    await box.receive(
+      c,
+      response(replayed, 'order.outcome', {
+        outcomeSeq: 40,
+        outcome: 'unknown',
+        clientOrderId: replayed,
+      }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    box.close();
+  });
+  it('requires an explicit router capability and captures both advertisements immutably', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const advertised = { ...f.connection(), capabilities: { delegatedOrderFramesV1: true } };
+    const c = box.connect(advertised);
+    // A caller mutating discovery after connect cannot enable that old ticket.
+    Object.assign(advertised.capabilities, { delegatedOrderLedgerV1: true });
+    const id = await box.enqueue(params);
+    await box.flush(c);
+    expect(f.writes).toEqual([]);
+    const next = box.connect(f.connection());
+    await box.flush(next);
+    expect(f.writes).toHaveLength(1);
+    expect(JSON.parse(f.writes[0]).d.intentId).toBe(id);
+    box.close();
+  });
+  it('gates deferred queue cancellation on both capabilities too', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection());
+    const id = await box.enqueue(params);
+    // Capture the cancellation while the handed-off intent is still sending;
+    // replacement then retires that captured ticket before cancellation dispatch.
+    const cancellation = box.cancel(id);
+    const disabled = box.connect({
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: false },
+    });
+    await cancellation;
+    await box.flush(disabled);
+    expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.submit']);
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.submit', 'order.cancelQueued']);
+    box.close();
+  });
+  it('accepts renumbered outcomes on a replacement ticket while discarding old socket deliveries', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const old = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(
+      old,
+      response(id, 'order.outcome', {
+        outcomeSeq: 900,
+        outcome: 'unknown',
+        clientOrderId: id,
+      }),
+    );
+    // A new physical socket may reuse the registration label, but not its ticket.
+    const current = box.connect(f.connection());
+    await box.receive(
+      old,
+      response(id, 'order.outcome', {
+        outcomeSeq: 901,
+        outcome: 'placed',
+        clientOrderId: id,
+        venueOrderId: 'old-socket',
+      }),
+    );
+    expect(box.entries()[0].state).toBe('unknown');
+    await box.receive(
+      current,
+      response(id, 'order.outcome', {
+        outcomeSeq: 1,
+        outcome: 'placed',
+        clientOrderId: id,
+        venueOrderId: 'replayed-order',
+      }),
+    );
+    await box.flush(current);
+    expect(box.entries()[0]).toMatchObject({ state: 'placed', venueOrderId: 'replayed-order' });
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  it('isolates replay sequencing when the owner switches during receipt persistence', async () => {
+    const a = fixture();
+    const alice = await DelegatedOutbox.open(a.options);
+    const old = alice.connect(a.connection());
+    const aId = await alice.enqueue(params);
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const put = a.options.storage.put;
+    a.options.storage.put = async (scope, row) => {
+      if (row.state === 'unknown') {
+        entered();
+        await held;
+      }
+      await put(scope, row);
+    };
+    const receipt = alice.receive(
+      old,
+      response(aId, 'order.outcome', {
+        outcomeSeq: 900,
+        outcome: 'unknown',
+        clientOrderId: aId,
+      }),
+    );
+    await waiting;
+    alice.close();
+    const b = fixture('bob', a.rows);
+    const bob = await DelegatedOutbox.open(b.options);
+    const current = bob.connect(b.connection());
+    const bId = await bob.enqueue(params);
+    // Deliberately collide account/intent labels; the captured owner is distinct.
+    expect(bId).toBe(aId);
+    await bob.receive(
+      current,
+      response(bId, 'order.outcome', {
+        outcomeSeq: 1,
+        outcome: 'unknown',
+        clientOrderId: bId,
+      }),
+    );
+    const stale = alice.receive(
+      old,
+      response(aId, 'order.outcome', {
+        outcomeSeq: 901,
+        outcome: 'placed',
+        clientOrderId: aId,
+        venueOrderId: 'stale',
+      }),
+    );
+    release();
+    await Promise.all([receipt, stale]);
+    expect(bob.entries()).toMatchObject([{ owner: 'bob', intentId: bId, state: 'unknown' }]);
+    expect(b.writes).toHaveLength(1);
+    expect(a.writes).toHaveLength(1);
+    expect([...a.rows.values()].filter((row) => row.owner === 'alice')).toMatchObject([{ state: 'unknown' }]);
+    bob.close();
+  });
+  it.each(routerReplies.boxReceipts)('pins the box receipt predicate: $name', async (test) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    await box.enqueue(params);
+    await expect(box.receive(c, test.frame)).resolves.toBeUndefined();
+    // A fixture's queued result denotes an ignored receipt. Physical handoff
+    // now leaves the same row sending; a malformed reply must preserve it.
+    expect(box.entries()[0].state).toBe(test.outboxState === 'queued' ? 'sending' : test.outboxState);
+    box.close();
+  });
+  it('does not send before socket admission even with both capabilities advertised', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const pending = box.connect({ ...f.connection(), ready: false });
+    const id = await box.enqueue(params);
+    await box.flush(pending);
+    await box.receive(pending, response(id, 'order.ack', { received: true }));
+    expect(f.writes).toEqual([]);
+    expect(box.entries()[0].state).toBe('queued');
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  it.each(routerReplies.cases)('accepts frozen router replies: $name', async (test) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    expect(id).toBe(frames.key);
+    if (test.request === 'cancelQueued') {
+      await box.cancel(id);
+      expect(JSON.parse(f.writes[1])).toEqual(frames.cancelQueued);
+    }
+    for (const reply of test.replies) {
+      if (reply.t === 'order.ack' || reply.t === 'order.outcome') {
+        const reference = reply.t === 'order.ack' ? frames.ack : frames.outcome;
+        expect(Object.keys(reply.d).sort()).toEqual(Object.keys(reference.d).sort());
+        expect(reply.d).toMatchObject({ accountName: 'main', instanceId: 'registration', intentId: id, seq: 1 });
+        expect(new TextEncoder().encode(JSON.stringify(reply)).length).toBeLessThanOrEqual(
+          reply.t === 'order.ack' ? 4096 : 8192,
+        );
+      } else {
+        expect(reply).toEqual({
+          t: 'msg',
+          d: { op: 'error', accountName: 'main', data: ['not sent: invalid order binding'] },
+        });
+      }
+      await box.receive(c, JSON.stringify(reply));
+    }
+    // An ordinary error cannot prove that a handed-off cancellation succeeded.
+    expect(box.entries()[0]).toMatchObject({
+      state: test.state === 'canceled' ? 'unknown' : test.state,
+      cancelPending: test.cancelPending,
+    });
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes.filter((text) => JSON.parse(text).t === 'order.submit')).toHaveLength(1);
+    expect(f.writes.filter((text) => JSON.parse(text).t === 'order.cancelQueued')).toHaveLength(
+      test.request === 'cancelQueued' ? (test.cancelPending ? 2 : 1) : 0,
+    );
+    box.close();
+  });
+  it('accepts independent renumbered results after both handoffs time out unknown', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const replayed = await box.enqueue(params);
+    const live = await box.enqueue(params);
+    f.advance(10_000);
+    expect(box.entries().map((row) => row.state)).toEqual(['unknown', 'unknown']);
+    await box.receive(
+      c,
+      response(live, 'order.outcome', {
+        seq: 2,
+        outcomeSeq: 42,
+        outcome: 'placed',
+        clientOrderId: live,
+        venueOrderId: 'live-after-deadline',
+      }),
+    );
+    await box.receive(
+      c,
+      response(replayed, 'order.outcome', {
+        outcomeSeq: 41,
+        outcome: 'placed',
+        clientOrderId: replayed,
+        venueOrderId: 'replay-after-deadline',
+      }),
+    );
+    expect(box.entries().map((row) => row.state)).toEqual(['placed', 'placed']);
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes).toHaveLength(2);
+    box.close();
+  });
+  it('keeps handed-off work unknown when a replacement loses ledger capability', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection());
+    const id = await box.enqueue(params);
+    const disabled = box.connect({
+      ...f.connection(),
+      capabilities: {
+        delegatedOrderFramesV1: true,
+        delegatedOrderLedgerV1: false,
+      },
+    });
+    expect(box.entries()[0].state).toBe('unknown');
+    await box.receive(disabled, response(id, 'order.ack', { received: false }));
+    f.advance(10_000);
+    await box.flush(disabled);
+    expect(box.entries()[0].state).toBe('unknown');
+    const current = box.connect(f.connection());
+    await box.flush(current);
+    expect(f.writes).toHaveLength(1);
+    await box.receive(
+      current,
+      response(id, 'order.outcome', {
+        outcomeSeq: 1,
+        outcome: 'placed',
+        clientOrderId: id,
+        venueOrderId: 'restored-ledger',
+      }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
     box.close();
   });
   it('uses sortable unique UUIDv7 keys that fit the Bybit client id field', () => {

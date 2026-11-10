@@ -313,9 +313,11 @@ const sizeClose = (
    *  still rounded, still clamped to the position, and still held to
    *  `minAmount` — an override changes the number, never the checks. */
   overrideAmount?: number,
-): { amount: number } | { reason: string } => {
+): { amount: number; full: number } | { reason: string } => {
   if (!market) return { reason: noMarket(position.symbol, position.account) };
 
+  if (position.nativeContracts === null || !Number.isFinite(position.nativeContracts))
+    return { reason: `native size is unknown for ${position.symbol} on ${position.account}; refresh the position` };
   const full = Math.abs(position.nativeContracts);
   if (!(full > 0)) {
     return { reason: `the ${position.symbol} position on ${position.account} has no size to close` };
@@ -334,7 +336,7 @@ const sizeClose = (
       reason: `${trim(rounded)} ${position.symbol} is below the ${trim(market.minAmount)} minimum on ${position.account}`,
     };
   }
-  return { amount: rounded };
+  return { amount: rounded, full };
 };
 
 /** A close is the opposite side of the position it reduces. */
@@ -424,9 +426,9 @@ const resolveReduce = (
         // the number no longer matches.
         edit?.amount !== undefined
           ? `Reduce ${position.symbol} ${position.side} on ${position.account} by ` +
-              `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))}`
+              `${trim(sized.amount)} of ${trim(sized.full)}`
           : `Reduce ${position.symbol} ${position.side} on ${position.account} by ` +
-              `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))} (${step.percent}%)`,
+              `${trim(sized.amount)} of ${trim(sized.full)} (${step.percent}%)`,
       ),
     );
   }
@@ -493,6 +495,10 @@ const resolveClose = (
         `the size of a hedged ${position.symbol} close on ${position.account} cannot be edited — ` +
           'ask again with the size you want',
       );
+      continue;
+    }
+    if (position.nativeContracts === null || !Number.isFinite(position.nativeContracts)) {
+      out.reasons.push(`native size is unknown for ${position.symbol} on ${position.account}; refresh the position`);
       continue;
     }
     if (edit?.amount === undefined && fastPathFits) {
