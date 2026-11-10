@@ -377,8 +377,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
-  // #3438 merged-head local build.sh --venue woo: web/node 2,655,191 B.
-  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3442 CI run 42749390151, job 129609649777 at ded39a35466: web/node 2,654,237 B.
+  // Current CI size + 10 KiB, rounded up to KiB.
   woo: 2_665_472,
 });
 export const wasmBudgetBytes = (profile, venue) =>
