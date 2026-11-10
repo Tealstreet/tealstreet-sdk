@@ -176,6 +176,77 @@ async fn queued<F: Future>(future: std::pin::Pin<&mut F>, registry: &Registry, c
     .expect("real construction is queued behind the held engine lane");
 }
 
+fn startup_store() -> String {
+    crate::envelope::msg(
+        "synthetic-main",
+        "store",
+        json!({"activeChasers":[], "activeTWAPs":[]}),
+    )
+}
+
+fn assert_construction_replies(
+    received: &mut crate::out::Receiver,
+    expected: Option<&str>,
+    admitted: bool,
+) {
+    let mut found = false;
+    while let Ok(text) = received.try_recv() {
+        if admitted && text == startup_store() {
+            continue;
+        }
+        assert!(!found, "construction replies contain no extra notification");
+        assert_eq!(Some(text.as_str()), expected, "construction reply owner");
+        found = true;
+    }
+    assert_eq!(found, expected.is_some(), "construction reply is delivered");
+}
+
+#[test]
+fn construction_reply_checks_still_reject_foreign_notifications() {
+    for foreign in ["synthetic-A-result", "synthetic-B-result", "unexpected"] {
+        let (sender, mut received, _) = Out::channel(4);
+        assert!(sender.send(startup_store()));
+        assert!(sender.send(foreign.into()));
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assert_construction_replies(&mut received, None, true);
+            }))
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn construction_reply_checks_allow_startup_for_admitted_owner() {
+    for expected in [None, Some("synthetic-A-result")] {
+        let (sender, mut received, _) = Out::channel(4);
+        assert!(sender.send(startup_store()));
+        if let Some(reply) = expected {
+            assert!(sender.send(reply.into()));
+        }
+        assert_construction_replies(&mut received, expected, true);
+    }
+}
+
+#[test]
+fn construction_reply_checks_reject_startup_for_never_admitted_owner() {
+    let (sender, mut received, _) = Out::channel(4);
+    assert!(sender.send(startup_store()));
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_construction_replies(&mut received, None, false);
+        }))
+        .is_err(),
+        "a never-admitted owner's outbox must reject even the startup snapshot"
+    );
+}
+
+#[test]
+fn construction_reply_checks_allow_empty_outbox_for_never_admitted_owner() {
+    let (_sender, mut received, _) = Out::channel(4);
+    assert_construction_replies(&mut received, None, false);
+}
+
 async fn construction_case(switch_user: bool, revoke_a: bool) {
     let Loopback {
         plan,
@@ -249,7 +320,7 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         assert!(registry.held(A, &account.name, a_socket).is_some());
         assert!(!registry.holds(&account, caller.socket) || !switch_user);
         account.notify("synthetic-A-result".into());
-        assert_eq!(a_out.try_recv().unwrap(), "synthetic-A-result");
+        assert_construction_replies(&mut a_out, Some("synthetic-A-result"), true);
         Some(account)
     };
     let b = if let Some(b) = b {
@@ -260,20 +331,18 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         assert_eq!(account.user, B);
         assert!(registry.held(B, &account.name, caller.socket).is_some());
         assert!(!registry.holds(&account, a_socket));
-        assert!(
-            b_out.as_mut().unwrap().try_recv().is_err(),
-            "A results stay off B's socket"
-        );
+        account.notify(startup_store());
+        assert_construction_replies(b_out.as_mut().unwrap(), None, true);
         account.notify("synthetic-B-result".into());
-        assert_eq!(
-            b_out.as_mut().unwrap().try_recv().unwrap(),
-            "synthetic-B-result"
-        );
+        assert_construction_replies(b_out.as_mut().unwrap(), Some("synthetic-B-result"), true);
         Some(account)
     } else {
         None
     };
-    assert!(a_out.try_recv().is_err(), "B results stay off A's socket");
+    if let Some(account) = &a {
+        account.notify(startup_store());
+    }
+    assert_construction_replies(&mut a_out, None, a.is_some());
 
     // Startup's signed private fee read exercises the actual injected provider
     // and the actual transport's per-operation proxy token, not a label-only mock.
