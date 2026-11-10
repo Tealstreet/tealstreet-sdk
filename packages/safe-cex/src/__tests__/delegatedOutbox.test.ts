@@ -88,6 +88,108 @@ describe('DELEGATED host-neutral outbox', () => {
     const intentId = '018bcfe5-6800-7000-8000-000000000001';
 
     it.each([
+      { source: 'caller', retry: false },
+      { source: 'caller', retry: true },
+      { source: 'SDK', retry: false },
+      { source: 'SDK', retry: true },
+    ])(
+      'retry then restore: "never replay them automatically or interpret failure as proof that no order exists"; prevent "a double placement manufactured inside the SDK" ($source key, retry=$retry)',
+      async ({ source, retry }) => {
+        // Both quoted invariants are from packages/safe-cex/CLAUDE.md.
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        box.connect(f.connection());
+        const id = await box.enqueue(params, source === 'caller' ? { intentId } : undefined);
+        const beforeRetry = [...f.rows.values()][0];
+        expect(beforeRetry.state).toBe('sending');
+        expect(f.writes).toHaveLength(1);
+        if (retry) {
+          f.advance(100);
+          expect(await box.enqueue(params, { intentId: id })).toBe(id);
+          expect(f.writes).toHaveLength(1);
+        }
+        const afterRetry = [...f.rows.values()][0];
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(f.writes.filter((frame) => JSON.parse(frame).t === 'order.submit')).toHaveLength(1);
+        expect(afterRetry).toEqual(retry ? { ...beforeRetry, callerSuppliedIntentId: true } : beforeRetry);
+        expect(restored.entries()[0]).toMatchObject({
+          intentId: id,
+          state: 'unknown',
+          fingerprint: beforeRetry.fingerprint,
+          seq: beforeRetry.seq,
+        });
+        restored.close();
+      },
+    );
+
+    it.each([false, true])(
+      'retry then restore preserves a committed handoff marker when its connection retires before dispatch (retry=%s)',
+      async (retry) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const connection = box.connect(f.connection());
+        const put = f.options.storage.put;
+        f.options.storage.put = async (scope, row) => {
+          await put(scope, row);
+          if (row.state === 'sending') box.disconnect(connection);
+        };
+        const id = await box.enqueue(params);
+        f.options.storage.put = put;
+        const beforeRetry = [...f.rows.values()][0];
+        expect(beforeRetry.state).toBe('sending');
+        expect(box.entries()[0].state).toBe('queued');
+        expect(f.writes).toEqual([]);
+        if (retry) expect(await box.enqueue(params, { intentId: id })).toBe(id);
+        const afterRetry = [...f.rows.values()][0];
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(f.writes).toEqual([]);
+        expect(afterRetry).toEqual(retry ? { ...beforeRetry, callerSuppliedIntentId: true } : beforeRetry);
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+        restored.close();
+      },
+    );
+
+    it.each([false, true])(
+      'retry then restore preserves uncertainty when receipt persistence failed (retry=%s)',
+      async (retry) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const connection = box.connect(f.connection());
+        const id = await box.enqueue(params, { intentId });
+        const beforeRetry = [...f.rows.values()][0];
+        const put = f.options.storage.put;
+        f.options.storage.put = async () => {
+          throw new Error('receipt storage unavailable');
+        };
+        await expect(
+          box.receive(
+            connection,
+            response(id, 'order.outcome', {
+              outcome: 'placed',
+              clientOrderId: id,
+              venueOrderId: 'synthetic-native-order',
+            }),
+          ),
+        ).rejects.toThrow('receipt storage unavailable');
+        expect(box.entries()[0].state).toBe('placed');
+        f.options.storage.put = put;
+        if (retry) expect(await box.enqueue(params, { intentId: id })).toBe(id);
+        const afterRetry = [...f.rows.values()][0];
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+        expect(afterRetry).toEqual(beforeRetry);
+        expect(f.writes).toHaveLength(1);
+        restored.close();
+      },
+    );
+
+    it.each([
       '',
       'not-a-uuid',
       '018bcfe5-6800-4000-8000-000000000001',
