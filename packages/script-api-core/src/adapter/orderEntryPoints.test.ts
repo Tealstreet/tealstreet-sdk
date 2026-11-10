@@ -44,7 +44,7 @@ const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web/package.json'));
  *  strange way to write it, but a determined bypass is possible. The guard
  *  raises the cost of adding an order path BY ACCIDENT, which is how every one
  *  of the six this epic found got there. */
-const PLACES_AN_ORDER = /\.placeOrders?[!?]?\s*\(/;
+const PLACES_AN_ORDER = /(?:\.placeOrders?[!?]?\s*\(|\bplaceOrders?\.call\s*\()/;
 
 /**
  * Comments are stripped before matching, because a file that only MENTIONS
@@ -97,7 +97,10 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
 
   // The CLI. Each of these prepares its payload with `prepareCliOrder`,
   // which is NOT listed — it rounds and validates, it does not send.
-  'packages/cli-core/src/commands/trading/BaseBuySellCommand.ts': 'buy / sell',
+  // At b861253bb3 (#3449), buy/sell still send in BaseBuySellCommand.submitOrders.
+  // d0e3206005e changed that send to captured placeOrder.call(exchange, order);
+  // the detector must recognize the call, and this real sender must stay listed.
+  'packages/cli-core/src/commands/trading/BaseBuySellCommand.ts': 'buy / sell through submitOrders',
   'packages/cli-core/src/commands/trading/CloseCommand.ts': 'close',
   'packages/cli-core/src/commands/trading/ScaleCommand.ts': 'scale',
   'packages/cli-core/src/commands/trading/StopCommand.ts': 'stop',
@@ -124,7 +127,8 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
   'packages/safe-cex/src/webworker/chaserOrder/ChaserOrderManager.ts': 'a chaser replacement',
   'apps/cli/src/cross-trade-daemon.ts': 'the CLI half of the cross-trade copier',
   'scripts/keys/lib/audit-runtime.ts': 'the `yarn keys` live audit',
-  'apps/web/src/components/customScripts/sandbox/escapeAttempts.ts': 'the sandbox escape corpus — attempts, never executed',
+  'apps/web/src/components/customScripts/sandbox/escapeAttempts.ts':
+    'the sandbox escape corpus — attempts, never executed',
 });
 
 /**
@@ -150,6 +154,15 @@ const trackedFiles = (): readonly string[] =>
     .filter((file) => !file.startsWith('v2/'));
 
 describe('the set of order entry points is closed', () => {
+  it('recognizes the listed CLI buy/sell sender without the web host', () => {
+    const file = 'packages/cli-core/src/commands/trading/BaseBuySellCommand.ts';
+    expect(file in ENTRY_POINTS).toBe(true);
+    expect(
+      PLACES_AN_ORDER.test(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))),
+      `${file} is listed but no longer places an order`,
+    ).toBe(true);
+  });
+
   // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('nothing outside the known set sends an order', () => {
     const offenders = trackedFiles()
@@ -167,18 +180,22 @@ describe('the set of order entry points is closed', () => {
   }, 30_000);
 
   // Walks the source tree; under CI load this outruns vitest's 5s default.
-  it.skipIf(!HAS_WEB_APP)('every listed entry point still exists and still places an order', () => {
-    // A stale entry is a hole: it lets a file be deleted and a different one
-    // added under the same path without the guard noticing.
-    const tracked = new Set(trackedFiles());
-    for (const file of Object.keys(ENTRY_POINTS)) {
-      expect(tracked, `${file} is listed but no longer tracked`).toContain(file);
-      expect(
-        PLACES_AN_ORDER.test(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))),
-        `${file} is listed but no longer places an order — remove it`,
-      ).toBe(true);
-    }
-  }, 30_000);
+  it.skipIf(!HAS_WEB_APP)(
+    'every listed entry point still exists and still places an order',
+    () => {
+      // A stale entry is a hole: it lets a file be deleted and a different one
+      // added under the same path without the guard noticing.
+      const tracked = new Set(trackedFiles());
+      for (const file of Object.keys(ENTRY_POINTS)) {
+        expect(tracked, `${file} is listed but no longer tracked`).toContain(file);
+        expect(
+          PLACES_AN_ORDER.test(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))),
+          `${file} is listed but no longer places an order — remove it`,
+        ).toBe(true);
+      }
+    },
+    30_000,
+  );
 
   it('test references are excluded while production sources stay in scope', () => {
     expect(isTest('packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts')).toBe(true);
@@ -191,6 +208,9 @@ describe('the set of order entry points is closed', () => {
     expect(PLACES_AN_ORDER.test(withoutComments('/** wraps `exchange.placeOrders()` */'))).toBe(false);
     expect(PLACES_AN_ORDER.test('await exchange.placeOrder!(order)')).toBe(true);
     expect(PLACES_AN_ORDER.test('await exchange.placeOrders(orders)')).toBe(true);
+    expect(PLACES_AN_ORDER.test('await placeOrder.call(exchange, order)')).toBe(true);
+    expect(PLACES_AN_ORDER.test('await placeOrders.call(exchange, orders)')).toBe(true);
+    expect(PLACES_AN_ORDER.test('const placeOrder = exchange.placeOrder;')).toBe(false);
     expect(PLACES_AN_ORDER.test('readonly placeOrder?: (opts: PlaceOrderOpts) => Promise<string[]>;')).toBe(false);
     expect(PLACES_AN_ORDER.test('if (!exchange.placeOrder) return;')).toBe(false);
   });
