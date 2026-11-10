@@ -68,7 +68,12 @@ Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a differen
 canonical payload for the same ID throws `intentConflict`. Identical retries
 return the existing durable ID without another sequence, deadline or submission,
 including after restore. A failed original put refuses retries with
-`intentNotDurable`. Caller-key rows remain reserved through ordinary history
+`intentNotDurable`. Caller-key reservation updates only the last successfully
+committed snapshot, preserving its handoff state and evidence even if a newer
+receipt could not be persisted. A retry never makes that newer outcome durable,
+renews replay permission, or replaces a committed handoff with an in-memory
+queued label. Persisted no-handoff claims still pass the evidence constructors.
+Caller-key rows remain reserved through ordinary history
 compaction, within the existing total capacity of 1,056 records; exhaustion
 refuses new intents rather than forgetting a key. Hosts must preserve scoped
 storage and close a writer before replacing it.

@@ -1,5 +1,4 @@
 import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
-
 import type { OutboxOptions as LegacyOutboxOptions } from './fixtures/delegatedOutbox.7232375420';
 
 import { describe, expect, it } from 'vitest';
@@ -192,6 +191,39 @@ describe('DELEGATED host-neutral outbox', () => {
       },
     );
 
+    it.each(['queued', 'expired', 'routerRefusal'] as const)(
+      'SDK-key adoption preserves the committed evidence gate (%s)',
+      async (kind) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const id = await box.enqueue(params);
+        if (kind === 'expired') {
+          f.advance(10_000);
+          await box.flush(box.connect(f.connection()));
+        } else if (kind === 'routerRefusal') {
+          const connection = box.connect(f.connection());
+          await box.flush(connection);
+          await box.receive(connection, response(id, 'order.ack', { received: false }));
+        }
+        const committed = [...f.rows.values()][0];
+        expect(committed.state).toBe(kind === 'queued' ? 'queued' : 'notSent');
+        expect(kind === 'queued' ? committed.noHandoffEvidence : committed.notSentEvidence).toMatchObject({
+          intentId: id,
+          seq: 1,
+          fingerprint: committed.fingerprint,
+          kind: kind === 'routerRefusal' ? 'routerRefusal' : 'noHandoff',
+        });
+        expect(await box.enqueue(params, { intentId: id })).toBe(id);
+        expect([...f.rows.values()][0]).toEqual({ ...committed, callerSuppliedIntentId: true });
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0].state).toBe(kind === 'queued' ? 'sending' : 'notSent');
+        expect(f.writes).toHaveLength(kind === 'expired' ? 0 : 1);
+        restored.close();
+      },
+    );
+
     it.each([
       '',
       'not-a-uuid',
@@ -359,6 +391,46 @@ describe('DELEGATED host-neutral outbox', () => {
       box.close();
     });
 
+    it('keeps SDK-key adoption scoped when the owner switches during reservation persistence', async () => {
+      const a = fixture();
+      const alice = await DelegatedOutbox.open(a.options);
+      const id = await alice.enqueue(params);
+      const put = a.options.storage.put;
+      let release!: () => void;
+      let started!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      a.options.storage.put = async (scope, row) => {
+        started();
+        await gate;
+        await put(scope, row);
+      };
+      const adoption = alice.enqueue(params, { intentId: id });
+      await entered;
+      alice.close();
+      const b = fixture('bob', a.rows);
+      const bob = await DelegatedOutbox.open(b.options);
+      bob.connect(b.connection());
+      expect(await bob.enqueue(params, { intentId: id })).toBe(id);
+      release();
+      expect(await adoption).toBe(id);
+      expect(a.writes).toEqual([]);
+      expect(b.writes).toHaveLength(1);
+      const saved = [...a.rows.values()];
+      expect(saved).toHaveLength(2);
+      expect(saved.find((row) => row.owner === 'alice')).toMatchObject({
+        intentId: id,
+        state: 'queued',
+        callerSuppliedIntentId: true,
+      });
+      expect(saved.find((row) => row.owner === 'bob')).toMatchObject({ intentId: id, state: 'sending' });
+      bob.close();
+    });
+
     it('cannot reattribute a duplicate when the owner switches during original persistence', async () => {
       const a = fixture();
       const put = a.options.storage.put;
@@ -522,7 +594,6 @@ describe('DELEGATED host-neutral outbox', () => {
     restored.close();
   });
 
-
   it('restores a legacy notSent row without evidence as unknown', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -582,18 +653,21 @@ describe('DELEGATED host-neutral outbox', () => {
       restored.close();
     },
   );
-  it.each(['sending', 'unknown'] as const)('refuses a local no-handoff claim for an already %s intent', async (state) => {
-    const f = fixture();
-    const box = await DelegatedOutbox.open(f.options);
-    box.connect(f.connection());
-    await box.enqueue(params);
-    if (state === 'unknown') f.advance(10_000);
-    const row = box.entries()[0];
-    expect(markDelegatedNotSent(row, { kind: 'noHandoff', source: 'adapter', handedOff: false })).toBe(false);
-    expect(row.state).toBe('unknown');
-    expect(row.notSentEvidence).toBeUndefined();
-    box.close();
-  });
+  it.each(['sending', 'unknown'] as const)(
+    'refuses a local no-handoff claim for an already %s intent',
+    async (state) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      await box.enqueue(params);
+      if (state === 'unknown') f.advance(10_000);
+      const row = box.entries()[0];
+      expect(markDelegatedNotSent(row, { kind: 'noHandoff', source: 'adapter', handedOff: false })).toBe(false);
+      expect(row.state).toBe('unknown');
+      expect(row.notSentEvidence).toBeUndefined();
+      box.close();
+    },
+  );
   it('rejects a live unbranded notSent claim even with copied JSON evidence', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -921,9 +995,7 @@ describe('DELEGATED host-neutral outbox', () => {
       cancelPending: false,
     });
     expect(changes.at(-1)).toMatchObject({ state: priorHandoff ? 'unknown' : 'notSent', cancelPending: false });
-    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
-      priorHandoff ? ['order.submit'] : [],
-    );
+    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(priorHandoff ? ['order.submit'] : []);
     box.close();
   });
   it('requires atomic compaction and upgrades legacy completed records on restore', async () => {

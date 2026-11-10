@@ -30,7 +30,12 @@ export {
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
 
-export { DelegatedOutbox, DelegatedIntentError, createDelegatedIntentId, markDelegatedNotSent } from './delegatedOutbox';
+export {
+  DelegatedOutbox,
+  DelegatedIntentError,
+  createDelegatedIntentId,
+  markDelegatedNotSent,
+} from './delegatedOutbox';
 export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
 export type {
   DelegatedOrderBinding,
