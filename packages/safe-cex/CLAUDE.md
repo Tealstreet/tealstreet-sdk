@@ -61,6 +61,33 @@ fixtures exercise the same production sender. The shared fixture lives with
 the server tests for receiver interoperability; Rust consumption depends on
 the server handover implementation landing.
 
+## DELEGATED order outbox
+
+`DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
+submits, gated on the advertised delegatedOrderFramesV1 capability. Hosts inject scoped persistence, secure randomness, a monotonic clock
+with a stable epoch, deadline scheduling and an admitted socket connection. Close
+the outbox on logout; pass the captured connection ticket to flush and receive.
+Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
+intents are never submitted again. Unacknowledged intents expire after ten
+monotonic seconds, including time spent waiting for persistence or admission.
+Restored ambiguous handoffs are unknown; queued records from another clock epoch
+are not sent. Once enqueue persistence succeeds, temporary unavailability while
+preparing handoff retains that queued intent and its ID for retry. The NX router
+supplies durable deduplication and queue cancellation;
+see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
+signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
+
+The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
+records. Acknowledged/unknown work and pending queue cancellations remain retained.
+Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
+listed retired intent IDs in that scope and advance its durable sequence using
+the maximum of old/new values. Preserve all other records. `load` returns an
+`OutboxSnapshot` with sequence progress and records (legacy record arrays are
+accepted for migration). `put` preserves checkpoint metadata. Compaction failure
+keeps records until a later flush retries. Unrelated retirement failure never
+rejects enqueue or hides its durable intent ID after handoff. Close the old
+outbox before replacing it with a new writer for the same scope.
+
 ## Mirror CI invariants (don't "clean these up")
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean

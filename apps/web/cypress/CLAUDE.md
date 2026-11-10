@@ -159,6 +159,11 @@ already flattened.
 
 ## Cleanup is destructive — the suite flattens EVERY position on the account
 
+Controller close orders use the exact finite, positive `extra.contractsNative`
+value without deriving or rounding it. If unavailable, cleanup logs the reason
+and skips that close; the Paradex market-close step fails its precondition.
+Neither path falls back to base size or notional (mirrors NX #9405).
+
 `flattenPositions` → `closeAllPositionsViaController()` is **symbol-agnostic**: it
 closes every position on every registered account and asserts zero remain. It runs
 in `cleanup()` before each test, so **adding an exchange to the matrix is a
