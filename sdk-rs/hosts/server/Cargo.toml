@@ -32,6 +32,7 @@ base64.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ryu-js.workspace = true
 # RFC 9180 handover. Only X25519 is enabled; use the crate's base-mode
 # implementation rather than maintaining a separate key schedule here.
 hpke = { version = "=0.13.0", default-features = false, features = ["std", "x25519"] }
@@ -43,6 +44,7 @@ zeroize.workspace = true
 libc = "=0.2.191"
 
 [features]
+delegated-order-frames = []
 # Test accounts and unsigned proxy tokens for the integration tests; never in the binary.
 test-support = ["safe-cex-engine/test-support"]
 

@@ -12,6 +12,7 @@ export const BITGET_CUMULATIVE_ANCHOR = '38b69912e461e27198f5252c98cef73b7521b16
 export const BITGET_MEASUREMENT_FILES = Object.freeze(['sdk-rs/harness/gate.mjs', 'sdk-rs/harness/replay.mjs', 'sdk-rs/harness/cpu-observation.mjs',
   'sdk-rs/harness/performance-policy.mjs', 'sdk-rs/harness/ci-wasm.mjs',
   'sdk-rs/harness/bitget-paired-steady.mjs', 'sdk-rs/harness/bitget-paired-oracle.mjs',
+  'sdk-rs/harness/bitget-anchor-positions.mjs', 'sdk-rs/hosts/wasm/js/wire.mjs',
   'sdk-rs/harness/bitget-oracle-refusal.mjs', 'sdk-rs/harness/cpu-ci.mjs', 'sdk-rs/harness/revalidate-gate.mjs']);
 export const BITGET_COHORT_ORDER = Object.freeze(['baseline', 'candidate', 'candidate', 'baseline',
   'candidate', 'baseline', 'baseline', 'candidate']);
@@ -21,6 +22,7 @@ export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.st
   scope: 'bitget:public:steadyCpuMs', freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
   comparisons: ['tip', 'anchor'], cumulativeAnchor: BITGET_CUMULATIVE_ANCHOR,
   oraclePreflight: 'each source TS output excluding metrics; differences never certify',
+  positionsCompatibility: 'public Bitget only: canonical empty revision-1 payload; all rows require revision 2',
   measurementCheckout: 'candidate', measurementFiles: BITGET_MEASUREMENT_FILES,
 })).digest('hex');
 const authorities = new WeakSet();
