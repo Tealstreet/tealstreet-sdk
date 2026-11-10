@@ -16,7 +16,9 @@ export interface OutboxScope {
   accountName: string;
 }
 const delegatedNotSentBrand = Symbol('delegatedNotSent');
+const delegatedReplayBrand = Symbol('delegatedReplay');
 type ProvenNotSent = 'notSent' & { readonly [delegatedNotSentBrand]: true };
+export type DelegatedReplayableIntent = DelegatedIntent & { readonly [delegatedReplayBrand]: true };
 export type IntentState =
   'queued' | 'sending' | 'acknowledged' | 'placed' | 'refused' | 'unknown' | ProvenNotSent | 'canceled';
 
@@ -39,6 +41,7 @@ interface EvidenceBinding extends OutboxScope {
   fingerprint: string;
 }
 export type StoredDelegatedNotSentEvidence = Readonly<DelegatedNotSentEvidence & EvidenceBinding>;
+export type StoredDelegatedNoHandoffEvidence = Readonly<NoHandoffEvidence & EvidenceBinding>;
 
 export interface DelegatedIntent extends OutboxScope {
   version: 1;
@@ -50,6 +53,7 @@ export interface DelegatedIntent extends OutboxScope {
   createdAt: number;
   state: IntentState;
   notSentEvidence?: StoredDelegatedNotSentEvidence;
+  noHandoffEvidence?: StoredDelegatedNoHandoffEvidence;
   cancelPending: boolean;
   /** Unknown history expired after 24 hours; never evidence of non-forwarding. */
   retentionExpired?: boolean;
@@ -137,8 +141,7 @@ function readNotSentEvidence(value: unknown): DelegatedNotSentEvidence | undefin
   }
 }
 
-function storedNotSentEvidence(row: DelegatedIntent): DelegatedNotSentEvidence | undefined {
-  const value: unknown = row.notSentEvidence;
+function storedEvidence(row: DelegatedIntent, value: unknown): DelegatedNotSentEvidence | undefined {
   if (
     !record(value) ||
     value.version !== 1 ||
@@ -152,9 +155,19 @@ function storedNotSentEvidence(row: DelegatedIntent): DelegatedNotSentEvidence |
   return readNotSentEvidence(value);
 }
 
+function storedNotSentEvidence(row: DelegatedIntent): DelegatedNotSentEvidence | undefined {
+  return storedEvidence(row, row.notSentEvidence);
+}
+
+function storedNoHandoffEvidence(row: DelegatedIntent): NoHandoffEvidence | undefined {
+  const proof = storedEvidence(row, row.noHandoffEvidence);
+  return proof?.kind === 'noHandoff' ? proof : undefined;
+}
+
 function unprovenNotSent(row: DelegatedIntent): void {
   row.state = 'unknown';
   delete row.notSentEvidence;
+  delete row.noHandoffEvidence;
   if (record(row.error) && row.error.outcome === 'notSent') row.error.outcome = 'unknown';
 }
 
@@ -181,8 +194,40 @@ export function markDelegatedNotSent(row: DelegatedIntent, evidence: DelegatedNo
     writable: false,
   });
   row.state = 'notSent' as ProvenNotSent;
+  delete row.noHandoffEvidence;
   delete row.retentionExpired;
   if (record(row.error)) row.error.outcome = row.state;
+  return true;
+}
+
+/** Only whole-intent no-handoff evidence can authorize a queued submission. */
+export function markDelegatedReplayable(
+  row: DelegatedIntent,
+  evidence: DelegatedNotSentEvidence,
+): row is DelegatedReplayableIntent {
+  const proof = readNotSentEvidence(evidence);
+  if (!proof || proof.kind !== 'noHandoff' || row.state !== 'queued') {
+    unprovenNotSent(row);
+    return false;
+  }
+  delete row.notSentEvidence;
+  delete row.noHandoffEvidence;
+  row.noHandoffEvidence = Object.freeze({
+    ...proof,
+    version: 1,
+    owner: row.owner,
+    accountName: row.accountName,
+    intentId: row.intentId,
+    seq: row.seq,
+    fingerprint: row.fingerprint,
+  });
+  Object.defineProperty(row, delegatedReplayBrand, {
+    value: true,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+  if (record(row.error) && row.error.outcome === 'notSent') row.error.outcome = 'unknown';
   return true;
 }
 
@@ -193,7 +238,6 @@ export class DelegatedOutbox {
   private readonly sent = new Map<string, Readonly<OutboxConnection>>();
   private readonly canceled = new Map<string, Readonly<OutboxConnection>>();
   private readonly durable = new Set<string>();
-  private readonly noHandoff = new WeakMap<DelegatedIntent, NoHandoffEvidence>();
   private connection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
@@ -247,8 +291,16 @@ export class DelegatedOutbox {
       }
       // Legacy terminal labels cannot settle a still-pending router cancellation.
       if (row.cancelPending && ['notSent', 'canceled'].includes(row.state)) unprovenNotSent(row);
-      if (row.state === 'queued' && (row.clockEpoch !== options.clock.epoch || box.expired(row)))
-        unprovenNotSent(row);
+      if (row.state === 'queued') {
+        const proof = storedNoHandoffEvidence(row);
+        if (
+          row.clockEpoch !== options.clock.epoch ||
+          box.expired(row) ||
+          !proof ||
+          !markDelegatedReplayable(row, proof)
+        )
+          unprovenNotSent(row);
+      }
       box.intents.set(row.intentId, row);
       await box.persist(row);
       box.arm(row);
@@ -353,7 +405,7 @@ export class DelegatedOutbox {
     if (JSON.stringify(row.params).length > 60 * 1024)
       return Promise.reject(new Error('Order parameters are too large'));
     this.intents.set(intentId, row);
-    this.noHandoff.set(row, { kind: 'noHandoff', source: 'local', attempted: false });
+    markDelegatedReplayable(row, { kind: 'noHandoff', source: 'local', attempted: false });
     this.arm(row);
     this.changed(row);
     const connection = this.connection;
@@ -367,7 +419,7 @@ export class DelegatedOutbox {
         this.changed(row);
         throw error;
       }
-      if (connection) await this.sendIntent(row, connection);
+      if (connection && this.replayable(row)) await this.sendIntent(row, connection);
       await this.compact().catch(() => {
         // Keep retirement pending for a later flush without hiding the durable
         // intent ID after a successful physical handoff.
@@ -380,8 +432,9 @@ export class DelegatedOutbox {
     return this.serial(async () => {
       for (const row of [...this.intents.values()].sort((a, b) => a.seq - b.seq)) {
         if (!this.current(connection)) return;
+        this.normalizeNotSent(row);
         if (!this.durable.has(row.intentId)) await this.persist(row);
-        if (row.state === 'queued') await this.sendIntent(row, connection);
+        if (this.replayable(row)) await this.sendIntent(row, connection);
         if (row.cancelPending) await this.sendCancellation(row, connection);
       }
       await this.compact();
@@ -450,7 +503,7 @@ export class DelegatedOutbox {
         }
         if (typeof data.venueOrderId === 'string') row.venueOrderId = data.venueOrderId;
       } else return;
-      this.noHandoff.delete(row);
+      delete row.noHandoffEvidence;
       row.cancelPending = false;
       this.stopTimer(row.intentId);
       this.changed(row);
@@ -493,8 +546,8 @@ export class DelegatedOutbox {
     return !Number.isFinite(age) || age < 0 || age >= MAX_AGE_MS;
   }
 
-  private async sendIntent(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
-    if (!this.current(connection) || row.state !== 'queued' || this.sent.get(row.intentId) === connection) return;
+  private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
+    if (!this.current(connection) || !this.replayable(row) || this.sent.get(row.intentId) === connection) return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -502,13 +555,16 @@ export class DelegatedOutbox {
     // Write ahead of the physical handoff. On reload an ambiguous handoff is
     // unknown, even if saving a later acknowledgement or outcome failed.
     try {
-      await this.options.storage.put(this.scope, clone({ ...row, state: 'sending' as const }));
+      await this.options.storage.put(
+        this.scope,
+        clone({ ...row, state: 'sending' as const, notSentEvidence: undefined, noHandoffEvidence: undefined }),
+      );
     } catch {
       // The queued intent is already durable. Preserve successful enqueue and
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!this.current(connection) || row.state !== 'queued') return;
+    if (!this.current(connection) || !this.replayable(row)) return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -521,7 +577,7 @@ export class DelegatedOutbox {
       ageMs: this.options.clock.now() - row.createdAt,
     });
     if (utf8ToBytes(frame).length > DELEGATED_SUBMIT_MAX) {
-      const proof = this.noHandoff.get(row);
+      const proof = storedNoHandoffEvidence(row);
       if (proof) markDelegatedNotSent(row, proof);
       else unprovenNotSent(row);
       this.stopTimer(row.intentId);
@@ -536,8 +592,9 @@ export class DelegatedOutbox {
     }
     // Set in-flight before invoking the synchronous adapter: a reentrant
     // deadline/disconnect must already treat this handoff as ambiguous.
-    const noHandoff = this.noHandoff.get(row);
-    this.noHandoff.delete(row);
+    const noHandoff = storedNoHandoffEvidence(row);
+    delete row.notSentEvidence;
+    delete row.noHandoffEvidence;
     row.state = 'sending';
     this.sent.set(row.intentId, connection);
     let handedOff = false;
@@ -550,7 +607,8 @@ export class DelegatedOutbox {
       if (noHandoff) {
         row.state = row.cancelPending ? 'canceled' : 'queued';
         row.cancelPending = false;
-        this.noHandoff.set(row, { kind: 'noHandoff', source: 'adapter', handedOff: false });
+        if (row.state === 'queued')
+          markDelegatedReplayable(row, { kind: 'noHandoff', source: 'adapter', handedOff: false });
       } else row.state = 'unknown';
       this.stopTimer(row.intentId);
     }
@@ -635,7 +693,7 @@ export class DelegatedOutbox {
 
   private expire(row: DelegatedIntent): void {
     if (!this.active || !['queued', 'sending', 'acknowledged'].includes(row.state)) return;
-    const proof = row.state === 'queued' ? this.noHandoff.get(row) : undefined;
+    const proof = this.replayable(row) ? storedNoHandoffEvidence(row) : undefined;
     if (proof) markDelegatedNotSent(row, proof);
     else unprovenNotSent(row);
     row.cancelPending = false;
@@ -663,14 +721,26 @@ export class DelegatedOutbox {
     this.canceled.delete(id);
   }
   private normalizeNotSent(row: DelegatedIntent): void {
+    if (row.state === 'queued') {
+      if (this.replayable(row)) return;
+      unprovenNotSent(row);
+    }
     if (row.state === 'notSent') {
       const marked = row as DelegatedIntent & { readonly [delegatedNotSentBrand]?: true };
-      if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row)) return;
+      if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row)) {
+        delete row.noHandoffEvidence;
+        return;
+      }
       unprovenNotSent(row);
     } else {
       delete row.notSentEvidence;
+      delete row.noHandoffEvidence;
       if (record(row.error) && row.error.outcome === 'notSent') row.error.outcome = 'unknown';
     }
+  }
+  private replayable(row: DelegatedIntent): row is DelegatedReplayableIntent {
+    const marked = row as DelegatedIntent & { readonly [delegatedReplayBrand]?: true };
+    return row.state === 'queued' && marked[delegatedReplayBrand] === true && !!storedNoHandoffEvidence(row);
   }
   private changed(row: DelegatedIntent): void {
     this.normalizeNotSent(row);
