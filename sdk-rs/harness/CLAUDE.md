@@ -17,3 +17,9 @@ missing the 10%-faster target is a warning; nightly certification files cpu-regr
   or update one `cpu-regression` issue for suites whose CPU gate failed on two adjacent UTC nights (the last run each night).
   Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and
   multiple runs on one night must not hide the previous night.
+
+Bitget CPU investigation uses `bitget-cpu-profile.mjs` only in an original CI
+attempt on `fix/bitget-cpu`. It profiles production modules separately from the
+certificate, retains steady-window markers, and accepts WASM symbol names only
+after proving identical optimized non-custom sections. Diagnostic profiles never
+certify a gate or change its fixed comparison policy.

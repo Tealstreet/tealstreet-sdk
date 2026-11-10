@@ -1579,3 +1579,66 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           CI_JOB_RESULTS: ${{ toJSON(needs) }}
         run: node sdk-rs/harness/ci-result.mjs
+
+  bitget-cpu-profile:
+    name: Rust / Bitget diagnostic CPU profiles
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/bitget-cpu'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: .
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_TARGET_DIR: ${{ github.workspace }}/sdk-rs/target
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+      ESBUILD_WORKER_THREADS: '0'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+          key: ${{ runner.os }}-cargo-bitget-profile-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-gate-
+      - name: Install pinned Rust and bindings
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - uses: ./.github/actions/install-binaryen
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Build and archive current Bitget composition
+        run: |
+          bash sdk-rs/harness/build.sh --venue bitget
+          node sdk-rs/harness/ci-wasm.mjs --venue bitget --archive sdk-rs/hosts/wasm/pkg/ci-replay
+      - name: Profile current and pinned prior Bitget modules separately
+        run: node sdk-rs/harness/bitget-cpu-profile.mjs --out '${{ runner.temp }}/bitget-cpu-profile'
+      - name: Retain diagnostic profiles and module proofs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bitget-cpu-profile
+          path: ${{ runner.temp }}/bitget-cpu-profile/
+          retention-days: 7
+          if-no-files-found: error
