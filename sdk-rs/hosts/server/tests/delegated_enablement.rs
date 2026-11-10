@@ -2,6 +2,27 @@
 
 #[test]
 fn compiled_order_frames_are_not_advertised_without_runtime_opt_in() {
+    const PROBE: &str = "TEALSTREET_TEST_ORDER_FRAME_DEFAULT_OFF";
+    if std::env::var(PROBE).as_deref() != Ok("1") {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "compiled_order_frames_are_not_advertised_without_runtime_opt_in",
+                "--nocapture",
+            ])
+            .env("TEALSTREET_DELEGATED_ORDER_FRAMES", "0")
+            .env(PROBE, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "runtime advertisement input 0:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        return;
+    }
     let capabilities = safe_cex_exchange_server::http::capabilities_json();
     assert_eq!(
         capabilities["transports"]["accountWorkerWebSocket"]["delegatedOrderFramesV1"],

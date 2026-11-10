@@ -110,10 +110,18 @@ mod tests {
 
     #[test]
     fn order_frame_runtime_control_is_default_off_and_strict() {
-        for value in [None, Some(""), Some("0")] {
-            assert!(!parse_delegated_order_frames(value).unwrap());
+        for (value, expected) in [
+            (None, Ok(false)),
+            (Some(""), Ok(false)),
+            (Some("0"), Ok(false)),
+            (Some("1"), Ok(true)),
+            (
+                Some("invalid"),
+                Err("TEALSTREET_DELEGATED_ORDER_FRAMES must be 0 or 1".into()),
+            ),
+        ] {
+            assert_eq!(parse_delegated_order_frames(value), expected, "{value:?}");
         }
-        assert!(parse_delegated_order_frames(Some("1")).unwrap());
         for value in ["true", "false", "on", "off", " 1", "1 ", "2"] {
             assert!(parse_delegated_order_frames(Some(value)).is_err());
         }

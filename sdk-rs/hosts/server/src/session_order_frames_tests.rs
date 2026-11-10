@@ -3,6 +3,28 @@ use super::*;
 #[tokio::test]
 async fn runtime_order_frames_are_off_for_an_admitted_session_by_default() {
     const EXPECT: &str = "TEALSTREET_TEST_ORDER_SESSION_ENABLED";
+    if std::env::var(EXPECT).is_err() {
+        for value in ["0", "1"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "session::delegated_writes_tests::order_frames::runtime_order_frames_are_off_for_an_admitted_session_by_default",
+                    "--nocapture",
+                ])
+                .env("TEALSTREET_DELEGATED_ORDER_FRAMES", value)
+                .env(EXPECT, value)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "runtime session input {value:?}:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        }
+        return;
+    }
     let enabled = std::env::var(EXPECT).as_deref() == Ok("1");
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -25,20 +47,6 @@ async fn runtime_order_frames_are_off_for_an_admitted_session_by_default() {
             registry.dispose(&account, Disposal::PageDisposed);
         })
         .await;
-    if !enabled {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "session::delegated_writes_tests::order_frames::runtime_order_frames_are_off_for_an_admitted_session_by_default",
-                "--nocapture",
-            ])
-            .env("TEALSTREET_DELEGATED_ORDER_FRAMES", "1")
-            .env(EXPECT, "1")
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "runtime-on session probe failed");
-        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
-    }
 }
 
 fn intent(age: u64) -> String {
