@@ -475,9 +475,9 @@ Order book amounts from WS are contract counts. Keep them in native contracts in
 ### WebSocket vs REST
 
 - **Private WS order events**: Processed immediately for individual order state updates (add/update for live/partially_filled, status change for filled/canceled). Then triggers a debounced (2-second) full order re-fetch to ensure state synchronization (see `blofin.ws-private.ts handleOrdersTopic`).
-- **Position updates**: WS position events apply via `addOrUpdatePositionsFull` so closed-symbol records (with their leverage / marginType / side / positionMode) are preserved while contracts / notional / upnl / liq are zeroed. The same call also recalculates `used` margin and `upnl` from the position data (see `blofin.ws-private.ts`).
+- **Position updates**: WS position events apply via `addOrUpdatePositionsFull`; omitted rows are removed and their reported leverage / marginType / side / positionMode are retained separately in `store.positionSettings`. The same call also recalculates `used` margin and `upnl` from the position data (see `blofin.ws-private.ts`).
 - **Account updates**: WS account events update `totalEquity` -> `free` and `total` balance fields.
-- **REST tick parity**: The 10s `tick` uses `addOrUpdatePositionsFull` (not a wholesale `store.update({ positions })`) so REST and WS share the same preserve-on-update semantics. Critical for keeping closed-symbol leverage available to the place-order % slider's no-position fallback. See the "Leverage" subsection under "Position & Margin Configuration" for the full rationale.
+- **REST tick parity**: The 10s `tick` uses `addOrUpdatePositionsFull` (not a wholesale `store.update({ positions })`) so REST and WS share the same full-snapshot semantics. Closed-symbol leverage is retained in `positionSettings` for the place-order % slider's no-position fallback. See the "Leverage" subsection under "Position & Margin Configuration" for the full rationale.
 - **Reconnection snapshot**: On private WS reconnect, `fetchAndSetPrivateSnapshot()` runs only after the private login success frame, so rejected keys do not trigger a retry-heavy private REST snapshot.
 - **Blank liquidation price**: `mapPositions` preserves the existing
   `liquidationPrice` for a matching open position when BloFin sends the field
@@ -707,7 +707,7 @@ but blank/missing fields reuse the existing position's liquidation price.
 
 The 10-second `tick` previously did a wholesale `store.update({ positions })` with the result of `fetchPositions()`. Because that REST call only returns OPEN positions, every tick wiped the empty position records the WS layer (`handlePositionTopic`) intentionally keeps around — destroying their preserved leverage and again causing the % slider to fall back to `1x` between tick and the next WS update.
 
-`tick` now calls `this.store.addOrUpdatePositionsFull(positions)` (matching the WS handler's semantics). Closed-symbol records are zeroed in contracts/notional/upnl/liq via `createEmptyPositionFrom`, but `leverage`, `marginType`, `side`, `positionMode`, `id`, and `symbol` survive.
+`tick` now calls `this.store.addOrUpdatePositionsFull(positions)` (matching the WS handler's semantics). Closed-symbol rows are removed from `positions`; `createEmptyPositionFrom` projects their reported `leverage`, `marginType`, `side`, `positionMode`, `id`, and `symbol` into `store.positionSettings` instead. Flat-symbol consumers must use that settings map or `fetchedLeverage`, and the retained TS reference mapper uses the settings map when a reopened row omits leverage.
 
 The initial bootstrap inside `start()` is intentionally left as a wholesale `store.update({ positions })` because there is nothing to preserve at that point.
 
@@ -757,7 +757,7 @@ The `tick()` method runs every 10 seconds, fetching:
 
 Both fetches are independent -- one failing does not block the other. The tick loop schedules itself via `loop(() => this.tick(count + 1), 10_000)`.
 
-Positions are committed to the store via `addOrUpdatePositionsFull` (matching the WS handler) rather than a wholesale `store.update({ positions })`. This preserves closed-symbol position records and their leverage between ticks, which the place-order % slider's no-position fallback depends on. See "Leverage" under "Position & Margin Configuration".
+Positions are committed to the store via `addOrUpdatePositionsFull` (matching the WS handler) rather than a wholesale `store.update({ positions })`. This preserves closed-symbol settings separately in `positionSettings` between ticks, without fabricating position exposure. Flat-symbol UI consumers use those settings or `fetchedLeverage`. See "Leverage" under "Position & Margin Configuration".
 
 ## CCXT Reference Implementation
 

@@ -1752,9 +1752,10 @@ export class BlofinExchange extends BaseExchange {
       // and writing 0 here causes the place-order % slider to jitter via the React fallback.
       const parsedLeverage = parseFloat(p.leverage);
       let leverage = Number.isFinite(parsedLeverage) && parsedLeverage > 0 ? parsedLeverage : 0;
+      const existingSettings = existingPosition ?? this.store.positionSettings?.[positionId];
       if (!leverage) {
-        if (existingPosition && existingPosition.leverage > 0) {
-          leverage = existingPosition.leverage;
+        if (existingSettings && existingSettings.leverage > 0) {
+          leverage = existingSettings.leverage;
         } else {
           const fetched = this.store.fetchedLeverage[market.symbol];
           if (fetched && !fetched.isFetching) {
