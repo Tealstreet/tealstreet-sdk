@@ -706,9 +706,13 @@ newer wins in both update orders. Reusing a fallback or closing a row never
 advances its sequence. An explicitly unknown live value cannot revive the
 closed cache. Conflicting values loaded without ordering provenance stay
 unavailable until a fresh confirmation; matching values need no tie-break.
+The unresolved conflict is tracked separately from the projected `NaN`, so
+repeated blank reports and close/reopen events cannot expose an old rail after
+the conflicting retained value has been replaced. Only a usable wire report,
+a read dispatched after the conflict, or a successful write ACK resolves it.
 No usable value remains `NaN` in the numeric Position field, never fabricated `0`.
 
-These private sequences are not public Store fields or serialized metadata.
+These private sequences and conflicts are not public Store fields or serialized metadata.
 They are cleared on exchange disposal. Read/write continuations capture an
 owner epoch and check it after config and HTTP awaits, dropping stale work
 before dispatch or Store mutation when login changes.

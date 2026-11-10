@@ -169,6 +169,50 @@ describe('retained adapters reopen without fabricated settings', () => {
     }
   });
 
+  it('BloFin keeps a loaded conflict unknown across three real blank handler events', () => {
+    const { store, exchange } = blofin();
+    try {
+      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
+      store.addOrUpdatePositionsFull([]);
+      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      for (let event = 1; event <= 3; event++) {
+        exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+        expect(store.positions[0].leverage, `blank event ${event}`).toBeNaN();
+      }
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('BloFin keeps absent leverage unknown across three real handler events', () => {
+    const { store, exchange } = blofin();
+    try {
+      for (let event = 1; event <= 3; event++) {
+        exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+        expect(store.positions[0].leverage, `blank event ${event}`).toBeNaN();
+      }
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('BloFin resolves a loaded conflict with a fresh wire report and preserves it on another blank event', () => {
+    const { store, exchange } = blofin();
+    try {
+      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
+      store.addOrUpdatePositionsFull([]);
+      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBeNaN();
+      exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+      expect(store.positions[0].leverage).toBe(50);
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBe(50);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
   it('BloFin does not skip a flat write because an older fetched rail already matches', async () => {
     const { store, exchange } = blofin();
     try {
@@ -188,6 +232,69 @@ describe('retained adapters reopen without fabricated settings', () => {
       expect(post).toHaveBeenCalledOnce();
       exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
       expect(store.positions[0].leverage).toBe(9);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it.each(['fetch', 'write'] as const)('BloFin resolves repeated loaded ambiguity with a fresh %s', async (source) => {
+    const { store, exchange } = blofin();
+    try {
+      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
+      store.addOrUpdatePositionsFull([]);
+      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+      vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+      const get = vi.fn().mockResolvedValue({
+        data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] },
+      });
+      const post = vi.fn().mockResolvedValue({ data: { code: '0', msg: '' } });
+      exchange.xhr = { get, post } as any;
+      for (let event = 1; event <= 20; event++) {
+        exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+        expect(store.positions[0].leverage, `blank event ${event}`).toBeNaN();
+        exchange.privateWebsocket.handlePositionTopic({ data: [] });
+        expect(store.positions).toEqual([]);
+      }
+      if (source === 'fetch') await exchange.fetchLeverageForSymbol('BTCUSDT');
+      else await exchange.setLeverage('BTCUSDT', 9);
+      expect(source === 'fetch' ? get : post).toHaveBeenCalledOnce();
+      for (let event = 1; event <= 3; event++) {
+        exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+        expect(store.positions[0].leverage).toBe(9);
+      }
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('BloFin keeps a loaded conflict unknown when an earlier in-flight read completes', async () => {
+    const { store, exchange } = blofin();
+    try {
+      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
+      store.addOrUpdatePositionsFull([]);
+      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+      let release!: (value: any) => void;
+      const get = vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      );
+      exchange.xhr = { get } as any;
+      const pending = exchange.fetchLeverageForSymbol('BTCUSDT');
+      await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBeNaN();
+      release({ data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] } });
+      await pending;
+      for (let event = 1; event <= 3; event++) {
+        exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+        expect(store.positions[0].leverage).toBeNaN();
+      }
+      exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBe(50);
     } finally {
       exchange.dispose();
     }

@@ -125,6 +125,7 @@ export class BlofinExchange extends BaseExchange {
   private leverageSequence = 0;
   private leverageEpoch = 0;
   private reportedLeverage = new Map<string, { value: number; sequence: number }>();
+  private ambiguousLeverage = new Map<string, number>();
   private fetchedLeverageObservations = new Map<
     string,
     {
@@ -151,11 +152,19 @@ export class BlofinExchange extends BaseExchange {
       },
     ].filter((candidate) => candidate.value !== undefined && Number.isFinite(candidate.value) && candidate.value > 0);
     const sequence = Math.max(...candidates.map((candidate) => candidate.sequence));
+    const unresolved = this.ambiguousLeverage.get(id);
+    // Projecting NaN into the Store must not erase a loaded conflict. Only a
+    // confirmation ordered after the conflict can make the fallback usable.
+    if (unresolved !== undefined && sequence <= unresolved) return Number.NaN;
     const newest = candidates.filter((candidate) => candidate.sequence === sequence);
     // Missing provenance cannot establish an order between conflicting values.
-    return newest.length && newest.every((candidate) => candidate.value === newest[0].value)
-      ? (newest[0].value ?? Number.NaN)
-      : Number.NaN;
+    if (!newest.length) return Number.NaN;
+    if (!newest.every((candidate) => candidate.value === newest[0].value)) {
+      this.ambiguousLeverage.set(id, this.leverageSequence);
+      return Number.NaN;
+    }
+    this.ambiguousLeverage.delete(id);
+    return newest[0].value ?? Number.NaN;
   };
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
@@ -197,6 +206,7 @@ export class BlofinExchange extends BaseExchange {
   dispose = () => {
     this.leverageEpoch += 1;
     this.reportedLeverage.clear();
+    this.ambiguousLeverage.clear();
     this.fetchedLeverageObservations.clear();
     super.dispose();
     this.publicWebsocket.dispose();
@@ -1824,6 +1834,7 @@ export class BlofinExchange extends BaseExchange {
       const parsedLeverage = parseFloat(p.leverage);
       let leverage: number;
       if (Number.isFinite(parsedLeverage) && parsedLeverage > 0) {
+        this.ambiguousLeverage.delete(positionId);
         this.reportedLeverage.set(positionId, { value: parsedLeverage, sequence: ++this.leverageSequence });
         leverage = parsedLeverage;
       } else {
