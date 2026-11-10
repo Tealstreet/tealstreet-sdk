@@ -64,6 +64,7 @@ export interface OutboxConnection extends OutboxScope {
     delegatedOrderLedgerV1?: boolean;
   };
   instanceId?: string;
+  /** True only for physical handoff; false means neither sent nor buffered for a later connection. */
   send(frame: string): boolean;
 }
 
@@ -134,6 +135,9 @@ export class DelegatedOutbox {
         row.state = 'unknown';
         row.cancelPending = false;
       }
+      // Older clients could persist a local terminal label while still waiting
+      // for the router to decide a physical handoff's cancellation.
+      if (row.cancelPending && ['notSent', 'canceled'].includes(row.state)) row.state = 'unknown';
       if (row.state === 'queued' && (row.clockEpoch !== options.clock.epoch || box.expired(row))) row.state = 'notSent';
       box.intents.set(row.intentId, row);
       await box.persist(row);
@@ -243,7 +247,7 @@ export class DelegatedOutbox {
       for (const row of [...this.intents.values()].sort((a, b) => a.seq - b.seq)) {
         if (!this.current(connection)) return;
         if (!this.durable.has(row.intentId) && this.completed(row)) await this.persist(row);
-        if (row.state === 'queued') await this.sendIntent(row, connection);
+        if (this.awaitingReceipt(row)) await this.sendIntent(row, connection);
         if (row.cancelPending) await this.sendCancellation(row, connection);
       }
       await this.compact();
@@ -271,7 +275,11 @@ export class DelegatedOutbox {
       const row = this.intents.get(data.intentId);
       if (!row || data.seq !== row.seq) return;
       if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
-        if (!['queued', 'notSent', 'canceled'].includes(row.state)) return;
+        if (
+          !['queued', 'sending', 'notSent', 'canceled'].includes(row.state) &&
+          !(row.state === 'unknown' && row.cancelPending)
+        )
+          return;
         row.state = data.received ? 'acknowledged' : 'notSent';
       } else if (
         parsed.t === 'order.outcome' &&
@@ -307,9 +315,9 @@ export class DelegatedOutbox {
 
   cancel(intentId: string): Promise<void> {
     const row = this.intents.get(intentId);
-    if (!this.active || !row || row.state !== 'queued') return Promise.resolve();
-    row.state = 'canceled';
-    row.cancelPending = this.submitted.has(intentId);
+    if (!this.active || !row || !this.awaitingReceipt(row)) return Promise.resolve();
+    row.cancelPending = row.state === 'sending' || this.submitted.has(intentId);
+    row.state = row.cancelPending ? 'unknown' : 'canceled';
     this.stopTimer(intentId);
     this.changed(row);
     const connection = this.connection;
@@ -331,6 +339,10 @@ export class DelegatedOutbox {
     );
   }
 
+  private awaitingReceipt(row: DelegatedIntent): boolean {
+    return row.state === 'queued' || row.state === 'sending';
+  }
+
   private expired(row: DelegatedIntent): boolean {
     if (row.clockEpoch !== this.options.clock.epoch) return true;
     const age = this.options.clock.now() - row.createdAt;
@@ -338,7 +350,7 @@ export class DelegatedOutbox {
   }
 
   private async sendIntent(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
-    if (!this.current(connection) || row.state !== 'queued' || this.sent.get(row.intentId) === connection) return;
+    if (!this.current(connection) || !this.awaitingReceipt(row) || this.sent.get(row.intentId) === connection) return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -352,7 +364,7 @@ export class DelegatedOutbox {
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!this.current(connection) || row.state !== 'queued') return;
+    if (!this.current(connection) || !this.awaitingReceipt(row)) return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -379,15 +391,20 @@ export class DelegatedOutbox {
         return;
       }
       this.submitted.add(row.intentId);
+      row.state = 'sending';
       const sent = connection.send(frame);
       if (!sent) {
         this.sent.delete(row.intentId);
         if (!previouslySubmitted) {
           this.submitted.delete(row.intentId);
+          // A declined first handoff proves no send, but the callback may have
+          // canceled or expired the intent synchronously. Keep those terminal.
+          row.state = this.expired(row) ? 'notSent' : row.cancelPending ? 'canceled' : 'queued';
           row.cancelPending = false;
+          this.changed(row);
         }
         await this.persist(row);
-      }
+      } else this.changed(row);
     } catch {
       row.state = 'unknown';
       row.cancelPending = false;
@@ -421,12 +438,12 @@ export class DelegatedOutbox {
   }
 
   private arm(row: DelegatedIntent): void {
-    if (row.state !== 'queued') return;
+    if (!this.awaitingReceipt(row)) return;
     this.timers.set(
       row.intentId,
       this.options.schedule(
         () => {
-          if (!this.active || row.state !== 'queued') return;
+          if (!this.active || !this.awaitingReceipt(row)) return;
           this.timers.delete(row.intentId);
           if (this.expired(row)) this.expire(row);
           else this.arm(row);
@@ -437,9 +454,9 @@ export class DelegatedOutbox {
   }
 
   private expire(row: DelegatedIntent): void {
-    if (!this.active || row.state !== 'queued') return;
-    row.state = 'notSent';
-    row.cancelPending = this.submitted.has(row.intentId);
+    if (!this.active || !this.awaitingReceipt(row)) return;
+    row.cancelPending = row.state === 'sending' || this.submitted.has(row.intentId);
+    row.state = row.cancelPending ? 'unknown' : 'notSent';
     this.stopTimer(row.intentId);
     this.changed(row);
     const connection = this.connection;
