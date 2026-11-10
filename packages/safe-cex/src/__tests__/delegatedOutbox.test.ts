@@ -84,6 +84,87 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  it.each(['notSent', 'canceled'] as const)(
+    'rollout restores unresolved legacy %s cancellations conservatively',
+    async (state) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      const id = await box.enqueue(params);
+      const row = box.entries()[0];
+      box.close();
+      // Legacy JSON intentionally lies outside the current branded state boundary.
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify({ ...row, state, cancelPending: true })));
+      f.advance(10_000);
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', cancelPending: true });
+      await restored.flush(restored.connect(f.connection('replacement')));
+      expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.submit', 'order.cancelQueued']);
+      restored.close();
+    },
+  );
+
+  it.each([undefined, false])('rollout requires the router ledger capability (%s)', async (ledger) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect({
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: ledger },
+    });
+    await box.enqueue(params);
+    await box.flush(c);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
+
+  it('rollout rechecks both capabilities after a connection replacement', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const first = box.connect({
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+    });
+    const id = await box.enqueue(params);
+    expect(f.writes).toHaveLength(1);
+    box.disconnect(first);
+    f.advance(500);
+    const replacement = box.connect({
+      ...f.connection('replacement'),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: false },
+    });
+    await box.flush(replacement);
+    expect(f.writes).toHaveLength(1);
+    expect(box.entries()[0].intentId).toBe(id);
+    box.close();
+  });
+
+  it('rollout keeps a physically handed-off intent unresolved at its deadline and after reload', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect({
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+    });
+    const id = await box.enqueue(params);
+    expect(f.writes).toHaveLength(1);
+    f.advance(10_000);
+    await box.flush(c);
+    expect(box.entries()[0].state).toBe('unknown');
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    const replacement = restored.connect({
+      ...f.connection('replacement'),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+    });
+    await restored.flush(replacement);
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    const submits = f.writes.map((text) => JSON.parse(text)).filter((frame) => frame.t === 'order.submit');
+    expect(submits).toHaveLength(1);
+    expect(submits[0].d.intentId).toBe(id);
+    restored.close();
+  });
+
+
   it('restores a legacy notSent row without evidence as unknown', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -401,6 +482,91 @@ describe('DELEGATED host-neutral outbox', () => {
       expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(handedOff ? ['order.cancelQueued'] : []);
       box.close();
     }
+  });
+  it.each([false, true])(
+    'preserves synchronous cancellation during a declined handoff (prior handoff: %s)',
+    async (priorHandoff) => {
+      const f = fixture();
+      const changes: DelegatedIntent[] = [];
+      f.options.changed = (row) => {
+        changes.push(row);
+      };
+      let box = await DelegatedOutbox.open(f.options);
+      let id: string | undefined;
+      let cancellation: Promise<void> | undefined;
+      if (priorHandoff) {
+        box.connect(f.connection());
+        id = await box.enqueue(params);
+        // Capture cancellation before replacement; handed-off work is never resubmitted.
+        cancellation = box.cancel(id);
+      }
+      const declined = box.connect({
+        ...f.connection(),
+        send(frame) {
+          const message = JSON.parse(frame);
+          if (message.t === 'order.submit') cancellation = box.cancel(message.d.intentId);
+          return false;
+        },
+      });
+      if (priorHandoff) await box.flush(declined);
+      else id = await box.enqueue(params);
+      expect(cancellation).toBeDefined();
+      await cancellation;
+      const afterCancel = box.entries()[0];
+      const persistedAfterCancel = [...f.rows.values()][0];
+      await box.flush(box.connect(f.connection('replacement')));
+      expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
+        priorHandoff ? ['order.submit', 'order.cancelQueued'] : [],
+      );
+      const expected = { intentId: id, state: priorHandoff ? 'unknown' : 'canceled', cancelPending: priorHandoff };
+      expect(afterCancel).toMatchObject(expected);
+      expect(persistedAfterCancel).toMatchObject(expected);
+      expect(changes.at(-1)).toMatchObject(expected);
+      f.advance(10_000);
+      box.close();
+      box = await DelegatedOutbox.open(f.options);
+      await box.flush(box.connect(f.connection('restored')));
+      expect(box.entries()[0]).toMatchObject(expected);
+      expect(f.writes.filter((frame) => JSON.parse(frame).t === 'order.submit')).toHaveLength(priorHandoff ? 1 : 0);
+      box.close();
+    },
+  );
+  it.each([false, true])('preserves expiry during a declined handoff (prior handoff: %s)', async (priorHandoff) => {
+    const f = fixture();
+    const changes: DelegatedIntent[] = [];
+    f.options.changed = (row) => {
+      changes.push(row);
+    };
+    const box = await DelegatedOutbox.open(f.options);
+    let id: string | undefined;
+    if (priorHandoff) {
+      box.connect(f.connection());
+      id = await box.enqueue(params);
+    }
+    const declined = box.connect({
+      ...f.connection(),
+      send(frame) {
+        if (JSON.parse(frame).t === 'order.submit') f.advance(10_000);
+        return false;
+      },
+    });
+    if (priorHandoff) {
+      await box.flush(declined);
+      // No second submit may call the adapter; advance the existing handoff's deadline.
+      f.advance(10_000);
+    } else id = await box.enqueue(params);
+    const afterDecline = box.entries()[0];
+    await box.flush(box.connect(f.connection('replacement')));
+    expect(afterDecline).toMatchObject({
+      intentId: id,
+      state: priorHandoff ? 'unknown' : 'notSent',
+      cancelPending: false,
+    });
+    expect(changes.at(-1)).toMatchObject({ state: priorHandoff ? 'unknown' : 'notSent', cancelPending: false });
+    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
+      priorHandoff ? ['order.submit'] : [],
+    );
+    box.close();
   });
   it('requires atomic compaction and upgrades legacy completed records on restore', async () => {
     const f = fixture();
@@ -874,10 +1040,12 @@ describe('DELEGATED host-neutral outbox', () => {
     const box = await DelegatedOutbox.open(f.options);
     const c = box.connect(f.connection());
     await box.enqueue(params);
+    const beforeReceipt = box.entries()[0];
+    expect(beforeReceipt.state).toBe('sending');
     await expect(box.receive(c, test.frame)).resolves.toBeUndefined();
-    // A fixture's queued result denotes an ignored receipt. Physical handoff
-    // now leaves the same row sending; a malformed reply must preserve it.
-    expect(box.entries()[0].state).toBe(test.outboxState === 'queued' ? 'sending' : test.outboxState);
+    // The frozen fixture's queued state denotes an ignored receipt.
+    if (test.outboxState === 'queued') expect(box.entries()).toEqual([beforeReceipt]);
+    else expect(box.entries()[0].state).toBe(test.outboxState);
     box.close();
   });
   it('does not send before socket admission even with both capabilities advertised', async () => {

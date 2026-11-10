@@ -86,8 +86,10 @@ those retained entries to unknown immediately while fencing later work and callb
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send
 adapter returns true only after socket handoff; false or a throw must guarantee
-no handoff. Queue cancellation after handoff remains unknown until a router
-receipt positively establishes non-forwarding.
+neither a handoff nor buffering for a later connection. Queue cancellation after handoff remains unknown until a router
+receipt positively establishes non-forwarding. Legacy pending cancellations restore
+as unknown. Cancellation or expiry during a declined first send remains terminal
+and is published; a declined retry cannot erase a previous handoff.
 `notSent` is a branded state, constructed only by the exported
 `markDelegatedNotSent(intent, evidence)`. It requires positive evidence for the
 whole intent: a locally known never-attempted intent, a declined adapter handoff
@@ -1949,7 +1951,7 @@ consuming app's CLAUDE.md for the capture playbook.
 worker op handled by `src/webworker/handlers/UpdatePositionsHandler.ts`.
 Account-wide refreshes (`symbols` omitted) must use
 `store.addOrUpdatePositionsFull(positions)`, including empty arrays, so
-positions omitted by the exchange are zeroed/cleared. Symbol-scoped refreshes
+positions omitted by the exchange are removed. Last reported per-ID leverage/margin/mode survives separately in the generated `positionSettings` map. Symbol-scoped refreshes
 remain partial and use `addOrUpdatePositions(positions)` when rows are
 returned. Do not replace this with a main-thread `fetchPositions()` + direct
 store write from the web app; the worker owns live exchange state and its

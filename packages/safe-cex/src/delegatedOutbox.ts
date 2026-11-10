@@ -90,7 +90,7 @@ export interface OutboxConnection extends OutboxScope {
     delegatedOrderLedgerV1?: boolean;
   };
   instanceId?: string;
-  /** Return true only after socket handoff. False or a throw guarantees no handoff. */
+  /** True only for physical handoff; false/throw means neither sent nor buffered for a later connection. */
   send(frame: string): boolean;
 }
 
@@ -245,6 +245,8 @@ export class DelegatedOutbox {
         row.state = 'unknown';
         row.cancelPending = false;
       }
+      // Legacy terminal labels cannot settle a still-pending router cancellation.
+      if (row.cancelPending && ['notSent', 'canceled'].includes(row.state)) unprovenNotSent(row);
       if (row.state === 'queued' && (row.clockEpoch !== options.clock.epoch || box.expired(row)))
         unprovenNotSent(row);
       box.intents.set(row.intentId, row);

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
 const { stripMutableDirectives } = require('./generate.cjs');
-const names = ['StoreOptions', 'StoreDataLoaded', 'StoreUpdateIds', 'FetchedLeverage', 'DisplayedMargin', 'StoreData'];
+const names = ['StoreOptions', 'StoreDataLoaded', 'StoreUpdateIds', 'FetchedLeverage', 'PositionSettings', 'DisplayedMargin', 'StoreData'];
 
 function generateStore({ check = false } = {}) {
   const destination = path.resolve(__dirname, '../../packages/safe-cex/src/generated');
