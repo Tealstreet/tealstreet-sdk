@@ -863,12 +863,22 @@ const resolveAmend = (
   const value = hasPrice
     ? roundToStep(step.price as number, market.priceStep)
     : roundToStep(step.amount as number, market.amountStep);
-  // The plan's amount is what should rest (nativeRemaining's unit); the engine's is the total.
-  const nativeFilled = order.remaining > 0 ? (order.filled * order.nativeRemaining) / order.remaining : 0;
-  const update = hasPrice ? { price: value } : { amount: roundToStep(value + nativeFilled, market.amountStep) };
   if (!(value > 0)) {
     out.reasons.push(`the amended ${hasPrice ? 'price' : 'amount'} rounds to zero`);
     return out;
+  }
+
+  let update: { price: number } | { amount: number };
+  if (hasPrice) {
+    update = { price: value };
+  } else {
+    if (order.nativeRemaining === null) {
+      out.reasons.push('cannot amend amount: native remaining size is unknown');
+      return out;
+    }
+    // The plan's amount is what should rest (nativeRemaining's unit); the engine's is the total.
+    const nativeFilled = order.remaining > 0 ? (order.filled * order.nativeRemaining) / order.remaining : 0;
+    update = { amount: roundToStep(value + nativeFilled, market.amountStep) };
   }
 
   out.commands.push({
