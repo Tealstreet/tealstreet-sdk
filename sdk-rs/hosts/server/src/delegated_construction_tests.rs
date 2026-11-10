@@ -102,7 +102,7 @@ fn account_plan(mut plan: RoutingPlan, suffix: &str) -> RoutingPlan {
     plan
 }
 
-fn authenticated(registry: &Arc<Registry>, user: &str) -> (Session, mpsc::Receiver<String>) {
+fn authenticated(registry: &Arc<Registry>, user: &str) -> (Session, crate::out::Receiver) {
     // Same verifier/Identity boundary as an authenticated upgrade, using the
     // existing unsigned fixture verifier rather than live credentials.
     let token = unsigned_token(user, now_ms() / 1000 + 300);
