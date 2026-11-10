@@ -31,8 +31,7 @@ const rawBlofin = {
   marginMode: 'cross',
   liquidationPrice: '30000',
 };
-const blofin = () => {
-  const store = new DefaultStore();
+const blofin = (store = new DefaultStore()) => {
   store.update({ markets: [market] });
   const exchange = new BlofinExchange('blofin', { key: '', secret: '', passphrase: '' }, store);
   return { store, exchange };
@@ -61,6 +60,237 @@ const position = (changes: Partial<Position> = {}): Position => ({
 });
 
 describe('retained adapters reopen without fabricated settings', () => {
+  it.each([
+    ['fetch', 'before', 50],
+    ['fetch', 'after', 9],
+    ['write', 'before', 50],
+    ['write', 'after', 9],
+  ] as const)('BloFin orders %s confirmation %s a position report by recency', async (source, order, expected) => {
+    const { store, exchange } = blofin();
+    try {
+      // Same-clock observations still have a definite source order.
+      vi.spyOn(Date, 'now').mockReturnValue(12345);
+      vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+      vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+      const get = vi
+        .fn()
+        .mockResolvedValue({
+          data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] },
+        });
+      const post = vi.fn().mockResolvedValue({ data: { code: '0', msg: '' } });
+      exchange.xhr = { get, post } as any;
+      const confirm = async () => {
+        if (source === 'fetch') await exchange.fetchLeverageForSymbol('BTCUSDT');
+        else await exchange.setLeverage('BTCUSDT', 9);
+        expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 9, sellLeverage: 9 });
+      };
+      if (order === 'before') await confirm();
+      exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+      expect(store.positions[0].leverage).toBe(50);
+      exchange.privateWebsocket.handlePositionTopic({ data: [] });
+      expect(store.positions).toEqual([]);
+      expect(store.positionSettings.BTCUSDT.leverage).toBe(50);
+      if (order === 'after') await confirm();
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBe(expected);
+      expect(source === 'fetch' ? get : post).toHaveBeenCalledOnce();
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('BloFin does not let an older in-flight read supersede a position report', async () => {
+    const { store, exchange } = blofin();
+    try {
+      vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+      let release!: (value: any) => void;
+      const get = vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      );
+      exchange.xhr = { get } as any;
+      const pending = exchange.fetchLeverageForSymbol('BTCUSDT');
+      await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
+      exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+      exchange.privateWebsocket.handlePositionTopic({ data: [] });
+      release({ data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] } });
+      await pending;
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBe(50);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('BloFin keeps a newer completed read when an older read completes last', async () => {
+    const { store, exchange } = blofin();
+    try {
+      exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+      exchange.privateWebsocket.handlePositionTopic({ data: [] });
+      vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+      let release!: (value: any) => void;
+      const get = vi
+        .fn()
+        .mockReturnValueOnce(
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+        )
+        .mockResolvedValueOnce({
+          data: { code: '0', data: [{ positionSide: 'net', leverage: '20', marginMode: 'cross' }] },
+        });
+      exchange.xhr = { get } as any;
+      const older = exchange.fetchLeverageForSymbol('BTCUSDT');
+      await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
+      await exchange.fetchLeverageForSymbol('BTCUSDT');
+      release({ data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] } });
+      await older;
+      expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(20);
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBe(20);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it.each([
+    [50, Number.NaN],
+    [9, 9],
+  ])('BloFin keeps untracked conflicting settings unavailable (%s)', (retained, expected) => {
+    const { store, exchange } = blofin();
+    try {
+      store.addOrUpdatePositionsFull([position({ leverage: retained })]);
+      store.addOrUpdatePositionsFull([]);
+      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      expect(exchange.mapPositions([{ ...rawBlofin, leverage: '' }] as any)[0].leverage).toBe(expected);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('BloFin does not skip a flat write because an older fetched rail already matches', async () => {
+    const { store, exchange } = blofin();
+    try {
+      vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+      vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+      const get = vi
+        .fn()
+        .mockResolvedValue({
+          data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] },
+        });
+      const post = vi.fn().mockResolvedValue({ data: { code: '0', msg: '' } });
+      exchange.xhr = { get, post } as any;
+      await exchange.fetchLeverageForSymbol('BTCUSDT');
+      exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+      exchange.privateWebsocket.handlePositionTopic({ data: [] });
+      await exchange.setLeverage('BTCUSDT', 9);
+      expect(post).toHaveBeenCalledOnce();
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBe(9);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it.each(['fetch', 'write'] as const)(
+    'BloFin drops owner A %s completion after login changes to owner B',
+    async (source) => {
+      const ownerA = blofin();
+      let ownerB: ReturnType<typeof blofin> | undefined;
+      try {
+        vi.spyOn(ownerA.exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+        vi.spyOn(ownerA.exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+        let release!: (value: any) => void;
+        const request = vi.fn().mockReturnValue(
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+        );
+        ownerA.exchange.xhr = { get: request, post: request } as any;
+        const pending =
+          source === 'fetch'
+            ? ownerA.exchange.fetchLeverageForSymbol('BTCUSDT')
+            : ownerA.exchange.setLeverage('BTCUSDT', 9);
+        await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+        ownerA.exchange.dispose();
+        ownerB = blofin(ownerA.store);
+        ownerB.exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+        ownerB.exchange.privateWebsocket.handlePositionTopic({ data: [] });
+        release({ data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] } });
+        await pending;
+        expect(ownerB.store.fetchedLeverage.BTCUSDT).toBeUndefined();
+        expect(ownerB.store.positions).toEqual([]);
+        ownerB.exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+        expect(ownerB.store.positions[0].leverage).toBe(50);
+      } finally {
+        if (ownerB) ownerB.exchange.dispose();
+        else ownerA.exchange.dispose();
+      }
+    },
+  );
+
+  it.each(['fetch', 'write'] as const)(
+    'BloFin drops owner A %s before dispatch when login changes during config await',
+    async (source) => {
+      const ownerA = blofin();
+      let ownerB: ReturnType<typeof blofin> | undefined;
+      try {
+        let release!: (value: MarginType) => void;
+        const margin = vi.spyOn(ownerA.exchange, 'getOrFetchMarginType').mockReturnValue(
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+        );
+        vi.spyOn(ownerA.exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+        const request = vi.fn();
+        ownerA.exchange.xhr = { get: request, post: request } as any;
+        const pending =
+          source === 'fetch'
+            ? ownerA.exchange.fetchLeverageForSymbol('BTCUSDT')
+            : ownerA.exchange.setLeverage('BTCUSDT', 9);
+        await vi.waitFor(() => expect(margin).toHaveBeenCalledOnce());
+        ownerA.exchange.dispose();
+        ownerB = blofin(ownerA.store);
+        ownerB.exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+        release(MarginType.Cross);
+        await pending;
+        expect(request).not.toHaveBeenCalled();
+        expect(ownerB.store.positions[0].leverage).toBe(50);
+        expect(ownerB.store.fetchedLeverage.BTCUSDT).toBeUndefined();
+      } finally {
+        if (ownerB) ownerB.exchange.dispose();
+        else ownerA.exchange.dispose();
+      }
+    },
+  );
+
+  it('BloFin does not recreate a row that closes during a leverage write', async () => {
+    const { store, exchange } = blofin();
+    try {
+      exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
+      vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
+      vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
+      let release!: (value: any) => void;
+      const post = vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      );
+      exchange.xhr = { post } as any;
+      const pending = exchange.setLeverage('BTCUSDT', 9);
+      await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
+      exchange.privateWebsocket.handlePositionTopic({ data: [] });
+      release({ data: { code: '0', msg: '' } });
+      await pending;
+      expect(store.positions).toEqual([]);
+      exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
+      expect(store.positions[0].leverage).toBe(9);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
   it('BloFin prefers acknowledged flat-account leverage to closed settings', async () => {
     const { store, exchange } = blofin();
     try {

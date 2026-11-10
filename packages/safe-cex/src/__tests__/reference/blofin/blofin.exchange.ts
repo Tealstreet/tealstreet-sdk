@@ -122,6 +122,41 @@ export class BlofinExchange extends BaseExchange {
 
   private _accountMarginType: MarginType | null = null;
   private _accountPositionMode: PositionMode | null = null;
+  private leverageSequence = 0;
+  private leverageEpoch = 0;
+  private reportedLeverage = new Map<string, { value: number; sequence: number }>();
+  private fetchedLeverageObservations = new Map<
+    string,
+    {
+      buyLeverage: number;
+      sellLeverage: number;
+      sequence: number;
+    }
+  >();
+
+  private knownLeverage = (symbol: string, id: string, side: PositionSide, position?: Position): number => {
+    const retained = position ?? this.store.positionSettings?.[id];
+    const reported = this.reportedLeverage.get(id);
+    const fetched = this.store.fetchedLeverage[symbol];
+    const observed = this.fetchedLeverageObservations.get(symbol);
+    const rail = side === PositionSide.Long ? 'buyLeverage' : 'sellLeverage';
+    const candidates = [
+      {
+        value: retained?.leverage,
+        sequence: reported && reported.value === retained?.leverage ? reported.sequence : 0,
+      },
+      {
+        value: fetched && !fetched.isFetching ? fetched[rail] : undefined,
+        sequence: observed && observed[rail] === fetched?.[rail] ? observed.sequence : 0,
+      },
+    ].filter((candidate) => candidate.value !== undefined && Number.isFinite(candidate.value) && candidate.value > 0);
+    const sequence = Math.max(...candidates.map((candidate) => candidate.sequence));
+    const newest = candidates.filter((candidate) => candidate.sequence === sequence);
+    // Missing provenance cannot establish an order between conflicting values.
+    return newest.length && newest.every((candidate) => candidate.value === newest[0].value)
+      ? (newest[0].value ?? Number.NaN)
+      : Number.NaN;
+  };
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -160,6 +195,9 @@ export class BlofinExchange extends BaseExchange {
   };
 
   dispose = () => {
+    this.leverageEpoch += 1;
+    this.reportedLeverage.clear();
+    this.fetchedLeverageObservations.clear();
     super.dispose();
     this.publicWebsocket.dispose();
     this.privateWebsocket.dispose();
@@ -554,6 +592,8 @@ export class BlofinExchange extends BaseExchange {
   };
 
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+    const epoch = this.leverageEpoch;
+    if (this.isDisposed) return null;
     try {
       const market = this.store.marketsBySymbol[symbol];
       if (!market) {
@@ -562,12 +602,16 @@ export class BlofinExchange extends BaseExchange {
       }
 
       const marginType = await this.getOrFetchMarginType();
+      if (this.isDisposed || epoch !== this.leverageEpoch) return null;
+      // A read already in flight cannot supersede a later position report.
+      const sequence = ++this.leverageSequence;
       const { data } = await this.xhr.get<FETCH_BATCH_LEV_RESPONSE>(ENDPOINTS.LEVERAGE, {
         params: {
           instId: market.id,
           marginMode: marginType === MarginType.Isolated ? 'isolated' : 'cross',
         },
       });
+      if (this.isDisposed || epoch !== this.leverageEpoch) return null;
 
       if (data.code !== '0') {
         this.emitAndLogError(data.msg);
@@ -600,6 +644,9 @@ export class BlofinExchange extends BaseExchange {
         positionMode: netRow ? PositionMode.OneWay : PositionMode.Hedged,
       };
 
+      const newer = this.fetchedLeverageObservations.get(symbol);
+      if (newer && newer.sequence > sequence) return this.store.fetchedLeverage[symbol] ?? null;
+      this.fetchedLeverageObservations.set(symbol, { buyLeverage, sellLeverage, sequence });
       this.store.update({
         fetchedLeverage: {
           ...this.store.fetchedLeverage,
@@ -609,6 +656,7 @@ export class BlofinExchange extends BaseExchange {
 
       return leverageObj;
     } catch (err: any) {
+      if (this.isDisposed || epoch !== this.leverageEpoch) return null;
       this.log(
         `Error fetching leverage for ${symbol}: ${err?.response?.data?.msg || err?.message || err}`,
         LogSeverity.Warning,
@@ -1444,21 +1492,36 @@ export class BlofinExchange extends BaseExchange {
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {
+    const epoch = this.leverageEpoch;
+    if (this.isDisposed) return;
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market ${symbol} not found on Blofin`);
 
     const leverage = Math.min(Math.max(inputLeverage, market.limits.leverage.min), market.limits.leverage.max);
 
-    // Skip the round-trip if we already know the requested leverage is set.
-    // Prefer position records (live truth from WS); fall back to the per-symbol
-    // fetchedLeverage cache when there's no open position for this symbol.
+    // Skip only when the latest observation agrees, rather than trusting an
+    // older fetched rail or a row captured before a newer confirmation.
     const existingPositions = this.store.positions.filter((p) => p.symbol === symbol);
-    if (existingPositions.length > 0 && existingPositions.every((p) => p.leverage === leverage)) {
+    const settings = existingPositions.length
+      ? existingPositions
+      : Object.values(this.store.positionSettings).filter((setting) => setting.symbol === symbol);
+    if (
+      settings.length &&
+      settings.every(
+        (setting) =>
+          this.knownLeverage(
+            symbol,
+            setting.id,
+            setting.side,
+            existingPositions.find((position) => position.id === setting.id),
+          ) === leverage,
+      )
+    ) {
       return;
     }
     const fetchedLev = this.store.fetchedLeverage[symbol];
     if (
-      existingPositions.length === 0 &&
+      settings.length === 0 &&
       fetchedLev &&
       !fetchedLev.isFetching &&
       fetchedLev.buyLeverage === leverage &&
@@ -1470,6 +1533,7 @@ export class BlofinExchange extends BaseExchange {
     // Both margin type and position mode are account-global on Blofin, so the
     // cached values populated during `start()` are reused here without REST.
     const [marginType, positionMode] = await Promise.all([this.getOrFetchMarginType(), this.getOrFetchPositionMode()]);
+    if (this.isDisposed || epoch !== this.leverageEpoch) return;
 
     const baseRequest = {
       instId: market.id,
@@ -1491,6 +1555,7 @@ export class BlofinExchange extends BaseExchange {
       datas = [data];
     }
 
+    if (this.isDisposed || epoch !== this.leverageEpoch) return;
     // Surface API-level errors immediately, before any optimistic store mutation.
     for (const data of datas) {
       if (data.code !== '0') {
@@ -1499,15 +1564,22 @@ export class BlofinExchange extends BaseExchange {
       }
     }
 
-    // Optimistically patch the store so the UI reflects the new leverage right away.
-    // The WS positions stream will deliver the authoritative value shortly, and the
-    // fetchedLeverage cache covers the no-open-position fallback used by the place-order
-    // % slider.
-    if (existingPositions.length > 0) {
-      const updates = existingPositions.map((p) => ({ ...p, leverage }));
-      this.store.addOrUpdatePositions(updates);
-    }
+    // A successful write confirms at ACK time. Patch only rows still present,
+    // atomically with the cache: a row may have closed while the write awaited.
+    this.fetchedLeverageObservations.set(symbol, {
+      buyLeverage: leverage,
+      sellLeverage: leverage,
+      sequence: ++this.leverageSequence,
+    });
+    const currentPositions = this.store.positions;
     this.store.update({
+      ...(currentPositions.some((position) => position.symbol === symbol)
+        ? {
+            positions: currentPositions.map((position) =>
+              position.symbol === symbol ? { ...position, leverage } : position,
+            ),
+          }
+        : {}),
       fetchedLeverage: {
         ...this.store.fetchedLeverage,
         [symbol]: { buyLeverage: leverage, sellLeverage: leverage, marginType, positionMode },
@@ -1747,23 +1819,16 @@ export class BlofinExchange extends BaseExchange {
       const positionId = createPositionId(market.symbol, side, positionMode);
       const existingPosition = this.store.positions.find((sp) => sp.id === positionId);
 
-      // Partial events can omit leverage. A confirmed flat-account update is
-      // newer than the last closed row; live/wire values remain authoritative.
+      // Record only actual wire confirmations. Reusing a fallback must not
+      // make an older source look like a new position observation.
       const parsedLeverage = parseFloat(p.leverage);
-      const fetched = this.store.fetchedLeverage[market.symbol];
-      const confirmedLeverage =
-        fetched && !fetched.isFetching
-          ? side === PositionSide.Long
-            ? fetched.buyLeverage
-            : fetched.sellLeverage
-          : undefined;
-      const leverage =
-        [
-          parsedLeverage,
-          existingPosition?.leverage,
-          confirmedLeverage,
-          existingPosition ? undefined : this.store.positionSettings?.[positionId]?.leverage,
-        ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? Number.NaN;
+      let leverage: number;
+      if (Number.isFinite(parsedLeverage) && parsedLeverage > 0) {
+        this.reportedLeverage.set(positionId, { value: parsedLeverage, sequence: ++this.leverageSequence });
+        leverage = parsedLeverage;
+      } else {
+        leverage = this.knownLeverage(market.symbol, positionId, side, existingPosition);
+      }
       const parsedLiquidationPrice = parseFloat(p.liquidationPrice);
       const liquidationPrice = Number.isFinite(parsedLiquidationPrice)
         ? parsedLiquidationPrice

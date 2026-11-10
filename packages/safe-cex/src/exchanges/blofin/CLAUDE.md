@@ -678,11 +678,11 @@ This is the React layer's no-position-on-symbol fallback — without it, `getCur
 Order of operations:
 
 1. Validate the market exists; clamp `leverage` to `market.limits.leverage` bounds.
-2. **No-op skip**: return early if either (a) all live position records for the symbol already report the requested leverage, or (b) there are no position records and `store.fetchedLeverage[symbol]` already matches.
+2. **No-op skip**: return early only if the newest known settings for every relevant position ID agree with the request. An older fetched rail matching the request cannot suppress a write after a newer position report.
 3. Read `marginType` and `positionMode` from the cached account-global values (`getOrFetchMarginType()` / `getOrFetchPositionMode()` with no symbol arg). Both are populated during `start()` so this is in-memory.
 4. POST to `SET_LEVERAGE`. In hedged isolated mode, fire long and short POSTs in **parallel** via `Promise.all` (not serial).
 5. **Check `data.code !== '0'` BEFORE any store mutation**, so an exchange-level error doesn't leave the store in an inconsistent state.
-6. Optimistically patch `store.positions` for the symbol (clone existing records with new `leverage`) via `addOrUpdatePositions`, and update `store.fetchedLeverage[symbol]` so the no-position fallback reflects the change immediately. The WS `positions` topic delivers the authoritative value shortly after.
+6. Confirm a new leverage observation at ACK time and atomically update `fetchedLeverage` with rows still present for the symbol. Never reinsert rows captured before the await: they may have closed during the request. The WS `positions` topic can subsequently confirm a newer value.
 
 What `setLeverage` deliberately does NOT do:
 
@@ -692,13 +692,26 @@ What `setLeverage` deliberately does NOT do:
 
 #### Leverage preservation in `mapPositions`
 
-Blofin occasionally pushes partial position events without a usable `leverage` field. To avoid zeroing a known-good leverage value (which would cause the React fallback in `getCurrentPositionSizeAndLeverage` to snap to `1x` and jitter the place-order % slider), `mapPositions` resolves leverage with this priority:
+BloFin occasionally sends partial events without usable leverage. The retained
+TS mapper records per-exchange monotonic observation sequences for actual
+finite positive position reports and completed leverage sources. A leverage
+read retains its dispatch sequence, so a position report arriving during the
+read wins; a successful write confirms at ACK time. An older read finishing
+after a newer read/write cannot replace its cache. Wall-clock ties do not matter.
 
-1. `parseFloat(p.leverage)` if finite and `> 0`.
-2. Otherwise, look up the existing position by `id` (built via `createPositionId(symbol, side, positionMode)`) and reuse its leverage if `> 0`.
-3. Otherwise, use a finite positive `store.fetchedLeverage[symbol]` rail (per-side in hedged mode) when present and not `isFetching`. A successful `setLeverage` while flat updates this confirmed setting, so it takes precedence over the closed cache.
-4. If there is no live row, use a finite positive `store.positionSettings[positionId].leverage` for the exact ID. An explicitly unknown live value does not revive the closed cache.
-5. Otherwise, keep leverage unavailable (`NaN` in the numeric Position field), rather than inventing `0`.
+A usable wire field is a new report. Otherwise the mapper compares the source
+sequences of the current row (or the exact-ID closed settings when no row is
+present) and the confirmed, non-fetching per-side leverage rail. Whichever is
+newer wins in both update orders. Reusing a fallback or closing a row never
+advances its sequence. An explicitly unknown live value cannot revive the
+closed cache. Conflicting values loaded without ordering provenance stay
+unavailable until a fresh confirmation; matching values need no tie-break.
+No usable value remains `NaN` in the numeric Position field, never fabricated `0`.
+
+These private sequences are not public Store fields or serialized metadata.
+They are cleared on exchange disposal. Read/write continuations capture an
+owner epoch and check it after config and HTTP awaits, dropping stale work
+before dispatch or Store mutation when login changes.
 
 `mapPositions` applies the same preserve-on-blank rule to
 `liquidationPrice`: numeric values (including explicit `0`) are accepted,
