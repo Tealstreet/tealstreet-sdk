@@ -4,6 +4,7 @@ import type { CrossTradeConfig, CrossTradeCopier } from '../types';
 
 import { OrderSide, PositionSide } from '../../types';
 import { loop } from '../../utils/loop';
+import { nativePositionSize } from '../../utils/nativePositionSize';
 import { convertFromBaseSizeToNative } from '../../utils/sizing';
 import { convertSymbol } from '../../utils/symbolConverter';
 import { getCopierSymbolFromMaster } from '../getCopierSymbolFromMaster';
@@ -11,6 +12,13 @@ import { getCopierWeightRatio } from '../getCopierWeightRatio';
 import { getMasterSymbolFromCopier } from '../getMasterSymbolFromCopier';
 
 const debug = (...args: unknown[]) => console.log('[CrossTradeManager]', ...args);
+
+// Keep canonical quantities unrounded until the order's lot-step conversion.
+const baseSizeFromNative = (native: number, market: Market, price: number): number | null => {
+  if (market.isInverse && (!Number.isFinite(price) || price <= 0)) return null;
+  const base = (native * (market.contractSize || 1)) / (market.isInverse ? price : 1);
+  return Number.isFinite(base) && (native === 0 || base > 0) ? base : null;
+};
 
 const FAILURE_THRESHOLD = 2;
 const FAILURE_MUTE_MS = 30_000;
@@ -156,7 +164,7 @@ export class CrossTradeManager {
 
     const masterStore = masterExchange.store;
     const masterExchangeName = masterExchange.name;
-    const masterPositions = masterStore.positions.filter((position) => !!position.contracts);
+    const masterPositions = masterStore.positions;
 
     let relevantPositionSymbol = undefined;
 
@@ -170,7 +178,7 @@ export class CrossTradeManager {
 
     // check all positions if not master symbol, else only position with symbol matching for copier
     const copierPositions = copierExchange.store.positions.filter(
-      (position) => !!position.contracts && (!relevantPositionSymbol || position.symbol === relevantPositionSymbol),
+      (position) => !relevantPositionSymbol || position.symbol === relevantPositionSymbol,
     );
 
     // check copier positions are valid
@@ -204,7 +212,14 @@ export class CrossTradeManager {
       }
 
       // need reference price
-      if (!referencePrice) return;
+      if (!referencePrice || !Number.isFinite(referencePrice) || referencePrice <= 0) return;
+
+      const copierNative = nativePositionSize(copierPosition, copierMarket);
+      if (copierNative === null) {
+        debug('Skipping reconciliation with unknown copier native size', copierPosition.symbol);
+        return;
+      }
+      if (copierNative === 0) return;
 
       // associated position in master
       let foundMasterPosition = undefined;
@@ -218,8 +233,14 @@ export class CrossTradeManager {
         );
       }
 
+      const masterNative = foundMasterPosition ? nativePositionSize(foundMasterPosition, masterMarket) : 0;
+      if (masterNative === null) {
+        debug('Skipping reconciliation with unknown master native size', masterSymbol);
+        return;
+      }
+
       // close the copier position if not open in master
-      if (!foundMasterPosition) {
+      if (!foundMasterPosition || masterNative === 0) {
         // no master position, close copier position
         return this._safePlaceOrder(
           copier,
@@ -228,7 +249,7 @@ export class CrossTradeManager {
           orderPrice,
           copierAccount,
           copierPosition.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
-          Math.abs(copierPosition.extra?.contractsNative || copierPosition.contracts),
+          copierNative,
           true,
         );
       } else {
@@ -243,12 +264,24 @@ export class CrossTradeManager {
           copierMarket,
         );
 
-        // contracts always in base
-        let masterSizeInCopierBase = Math.abs(foundMasterPosition.contracts);
+        let masterSizeInCopierBase = baseSizeFromNative(
+          masterNative,
+          masterMarket,
+          masterTicker?.last || referencePrice,
+        );
+        const copierSizeInBase = baseSizeFromNative(copierNative, copierMarket, referencePrice);
+        if (masterSizeInCopierBase === null || copierSizeInBase === null) return;
 
         // need to convert to copier base
         if (masterMarket.base !== copierMarket.base) {
-          if (!masterTicker?.last || !copierTicker?.last) {
+          if (
+            !masterTicker?.last ||
+            !copierTicker?.last ||
+            !Number.isFinite(masterTicker.last) ||
+            !Number.isFinite(copierTicker.last) ||
+            masterTicker.last <= 0 ||
+            copierTicker.last <= 0
+          ) {
             debug('No ticker for', foundMasterPosition.symbol, copierPosition.symbol);
             return;
           }
@@ -257,18 +290,16 @@ export class CrossTradeManager {
           masterSizeInCopierBase = masterSizeInUsd / copierTicker.last;
         }
 
-        // contracts always in base
-        const copierSizeInBase = Math.abs(copierPosition.contracts);
-
         if (!copierWeightRatio) return;
 
         const sizeDiff = masterSizeInCopierBase * copierWeightRatio - copierSizeInBase;
         const sizeDiffNative = convertFromBaseSizeToNative(sizeDiff, copierMarket, referencePrice);
 
         if (
+          Number.isFinite(sizeDiffNative) &&
           sizeDiffNative !== 0 &&
           //   greater than 5% diff
-          Math.abs(sizeDiff / copierPosition.contracts) > 0.05
+          Math.abs(sizeDiff / copierSizeInBase) > 0.05
         ) {
           return this._safePlaceOrder(
             copier,
@@ -284,7 +315,7 @@ export class CrossTradeManager {
                 ? OrderSide.Sell
                 : OrderSide.Buy,
 
-            Math.abs(sizeDiffNative),
+            sizeDiffNative < 0 ? Math.min(-sizeDiffNative, copierNative) : sizeDiffNative,
             sizeDiffNative < 0,
           );
         }
@@ -316,10 +347,10 @@ export class CrossTradeManager {
 
     // check all positions if not master symbol, else only that position
     const masterPositions = masterStore.positions.filter(
-      (position) => !!position.contracts && (!config.masterSymbol || position.symbol === config.masterSymbol),
+      (position) => !config.masterSymbol || position.symbol === config.masterSymbol,
     );
 
-    const copierPositions = copierExchange.store.positions.filter((position) => !!position.contracts);
+    const copierPositions = copierExchange.store.positions;
 
     // check positions in master are correct in copier
     const requests = masterPositions.map((masterPosition) => {
@@ -341,6 +372,9 @@ export class CrossTradeManager {
         return;
       }
 
+      const masterNative = nativePositionSize(masterPosition, masterMarket);
+      if (masterNative === null || masterNative === 0) return;
+
       let referencePrice = copierTicker?.last;
       // dont use reference price, we dont want to slip to position entry...
       let orderPrice = copierTicker?.last;
@@ -350,23 +384,38 @@ export class CrossTradeManager {
         orderPrice = orderPrice || masterTicker?.last;
       }
 
-      if (!referencePrice) return;
+      if (!referencePrice || !Number.isFinite(referencePrice) || referencePrice <= 0) return;
 
-      // find the copier position
-      const foundCopierPosition = copierPositions.find(
-        (copierPosition) =>
-          copierPosition.symbol === copierSymbol &&
-          ((!isHedged && copierPosition.side === masterPosition.side) ||
-            (isHedged && copierPosition.side !== masterPosition.side)),
+      const copierSizes = copierPositions
+        .filter((position) => position.symbol === copierSymbol)
+        .map((position) => ({ position, native: nativePositionSize(position, copierMarket) }));
+      // An opposite-side entry can reduce a position too, even without reduceOnly.
+      if (copierSizes.some(({ native }) => native === null)) return;
+      const hasCopierPosition = copierSizes.some(
+        ({ position, native }) =>
+          native !== null &&
+          native > 0 &&
+          ((!isHedged && position.side === masterPosition.side) || (isHedged && position.side !== masterPosition.side)),
       );
 
-      if (!foundCopierPosition) {
-        // contracts always in base
-        let masterSizeInCopierBase = Math.abs(masterPosition.contracts);
+      if (!hasCopierPosition) {
+        let masterSizeInCopierBase = baseSizeFromNative(
+          masterNative,
+          masterMarket,
+          masterTicker?.last || referencePrice,
+        );
+        if (masterSizeInCopierBase === null) return;
 
         // need to convert to copier base
         if (masterMarket.base !== copierMarket.base) {
-          if (!masterTicker?.last || !copierTicker?.last) {
+          if (
+            !masterTicker?.last ||
+            !copierTicker?.last ||
+            !Number.isFinite(masterTicker.last) ||
+            !Number.isFinite(copierTicker.last) ||
+            masterTicker.last <= 0 ||
+            copierTicker.last <= 0
+          ) {
             debug('No ticker for', masterPosition.symbol, copierSymbol);
             return;
           }
@@ -395,6 +444,7 @@ export class CrossTradeManager {
           copierMarket,
           referencePrice,
         );
+        if (!Number.isFinite(copierSizeNative) || copierSizeNative <= 0) return;
 
         const nonHedgeModeSide = masterPosition.side === PositionSide.Long ? OrderSide.Buy : OrderSide.Sell;
 

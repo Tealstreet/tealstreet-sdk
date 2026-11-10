@@ -65,7 +65,7 @@ const boundPosition = (position: OemsPositionRef): OemsPositionRef => ({
   symbol: clipName(position.symbol),
   side: position.side === 'short' ? 'short' : 'long',
   contracts: num(position.contracts),
-  nativeContracts: num(position.nativeContracts),
+  nativeContracts: nullableNum(position.nativeContracts),
   entryPrice: num(position.entryPrice),
   markPrice: num(position.markPrice),
   notional: nullableNum(position.notional),
