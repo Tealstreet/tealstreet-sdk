@@ -60,6 +60,8 @@ mod hyperliquid_setup;
 mod lighter_setup;
 #[cfg(feature = "paradex")]
 mod paradex_setup;
+#[cfg(any(feature = "phemex", feature = "okx"))]
+pub use construction::HelperCapabilities;
 pub use construction::{
     BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
     signer_setup_public_data_only,
