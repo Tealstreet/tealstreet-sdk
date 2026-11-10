@@ -432,31 +432,32 @@ pub fn initial_store_data() -> StoreData {
 // Private wire companions keep serde metadata without exposing permissive decoders.
 mod strict_codecs {
     #[derive(serde::Deserialize)]
-    #[serde(remote = "super::PositionSettings", rename_all = "camelCase")]
+    #[serde(remote = "super::PositionSettings")]
+    #[serde(rename_all = "camelCase")]
     struct WirePositionSettings {
         id: String,
         symbol: String,
-        side: crate::PositionSide,
+        side: PositionSide,
         leverage: f64,
         #[serde(
             default,
-            deserialize_with = "crate::deserialize_present",
+            deserialize_with = "deserialize_present",
             skip_serializing_if = "Option::is_none"
         )]
-        margin_type: Option<crate::MarginType>,
+        margin_type: Option<MarginType>,
         #[serde(
             default,
-            deserialize_with = "crate::deserialize_present",
+            deserialize_with = "deserialize_present",
             skip_serializing_if = "Option::is_none"
         )]
-        position_mode: Option<crate::PositionMode>,
+        position_mode: Option<PositionMode>,
     }
     impl<'de> serde::Deserialize<'de> for super::PositionSettings {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             WirePositionSettings::deserialize(crate::strict_decode::object(deserializer))
         }
     }
-    use super::{MarginType, PositionMode, deserialize_present};
+    use super::{MarginType, PositionMode, PositionSide, deserialize_present};
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::StoreDataLoaded")]
     #[serde(rename_all = "camelCase")]
