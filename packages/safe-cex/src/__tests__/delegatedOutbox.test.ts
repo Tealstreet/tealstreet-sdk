@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
 import { createDelegatedIntentId, DelegatedOutbox, markDelegatedNotSent } from '../delegatedOutbox';
+import { DelegatedOutbox as LegacyOutbox } from './fixtures/delegatedOutbox.7232375420';
+import type { OutboxOptions as LegacyOutboxOptions } from './fixtures/delegatedOutbox.7232375420';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
 function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
@@ -84,6 +86,26 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  it('does not replay a legacy queued handoff after a declined reconnect in the same epoch', async () => {
+    const f = fixture();
+    // Exercise the historical writer rather than manufacturing an ambiguous label.
+    const old = await LegacyOutbox.open(f.options as unknown as LegacyOutboxOptions);
+    old.connect(f.connection());
+    const id = await old.enqueue(params);
+    expect(f.writes).toHaveLength(1);
+    const declined = old.connect({ ...f.connection(), send: () => false });
+    await old.flush(declined);
+    const saved = [...f.rows.values()][0];
+    expect(saved).toMatchObject({ intentId: id, state: 'queued', clockEpoch: 'boot-A', createdAt: 0 });
+    expect(saved).not.toHaveProperty('replayEvidence');
+    expect(saved).not.toHaveProperty('notSentEvidence');
+    old.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(f.writes).toHaveLength(1);
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    restored.close();
+  });
   it.each(['notSent', 'canceled'] as const)(
     'rollout restores unresolved legacy %s cancellations conservatively',
     async (state) => {
