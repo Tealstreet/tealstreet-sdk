@@ -238,6 +238,11 @@ widening an address is a security change, not a convenience.
 null and converts nonpositive or non-finite thresholds to null; the prompt
 describes this as unknown, never zero or proof that liquidation is impossible.
 
+`OemsPositionRef.notional` and `OemsOrderRef.nativeRemaining` also preserve
+unknown as null through browser bounding, JSON and route re-bounding. Known
+zeroes stay zero. An amount amend needs a known native remaining size to derive
+the engine's total amount; a price-only amend does not.
+
 `positionMode` rides every position for the same class of reason: in `hedged`
 mode `(account, symbol)` addresses two positions, and a reduce that omits the
 side is ambiguous rather than merely imprecise. `isSpot`, `isInverse` and
