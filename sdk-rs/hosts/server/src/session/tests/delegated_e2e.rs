@@ -63,7 +63,7 @@ fn plaintext(vector: &Value) -> Vec<u8> {
     bytes
 }
 
-fn connection(registry: Arc<Registry>) -> (Session, mpsc::Receiver<String>) {
+fn connection(registry: Arc<Registry>) -> (Session, crate::out::Receiver) {
     let (out, sent, _) = Out::channel(1024);
     (
         Session::new(
@@ -86,7 +86,7 @@ async fn wire(session: &mut Session, message: Value) {
     session.handle(&message.to_string()).await.unwrap();
 }
 
-async fn next_text(sent: &mut mpsc::Receiver<String>, op: &str) -> String {
+async fn next_text(sent: &mut crate::out::Receiver, op: &str) -> String {
     tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(text) = sent.recv().await {
             let value: Value = serde_json::from_str(&text).unwrap();
@@ -104,11 +104,11 @@ async fn next_text(sent: &mut mpsc::Receiver<String>, op: &str) -> String {
     .expect("bounded test reply")
 }
 
-async fn next(sent: &mut mpsc::Receiver<String>, op: &str) -> Value {
+async fn next(sent: &mut crate::out::Receiver, op: &str) -> Value {
     serde_json::from_str(&next_text(sent, op).await).unwrap()
 }
 
-async fn snapshot(session: &mut Session, sent: &mut mpsc::Receiver<String>) -> Value {
+async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Value {
     let mut loaded = session.take_loaded();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -128,7 +128,7 @@ async fn snapshot(session: &mut Session, sent: &mut mpsc::Receiver<String>) -> V
 
 async fn sealed_init(
     session: &mut Session,
-    sent: &mut mpsc::Receiver<String>,
+    sent: &mut crate::out::Receiver,
     vector: &Value,
     bytes: &[u8],
     venue: &str,
