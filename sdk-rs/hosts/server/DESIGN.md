@@ -591,6 +591,12 @@ does not compare secret material or replace an existing account's settings.
 The probe's router-lease generation remains attached through native construction
 and outbound IO. Its account is also disposed when the pending init is canceled.
 
+Verified admission binds the account's output to its socket-local generation
+before construction can defer replies. Joining a different native account retires
+the previous generation and refreshes the holder's outbox; joining the same
+account keeps its generation. Pending handover replies retain their separate
+registration lifecycle.
+
 Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
 message. Auth kinds are permanent refusals; rate, network, timeout and venue
 availability failures are transient. Replies retain the init's registration ID;
@@ -624,6 +630,15 @@ State that SCXF does not carry stays JSON, under the existing op names and shape
 - **`op:'store'` partial payloads:** these carry only the fields frames don't (`fetchedLeverage`, `balance.info`, `socketHealth`, `messageHandlerStats`, `activeChasers`, `activeTWAPs`, `ordersRisk`). They are merged over the frame store, which matches the worker's `_derivedStorePayload` in frame mode.
 - **Unchanged replies:** `error`, `warning`, `log`, `engine-event`, `command-progress`, `callMethod:done`, `exec-result`, `updatePositions:done`, `chaser:*` and `twap:*`.
 
+Account output captures a socket-local account generation before a callback,
+detached read, signer or frame pump can defer it. An accepted rebuilding init
+retires that generation before obtaining the replacement; dispose and orphan
+release retire it too. Both enqueue and socket dequeue check the captured
+generation and discard stale output, including delayed algo stop notices and
+already-queued frames and account-scoped init refusals, including signing-mode
+mismatches. Repeated init and re-snapshot of the same account keep their
+generation. Other accounts and session envelopes are unaffected.
+
 An optional string `init.instanceId` identifies the browser registration, not
 the account or its authority. It never enters engine options, fingerprints or
 rebuild comparisons. Account `msg` replies and remote `sign-req` frames echo it
@@ -643,13 +658,15 @@ Each init refreshes fallback reply provenance after the connection's policy
 checks, even when rebuilding is refused or the venue is unsupported. Native
 disposal or join cleanup cannot restore an older registration. Explicit client
 disposal removes it. This metadata grants no engine or signing authority; outputs
-already captured by old clients, commands or callbacks keep their original ID.
+already captured by old clients, commands or callbacks keep their original ID
+while their account generation is current; retired generations are dropped.
 Retained records capture their source account fingerprint before deferral and
 are stored separately by user, name and fingerprint. Replay selects the actually
 joined fingerprint before stamping the new holder's ID, so retired credentials
 cannot donate a notice or overwrite another account's owed record through an
-empty registry slot. Session envelopes and all existing account/lease authority
-checks remain unchanged.
+empty registry slot. Same-fingerprint rebuilds preserve resume-owner, once-only
+and 24-hour retention rules. Session envelopes and all existing account/lease
+authority checks remain unchanged.
 
 A resumed signer can reattach before the browser re-inits. Its unsent signing
 requests wait in a queue bounded by the socket's outbound capacity until the

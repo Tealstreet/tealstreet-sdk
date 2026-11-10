@@ -5,6 +5,9 @@ use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
 use serde::Deserialize;
 
 const CREATION_WINDOW_MS: u64 = 5_000;
+const TARGET_POLL_DELAY_MS: u32 = 100;
+/// The wait before each target history read: about 5 s in all for history to index the cancel.
+const HISTORY_POLL_DELAYS_MS: [u32; 6] = [250, 500, 750, 1_000, 1_250, 1_500];
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -227,6 +230,7 @@ pub(super) struct Flow {
     history_done: bool,
     observed_at: f64,
     target_reads: u8,
+    history_reads: u8,
     history_window: Option<(u64, u64)>,
 }
 
@@ -300,6 +304,16 @@ impl Flow {
     pub(super) fn proof(&self, axis: Axis) -> Planned {
         proof(&self.guard.category, &self.guard.original, axis)
     }
+    /// How long to wait before the next read on `axis`.
+    pub(super) fn poll_delay_ms(&self, axis: Axis) -> u32 {
+        match axis {
+            Axis::TargetHistory => {
+                let index = usize::from(self.history_reads).min(HISTORY_POLL_DELAYS_MS.len() - 1);
+                HISTORY_POLL_DELAYS_MS[index]
+            }
+            _ => TARGET_POLL_DELAY_MS,
+        }
+    }
     pub(super) fn target_id(&self) -> &str {
         &self.guard.original.id
     }
@@ -312,6 +326,7 @@ impl Flow {
             history_done: false,
             observed_at: 0.0,
             target_reads: 0,
+            history_reads: 0,
             history_window: None,
         }
     }
@@ -347,8 +362,15 @@ impl Flow {
             } else {
                 Axis::TargetHistory
             };
-            if page.list.is_empty() && axis == Axis::Target && page.next_page_cursor.is_empty() {
-                return Ok(Observation::Retry(retry));
+            if page.list.is_empty() && page.next_page_cursor.is_empty() {
+                if axis == Axis::Target {
+                    return Ok(Observation::Retry(retry));
+                }
+                // A unified account's cancelled order is only in history, which can lag the cancel.
+                self.history_reads += 1;
+                if usize::from(self.history_reads) < HISTORY_POLL_DELAYS_MS.len() {
+                    return Ok(Observation::Retry(Axis::TargetHistory));
+                }
             }
             if page.list.len() != 1 {
                 return Err(failed(&format!("target-len={}", page.list.len())));

@@ -256,3 +256,43 @@ async fn probe_authority_is_captured_before_the_spawned_task_first_runs() {
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
     session.close();
 }
+
+#[tokio::test]
+async fn verified_rebuild_retires_previous_output_generation() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut completed = session.take_verified();
+    let init = payload(&mut session, Some("verified-owner-A"));
+    session.init(init).await.unwrap();
+    finish(&mut session, &mut completed).await;
+    let a = session.joined["acct"].account.clone();
+    let previous = session.account_out("acct");
+    while sent.try_recv().is_ok() {}
+    assert!(previous.send(envelope::error(Some("acct"), "queued-verified-A")));
+    f.registry.dispose(&a, Disposal::Replaced);
+    let init = payload(&mut session, Some("verified-owner-B"));
+    session.init(init).await.unwrap();
+    finish(&mut session, &mut completed).await;
+    assert!(!Arc::ptr_eq(&session.joined["acct"].account, &a));
+    assert!(
+        !previous.send(envelope::error(Some("acct"), "late-verified-A")),
+        "a verified rebuild must retire the old account's output"
+    );
+    while let Ok(frame) = sent.try_recv() {
+        assert!(
+            !frame.contains("queued-verified-A") && !frame.contains("late-verified-A"),
+            "retired verified output survived: {frame}"
+        );
+    }
+    assert!(
+        session
+            .account_out("acct")
+            .send(envelope::error(Some("acct"), "current-verified-B"))
+    );
+    let current = std::iter::from_fn(|| sent.try_recv().ok())
+        .find(|frame| frame.contains("current-verified-B"))
+        .expect("the current verified owner still receives output");
+    let current: Value = serde_json::from_str(&current).unwrap();
+    assert_eq!(current["d"]["instanceId"], "verified-owner-B");
+    session.close();
+}
