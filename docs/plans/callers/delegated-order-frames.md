@@ -196,6 +196,9 @@ never creates an outcome named `canceled`, a new acknowledgement kind, or a fift
 order frame. Ordinary malformed/unbindable request errors likewise remain ordinary
 error messages, not fabricated order receipts. Hosts must not clear pending queue
 cancellation merely on receipt of such an ordinary error.
+Ignored box receipts preserve the current state (`sending` after physical handoff).
+An ordinary request error likewise leaves a handed-off cancellation `unknown`
+with `cancelPending: true`; only an authoritative receipt settles that request.
 
 The router decodes box JSON before classifying it, including escaped kind names
 and reordered fields. Every receipt the outbox can consume is intercepted or
@@ -213,19 +216,31 @@ after admission and capability discovery. Pass the captured ticket to `flush`
 and `receive`, and close the outbox on logout or removal. Deferred storage work
 can neither send through a replaced socket nor switch to another owner.
 
-The injected `send` must use that ticket's currently open socket without a
-reconnect buffer: true means physical handoff, false means neither sent nor
-queued for a later connection. An indeterminate handoff throws and stays unknown.
-
-The outbox persists before handoff and resends the same unacknowledged intent
-across reconnects within ten monotonic seconds, only with both capabilities on
-the new connection. It shows a physical handoff as `sending`. At the deadline an
-intent never handed off is `notSent`; a still-unresolved physical handoff is
-`unknown`. Physical handoff rechecks the cap after storage waits. Queue
-cancellation after a physical handoff also remains unknown until a router receipt
-resolves it. Persisted `sending` records restore as unknown, including when saving a
-later result failed. A queued record from a different monotonic epoch becomes
-not sent rather than inferring elapsed time from wall time. Queue cancellation
+The outbox persists before handoff and marks the row `sending` at the physical
+socket boundary. It never resubmits sending, acknowledged or unknown work.
+Disconnect or connection replacement changes sending/acknowledged rows to unknown;
+late receipts can still resolve those rows on the current admitted connection.
+Direct `close()` immediately exposes those retained rows as unknown and fences
+all later receipts, callbacks and socket work.
+Only `markDelegatedNotSent(intent, evidence)` can construct a `notSent` state.
+Its positive no-handoff or authoritative-refusal evidence is stored with its
+kind and exact scope/intent/sequence/fingerprint binding. The private runtime
+brand is never serialized: restore validates the stored evidence before
+reissuing it. A legacy, missing or mismatched proof restores as unknown and
+cannot enable a replay. Callers must retain the existing changed/persist and
+retention handling after this constructor, including when a local claim is
+refused and becomes unknown.
+At ten monotonic seconds from creation, its deadline observer marks queued,
+never-forwarded work not sent, even while storage is waiting, and marks in-flight
+or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+send adapter must return true only for a physical handoff; false or a throw
+positively guarantees neither handoff nor buffering for a later connection.
+Cancellation or expiry during a declined first send remains terminal; a legacy
+pending cancellation restores as unknown. A queue cancellation after handoff remains
+unknown until an authoritative receipt proves non-forwarding. Persisted `sending`
+records restore as unknown, including when saving a later result failed. A queued
+record from a different monotonic epoch becomes unknown rather than inferring
+elapsed time from wall time. Queue cancellation
 can be persisted and resent; order submission cannot resume after acknowledgement
 or unknown. Rendering, consent and router ledger storage remain host concerns.
 Legacy `notSent`/`canceled` records with pending router cancellation also restore
@@ -238,7 +253,16 @@ handoff keeps enqueue successful with that same intent ID; retry preserves it.
 Pending work is limited to 1,024 records; at most 32 completed records are kept
 for recent history. Placed, refused, not-sent and canceled records can retire only
 after their state is durable and no queue cancellation is pending. Acknowledged
-and unknown records remain retained and never become resendable through pruning.
+work becomes unknown at the command deadline or disconnect. Unknown rows remain
+unresolved for 24 hours from UUIDv7 Unix creation time, evaluated against the
+injected Unix clock on timers and reload (a clock rollback extends retention).
+Expiry emits `changed` with `state: "unknown", retentionExpired: true`, clears any
+pending queue cancellation, and persists that explicit expired-history marker.
+Hosts surface expired unresolved history and use ordinary order state/history for
+reconciliation. Expired unknowns join the latest-32 completed history only after
+the expiry marker is durable. Compaction never changes their outcome to not sent
+or makes their identity resendable. Storage failure retains them until flush can
+retry. A later authoritative result may still resolve a retained history row.
 
 Adapters provide `compact(scope, {version:1, sequence, retiredIntentIds})` as one
 atomic transaction. It deletes only those IDs for that owner/account and advances
