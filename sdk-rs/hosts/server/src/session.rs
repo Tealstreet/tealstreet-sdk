@@ -113,17 +113,25 @@ pub struct Session {
     next_verification: u64,
     verified: tokio::sync::mpsc::UnboundedSender<JoinCompletion>,
     verified_rx: Option<tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>>,
+    #[cfg(test)]
+    cosigned_admission_test: bool,
 }
 
 struct PendingVerification {
     generation: u64,
     task: tokio::task::JoinHandle<()>,
     out: Out,
+    #[cfg(test)]
+    cosigned_link: Option<Arc<safe_cex_remote_signer::SignerLink>>,
 }
 
 impl Drop for PendingVerification {
     fn drop(&mut self) {
         self.task.abort();
+        #[cfg(test)]
+        if let Some(link) = &self.cosigned_link {
+            link.mark_unavailable();
+        }
     }
 }
 
@@ -136,6 +144,8 @@ pub struct JoinCompletion {
     account_name: String,
     candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
     probe: Option<ProbedInit>,
+    #[cfg(test)]
+    cosigned: Option<cosigned_admission_test_support::Completion>,
 }
 
 struct ProbedInit {
@@ -251,6 +261,8 @@ impl Session {
             next_verification: 0,
             verified,
             verified_rx: Some(verified_rx),
+            #[cfg(test)]
+            cosigned_admission_test: false,
         }
     }
 
@@ -400,6 +412,8 @@ impl Session {
                 account_name,
                 candidate,
                 probe,
+                #[cfg(test)]
+                cosigned: None,
             });
         });
         self.pending_verifications.insert(
@@ -408,6 +422,8 @@ impl Session {
                 generation,
                 task,
                 out,
+                #[cfg(test)]
+                cosigned_link: None,
             },
         );
     }
@@ -433,6 +449,10 @@ impl Session {
         if self.moved_by_drain() {
             self.moved = true;
             return Err(Close::Moved);
+        }
+        #[cfg(test)]
+        if let Some(probed) = completed.cosigned {
+            return self.complete_cosigned_test_admission(probed, out).await;
         }
         if let Some(probe) = completed.probe {
             match (completed.candidate, probe.permit) {
@@ -819,6 +839,15 @@ impl Session {
                         "Unauthenticated exchange-server sessions cannot sign",
                     ));
                 }
+                #[cfg(test)]
+                if self.pending_verifications.values().any(|pending| {
+                    pending
+                        .cosigned_link
+                        .as_ref()
+                        .is_some_and(|link| link.resolve(self.socket, response.clone()))
+                }) {
+                    return Ok(());
+                }
                 // Only links this socket owns can match: another socket's ids never resolve here.
                 for joined in self.joined.values() {
                     if let Some(link) = &joined.account.link
@@ -925,6 +954,11 @@ impl Session {
         }
         if init.signing_mode.as_deref() == Some("delegated") {
             self.delegated_init(init);
+            return Ok(());
+        }
+        #[cfg(test)]
+        if self.cosigned_admission_test && init.signing_mode.as_deref() == Some("cosigned") {
+            self.init_cosigned_test_admission(init);
             return Ok(());
         }
         self.handovers.forget(&init.account_name);
@@ -5361,3 +5395,7 @@ mod tests {
 #[cfg(test)]
 #[path = "session_delegated_writes_tests.rs"]
 mod delegated_writes_tests;
+
+#[cfg(test)]
+#[path = "session/cosigned_admission_test_support.rs"]
+mod cosigned_admission_test_support;

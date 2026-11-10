@@ -4185,3 +4185,7 @@ mod delegated_accounts_tests;
 #[cfg(test)]
 #[path = "delegated_construction_tests.rs"]
 mod delegated_construction_tests;
+
+#[cfg(test)]
+#[path = "accounts/cosigned_admission_test_support.rs"]
+mod cosigned_admission_test_support;
