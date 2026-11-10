@@ -1,5 +1,46 @@
 use super::*;
 
+#[tokio::test]
+async fn runtime_order_frames_are_off_for_an_admitted_session_by_default() {
+    const EXPECT: &str = "TEALSTREET_TEST_ORDER_SESSION_ENABLED";
+    let enabled = std::env::var(EXPECT).as_deref() == Ok("1");
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) =
+                joined_without_runtime_opt_in(registry.clone(), "A", account.clone()).await;
+            submit(&mut session, 0, None).await;
+            let ack = order_frame(&mut sent, "order.ack").await;
+            assert_eq!(ack["d"]["received"], enabled);
+            if enabled {
+                let outcome = order_frame(&mut sent, "order.outcome").await;
+                assert_eq!(outcome["d"]["outcome"], "placed");
+                assert_eq!(*tape.writes.lock().unwrap(), vec!["create"]);
+            } else {
+                assert!(tape.writes.lock().unwrap().is_empty());
+            }
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+    if !enabled {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "session::delegated_writes_tests::order_frames::runtime_order_frames_are_off_for_an_admitted_session_by_default",
+                "--nocapture",
+            ])
+            .env("TEALSTREET_DELEGATED_ORDER_FRAMES", "1")
+            .env(EXPECT, "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "runtime-on session probe failed");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+}
+
 fn intent(age: u64) -> String {
     let epoch = crate::accounts::now_ms().saturating_sub(age);
     let hex = format!("{epoch:012x}");

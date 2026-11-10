@@ -64,12 +64,16 @@ the server handover implementation landing.
 ## DELEGATED order outbox
 
 `DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
-submits, gated on the advertised delegatedOrderFramesV1 capability. Hosts inject scoped persistence, secure randomness, a monotonic clock
+submits, gated on both advertised delegatedOrderFramesV1 and delegatedOrderLedgerV1
+capabilities for each connection. Hosts inject scoped persistence, secure randomness, a monotonic clock
 with a stable epoch, deadline scheduling and an admitted socket connection. Close
 the outbox on logout; pass the captured connection ticket to flush and receive.
 Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
-intents are never submitted again. Unacknowledged intents expire after ten
-monotonic seconds, including time spent waiting for persistence or admission.
+intents are never submitted again. After ten monotonic seconds, including time
+spent waiting for persistence or admission, an intent never handed off is not sent;
+an unresolved physical handoff is unknown. A physical handoff is shown as sending
+until its receipt or deadline. Queue cancellation also preserves uncertainty after
+a handoff. Legacy pending cancellations restore as unknown, never as proof of no send.
 Restored ambiguous handoffs are unknown; queued records from another clock epoch
 are not sent. Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router

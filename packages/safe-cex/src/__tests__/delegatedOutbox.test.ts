@@ -52,7 +52,7 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
     venue: 'bybit',
     signingMode: 'delegated',
     ready: true,
-    capabilities: { delegatedOrderFramesV1: true },
+    capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
     instanceId,
     send(frame) {
       writes.push(frame);
@@ -83,6 +83,85 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  it.each(['notSent', 'canceled'] as const)(
+    'rollout restores unresolved legacy %s cancellations conservatively',
+    async (state) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      const id = await box.enqueue(params);
+      const row = box.entries()[0];
+      box.close();
+      await f.options.storage.put(f.options, { ...row, state, cancelPending: true });
+      f.advance(10_000);
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', cancelPending: true });
+      await restored.flush(restored.connect(f.connection('replacement')));
+      expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.submit', 'order.cancelQueued']);
+      restored.close();
+    },
+  );
+
+  it.each([undefined, false])('rollout requires the router ledger capability (%s)', async (ledger) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect({
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: ledger },
+    });
+    await box.enqueue(params);
+    await box.flush(c);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
+
+  it('rollout rechecks both capabilities after a connection replacement', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const first = box.connect({
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+    });
+    const id = await box.enqueue(params);
+    expect(f.writes).toHaveLength(1);
+    box.disconnect(first);
+    f.advance(500);
+    const replacement = box.connect({
+      ...f.connection('replacement'),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: false },
+    });
+    await box.flush(replacement);
+    expect(f.writes).toHaveLength(1);
+    expect(box.entries()[0].intentId).toBe(id);
+    box.close();
+  });
+
+  it('rollout keeps a physically handed-off intent unresolved at its deadline and after reload', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect({
+      ...f.connection(),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+    });
+    const id = await box.enqueue(params);
+    expect(f.writes).toHaveLength(1);
+    f.advance(10_000);
+    await box.flush(c);
+    expect(box.entries()[0].state).toBe('unknown');
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    const replacement = restored.connect({
+      ...f.connection('replacement'),
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+    });
+    await restored.flush(replacement);
+    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    const submits = f.writes.map((text) => JSON.parse(text)).filter((frame) => frame.t === 'order.submit');
+    expect(submits).toHaveLength(1);
+    expect(submits[0].d.intentId).toBe(id);
+    restored.close();
+  });
+
   it('returns the durable physically-sent intent even when unrelated retirement fails', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -116,7 +195,7 @@ describe('DELEGATED host-neutral outbox', () => {
       expect(box.entries()).toHaveLength(33);
       expect(f.rows.size).toBe(33);
       expect(f.writes).toHaveLength(1);
-      expect(box.entries().find((row) => row.intentId === result.id)?.state).toBe('queued');
+      expect(box.entries().find((row) => row.intentId === result.id)?.state).toBe('sending');
     } finally {
       box.close();
     }
@@ -269,7 +348,7 @@ describe('DELEGATED host-neutral outbox', () => {
     await finishing;
     expect(a.writes).toEqual([]);
     expect(b.writes).toHaveLength(1);
-    expect(bob.entries()[0]).toMatchObject({ owner: 'bob', intentId: bId, state: 'queued' });
+    expect(bob.entries()[0]).toMatchObject({ owner: 'bob', intentId: bId, state: 'sending' });
     expect([...a.rows.values()].filter((row) => row.owner === 'bob')).toHaveLength(1);
     bob.close();
   });
@@ -396,7 +475,7 @@ describe('DELEGATED host-neutral outbox', () => {
     const c = box.connect(f.connection());
     await box.flush(c);
     await box.receive(c, response(id, 'order.ack', { received: true, padding: 'x'.repeat(4096) }));
-    expect(box.entries()[0].state).toBe('queued');
+    expect(box.entries()[0].state).toBe('sending');
     await box.receive(c, response(id, 'order.outcome', { outcome: 'unknown', clientOrderId: id, outcomeSeq: 2 }));
     await box.receive(
       c,
@@ -535,7 +614,7 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toHaveLength(1);
     expect(JSON.parse(f.writes[0]).d.instanceId).toBe('new');
     await box.receive(stale, response(id, 'order.ack', { received: true }));
-    expect(box.entries()[0].state).toBe('queued');
+    expect(box.entries()[0].state).toBe('sending');
     box.close();
   });
   it('expires synchronously while the physical-handoff persistence is delayed', async () => {
@@ -651,7 +730,7 @@ describe('DELEGATED host-neutral outbox', () => {
     frame.d.instanceId = 'registration';
     frame.d.accountName = 'another';
     await box.receive(c, frame);
-    expect(box.entries()[0].state).toBe('queued');
+    expect(box.entries()[0].state).toBe('sending');
     box.close();
   });
   it('does not hand off while pending, after storage failure, or through HTTP', async () => {
