@@ -105,6 +105,10 @@ pub struct AccountMsg {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "t", content = "d", rename_all = "kebab-case")]
 pub enum Inbound {
+    #[serde(rename = "order.submit")]
+    OrderSubmit(crate::order_contract::OrderSubmit),
+    #[serde(rename = "order.cancelQueued")]
+    OrderCancelQueued(crate::order_contract::CancelQueued),
     Init(Box<InitPayload>),
     Msg(AccountMsg),
     SignRes(Value),
@@ -143,6 +147,8 @@ pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
     let kind = match frame["t"].as_str() {
         Some("msg") => "msg",
         Some("sign-req") => "sign-req",
+        Some("order.ack") => "order.ack",
+        Some("order.outcome") => "order.outcome",
         _ => return text,
     };
     let Some(data) = frame["d"].as_object_mut() else {
@@ -157,6 +163,11 @@ pub fn msg(account_name: &str, op: &str, data: Value) -> String {
         "msg",
         json!({"op": op, "accountName": account_name, "data": data}),
     )
+}
+
+pub fn order_frame(kind: &str, account_name: &str, mut data: Value) -> String {
+    data["accountName"] = account_name.into();
+    envelope(kind, data)
 }
 
 pub fn delegated_key(account_name: &str, offer: &crate::delegated::KeyOffer) -> String {
