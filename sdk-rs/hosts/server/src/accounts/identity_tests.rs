@@ -501,3 +501,40 @@ async fn parked_holder_prevents_implicit_settings_changes_and_renamed_resume_kee
         })
         .await;
 }
+
+#[tokio::test]
+async fn label_lookup_selects_the_requested_holder_across_identity_modes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let identified = init();
+            let identity_account = account(&registry, "u", &identified);
+            let legacy = InitPayload {
+                exchange_name: "bybitinverse".into(),
+                ..identified.clone()
+            };
+            let legacy_account = account(&registry, "u", &legacy);
+            for (init, holder) in [(&identified, 7), (&legacy, 8)] {
+                registry
+                    .obtain("u", init, false, holder, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+            }
+            assert!(Arc::ptr_eq(
+                &registry.held("u", &legacy.account_name, 8).unwrap(),
+                &legacy_account
+            ));
+            assert!(registry.holds(&identity_account, 7));
+            assert!(Arc::ptr_eq(
+                &registry.held("u", &identified.account_name, 7).unwrap(),
+                &identity_account
+            ));
+            assert!(registry.held("u", &identified.account_name, 9).is_none());
+            assert!(
+                registry
+                    .held("other-user", &identified.account_name, 7)
+                    .is_none()
+            );
+        })
+        .await;
+}

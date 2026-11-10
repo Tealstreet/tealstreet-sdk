@@ -322,3 +322,101 @@ async fn apply_settings_without_admission_replies_to_the_current_registration() 
     assert_eq!(reply["d"]["instanceId"], "current");
     assert_eq!(f.registry.account_count(), 0);
 }
+
+async fn replaced_identity_releases_only_its_label(keep_alias: bool, keep_other: bool) {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut results = session.take_verified();
+    admitted(&mut session, "acct", "synthetic-key", "old", &mut results).await;
+    let previous = session.joined["acct"].account.clone();
+    if keep_alias {
+        admitted(
+            &mut session,
+            "alias",
+            "synthetic-key",
+            "alias-id",
+            &mut results,
+        )
+        .await;
+    }
+    let (mut other, mut other_sent) = user_session(f.registry.clone(), "alice");
+    let mut other_results = other.take_verified();
+    if keep_other {
+        admitted(
+            &mut other,
+            "other",
+            "synthetic-key",
+            "other-id",
+            &mut other_results,
+        )
+        .await;
+    }
+    admitted(
+        &mut session,
+        "acct",
+        "synthetic-next-key",
+        "new",
+        &mut results,
+    )
+    .await;
+    let current = session.joined["acct"].account.clone();
+    assert!(!Arc::ptr_eq(&previous, &current));
+    assert!(Arc::ptr_eq(
+        &current,
+        &f.registry.held("alice", "acct", session.socket).unwrap()
+    ));
+    assert_eq!(
+        previous.labels(session.socket),
+        if keep_alias {
+            vec!["alias".to_owned()]
+        } else {
+            vec![]
+        }
+    );
+    assert_eq!(f.registry.holds(&previous, session.socket), keep_alias);
+    assert_eq!(f.registry.holds(&previous, other.socket), keep_other);
+    assert_eq!(
+        previous.handle.disposal_cause().is_none(),
+        keep_alias || keep_other
+    );
+    let notice = "synthetic previous account notice";
+    previous.notify(envelope::error(Some("acct"), notice));
+    for (sent, label, id, expected) in [
+        (&mut sent, "alias", "alias-id", keep_alias && !keep_other),
+        (&mut other_sent, "other", "other-id", keep_other),
+    ] {
+        let mut notices = 0;
+        while let Ok(message) = sent.try_recv() {
+            let message: Value = serde_json::from_str(&message).unwrap();
+            if message["d"]["op"] == "error" && message["d"]["data"][0] == notice {
+                notices += 1;
+                assert_eq!(message["d"]["accountName"], label);
+                assert_eq!(message["d"]["instanceId"], id);
+            }
+        }
+        assert_eq!(notices, usize::from(expected));
+    }
+    session.identity.resumable = false;
+    other.identity.resumable = false;
+    let socket = session.socket;
+    session.close();
+    other.close();
+    assert!(!f.registry.holds(&previous, socket));
+    assert!(!f.registry.holds(&current, socket));
+    assert_eq!(f.registry.account_count(), 0);
+}
+
+#[tokio::test]
+async fn verified_identity_change_releases_the_replaced_registration() {
+    replaced_identity_releases_only_its_label(false, false).await;
+}
+
+#[tokio::test]
+async fn verified_identity_change_preserves_another_alias() {
+    replaced_identity_releases_only_its_label(true, false).await;
+}
+
+#[tokio::test]
+async fn verified_identity_change_preserves_another_holder() {
+    replaced_identity_releases_only_its_label(false, true).await;
+}

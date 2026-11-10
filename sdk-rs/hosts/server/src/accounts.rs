@@ -1612,7 +1612,7 @@ impl Registry {
         let accounts = self.accounts.lock().unwrap();
         let account = accounts
             .get(&(user.to_owned(), name.to_owned()))
-            .filter(|account| account.identity.is_none())
+            .filter(|account| account.identity.is_none() && self.holds(account, holder))
             .cloned()
             .or_else(|| {
                 accounts

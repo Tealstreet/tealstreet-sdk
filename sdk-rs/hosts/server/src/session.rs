@@ -464,7 +464,7 @@ impl Session {
                                 if let Some(previous) = self.joined.remove(&completed.account_name)
                                 {
                                     previous.out.retire_registration();
-                                    Self::leave_engine(previous);
+                                    self.leave(previous, Disposal::SettingsChanged);
                                 }
                                 self.join(account, out.clone()).await;
                             }
@@ -1356,22 +1356,31 @@ impl Session {
         }
     }
 
+    // Capture this registration before the rebuild can yield to another owner.
+    pub(crate) fn settings_change(
+        &self,
+        init: InitPayload,
+        account: Arc<Account>,
+    ) -> impl std::future::Future<Output = Result<Arc<Account>, String>> + use<> {
+        let registry = self.registry.clone();
+        let identity = self.identity.clone();
+        let socket = self.socket;
+        let outbox = self.account_out(&init.account_name).outbox();
+        async move {
+            let user = identity.user.ok_or("Authenticated user required")?;
+            registry
+                .apply_settings(&user, &init, account, socket, identity.token, outbox)
+                .await
+        }
+    }
+
     async fn apply_settings(&mut self, name: &str, data: Value) {
         let out = self.account_out(name);
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
         let result = match serde_json::from_value::<InitPayload>(data["settings"].clone()) {
             Ok(init) if init.account_name == name => {
                 let account = self.joined[name].account.clone();
-                self.registry
-                    .apply_settings(
-                        self.user(),
-                        &init,
-                        account,
-                        self.socket,
-                        self.identity.token.clone(),
-                        out.outbox(),
-                    )
-                    .await
+                self.settings_change(init, account).await
             }
             _ => Err("Apply settings requires settings for this account label".into()),
         };

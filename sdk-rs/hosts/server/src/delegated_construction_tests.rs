@@ -200,7 +200,7 @@ fn assert_construction_outbox(
     );
 }
 
-async fn construction_case(switch_user: bool, revoke_a: bool) {
+async fn construction_case(switch_user: bool, revoke_a: bool, apply_settings: bool) {
     let Loopback {
         plan,
         received,
@@ -229,6 +229,25 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
     caller.open().await;
     let a_socket = caller.socket;
 
+    let mut resident = None;
+    if apply_settings {
+        let (init, pair) = setup("synthetic-A-key");
+        let account = caller.delegated_test_build(init, pair).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !received
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event.key.as_deref() == Some("synthetic-A-key"))
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("resident A positive control signs against loopback");
+        resident = Some(account);
+    }
+
     // Hold the actual engine placement lane, after preparation and before spawn.
     let (release, blocked) = std::sync::mpsc::channel();
     let (entered, waiting) = tokio::sync::oneshot::channel();
@@ -237,11 +256,24 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         blocked.recv_timeout(Duration::from_secs(20)).unwrap();
     }));
     waiting.await.unwrap();
-    let (init, pair) = setup("synthetic-A-key");
-    let a = caller.delegated_test_build(init, pair);
+    let (mut init, pair) = setup("synthetic-A-key");
+    let a: std::pin::Pin<Box<dyn Future<Output = Result<Arc<Account>, String>>>> =
+        if let Some(account) = &resident {
+            init.signing_mode = Some("delegated".into());
+            init.enable_spot_markets = Some(true);
+            Box::pin(caller.settings_change(init, account.clone()))
+        } else {
+            Box::pin(caller.delegated_test_build(init, pair))
+        };
     tokio::pin!(a);
-    queued(a.as_mut(), &registry, 2).await;
-    assert!(received.lock().unwrap().is_empty());
+    queued(a.as_mut(), &registry, 2 + usize::from(apply_settings)).await;
+    if let Some(account) = &resident {
+        assert!(account.handle.disposal_cause().is_some());
+        received.lock().unwrap().clear();
+        assert_construction_outbox(&mut a_out, None, true);
+    } else {
+        assert!(received.lock().unwrap().is_empty());
+    }
 
     let mut b_out = None;
     let mut b = None;
@@ -252,7 +284,12 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
         b_out = Some(out);
         let (init, pair) = setup("synthetic-B-key");
         b = Some(Box::pin(caller.delegated_test_build(init, pair)));
-        queued(b.as_mut().unwrap().as_mut(), &registry, 3).await;
+        queued(
+            b.as_mut().unwrap().as_mut(),
+            &registry,
+            3 + usize::from(apply_settings),
+        )
+        .await;
     }
     if revoke_a {
         grant(&registry, 2);
@@ -270,6 +307,15 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
     } else {
         let account = a.unwrap_or_else(|_| panic!("same-owner construction completes"));
         assert_eq!(account.user, A);
+        if let Some(before) = &resident {
+            assert!(!Arc::ptr_eq(before, &account));
+            assert_eq!(before.registry_name(), account.registry_name());
+            assert_ne!(before.fingerprint, account.fingerprint);
+            assert!(Arc::ptr_eq(
+                &before.delegated.as_ref().unwrap().provider(),
+                &account.delegated.as_ref().unwrap().provider()
+            ));
+        }
         assert!(registry.held(A, &account.name, a_socket).is_some());
         assert!(!registry.holds(&account, caller.socket) || !switch_user);
         account.notify("synthetic-A-result".into());
@@ -361,15 +407,30 @@ async fn construction_case(switch_user: bool, revoke_a: bool) {
 
 #[tokio::test]
 async fn delegated_construction_same_authenticated_owner_control() {
-    construction_case(false, false).await;
+    construction_case(false, false, false).await;
 }
 
 #[tokio::test]
 async fn delegated_construction_authenticated_switch_keeps_original_attribution() {
-    construction_case(true, false).await;
+    construction_case(true, false, false).await;
 }
 
 #[tokio::test]
 async fn delegated_construction_authenticated_switch_drops_retired_work_and_builds_fresh_b() {
-    construction_case(true, true).await;
+    construction_case(true, true, false).await;
+}
+
+#[tokio::test]
+async fn delegated_settings_same_authenticated_owner_control() {
+    construction_case(false, false, true).await;
+}
+
+#[tokio::test]
+async fn delegated_settings_authenticated_switch_keeps_original_attribution() {
+    construction_case(true, false, true).await;
+}
+
+#[tokio::test]
+async fn delegated_settings_authenticated_switch_drops_retired_work_and_builds_fresh_b() {
+    construction_case(true, true, true).await;
 }
