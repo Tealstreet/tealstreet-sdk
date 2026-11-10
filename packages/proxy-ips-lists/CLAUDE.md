@@ -4,16 +4,15 @@ Private proxy IP addresses database organized by region.
 
 - **Key file**: `src/index.ts`
 - **Exports**: `privateProxyIpsVultrTokyo`, `privateProxyIpsSingapore`, `privateProxyIpsTokyo`, `tokyoK8sNatGatewayIp`, `wsProxyIps`, `exchangesRequireWsIp`
-- **Routing metadata stays all-Vultr.** Every whitelist in master's
-  `exchangeMetadata` is `privateProxyIpsVultrTokyo`; its invariant test stays
-  unchanged. AWS exports remain active for rollback and legacy whitelabels.
-- **Display policy** lives in `src/whitelist.ts`, shared by web and docs. Its
-  `legacyWhitelist.ts` maps venue/region to the existing AWS exports by symbol,
-  projected from the cited legacy-master revision, without changing routing.
-  Fleet comes first, followed by legacy AWS and WS/Bitunix extras. Copy uses the
-  unique union unless a verified venue cap requires fleet only; legacy addresses
-  remain visible and optional. Unknown caps are not guessed. The legacy WS gate
-  is retained separately because master's `exchangesRequireWsIp` is now empty.
+- **Routing and user-facing whitelist copy stay all-Vultr.** Every whitelist in
+  master's `exchangeMetadata` is `privateProxyIpsVultrTokyo`, and
+  `whitelist.ts` returns that same fleet for display and copy. The old AWS
+  exports are retained only as historical named data while retired references
+  are cleaned up; do not add them back to account setup copy.
+- **Display policy** lives in `src/whitelist.ts`, shared by web and docs. It
+  intentionally ignores `legacyWhitelist.ts` so new account setup, refused-key
+  recovery and docs all copy only the active fleet addresses. Keep old AWS
+  addresses out of the copy surface.
 - **Build**: `yarn build-force` (tsup)
 - **Note**: Data-only package. Lists exchanges that require WebSocket proxy.
   `tokyoK8sNatGatewayIp` is not part of `privateProxyIpsTokyo`; it is the
