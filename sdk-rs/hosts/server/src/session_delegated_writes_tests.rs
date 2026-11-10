@@ -260,7 +260,7 @@ async fn joined(
     registry: Arc<Registry>,
     user: &str,
     account: Arc<Account>,
-) -> (Session, mpsc::Receiver<String>) {
+) -> (Session, crate::out::Receiver) {
     let (out, sent, _) = Out::channel(256);
     let mut session = Session::new(
         registry,
@@ -317,7 +317,7 @@ async fn call(session: &mut Session, request: &str, method: &str, args: Value) {
         .unwrap();
 }
 
-async fn reply(sent: &mut mpsc::Receiver<String>, request: &str) -> Value {
+async fn reply(sent: &mut crate::out::Receiver, request: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(text) = sent.recv().await {
             let value: Value = serde_json::from_str(&text).unwrap();

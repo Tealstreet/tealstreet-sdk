@@ -16,7 +16,7 @@ async fn submit(session: &mut Session, age: u64, registration: Option<&str>) -> 
     id
 }
 
-async fn order_frame(sent: &mut mpsc::Receiver<String>, op: &str) -> Value {
+async fn order_frame(sent: &mut crate::out::Receiver, op: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(2), async {
         while let Some(text) = sent.recv().await {
             let frame: Value = serde_json::from_str(&text).unwrap();

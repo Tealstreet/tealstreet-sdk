@@ -508,7 +508,7 @@ fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
         // PendingCancel is accepted but not final: the socket frame ends the order.
         let pending_cancel = row.exec_status.eq_ignore_ascii_case("PendingCancel");
         let status = match row.ord_status.to_ascii_lowercase().as_str() {
-            "init" => None,
+            "init" | "created" => None,
             "canceled" | "cancelled" | "deactivated" => Some(OrderStatus::Canceled),
             "filled" => Some(OrderStatus::Closed),
             "new" | "partiallyfilled" if pending_cancel => None,
@@ -2476,7 +2476,8 @@ impl PhemexPerpetuals {
                     if identity.biz_error != 0 {
                         return Err("Phemex create acknowledgement rejection mismatch".into());
                     }
-                    let pending = identity.ord_status == "Init";
+                    // Both documented acknowledgement states are transient, not working orders.
+                    let pending = matches!(identity.ord_status.as_str(), "Init" | "Created");
                     if !pending {
                         row.orders(cx.now)
                             .ok_or("Phemex unrecognized create order response")?;
