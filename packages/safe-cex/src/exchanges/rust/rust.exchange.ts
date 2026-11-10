@@ -3149,8 +3149,21 @@ export class RustEngineExchange extends BaseExchange {
     this.refuseWriteBeforeEngine();
     if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
-      for (const position of await this.fetchPositions()) {
-        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage, position.side);
+      const positions = await this.fetchPositions();
+      if (this.isDisposed) return;
+      const liveSymbols = new Set(positions.map((position) => position.symbol));
+      const flatSymbols = new Set(
+        Object.values(this.store.positionSettings ?? {})
+          .map((settings) => settings.symbol)
+          .filter((symbol) => !liveSymbols.has(symbol)),
+      );
+      for (const position of positions) {
+        if (this.isDisposed) return;
+        await this.setLeverage(position.symbol, leverage, position.side);
+      }
+      for (const symbol of flatSymbols) {
+        if (this.isDisposed) return;
+        await this.setLeverage(symbol, leverage);
       }
     }
   };

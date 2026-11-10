@@ -789,7 +789,7 @@ export class DefaultStore implements Store {
     if (idx > -1) {
       this.updateInArray('positions', idx, position);
     } else {
-      this.state.positions.push({ ...position });
+      this.state.positions.push({ ...this.state.positionSettings[position.id], ...position });
     }
     this.auditPositions();
 
@@ -828,7 +828,7 @@ export class DefaultStore implements Store {
         if (positionIndexById) {
           positionIndexById[position.id] = this.state.positions.length;
         }
-        this.state.positions.push({ ...position });
+        this.state.positions.push({ ...this.state.positionSettings[position.id], ...position });
       }
     });
 

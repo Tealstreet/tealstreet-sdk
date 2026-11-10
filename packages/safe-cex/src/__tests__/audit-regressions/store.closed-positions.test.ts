@@ -23,6 +23,54 @@ const position = (changes: Partial<Position> = {}): Position => ({
 });
 
 describe('closed positions leave settings, never manufactured exposure', () => {
+  it.each(['single', 'batch'] as const)('restores omitted settings on an incremental %s reopen', (method) => {
+    const store = new DefaultStore();
+    store.addOrUpdatePositionsFull([
+      position(),
+      position({ id: 'BTC-short', side: PositionSide.Short, marginType: MarginType.Cross }),
+    ]);
+    store.addOrUpdatePositionsFull([]);
+    const row: Writable<Position> = position({ contracts: 4, entryPrice: 120, leverage: 9, liquidationPrice: null });
+    delete row.marginType;
+    delete row.positionMode;
+    const notify = vi.fn();
+    store.subscribe(notify);
+    const version = store.updateIds.positions;
+    if (method === 'single') store.addOrUpdatePosition(row);
+    else store.addOrUpdatePositions([row]);
+    expect(store.positions).toEqual([{ ...row, marginType: MarginType.Isolated, positionMode: PositionMode.Hedged }]);
+    expect(store.updateIds.positions).toBe(version + 1);
+    expect(notify).toHaveBeenCalledOnce();
+    store.addOrUpdatePositionsFull([]);
+    expect(store.positions).toEqual([]);
+    expect(store.positionSettings['BTC-long']).toEqual({
+      id: 'BTC-long',
+      symbol: 'BTCUSDT',
+      side: PositionSide.Long,
+      leverage: 9,
+      marginType: MarginType.Isolated,
+      positionMode: PositionMode.Hedged,
+    });
+    expect(store.positionSettings['BTC-short'].marginType).toBe(MarginType.Cross);
+  });
+
+  it.each(['single', 'batch'] as const)('keeps incoming settings and explicit unknowns on a %s reopen', (method) => {
+    for (const supplied of [
+      { leverage: 11, marginType: MarginType.Cross, positionMode: PositionMode.OneWay },
+      { leverage: Number.NaN, marginType: undefined, positionMode: undefined },
+    ]) {
+      const store = new DefaultStore();
+      store.addOrUpdatePositionsFull([position()]);
+      store.addOrUpdatePositionsFull([]);
+      const row = position({ ...supplied, liquidationPrice: null });
+      if (method === 'single') store.addOrUpdatePosition(row);
+      else store.addOrUpdatePositions([row]);
+      expect(store.positions).toEqual([row]);
+      store.addOrUpdatePositionsFull([]);
+      expect(store.positionSettings['BTC-long']).toEqual(store.createEmptyPositionFrom(row));
+    }
+  });
+
   it('removes omitted IDs on partial and empty full snapshots and notifies once', () => {
     const store = new DefaultStore();
     store.addOrUpdatePositions([position(), position({ id: 'ETH-short', symbol: 'ETHUSDT' })]);
