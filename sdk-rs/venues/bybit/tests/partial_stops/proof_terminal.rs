@@ -398,3 +398,73 @@ fn proof_diag_names_a_census_row_for_the_target() {
     );
     assert_proof_diag(&h, "axis=live peer-target-status=New");
 }
+
+/// A unified account's realtime read omits the cancelled stop: three empty target reads.
+fn exhaust_realtime_reads(h: &mut Harness) {
+    for read in 0..3 {
+        if read > 0 {
+            h.advance(100.0);
+        }
+        answer(h, vec![], "");
+        assert!(
+            !h.unknown.contains(&91),
+            "empty realtime read {read} failed"
+        );
+    }
+}
+
+fn answer_history(h: &mut Harness, rows: Vec<serde_json::Value>) {
+    h.respond(
+        "/v5/order/history?category=linear&symbol=BTCUSDT&orderId=partial",
+        200,
+        &serde_json::json!({
+            "retCode":0,"result":{"category":"linear","list":rows,"nextPageCursor":""}
+        })
+        .to_string(),
+    );
+}
+
+#[test]
+fn lagging_history_is_polled_until_it_shows_the_cancelled_stop() {
+    let (mut h, mut row) = first_proof("StopLoss");
+    exhaust_realtime_reads(&mut h);
+    h.advance(250.0);
+    answer_history(&mut h, vec![]);
+    assert!(
+        !h.unknown.contains(&91),
+        "history that has not indexed the cancel yet must be read again"
+    );
+    h.advance(500.0);
+    row["orderStatus"] = "Deactivated".into();
+    answer_history(&mut h, vec![row]);
+    assert!(advanced(&h), "indexed history refused: {:?}", h.result(91));
+    complete_census_and_restore(&mut h);
+}
+
+#[test]
+fn history_that_never_shows_the_stop_still_ends_unknown() {
+    let (mut h, _) = first_proof("StopLoss");
+    exhaust_realtime_reads(&mut h);
+    for delay in [250.0, 500.0, 750.0, 1_000.0, 1_250.0] {
+        h.advance(delay);
+        answer_history(&mut h, vec![]);
+        assert!(!h.unknown.contains(&91));
+    }
+    h.advance(1_500.0);
+    answer_history(&mut h, vec![]);
+    assert_proof_diag(&h, "axis=target-history target-len=0");
+    assert!(!h.has_request("/v5/order/history?category=linear&symbol=BTCUSDT&orderId=partial"));
+}
+
+#[test]
+fn history_polls_wait_longer_than_realtime_polls() {
+    let (mut h, _) = first_proof("StopLoss");
+    exhaust_realtime_reads(&mut h);
+    h.advance(100.0);
+    assert!(
+        !h.has_request("/v5/order/history"),
+        "the first history read waits 250 ms, not the realtime 100 ms"
+    );
+    h.advance(150.0);
+    assert!(h.has_request("/v5/order/history?category=linear&symbol=BTCUSDT&orderId=partial"));
+}
