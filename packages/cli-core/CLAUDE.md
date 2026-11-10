@@ -272,6 +272,12 @@ equity, ETF, commodity and FX refuse; empty/innovation crypto pass; absent and
 new venue labels retain their unknown classification. No additional venue read
 or agreement signing occurs during preflight.
 
+## Unknown position size refuses a close
+
+`nativeCloseSize` rejects the shared helper's null result before rounding or
+placement. Position percentages use the same wrapper, so neither full nor
+percentage closes can turn unknown evidence into a guessed quantity.
+
 ## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
 
 `TradingBaseCommand.notionalToSize` (and the `%bal` path beside it) must divide

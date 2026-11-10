@@ -424,7 +424,12 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           // thousandfold on OKX's `DOGE-USDT-SWAP` and a fraction of the
           // position on a Bybit inverse market. `opts.amount` is already
           // native by contract; only the fallback needed converting.
-          const closeAmount = roundMarketCloseSize(opts.amount ?? nativePositionSize(position, market), market);
+          const amount = opts.amount ?? nativePositionSize(position, market);
+          if (amount === null)
+            throw new ScriptValidationError(
+              `closePosition: native size is unknown for '${opts.symbol}'; refresh the position before closing`,
+            );
+          const closeAmount = roundMarketCloseSize(amount, market);
           if (!Number.isFinite(closeAmount) || closeAmount <= 0) {
             throw new ScriptValidationError(`closePosition: non-positive size for '${opts.symbol}'`);
           }
