@@ -97,7 +97,7 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toHaveLength(1);
     box.close();
   });
-  it('keeps a handoff unknown through close, deadline and reconnect without a replay', async () => {
+  it('keeps a handoff unknown through disconnect, deadline and reconnect without a replay', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     const c = box.connect(f.connection());
@@ -110,6 +110,33 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toHaveLength(1);
     box.close();
   });
+  it.each([false, true])(
+    'makes direct close unknown immediately after handoff (acknowledged=%s)',
+    async (acknowledged) => {
+      const f = fixture();
+      const changes: DelegatedIntent[] = [];
+      f.options.changed = (row) => changes.push(row);
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      if (acknowledged) await box.receive(c, response(id, 'order.ack', { received: true }));
+      expect(box.entries()[0].state).toBe(acknowledged ? 'acknowledged' : 'sending');
+      const beforeClose = changes.length;
+      box.close();
+      expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+      f.advance(10_000);
+      await box.receive(c, response(id, 'order.ack', { received: false, error: 'late refusal' }));
+      await box.flush(c);
+      expect(box.entries()[0].state).toBe('unknown');
+      expect(changes).toHaveLength(beforeClose);
+      expect(f.writes).toHaveLength(1);
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection()));
+      expect(restored.entries()[0].state).toBe('unknown');
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    },
+  );
   it.each(['throw', 'closed', 'declined'] as const)('expires a never-forwarded %s send as notSent', async (kind) => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
