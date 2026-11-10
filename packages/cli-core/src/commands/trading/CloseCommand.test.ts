@@ -192,6 +192,19 @@ describe('CloseCommand', () => {
     });
   });
 
+  it('refuses a full close when native sizing is unknown', async () => {
+    const exchange = createMockExchange([{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 2, extra: { contractsNative: 1 } } as never]);
+    await expect(command.execute(createMockContext(['close'], exchange))).rejects.toThrow(/unknown/i);
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
+  });
+  it('refuses a position-percentage close when native sizing is unknown', async () => {
+    const exchange = createMockExchange([{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 2, extra: { contractsNative: 1 } } as never]);
+    const result = await command.execute(createMockContext(['close', '50%'], exchange));
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/unknown/i);
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
+  });
+
   describe('closing positions', () => {
     it('closes long position with sell order', async () => {
       const exchange = createMockExchange([

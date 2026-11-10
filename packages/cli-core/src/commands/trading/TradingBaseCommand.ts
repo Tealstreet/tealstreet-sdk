@@ -3,11 +3,10 @@ import type { CommandContext, CommandResult } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
-import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
+import { nativeCloseSize, prepareCliAmendPrice } from '../../order/prepareCliOrder';
 import type { Market } from '@tealstreet/safe-cex/src/types';
 import { nativeAmountRules } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
 
@@ -239,7 +238,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
         // NATIVE contracts. `position.contracts` is base and differs by
         // `contractSize`, so `close 50%` on an OKX-shaped market asked for a
         // multiple of the position rather than half of it.
-        return roundParsedSize(exchange, market, (nativePositionSize(position, market) * pct) / 100);
+        return roundParsedSize(exchange, market, (nativeCloseSize(exchange, position) * pct) / 100);
       }
 
       // balance scope

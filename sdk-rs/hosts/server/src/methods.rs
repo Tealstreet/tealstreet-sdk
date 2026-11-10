@@ -56,6 +56,8 @@ pub enum Reply {
     Unit,
     /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
     Placed { client_order_id: String },
+    /// An order frame using the same single-order command and audit path.
+    Intent { client_order_id: String, seq: u64 },
     /// `updateOrder`: the worker bridge's `WorkerOrderIds`, which the main-thread
     /// mirror decodes (`decodeWorkerOrderIds`); a bare array would throw there.
     OrderIds,

@@ -329,7 +329,10 @@ old web adapter. They differ by `market.contractSize`, so a bare
 `DOGE-USDT-SWAP` and a fraction of the position on a Bybit inverse market. It
 goes through `nativePositionSize` now (the SDK utility re-exported from
 `src/order/positionSizing.ts`), and `createCoreAdapter.test.ts` pins
-both halves — the fallback converts, an explicit `amount` does not.
+both halves — the fallback converts, an explicit `amount` does not. The shared
+helper returns null for conflicting or unavailable size evidence; a default
+close refuses it before rounding or submission. Never replace unknown with zero
+or a maximum of native and derived quantities.
 
 `resolveOemsPlan` only routed to this verb when `contractSize === 1 && !isInverse`,
 which is the shape of a workaround for a bug nobody had written down.
