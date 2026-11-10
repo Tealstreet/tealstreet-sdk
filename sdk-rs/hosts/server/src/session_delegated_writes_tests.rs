@@ -11,9 +11,14 @@ use safe_cex_remote_signer::SignerLink;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+#[cfg(feature = "delegated-order-frames")]
+#[path = "session_order_frames_tests.rs"]
+mod order_frames;
+
 #[derive(Clone, Default)]
 struct Tape {
     writes: Arc<Mutex<Vec<String>>>,
+    client_order_ids: Arc<Mutex<Vec<String>>>,
     hold: bool,
     expected_key: Option<String>,
     waiting: Arc<Mutex<Vec<(RequestId, Events)>>>,
@@ -77,6 +82,18 @@ impl Transport for Tape {
             || path.contains("/v5/order/amend")
             || path.contains("/v5/order/cancel");
         if mutation {
+            if path.contains("/create") {
+                let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                let rows = body
+                    .get("request")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_else(|| vec![body]);
+                self.client_order_ids.lock().unwrap().extend(
+                    rows.iter()
+                        .map(|row| row["orderLinkId"].as_str().unwrap_or_default().to_owned()),
+                );
+            }
             assert!(
                 request
                     .headers
@@ -243,7 +260,17 @@ async fn joined(
     registry: Arc<Registry>,
     user: &str,
     account: Arc<Account>,
-) -> (Session, mpsc::Receiver<String>) {
+) -> (Session, crate::out::Receiver) {
+    let (mut session, sent) = joined_without_runtime_opt_in(registry, user, account).await;
+    session.order_frames_enabled = crate::order_contract::enabled();
+    (session, sent)
+}
+
+async fn joined_without_runtime_opt_in(
+    registry: Arc<Registry>,
+    user: &str,
+    account: Arc<Account>,
+) -> (Session, crate::out::Receiver) {
     let (out, sent, _) = Out::channel(256);
     let mut session = Session::new(
         registry,
@@ -258,7 +285,9 @@ async fn joined(
         out.clone(),
     );
     crate::accounts::tests::hold_live(&account, session.socket, out.outbox());
-    session.join(account.clone(), out).await;
+    session
+        .join(account.clone(), out.with_instance_id(None))
+        .await;
     if account.delegated.is_some() {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -298,7 +327,7 @@ async fn call(session: &mut Session, request: &str, method: &str, args: Value) {
         .unwrap();
 }
 
-async fn reply(sent: &mut mpsc::Receiver<String>, request: &str) -> Value {
+async fn reply(sent: &mut crate::out::Receiver, request: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(text) = sent.recv().await {
             let value: Value = serde_json::from_str(&text).unwrap();
@@ -505,6 +534,43 @@ async fn cosigned_call_method_reply_keeps_its_existing_bytes() {
             );
             assert!(account.delegated.is_none());
             assert!(account.link.is_some());
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[cfg(not(feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn disabled_order_frames_refuse_even_an_existing_delegated_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let f: Value =
+                serde_json::from_str(include_str!("../tests/data/delegated-orders-v1.json"))
+                    .unwrap();
+            let mut submit = f["submit"].clone();
+            submit["d"]["accountName"] = "synthetic-main".into();
+            session.handle(&submit.to_string()).await.unwrap();
+            let outcome = tokio::time::timeout(Duration::from_secs(2), async {
+                while let Some(text) = sent.recv().await {
+                    let v: Value = serde_json::from_str(&text).unwrap();
+                    if v["t"] == "order.outcome" {
+                        return v;
+                    }
+                }
+                panic!("missing visible capability refusal")
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                outcome["d"]["error"]["message"],
+                "not sent: account not admitted for order frames"
+            );
+            assert!(tape.writes.lock().unwrap().is_empty());
+            session.close();
             registry.dispose(&account, Disposal::PageDisposed);
         })
         .await;

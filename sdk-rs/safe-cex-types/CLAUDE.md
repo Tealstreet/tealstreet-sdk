@@ -335,3 +335,10 @@ config/user data projects to unknown; its native retained/JSON policy is unchang
 DisplayedMargin sides and total are required nullable numbers: unknown exposure
 remains null through Store serialization, while known zero stays zero. The
 postprocessor poisons only incomplete scopes; native codecs reject missing fields.
+
+`PositionSettings` is the Store slice's separate last-reported settings record.
+`StoreData.positionSettings` is generated as a map keyed by exact position ID;
+its default is empty and old snapshots decode without it. The private record
+codec preserves required identity/leverage and optional margin/mode without
+adding exposure fields. Regenerate with the scoped `store` example and
+`store-generate.cjs`; Position and its display contract are unchanged.

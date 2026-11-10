@@ -1,7 +1,7 @@
 //! Shared store models used by the Store contract; source: packages/safe-cex/src/types.ts.
 use crate::{
     Balance, MarginType, Market, Order, OrderRiskProfile, OrderSide, Position, PositionMode,
-    RequestOutcomeCounts, Ticker, deserialize_present,
+    PositionSide, RequestOutcomeCounts, Ticker, deserialize_present,
 };
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -251,6 +251,29 @@ pub struct StoreUpdateIds {
     pub orders: f64,
 }
 
+/// Last reported per-position settings, separate from current exposure.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct PositionSettings {
+    pub id: String,
+    pub symbol: String,
+    pub side: PositionSide,
+    pub leverage: f64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub margin_type: Option<MarginType>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub position_mode: Option<PositionMode>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -293,6 +316,9 @@ pub struct StoreData {
     #[ts(type = "unknown", optional)]
     pub user_data: Option<Value>,
     pub positions: Vec<Position>,
+    #[serde(default)]
+    #[ts(type = "Record<string, PositionSettings>")]
+    pub position_settings: IndexMap<String, PositionSettings>,
     #[serde(rename = "displayedPositions")]
     #[ts(type = "DisplayedPosition[]")]
     pub displayed_positions: Vec<DisplayedPosition>,
@@ -367,6 +393,7 @@ pub fn initial_store_data() -> StoreData {
         tickers: vec![],
         orders: vec![],
         positions: vec![],
+        position_settings: IndexMap::new(),
         displayed_positions: vec![],
         stark_config: None,
         zk_link_config: None,
@@ -410,7 +437,33 @@ pub fn initial_store_data() -> StoreData {
 
 // Private wire companions keep serde metadata without exposing permissive decoders.
 mod strict_codecs {
-    use super::{MarginType, PositionMode, deserialize_present};
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::PositionSettings")]
+    #[serde(rename_all = "camelCase")]
+    struct WirePositionSettings {
+        id: String,
+        symbol: String,
+        side: PositionSide,
+        leverage: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        margin_type: Option<MarginType>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        position_mode: Option<PositionMode>,
+    }
+    impl<'de> serde::Deserialize<'de> for super::PositionSettings {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WirePositionSettings::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+    use super::{MarginType, PositionMode, PositionSide, deserialize_present};
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::StoreDataLoaded")]
     #[serde(rename_all = "camelCase")]
@@ -510,9 +563,9 @@ mod strict_codecs {
     use super::StoreData;
     use super::{
         ActiveChaser, ActiveTWAP, Balance, DisplayedMargin, DisplayedPosition, FetchedLeverage,
-        IndexMap, Market, Order, OrderRiskProfile, OrderSide, Position, RequestOutcomeCounts,
-        SliceAction, StoreDataLoaded, StoreOptions, StoreUpdateIds, TaskOrigin, Ticker, TwapStatus,
-        Value,
+        IndexMap, Market, Order, OrderRiskProfile, OrderSide, Position, PositionSettings,
+        RequestOutcomeCounts, SliceAction, StoreDataLoaded, StoreOptions, StoreUpdateIds,
+        TaskOrigin, Ticker, TwapStatus, Value,
     };
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::TaskOrigin")]
@@ -1089,6 +1142,8 @@ mod strict_codecs {
         #[serde(rename = "userData")]
         user_data: Option<Value>,
         positions: Vec<Position>,
+        #[serde(default)]
+        position_settings: IndexMap<String, PositionSettings>,
         #[serde(rename = "displayedPositions")]
         displayed_positions: Vec<DisplayedPosition>,
         #[serde(
@@ -1247,6 +1302,9 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<StoreDataLoaded>("StoreDataLoaded");
             crate::strict_decode::tests::record::<StoreOptions>("StoreOptions");
             crate::strict_decode::tests::record::<FetchedLeverage>("FetchedLeverage");
+            crate::strict_decode::tests::record::<super::super::PositionSettings>(
+                "PositionSettings",
+            );
             crate::strict_decode::tests::record::<DisplayedMargin>("DisplayedMargin");
             crate::strict_decode::tests::record::<StoreUpdateIds>("StoreUpdateIds");
         }

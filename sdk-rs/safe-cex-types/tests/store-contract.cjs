@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../../..');
-const names = ['StoreData', 'StoreOptions', 'StoreDataLoaded', 'StoreUpdateIds', 'FetchedLeverage', 'DisplayedMargin'];
+const names = ['StoreData', 'StoreOptions', 'StoreDataLoaded', 'StoreUpdateIds', 'FetchedLeverage', 'PositionSettings', 'DisplayedMargin'];
 
 test('Store contracts are exact Rust-generated modules without internal mutability directives', () => {
   for (const name of names) {
@@ -31,7 +31,7 @@ ${parity}
 type OpaqueStoreFields = 'starkConfig' | 'zkLinkConfig' | 'userData';
 type StoreKeys = Assert<Equal<keyof StoreData, keyof PublicStoreData>>;
 type StoreShape = Assert<Equal<Omit<StoreData, OpaqueStoreFields>, Omit<PublicStoreData, OpaqueStoreFields>>>;
-import { MarginType, PositionMode } from '../types';
+import { MarginType, PositionMode, PositionSide } from '../types';
 declare const store: StoreData;
 const latency: number | null = store.latency;
 const loaded: StoreDataLoaded = store.loaded;
@@ -50,6 +50,9 @@ margin.totalNotional = 1;
 const bareMargin: FetchedLeverage['marginType'] = 'cross';
 const nullRail: FetchedLeverage = { buyLeverage: null, sellLeverage: 0 };
 const missingRail: FetchedLeverage = { buyLeverage: 0 };
+const settings: PositionSettings = { id: 'p', symbol: 'BTCUSDT', side: PositionSide.Long, leverage: 7 };
+const cached: PositionSettings = store.positionSettings.p;
+const fabricatedExposure: PositionSettings = { ...settings, contracts: 0 };
 const opaque: string = store.userData;
 `;
   const configFile = path.join(root, 'packages/safe-cex/tsconfig.json');
@@ -71,6 +74,7 @@ const opaque: string = store.userData;
     ['const bareMargin:', 2322],
     ['const nullRail:', 2322],
     ['const missingRail:', 2741],
+    ['const fabricatedExposure:', 2353],
     ['const opaque:', 2322],
   ];
   assert.deepEqual(

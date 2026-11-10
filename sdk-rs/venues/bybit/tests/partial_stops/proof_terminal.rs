@@ -271,3 +271,200 @@ fn first_read_canonical_cancelled_control_advances_without_unknown() {
         OrderStatus::Canceled
     );
 }
+
+/// The command error and the `[proof-diag]` warning both name the failed check.
+fn assert_proof_diag(h: &Harness, reason: &str) {
+    assert!(h.unknown.contains(&91));
+    let errors: Vec<_> = h
+        .command_errors
+        .iter()
+        .filter(|(command, _)| *command == 91)
+        .map(|(_, message)| message.as_str())
+        .collect();
+    assert_eq!(
+        errors,
+        vec![format!(
+            "The protective cancel could not be confirmed from native orders; check Open Orders before retrying [proof: {reason}]"
+        )]
+    );
+    let warnings: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event) if event.code == "partial.proof_failed" => {
+                Some((event.level, event.message.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        warnings,
+        vec![(
+            safe_cex_engine::Level::Warn,
+            format!("[proof-diag] {reason}")
+        )]
+    );
+}
+
+#[test]
+fn proof_diag_names_a_non_terminal_first_read_status() {
+    let (mut h, mut row) = first_proof("StopLoss");
+    row["orderStatus"] = "Triggered".into();
+    answer(&mut h, vec![row], "");
+    assert_proof_diag(&h, "axis=target target-status=Triggered");
+}
+
+#[test]
+fn proof_diag_names_the_first_mismatched_field() {
+    let (mut h, mut row) = first_proof("StopLoss");
+    row["triggerBy"] = "LastPrice".into();
+    answer(&mut h, vec![row], "");
+    assert_proof_diag(&h, "axis=target target-field=triggerBy");
+}
+
+#[test]
+fn proof_diag_names_status_and_field_together() {
+    let (mut h, mut row) = first_proof("TakeProfit");
+    row["orderStatus"] = "Filled".into();
+    row["cumExecQty"] = "1".into();
+    answer(&mut h, vec![row], "");
+    assert_proof_diag(
+        &h,
+        "axis=target target-status=Filled target-field=cumExecQty",
+    );
+}
+
+#[test]
+fn proof_diag_carries_kind_enums_only() {
+    let (mut h, mut row) = first_proof("StopLoss");
+    row["tpslMode"] = "Full".into();
+    answer(&mut h, vec![row], "");
+    assert_proof_diag(
+        &h,
+        "axis=target target-field=kind tpslMode=Full stopOrderType=StopLoss",
+    );
+}
+
+#[test]
+fn proof_diag_never_echoes_a_non_enum_value() {
+    for status in ["Can celled", "x".repeat(33).as_str(), "", "BTCUSDT-0.5"] {
+        let (mut h, mut row) = first_proof("StopLoss");
+        row["orderStatus"] = status.into();
+        answer(&mut h, vec![row], "");
+        assert_proof_diag(&h, "axis=target target-status=other");
+    }
+}
+
+#[test]
+fn proof_diag_names_page_shape_failures() {
+    let (mut h, row) = first_proof("StopLoss");
+    answer(&mut h, vec![row.clone(), row], "");
+    assert_proof_diag(&h, "axis=target target-len=2");
+
+    let (mut h, row) = first_proof("StopLoss");
+    answer(&mut h, vec![row], "another-page");
+    assert_proof_diag(&h, "axis=target target-cursor");
+
+    let (mut h, row) = first_proof("StopLoss");
+    h.respond(
+        "&orderId=partial",
+        200,
+        &serde_json::json!({
+            "retCode":0,"result":{"category":"inverse","list":[row],"nextPageCursor":""}
+        })
+        .to_string(),
+    );
+    assert_proof_diag(&h, "axis=target category");
+
+    let (mut h, _) = first_proof("StopLoss");
+    h.respond("&orderId=partial", 503, "");
+    assert_proof_diag(&h, "axis=target http=503");
+}
+
+#[test]
+fn proof_diag_names_a_census_row_for_the_target() {
+    let (mut h, row) = first_proof("StopLoss");
+    answer(&mut h, vec![row.clone()], "");
+    assert!(advanced(&h));
+    let mut census = row;
+    census["orderStatus"] = "New".into();
+    h.respond(
+        "&openOnly=0&limit=50",
+        200,
+        &serde_json::json!({
+            "retCode":0,"result":{"category":"linear","list":[census],"nextPageCursor":""}
+        })
+        .to_string(),
+    );
+    assert_proof_diag(&h, "axis=live peer-target-status=New");
+}
+
+/// A unified account's realtime read omits the cancelled stop: three empty target reads.
+fn exhaust_realtime_reads(h: &mut Harness) {
+    for read in 0..3 {
+        if read > 0 {
+            h.advance(100.0);
+        }
+        answer(h, vec![], "");
+        assert!(
+            !h.unknown.contains(&91),
+            "empty realtime read {read} failed"
+        );
+    }
+}
+
+fn answer_history(h: &mut Harness, rows: Vec<serde_json::Value>) {
+    h.respond(
+        "/v5/order/history?category=linear&symbol=BTCUSDT&orderId=partial",
+        200,
+        &serde_json::json!({
+            "retCode":0,"result":{"category":"linear","list":rows,"nextPageCursor":""}
+        })
+        .to_string(),
+    );
+}
+
+#[test]
+fn lagging_history_is_polled_until_it_shows_the_cancelled_stop() {
+    let (mut h, mut row) = first_proof("StopLoss");
+    exhaust_realtime_reads(&mut h);
+    h.advance(250.0);
+    answer_history(&mut h, vec![]);
+    assert!(
+        !h.unknown.contains(&91),
+        "history that has not indexed the cancel yet must be read again"
+    );
+    h.advance(500.0);
+    row["orderStatus"] = "Deactivated".into();
+    answer_history(&mut h, vec![row]);
+    assert!(advanced(&h), "indexed history refused: {:?}", h.result(91));
+    complete_census_and_restore(&mut h);
+}
+
+#[test]
+fn history_that_never_shows_the_stop_still_ends_unknown() {
+    let (mut h, _) = first_proof("StopLoss");
+    exhaust_realtime_reads(&mut h);
+    for delay in [250.0, 500.0, 750.0, 1_000.0, 1_250.0] {
+        h.advance(delay);
+        answer_history(&mut h, vec![]);
+        assert!(!h.unknown.contains(&91));
+    }
+    h.advance(1_500.0);
+    answer_history(&mut h, vec![]);
+    assert_proof_diag(&h, "axis=target-history target-len=0");
+    assert!(!h.has_request("/v5/order/history?category=linear&symbol=BTCUSDT&orderId=partial"));
+}
+
+#[test]
+fn history_polls_wait_longer_than_realtime_polls() {
+    let (mut h, _) = first_proof("StopLoss");
+    exhaust_realtime_reads(&mut h);
+    h.advance(100.0);
+    assert!(
+        !h.has_request("/v5/order/history"),
+        "the first history read waits 250 ms, not the realtime 100 ms"
+    );
+    h.advance(150.0);
+    assert!(h.has_request("/v5/order/history?category=linear&symbol=BTCUSDT&orderId=partial"));
+}

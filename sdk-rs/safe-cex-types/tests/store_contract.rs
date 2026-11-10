@@ -80,3 +80,38 @@ fn margin_unknown_fields_are_required_nullable_and_survive_store_roundtrip() {
         assert!(serde_json::from_value::<DisplayedMargin>(invalid).is_err());
     }
 }
+
+#[test]
+fn position_settings_survive_without_exposure_and_older_snapshots_remain_readable() {
+    use safe_cex_types::store_model::PositionSettings;
+    let row =
+        json!({"id":"p","symbol":"BTCUSDT","side":"long","leverage":7.0,"marginType":"isolated"});
+    let native: PositionSettings = serde_json::from_value(row.clone()).unwrap();
+    assert_eq!(native.leverage, 7.0);
+    assert_eq!(
+        native.margin_type,
+        Some(safe_cex_types::MarginType::Isolated)
+    );
+    assert_eq!(native.position_mode, None);
+    assert_eq!(serde_json::to_value(native).unwrap(), row);
+    for invalid in [
+        json!(["p", "BTCUSDT", "long", 7]),
+        json!({"id":"p","symbol":"BTCUSDT","side":"long","leverage":null}),
+        json!({"id":"p","symbol":"BTCUSDT","side":"long","leverage":7,"marginType":null}),
+    ] {
+        assert!(serde_json::from_value::<PositionSettings>(invalid).is_err());
+    }
+    let mut snapshot = serde_json::to_value(initial_store_data()).unwrap();
+    snapshot["positionSettings"] = json!({"p": row});
+    let decoded: StoreData = serde_json::from_value(snapshot.clone()).unwrap();
+    assert!(decoded.positions.is_empty());
+    assert_eq!(decoded.position_settings["p"].leverage, 7.0);
+    assert_eq!(serde_json::to_value(decoded).unwrap(), snapshot);
+    snapshot.as_object_mut().unwrap().remove("positionSettings");
+    assert!(
+        serde_json::from_value::<StoreData>(snapshot)
+            .unwrap()
+            .position_settings
+            .is_empty()
+    );
+}
