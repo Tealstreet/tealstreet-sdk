@@ -341,6 +341,8 @@ which is the shape of a workaround for a bug nobody had written down.
 ## Percentage closes
 
 `ClosePositionOpts.percent` is mutually exclusive with explicit native `amount`.
+This additive contract starts at Core API 1.4.0; newly stamped scripts require
+that version, so the load gate refuses them on a 1.3.3 runtime before dispatch.
 `roundPercentageCloseSize` floors a known native quantity below 100%, refusing
 zero with a visible size/step error; 100% keeps the full native size. CoreAdapter
 and CLI share the rule, and MCP delegates its close tool to CoreAdapter. Explicit
