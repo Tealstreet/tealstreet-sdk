@@ -144,6 +144,40 @@ fn failed_read_settles_once_and_duplicate_delivery_is_inert() {
 }
 
 #[test]
+fn non_success_http_status_fails_instead_of_returning_empty_context() {
+    for status in [302, 199, 300, 307, 399] {
+        let mut e = engine();
+        let before = e.account_snapshot_frame(NOW).to_vec();
+        let r = ask(&mut e, "ADAUSDT");
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: r#"{"code":0}"#,
+                },
+            },
+        );
+        let out: Vec<_> = e.drain_actions().collect();
+        assert_eq!(
+            out.iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 42, .. })))
+                .count(),
+            1,
+            "HTTP {status} must fail the read"
+        );
+        assert!(!out.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(Notice::CommandDone { command: 42, .. })
+        )));
+        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert!(reply(&mut e, &r, json!({"code":0})).is_empty());
+    }
+}
+
+#[test]
 fn zero_leverage_and_unknown_mode_keep_ts_defaults_instead_of_requiring_an_open_position() {
     let mut e = engine();
     let r = ask(&mut e, "ADAUSDT");

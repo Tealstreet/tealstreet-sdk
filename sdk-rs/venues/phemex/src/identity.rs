@@ -205,7 +205,9 @@ impl PhemexPerpetuals {
             Kind::Identity => parse(response).and_then(|identity| {
                 serde_json::to_string(&identity).map_err(|error| error.to_string())
             }),
-            Kind::Leverage(symbol) => crate::leverage::parse(response.body, symbol),
+            Kind::Leverage(symbol) => {
+                crate::leverage::parse(response.status, response.body, symbol)
+            }
         };
         finish(cx, read.root.context(), result.map_err(Into::into));
     }

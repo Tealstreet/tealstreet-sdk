@@ -32,7 +32,10 @@ struct Rails {
     margin_type: MarginType,
     position_mode: PositionMode,
 }
-pub(crate) fn parse(body: &str, symbol: &str) -> Result<String, String> {
+pub(crate) fn parse(status: u16, body: &str, symbol: &str) -> Result<String, String> {
+    if !(200..300).contains(&status) {
+        return Err(format!("Phemex leverage context HTTP {status}"));
+    }
     let envelope: Envelope =
         serde_json::from_str(body).map_err(|_| "Phemex leverage context response is invalid")?;
     let rows: Vec<_> = envelope
