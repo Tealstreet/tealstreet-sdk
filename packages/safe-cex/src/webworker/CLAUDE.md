@@ -13,6 +13,16 @@ snapshots to the main thread on every `store.notify()`.
 serializing its level, message and context. A standalone object is coerced to
 `[object Object]` by existing main-thread log consumers; `warn` maps to `warning`.
 
+## Public-data frame rejection messages
+
+Book and candle subscription handlers forward typed rejection observers as
+`listenOrderBook:rejected` and `listenOHLCV:rejected`. Each message carries its
+`subId`, stream, symbol, candle interval where applicable, and the existing
+JSON-safe serialized error; receivers restore the error for the optional third
+observer. Rejections fan out to every current subscriber, cancel pending data
+throttles, and send no substitute data. Unsubscribe and handler disposal remove
+these observers. Worker owner/generation fences apply to these messages too.
+
 ## History result completeness
 
 Successful `callMethod:done` replies include optional `data.completeness:

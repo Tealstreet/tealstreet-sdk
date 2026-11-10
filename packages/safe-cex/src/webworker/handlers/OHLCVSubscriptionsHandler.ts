@@ -1,5 +1,8 @@
+import type { StoreWorkerOHLCVFrameRejection } from '../StoreWorkerPayload';
+
 import throttle from 'lodash/throttle';
 
+import { serializeCommandError } from '../../commandOutcome';
 import { Candle, OHLCVOptions } from '../../types';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
@@ -81,17 +84,31 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         );
         sub.throttleFn = f;
 
-        const ohlcvSub = this._exchange.listenOHLCV(data, (c) => {
-          if (c.timestamp !== sub.lastCandleTimestamp) {
-            try {
-              f?.flush?.();
-              sub.lastCandleTimestamp = c.timestamp;
-            } catch (_e) {
-              // Ignored
+        const ohlcvSub = this._exchange.listenOHLCV(
+          data,
+          (c) => {
+            if (c.timestamp !== sub.lastCandleTimestamp) {
+              try {
+                f?.flush?.();
+                sub.lastCandleTimestamp = c.timestamp;
+              } catch (_e) {
+                // Ignored
+              }
             }
-          }
-          f(c);
-        });
+            f(c);
+          },
+          (signal) => {
+            f.cancel();
+            for (const subId of sub.subIds) {
+              const data: StoreWorkerOHLCVFrameRejection = {
+                ...signal,
+                subId,
+                error: serializeCommandError(signal.error),
+              };
+              this._ctx.postMessage({ op: 'listenOHLCV:rejected', data });
+            }
+          },
+        );
         sub.unsub = ohlcvSub || (() => {});
 
         this._subsByKey.set(key, sub);
@@ -124,5 +141,19 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         break;
       }
     }
+  }
+  dispose() {
+    super.dispose();
+    for (const sub of this._subsByKey.values()) {
+      sub.subIds.clear();
+      sub.payloadDataBySubId.clear();
+      sub.throttleFn?.cancel();
+      try {
+        sub.unsub();
+      } catch {
+        /* Continue releasing other subscriptions. */
+      }
+    }
+    this._subsByKey.clear();
   }
 }

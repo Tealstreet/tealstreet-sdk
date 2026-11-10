@@ -94,7 +94,7 @@ describe('OrderBookSubscriptionsHandler', () => {
 
         handler.handle(payload);
 
-        expect(mockListenOrderBook).toHaveBeenCalledWith('BTCUSDT', expect.any(Function));
+        expect(mockListenOrderBook).toHaveBeenCalledWith('BTCUSDT', expect.any(Function), expect.any(Function));
       });
 
       it('should skip subscription for symbol not on exchange', () => {

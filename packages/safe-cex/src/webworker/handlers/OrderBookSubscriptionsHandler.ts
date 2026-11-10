@@ -1,6 +1,9 @@
+import type { StoreWorkerOrderBookFrameRejection } from '../StoreWorkerPayload';
+
 import throttle from 'lodash/throttle';
 
 import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
+import { serializeCommandError } from '../../commandOutcome';
 import { OrderBook } from '../../types';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
@@ -75,12 +78,24 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
             (this._exchange.options?.tuning?.dataUpdateThrottleMultiplier || 1),
           { trailing: true },
         );
-        const unsub = this._exchange.listenOrderBook(symbol, f) || (() => {});
+        const subIds = new Set([subId]);
+        const unsub =
+          this._exchange.listenOrderBook(symbol, f, (signal) => {
+            f.cancel();
+            for (const subId of subIds) {
+              const data: StoreWorkerOrderBookFrameRejection = {
+                ...signal,
+                subId,
+                error: serializeCommandError(signal.error),
+              };
+              this._ctx.postMessage({ op: 'listenOrderBook:rejected', data });
+            }
+          }) || (() => {});
 
         this._subsBySymbol.set(symbol, {
           unsub,
           throttleFn: f,
-          subIds: new Set([subId]),
+          subIds,
         });
         break;
       }
@@ -109,5 +124,18 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         break;
       }
     }
+  }
+  dispose() {
+    super.dispose();
+    for (const sub of this._subsBySymbol.values()) {
+      sub.subIds.clear();
+      sub.throttleFn.cancel();
+      try {
+        sub.unsub();
+      } catch {
+        /* Continue releasing other subscriptions. */
+      }
+    }
+    this._subsBySymbol.clear();
   }
 }

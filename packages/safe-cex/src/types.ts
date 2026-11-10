@@ -20,6 +20,7 @@ import type { FetchedLeverage } from './generated/FetchedLeverage';
 export type { FetchedLeverage } from './generated/FetchedLeverage';
 export type { DisplayedMargin } from './generated/DisplayedMargin';
 
+import type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';
 import type { ExchangeErrorKind } from './commandOutcome';
 import type { Candle } from './generated/Candle';
 import type { OrderBook } from './generated/OrderBook';
@@ -409,8 +410,16 @@ export interface PublicDataSource {
     readonly markets: StoreData['markets'];
     readonly loaded: StoreData['loaded'];
   };
-  listenOrderBook: (symbol: string, callback: (orderbook: OrderBook) => void) => () => void;
-  listenOHLCV: (opts: OHLCVOptions, callback: (candle: Candle) => void) => () => void;
+  listenOrderBook: (
+    symbol: string,
+    callback: (orderbook: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => () => void;
+  listenOHLCV: (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => () => void;
 }
 
 // Remote signing types — used for hosted CLI servers that delegate signing to clients

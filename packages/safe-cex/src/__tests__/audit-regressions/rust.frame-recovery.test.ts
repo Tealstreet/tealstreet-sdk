@@ -1,15 +1,23 @@
-import type { CallableMethodsInWorker, EngineSnapshot } from '../../exchanges/base';
+import type {
+  CallableMethodsInWorker,
+  EngineSnapshot,
+  OHLCVFrameRejection,
+  OrderBookFrameRejection,
+} from '../../exchanges/base';
 import type { OrderFillEvent } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Frame, LOADED_FLAG, SECTION } from '@tealstreet/safe-cex-wasm/wire';
 import { BaseExchange } from '../../exchanges/base';
+import { InProcessPublicDataProvider } from '../../exchanges/in-process-public-data';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
+import { OHLCVSubscriptionsHandler } from '../../webworker/handlers/OHLCVSubscriptionsHandler';
+import { OrderBookSubscriptionsHandler } from '../../webworker/handlers/OrderBookSubscriptionsHandler';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -20,6 +28,9 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 const align8 = (value: number) => Math.ceil(value / 8) * 8;
 type FixtureOptions = {
   brokenBook?: boolean;
+  invalidBook?: boolean;
+  invalidCandle?: boolean;
+  unknownIdentity?: boolean;
   fills?: number;
   book?: boolean;
   total?: number;
@@ -39,6 +50,9 @@ type FixtureOptions = {
 // Independent binary sections exercise the real readers and caller recovery.
 const fixture = ({
   brokenBook = false,
+  invalidBook = false,
+  invalidCandle = false,
+  unknownIdentity = false,
   fills = 2,
   book = true,
   total = 42,
@@ -66,7 +80,11 @@ const fixture = ({
     numbers.forEach((number, i) => view.setFloat64(numericOffset + i * 8, number, true));
     tail.forEach((word, i) => view.setUint32(numericOffset + numbers.length * 8 + i * 4, word, true));
     financials.forEach((number, i) => view.setFloat64(financialOffset + i * 8, number, true));
-    sections.push({ kind, bytes, revision: kind === SECTION.POSITIONS || kind === SECTION.FILLS ? 2 : tail.length ? 1 : 0 });
+    sections.push({
+      kind,
+      bytes,
+      revision: kind === SECTION.POSITIONS || kind === SECTION.FILLS ? 2 : tail.length ? 1 : 0,
+    });
   };
   if (markets) {
     const columns = [0.001, 1, 0.001, 100, 1, 100, NaN, 1, NaN, NaN];
@@ -89,8 +107,8 @@ const fixture = ({
     [...Array(fills).fill(strings.indexOf(fillSymbol)), ...fillIds.map((id) => strings.indexOf(id))],
     Array(fills * 2).fill(NaN),
   );
-  table(SECTION.CANDLES, [1, 0, 4], [1234, 100, 101, 99, 100, 5]);
-  if (book) table(SECTION.BOOK, [0, brokenBook ? 2 : 1, 0, 0], [100, 1, 1]);
+  table(SECTION.CANDLES, [1, unknownIdentity ? 999 : 0, 4], [1234, 100, 101, 99, invalidCandle ? NaN : 100, 5]);
+  if (book) table(SECTION.BOOK, [unknownIdentity ? 999 : 0, brokenBook ? 2 : 1, 0, 0], [invalidBook ? NaN : 100, 1, 1]);
   if (loaded !== undefined) table(SECTION.STATUS, [loaded, 0], [0]);
   const encoded = strings.map((value) => new TextEncoder().encode(value));
   const stringBytes = new Uint8Array(
@@ -943,4 +961,245 @@ describe('Rust frame recovery callers', () => {
       exchange.dispose();
     },
   );
+});
+
+describe('direct public-data rejection observers', () => {
+  beforeEach(() => vi.spyOn(console, 'error').mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(['book', 'candle', 'envelope', 'identity'] as const)(
+    'scopes native %s failures and keeps two-argument data delivery',
+    (failure) => {
+      const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+      installHost(exchange, vi.fn());
+      const book = vi.fn<(signal: OrderBookFrameRejection) => void>();
+      const candle = vi.fn<(signal: OHLCVFrameRejection) => void>();
+      const otherBook = vi.fn();
+      const otherCandle = vi.fn();
+      const data = vi.fn();
+      const candles = vi.fn();
+      const stopBook = exchange.listenOrderBook('BTCUSDT', data, book);
+      const stopCandle = exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, candles, candle);
+      exchange.listenOrderBook('ETHUSDT', () => {}, otherBook);
+      exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '5m' }, () => {}, otherCandle);
+      const legacyBook = vi.fn();
+      const legacyCandle = vi.fn();
+      exchange.listenOrderBook('BTCUSDT', legacyBook);
+      exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, legacyCandle);
+      try {
+        receive(exchange, fixture({ fills: 0, secondaryMarket: true }));
+        expect(data).toHaveBeenCalledTimes(1);
+        expect(legacyBook).toHaveBeenCalledWith(data.mock.calls[0][0]);
+        expect(legacyCandle).toHaveBeenCalledWith(candles.mock.calls[0][0]);
+        const malformed =
+          failure === 'envelope'
+            ? new ArrayBuffer(0)
+            : fixture({
+                fills: 0,
+                secondaryMarket: true,
+                invalidBook: failure === 'book',
+                invalidCandle: failure === 'candle',
+                unknownIdentity: failure === 'identity',
+              });
+        receive(exchange, malformed);
+        expect(data).toHaveBeenCalledTimes(failure === 'candle' ? 2 : 1);
+        expect(candles).toHaveBeenCalledTimes(failure === 'book' ? 2 : 1);
+        if (failure !== 'candle')
+          expect(book).toHaveBeenCalledExactlyOnceWith({
+            stream: 'orderBook',
+            symbol: 'BTCUSDT',
+            error: expect.any(Error),
+          });
+        else expect(book).not.toHaveBeenCalled();
+        if (failure !== 'book')
+          expect(candle).toHaveBeenCalledExactlyOnceWith({
+            stream: 'ohlcv',
+            symbol: 'BTCUSDT',
+            interval: '1m',
+            error: expect.any(Error),
+          });
+        else expect(candle).not.toHaveBeenCalled();
+        expect(otherBook).toHaveBeenCalledTimes(Number(failure === 'envelope' || failure === 'identity'));
+        expect(otherCandle).toHaveBeenCalledTimes(Number(failure === 'envelope' || failure === 'identity'));
+        stopBook();
+        stopCandle();
+        const counts = [book.mock.calls.length, candle.mock.calls.length];
+        receive(exchange, new ArrayBuffer(0));
+        expect([book.mock.calls.length, candle.mock.calls.length]).toEqual(counts);
+        exchange.dispose();
+        receive(exchange, new ArrayBuffer(0));
+        expect([book.mock.calls.length, candle.mock.calls.length]).toEqual(counts);
+      } finally {
+        exchange.dispose();
+      }
+    },
+  );
+
+  it('isolates a throwing direct observer from the other subscriptions', () => {
+    const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    exchange.listenOrderBook(
+      'BTCUSDT',
+      () => {},
+      () => {
+        throw new Error('synthetic observer failure');
+      },
+    );
+    const observed = vi.fn();
+    exchange.listenOrderBook('ETHUSDT', () => {}, observed);
+    try {
+      expect(() => receive(exchange, new ArrayBuffer(0))).not.toThrow();
+      expect(observed).toHaveBeenCalledExactlyOnceWith({
+        stream: 'orderBook',
+        symbol: 'ETHUSDT',
+        error: expect.any(Error),
+      });
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it('carries native rejections across JSON worker messages to each subscription and releases them', () => {
+    const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    const main = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    installHost(source, vi.fn());
+    receive(source, fixture({ fills: 0 }));
+    const messages: Array<{ op: string; data: unknown }> = [];
+    const context = {
+      postMessage(message: { op: string; data: unknown }) {
+        const transported = JSON.parse(JSON.stringify(message));
+        messages.push(transported);
+        main.emitter.emit(transported.op, transported.data);
+      },
+    } as unknown as Worker;
+    const bookHandler = new OrderBookSubscriptionsHandler(
+      'synthetic',
+      'bybit',
+      source,
+      context,
+      {} as never,
+      {} as never,
+    );
+    const candleHandler = new OHLCVSubscriptionsHandler(
+      'synthetic',
+      'bybit',
+      source,
+      context,
+      {} as never,
+      {} as never,
+    );
+    for (const op of ['subscribeOrderBook', 'unsubscribeOrderBook'] as const)
+      main.on(op, (data: unknown) => bookHandler.handle({ op, data }));
+    for (const op of ['subscribeOHLCV', 'unsubscribeOHLCV'] as const)
+      main.on(op, (data: unknown) => candleHandler.handle({ op, data }));
+    const book = vi.fn();
+    const secondBook = vi.fn();
+    const candle = vi.fn();
+    const data = vi.fn();
+    const candles = vi.fn();
+    const stop = main.listenOrderBookWebworker('BTCUSDT', data, book);
+    main.listenOrderBookWebworker('BTCUSDT', () => {}, secondBook);
+    main.listenOHLCVWebworker({ symbol: 'BTCUSDT', interval: '1m' }, candles, candle);
+    try {
+      receive(source, fixture({ fills: 0 }));
+      expect(data).toHaveBeenCalledTimes(1);
+      expect(candles).toHaveBeenCalledTimes(1);
+      receive(source, fixture({ fills: 0, invalidBook: true }));
+      for (const listener of [book, secondBook]) expect(listener).toHaveBeenCalledTimes(1);
+      expect(candle).not.toHaveBeenCalled();
+      receive(source, fixture({ fills: 0, invalidCandle: true }));
+      expect(candle).toHaveBeenCalledTimes(1);
+      for (const listener of [book, secondBook]) expect(listener).toHaveBeenCalledTimes(1);
+      for (const listener of [book, secondBook, candle]) listener.mockClear();
+      messages.length = 0;
+      receive(source, new ArrayBuffer(0));
+      for (const listener of [book, secondBook])
+        expect(listener).toHaveBeenCalledExactlyOnceWith({
+          stream: 'orderBook',
+          symbol: 'BTCUSDT',
+          error: expect.any(Error),
+        });
+      expect(candle).toHaveBeenCalledExactlyOnceWith({
+        stream: 'ohlcv',
+        symbol: 'BTCUSDT',
+        interval: '1m',
+        error: expect.any(Error),
+      });
+      expect(book.mock.calls[0][0].error.message).toBeTruthy();
+      expect(messages.filter((m) => m.op === 'listenOrderBook:rejected')).toHaveLength(2);
+      stop();
+      receive(source, new ArrayBuffer(0));
+      expect(book).toHaveBeenCalledTimes(1);
+      expect(secondBook).toHaveBeenCalledTimes(2);
+      bookHandler.dispose();
+      candleHandler.dispose();
+      const before = messages.length;
+      receive(source, new ArrayBuffer(0));
+      expect(messages).toHaveLength(before);
+    } finally {
+      bookHandler.dispose();
+      candleHandler.dispose();
+      source.dispose();
+      main.dispose();
+    }
+  });
+});
+
+it('registers worker rejection observers before synchronous subscription replies', () => {
+  const main = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const observed = vi.fn();
+  main.on('subscribeOrderBook', ({ symbol, subId }: { symbol: string; subId: string }) =>
+    main.emitter.emit('listenOrderBook:rejected', {
+      stream: 'orderBook',
+      symbol,
+      subId,
+      error: { message: 'synthetic book refusal' },
+    }),
+  );
+  main.on('subscribeOHLCV', ({ symbol, interval, subId }: { symbol: string; interval: string; subId: string }) =>
+    main.emitter.emit('listenOHLCV:rejected', {
+      stream: 'ohlcv',
+      symbol,
+      interval,
+      subId,
+      error: { message: 'synthetic candle refusal' },
+    }),
+  );
+  try {
+    main.listenOrderBookWebworker('BTCUSDT', () => {}, observed);
+    main.listenOHLCVWebworker({ symbol: 'BTCUSDT', interval: '1m' }, () => {}, observed);
+    expect(observed).toHaveBeenCalledTimes(2);
+    expect(observed.mock.calls[0][0].error).toBeInstanceOf(Error);
+    expect(observed.mock.calls[1][0].error.message).toBe('synthetic candle refusal');
+  } finally {
+    main.dispose();
+  }
+});
+
+it('forwards PublicDataSource rejection observers and removes them when its provider is disposed', () => {
+  const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const parent = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const provider = new InProcessPublicDataProvider(parent, source);
+  parent.externalPublicDataProvider = provider;
+  const book = vi.fn();
+  const candle = vi.fn();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const stop = parent.listenOrderBook('BTCUSDT', () => {}, book);
+    parent.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, () => {}, candle);
+    receive(source, new ArrayBuffer(0));
+    expect(book).toHaveBeenCalledTimes(1);
+    expect(candle).toHaveBeenCalledTimes(1);
+    stop();
+    stop();
+    receive(source, new ArrayBuffer(0));
+    expect(book).toHaveBeenCalledTimes(1);
+    expect(candle).toHaveBeenCalledTimes(2);
+    parent.dispose();
+    receive(source, new ArrayBuffer(0));
+    expect(candle).toHaveBeenCalledTimes(2);
+  } finally {
+    parent.dispose();
+    source.dispose();
+    vi.restoreAllMocks();
+  }
 });

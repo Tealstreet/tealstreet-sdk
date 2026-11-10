@@ -1,5 +1,5 @@
 import type { Candle, OHLCVOptions, OrderBook, PublicDataSource, StoreData } from '../types';
-import type { BaseExchange } from './base';
+import type { BaseExchange, OHLCVFrameRejection, OrderBookFrameRejection } from './base';
 
 import { LogSeverity } from '../types';
 import { EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS } from './external-public-data';
@@ -22,6 +22,7 @@ export class InProcessPublicDataProvider {
   private source: PublicDataSource;
   private unsubscribeStore?: () => void;
   private isDisposed = false;
+  private readonly subscriptions = new Set<() => void>();
   private initialized = false;
   private lastReceived = 0;
 
@@ -118,17 +119,37 @@ export class InProcessPublicDataProvider {
    * Subscribe to orderbook updates for a symbol.
    * Delegates to the source exchange's listenOrderBook method.
    */
-  subscribeOrderbook = (symbol: string, callback: (orderbook: OrderBook) => void): (() => void) => {
-    return this.source.listenOrderBook(symbol, callback);
+  subscribeOrderbook = (
+    symbol: string,
+    callback: (orderbook: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ): (() => void) => {
+    if (this.isDisposed) return () => {};
+    if (!onRejection) return this.source.listenOrderBook(symbol, callback);
+    return this.trackSubscription(this.source.listenOrderBook(symbol, callback, onRejection));
   };
 
   /**
    * Subscribe to candle updates for a symbol/interval.
    * Delegates to the source exchange's listenOHLCV method.
    */
-  subscribeCandle = (opts: OHLCVOptions, callback: (candle: Candle) => void): (() => void) => {
-    return this.source.listenOHLCV(opts, callback);
+  subscribeCandle = (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ): (() => void) => {
+    if (this.isDisposed) return () => {};
+    if (!onRejection) return this.source.listenOHLCV(opts, callback);
+    return this.trackSubscription(this.source.listenOHLCV(opts, callback, onRejection));
   };
+
+  private trackSubscription(unsubscribe: () => void): () => void {
+    const stop = () => {
+      if (this.subscriptions.delete(stop)) unsubscribe();
+    };
+    this.subscriptions.add(stop);
+    return stop;
+  }
 
   /**
    * Check if the provider is connected (source store subscription is active).
@@ -168,6 +189,13 @@ export class InProcessPublicDataProvider {
    */
   dispose = () => {
     this.isDisposed = true;
+    for (const stop of [...this.subscriptions]) {
+      try {
+        stop();
+      } catch {
+        /* Release every subscription even if one source refuses cleanup. */
+      }
+    }
 
     if (this.unsubscribeStore) {
       this.unsubscribeStore();
