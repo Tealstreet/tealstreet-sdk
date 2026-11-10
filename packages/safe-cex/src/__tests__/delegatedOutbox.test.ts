@@ -226,6 +226,86 @@ describe('DELEGATED host-neutral outbox', () => {
       box.close();
     }
   });
+  it.each([false, true])(
+    'preserves synchronous cancellation during a declined handoff (prior handoff: %s)',
+    async (priorHandoff) => {
+      const f = fixture();
+      const changes: DelegatedIntent[] = [];
+      f.options.changed = (row) => {
+        changes.push(row);
+      };
+      let box = await DelegatedOutbox.open(f.options);
+      let id: string | undefined;
+      let cancellation: Promise<void> | undefined;
+      if (priorHandoff) {
+        box.connect(f.connection());
+        id = await box.enqueue(params);
+      }
+      const declined = box.connect({
+        ...f.connection(),
+        send(frame) {
+          const message = JSON.parse(frame);
+          if (message.t === 'order.submit') cancellation = box.cancel(message.d.intentId);
+          return false;
+        },
+      });
+      if (priorHandoff) await box.flush(declined);
+      else id = await box.enqueue(params);
+      expect(cancellation).toBeDefined();
+      await cancellation;
+      const afterCancel = box.entries()[0];
+      const persistedAfterCancel = [...f.rows.values()][0];
+      await box.flush(box.connect(f.connection('replacement')));
+      expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
+        priorHandoff ? ['order.submit', 'order.cancelQueued'] : [],
+      );
+      const expected = { intentId: id, state: priorHandoff ? 'unknown' : 'canceled', cancelPending: priorHandoff };
+      expect(afterCancel).toMatchObject(expected);
+      expect(persistedAfterCancel).toMatchObject(expected);
+      expect(changes.at(-1)).toMatchObject(expected);
+      f.advance(10_000);
+      box.close();
+      box = await DelegatedOutbox.open(f.options);
+      await box.flush(box.connect(f.connection('restored')));
+      expect(box.entries()[0]).toMatchObject(expected);
+      expect(f.writes.filter((frame) => JSON.parse(frame).t === 'order.submit')).toHaveLength(priorHandoff ? 1 : 0);
+      box.close();
+    },
+  );
+  it.each([false, true])('preserves expiry during a declined handoff (prior handoff: %s)', async (priorHandoff) => {
+    const f = fixture();
+    const changes: DelegatedIntent[] = [];
+    f.options.changed = (row) => {
+      changes.push(row);
+    };
+    const box = await DelegatedOutbox.open(f.options);
+    let id: string | undefined;
+    if (priorHandoff) {
+      box.connect(f.connection());
+      id = await box.enqueue(params);
+    }
+    const declined = box.connect({
+      ...f.connection(),
+      send(frame) {
+        if (JSON.parse(frame).t === 'order.submit') f.advance(10_000);
+        return false;
+      },
+    });
+    if (priorHandoff) await box.flush(declined);
+    else id = await box.enqueue(params);
+    const afterDecline = box.entries()[0];
+    await box.flush(box.connect(f.connection('replacement')));
+    expect(afterDecline).toMatchObject({
+      intentId: id,
+      state: priorHandoff ? 'unknown' : 'notSent',
+      cancelPending: priorHandoff,
+    });
+    expect(changes.at(-1)).toMatchObject({ state: priorHandoff ? 'unknown' : 'notSent', cancelPending: priorHandoff });
+    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
+      priorHandoff ? ['order.submit', 'order.cancelQueued'] : [],
+    );
+    box.close();
+  });
   it('requires atomic compaction and upgrades legacy completed records on restore', async () => {
     const f = fixture();
     const compact = f.options.storage.compact;

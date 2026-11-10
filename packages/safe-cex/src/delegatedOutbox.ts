@@ -397,8 +397,11 @@ export class DelegatedOutbox {
         this.sent.delete(row.intentId);
         if (!previouslySubmitted) {
           this.submitted.delete(row.intentId);
-          row.state = 'queued';
+          // A declined first handoff proves no send, but the callback may have
+          // canceled or expired the intent synchronously. Keep those terminal.
+          row.state = this.expired(row) ? 'notSent' : row.cancelPending ? 'canceled' : 'queued';
           row.cancelPending = false;
+          this.changed(row);
         }
         await this.persist(row);
       } else this.changed(row);

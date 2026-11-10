@@ -84,6 +84,8 @@ spent waiting for persistence or admission, an intent never handed off is not se
 an unresolved physical handoff is unknown. A physical handoff is shown as sending
 until its receipt or deadline. Queue cancellation also preserves uncertainty after
 a handoff. Legacy pending cancellations restore as unknown, never as proof of no send.
+Cancellation or expiry inside a declined first send remains terminal and is
+published to observers; declining a retry cannot erase an earlier handoff's uncertainty.
 Restored ambiguous handoffs are unknown; queued records from another clock epoch
 are not sent. Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
