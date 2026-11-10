@@ -330,6 +330,43 @@ struct Port {
     running: Arc<Running>,
 }
 
+/// A nuke belongs to the registration that requested it, even while another
+/// holder keeps the account resident. Fence every native leg after an await;
+/// suppressing the final receipt alone would still permit new retired writes.
+struct ActionNukePort {
+    port: Rc<Port>,
+    registration: crate::out::Out,
+}
+
+impl AccountPort for ActionNukePort {
+    fn store(&self) -> Ref<'_, AlgoStore> {
+        self.port.store()
+    }
+    fn subscribe(&self) -> mpsc::UnboundedReceiver<Change> {
+        self.port.subscribe()
+    }
+    fn next_command_id(&self) -> CommandId {
+        self.port.next_command_id()
+    }
+    fn command(&self, command: Command) -> CommandFuture {
+        if !self.registration.action_active() {
+            return Box::pin(async {
+                Err(
+                    VenueError::new("Action registration retired; no further nuke leg was sent")
+                        .outcome(Outcome::Unknown),
+                )
+            });
+        }
+        self.port.command(command)
+    }
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        self.port.capabilities()
+    }
+    fn emit(&self, op: &str, data: String) {
+        self.port.emit(op, data);
+    }
+}
+
 impl AccountPort for Port {
     fn store(&self) -> Ref<'_, AlgoStore> {
         self.store.borrow()
@@ -1086,6 +1123,13 @@ pub async fn run(
                         loaded
                     });
                     let admission = running.user.get().map(|user| user.admit_cleanup());
+                    let nuke_cx = match action.as_ref().and_then(|receipt| receipt.registration()) {
+                        Some(registration) => AlgoCx::new(
+                            Rc::new(ActionNukePort { port: port.clone(), registration }),
+                            cx.scope.clone(),
+                        ),
+                        None => cx.clone(),
+                    };
                     let started = match admission.as_ref() {
                         _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"})),
                         Some(Err(error)) => Err(error.clone()),
@@ -1093,7 +1137,7 @@ pub async fn run(
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
-                            exec.nuke(mode, &cx)
+                            exec.nuke(mode, &nuke_cx)
                         }
                         _ => Err(serde_json::json!({
                             "message": crate::methods::NUKE_NOT_LOADED,

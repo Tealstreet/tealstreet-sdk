@@ -79,8 +79,11 @@ completion and audit. Nuke uses the account's existing native algo-host nuke,
 awaiting cancellation and closing legs; a partial/interrupted action stays
 unknown. Actor-queued nuke work carries the original registration and rechecks
 its liveness, account holder and IO authority after load waits and after the
-actor's store read. Retirement drops stale outcomes. An aborted/abandoned nuke
-settles unknown on its captured output, never another owner's registration.
+actor's store read. A server-owned account-port adapter also rechecks that
+registration before every later native command, including close legs after an
+awaited cancel. Retirement fences new legs and drops stale outcomes; already
+handed-off work remains uncertain. An aborted/abandoned nuke settles unknown on
+its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.

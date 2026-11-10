@@ -10,6 +10,11 @@ adapters call the existing native amend, cancel, cancel-all and nuke paths;
 this version adds no crates and changes nothing under `sdk-rs/engine`,
 `sdk-rs/venues/*` or `sdk-rs/algos`. No exception to this boundary is required.
 
+The server's nuke account-port adapter carries the original registration and
+checks it before every native command, including later close legs after an
+awaited cancel. Retirement fences those new legs without undoing an earlier
+handoff or turning its uncertainty into a not-sent proof.
+
 `hosts/server` is excluded from the beta-wasm fingerprint, so the Rust changes
 require a box roll without a full SDK release, a new wasm pin or the lane
 fingerprint gate. The TypeScript API and router capability still require their

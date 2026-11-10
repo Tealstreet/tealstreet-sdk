@@ -230,3 +230,66 @@ async fn a_partial_native_nuke_is_unknown_after_its_cancel_leg_completed() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn action_fix_nuke_owner_is_checked_between_native_legs() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for retire in [false, true] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape {
+                    hold: true,
+                    ..Default::default()
+                };
+                let a = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+                let (alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
+                let mut alice = Some(alice);
+                let (keeper, _keeper_rx, _) = Out::channel(256);
+                crate::accounts::tests::hold_live(&a, 9999, keeper.outbox());
+                action(alice.as_mut().unwrap(), json!({"kind":"nuke"}), 1, false).await;
+                action_frame(&mut a_sent, "order.actionAck").await;
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while tape.waiting.lock().unwrap().is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("first native cancel reached controlled transport");
+                assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
+                if retire {
+                    alice.take().unwrap().close();
+                }
+                // A separate owner's real native action remains a working positive control.
+                let b_tape = Tape::default();
+                let b = delegated_account(&registry, "B", "bybit", b_tape.clone());
+                let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+                action(&mut bob, json!({"kind":"cancelAll"}), 1, false).await;
+                let b_out = action_frame(&mut b_sent, "order.actionOutcome").await;
+                assert_eq!(b_out["d"]["outcome"], "applied");
+                assert_eq!(*b_tape.writes.lock().unwrap(), vec!["cancel"]);
+                tape.finish_unknown();
+                let crossed = tokio::time::timeout(Duration::from_millis(750), async {
+                    loop {
+                        if tape.writes.lock().unwrap().iter().any(|op| op == "create") {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .is_ok();
+                let writes = tape.writes.lock().unwrap().clone();
+                bob.close();
+                if let Some(alice) = alice.take() {
+                    alice.close();
+                }
+                registry.dispose(&a, Disposal::PageDisposed);
+                registry.dispose(&b, Disposal::PageDisposed);
+                assert_eq!(
+                    crossed, !retire,
+                    "retire={retire}; native A writes={writes:?}"
+                );
+            }
+        })
+        .await;
+}

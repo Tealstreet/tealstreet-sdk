@@ -195,6 +195,9 @@ impl NukeReceipt {
     pub fn new(out: Out, name: String, id: Value, seq: u64) -> Self {
         Self(Some((out, name, id, seq)))
     }
+    pub(crate) fn registration(&self) -> Option<Out> {
+        self.0.as_ref().map(|(out, ..)| out.clone())
+    }
     pub fn active(&self) -> bool {
         self.0.as_ref().is_some_and(|(out, ..)| out.action_active())
     }
