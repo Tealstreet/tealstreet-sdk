@@ -239,6 +239,8 @@ export class DelegatedOutbox {
   private readonly sent = new Map<string, Readonly<OutboxConnection>>();
   private readonly canceled = new Map<string, Readonly<OutboxConnection>>();
   private readonly durable = new Set<string>();
+  // Only current, durably completed rows can release capacity or retire.
+  private readonly completedIntents = new Map<string, DelegatedIntent>();
   private connection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
@@ -725,21 +727,23 @@ export class DelegatedOutbox {
   }
   private normalizeNotSent(row: DelegatedIntent): void {
     if (row.state === 'queued') {
-      if (this.replayable(row)) return;
-      unprovenNotSent(row);
-    }
-    if (row.state === 'notSent') {
+      if (!this.replayable(row)) unprovenNotSent(row);
+    } else if (row.state === 'notSent') {
       const marked = row as DelegatedIntent & { readonly [delegatedNotSentBrand]?: true };
-      if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row)) {
+      if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row))
         delete row.noHandoffEvidence;
-        return;
-      }
-      unprovenNotSent(row);
+      else unprovenNotSent(row);
     } else {
       delete row.notSentEvidence;
       delete row.noHandoffEvidence;
       if (record(row.error) && row.error.outcome === 'notSent') row.error.outcome = 'unknown';
     }
+    this.refreshCompleted(row);
+  }
+  private refreshCompleted(row: DelegatedIntent): void {
+    if (this.intents.get(row.intentId) !== row) return;
+    if (this.durable.has(row.intentId) && this.completed(row)) this.completedIntents.set(row.intentId, row);
+    else this.completedIntents.delete(row.intentId);
   }
   private replayable(row: DelegatedIntent): row is DelegatedReplayableIntent {
     const marked = row as DelegatedIntent & { readonly [delegatedReplayBrand]?: true };
@@ -748,6 +752,7 @@ export class DelegatedOutbox {
   private changed(row: DelegatedIntent): void {
     this.normalizeNotSent(row);
     this.durable.delete(row.intentId);
+    this.completedIntents.delete(row.intentId);
     if (this.active) this.options.changed?.(clone(row));
   }
   private async persist(row: DelegatedIntent): Promise<void> {
@@ -758,6 +763,7 @@ export class DelegatedOutbox {
     // A synchronous deadline/cancellation can change memory during this await.
     if (JSON.stringify(saved) === JSON.stringify(row)) this.durable.add(row.intentId);
     else this.durable.delete(row.intentId);
+    this.refreshCompleted(row);
   }
   private completed(row: DelegatedIntent): boolean {
     return (
@@ -770,17 +776,18 @@ export class DelegatedOutbox {
     );
   }
   private pendingCount(): number {
-    let count = 0;
-    for (const row of this.intents.values())
-      if (!this.durable.has(row.intentId) || !this.completed(row)) count++;
-    return count;
+    return this.intents.size - this.completedIntents.size;
   }
   private async compact(): Promise<void> {
-    const completed: DelegatedIntent[] = [];
-    for (const row of this.intents.values())
-      if (this.durable.has(row.intentId) && this.completed(row)) completed.push(row);
-    if (completed.length <= COMPLETED_HISTORY) return;
-    completed.sort((a, b) => a.seq - b.seq);
+    if (this.completedIntents.size <= COMPLETED_HISTORY) return;
+    const completed = [...this.completedIntents.values()];
+    let insertionOrder: Map<string, number> | undefined;
+    completed.sort((a, b) => {
+      if (a.seq !== b.seq) return a.seq - b.seq;
+      // Legacy rows may share a sequence: retain the original stable tie order.
+      insertionOrder ??= new Map([...this.intents.keys()].map((id, index) => [id, index] as const));
+      return insertionOrder.get(a.intentId)! - insertionOrder.get(b.intentId)!;
+    });
     const retired = completed.slice(0, completed.length - COMPLETED_HISTORY);
     await this.options.storage.compact(this.scope, {
       version: 1,
@@ -791,6 +798,7 @@ export class DelegatedOutbox {
       this.stopTimer(row.intentId);
       this.intents.delete(row.intentId);
       this.durable.delete(row.intentId);
+      this.completedIntents.delete(row.intentId);
       this.outcomeSequences.delete(row.intentId);
     }
   }
