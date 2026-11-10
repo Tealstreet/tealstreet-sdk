@@ -50,7 +50,10 @@ try {
     tool('node', ['sdk-rs/harness/ci-wasm.mjs', '--venue', 'bitget', '--archive', modules[arm]], `${arm}-archive.log`);
   }
   git('checkout', '--detach', composition);
-  tool('cargo', ['test', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-types', '-p', 'safe-cex-venue-bitget', '-j2'], 'composition-native-tests.log');
+  // Restored types enable arbitrary_precision; CI keeps that feature closure
+  // separate from venue tests. Run both full suites without unifying them.
+  tool('cargo', ['test', '--locked', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-types', '-j2'], 'composition-types-tests.log');
+  tool('cargo', ['test', '--locked', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-bitget', '-j2'], 'composition-native-tests.log');
   const pooled = { baseline: { ts: [], rust: [] }, candidate: { ts: [], rust: [] } };
   const active = `${out}/active-module`;
   for (const [index, arm] of BITGET_COHORT_ORDER.entries()) {
