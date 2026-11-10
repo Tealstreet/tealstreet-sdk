@@ -27,6 +27,8 @@ export interface DelegatedIntent extends OutboxScope {
   createdAt: number;
   state: IntentState;
   cancelPending: boolean;
+  /** Unknown history expired after 24 hours; never evidence of non-forwarding. */
+  retentionExpired?: boolean;
   venueOrderId?: string;
   error?: { message: string; outcome?: string };
 }
@@ -59,11 +61,13 @@ export interface OutboxConnection extends OutboxScope {
   ready: boolean;
   capabilities: { delegatedOrderFramesV1: boolean };
   instanceId?: string;
+  /** Return true only after socket handoff. False or a throw guarantees no handoff. */
   send(frame: string): boolean;
 }
 
 const MAX_AGE_MS = 10_000;
 const MAX_PENDING = 1024;
+const UNKNOWN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const COMPLETED_HISTORY = 32;
 const STATES: IntentState[] = [
   'queued',
@@ -83,7 +87,6 @@ export class DelegatedOutbox {
   private readonly timers = new Map<string, () => void>();
   private readonly sent = new Map<string, Readonly<OutboxConnection>>();
   private readonly canceled = new Map<string, Readonly<OutboxConnection>>();
-  private readonly submitted = new Set<string>();
   private readonly durable = new Set<string>();
   private connection?: Readonly<OutboxConnection>;
   private active = true;
@@ -118,6 +121,7 @@ export class DelegatedOutbox {
         typeof row.params !== 'object' ||
         Array.isArray(row.params) ||
         typeof row.cancelPending !== 'boolean' ||
+        (row.retentionExpired !== undefined && (row.retentionExpired !== true || row.state !== 'unknown')) ||
         box.intents.has(row.intentId)
       )
         throw new Error('Invalid persisted intent');
@@ -125,7 +129,7 @@ export class DelegatedOutbox {
         throw new Error('Persisted fingerprint differs');
       box.sequence = Math.max(box.sequence, row.seq);
       // A persisted handoff can have crossed the physical socket boundary.
-      if (row.state === 'sending') {
+      if (row.state === 'sending' || row.state === 'acknowledged') {
         row.state = 'unknown';
         row.cancelPending = false;
       }
@@ -155,6 +159,7 @@ export class DelegatedOutbox {
       connection.signingMode !== 'delegated'
     )
       throw new Error('Outbox connection scope differs');
+    if (this.connection) this.disconnect(this.connection);
     this.sent.clear();
     this.canceled.clear();
     this.outcomeSequence = 0;
@@ -167,7 +172,22 @@ export class DelegatedOutbox {
   }
 
   disconnect(connection: Readonly<OutboxConnection>): void {
-    if (this.connection === connection) this.connection = undefined;
+    if (this.connection !== connection) return;
+    this.connection = undefined;
+    for (const row of this.intents.values()) {
+      if (row.state !== 'sending' && row.state !== 'acknowledged') continue;
+      row.state = 'unknown';
+      this.stopTimer(row.intentId);
+      this.changed(row);
+      this.arm(row);
+      void this.serial(async () => {
+        if (!this.active) return;
+        await this.persist(row);
+        if (this.active) await this.compact();
+      }).catch(() => {
+        /* Write-ahead sending still restores as unknown. */
+      });
+    }
   }
 
   close(): void {
@@ -177,7 +197,6 @@ export class DelegatedOutbox {
     this.timers.clear();
     this.sent.clear();
     this.canceled.clear();
-    this.submitted.clear();
   }
 
   entries(): DelegatedIntent[] {
@@ -236,7 +255,7 @@ export class DelegatedOutbox {
     return this.serial(async () => {
       for (const row of [...this.intents.values()].sort((a, b) => a.seq - b.seq)) {
         if (!this.current(connection)) return;
-        if (!this.durable.has(row.intentId) && this.completed(row)) await this.persist(row);
+        if (!this.durable.has(row.intentId)) await this.persist(row);
         if (row.state === 'queued') await this.sendIntent(row, connection);
         if (row.cancelPending) await this.sendCancellation(row, connection);
       }
@@ -265,14 +284,17 @@ export class DelegatedOutbox {
       const row = this.intents.get(data.intentId);
       if (!row || data.seq !== row.seq) return;
       if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
-        if (!['queued', 'notSent', 'canceled'].includes(row.state)) return;
+        if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return;
+        if (row.retentionExpired && data.received) return;
         row.state = data.received ? 'acknowledged' : 'notSent';
+        delete row.retentionExpired;
       } else if (parsed.t === 'order.outcome' && ['placed', 'refused', 'unknown'].includes(String(data.outcome))) {
         if (data.clientOrderId !== null && data.clientOrderId !== row.intentId) return;
         if (!Number.isSafeInteger(data.outcomeSeq) || Number(data.outcomeSeq) <= this.outcomeSequence) return;
         if (data.outcome === 'placed' && (typeof data.venueOrderId !== 'string' || !data.venueOrderId)) return;
         this.outcomeSequence = Number(data.outcomeSeq);
         row.state = data.outcome as IntentState;
+        delete row.retentionExpired;
         if (record(data.error) && typeof data.error.message === 'string') {
           row.error = { message: data.error.message };
           if (data.error.outcome === 'notSent') {
@@ -285,6 +307,7 @@ export class DelegatedOutbox {
       row.cancelPending = false;
       this.stopTimer(row.intentId);
       this.changed(row);
+      this.arm(row);
       await this.persist(row);
       await this.compact();
     });
@@ -292,11 +315,12 @@ export class DelegatedOutbox {
 
   cancel(intentId: string): Promise<void> {
     const row = this.intents.get(intentId);
-    if (!this.active || !row || row.state !== 'queued') return Promise.resolve();
-    row.state = 'canceled';
-    row.cancelPending = this.submitted.has(intentId);
+    if (!this.active || !row || !['queued', 'sending'].includes(row.state)) return Promise.resolve();
+    row.cancelPending = row.state === 'sending';
+    row.state = row.cancelPending ? 'unknown' : 'canceled';
     this.stopTimer(intentId);
     this.changed(row);
+    this.arm(row);
     const connection = this.connection;
     return this.serial(async () => {
       if (!this.active) return;
@@ -341,44 +365,44 @@ export class DelegatedOutbox {
       this.expire(row);
       return;
     }
-    const previouslySubmitted = this.submitted.has(row.intentId);
-    this.sent.set(row.intentId, connection);
-    try {
-      const frame = this.frame(connection, 'order.submit', {
-        intentId: row.intentId,
-        fingerprint: row.fingerprint,
-        params: row.params,
-        seq: row.seq,
-        ageMs: this.options.clock.now() - row.createdAt,
-      });
-      if (utf8ToBytes(frame).length > DELEGATED_SUBMIT_MAX) {
-        row.state = 'notSent';
-        this.stopTimer(row.intentId);
-        this.changed(row);
-        await this.persist(row);
-        return;
-      }
-      if (this.expired(row)) {
-        this.expire(row);
-        return;
-      }
-      this.submitted.add(row.intentId);
-      const sent = connection.send(frame);
-      if (!sent) {
-        this.sent.delete(row.intentId);
-        if (!previouslySubmitted) {
-          this.submitted.delete(row.intentId);
-          row.cancelPending = false;
-        }
-        await this.persist(row);
-      }
-    } catch {
-      row.state = 'unknown';
-      row.cancelPending = false;
+    const frame = this.frame(connection, 'order.submit', {
+      intentId: row.intentId,
+      fingerprint: row.fingerprint,
+      params: row.params,
+      seq: row.seq,
+      ageMs: this.options.clock.now() - row.createdAt,
+    });
+    if (utf8ToBytes(frame).length > DELEGATED_SUBMIT_MAX) {
+      row.state = 'notSent';
       this.stopTimer(row.intentId);
       this.changed(row);
       await this.persist(row);
+      return;
     }
+    if (this.expired(row)) {
+      this.expire(row);
+      return;
+    }
+    // Set in-flight before invoking the synchronous adapter: a reentrant
+    // deadline/disconnect must already treat this handoff as ambiguous.
+    row.state = 'sending';
+    this.sent.set(row.intentId, connection);
+    let handedOff = false;
+    try {
+      handedOff = connection.send(frame);
+    } catch {
+      // The adapter contract guarantees a throw means no physical handoff.
+    }
+    if (!handedOff) {
+      row.state = row.cancelPending ? 'canceled' : 'queued';
+      row.cancelPending = false;
+      this.stopTimer(row.intentId);
+    }
+    this.changed(row);
+    this.arm(row);
+    if (!handedOff && this.expired(row)) this.expire(row);
+    // Keep the write-ahead sending record on storage failure after handoff.
+    await this.persist(row).catch(() => undefined);
   }
 
   private async sendCancellation(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
@@ -405,12 +429,36 @@ export class DelegatedOutbox {
   }
 
   private arm(row: DelegatedIntent): void {
-    if (row.state !== 'queued') return;
+    if (!this.active) return;
+    this.timers.get(row.intentId)?.();
+    this.timers.delete(row.intentId);
+    if (row.state === 'unknown') {
+      if (row.retentionExpired) return;
+      const delay = delegatedIntentTime(row.intentId) + UNKNOWN_RETENTION_MS - this.options.clock.unix();
+      if (!Number.isFinite(delay)) return;
+      if (delay <= 0) {
+        this.expireUnknown(row);
+        return;
+      }
+      this.timers.set(
+        row.intentId,
+        this.options.schedule(
+          () => {
+            if (!this.active || row.state !== 'unknown' || row.retentionExpired) return;
+            this.timers.delete(row.intentId);
+            this.arm(row);
+          },
+          Math.min(delay, UNKNOWN_RETENTION_MS),
+        ),
+      );
+      return;
+    }
+    if (!['queued', 'sending', 'acknowledged'].includes(row.state)) return;
     this.timers.set(
       row.intentId,
       this.options.schedule(
         () => {
-          if (!this.active || row.state !== 'queued') return;
+          if (!this.active || !['queued', 'sending', 'acknowledged'].includes(row.state)) return;
           this.timers.delete(row.intentId);
           if (this.expired(row)) this.expire(row);
           else this.arm(row);
@@ -420,22 +468,33 @@ export class DelegatedOutbox {
     );
   }
 
-  private expire(row: DelegatedIntent): void {
-    if (!this.active || row.state !== 'queued') return;
-    row.state = 'notSent';
-    row.cancelPending = this.submitted.has(row.intentId);
+  private expireUnknown(row: DelegatedIntent): void {
+    if (!this.active || row.state !== 'unknown' || row.retentionExpired) return;
+    row.retentionExpired = true;
+    row.cancelPending = false;
     this.stopTimer(row.intentId);
     this.changed(row);
-    const connection = this.connection;
-    // The state changes synchronously at the deadline; storage latency cannot
-    // defer the last handoff check or attribute work to another connection.
+    this.saveExpired(row);
+  }
+
+  private expire(row: DelegatedIntent): void {
+    if (!this.active || !['queued', 'sending', 'acknowledged'].includes(row.state)) return;
+    row.state = row.state === 'queued' ? 'notSent' : 'unknown';
+    row.cancelPending = false;
+    this.stopTimer(row.intentId);
+    this.changed(row);
+    this.arm(row);
+    this.saveExpired(row);
+  }
+
+  private saveExpired(row: DelegatedIntent): void {
+    // Capture row/scope now; deferred persistence can never change its owner.
     void this.serial(async () => {
       if (!this.active) return;
       await this.persist(row);
-      if (connection) await this.sendCancellation(row, connection);
-      await this.compact();
+      if (this.active) await this.compact();
     }).catch(() => {
-      /* The in-memory terminal state still prevents a send. */
+      /* The in-memory state and write-ahead record still prevent a replay. */
     });
   }
 
@@ -444,18 +503,24 @@ export class DelegatedOutbox {
     this.timers.delete(id);
     this.sent.delete(id);
     this.canceled.delete(id);
-    this.submitted.delete(id);
   }
   private changed(row: DelegatedIntent): void {
+    this.durable.delete(row.intentId);
     if (this.active) this.options.changed?.(clone(row));
   }
   private async persist(row: DelegatedIntent): Promise<void> {
     if (this.intents.get(row.intentId) !== row) return;
-    await this.options.storage.put(this.scope, clone(row));
-    this.durable.add(row.intentId);
+    const saved = clone(row);
+    await this.options.storage.put(this.scope, saved);
+    // A synchronous deadline/cancellation can change memory during this await.
+    if (JSON.stringify(saved) === JSON.stringify(row)) this.durable.add(row.intentId);
+    else this.durable.delete(row.intentId);
   }
   private completed(row: DelegatedIntent): boolean {
-    return !row.cancelPending && ['placed', 'refused', 'notSent', 'canceled'].includes(row.state);
+    return (
+      !row.cancelPending &&
+      (row.retentionExpired === true || ['placed', 'refused', 'notSent', 'canceled'].includes(row.state))
+    );
   }
   private pendingCount(): number {
     return [...this.intents.values()].filter((row) => !this.durable.has(row.intentId) || !this.completed(row)).length;

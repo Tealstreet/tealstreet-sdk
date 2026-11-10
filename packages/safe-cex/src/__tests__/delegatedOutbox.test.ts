@@ -83,6 +83,155 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  it('marks physical handoff in flight and turns its deadline into unknown', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'sending' });
+    f.advance(10_000);
+    expect(box.entries()[0].state).toBe('unknown');
+    await box.flush(c);
+    expect([...f.rows.values()][0].state).toBe('unknown');
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  it('keeps a handoff unknown through close, deadline and reconnect without a replay', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    await box.enqueue(params);
+    box.disconnect(c);
+    expect(box.entries()[0].state).toBe('unknown');
+    f.advance(10_000);
+    await box.flush(box.connect(f.connection()));
+    expect(box.entries()[0].state).toBe('unknown');
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  it.each(['throw', 'closed', 'declined'] as const)('expires a never-forwarded %s send as notSent', async (kind) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect({
+      ...f.connection(),
+      send: () => {
+        if (kind === 'throw') throw new Error('socket closed before send');
+        return false;
+      },
+    });
+    if (kind === 'closed') box.disconnect(c);
+    await box.enqueue(params);
+    f.advance(10_000);
+    expect(box.entries()[0].state).toBe('notSent');
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
+  it('expires unknown retention explicitly after 24 hours and recovers capacity durably', async () => {
+    const f = fixture();
+    const expired: DelegatedIntent[] = [];
+    f.options.changed = (row) => {
+      if ('retentionExpired' in row && row.retentionExpired) expired.push(row);
+    };
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    let first = '';
+    for (let seq = 1; seq <= 1024; seq++) {
+      const id = await box.enqueue(params);
+      if (!first) first = id;
+      await box.receive(
+        c,
+        response(id, 'order.outcome', { seq, outcomeSeq: seq, outcome: 'unknown', clientOrderId: id }),
+      );
+      f.advance(1);
+    }
+    await expect(box.enqueue(params)).rejects.toThrow('full');
+    f.advance(86_400_000 - 1024 - 1);
+    expect(box.entries().find((row) => row.intentId === first)).toMatchObject({ state: 'unknown' });
+    expect(expired).toHaveLength(0);
+    f.advance(1025);
+    await box.flush(c);
+    expect(expired).toHaveLength(1024);
+    expect(expired.every((row) => row.state === 'unknown')).toBe(true);
+    expect(box.entries()).toHaveLength(32);
+    expect(f.rows.size).toBe(32);
+    await box.enqueue(params);
+    expect(JSON.parse(f.writes.at(-1)!).d.seq).toBe(1025);
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries().filter((row) => row.state === 'unknown')).toHaveLength(33);
+    expect(f.writes).toHaveLength(1025);
+    restored.close();
+  });
+
+  it.each(['declined', 'throw'] as const)('preserves a reentrant cancellation when handoff is %s', async (kind) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    let cancellation: Promise<void> | undefined;
+    box.connect({
+      ...f.connection(),
+      send: (text) => {
+        cancellation = box.cancel(JSON.parse(text).d.intentId);
+        if (kind === 'throw') throw new Error('closed before handoff');
+        return false;
+      },
+    });
+    await box.enqueue(params);
+    await cancellation;
+    expect(box.entries()[0]).toMatchObject({ state: 'canceled', cancelPending: false });
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
+  it('keeps delayed unknown-expiry storage and timers with Alice across a Bob login', async () => {
+    const a = fixture('alice');
+    const aliceChanges: DelegatedIntent[] = [];
+    a.options.changed = (row) => aliceChanges.push(row);
+    const alice = await DelegatedOutbox.open(a.options);
+    const c = alice.connect(a.connection());
+    const aId = await alice.enqueue(params);
+    await alice.receive(c, response(aId, 'order.outcome', { outcome: 'unknown', clientOrderId: aId }));
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const put = a.options.storage.put;
+    a.options.storage.put = async (scope, row) => {
+      if (row.retentionExpired) {
+        entered();
+        await held;
+      }
+      await put(scope, row);
+    };
+    a.advance(86_400_000);
+    await waiting;
+    alice.close();
+    const changesAtLogout = aliceChanges.length;
+    const b = fixture('bob', a.rows);
+    const bob = await DelegatedOutbox.open(b.options);
+    const bc = bob.connect(b.connection());
+    const bId = await bob.enqueue(params);
+    release();
+    await alice.flush(c);
+    a.advance(86_400_000);
+    await bob.flush(bc);
+    expect(aliceChanges).toHaveLength(changesAtLogout);
+    expect(a.writes).toHaveLength(1);
+    expect(b.writes).toHaveLength(1);
+    expect(bob.entries()[0]).toMatchObject({ owner: 'bob', intentId: bId, state: 'sending' });
+    expect([...a.rows.values()].filter((row) => row.owner === 'bob')).toEqual(bob.entries());
+    bob.close();
+    const restored = await DelegatedOutbox.open(a.options);
+    await restored.flush(restored.connect(a.connection()));
+    expect(restored.entries()[0]).toMatchObject({ owner: 'alice', state: 'unknown', retentionExpired: true });
+    expect(a.writes).toHaveLength(1);
+    restored.close();
+  });
   it('returns the durable physically-sent intent even when unrelated retirement fails', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -116,33 +265,29 @@ describe('DELEGATED host-neutral outbox', () => {
       expect(box.entries()).toHaveLength(33);
       expect(f.rows.size).toBe(33);
       expect(f.writes).toHaveLength(1);
-      expect(box.entries().find((row) => row.intentId === result.id)?.state).toBe('queued');
+      expect(box.entries().find((row) => row.intentId === result.id)?.state).toBe('sending');
     } finally {
       box.close();
     }
   });
-  it('distinguishes a declined handoff from a prior successful handoff on cancellation', async () => {
+  it('distinguishes a declined handoff from a successful handoff on cancellation', async () => {
     for (const handedOff of [false, true]) {
       const f = fixture();
-      const box = await DelegatedOutbox.open(f.options);
-      if (handedOff) box.connect(f.connection());
-      const id = await box.enqueue(params);
       const attempts: string[] = [];
-      const c = box.connect({
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect({
         ...f.connection(),
         send: (frame) => {
           attempts.push(JSON.parse(frame).t);
-          return false;
+          return handedOff;
         },
       });
-      await box.flush(c);
+      const id = await box.enqueue(params);
       await box.cancel(id);
-      expect(box.entries()[0].cancelPending).toBe(handedOff);
+      expect(box.entries()[0]).toMatchObject({ cancelPending: handedOff, state: handedOff ? 'unknown' : 'canceled' });
       expect(attempts).toEqual(handedOff ? ['order.submit', 'order.cancelQueued'] : ['order.submit']);
       await box.flush(box.connect(f.connection()));
-      expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
-        handedOff ? ['order.submit', 'order.cancelQueued'] : [],
-      );
+      expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(handedOff ? ['order.cancelQueued'] : []);
       box.close();
     }
   });
@@ -269,7 +414,7 @@ describe('DELEGATED host-neutral outbox', () => {
     await finishing;
     expect(a.writes).toEqual([]);
     expect(b.writes).toHaveLength(1);
-    expect(bob.entries()[0]).toMatchObject({ owner: 'bob', intentId: bId, state: 'queued' });
+    expect(bob.entries()[0]).toMatchObject({ owner: 'bob', intentId: bId, state: 'sending' });
     expect([...a.rows.values()].filter((row) => row.owner === 'bob')).toHaveLength(1);
     bob.close();
   });
@@ -369,7 +514,7 @@ describe('DELEGATED host-neutral outbox', () => {
     await restored.flush(restored.connect(f.connection()));
     expect(f.writes).toHaveLength(2);
     expect(restored.entries().find((row) => row.intentId === uncertain)?.state).toBe('unknown');
-    expect(restored.entries().find((row) => row.intentId === acknowledged)?.state).toBe('acknowledged');
+    expect(restored.entries().find((row) => row.intentId === acknowledged)?.state).toBe('unknown');
     restored.close();
   });
   it('pins all four frozen frame shapes against the shared native fixture', async () => {
@@ -396,7 +541,7 @@ describe('DELEGATED host-neutral outbox', () => {
     const c = box.connect(f.connection());
     await box.flush(c);
     await box.receive(c, response(id, 'order.ack', { received: true, padding: 'x'.repeat(4096) }));
-    expect(box.entries()[0].state).toBe('queued');
+    expect(box.entries()[0].state).toBe('sending');
     await box.receive(c, response(id, 'order.outcome', { outcome: 'unknown', clientOrderId: id, outcomeSeq: 2 }));
     await box.receive(
       c,
@@ -418,7 +563,7 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(a < b).toBe(true);
   });
-  it('persists before handoff, resends the same intent on reconnect, then stops at ack', async () => {
+  it('persists before handoff, stays unknown on reconnect, and accepts a late receipt', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     const c = box.connect(f.connection());
@@ -437,12 +582,12 @@ describe('DELEGATED host-neutral outbox', () => {
     f.advance(500);
     const next = box.connect(f.connection());
     await box.flush(next);
-    expect(f.writes).toHaveLength(2);
-    expect(JSON.parse(f.writes[1]).d).toMatchObject({ intentId: id, ageMs: 500, seq: 1 });
+    expect(f.writes).toHaveLength(1);
+    expect(box.entries()[0].state).toBe('unknown');
     await box.receive(next, response(id, 'order.ack', { received: true }));
     const third = box.connect(f.connection());
     await box.flush(third);
-    expect(f.writes).toHaveLength(2);
+    expect(f.writes).toHaveLength(1);
     box.close();
   });
   it('caps every queued order at ten monotonic seconds and only sends queue cancellation afterward', async () => {
@@ -535,7 +680,7 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toHaveLength(1);
     expect(JSON.parse(f.writes[0]).d.instanceId).toBe('new');
     await box.receive(stale, response(id, 'order.ack', { received: true }));
-    expect(box.entries()[0].state).toBe('queued');
+    expect(box.entries()[0].state).toBe('sending');
     box.close();
   });
   it('expires synchronously while the physical-handoff persistence is delayed', async () => {
@@ -596,7 +741,7 @@ describe('DELEGATED host-neutral outbox', () => {
     await expect(
       box.receive(c, response(id, 'order.outcome', { outcome: 'unknown', clientOrderId: id })),
     ).rejects.toThrow('storage');
-    await box.flush(box.connect(f.connection()));
+    await expect(box.flush(box.connect(f.connection()))).rejects.toThrow('storage');
     expect(f.writes).toHaveLength(1);
     box.close();
     f.options.storage.put = put;
@@ -651,7 +796,7 @@ describe('DELEGATED host-neutral outbox', () => {
     frame.d.instanceId = 'registration';
     frame.d.accountName = 'another';
     await box.receive(c, frame);
-    expect(box.entries()[0].state).toBe('queued');
+    expect(box.entries()[0].state).toBe('sending');
     box.close();
   });
   it('does not hand off while pending, after storage failure, or through HTTP', async () => {

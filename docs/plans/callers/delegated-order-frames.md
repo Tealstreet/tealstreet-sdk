@@ -109,11 +109,17 @@ after admission and capability discovery. Pass the captured ticket to `flush`
 and `receive`, and close the outbox on logout or removal. Deferred storage work
 can neither send through a replaced socket nor switch to another owner.
 
-The outbox persists before handoff and resends the same unacknowledged intent
-across reconnects within ten monotonic seconds. Its deadline observer marks
-not-sent state even while storage is waiting, and physical handoff rechecks the
-cap. Persisted `sending` records restore as unknown, including when saving a
-later result failed. A queued record from a different monotonic epoch becomes
+The outbox persists before handoff and marks the row `sending` at the physical
+socket boundary. It never resubmits sending, acknowledged or unknown work.
+Disconnect or connection replacement changes sending/acknowledged rows to unknown;
+late receipts can still resolve those rows on the current admitted connection.
+At ten monotonic seconds from creation, its deadline observer marks queued,
+never-forwarded work not sent, even while storage is waiting, and marks in-flight
+or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+send adapter must return true only for a physical handoff; false or a throw
+positively guarantees no handoff. A queue cancellation after handoff remains
+unknown until an authoritative receipt proves non-forwarding. Persisted `sending`
+records restore as unknown, including when saving a later result failed. A queued record from a different monotonic epoch becomes
 not sent rather than inferring elapsed time from wall time. Queue cancellation
 can be persisted and resent; order submission cannot resume after acknowledgement
 or unknown. Rendering, consent and router ledger storage remain host concerns.
@@ -125,7 +131,16 @@ handoff keeps enqueue successful with that same intent ID; retry preserves it.
 Pending work is limited to 1,024 records; at most 32 completed records are kept
 for recent history. Placed, refused, not-sent and canceled records can retire only
 after their state is durable and no queue cancellation is pending. Acknowledged
-and unknown records remain retained and never become resendable through pruning.
+work becomes unknown at the command deadline or disconnect. Unknown rows remain
+unresolved for 24 hours from UUIDv7 Unix creation time, evaluated against the
+injected Unix clock on timers and reload (a clock rollback extends retention).
+Expiry emits `changed` with `state: "unknown", retentionExpired: true`, clears any
+pending queue cancellation, and persists that explicit expired-history marker.
+Hosts surface expired unresolved history and use ordinary order state/history for
+reconciliation. Expired unknowns join the latest-32 completed history only after
+the expiry marker is durable. Compaction never changes their outcome to not sent
+or makes their identity resendable. Storage failure retains them until flush can
+retry. A later authoritative result may still resolve a retained history row.
 
 Adapters provide `compact(scope, {version:1, sequence, retiredIntentIds})` as one
 atomic transaction. It deletes only those IDs for that owner/account and advances

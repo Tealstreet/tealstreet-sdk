@@ -67,9 +67,15 @@ the server handover implementation landing.
 submits, gated on the advertised delegatedOrderFramesV1 capability. Hosts inject scoped persistence, secure randomness, a monotonic clock
 with a stable epoch, deadline scheduling and an admitted socket connection. Close
 the outbox on logout; pass the captured connection ticket to flush and receive.
-Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
-intents are never submitted again. Unacknowledged intents expire after ten
-monotonic seconds, including time spent waiting for persistence or admission.
+Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
+an intent `sending` in memory; sending, acknowledged and unknown intents are never
+submitted again. At ten monotonic seconds from creation (including persistence
+and admission waits), a never-forwarded queued intent becomes `notSent`; an
+in-flight or acknowledged intent becomes `unknown`. Disconnect/replacement makes
+in-flight and acknowledged intents unknown immediately. The synchronous send
+adapter returns true only after socket handoff; false or a throw must guarantee
+no handoff. Queue cancellation after handoff remains unknown until a router
+receipt positively establishes non-forwarding.
 Restored ambiguous handoffs are unknown; queued records from another clock epoch
 are not sent. Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
@@ -78,7 +84,16 @@ see `docs/plans/callers/delegated-order-frames.md`. This module does not select 
 signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
 
 The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
-records. Acknowledged/unknown work and pending queue cancellations remain retained.
+records. Unknown work, including pending queue cancellation, is retained for 24
+hours from its UUIDv7 Unix creation time, using the injected Unix clock across
+reloads (clock rollback can extend retention). At expiry it remains `unknown`,
+gains `retentionExpired: true`, stops pending queue cancellation, and emits the
+normal `changed` notification. Hosts must surface this as expired, unresolved
+history and reconcile via ordinary orders/history; expiry proves nothing about
+the venue outcome. Only after that explicit expiry state is durable may it join
+the latest-32 completed history and retire. Expiry never enables resubmission or
+changes an unknown to `notSent`; a late positive router refusal can still prove
+non-forwarding. Storage failure keeps the row for a later flush retry.
 Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
 listed retired intent IDs in that scope and advance its durable sequence using
 the maximum of old/new values. Preserve all other records. `load` returns an
