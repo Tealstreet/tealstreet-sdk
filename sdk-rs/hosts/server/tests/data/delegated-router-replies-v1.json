@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "submit with an uncertain handoff",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "submit refused before dispatch",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.ack",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "received": false
+          }
+        },
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "refused",
+            "venueOrderId": null,
+            "clientOrderId": null,
+            "error": {
+              "message": "not sent: order ledger unavailable",
+              "outcome": "notSent"
+            }
+          }
+        }
+      ],
+      "state": "notSent",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel before dispatch",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.ack",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "received": false
+          }
+        },
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "refused",
+            "venueOrderId": null,
+            "clientOrderId": null,
+            "error": {
+              "message": "not sent: canceled",
+              "outcome": "notSent"
+            }
+          }
+        }
+      ],
+      "state": "notSent",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel after a recorded placement",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.ack",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "received": true
+          }
+        },
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "placed",
+            "venueOrderId": "native-one",
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": null
+          }
+        }
+      ],
+      "state": "placed",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel after an uncertain handoff",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel an unretained expired key",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel while ledger persistence is unavailable",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "msg",
+          "d": {
+            "op": "error",
+            "accountName": "main",
+            "data": ["order ledger unavailable"]
+          }
+        }
+      ],
+      "state": "canceled",
+      "cancelPending": true
+    }
+  ]
+}

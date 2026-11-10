@@ -3,7 +3,9 @@
 This opt-in protocol uses the existing authenticated account socket and the
 existing method translation, native completion and order audit. It places one
 Bybit order per submit. LOCAL and COSIGNED retain their existing call protocol.
-The shared fixture is `sdk-rs/hosts/server/tests/data/delegated-orders-v1.json`.
+The frozen frame fixture is
+`sdk-rs/hosts/server/tests/data/delegated-orders-v1.json`; synthetic router replies
+are in `sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json`.
 
 ## DESIGN
 
@@ -12,9 +14,17 @@ The shared fixture is `sdk-rs/hosts/server/tests/data/delegated-orders-v1.json`.
 The server advertises `transports.accountWorkerWebSocket.delegatedOrderFramesV1`
 in `capabilities_json`. It is false by default and true only in a build with the
 `delegated-order-frames` Cargo feature and the existing Bybit DELEGATED flag.
-NX and client hosts must check this advertisement before using the protocol.
-The outbox also requires it in the captured connection ticket. A pending socket
-or any account/mode/venue/registration mismatch receives a visible refusal.
+Hosts enable the outbox only when **both** that box advertisement and the
+router-owned `transports.accountWorkerWebSocket.delegatedOrderLedgerV1` are
+explicitly true. The latter attests that the routing hop provides the durable
+ledger; an older pass-through router omits it. Neither flag implies the other.
+Hosts copy the box's `delegatedOrderFramesV1` and the router's
+`delegatedOrderLedgerV1` into the admitted outbox connection's `capabilities`.
+Missing or false flags disable submits, queued cancellations and receipt handling;
+durable queued work remains subject to its original expiry. Discovery changes
+require a new captured ticket; mutating a discovery object cannot enable an old
+connection. A pending socket or any account/mode/venue/registration mismatch
+receives a visible refusal.
 
 Every request carries the account label and that connection's current
 `instanceId`. The server requires the same registration and the resident account
@@ -38,14 +48,23 @@ Every `d` includes `accountName`, optional `instanceId`, `intentId`, and `seq`.
 
 Outcome ID and error fields are always present and nullable. Error objects use
 `message` and optional `outcome: "notSent" | "unknown"`. Receipts echo the input
-`seq`. Each account on a connection has an increasing `outcomeSeq`, assigned
-atomically when an outcome is queued for that socket. Native completions may
-finish in a different order from submits; sequence gaps are allowed, reversals
-are ignored by the outbox. A reconnect or replacement registration starts a new
-receipt-sequence domain; hosts pass a new outbox connection ticket after admission.
-The intent sequence is a positive JS-safe integer allocated by the account's
-outbox and retained across resends. NX preserves admission order while awaiting
-its durable writes.
+`seq`. `outcomeSeq` is a positive JS-safe transport delivery counter, not part
+of a business result or its fingerprint. The box numbers its registration output;
+the router may replace that number on **every** live or replayed outcome with its
+own increasing counter for the receiving client socket, spanning accounts and
+intents. Replaying a stored result must use the current request's binding and
+that receiving socket's counter, rather than an old box/socket counter.
+
+Native completions may finish in a different order from submits; gaps are allowed.
+The outbox compares receipt numbers only for the **same intent on the same captured
+ticket**, ignoring repeated or lower numbers there. An independent intent's higher
+number cannot suppress a result delivered later by a deferred host callback. A
+reconnect or replacement registration starts a new receipt-sequence domain; hosts
+pass a new outbox connection ticket after admission, even if the registration
+label is reused. Old tickets cannot deliver into the new domain. No counter is
+added to persisted intents and the four frame shapes are unchanged. The intent
+`seq` remains a positive JS-safe integer allocated by the account's outbox and
+retained across resends. NX preserves admission order while awaiting durable writes.
 
 Submits are bounded to 64 KiB; acknowledgements to 4 KiB; outcomes to 8 KiB,
 including their envelope and registration ID. Native error messages are bounded
@@ -100,6 +119,29 @@ off, it returns the stored receipt/outcome and never converts this frame into a
 venue cancellation. The server owns no such queue; an admitted, valid cancellation
 that reaches it returns unknown without issuing a venue command. Unadmitted
 cancellation frames visibly refuse. There is no HTTP write fallback.
+
+### Router reply compatibility
+
+Router replies use the frozen `order.ack` and `order.outcome` envelopes, with the
+requesting socket's `accountName`, optional `instanceId`, `intentId` and input `seq`.
+All outcomes carry `venueOrderId`, `clientOrderId` and `error`, including explicit
+nulls. The synthetic router fixture pins these cases:
+
+| Situation | Replies | Outbox result |
+| --- | --- | --- |
+| Claimed intent whose handoff/result cannot be proven | `unknown`, venue ID null, intent UUID as client ID, error `{message: "Order result is not yet known", outcome: "unknown"}`; an ACK is not required | Unknown; never resubmit |
+| Submit refused before dispatch | ACK `received: false`, then `refused`, both IDs null, error `{message: "not sent: order ledger unavailable", outcome: "notSent"}` (other validation refusals use their reason) | Not sent |
+| Queue cancellation before dispatch, including a repeated cancellation | ACK `received: false`, then `refused`, both IDs null, error `{message: "not sent: canceled", outcome: "notSent"}` | Not sent; cancellation settled |
+| Queue cancellation after dispatch | Replay stored ACK/result when present, or await a live receipt; if the handoff can no longer be proven, the same `unknown` shape above | Stored result or unknown; no venue cancellation |
+| Queue cancellation for an unretained expired key | The same `unknown` shape above | Unknown; no venue cancellation |
+| Queue cancellation whose persistence fails | Ordinary `{t: "msg", d: {op: "error", accountName, data: ["order ledger unavailable"]}}`, without an order receipt | Keep cancellation pending for retry |
+
+A replayed placement retains the stored venue ID and intent UUID as client ID,
+with `error: null`. Unknown does not mean not sent. A router queue cancellation
+never creates an outcome named `canceled`, a new acknowledgement kind, or a fifth
+order frame. Ordinary malformed/unbindable request errors likewise remain ordinary
+error messages, not fabricated order receipts. Hosts must not clear pending queue
+cancellation merely on receipt of such an ordinary error.
 
 ### Host-neutral outbox
 

@@ -64,9 +64,16 @@ the server handover implementation landing.
 ## DELEGATED order outbox
 
 `DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
-submits, gated on the advertised delegatedOrderFramesV1 capability. Hosts inject scoped persistence, secure randomness, a monotonic clock
-with a stable epoch, deadline scheduling and an admitted socket connection. Close
+submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
+`delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
+missing/false flags disable writes and receipts. Hosts inject scoped persistence,
+secure randomness, a monotonic clock with a stable epoch, deadline scheduling
+and an admitted socket connection. Close
 the outbox on logout; pass the captured connection ticket to flush and receive.
+Router outcomes may be renumbered per client socket, including stored replays.
+Receipt ordering is checked per intent within that ticket, so one intent's higher
+number cannot hide another's deferred replay. Replacement tickets reset receipt
+ordering and old tickets cannot update the replacement connection.
 Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
 intents are never submitted again. Unacknowledged intents expire after ten
 monotonic seconds, including time spent waiting for persistence or admission.
