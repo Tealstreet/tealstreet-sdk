@@ -63,3 +63,28 @@ clones. Replacing or retiring that registration also retires its order receipts;
 successful same-resident re-verification follows the same replacement lifecycle.
 Existing method/signing envelopes retain their lifecycle. Sequence exhaustion
 signals reconnect without wrapping the counter.
+
+
+## DELEGATED action frames v1
+
+The additive `order.action` family dispatches amend, venue cancel, cancel-all and
+nuke on the admitted Bybit DELEGATED account. `delegatedOrderActionsV1` follows
+the existing feature/Bybit gate; hosts also require the router's separate
+`delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
+bind UUIDv7 identity, version, action kind and target IDs in a separate canonical
+fingerprint domain. Placement's four frames and fingerprints are unchanged.
+
+Amend/cancel/cancel-all use the existing method translator, native command
+completion and audit. Nuke uses the account's existing native algo-host nuke,
+awaiting cancellation and closing legs; a partial/interrupted action stays
+unknown. Actor-queued nuke work carries the original registration and rechecks
+its liveness, account holder and IO authority after load waits and after the
+actor's store read. Retirement drops stale outcomes. An aborted/abandoned nuke
+settles unknown on its captured output, never another owner's registration.
+
+Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
+`unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+Receipt counters share the existing registration lifecycle and size bounds.
+`order.actionCancelQueued` belongs to the router and never issues a venue cancel.
+See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
+`tests/data/delegated-actions-v1.json` contract.

@@ -107,6 +107,10 @@ pub struct AccountMsg {
 pub enum Inbound {
     #[serde(rename = "order.submit")]
     OrderSubmit(crate::order_contract::OrderSubmit),
+    #[serde(rename = "order.action")]
+    OrderAction(crate::order_actions::Request),
+    #[serde(rename = "order.actionCancelQueued")]
+    OrderActionCancelQueued(crate::order_actions::CancelQueued),
     #[serde(rename = "order.cancelQueued")]
     OrderCancelQueued(crate::order_contract::CancelQueued),
     Init(Box<InitPayload>),

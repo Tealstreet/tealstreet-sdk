@@ -29,6 +29,7 @@ pub enum AlgoInput {
     Nuke {
         mode: &'static str,
         request_id: Value,
+        action: Option<crate::order_actions::NukeReceipt>,
     },
     /// A socket joined (a resume or another tab): resend the algo store rows.
     Joined,
@@ -1068,11 +1069,12 @@ pub async fn run(
                     }
                     publish(&mut published);
                 }
-                Some(AlgoInput::Nuke { mode, request_id }) => {
-                    if !running.io_allowed() {
-                        (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
+                Some(AlgoInput::Nuke { mode, request_id, action }) => {
+                    if !running.io_allowed() || action.as_ref().is_some_and(|receipt| !receipt.active()) {
+                        if let Some(receipt) = action { receipt.finish(Err(crate::user_drain::refusal())); }
+                        else { (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
                             "requestId":request_id,"success":false,"result":crate::user_drain::refusal(),
-                        })));
+                        }))); }
                         continue;
                     }
                     // The engine may have loaded ahead of this store's frames: read it
@@ -1085,6 +1087,7 @@ pub async fn run(
                     });
                     let admission = running.user.get().map(|user| user.admit_cleanup());
                     let started = match admission.as_ref() {
+                        _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"})),
                         Some(Err(error)) => Err(error.clone()),
                         _ => match seen {
                         Some((markets, positions, orders))
@@ -1101,12 +1104,14 @@ pub async fn run(
                     running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                     drop(admission);
                     let (port, name, who) = (port.clone(), name.clone(), who.clone());
+                    let action_started = action.is_some();
                     let settle = move |outcome: Result<Value, Value>| {
                         let audit = match &outcome {
                             Ok(_) => Value::from("ok"),
                             Err(error) => error["message"].clone(),
                         };
                         crate::audit::log(&who, "callMethod", &crate::audit::algo_op("nuke", &Value::from(mode).to_string()), audit);
+                        if let Some(receipt) = action { receipt.finish(outcome); return; }
                         let data = match outcome {
                             // Every leg was accepted; the result names the algos stopped first.
                             Ok(done) => {
@@ -1129,7 +1134,15 @@ pub async fn run(
                     };
                     let reply = NukeReply(Some(Box::new(settle)));
                     match started {
-                        Ok(nuke) => cx.spawn(async move { reply.settle(nuke.await) }),
+                        Ok(nuke) => cx.spawn(async move {
+                            let result = nuke.await.map_err(|mut error| {
+                                // Once native nuke started, a failed later leg cannot
+                                // prove the whole action was never sent.
+                                if action_started { error["outcome"] = "unknown".into(); }
+                                error
+                            });
+                            reply.settle(result)
+                        }),
                         Err(error) => reply.settle(Err(error)),
                     }
                 }

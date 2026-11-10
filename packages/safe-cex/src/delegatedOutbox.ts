@@ -1,5 +1,8 @@
+import type { DelegatedAction, DelegatedActionResult } from './delegatedActions';
+
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
+import { delegatedActionFingerprint, isDelegatedAction, isDelegatedActionResult } from './delegatedActions';
 import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
@@ -9,6 +12,7 @@ import {
   delegatedIntentTime,
 } from './delegatedOrderFrames';
 
+export type { DelegatedAction, DelegatedActionResult, DelegatedActionOutcome } from './delegatedActions';
 export { createDelegatedIntentId } from './delegatedOrderFrames';
 
 export interface OutboxScope {
@@ -16,9 +20,11 @@ export interface OutboxScope {
   accountName: string;
 }
 export type IntentState =
-  'queued' | 'sending' | 'acknowledged' | 'placed' | 'refused' | 'unknown' | 'notSent' | 'canceled';
+  'queued' | 'sending' | 'acknowledged' | 'applied' | 'placed' | 'refused' | 'unknown' | 'notSent' | 'canceled';
 export interface DelegatedIntent extends OutboxScope {
-  version: 1;
+  version: 1 | 2;
+  action?: DelegatedAction;
+  result?: DelegatedActionResult;
   fingerprint: string;
   intentId: string;
   seq: number;
@@ -62,6 +68,8 @@ export interface OutboxConnection extends OutboxScope {
     delegatedOrderFramesV1: boolean;
     /** Advertised by the router; absent on older pass-through routers. */
     delegatedOrderLedgerV1?: boolean;
+    delegatedOrderActionsV1?: boolean;
+    delegatedOrderActionLedgerV1?: boolean;
   };
   instanceId?: string;
   send(frame: string): boolean;
@@ -75,6 +83,7 @@ const STATES: IntentState[] = [
   'sending',
   'acknowledged',
   'placed',
+  'applied',
   'refused',
   'unknown',
   'notSent',
@@ -110,7 +119,7 @@ export class DelegatedOutbox {
     for (const saved of [...rows]) {
       const row = clone(saved);
       if (
-        row.version !== 1 ||
+        ![1, 2].includes(row.version) ||
         row.owner !== box.scope.owner ||
         row.accountName !== box.scope.accountName ||
         delegatedIntentTime(row.intentId) < 0 ||
@@ -126,8 +135,18 @@ export class DelegatedOutbox {
         box.intents.has(row.intentId)
       )
         throw new Error('Invalid persisted intent');
-      if (row.fingerprint !== delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq))
-        throw new Error('Persisted fingerprint differs');
+      if (
+        (row.version === 2 &&
+          (!isDelegatedAction(row.action) || Object.keys(row.params).length > 0 || row.state === 'placed')) ||
+        (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
+      )
+        throw new Error('Invalid persisted action');
+      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind)))
+        throw new Error('Invalid persisted action result');
+      const fingerprint = row.action
+        ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
+        : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
+      if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
       box.sequence = Math.max(box.sequence, row.seq);
       // A persisted handoff can have crossed the physical socket boundary.
       if (row.state === 'sending') {
@@ -190,7 +209,20 @@ export class DelegatedOutbox {
     return [...this.intents.values()].map((row) => clone(row));
   }
 
+  enqueueAction(action: DelegatedAction): Promise<string> {
+    if (!isDelegatedAction(action)) return Promise.reject(new Error('Invalid delegated action'));
+    try {
+      return this.enqueueIntent({}, clone(action));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
   enqueue(params: Record<string, unknown>): Promise<string> {
+    return this.enqueueIntent(params);
+  }
+
+  private enqueueIntent(params: Record<string, unknown>, action?: DelegatedAction): Promise<string> {
     const createdAt = this.options.clock.now();
     if (!this.active || this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
       return Promise.reject(new Error('Outbox is closed or full'));
@@ -201,8 +233,11 @@ export class DelegatedOutbox {
       return Promise.reject(new Error('Intent id or sequence exhausted'));
     const row: DelegatedIntent = {
       ...this.scope,
-      version: 1,
-      fingerprint: delegatedIntentFingerprint(this.scope.accountName, intentId, params, this.sequence + 1),
+      version: action ? 2 : 1,
+      ...(action ? { action } : {}),
+      fingerprint: action
+        ? delegatedActionFingerprint(this.scope.accountName, intentId, action, this.sequence + 1)
+        : delegatedIntentFingerprint(this.scope.accountName, intentId, params, this.sequence + 1),
       intentId,
       seq: ++this.sequence,
       params: clone(params),
@@ -261,16 +296,28 @@ export class DelegatedOutbox {
           return;
         }
       }
-      if (!record(parsed) || (parsed.t !== 'order.ack' && parsed.t !== 'order.outcome') || !record(parsed.d)) return;
+      if (
+        !record(parsed) ||
+        !['order.ack', 'order.outcome', 'order.actionAck', 'order.actionOutcome'].includes(
+          typeof parsed.t === 'string' ? parsed.t : '',
+        ) ||
+        !record(parsed.d)
+      )
+        return;
       const d = parsed.d;
       if (d.accountName !== this.scope.accountName || d.instanceId !== connection.instanceId) return;
       const size = utf8ToBytes(JSON.stringify(parsed)).length;
-      if (size > (parsed.t === 'order.ack' ? DELEGATED_ACK_MAX : DELEGATED_OUTCOME_MAX)) return;
+      if (
+        size > (parsed.t === 'order.ack' || parsed.t === 'order.actionAck' ? DELEGATED_ACK_MAX : DELEGATED_OUTCOME_MAX)
+      )
+        return;
       const data = d;
       if (typeof data.intentId !== 'string') return;
       const row = this.intents.get(data.intentId);
       if (!row || data.seq !== row.seq) return;
-      if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
+      if (row.action) {
+        if (!this.actionCurrent(connection) || !this.actionReceipt(row, parsed.t, data)) return;
+      } else if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
         if (!['queued', 'notSent', 'canceled'].includes(row.state)) return;
         row.state = data.received ? 'acknowledged' : 'notSent';
       } else if (
@@ -305,11 +352,61 @@ export class DelegatedOutbox {
     });
   }
 
+  private actionReceipt(row: DelegatedIntent, kind: unknown, data: Record<string, unknown>): boolean {
+    if (data.version !== 1 || !row.action) return false;
+    if (kind === 'order.actionAck' && typeof data.received === 'boolean') {
+      if (
+        !['queued', 'notSent', 'canceled'].includes(row.state) &&
+        !(row.state === 'unknown' && row.cancelPending && !data.received)
+      )
+        return false;
+      row.state = data.received ? 'acknowledged' : 'notSent';
+      return true;
+    }
+    if (
+      kind !== 'order.actionOutcome' ||
+      !Number.isSafeInteger(data.outcomeSeq) ||
+      Number(data.outcomeSeq) <= (this.outcomeSequences.get(row.intentId) ?? 0)
+    )
+      return false;
+    if (data.outcome === 'applied') {
+      if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind)) return false;
+      row.result = clone(data.result);
+      row.state = 'applied';
+      delete row.error;
+    } else {
+      if (
+        data.result !== null ||
+        !record(data.error) ||
+        typeof data.error.message !== 'string' ||
+        [...data.error.message].length > 512
+      )
+        return false;
+      if (data.outcome === 'refused' && data.error.outcome === 'notSent') row.state = 'notSent';
+      else if (data.outcome === 'unknown' && data.error.outcome === 'unknown') row.state = 'unknown';
+      else return false;
+      delete row.result;
+      row.error = { message: data.error.message, outcome: data.error.outcome };
+    }
+    this.outcomeSequences.set(row.intentId, Number(data.outcomeSeq));
+    return true;
+  }
+
+  private actionCurrent(connection: Readonly<OutboxConnection>): boolean {
+    return (
+      this.current(connection) &&
+      connection.capabilities.delegatedOrderActionsV1 === true &&
+      connection.capabilities.delegatedOrderActionLedgerV1 === true
+    );
+  }
+
   cancel(intentId: string): Promise<void> {
     const row = this.intents.get(intentId);
     if (!this.active || !row || row.state !== 'queued') return Promise.resolve();
-    row.state = 'canceled';
     row.cancelPending = this.submitted.has(intentId);
+    row.state = row.action && row.cancelPending ? 'unknown' : 'canceled';
+    if (row.action && row.cancelPending)
+      row.error = { message: 'Action awaits router confirmation', outcome: 'unknown' };
     this.stopTimer(intentId);
     this.changed(row);
     const connection = this.connection;
@@ -338,7 +435,12 @@ export class DelegatedOutbox {
   }
 
   private async sendIntent(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
-    if (!this.current(connection) || row.state !== 'queued' || this.sent.get(row.intentId) === connection) return;
+    if (
+      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      row.state !== 'queued' ||
+      this.sent.get(row.intentId) === connection
+    )
+      return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -352,7 +454,7 @@ export class DelegatedOutbox {
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!this.current(connection) || row.state !== 'queued') return;
+    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || row.state !== 'queued') return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -360,10 +462,10 @@ export class DelegatedOutbox {
     const previouslySubmitted = this.submitted.has(row.intentId);
     this.sent.set(row.intentId, connection);
     try {
-      const frame = this.frame(connection, 'order.submit', {
+      const frame = this.frame(connection, row.action ? 'order.action' : 'order.submit', {
+        ...(row.action ? { version: 1, action: row.action } : { params: row.params }),
         intentId: row.intentId,
         fingerprint: row.fingerprint,
-        params: row.params,
         seq: row.seq,
         ageMs: this.options.clock.now() - row.createdAt,
       });
@@ -398,12 +500,18 @@ export class DelegatedOutbox {
   }
 
   private async sendCancellation(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
-    if (!this.current(connection) || !row.cancelPending || this.canceled.get(row.intentId) === connection) return;
+    if (
+      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !row.cancelPending ||
+      this.canceled.get(row.intentId) === connection
+    )
+      return;
     await this.persist(row);
-    if (!this.current(connection) || !row.cancelPending) return;
+    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !row.cancelPending) return;
     if (
       connection.send(
-        this.frame(connection, 'order.cancelQueued', {
+        this.frame(connection, row.action ? 'order.actionCancelQueued' : 'order.cancelQueued', {
+          ...(row.action ? { version: 1 } : {}),
           intentId: row.intentId,
           seq: row.seq,
           fingerprint: row.fingerprint,
@@ -438,8 +546,10 @@ export class DelegatedOutbox {
 
   private expire(row: DelegatedIntent): void {
     if (!this.active || row.state !== 'queued') return;
-    row.state = 'notSent';
     row.cancelPending = this.submitted.has(row.intentId);
+    row.state = row.action && row.cancelPending ? 'unknown' : 'notSent';
+    if (row.action && row.cancelPending)
+      row.error = { message: 'Action awaits router confirmation', outcome: 'unknown' };
     this.stopTimer(row.intentId);
     this.changed(row);
     const connection = this.connection;
@@ -471,7 +581,7 @@ export class DelegatedOutbox {
     this.durable.add(row.intentId);
   }
   private completed(row: DelegatedIntent): boolean {
-    return !row.cancelPending && ['placed', 'refused', 'notSent', 'canceled'].includes(row.state);
+    return !row.cancelPending && ['applied', 'placed', 'refused', 'notSent', 'canceled'].includes(row.state);
   }
   private pendingCount(): number {
     return [...this.intents.values()].filter((row) => !this.durable.has(row.intentId) || !this.completed(row)).length;

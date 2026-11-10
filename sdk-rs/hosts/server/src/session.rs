@@ -14,7 +14,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 
+mod order_actions;
 mod order_frames;
+
+#[derive(Clone, Copy)]
+pub(super) enum OrderReceipt {
+    Placement(u64),
+    Action { seq: u64, kind: &'static str },
+}
 
 /// Who connected, as verified before the upgrade.
 #[derive(Clone)]
@@ -838,6 +845,34 @@ impl Session {
         };
         let authenticated = self.identity.user.is_some();
         match message {
+            Inbound::OrderAction(request) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                if text.len() > crate::order_contract::SUBMIT_MAX {
+                    self.handover_out(&request.account_name)
+                        .send(envelope::error(
+                            Some(&request.account_name),
+                            "not sent: action exceeds size limit",
+                        ));
+                    return Ok(());
+                }
+                self.order_action(request).await;
+            }
+            Inbound::OrderActionCancelQueued(cancel) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                if text.len() > crate::order_contract::ACK_MAX {
+                    self.handover_out(&cancel.account_name)
+                        .send(envelope::error(
+                            Some(&cancel.account_name),
+                            "not sent: action queue cancellation exceeds size limit",
+                        ));
+                    return Ok(());
+                }
+                self.action_cancel_queued(cancel);
+            }
             Inbound::OrderSubmit(submit) => {
                 if !authenticated {
                     return Err(Close::Policy("Unauthenticated order rejected"));
@@ -1542,7 +1577,7 @@ impl Session {
         self.call_inner(name, data, None).await;
     }
 
-    async fn call_inner(&mut self, name: &str, data: Value, order_frame: Option<u64>) {
+    async fn call_inner(&mut self, name: &str, data: Value, order_frame: Option<OrderReceipt>) {
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
         let method = data
             .get("method")
@@ -1624,12 +1659,15 @@ impl Session {
                 return;
             }
         };
-        if let Some(seq) = order_frame {
+        if let Some(receipt) = order_frame {
             for plan in &mut plans {
-                if let Plan::Command { reply, .. } = plan {
-                    *reply = methods::Reply::Intent {
-                        client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
-                        seq,
+                if let Plan::Command { reply, .. } | Plan::AfterLoad { reply, .. } = plan {
+                    *reply = match receipt {
+                        OrderReceipt::Placement(seq) => methods::Reply::Intent {
+                            client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
+                            seq,
+                        },
+                        OrderReceipt::Action { seq, kind } => methods::Reply::Action { seq, kind },
                     };
                 }
             }
@@ -1642,12 +1680,29 @@ impl Session {
         });
         for plan in plans {
             match plan {
-                Plan::Reply(result) => self.send(envelope::msg(
-                    name,
-                    "callMethod:done",
-                    json!({"requestId": request_id, "success": true, "result": result}),
-                )),
+                Plan::Reply(result) => {
+                    if let Some(OrderReceipt::Action { seq, kind }) = order_frame {
+                        crate::order_actions::settle(
+                            &self.account_out(name),
+                            name,
+                            &request_id,
+                            seq,
+                            kind,
+                            Ok(result),
+                        );
+                    } else {
+                        self.send(envelope::msg(
+                            name,
+                            "callMethod:done",
+                            json!({"requestId":request_id,"success":true,"result":result}),
+                        ));
+                    }
+                }
                 Plan::Nuke(mode) => {
+                    if let Some(OrderReceipt::Action { seq, .. }) = order_frame {
+                        self.send_action_nuke(name, &request_id, seq);
+                        continue;
+                    }
                     let handle = account.handle.clone();
                     // Asked of the whole account, so a page running its own legs after
                     // `algos` is told too: its positions read then waits the same 30s.
@@ -1674,6 +1729,7 @@ impl Session {
                     let input = crate::algos::AlgoInput::Nuke {
                         mode,
                         request_id: request_id.clone(),
+                        action: None,
                     };
                     if !waiting || mode == "algos" {
                         if algos.send(input).is_err() {
@@ -1803,7 +1859,8 @@ impl Session {
         after_load: bool,
     ) {
         let order_frame = match &reply {
-            methods::Reply::Intent { seq, .. } => Some(*seq),
+            methods::Reply::Intent { seq, .. } => Some(OrderReceipt::Placement(*seq)),
+            methods::Reply::Action { seq, kind } => Some(OrderReceipt::Action { seq: *seq, kind }),
             _ => None,
         };
         if !self.joined[name].account.running.io_allowed() {
@@ -1884,12 +1941,11 @@ impl Session {
             if let Some(message) = failure
                 && let Some(pending) = pending.lock().unwrap().remove(&id)
             {
-                settle(
-                    &out,
-                    &name,
-                    pending,
-                    Err(failure_detail("Error", &message, false)),
-                );
+                let mut detail = failure_detail("Error", &message, false);
+                if matches!(pending.reply, methods::Reply::Action { .. }) {
+                    detail["outcome"] = "notSent".into();
+                }
+                settle(&out, &name, pending, Err(detail));
             }
         };
         let Some((handle, pending, out, name)) = waiter else {
@@ -2063,6 +2119,10 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             }
         }
     };
+    if let methods::Reply::Action { kind, seq } = &pending.reply {
+        crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
+        return;
+    }
     if let methods::Reply::Intent {
         client_order_id,
         seq,
@@ -2081,7 +2141,9 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
     let data = match outcome {
         Ok(result) => {
             let result = match pending.reply {
-                methods::Reply::Result | methods::Reply::Intent { .. } => result,
+                methods::Reply::Result
+                | methods::Reply::Intent { .. }
+                | methods::Reply::Action { .. } => result,
                 methods::Reply::Unit => Value::Null,
                 methods::Reply::OrderIds => methods::worker_order_ids(result),
                 methods::Reply::Placed { client_order_id } => {

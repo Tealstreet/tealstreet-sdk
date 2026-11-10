@@ -26,7 +26,10 @@ pub struct OrderSubmit {
 
 // Match the client's JSON number representation without discarding fractional
 // monotonic ages. In particular, zero is `0`, including negative zero.
-fn serialize_age_ms<S: serde::Serializer>(age: &f64, serializer: S) -> Result<S::Ok, S::Error> {
+pub(crate) fn serialize_age_ms<S: serde::Serializer>(
+    age: &f64,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     if (0.0..=9_007_199_254_740_991.0).contains(age) && age.fract() == 0.0 {
         serializer.serialize_u64(*age as u64)
     } else {
@@ -89,6 +92,39 @@ pub fn fingerprint(
     canonical_value(&value, &mut canonical, 0)?;
     if canonical.len() > SUBMIT_MAX {
         return Err("not sent: parameters too large");
+    }
+    Ok(safe_cex_crypto::sha256(canonical.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
+/// Separate identity domain for versioned account actions. Targets and kind are
+/// part of the canonical payload; placement hashes remain unchanged.
+pub fn action_fingerprint(
+    account: &str,
+    id: &str,
+    action: &Value,
+    seq: u64,
+) -> Result<String, &'static str> {
+    if key_time(id).is_none() || seq == 0 || seq > 9_007_199_254_740_991 {
+        return Err("not sent: invalid intent");
+    }
+    let decoded: crate::order_actions::Action =
+        serde_json::from_value(action.clone()).map_err(|_| "not sent: invalid action")?;
+    decoded.call()?;
+    if action
+        .get("update")
+        .and_then(Value::as_object)
+        .is_some_and(|fields| fields.values().any(|v| !v.is_number()))
+    {
+        return Err("not sent: invalid update");
+    }
+    let value = json!({"accountName":account,"action":action,"intentId":id,"seq":seq,"version":1});
+    let mut canonical = String::from("tealstreet/delegated-action/v1\0");
+    canonical_value(&value, &mut canonical, 0)?;
+    if canonical.len() > SUBMIT_MAX {
+        return Err("not sent: action too large");
     }
     Ok(safe_cex_crypto::sha256(canonical.as_bytes())
         .iter()
