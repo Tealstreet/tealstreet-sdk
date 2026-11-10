@@ -149,15 +149,15 @@ impl Session {
             if let Err(error) = algos.send(crate::algos::AlgoInput::Nuke {
                 mode: "all",
                 request_id,
+                action: Some(Box::new(receipt)),
+            }) && let crate::algos::AlgoInput::Nuke {
                 action: Some(receipt),
-            }) {
-                if let crate::algos::AlgoInput::Nuke {
-                    action: Some(receipt),
-                    ..
-                } = error.0
-                {
-                    receipt.finish(Err(json!({"message":"Nuke is unavailable for this account","outcome":"notSent"})));
-                }
+                ..
+            } = error.0
+            {
+                receipt.finish(Err(
+                    json!({"message":"Nuke is unavailable for this account","outcome":"notSent"}),
+                ));
             }
         });
     }

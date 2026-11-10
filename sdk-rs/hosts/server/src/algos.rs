@@ -29,7 +29,7 @@ pub enum AlgoInput {
     Nuke {
         mode: &'static str,
         request_id: Value,
-        action: Option<crate::order_actions::NukeReceipt>,
+        action: Option<Box<crate::order_actions::NukeReceipt>>,
     },
     /// A socket joined (a resume or another tab): resend the algo store rows.
     Joined,
