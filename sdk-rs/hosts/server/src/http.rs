@@ -887,7 +887,7 @@ async fn send(
 /// What the page was already sent goes first (a break-glass stop notice), then the move.
 async fn move_away(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    outgoing: &mut tokio::sync::mpsc::Receiver<String>,
+    outgoing: &mut crate::out::Receiver,
     moved: Close,
 ) {
     while let Ok(text) = outgoing.try_recv() {
