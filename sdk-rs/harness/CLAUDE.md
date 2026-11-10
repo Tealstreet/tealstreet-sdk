@@ -23,3 +23,8 @@ attempt on `fix/bitget-cpu`. It profiles production modules separately from the
 certificate, retains steady-window markers, and accepts WASM symbol names only
 after proving identical optimized non-custom sections. Diagnostic profiles never
 certify a gate or change its fixed comparison policy.
+
+`bitget-cpu-composition.mjs` separately measures the clean automatic composition
+with pinned #3426 against the fixed anchor using the unchanged gate and cohort
+order. Its synthetic commit is diagnostic only and cannot issue a certificate;
+#3426 still needs its own authenticated certification after incorporating the fix.

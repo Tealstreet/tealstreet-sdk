@@ -1584,7 +1584,7 @@ jobs:
     name: Rust / Bitget diagnostic CPU profiles
     if: github.event_name == 'pull_request' && github.head_ref == 'fix/bitget-cpu'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: .
@@ -1638,6 +1638,8 @@ jobs:
       - name: Native quote allocation regression (no timing measurement)
         if: always() && steps.profile_build.outcome == 'success'
         run: cargo test --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-bitget --test ticker_allocations -j2
+      - name: Diagnostic automatic composition with pinned PR 3426 (no certification)
+        run: node sdk-rs/harness/bitget-cpu-composition.mjs --out '${{ runner.temp }}/bitget-composition'
       - name: Retain diagnostic profiles and module proofs
         if: always()
         uses: actions/upload-artifact@v7
@@ -1649,5 +1651,6 @@ jobs:
             ${{ runner.temp }}/bitget-cpu-profile/*.log
             ${{ runner.temp }}/bitget-cpu-profile/*-map/*.json
             ${{ runner.temp }}/bitget-cpu-profile/*-map/*.map
+            ${{ runner.temp }}/bitget-composition/
           retention-days: 7
           if-no-files-found: error
