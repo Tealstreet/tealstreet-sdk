@@ -491,6 +491,11 @@ preserve `unsupported`/`notSent` through startup and account validation.
 
 ## Rust engine capabilities
 
+Optional SDK helpers needed before engine startup are declared under
+`bridge.helpers` in `construction-rules.json`. The native generated construction
+record and synchronous SDK record share that declaration. Install and dispatch
+those helpers from their declared flags, never from a venue-name check.
+
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
@@ -1918,7 +1923,7 @@ consuming app's CLAUDE.md for the capture playbook.
 worker op handled by `src/webworker/handlers/UpdatePositionsHandler.ts`.
 Account-wide refreshes (`symbols` omitted) must use
 `store.addOrUpdatePositionsFull(positions)`, including empty arrays, so
-positions omitted by the exchange are zeroed/cleared. Symbol-scoped refreshes
+positions omitted by the exchange are removed. Last reported per-ID leverage/margin/mode survives separately in the generated `positionSettings` map. Symbol-scoped refreshes
 remain partial and use `addOrUpdatePositions(positions)` when rows are
 returned. Do not replace this with a main-thread `fetchPositions()` + direct
 store write from the web app; the worker owns live exchange state and its
