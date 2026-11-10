@@ -2,7 +2,7 @@ import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions
 
 import type { OutboxOptions as LegacyOutboxOptions } from './fixtures/delegatedOutbox.7232375420';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
@@ -87,6 +87,117 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  describe('completed index subset', () => {
+    type IndexedOutbox = {
+      intents: Map<string, DelegatedIntent>;
+      completedIntents: Map<string, DelegatedIntent>;
+      pendingCount(): number;
+      compact(): Promise<void>;
+    };
+    const index = (box: DelegatedOutbox) => box as unknown as IndexedOutbox;
+    function expectSubset(box: DelegatedOutbox): void {
+      const { intents, completedIntents } = index(box);
+      for (const [id, row] of completedIntents) expect(intents.get(id)).toBe(row);
+    }
+
+    it('keeps the same-object subset after cancel, compact and restore', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      for (let n = 0; n < 35; n++) {
+        await box.cancel(await box.enqueue(params));
+        expectSubset(box);
+      }
+      expect(index(box).intents.size).toBe(32);
+      expect(index(box).completedIntents.size).toBe(32);
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      expectSubset(restored);
+      expect(index(restored).completedIntents.size).toBe(32);
+      await restored.cancel(await restored.enqueue(params));
+      expectSubset(restored);
+      expect(index(restored).intents.size).toBe(32);
+      expect(f.writes).toHaveLength(0);
+      restored.close();
+    });
+
+    it.each(['removed', 'replaced'] as const)(
+      'never undercounts pending work when a completed row was %s without updating the index',
+      async (fault) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        await box.enqueue(params);
+        const completed = await box.enqueue(params);
+        await box.cancel(completed);
+        const internal = index(box);
+        const row = internal.intents.get(completed)!;
+        if (fault === 'removed') internal.intents.delete(completed);
+        else internal.intents.set(completed, { ...row, state: 'queued' });
+        // Fault injection bypasses the production removal discipline intentionally.
+        expect(internal.pendingCount()).toBe(fault === 'removed' ? 1 : 2);
+        expect(internal.completedIntents.has(completed)).toBe(false);
+        expectSubset(box);
+        box.close();
+      },
+    );
+
+    it('prunes an orphan before compaction so comparisons stay finite and retirement stays live', async () => {
+      const f = fixture();
+      const compact = f.options.storage.compact;
+      f.options.storage.compact = async () => {
+        throw new Error('hold retirement');
+      };
+      const box = await DelegatedOutbox.open(f.options);
+      const ids: string[] = [];
+      for (let n = 0; n < 33; n++) {
+        const id = await box.enqueue(params);
+        ids.push(id);
+        if (n === 32) await expect(box.cancel(id)).rejects.toThrow('hold retirement');
+        else await box.cancel(id);
+      }
+      const internal = index(box);
+      const first = internal.intents.get(ids[0])!;
+      internal.completedIntents.set('orphan', { ...first, intentId: 'orphan' });
+      const retired: string[][] = [];
+      f.options.storage.compact = async (scope, checkpoint) => {
+        retired.push([...checkpoint.retiredIntentIds]);
+        await compact(scope, checkpoint);
+      };
+      const comparisons: number[] = [];
+      const sort = Array.prototype.sort;
+      const spy = vi.spyOn(Array.prototype, 'sort').mockImplementation(function <T>(
+        this: T[],
+        compare?: (a: T, b: T) => number,
+      ) {
+        return sort.call(
+          this,
+          compare && ((a: T, b: T) => {
+            const result = compare(a, b);
+            comparisons.push(result);
+            return result;
+          }),
+        );
+      });
+      // compact sorts synchronously before its storage await; restore the global
+      // method before yielding to other work in the test runner.
+      const compacted = (() => {
+        try {
+          return internal.compact();
+        } finally {
+          spy.mockRestore();
+        }
+      })();
+      await compacted;
+      expect(comparisons.length).toBeGreaterThan(0);
+      expect(comparisons.every(Number.isFinite)).toBe(true);
+      expect(retired).toEqual([[ids[0]]]);
+      expect(internal.completedIntents.has('orphan')).toBe(false);
+      expectSubset(box);
+      expect(internal.intents.size).toBe(32);
+      expect(f.rows.size).toBe(32);
+      box.close();
+    });
+  });
+
   it('does not replay a legacy queued handoff after a declined reconnect in the same epoch', async () => {
     const f = fixture();
     // Exercise the historical writer rather than manufacturing an ambiguous label.
