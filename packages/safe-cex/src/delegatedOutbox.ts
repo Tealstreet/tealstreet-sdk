@@ -212,6 +212,13 @@ export function markDelegatedReplayable(
   }
   delete row.notSentEvidence;
   delete row.noHandoffEvidence;
+  // Keep the removable proof field after the non-serialized runtime brand.
+  Object.defineProperty(row, delegatedReplayBrand, {
+    value: true,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
   row.noHandoffEvidence = Object.freeze({
     ...proof,
     version: 1,
@@ -220,12 +227,6 @@ export function markDelegatedReplayable(
     intentId: row.intentId,
     seq: row.seq,
     fingerprint: row.fingerprint,
-  });
-  Object.defineProperty(row, delegatedReplayBrand, {
-    value: true,
-    configurable: false,
-    enumerable: false,
-    writable: false,
   });
   if (record(row.error) && row.error.outcome === 'notSent') row.error.outcome = 'unknown';
   return true;
@@ -761,18 +762,26 @@ export class DelegatedOutbox {
   private completed(row: DelegatedIntent): boolean {
     return (
       !row.cancelPending &&
-      (row.retentionExpired === true || ['placed', 'refused', 'notSent', 'canceled'].includes(row.state))
+      (row.retentionExpired === true ||
+        row.state === 'placed' ||
+        row.state === 'refused' ||
+        row.state === 'notSent' ||
+        row.state === 'canceled')
     );
   }
   private pendingCount(): number {
-    return [...this.intents.values()].filter((row) => !this.durable.has(row.intentId) || !this.completed(row)).length;
+    let count = 0;
+    for (const row of this.intents.values())
+      if (!this.durable.has(row.intentId) || !this.completed(row)) count++;
+    return count;
   }
   private async compact(): Promise<void> {
-    const completed = [...this.intents.values()]
-      .filter((row) => this.durable.has(row.intentId) && this.completed(row))
-      .sort((a, b) => a.seq - b.seq);
-    const retired = completed.slice(0, Math.max(0, completed.length - COMPLETED_HISTORY));
-    if (!retired.length) return;
+    const completed: DelegatedIntent[] = [];
+    for (const row of this.intents.values())
+      if (this.durable.has(row.intentId) && this.completed(row)) completed.push(row);
+    if (completed.length <= COMPLETED_HISTORY) return;
+    completed.sort((a, b) => a.seq - b.seq);
+    const retired = completed.slice(0, completed.length - COMPLETED_HISTORY);
     await this.options.storage.compact(this.scope, {
       version: 1,
       sequence: this.sequence,
