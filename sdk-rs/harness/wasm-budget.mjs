@@ -271,8 +271,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current CI run 42565604601, merge ec8633c44e98: web/node 2,225,586 B + 10 KiB, rounded up.
   // #3433 run 42742356027 at CI merge 972f1282ea16: web/node 2,236,421 B.
   // Current measured size + 10 KiB, rounded up to KiB; both aliases share the family.
-  hyperliquid: 2_247_680,
-  hyperliquidspot: 2_247_680,
+  // #3433 branch 1547c3b2e287: optimized local web/node 2,237,725 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
+  hyperliquid: 2_248_704,
+  hyperliquidspot: 2_248_704,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:
@@ -313,7 +316,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
   // #3433 run 42742356027 at CI merge 972f1282ea16: web/node 1,991,688 B.
   // Current measured size + 10 KiB, rounded up to KiB.
-  weex: 2_002_944,
+  // #3433 branch 1547c3b2e287: optimized local web/node 1,993,200 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
+  weex: 2_003_968,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
