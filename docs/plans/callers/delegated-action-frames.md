@@ -3,6 +3,21 @@
 Additive to [the placement protocol](delegated-order-frames.md). Shared synthetic
 TS/Rust fixtures: `sdk-rs/hosts/server/tests/data/delegated-actions-v1.json`.
 
+## Implementation and release boundary
+
+Box-side action dispatch stays entirely within `sdk-rs/hosts/server`. Its
+adapters call the existing native amend, cancel, cancel-all and nuke paths;
+this version adds no crates and changes nothing under `sdk-rs/engine`,
+`sdk-rs/venues/*` or `sdk-rs/algos`. No exception to this boundary is required.
+
+`hosts/server` is excluded from the beta-wasm fingerprint, so the Rust changes
+require a box roll without a full SDK release, a new wasm pin or the lane
+fingerprint gate. The TypeScript API and router capability still require their
+own integration; action admission remains gated by all required capability flags.
+If a future change genuinely requires Rust code outside `hosts/server`, record
+an explicit decision here with the reason and the resulting SDK release, wasm
+pin and lane fingerprint gate requirements before implementing that exception.
+
 ## Capability and admission
 
 The box advertises transports.accountWorkerWebSocket.delegatedOrderActionsV1.
