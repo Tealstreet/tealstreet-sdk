@@ -57,6 +57,17 @@ struct BridgeRule {
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
     read_credentials: ReadCredentialsPolicy,
+    helpers: Option<HelperCapabilities>,
+}
+
+/// Optional SDK helpers available from the shared declaration before startup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelperCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolve_leverage_context: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetch_algo_orders: Option<bool>,
 }
 
 /// What trusted setup does with a family's read key (declared, never inferred).
@@ -98,6 +109,8 @@ pub struct BridgeConstruction {
     /// Omitted when `Install`, so undeclared families keep their exact record.
     #[serde(skip_serializing_if = "ReadCredentialsPolicy::is_install")]
     pub read_credentials: ReadCredentialsPolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub helpers: Option<HelperCapabilities>,
 }
 
 pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
@@ -129,6 +142,7 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
         isolated_book_subscriptions: rule.isolated_book_subscriptions,
         dispatch_signing: rule.dispatch_signing,
         read_credentials: rule.read_credentials,
+        helpers: rule.helpers,
     }
 }
 

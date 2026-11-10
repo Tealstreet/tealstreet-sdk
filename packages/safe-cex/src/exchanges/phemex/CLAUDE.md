@@ -675,7 +675,8 @@ any known symbol remains hedged.
 ### Rust-backed leverage context confirmation
 
 `RustEngineExchange` exposes the optional `resolveLeverageContext(symbol)` helper
-only for Phemex. It returns `{ marginType, positionMode, longLeverage,
+when `bridge.helpers.resolveLeverageContext` is declared in the shared
+construction rules (currently Phemex). It returns `{ marginType, positionMode, longLeverage,
 shortLeverage }` or `undefined`, matching the TS reference helper used to confirm
 metadata. A worker mirror uses the existing `fetchLeverageForSymbol(symbol, true)` RPC
 to force this fresh read in both browser and hosted workers; it never

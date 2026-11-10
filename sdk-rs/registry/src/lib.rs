@@ -61,7 +61,7 @@ mod lighter_setup;
 #[cfg(feature = "paradex")]
 mod paradex_setup;
 pub use construction::{
-    BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
+    BridgeConstruction, HelperCapabilities, PublicMode, remote_signing_policy, signer_setup_policy,
     signer_setup_public_data_only,
 };
 #[cfg(feature = "bybit")]

@@ -1844,3 +1844,15 @@ test('#3300 pinned master merge c4d663622c01 retains measured ApeX Omni headroom
   assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
+
+test('#3429 Phemex current-head size has measured plus 10 KiB headroom', () => {
+  // CI run 42729630872, head a2be15368b4: web/node measured 2,125,299 bytes.
+  // Same pinned build after the shared-helper fix: web/node 2,127,824 bytes.
+  const measured = Math.max(2_125_299, 2_127_824);
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_138_112);
+  const cap = WASM_VENUE_OVERRIDES.phemex;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'phemex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'phemex'), /exceeds/);
+});

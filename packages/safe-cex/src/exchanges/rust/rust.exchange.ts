@@ -8,6 +8,7 @@ import type {
   EngineConstruction,
   EngineEvent,
   EngineHealth,
+  EngineHelperCapabilities,
   EngineHost as EngineHostType,
   Transport,
   VenueErrorDetail,
@@ -702,6 +703,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private workerCapabilities?: Promise<void>;
+  private readonly helperCapabilities: Readonly<EngineHelperCapabilities>;
   private workerCapabilityRetryAt = 0;
   private stopWorkerCapabilitySync?: () => void;
 
@@ -1011,7 +1013,9 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = bridgeConstruction.spot;
     this.isDemo = bridgeConstruction.demo;
     this.applier = new FrameApplier(store);
-    if (exchangeName === 'phemex') this.resolveLeverageContext = this.resolvePhemexLeverageContext;
+    this.helperCapabilities = bridgeConstruction.helpers ?? {};
+    if (this.helperCapabilities.resolveLeverageContext === true)
+      this.resolveLeverageContext = this.resolvePhemexLeverageContext;
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     this.forwardToWorker();
@@ -3570,7 +3574,7 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchLeverageForSymbol = async (symbol: string, fresh = false): Promise<FetchedLeverage | null> => {
     // Phemex metadata confirmation must bypass cached rails, including while flat.
-    if (fresh && this.name === 'phemex') {
+    if (fresh && this.helperCapabilities.resolveLeverageContext === true) {
       if (this.routesToWorker) {
         const admitted = this.captureWorkerAdmission();
         const args: [string, boolean] = [symbol, true];
