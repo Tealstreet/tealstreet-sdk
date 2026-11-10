@@ -1,5 +1,7 @@
 import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 
@@ -86,10 +88,12 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 
 describe('DELEGATED host-neutral outbox', () => {
   it('requires evidence to construct notSent at compile time', () => {
-    const file = new URL('./__outbox_type_contract__.ts', import.meta.url).pathname;
+    const file = resolve('src/__tests__/__outbox_type_contract__.ts');
     const source = `import type { DelegatedIntent } from '../delegatedOutbox';
 declare const row: DelegatedIntent;
 row.state = 'unknown';
+// @ts-expect-error Working control: unrelated state words are also refused.
+row.state = 'invented';
 // @ts-expect-error Only the evidence constructor can construct notSent.
 row.state = 'notSent';
 // @ts-expect-error Error outcomes cannot fabricate no-handoff evidence either.
