@@ -182,6 +182,16 @@ The outbox persists before handoff and marks the row `sending` at the physical
 socket boundary. It never resubmits sending, acknowledged or unknown work.
 Disconnect or connection replacement changes sending/acknowledged rows to unknown;
 late receipts can still resolve those rows on the current admitted connection.
+Direct `close()` immediately exposes those retained rows as unknown and fences
+all later receipts, callbacks and socket work.
+Only `markDelegatedNotSent(intent, evidence)` can construct a `notSent` state.
+Its positive no-handoff or authoritative-refusal evidence is stored with its
+kind and exact scope/intent/sequence/fingerprint binding. The private runtime
+brand is never serialized: restore validates the stored evidence before
+reissuing it. A legacy, missing or mismatched proof restores as unknown and
+cannot enable a replay. Callers must retain the existing changed/persist and
+retention handling after this constructor, including when a local claim is
+refused and becomes unknown.
 At ten monotonic seconds from creation, its deadline observer marks queued,
 never-forwarded work not sent, even while storage is waiting, and marks in-flight
 or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
@@ -189,7 +199,7 @@ send adapter must return true only for a physical handoff; false or a throw
 positively guarantees no handoff. A queue cancellation after handoff remains
 unknown until an authoritative receipt proves non-forwarding. Persisted `sending`
 records restore as unknown, including when saving a later result failed. A queued
-record from a different monotonic epoch becomes not sent rather than inferring
+record from a different monotonic epoch becomes unknown rather than inferring
 elapsed time from wall time. Queue cancellation
 can be persisted and resent; order submission cannot resume after acknowledgement
 or unknown. Rendering, consent and router ledger storage remain host concerns.

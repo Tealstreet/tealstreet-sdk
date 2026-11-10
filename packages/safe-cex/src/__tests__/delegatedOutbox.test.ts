@@ -7,7 +7,7 @@ import ts from 'typescript';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
-import { createDelegatedIntentId, DelegatedOutbox } from '../delegatedOutbox';
+import { createDelegatedIntentId, DelegatedOutbox, markDelegatedNotSent } from '../delegatedOutbox';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
 function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
@@ -114,7 +114,9 @@ row.error = { message: 'unproven', outcome: 'notSent' };
     host.getSourceFile = (name, language, ...args) =>
       name === file ? ts.createSourceFile(name, source, language, true) : read(name, language, ...args);
     const program = ts.createProgram([file], options, host);
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'))).toEqual([]);
+    expect(
+      ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n')),
+    ).toEqual([]);
   });
   it('restores a legacy notSent row without evidence as unknown', async () => {
     const f = fixture();
@@ -123,13 +125,81 @@ row.error = { message: 'unproven', outcome: 'notSent' };
     box.close();
     const [key, saved] = [...f.rows][0];
     // Simulate JSON written by an old build, outside the current type boundary.
-    f.rows.set(key, JSON.parse(JSON.stringify({ ...saved, state: 'notSent', error: { message: 'unproven', outcome: 'notSent' } })));
+    f.rows.set(
+      key,
+      JSON.parse(JSON.stringify({ ...saved, state: 'notSent', error: { message: 'unproven', outcome: 'notSent' } })),
+    );
     const restored = await DelegatedOutbox.open(f.options);
     await restored.flush(restored.connect(f.connection()));
     expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
     expect(restored.entries()[0].error?.outcome).not.toBe('notSent');
     expect(f.writes).toEqual([]);
     restored.close();
+  });
+  it.each(['local', 'router'] as const)('validates and restores scoped %s no-forwarding evidence', async (kind) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    let c = kind === 'router' ? box.connect(f.connection()) : undefined;
+    const id = await box.enqueue(params);
+    if (c) await box.receive(c, response(id, 'order.ack', { received: false }));
+    else f.advance(10_000);
+    c ??= box.connect(f.connection());
+    await box.flush(c);
+    expect(box.entries()[0]).toMatchObject({
+      state: 'notSent',
+      notSentEvidence: { kind: kind === 'local' ? 'noHandoff' : 'routerRefusal', intentId: id, seq: 1 },
+    });
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0].state).toBe('notSent');
+    expect(f.writes).toHaveLength(kind === 'local' ? 0 : 1);
+    restored.close();
+  });
+  it.each(['owner', 'accountName', 'intentId', 'seq', 'fingerprint', 'kind', 'received'] as const)(
+    'restores unknown when persisted no-forwarding evidence has an invalid %s',
+    async (field) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      await box.receive(c, response(id, 'order.ack', { received: false }));
+      box.close();
+      const [key, saved] = [...f.rows][0];
+      const wire = JSON.parse(JSON.stringify(saved));
+      wire.notSentEvidence[field] = field === 'seq' ? 2 : field === 'received' ? true : 'foreign';
+      f.rows.set(key, wire);
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection()));
+      expect(restored.entries()[0].state).toBe('unknown');
+      expect(restored.entries()[0].notSentEvidence).toBeUndefined();
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    },
+  );
+  it.each(['sending', 'unknown'] as const)('refuses a local no-handoff claim for an already %s intent', async (state) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection());
+    await box.enqueue(params);
+    if (state === 'unknown') f.advance(10_000);
+    const row = box.entries()[0];
+    expect(markDelegatedNotSent(row, { kind: 'noHandoff', source: 'adapter', handedOff: false })).toBe(false);
+    expect(row.state).toBe('unknown');
+    expect(row.notSentEvidence).toBeUndefined();
+    box.close();
+  });
+  it('rejects a live unbranded notSent claim even with copied JSON evidence', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const id = await box.enqueue(params);
+    const row = box.entries()[0];
+    expect(markDelegatedNotSent(row, { kind: 'noHandoff', source: 'local', attempted: false })).toBe(true);
+    // Deliberately bypass the compiler to test the runtime boundary, not restore.
+    const internal = box as unknown as { intents: Map<string, DelegatedIntent> };
+    internal.intents.set(id, JSON.parse(JSON.stringify(row)));
+    expect(box.entries()[0].state).toBe('unknown');
+    box.close();
   });
   it('marks physical handoff in flight and turns its deadline into unknown', async () => {
     const f = fixture();
@@ -1125,7 +1195,8 @@ row.error = { message: 'unproven', outcome: 'notSent' };
       f.options.clock.epoch = 'new-boot';
       const restored = await DelegatedOutbox.open(f.options);
       await restored.flush(restored.connect(f.connection()));
-      expect(restored.entries()[0].state).toBe(sent ? 'unknown' : 'notSent');
+      // A restored queued label has no live proof that an old build never sent.
+      expect(restored.entries()[0].state).toBe('unknown');
       expect(f.writes).toHaveLength(sent ? 1 : 0);
       restored.close();
     }

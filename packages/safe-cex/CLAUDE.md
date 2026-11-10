@@ -81,13 +81,25 @@ Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff mar
 an intent `sending` in memory; sending, acknowledged and unknown intents are never
 submitted again. At ten monotonic seconds from creation (including persistence
 and admission waits), a never-forwarded queued intent becomes `notSent`; an
-in-flight or acknowledged intent becomes `unknown`. Disconnect/replacement makes
+in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+those retained entries to unknown immediately while fencing later work and callbacks.
+Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send
 adapter returns true only after socket handoff; false or a throw must guarantee
 no handoff. Queue cancellation after handoff remains unknown until a router
 receipt positively establishes non-forwarding.
-Restored ambiguous handoffs are unknown; queued records from another clock epoch
-are not sent. Once enqueue persistence succeeds, temporary unavailability while
+`notSent` is a branded state, constructed only by the exported
+`markDelegatedNotSent(intent, evidence)`. It requires positive evidence for the
+whole intent: a locally known never-attempted intent, a declined adapter handoff
+with no earlier possible handoff, or an admitted authoritative router refusal.
+A failed reconnect attempt cannot prove an earlier handoff did not occur.
+The private runtime brand is read only by the outbox; plain state writes cannot
+manufacture the result. JSON stores the evidence kind and its owner/account,
+intent ID, sequence and fingerprint binding. Restore validates that evidence and
+reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
+including their unsupported error outcome. No-evidence clock-epoch/deadline
+expiry of a restored queued record is also unknown rather than proof of no send.
+Restored ambiguous handoffs are unknown. Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
 supplies durable deduplication and queue cancellation;
 see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
