@@ -1162,9 +1162,13 @@ Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
 use it. The helper returns `number | null`: coherent native evidence wins, absent
 native uses derived size, and conflicting/unavailable quantities remain unknown.
 No per-field freshness signal exists; close/reduce consumers refuse a conflict
-rather than selecting either value by magnitude. Automatic CrossTrade orphan
-closes use the same helper with the copier market and skip unknown or zero
-quantities before reduce-only placement.
+rather than selecting either value by magnitude. CrossTrade validates canonical
+quantities in both reconciliation passes. Unknown master/copier rows remain
+present and refuse automatic sizing; known-flat rows remain distinct. Matched
+reductions compare exposures projected from canonical native quantities, and
+lot-rounded reductions are capped at the known copier quantity. The missing-
+position pass also refuses unknown opposite-side rows, since an entry could
+reduce them. Market, LimitSlippage and Chase forward these validated amounts.
 
 ### 4. Break-even — NOT trustworthy, and the order paths are off it
 
