@@ -515,8 +515,10 @@ export class DelegatedOutbox {
 
   cancel(intentId: string): Promise<void> {
     const row = this.intents.get(intentId);
-    if (!this.active || !row || !['queued', 'sending'].includes(row.state)) return Promise.resolve();
-    row.cancelPending = row.state === 'sending';
+    const handedOff =
+      row?.state === 'sending' || row?.state === 'acknowledged' || (row?.state === 'unknown' && !row.retentionExpired);
+    if (!this.active || !row || (row.state !== 'queued' && !handedOff)) return Promise.resolve();
+    row.cancelPending = handedOff;
     row.state = row.cancelPending ? 'unknown' : 'canceled';
     this.stopTimer(intentId);
     this.changed(row);
