@@ -57,7 +57,12 @@ export interface OutboxConnection extends OutboxScope {
   venue: 'bybit';
   signingMode: 'delegated';
   ready: boolean;
-  capabilities: { delegatedOrderFramesV1: boolean; delegatedOrderLedgerV1?: boolean };
+  capabilities: {
+    /** Advertised by the admitted box. */
+    delegatedOrderFramesV1: boolean;
+    /** Advertised by the router; absent on older pass-through routers. */
+    delegatedOrderLedgerV1?: boolean;
+  };
   instanceId?: string;
   /** True only for physical handoff; false means neither sent nor buffered for a later connection. */
   send(frame: string): boolean;
@@ -89,7 +94,7 @@ export class DelegatedOutbox {
   private connection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
-  private outcomeSequence = 0;
+  private readonly outcomeSequences = new Map<string, number>();
   private work: Promise<unknown> = Promise.resolve();
 
   static async open(options: OutboxOptions): Promise<DelegatedOutbox> {
@@ -161,7 +166,7 @@ export class DelegatedOutbox {
       throw new Error('Outbox connection scope differs');
     this.sent.clear();
     this.canceled.clear();
-    this.outcomeSequence = 0;
+    this.outcomeSequences.clear();
     this.connection = Object.freeze({
       ...connection,
       capabilities: Object.freeze({ ...connection.capabilities }),
@@ -182,6 +187,7 @@ export class DelegatedOutbox {
     this.sent.clear();
     this.canceled.clear();
     this.submitted.clear();
+    this.outcomeSequences.clear();
   }
 
   entries(): DelegatedIntent[] {
@@ -259,7 +265,7 @@ export class DelegatedOutbox {
           return;
         }
       }
-      if (!record(parsed) || !['order.ack', 'order.outcome'].includes(String(parsed.t)) || !record(parsed.d)) return;
+      if (!record(parsed) || (parsed.t !== 'order.ack' && parsed.t !== 'order.outcome') || !record(parsed.d)) return;
       const d = parsed.d;
       if (d.accountName !== this.scope.accountName || d.instanceId !== connection.instanceId) return;
       const size = utf8ToBytes(JSON.stringify(parsed)).length;
@@ -275,11 +281,20 @@ export class DelegatedOutbox {
         )
           return;
         row.state = data.received ? 'acknowledged' : 'notSent';
-      } else if (parsed.t === 'order.outcome' && ['placed', 'refused', 'unknown'].includes(String(data.outcome))) {
+      } else if (
+        parsed.t === 'order.outcome' &&
+        (data.outcome === 'placed' || data.outcome === 'refused' || data.outcome === 'unknown')
+      ) {
         if (data.clientOrderId !== null && data.clientOrderId !== row.intentId) return;
-        if (!Number.isSafeInteger(data.outcomeSeq) || Number(data.outcomeSeq) <= this.outcomeSequence) return;
+        // Router counters describe delivery on this captured socket, not the
+        // business result. Another intent's live/replayed result is no fence.
+        if (
+          !Number.isSafeInteger(data.outcomeSeq) ||
+          Number(data.outcomeSeq) <= (this.outcomeSequences.get(row.intentId) ?? 0)
+        )
+          return;
         if (data.outcome === 'placed' && (typeof data.venueOrderId !== 'string' || !data.venueOrderId)) return;
-        this.outcomeSequence = Number(data.outcomeSeq);
+        this.outcomeSequences.set(row.intentId, Number(data.outcomeSeq));
         row.state = data.outcome as IntentState;
         if (record(data.error) && typeof data.error.message === 'string') {
           row.error = { message: data.error.message };
@@ -490,6 +505,7 @@ export class DelegatedOutbox {
       this.stopTimer(row.intentId);
       this.intents.delete(row.intentId);
       this.durable.delete(row.intentId);
+      this.outcomeSequences.delete(row.intentId);
     }
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
