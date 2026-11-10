@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createReplayEntropy } from './replay-entropy.mjs';
 import { prepareRecordedHttp } from './recorded-http.mjs';
+import { replayPositions } from './bitget-anchor-positions.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -313,7 +314,7 @@ async function runRust() {
       tickers.apply(frame);
       for (const book of frame.books()) books.set(book.market, book);
       orders = frame.orders() ?? orders;
-      const positionUpdate = frame.positions();
+      const positionUpdate = replayPositions(frame, values.venue, isPrivate);
       if (positionUpdate) {
         positions = positionUpdate;
         positionGreeks = frame.positionGreeks();
