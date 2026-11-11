@@ -56,6 +56,8 @@ pub enum Reply {
     Unit,
     /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
     Placed { client_order_id: String },
+    /// An order frame using the same single-order command and audit path.
+    Intent { client_order_id: String, seq: u64 },
     /// `updateOrder`: the worker bridge's `WorkerOrderIds`, which the main-thread
     /// mirror decodes (`decodeWorkerOrderIds`); a bare array would throw there.
     OrderIds,
@@ -377,6 +379,24 @@ fn fill_bound(value: Option<Value>, time: FillHistoryTime) -> Option<Value> {
     };
     let value = if milliseconds { value } else { value * 1000.0 };
     Some(value.floor().into())
+}
+
+/// DELEGATED uses the existing translation only for an enabled private venue.
+pub fn translate_delegated(
+    venue: &str,
+    method: &str,
+    args: &[Value],
+    capabilities: &Capabilities,
+    open_order_symbols: &[String],
+    public_only: bool,
+) -> Result<Vec<Plan>, Refused> {
+    if public_only || !safe_cex_remote_signer::delegated_enabled(venue) {
+        return Err(refused(
+            "UnsupportedMethod",
+            "DELEGATED methods are not enabled for this account",
+        ));
+    }
+    translate(method, args, capabilities, open_order_symbols, public_only)
 }
 
 /// Translates one hosted `callMethod`. `open_order_symbols` (engine store) answers

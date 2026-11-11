@@ -55,6 +55,14 @@ describe('buildOemsPrompt', () => {
     expect(instructions).toContain('close_positions');
   });
 
+  it.each([false, true])('invalidates the prior cache contract for nullable native size (final=%s)', (final) => {
+    const built = buildOemsPrompt({ context: context(), transcript: [], message: 'close my position', final }, 'n');
+    expect(built.instructions).toContain('A null nativeContracts means unknown position size');
+    // Version 7 predates the nullable native-size instruction on master.
+    expect(OEMS_PROMPT_VERSION).toBeGreaterThan(7);
+    expect(built.cacheKey).not.toBe(`tealstreet-oems-7-${OEMS_PLAN_SCHEMA_VERSION}${final ? '-final' : ''}`);
+  });
+
   it('keys the cache on both versions, so neither can drift alone', () => {
     const { cacheKey } = buildOemsPrompt({ context: context(), transcript: [], message: 'x' }, 'n');
     expect(cacheKey).toBe(`tealstreet-oems-${OEMS_PROMPT_VERSION}-${OEMS_PLAN_SCHEMA_VERSION}`);

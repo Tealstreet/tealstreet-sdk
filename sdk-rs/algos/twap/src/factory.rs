@@ -23,6 +23,8 @@ pub trait TwapChasers {
     /// An `Err` is the refusal the client sees as an error log.
     fn start_with_id(&self, cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String>;
     fn progress(&self, chaser_id: &str) -> Option<ChaserProgress>;
+    /// Stop further writes after an uncertain TWAP outcome; current and late orders stay.
+    fn halt(&self, cx: &AlgoCx, chaser_id: &str);
     /// Stop the chaser and cancel its open order.
     fn remove(&self, cx: &AlgoCx, chaser_id: &str);
 }
@@ -282,6 +284,21 @@ impl Inner {
         true
     }
 
+    fn remainder_settled(
+        inner: &Rc<Self>,
+        cx: &AlgoCx,
+        twap_id: &str,
+        index: usize,
+        outcome: Result<Vec<String>, VenueError>,
+    ) {
+        let effects = inner
+            .book
+            .borrow_mut()
+            .remainder_settled(twap_id, index, outcome);
+        Self::run(inner, cx, effects);
+        inner.rescheduled.notify_one();
+    }
+
     fn ensure_driver(inner: &Rc<Self>, cx: &AlgoCx) {
         if inner.driver_started.replace(true) {
             inner.rescheduled.notify_one();
@@ -333,12 +350,35 @@ impl Inner {
                 return;
             }
             match effect {
+                TwapEffect::Outcome { twap_id, error } => {
+                    let elements = error.elements.as_deref().map(|elements| &elements[..]);
+                    let unknown = elements.map_or(
+                        0,
+                        |rows: &[safe_cex_engine::write_plan::ElementOutcome]| {
+                            rows.iter()
+                                .filter(|row| {
+                                    matches!(
+                                        row.result,
+                                        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+                                    )
+                                })
+                                .count()
+                        },
+                    );
+                    cx.port.emit(
+                        "twap:outcome",
+                        json!({ "id": twap_id, "error": error }).to_string(),
+                    );
+                    cx.port.emit("telemetry", json!({ "kind": "twap.unknown_outcome", "twapId": twap_id, "outcome": "unknown", "unknown": unknown, "error": error }).to_string());
+                }
+                TwapEffect::HaltChaser { chaser_id } => inner.chasers.halt(cx, &chaser_id),
                 TwapEffect::PlaceOrder {
                     twap_id,
                     settle_token,
+                    element_index,
                     request,
                 } => {
-                    Self::place(inner, cx, twap_id, settle_token, &request);
+                    Self::place(inner, cx, twap_id, settle_token, element_index, &request);
                 }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
                 TwapEffect::Log { message } => report(cx, &message),
@@ -355,18 +395,18 @@ impl Inner {
         cx: &AlgoCx,
         twap_id: String,
         settle_token: Option<u64>,
+        element_index: usize,
         request: &TwapOrderRequest,
     ) {
         let command = match place_command(cx, request) {
             Ok(command) => command,
             Err(message) => {
-                let failure = SliceFailure {
-                    message,
-                    nothing_placed: true,
-                };
+                let failure = VenueError::new(message).outcome(Outcome::NotSent);
                 match settle_token {
                     Some(token) => Self::settled(inner, cx, &twap_id, token, Err(failure)),
-                    None => report_remainder(cx, &request.symbol, &failure.message),
+                    None => {
+                        Self::remainder_settled(inner, cx, &twap_id, element_index, Err(failure))
+                    }
                 }
                 return;
             }
@@ -375,7 +415,6 @@ impl Inner {
         let future = cx.port.command(command);
         inner.placing.set(inner.placing.get() + 1);
         let (inner, task_cx) = (inner.clone(), cx.clone());
-        let symbol = request.symbol.clone();
         cx.spawn(async move {
             let outcome = placement_outcome(future.await);
             inner.placing.set(inner.placing.get() - 1);
@@ -386,8 +425,9 @@ impl Inner {
             }
             match (settle_token, outcome) {
                 (Some(token), outcome) => Self::settled(&inner, &task_cx, &twap_id, token, outcome),
-                (None, Err(failure)) => report_remainder(&task_cx, &symbol, &failure.message),
-                (None, Ok(_)) => {}
+                (None, outcome) => {
+                    Self::remainder_settled(&inner, &task_cx, &twap_id, element_index, outcome)
+                }
             }
         });
     }
@@ -412,24 +452,14 @@ impl Inner {
     }
 }
 
-/// A slice placement's ids, or its failure. Ids that cannot be read and unknown
-/// outcomes say the order may be live. Only a whole refusal proves nothing was
-/// placed; an unclassified error or a partial one does not.
+/// Preserve fully known refusals and their native partial-placement facts.
+/// Unreadable identities or unresolved outcomes remain execution uncertainty.
 pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, SliceFailure> {
     match result {
-        Ok(result) => serde_json::from_str::<Vec<String>>(&result).map_err(|_| SliceFailure {
-            message: format!("order ids unknown, the order may be live (result {result})"),
-            nothing_placed: false,
-        }),
-        Err(error) if error.outcome == Some(Outcome::Unknown) => Err(SliceFailure {
-            message: format!("outcome unknown, the order may be live: {}", error.message),
-            nothing_placed: false,
-        }),
-        Err(error) => Err(SliceFailure {
-            nothing_placed: matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-                && error.partial.is_none(),
-            message: error.message,
-        }),
+        Ok(result) => serde_json::from_str::<Vec<String>>(&result)
+            .map_err(|_| crate::unknown_outcome(VenueError::new("unreadable order identities"))),
+        Err(error) if crate::known_refusal(&error) => Err(error),
+        Err(error) => Err(crate::unknown_outcome(error)),
     }
 }
 
@@ -549,6 +579,10 @@ impl TwapEnv for CxEnv {
 /// The account's chaser book, shared with the `chaser:*` ops: pass
 /// `ChaserFactory::book()` and register that same `ChaserFactory`.
 impl TwapChasers for Rc<ChaserBook> {
+    fn halt(&self, _cx: &AlgoCx, id: &str) {
+        ChaserBook::halt_keep_order(self, id);
+    }
+
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
         // TS slices pass no origin, account or terminate rule, and the chaser
         // ignores `delay`.
@@ -582,14 +616,6 @@ impl TwapChasers for Rc<ChaserBook> {
     fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
         ChaserBook::remove(self, chaser_id);
     }
-}
-
-/// A chase slice's market remainder failed; the TWAP goes on without it.
-fn report_remainder(cx: &AlgoCx, symbol: &str, message: &str) {
-    report(
-        cx,
-        &format!("TWAP {symbol} slice remainder failed: {message}"),
-    );
 }
 
 /// A TWAP error the user must see: the `error` op is what the web toasts.

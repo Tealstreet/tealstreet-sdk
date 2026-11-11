@@ -1086,10 +1086,8 @@ fn released_unproven_write_cleanup_precedes_immediate_cancel_all() {
 }
 
 fn unsupported(id: u32) -> Command {
-    Command::FetchLeverage {
-        command: id,
-        symbol: "BTCUSDT".into(),
-    }
+    // Leverage reads are supported; STP remains an unsupported-command probe.
+    Command::FetchStpMode { command: id }
 }
 fn assert_refusal(actions: &[Action], id: u32, message: &str, kind: Option<ErrorKind>) {
     let results = terminal(actions, id);

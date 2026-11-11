@@ -1819,7 +1819,7 @@ fn unknown_fallback_replacement_http503_keeps_engine_sealed_wording() {
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(
         failures[0].message,
-        "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"
+        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"
     );
 }
 

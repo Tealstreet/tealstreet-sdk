@@ -1202,6 +1202,14 @@ export class EngineHost {
     return output;
   }
 
+  coinbaseSigningMetadata() {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw new EngineDisposedError();
+    if (typeof this.engine.coinbaseSigningMetadata !== 'function')
+      throw new ExchangeError('Coinbase signing metadata is unavailable', { kind: 'unsupported', outcome: 'notSent' });
+    return JSON.parse(this.invokeHosted(this.engine.coinbaseSigningMetadata));
+  }
+
   hostedSigning(input) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return Promise.reject(new EngineDisposedError());

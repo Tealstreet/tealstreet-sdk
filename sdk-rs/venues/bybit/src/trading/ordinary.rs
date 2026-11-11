@@ -1068,9 +1068,15 @@ impl BybitLinear {
                     }
                     Decision::Next(Vec::new())
                 }
-                Err(error) => {
+                Err(failure) => {
+                    // A stable prefix lets logs count failed proofs per check.
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        "partial.proof_failed",
+                        format!("[proof-diag] {}", failure.reason),
+                    );
                     let _ = cx.inherit_plan_uncertainty(&run.plan);
-                    Decision::Failed(error)
+                    Decision::Failed(failure.error())
                 }
             }
         } else {
@@ -1095,7 +1101,9 @@ impl BybitLinear {
         let plan = run.plan.clone();
         match decision {
             Decision::ProofPoll(axis) => {
-                let planned = run.partial.as_ref().unwrap().proof(axis);
+                let flow = run.partial.as_ref().unwrap();
+                let planned = flow.proof(axis);
+                let delay_ms = flow.poll_delay_ms(axis);
                 run.queue.push_front(Leg {
                     planned,
                     intent: LegIntent::Command,
@@ -1106,7 +1114,7 @@ impl BybitLinear {
                         &plan,
                         &active.slot,
                         &active.context,
-                        100,
+                        delay_ms,
                         partial_call(Operation::Read, 1),
                     )
                     .is_err()

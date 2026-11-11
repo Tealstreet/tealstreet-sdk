@@ -322,7 +322,9 @@ updates. Other TS pollers continue reading the multiplier at their next tick.
 
 `nativePositionSize.ts` is the shared sizing leaf for SDK bulk closes and the
 existing script-api-core re-export. It converts base contracts for linear
-markets and quote notional for inverse markets, retaining the existing maximum
-of derived size and `extra.contractsNative`. Missing/zero contract size defaults
-to one. Rounding and input validation belong to the caller; do not add a reverse
-dependency on script-api-core.
+markets and quote notional for inverse markets. Coherent native evidence wins;
+without native evidence it uses the derived quantity. Conflicting or unavailable
+evidence returns null, which close/reduce callers must refuse. There is no
+per-field freshness marker, so disagreement beyond roundoff cannot select a
+newer value. Missing/zero contract size still defaults to one; rounding belongs
+to the caller. Do not add a reverse dependency on script-api-core.

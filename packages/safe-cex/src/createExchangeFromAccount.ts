@@ -141,6 +141,9 @@ export function accountToExchangeOptions(
     // Testnet
     ...(account.testnet ? { testnet: account.testnet } : {}),
     ...(bybitSiteId ? { bybitSiteId } : {}),
+    ...((account.exchange === 'coinbase' || account.exchange === 'coinbasespot') && account.coinbaseJwtAlgorithm
+      ? { coinbaseJwtAlgorithm: account.coinbaseJwtAlgorithm }
+      : {}),
 
     // Spot opt-in, for venues that serve spot + derivatives from one
     // connection. Only forwarded when the venue actually offers the toggle,

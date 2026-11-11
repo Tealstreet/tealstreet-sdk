@@ -73,9 +73,11 @@ command `Unknown`, even if its peer succeeds or is definitively refused.
 Mainnet WOO accounts using the Tealstreet REST proxy or HOW tunnel also send
 their private socket through the fleet's existing `rpc.relay`, with the original
 application-ID suffix. Public, unproxied and staging sockets stay direct. The
-shared TS/native routing table owns the override; native Hosted WOO admission
-remains refused. Roll the production upstream allowlist on both tunnel hosts
-before merging this routing change; no runtime feature flag gates the override.
+shared TS/native routing table owns the override. Native Hosted routing resolves
+WOO mainnet/staging REST origins and carries the init application ID into the
+private relay URL; signing admission still uses the registry policy. Roll the
+production upstream allowlist on both tunnel hosts before merging this routing
+change; no runtime feature flag gates the override.
 
 Auth refusals expose only the numeric WOO code, an optional numeric response
 status, and closed reasons from `https://docs.woox.io/#error-codes`. Free vendor

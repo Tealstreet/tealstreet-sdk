@@ -434,6 +434,41 @@ fn zero_fill_reports_without_a_trade_id_still_establish_an_open_order() {
     e.handle(NOW,Event::WsMessage{socket,text:r#"{"code":0,"dataType":"spot.executionReport","data":{"s":"BTC-USDT","i":9007199254740993,"S":"BUY","o":"LIMIT","X":"NEW","q":"0.002","p":"41000","z":"0","l":"0","L":"0","T":1702720824000}}"#});
     assert!(e.store().order("9007199254740993").is_some());
 }
+
+#[test]
+fn spot_followup_execution_reports_preserve_documented_client_id() {
+    for field in ["c", "C"] {
+        let (mut e, sockets) = seed(true);
+        let socket = sockets.iter().find(|(_, url)| url.contains('?')).unwrap().0;
+        e.handle(NOW, Event::WsOpened { socket });
+        collect(&mut e);
+        for (filled, last, status, trade) in [
+            ("0", "0", "NEW", 0),
+            ("0.001", "0.001", "PARTIALLY_FILLED", 77),
+        ] {
+            let mut report = json!({"code":0,"dataType":"spot.executionReport","data":{
+                "s":"BTC-USDT","i":9007199254740993u64,"S":"BUY","o":"LIMIT",
+                "X":status,"q":"0.002","p":"41000","z":filled,"l":last,
+                "L":"41000","t":trade,"T":NOW
+            }});
+            report["data"][field] = json!("caller_spot_1");
+            e.handle(
+                NOW,
+                Event::WsMessage {
+                    socket,
+                    text: &report.to_string(),
+                },
+            );
+            let order = e.store().order("9007199254740993").unwrap();
+            assert_eq!(order.filled, filled.parse::<f64>().unwrap());
+            assert_eq!(
+                order.client_order_id.as_deref(),
+                Some("caller_spot_1"),
+                "field {field}"
+            );
+        }
+    }
+}
 #[test]
 fn public_ticker_and_candle_frames_follow_the_spot_topics() {
     let (mut e, sockets) = seed(false);

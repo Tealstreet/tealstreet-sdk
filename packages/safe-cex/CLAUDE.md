@@ -11,10 +11,12 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
+MEXC (RemoteSigner and REST-only PayloadSigner; see `sdk-rs/venues/mexc/README.md`),
 Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
 Bitrue (HMAC RemoteSigner and REST-only PayloadSigner; `sdk-rs/venues/bitrue/README.md`),
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
+Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures and Spot (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md` and `docs/plans/callers/kucoinspot-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
@@ -58,6 +60,75 @@ one fresh encapsulation per call. Deterministic RFC and shared synthetic handove
 fixtures exercise the same production sender. The shared fixture lives with
 the server tests for receiver interoperability; Rust consumption depends on
 the server handover implementation landing.
+
+## DELEGATED order outbox
+
+`DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
+submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
+`delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
+missing/false flags disable writes and receipts. Hosts inject scoped persistence,
+secure randomness, a monotonic clock with a stable epoch, deadline scheduling
+and an admitted socket connection. Close the outbox on logout; pass the captured connection ticket to flush and receive.
+Router outcomes may be renumbered per client socket, including stored replays.
+Receipt ordering is checked per intent within that ticket, so one intent's higher
+number cannot hide another's deferred replay. Replacement tickets reset receipt
+ordering and old tickets cannot update the replacement connection.
+The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations,
+coverage uncertainty and ledger failures answer unknown, never prove not sent.
+Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
+string coercion. Capability discovery still requires completed socket admission.
+Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
+an intent `sending` in memory; sending, acknowledged and unknown intents are never
+submitted again. At ten monotonic seconds from creation (including persistence
+and admission waits), a never-forwarded queued intent becomes `notSent`; an
+in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+those retained entries to unknown immediately while fencing later work and callbacks.
+Disconnect/replacement makes
+in-flight and acknowledged intents unknown immediately. The synchronous send
+adapter returns true only after socket handoff; only an explicit false guarantees
+neither handoff nor buffering for a later connection. A throw or any other non-true
+return supplies no such evidence: it becomes unknown immediately, loses its replay
+proof, and is never automatically submitted again, including after reconnect or restore.
+Queue cancellation after handoff remains unknown until a router
+receipt positively establishes non-forwarding. Legacy pending cancellations restore
+as unknown. Cancellation or expiry during a declined first send remains terminal
+and is published; a declined retry cannot erase a previous handoff.
+`notSent` is a branded state, constructed only by the exported
+`markDelegatedNotSent(intent, evidence)`. It requires positive evidence for the
+whole intent: a locally known never-attempted intent, a declined adapter handoff
+with no earlier possible handoff, or an admitted authoritative router refusal.
+A failed reconnect attempt cannot prove an earlier handoff did not occur.
+The private runtime brand is read only by the outbox; plain state writes cannot
+manufacture the result. JSON stores the evidence kind and its owner/account,
+intent ID, sequence and fingerprint binding. Restore validates that evidence and
+reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
+including their unsupported error outcome. No-evidence clock-epoch/deadline
+expiry of a restored queued record is also unknown rather than proof of no send.
+Restored ambiguous handoffs are unknown. Once enqueue persistence succeeds, temporary unavailability while
+preparing handoff retains that queued intent and its ID for retry. The NX router
+supplies durable deduplication and queue cancellation;
+see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
+signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
+
+The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
+records. Unknown work, including pending queue cancellation, is retained for 24
+hours from its UUIDv7 Unix creation time, using the injected Unix clock across
+reloads (clock rollback can extend retention). At expiry it remains `unknown`,
+gains `retentionExpired: true`, stops pending queue cancellation, and emits the
+normal `changed` notification. Hosts must surface this as expired, unresolved
+history and reconcile via ordinary orders/history; expiry proves nothing about
+the venue outcome. Only after that explicit expiry state is durable may it join
+the latest-32 completed history and retire. Expiry never enables resubmission or
+changes an unknown to `notSent`; a late positive router refusal can still prove
+non-forwarding. Storage failure keeps the row for a later flush retry.
+Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
+listed retired intent IDs in that scope and advance its durable sequence using
+the maximum of old/new values. Preserve all other records. `load` returns an
+`OutboxSnapshot` with sequence progress and records (legacy record arrays are
+accepted for migration). `put` preserves checkpoint metadata. Compaction failure
+keeps records until a later flush retries. Unrelated retirement failure never
+rejects enqueue or hides its durable intent ID after handoff. Close the old
+outbox before replacing it with a new writer for the same scope.
 
 ## Mirror CI invariants (don't "clean these up")
 
@@ -168,8 +239,8 @@ The same field policy declares primary required-for-private passphrases and
 required secondary passphrases with primary fallback for OKX and Bitget aliases
 and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
-explicit empty never inherits. Public mode bypasses only the primary requirement,
-while secondary validation stays active. Shared publicMode intent takes precedence
+explicit empty never inherits. Local signer setup in public mode bypasses only
+the primary requirement, while secondary validation stays active. Shared publicMode intent takes precedence
 over legacy publicDataOnly, including null/omitted requested. This declaration does
 not enable signing for an unmigrated family.
 Normalization and required-material validation occur before opaque identities are installed, and SDK cached
@@ -226,6 +297,14 @@ Private WOO RemoteSigner setup refuses any configured secondary credentials with
 `unsupported` / `notSent` before native construction or callbacks: its HMAC wire
 cannot select the device's read-key slot. Remove the secondary credentials to
 use Hosted with the primary key, or use read keys in local browser mode.
+ApeX Omni admits RemoteSigner through `apexomni-batch`: device-held OmniKey
+contracts precede base64-text-key HMAC signing. Origins retain their API
+passphrase in Present-only provider custody; the secret and OmniKey stay on the
+device. Private PayloadSigner and secondary read keys refuse before I/O.
+ApeX HTTP POST captures sign sorted semantic form fields, decoding serialized
+form/multipart bodies while preserving transport bytes and existing zkLink signatures.
+See `docs/plans/callers/apexomni-hosted-signing.md` for the wire and parity contract.
+
 Crypto.com admits RemoteSigner and canonical HMAC PayloadSigner. Every signed
 REST envelope and `public/auth` uses provider custody; the hosted wire carries
 only `method + id + api_key + canonical params + nonce`. PayloadSigner keeps
@@ -240,10 +319,15 @@ Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
-Explicit `publicDataOnly: true` in delegated setup preserves raw mode-intent
+Effective public mode in delegated setup is resolved before custody checks,
+including keyless accounts with unused callbacks. It preserves raw mode-intent
 flags but ignores signing callbacks, credentials and setup metadata. It installs
 no provider or identity, advertises no algorithms, and cannot sign. Private-mode
 callback validation, primary/secondary selection and mode refusals remain strict.
+ApeX uses this shared early return for saved-key and keyless accounts explicitly
+requesting public mode. Captured public mode cannot be changed by later
+construction input; no separate ApeX public-mode guard is installed.
+
 Construction snapshots outer signer fields and their methods together under one
 guard before mode resolution. Admission, asynchronous factories and signer setup
 share that immutable snapshot, preserving receivers without further caller reads.
@@ -437,6 +521,11 @@ carry JSON `venueError` detail, which the bridge wraps as `ExchangeError` to
 preserve `unsupported`/`notSent` through startup and account validation.
 
 ## Rust engine capabilities
+
+Optional SDK helpers needed before engine startup are declared under
+`bridge.helpers` in `construction-rules.json`. The native generated construction
+record and synchronous SDK record share that declaration. Install and dispatch
+those helpers from their declared flags, never from a venue-name check.
 
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
@@ -1144,9 +1233,16 @@ only defined on linear markets.
 `safe-cex/src/utils/nativePositionSize.ts` is the single definition;
 `script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
 Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
-use it. Its own comment records that the copies HAD drifted
-before they were merged. One function in the shared layer, adapters either
-side.
+use it. The helper returns `number | null`: coherent native evidence wins, absent
+native uses derived size, and conflicting/unavailable quantities remain unknown.
+No per-field freshness signal exists; close/reduce consumers refuse a conflict
+rather than selecting either value by magnitude. CrossTrade validates canonical
+quantities in both reconciliation passes. Unknown master/copier rows remain
+present and refuse automatic sizing; known-flat rows remain distinct. Matched
+reductions compare exposures projected from canonical native quantities, and
+lot-rounded reductions are capped at the known copier quantity. The missing-
+position pass also refuses unknown opposite-side rows, since an entry could
+reduce them. Market, LimitSlippage and Chase forward these validated amounts.
 
 ### 4. Break-even — NOT trustworthy, and the order paths are off it
 
@@ -1415,8 +1511,13 @@ Its test also requires each advertised route to select an existing backend; comm
 are not routes. Remove retired DNS names from both files together, or
 `engine.ts` can select an HTTP fallback the fleet cannot serve. WEEX remains
 HTTP-only (no HOW); adding its fleet route does not enable the venue or change
-that transport policy. Lighter's `testnet-api.lighter.xyz` does not resolve and
-is intentionally absent; do not introduce another dead backend to cover it.
+that transport policy. Lighter's `testnet-api.lighter.xyz` was documented as retired
+and previously excluded. The SDK inventory now includes every fixed REST base
+declared by the venue crates, including that testnet URL; the source-derived
+coverage test includes production, demo/testnet and auxiliary APIs. Configured
+HyroTrader endpoints are caller-owned rather than fixed venue bases. SDK coverage
+does not prove endpoint reachability: HAProxy config and the fleet rollout remain
+a human step, including resolving the retired Lighter endpoint before routing it.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned family (bybit when tunnelling), whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
@@ -1853,7 +1954,7 @@ consuming app's CLAUDE.md for the capture playbook.
 worker op handled by `src/webworker/handlers/UpdatePositionsHandler.ts`.
 Account-wide refreshes (`symbols` omitted) must use
 `store.addOrUpdatePositionsFull(positions)`, including empty arrays, so
-positions omitted by the exchange are zeroed/cleared. Symbol-scoped refreshes
+positions omitted by the exchange are removed. Last reported per-ID leverage/margin/mode survives separately in the generated `positionSettings` map. Symbol-scoped refreshes
 remain partial and use `addOrUpdatePositions(positions)` when rows are
 returned. Do not replace this with a main-thread `fetchPositions()` + direct
 store write from the web app; the worker owns live exchange state and its
