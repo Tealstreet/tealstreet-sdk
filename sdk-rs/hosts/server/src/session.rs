@@ -1034,7 +1034,7 @@ impl Session {
             && joined.account.delegated.is_some()
             && (public_only || joined.account.matches_init(self.user(), &init))
         {
-            out.send(envelope::init_refused(
+            out.account(&init.account_name).send(envelope::init_refused(
                 &init.account_name,
                 "Account signing mode differs; account not attached",
             ));
