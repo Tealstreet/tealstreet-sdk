@@ -53,7 +53,7 @@ it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
 });
 
 it('backpack_private_payload_and_undeclared_venue_stay_refused', () => {
-  const venues: ExchangeName[] = ['backpack', 'mexc'];
+  const venues: ExchangeName[] = ['backpack', 'weex'];
   for (const name of venues) {
     const create = () => new RustEngineExchange(name, { key: 'fixture-key', secret: '', payloadSigner: vi.fn() }, new DefaultStore());
     expect(create).toThrow();
