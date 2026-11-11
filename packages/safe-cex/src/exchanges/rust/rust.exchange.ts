@@ -79,6 +79,7 @@ import { assertEngineAccountRouting, createEngineTransport, withSecondaryReadKey
 import { withRequestsLog } from '../../transport/requestsLog';
 import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
@@ -1239,7 +1240,7 @@ export class RustEngineExchange extends BaseExchange {
     } catch (error) {
       // A refused frame leaves no baseline to apply deltas to: drop them until a fresh snapshot.
       this.sourceBaseline = false;
-      console.error(`${this.name} source frame refused`, error);
+      diagnosticConsole.error(`${this.name} source frame refused`, error);
       if (!this.engineFailure) this.emitter.emit('frameFed:needsSnapshot');
       return;
     }
@@ -2324,7 +2325,7 @@ export class RustEngineExchange extends BaseExchange {
       frame = new Frame(buffer);
     } catch (error) {
       this.applier.invalidateMarketIdentity();
-      console.error('Invalid engine frame', error);
+      diagnosticConsole.error('Invalid engine frame', error);
       if (recover) this.recoverEngineFrame();
       return;
     }
@@ -2334,14 +2335,14 @@ export class RustEngineExchange extends BaseExchange {
       this.applier.apply(frame, !this.frameConsumerDecodesMarketData || this.feedBookListeners.size > 0);
     } catch (error) {
       needsSnapshot = error instanceof FrameApplyError;
-      console.error('Engine frame apply failed', error);
+      diagnosticConsole.error('Engine frame apply failed', error);
     }
     const read = <T>(section: () => T[]): T[] => {
       try {
         return section();
       } catch (error) {
         needsSnapshot = true;
-        console.error('Engine frame section failed', error);
+        diagnosticConsole.error('Engine frame section failed', error);
         return [];
       }
     };
@@ -2351,7 +2352,7 @@ export class RustEngineExchange extends BaseExchange {
       this.nativeLoaded = receivedLoaded;
     } catch (error) {
       needsSnapshot = true;
-      console.error('Engine status section failed', error);
+      diagnosticConsole.error('Engine status section failed', error);
     }
     const catalogChanged = previousMarkets !== this.store.markets;
     if (this.publicFeedObservers.size) {
@@ -2360,7 +2361,7 @@ export class RustEngineExchange extends BaseExchange {
         publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas() || frame.tickerObservations?.());
       } catch (error) {
         needsSnapshot = true;
-        console.error('Engine public feed section failed', error);
+        diagnosticConsole.error('Engine public feed section failed', error);
       }
       if (publicChanged)
         for (const observer of this.publicFeedObservers)
@@ -2455,7 +2456,7 @@ export class RustEngineExchange extends BaseExchange {
       this.applyEngineFrame(snapshot.frame, false, true);
       this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
     } catch (error) {
-      console.error('Engine frame recovery failed', error);
+      diagnosticConsole.error('Engine frame recovery failed', error);
     } finally {
       this.frameRecoveryPending = false;
     }

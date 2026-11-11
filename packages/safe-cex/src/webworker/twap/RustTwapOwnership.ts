@@ -2,6 +2,7 @@ import type { Exchange } from '../../exchanges/base';
 import type { TwapOptions } from './TwapOptions';
 import type { TwapOwner } from './TwapOwner';
 import type { TwapState } from './TwapState';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 
 import { inFlightSlicePlaced } from './inFlightSlice';
 import { acquireTwapLock, acquireTwapLockWithin, TWAP_RESTORE_LOCK_WAIT_MS, twapLockName } from './twapLock';
@@ -86,7 +87,7 @@ export class RustTwapOwnership {
 
   private restore(data: unknown, ownerSession: TwapOwner | null | undefined) {
     if (!Array.isArray(data)) {
-      console.error('[TWAP] twap:state expects an array');
+      diagnosticConsole.error('[TWAP] twap:state expects an array');
       return;
     }
     let refused = false;
