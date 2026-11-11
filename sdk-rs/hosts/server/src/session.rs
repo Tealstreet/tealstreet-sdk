@@ -1487,7 +1487,15 @@ impl Session {
                 if let Some(previous) = self.joined.remove(name) {
                     Self::leave_engine(previous);
                 }
-                self.join(account, out.clone()).await;
+                // Keep captured provenance, but never reuse the retired engine's receipts.
+                let replacement = out.with_fresh_order_receipts();
+                if let Some(fallback) = self.registration_outputs.get_mut(name)
+                    && fallback.shares_order_receipts(&out)
+                {
+                    *fallback = replacement.clone();
+                }
+                account.update_reply_outbox(self.socket, replacement.outbox(), name);
+                self.join(account, replacement).await;
                 if self.joined.contains_key(name) {
                     Ok(())
                 } else {

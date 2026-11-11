@@ -187,6 +187,17 @@ impl Out {
         self.order_receipts.lock().unwrap().retired = true;
     }
 
+    pub(crate) fn with_fresh_order_receipts(&self) -> Self {
+        Self {
+            order_receipts: Arc::default(),
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn shares_order_receipts(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.order_receipts, &other.order_receipts)
+    }
+
     /// A resumed signer can reconnect before init supplies the new registration.
     pub(crate) fn awaiting_instance_id(&self) -> Self {
         Self {

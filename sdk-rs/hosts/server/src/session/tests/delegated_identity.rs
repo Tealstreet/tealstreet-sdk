@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(feature = "delegated-order-frames")]
+#[path = "delegated_identity_orders.rs"]
+mod orders;
+
 fn named_payload(session: &mut Session, name: &str, key: &str, id: &str) -> InitPayload {
     let offer = session
         .handovers
@@ -303,6 +307,7 @@ async fn apply_settings_refuses_another_key_and_preserves_the_running_account() 
     assert_eq!(reply["d"]["instanceId"], "current");
     assert!(Arc::ptr_eq(&before, &session.joined["acct"].account));
     assert!(f.registry.holds(&before, session.socket));
+    assert!(f.orders.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
