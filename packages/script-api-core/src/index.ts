@@ -146,6 +146,7 @@ export {
   roundOrderSize,
   roundOrderSizeToNearest,
   venueAutoDownsizesReduceOrders,
+  venueUsesBaseAmountRails,
   venueSupportsInfinityStops,
 } from './order/orderPricing';
 export { notionalToNativeSize } from './order/notionalSizing';
