@@ -290,6 +290,10 @@ this.log(`Order rejected: ${err}`, LogSeverity.Error);
 - The default `Info` is what `console.log`s show in app logs and what the
   emitter forwards to subscribers.
 
+`ExchangeEmitter` makes diagnostic copies for `log`, `error`, `warning`,
+`engine-event`, `exec-log` and all `grafana-*` events before listener delivery.
+Live command/result and market events retain their original payloads and identity.
+
 ### Pre-flight validation throws must emit first
 
 **Any `throw new Error(msg)` inside an exchange method must be preceded by

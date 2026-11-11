@@ -34,6 +34,26 @@ const signer = (browser: RustEngineExchange) => {
   return { sign, remoteSigner };
 };
 
+it.each([
+  ['/api/v1/private/order/submit', '{"symbol":"BTC_USDT","vol":1,"price":60000}'],
+  ['/api/v1/private/order/submit_batch', '[{"symbol":"BTC_USDT","vol":1,"price":60000}]'],
+  ['/api/v1/private/planorder/place/v2', '{"symbol":"BTC_USDT","triggerPrice":55000,"vol":1}'],
+  ['/api/v1/private/stoporder/place', '{"positionId":"fixture-position","stopLossPrice":55000}'],
+])('actual WASM broker attribution on %s survives every hosted capture provider', async (path, body) => {
+  const browser = fixture();
+  const { remoteSigner } = signer(browser.exchange);
+  const remote = fixture({ secret: '', remoteSigner });
+  const payload = fixture({ secret: '', payloadSigner: ({ payload }) => ({ signature: mac(payload) }) });
+  for (const target of [browser, remote, payload]) {
+    const result = await target.exchange.signHttpRequest(request({ ...vectors[2], method: 'POST', params: [], path, body }));
+    expect(result.error).toBeUndefined();
+    expect(result.config?.headers.source).toBe('TEAL');
+    expect(result.config?.headers.Signature).toBe(mac(`replay-key${stamp}${body}`));
+    expect(result.config?.data).toBe(body);
+    expect(target.io).not.toHaveBeenCalled();
+  }
+});
+
 it.each(vectors)('actual WASM MEXC $label: keyless RemoteSigner matches local payload and signature bytes', async (vector) => {
   const browser = fixture();
   const { sign, remoteSigner } = signer(browser.exchange);
@@ -44,6 +64,7 @@ it.each(vectors)('actual WASM MEXC $label: keyless RemoteSigner matches local pa
   expect(local.error).toBeUndefined(); expect(delegated.error).toBeUndefined();
   expect(delegated.config).toEqual(local.config);
   expect(delegated.config?.headers['Signature']).toBe(vector.signature);
+  expect(delegated.config?.headers.source).toBe('TEAL');
   expect(sign).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: 'ws-auth', exchangeName: 'mexc',
     accountName: 'fixture-account', wsAuth: { toSign: vector.payload, outputFormat: 'hex' } }));
   expect(server.exchange.options).not.toHaveProperty('secret');
@@ -116,7 +137,7 @@ const tickers = {"success":true,"code":0,"data":[{"symbol":"BTC_USDT","lastPrice
 
 it.each(['remote', 'payload', 'payload-headers', 'remote-trimmed'] as const)('actual WASM MEXC %s startup signs REST, retains identity and selects the private feed policy', async (mode) => {
   const browser = fixture(); const { sign, remoteSigner } = signer(browser.exchange);
-  const payloadSigner = vi.fn(({ payload }: { payload: string }) => ({ signature: mac(payload), ...(mode === 'payload-headers' ? { headers: { 'X-Trace': 'fixture-trace', apikey: 'spoofed', signature: 'spoofed', 'request-time': '1', 'recv-window': '1', 'content-type': 'spoofed' } } : {}) }));
+  const payloadSigner = vi.fn(({ payload }: { payload: string }) => ({ signature: mac(payload), ...(mode === 'payload-headers' ? { headers: { 'X-Trace': 'fixture-trace', apikey: 'spoofed', signature: 'spoofed', 'request-time': '1', 'recv-window': '1', 'content-type': 'spoofed', source: 'spoofed' } } : {}) }));
   const logins: string[] = [];
   const requests: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
   setRustEngineTransport(() => ({ prepareHttp: prepareRecordedHttp, now: () => stamp,
@@ -154,6 +175,7 @@ it.each(['remote', 'payload', 'payload-headers', 'remote-trimmed'] as const)('ac
     const url = new URL(r.url);
     expect(headers.signature).toBe(mac(`replay-key${stamp}${r.method === 'GET' ? url.search.slice(1) : r.body ?? ''}`));
     expect(headers.apikey).toBe('replay-key');
+    expect(headers.source).toBe('TEAL');
     if (mode === 'payload-headers') expect(r.headers['X-Trace']).toBe('fixture-trace');
     expect(r.headers['Content-Type']).toBe('application/json');
     expect(r.headers['Recv-Window']).toBe('20000');

@@ -6,6 +6,7 @@ import { serializeCommandError } from '../../commandOutcome';
 import { WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
 import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { historyCompletenessOf } from '../../historyCompleteness';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { runWithWriteTiming, WriteTiming } from '../../writeTiming';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { isWorkerWriteMarks } from '../workerMessage';
@@ -65,7 +66,7 @@ export class CallMethodHandler extends BaseHandler {
     const timing = marks ? new WriteTiming(method, { ...marks }) : undefined;
     timing?.mark('received');
     if (logging) {
-      console.log('Calling method', method);
+      diagnosticConsole.log('Calling method', method);
     }
     try {
       // Mirrors forward every metadata refresh; the worker keeps coalescing them.
@@ -135,11 +136,11 @@ export class CallMethodHandler extends BaseHandler {
           throw this.unsupportedMethod(method);
       }
       if (logging) {
-        console.log('Method called', method, result);
+        diagnosticConsole.log('Method called', method, result);
       }
       this.replySuccess(requestId, result);
     } catch (e: unknown) {
-      console.error('Error calling method', e);
+      diagnosticConsole.error('Error calling method', e);
       const serializedError = serializeCommandError(e);
       this._ctx.postMessage({
         op: 'callMethod:done',
