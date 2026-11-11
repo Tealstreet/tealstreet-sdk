@@ -11,6 +11,7 @@ use safe_cex_algo_twap::{
 use serde_json::{Value, json};
 
 #[path = "twap/identity.rs"]
+#[cfg(not(target_arch = "wasm32"))]
 mod identity;
 
 struct Env {

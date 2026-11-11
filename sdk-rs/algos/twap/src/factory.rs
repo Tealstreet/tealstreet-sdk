@@ -66,27 +66,10 @@ struct Inner {
 impl TwapFactory {
     /// `account_name` is the account's `accountName`; TWAPs naming another are refused.
     pub fn new(account_name: &str, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
-        Self::from_book(TwapBook::new(account_name), account_cx, chasers)
-    }
-
-    pub fn new_with_owner(
-        account_name: &str,
-        account_cx: AlgoCx,
-        chasers: Rc<dyn TwapChasers>,
-        owner: String,
-    ) -> Self {
-        Self::from_book(
-            TwapBook::new_with_owner(account_name, owner),
-            account_cx,
-            chasers,
-        )
-    }
-
-    fn from_book(book: TwapBook, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
         Self {
             inner: Rc::new(Inner {
                 cx: account_cx,
-                book: RefCell::new(book),
+                book: RefCell::new(TwapBook::new(account_name)),
                 chasers,
                 env: RefCell::new(CxEnv::seeded()),
                 rescheduled: Notify::new(),
@@ -96,6 +79,19 @@ impl TwapFactory {
                 placed: Notify::new(),
             }),
         }
+    }
+
+    /// Hosted identity binding does not change the browser's account-label book.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_with_owner(
+        account_name: &str,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+        owner: String,
+    ) -> Self {
+        let factory = Self::new(account_name, account_cx, chasers);
+        factory.inner.book.borrow_mut().owner_id = Some(owner);
+        factory
     }
 
     /// Stop every TWAP (`twap:stop` each) and send the final state; nothing is
