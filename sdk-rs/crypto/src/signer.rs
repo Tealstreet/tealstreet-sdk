@@ -13,6 +13,19 @@ mod key_material;
 mod primitives;
 pub use key_material::KeyEncoding;
 
+#[cfg(target_arch = "wasm32")]
+macro_rules! heap_material {
+    ($bytes:expr) => {
+        $bytes
+    };
+}
+#[cfg(not(target_arch = "wasm32"))]
+macro_rules! heap_material {
+    ($bytes:expr) => {
+        Material::Heap($bytes)
+    };
+}
+
 /// Trusted provider setup only. Never place these values in venue/engine options.
 #[derive(Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -255,23 +268,23 @@ impl DecodedIdentity {
         if !self.key.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.credential")), heap_material(self.key));
+                .insert(KeyRef(format!("{slot}.credential")), heap_material!(self.key));
         }
         if !self.secret.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.signing")), heap_material(self.secret));
+                .insert(KeyRef(format!("{slot}.signing")), heap_material!(self.secret));
         }
         if let Some(passphrase) = self.passphrase {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.passphrase")), heap_material(passphrase));
+                .insert(KeyRef(format!("{slot}.passphrase")), heap_material!(passphrase));
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
                 let reference = Self::extra_ref(slot, name);
                 signer.roles.insert(reference.clone(), name);
-                signer.keys.insert(reference, heap_material(bytes));
+                signer.keys.insert(reference, heap_material!(bytes));
             }
         }
     }
@@ -292,16 +305,6 @@ type Material = Zeroizing<Vec<u8>>;
 enum Material {
     Heap(Zeroizing<Vec<u8>>),
     Protected(Box<dyn ProtectedBytes>),
-}
-fn heap_material(bytes: Zeroizing<Vec<u8>>) -> Material {
-    #[cfg(target_arch = "wasm32")]
-    {
-        bytes
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Material::Heap(bytes)
-    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl Material {
@@ -488,7 +491,7 @@ impl LocalSigner {
             }
         }
         self.keys
-            .insert(reference, heap_material(Zeroizing::new(bytes)));
+            .insert(reference, heap_material!(Zeroizing::new(bytes)));
     }
     pub fn from_setup(
         setup: LocalSetup,
@@ -818,7 +821,7 @@ impl LocalSigner {
         }
         self.redraw();
         self.keys
-            .insert(reference.clone(), heap_material(Zeroizing::new(bytes)));
+            .insert(reference.clone(), heap_material!(Zeroizing::new(bytes)));
         self.algorithms.insert(reference, algorithm);
         Ok(())
     }
