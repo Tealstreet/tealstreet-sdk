@@ -63,6 +63,10 @@ mod tests {
         assert_eq!(b.owner_id, "tenant:B");
         assert_ne!(b.generation, a.generation);
         assert!(binding.rebind_owner("tenant:A"));
-        assert_eq!(binding.snapshot(), a);
+        assert_eq!(binding.snapshot().owner_id, a.owner_id);
+        assert_ne!(binding.snapshot().generation, a.generation);
+        let returned = binding.snapshot();
+        assert!(!binding.rebind_owner("tenant:A"));
+        assert_eq!(binding.snapshot(), returned);
     }
 }
