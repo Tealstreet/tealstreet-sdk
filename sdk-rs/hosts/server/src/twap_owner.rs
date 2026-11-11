@@ -2,7 +2,9 @@
 use safe_cex_algo_twap::TwapOwner;
 use std::sync::Mutex;
 
-/// The owner's generation, stable across account rebuilds, restarts and boxes so
+const MAX_OWNER_GENERATION: u64 = (1 << 53) - 1;
+
+/// The initial generation, stable across account rebuilds, restarts and boxes so
 /// the approved 60-second COSIGNED resume window and cross-box transfer restore
 /// the same user's rows; a different owner gets a different generation.
 fn generation_for(authenticated_user: &str) -> u64 {
@@ -33,14 +35,20 @@ impl Binding {
     /// Bump the generation only when the authenticated owner changes. A same-user
     /// reconnect, resume or signing handover keeps it, so the approved 60-second
     /// COSIGNED resume window keeps the account's TWAPs. Returns whether it changed.
+    /// Returning to an earlier owner never reinstates its retired generation.
     pub fn rebind_owner(&self, authenticated_user: &str) -> bool {
         let mut current = self.current.lock().unwrap();
         if current.owner_id == authenticated_user {
             return false;
         }
+        let generation = current
+            .generation
+            .checked_add(1)
+            .filter(|generation| *generation <= MAX_OWNER_GENERATION)
+            .expect("TWAP owner generation exhausted");
         *current = TwapOwner {
             owner_id: authenticated_user.into(),
-            generation: generation_for(authenticated_user),
+            generation,
         };
         true
     }

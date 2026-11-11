@@ -26,11 +26,13 @@ including untagged rows; it never invents missing tags. The separate
 tags to match its trusted owner. Invalid or unavailable explicit ownership
 never falls back to compatibility mode.
 
-The native server binds the verified authenticated user and a generation
-derived from that user, so the same user keeps it across same-socket reinit,
-reconnects, signing handovers, account rebuilds, restarts and box moves: the
-approved 60-second COSIGNED resume window keeps the account's TWAPs. Only an
-authenticated owner change yields a different generation; queued TWAP ops
+The native server initially binds the verified authenticated user and a generation
+derived from that user. Same-socket reinit, reconnects and same-owner signing
+handovers keep the current generation: the approved 60-second COSIGNED resume
+window keeps the account's TWAPs. Fresh bindings for the same identity use the
+same initial generation across account rebuilds, restarts and box moves. Only an
+in-place authenticated owner change advances the generation, and returning to an
+earlier owner never reinstates its retired generation. Queued TWAP ops
 captured before that change are refused, and remaining slices from the old
 owner are dropped. EXEC captures the binding before a sleep
 or wait and cannot start a TWAP after it changes. Already-issued venue writes are not undone;

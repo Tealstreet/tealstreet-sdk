@@ -17,11 +17,14 @@ owner parameter is absent. This compatibility exception is interim; explicit
 null/invalid ownership never selects it. Bound restores require both original
 persisted tags; untagged saved rows do not resume.
 
-The native server binds TWAPs to the verified authenticated user and a
-generation derived from that user. A same-user reconnect, resume, signing
-handover, account rebuild, restart or box move keeps the generation, so the
-approved 60-second COSIGNED resume window keeps running TWAPs; only an owner
-change yields a different generation and drops the old owner's pending slices.
+The native server initially binds TWAPs to the verified authenticated user and a
+generation derived from that user. Same-user reconnects, resumes and signing
+handovers keep the current generation, so the approved 60-second COSIGNED resume
+window keeps running TWAPs. Fresh bindings for the same authenticated identity
+use the same initial generation across account rebuilds, restarts and box moves.
+An in-place authenticated owner change advances the binding's generation and
+drops the old owner's pending slices, even when returning to an earlier owner;
+a retired generation is never reinstated on that binding.
 Bound restores refuse pre-release-8 untagged rows with a visible error; see the
 [TWAP ownership contract](algos/twap/README.md) for the exact messages.
 

@@ -1027,10 +1027,18 @@ async fn legacy_parity_restored_invalid_tail_is_left_to_each_native_write() {
                 market.limits.amount.max = 10.0;
             }
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            let factory = TwapFactory::with_owner(
+                "a",
+                safe_cex_algo_twap::TwapOwner {
+                    owner_id: "parity-owner".into(),
+                    generation: 7,
+                },
+                cx.clone(),
+                Rc::new(Chasers::default()),
+            );
             let options: Value = serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap();
             let restore = json!([{
-                "id": "legacy-tail", "options": options,
+                "id": "legacy-tail", "ownerId": "parity-owner", "ownerGeneration": 7, "options": options,
                 "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
                     "size": 4, "ordersSizes": [3, 1], "side": "buy", "status": "running",
                     "ordersCount": 2, "ordersExecuted": 0, "nextOrderAt": cx.now_ms() }

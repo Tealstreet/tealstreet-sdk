@@ -232,11 +232,26 @@ pub struct Live {
 #[derive(Default)]
 struct Holders {
     by_id: HashMap<u64, Option<Live>>,
+    /// Live holders in init/resume order; socket IDs do not order later reinits.
+    init_order: Vec<u64>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
 }
 
 impl Holders {
+    fn insert(&mut self, id: u64, live: Option<Live>) {
+        self.init_order.retain(|holder| *holder != id);
+        if live.is_some() {
+            self.init_order.push(id);
+        }
+        self.by_id.insert(id, live);
+    }
+
+    fn remove(&mut self, id: u64) {
+        self.init_order.retain(|holder| *holder != id);
+        self.by_id.remove(&id);
+    }
+
     /// `None` when `leaving` was not signing; otherwise the newest live holder
     /// to sign through next, or `Some(None)` when none is live.
     fn successor(&self, leaving: u64) -> Option<Option<(u64, Live)>> {
@@ -244,11 +259,11 @@ impl Holders {
             return None;
         }
         Some(
-            self.by_id
+            self.init_order
                 .iter()
-                .filter(|(id, _)| **id != leaving)
-                .filter_map(|(id, live)| live.clone().map(|live| (*id, live)))
-                .max_by_key(|(id, _)| *id),
+                .rev()
+                .filter(|id| **id != leaving)
+                .find_map(|id| self.by_id.get(id)?.as_ref().map(|live| (*id, live.clone()))),
         )
     }
 }
@@ -303,7 +318,7 @@ impl Account {
 
     fn hold(&self, id: u64, live: Live) {
         let mut holders = self.holders.lock().unwrap();
-        holders.by_id.insert(id, Some(live.clone()));
+        holders.insert(id, Some(live.clone()));
         self.sign_through(&mut holders, id, &live);
     }
 
@@ -1447,7 +1462,7 @@ impl Registry {
     pub fn release(&self, account: &Arc<Account>, holder: u64, disposal: Disposal) {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
-            holders.by_id.remove(&holder);
+            holders.remove(holder);
             account.hand_over(&mut holders, holder);
             holders.by_id.is_empty()
         };
@@ -1901,8 +1916,8 @@ impl Registry {
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
-                holders.by_id.remove(&holder);
-                holders.by_id.insert(park_holder, None);
+                holders.remove(holder);
+                holders.insert(park_holder, None);
                 account.hand_over(&mut holders, holder);
             }
             parked.push((account, park_holder));
@@ -1940,7 +1955,7 @@ impl Registry {
                     // No browser to tell: the next init of the account is told.
                     let last = {
                         let mut holders = account.holders.lock().unwrap();
-                        holders.by_id.remove(&park_holder);
+                        holders.remove(park_holder);
                         account.hand_over(&mut holders, park_holder);
                         holders.by_id.is_empty()
                     };
@@ -2025,7 +2040,7 @@ impl Registry {
         accounts
             .into_iter()
             .map(|(account, park_holder)| {
-                account.holders.lock().unwrap().by_id.remove(&park_holder);
+                account.holders.lock().unwrap().remove(park_holder);
                 account.hold(
                     holder,
                     Live {
@@ -3698,19 +3713,19 @@ pub(crate) mod tests {
             })
         };
         let mut holders = Holders::default();
-        holders.by_id.insert(1, live("first tab"));
-        holders.by_id.insert(2, live("second tab"));
-        holders.by_id.insert(3, None);
+        holders.insert(1, live("first tab"));
+        holders.insert(2, live("second tab"));
+        holders.insert(3, None);
         holders.signing = Some(2);
         assert!(
             holders.successor(1).is_none(),
             "a non-signing tab leaving changes nothing"
         );
-        holders.by_id.remove(&2);
+        holders.remove(2);
         let (id, next) = holders.successor(2).unwrap().unwrap();
         assert_eq!((id, next.token.unwrap().0.as_str()), (1, "first tab"));
         holders.signing = Some(1);
-        holders.by_id.remove(&1);
+        holders.remove(1);
         assert!(
             holders.successor(1).unwrap().is_none(),
             "only a parked holder: suspend"

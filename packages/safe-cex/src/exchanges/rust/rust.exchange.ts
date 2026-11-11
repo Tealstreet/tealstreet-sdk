@@ -1431,7 +1431,14 @@ export class RustEngineExchange extends BaseExchange {
    * order). An op that cannot run there reaches `refuse` with the reason.
    */
   routeAlgoOp = (accountName: string, op: string, rust: () => void, refuse: (message: string) => void): void => {
-    if (!this.algoRoute) this.startAlgos(accountName);
+    if (!this.algoRoute) {
+      try {
+        this.startAlgos(accountName);
+      } catch (error) {
+        refuse(`${op} was not run: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+    }
     if (this.algoRoute === 'rust') {
       rust();
       return;
