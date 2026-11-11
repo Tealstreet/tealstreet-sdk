@@ -249,7 +249,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   blofin: 2_072_576,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025076016: 2,316,667 B + 10 KiB rounded up.
-  bybit: 2_330_624,
+  // #3397 merge fcee82e27df: local optimized web/node 2,329,775 B.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue bybit.
+  // Current measured bytes + 10 KiB, rounded up; retain both parent floors.
+  bybit: 2_340_864,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
@@ -258,7 +261,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // measured web/node 2,094,041 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
   // measured 2,094,163 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
-  coinbase: 2_105_344,
+  // #3397 merge fcee82e27df: local optimized web/node 2,105,215 B.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue coinbase.
+  // Current measured bytes + 10 KiB, rounded up; retain both parent floors.
+  coinbase: 2_115_584,
   cryptocom: 1_807_360,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
@@ -313,6 +319,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3433 head 99eed37c13cc: fresh optimized web/node 1,927,409 B + 10 KiB, rounded up to KiB.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 (two -Oz passes).
+  // #3397 merge fcee82e27df: local optimized web/node 1,927,721 B.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue mexc.
+  // Current measured bytes + 10 KiB, rounded up, already fits the parent cap.
   mexc: 1_938_432,
   okx: 2_053_120,
   orderly: 1_773_568,
