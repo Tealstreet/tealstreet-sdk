@@ -20,11 +20,31 @@ write response is not retried. Post-only and time-in-force flags survive
 reconciliation, amend and trigger repair. Attached protective stops remain market
 orders, including after a gap.
 
-Placement preserves legacy TypeScript rounding without an extra rounded-wire
-bounds check (`reference/backpack/backpack.exchange.ts:746-779,872-878,918-925`).
-Pairs, TP/SL children, amend replacements and prepared put-backs keep those
-formatted quantities. A venue can therefore refuse a rounded quantity after
-earlier writes have landed. The existing Unknown fence and protective guards remain.
+Split dispatch follows the legacy TypeScript adapter in
+`packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts`.
+Legacy rows round without rechecking wire quantity bounds or native maximum
+prices. Independent rows, pairs, cancel batches and protective children continue
+after a proven refusal; Unknown stops the remaining writes. A failed entry skips
+its own protective children.
+These inherited partial-placement cases remain known issues for Sam.
+
+Prepared protective put-backs retain the same rounded quantities without an
+extra rounded-wire bounds check.
+
+The engine's `WritePlan` observes dispatch and reports indexed outcomes without
+adding a validation gate or choosing continuation. Proven placements retain
+native IDs, ambiguous writes remain unknown, and skipped children are not sent.
+The command's terminal error retains the journal and accepted IDs after the
+legacy loop finishes. A failed write is never resent.
+
+Accepted cancel and leverage effects use `Applied`, with existing cancel targets
+kept separate from newly created IDs. Legacy cancel-replace uses the requested
+total and edited price after cancellation, without a fill or reference veto.
+Protective put-back kept per Sam's decision, SPLIT_PLAN_INVARIANT.md exception 2:
+a definite coded refusal of a protective replacement can read open orders and
+put back the untouched original once, only after proving the replacement absent.
+Unknown replies stop without another write. Background missing-trigger-source
+repair continues its separate legacy cancel/re-place behavior.
 
 Account leverage is global. Position mode is fixed hedged, and margin mode is
 fixed cross; requests for another mode return an error. Private reconciliation

@@ -10,8 +10,15 @@ snapshots to the main thread on every `store.notify()`.
 ## Worker lifecycle logs
 
 `ExchangeWorker.log` sends the emitter argument array `[JSON text, severity]`,
-serializing its level, message and context. A standalone object is coerced to
-`[object Object]` by existing main-thread log consumers; `warn` maps to `warning`.
+serializing its level, message and context. Global exception and promise rejection
+handlers redact a detached copy of the entire diagnostic packet before delivery
+through DedicatedWorker or SharedWorker ports, preserving the error event shape.
+A standalone object is coerced to `[object Object]` by existing main-thread log
+consumers; `warn` maps to `warning`.
+
+Startup retry explanations are diagnostic copies when cached, so a native read
+failure cannot bypass masking in the later retry warning. Deactivation refusal
+text uses the same text policy while its status flag remains unchanged.
 
 ## History result completeness
 
@@ -62,19 +69,52 @@ the `init` payload into the handler closure and reused for
 `getMyExchangeWorker` / `deleteMyExchangeWorker` / dispose — so the key
 is whatever the `init` message carried.
 
-This is correct for the **browser** (one device = one tenant, account
-names unique, and the `ports`/`shared` machinery fans one worker out to
-multiple _tabs_ of the same user). It is **NOT safe for a multi-tenant
-host** that runs many clients through one process: two clients using the
-same account name collide — the second `init` overwrites the first, the
-first `ExchangeWorker`/exchange is orphaned (never disposed,
-`isDisposed` stays false), and its `tick` signs REST forever.
+Shared browser attachments capture the worker's `init.sessionKey`. Reusing a
+named account requires the same nonblank session key; a mismatched or missing
+identity gets a failed startup acknowledgement and warning before receiving a
+snapshot or joining the channel. Ports retained after failed startup keep that
+channel's session until they detach. Session keys are never logged or echoed.
+
+Each shared port is bound to the exact accepted worker and its own optional
+`instanceId`, so another tab's instance ID does not prevent same-session sharing.
+Unstamped inbound commands are accepted only on the initial binding. Changing
+the session, account, exchange or instance requires a nonempty instance ID never
+previously used on that port; subsequent commands must carry that exact ID.
+Missing or retired IDs refuse the rebind before disturbing the current worker.
+An identical accepted init retains its binding and generation, allowing pending
+exchange construction to finish starting its configured integration. Legacy
+callers can open a new port instead.
+Commands from detached or replaced bindings are dropped. A stale `dispose` may
+detach only its own port; it cannot dispose another session's worker. When the
+last port changes owner, the previous worker is disposed; other old-owner tabs
+keep their worker. Dedicated init generations fence continuations after startup
+awaits. Shared startup retains its original worker and requires that worker's
+registry entry and a surviving attachment, even if the creating port has moved.
+An old init never starts its integration on a new account.
+
+Account names still must be unique in a **multi-tenant host** that runs many
+clients through one process. The shared-session fence does not change dedicated
+contexts' registry keys: a second same-name init can overwrite the first and
+orphan an exchange whose tick continues signing REST.
 
 **Any multi-tenant consumer (e.g. the hosted `exchange-server`) MUST
 pass a connection-scoped `accountName` into the `init` payload** (it does:
 `${connId}:${accountName}`). Don't "fix" that back to a bare account
 name, and don't assume `accountName` is globally unique here. See
 `services/exchange-server/CLAUDE.md` → "Multi-tenant invariant".
+
+Each shared worker's outbound proxy captures its original routing key and exact
+registry instance. Rebinding its creating port must not redirect a surviving
+worker's updates; replacing that registry instance drops its stale output.
+Subscription-targeted delivery is restricted to ports attached to that routing key.
+
+Telegram starts once per exact `ExchangeWorker`, including identical same-port
+init, additional shared ports and startup retries. A replacement worker can start
+its own integration. Startup carries the original worker and init owner across
+the await, checking its original registry entry and exact remaining shared-port
+attachments before starting Telegram. If the creating port moves to B while Q
+still serves A, A's integration starts once on A. Rebound ports do not count as
+surviving attachments, and A's token cannot configure B's integration.
 
 ## Files
 
@@ -424,6 +464,21 @@ in-process CLI callers (cli-core commands, `apps/cli`), whose nuke stops them
 through `stopAccountAlgos.ts`.
 
 ## TWAP restore and the cross-tab owner lock
+
+Multi-user worker hosts supply `TwapWorkerContext.getTwapOwner()` before creating
+`ExchangeWorker`: `{ ownerId, generation }`, or `null` after revocation/logout.
+The generation must change for every owner/session transition, including A→B→A;
+it is a non-secret session counter, not an access token. Restore captures a copy
+before the engine-readiness queue, retains `ownerId` in pending/forwarded rows,
+and rechecks identity and generation after the lock and in-flight lookup awaits,
+immediately before handing the row to the algos. Stale restores release their
+lock, are removed from persisted state and emit a `cancelled-for-owner-change` warning.
+Owned rows without a host owner check fail closed. A host with that API must
+also reject untagged rows: the current login never proves an old row's owner.
+Native `PersistedTwap` and `TwapBook::serialize_state` preserve an explicit
+top-level `ownerId`; they never infer it from the account or current session.
+Untagged single-user rows without the API keep their existing behavior. Session snapshots remain private
+to the pending restore and are never persisted or forwarded to the engine.
 
 `twap/RustTwapOwnership.ts`, owned by `TwapHandler`, keeps these rules for the
 Rust TWAPs: it takes each running TWAP's Web Lock, holds a restored row until it

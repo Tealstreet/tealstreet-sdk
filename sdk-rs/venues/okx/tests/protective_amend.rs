@@ -358,8 +358,8 @@ fn trailing_replacement_refusal_restores_exact_native_parameters_once() {
         .expect("restored native order identity accompanies the failed edit");
     assert_eq!(
         restored.order_ids,
-        ["91", "92"],
-        "canceled and newly restored native identities are both recorded"
+        ["92"],
+        "only the newly restored native identity is created-order evidence"
     );
     assert!(
         !out.iter()
@@ -461,7 +461,78 @@ fn replacement(e: &mut Engine<Okx>, ack_at: f64) -> Action {
 }
 
 #[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/okx/okx.exchange.ts:1561-1562,2375-2383.
+fn unknown_exception_protective_cancel_replace() {
+    let mut e = native_engine(TRAILING, "move_order_stop");
+    amend(&mut e, "91_tsl", Some(39940.), Some(5.));
+    let cancel = post(&prepared(&mut e, 5.), "/cancel-algos");
+    reply(
+        &mut e,
+        &cancel,
+        &envelope(r#"{"algoId":"91","sCode":"51412","sMsg":"uncertain cancel"}"#),
+        6.,
+    );
+    let mut out = prepared(&mut e, 6.);
+    for now in [7., 30000.] {
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)),
+            "no replacement, retry or restore"
+        );
+        let failures: Vec<_> = out
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 20, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert_unknown_message(failures[0], ENGINE_UNKNOWN_TEXT);
+        assert!(failures[0].message.contains("91"));
+        assert!(failures[0].partial.is_none());
+        assert!(failures[0].protection.is_none());
+        let events: Vec<_> = out
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].message, ENGINE_UNKNOWN_TEXT);
+        assert!(events[0].fields.iter().any(
+            |(key, value)| *key == "command" && *value == safe_cex_engine::log::Value::Num(20.)
+        ));
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(key, value)| *key == "placedCount"
+                    && *value == safe_cex_engine::log::Value::Num(0.))
+        );
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(key, value)| *key == "unknownRequest"
+                    && value.as_str().is_some_and(|s| s.contains("91")))
+        );
+        reply(
+            &mut e,
+            &cancel,
+            &envelope(r#"{"algoId":"91","sCode":"0"}"#),
+            now,
+        );
+        out.extend(prepared(&mut e, now));
+    }
+}
+
+#[test]
 fn released_cancel_late_ack_still_places_and_does_not_recheck_the_expired_quote() {
+    // TS okx.exchange.ts:1561-1562 awaits cancellation before the replacement placement.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | protective cancel/re-place
     let mut e = native_engine(TRAILING, "move_order_stop");
     let replace = replacement(&mut e, 10000.);
     reply(
@@ -631,6 +702,8 @@ fn unproven_trailing_and_dust_refuse_before_any_cancel() {
 
 #[test]
 fn dependent_cancel_refusal_never_replaces_or_restores() {
+    // TS okx.exchange.ts:1561-1562; okx.api.ts:77-82: thrown cancel prevents re-place.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | protective cancel/re-place
     let mut e = native_engine(TRAILING, "move_order_stop");
     amend(&mut e, "91_tsl", Some(39940.), Some(5.));
     let cancel = post(&prepared(&mut e, 5.), "/cancel-algos");

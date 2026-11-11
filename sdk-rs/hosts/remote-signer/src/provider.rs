@@ -1,6 +1,7 @@
 //! The Rust twin of packages/safe-cex/src/exchanges/rust/remoteSignerProvider.ts:
 //! engine sign work becomes today's ws-auth `RemoteSignerRequest`, so the
 //! browser's existing signing host answers it unchanged.
+mod orderly;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -36,6 +37,7 @@ pub(crate) enum Family {
     Grvt,
     Lighter,
     Paradex,
+    Orderly,
 }
 impl Family {
     pub(crate) fn of(venue: &str) -> Self {
@@ -47,6 +49,7 @@ impl Family {
             "grvt" => Self::Grvt,
             "lighter" | "lighter-robinhood" => Self::Lighter,
             "paradex" => Self::Paradex,
+            "kodiakfi" | "mode" | "what" | "woofi" => Self::Orderly,
             _ => Self::Hmac,
         }
     }
@@ -58,6 +61,7 @@ impl Family {
             Self::Hyperliquid | Self::Grvt => Algorithm::Secp256k1Digest,
             Self::Lighter => Algorithm::SchnorrDigest,
             Self::Paradex => Algorithm::StarkDigest,
+            Self::Orderly => Algorithm::Ed25519,
         }
     }
 }
@@ -456,6 +460,9 @@ impl Inner {
         self: Arc<Self>,
         request: SignRequest,
     ) -> Result<SignResult, SignError> {
+        if self.family == Family::Orderly {
+            return self.sign_orderly(&request).await;
+        }
         let receipt = request.receipt;
         if request.operations.is_empty() || request.operations.len() > MAX_OPERATIONS {
             return refused();
@@ -468,6 +475,7 @@ impl Inner {
             Family::Paradex => self.sign_stark(&operations).await?,
             Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
             Family::Hmac => self.sign_hmac(&operations, receipt).await?,
+            Family::Orderly => return refused(),
             Family::Kucoin => self.sign_kucoin(&operations).await?,
             Family::Backpack => self.sign_backpack(&operations).await?,
         };

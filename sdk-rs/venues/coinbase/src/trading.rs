@@ -3,6 +3,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -11,10 +12,25 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const ROOT: &str = "/api/v3/brokerage/orders";
 const MAX_JOBS: usize = 100;
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 pub struct Request {
     command: CommandId,
     step: Step,
+    placement_reserved: bool,
+}
+impl Request {
+    pub(crate) fn signing_role(&self) -> safe_cex_engine::credential_selection::CredentialRole {
+        use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
+        if matches!(self.step, Step::Confirm { .. }) {
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::ClientOrderLookup,
+                scope: None,
+            }
+        } else {
+            CredentialRole::Mutation
+        }
+    }
 }
 enum Step {
     Place {
@@ -48,10 +64,15 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     collect: bool,
+    placement_report: Option<PlacementReport>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
     /// An INTX amend's symbol: its replacement's refusal leaves the order gone.
     replaces: Option<String>,
+}
+struct PlacementReport {
+    plan: WritePlan,
+    next_index: usize,
 }
 #[derive(Default)]
 pub(crate) struct Trading {
@@ -312,11 +333,12 @@ impl Coinbase {
             }
         };
         let amount = num::adjust(opts.amount, market.precision.amount);
+        // Legacy TS sends above-max new creates as one payload. Keep replacement bounds.
         if !opts.amount.is_finite()
             || opts.amount <= 0.0
-            || opts.amount > market.limits.amount.max
             || amount < market.limits.amount.min
-            || amount > market.limits.amount.max
+            || (canceled.is_some()
+                && (opts.amount > market.limits.amount.max || amount > market.limits.amount.max))
         {
             return Err("Coinbase size is outside market limits".into());
         }
@@ -530,6 +552,7 @@ impl Coinbase {
             steps: VecDeque::new(),
             ids: vec![],
             collect: false,
+            placement_report: None,
             effective: false,
             replaces: None,
         };
@@ -539,14 +562,27 @@ impl Coinbase {
                     return Err("Coinbase placement batch must contain 1 to 100 orders".into());
                 }
                 let mut ids = HashSet::new();
-                for opts in &orders {
+                let mut elements = Vec::with_capacity(orders.len());
+                for (index, opts) in orders.iter().enumerate() {
                     if let Some(id) = &opts.client_order_id
                         && !ids.insert(id)
                     {
                         return Err("Coinbase batch contains a duplicate caller ID".into());
                     }
-                    job.steps.push_back(self.prepare_create(cx, opts, None)?);
+                    let step = self.prepare_create(cx, opts, None)?;
+                    let Step::Place { payload, .. } = &step else {
+                        unreachable!("create preparation returns a placement");
+                    };
+                    elements.push(Element {
+                        index,
+                        client_order_id: Some(payload.client_order_id.clone()),
+                    });
+                    job.steps.push_back(step);
                 }
+                job.placement_report = Some(PlacementReport {
+                    plan: WritePlan::new(elements),
+                    next_index: 0,
+                });
                 job.collect = true;
             }
             Command::CancelOrders { ids, .. } => job.steps = cancel_steps(ids)?,
@@ -1154,7 +1190,7 @@ impl Coinbase {
             }
             _ => {}
         }
-        if self.credentials.is_none()
+        if !self.signers.has_primary()
             || self.options.public_data_only
             || self.account.kind.is_none()
             || !cx.store.loaded().markets
@@ -1193,7 +1229,7 @@ impl Coinbase {
     pub(crate) fn trading_before_dispatch(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: &Request,
+        request: &mut Request,
     ) -> Result<(), String> {
         self.reconcile_reductions(cx);
         match &request.step {
@@ -1275,6 +1311,7 @@ impl Coinbase {
                         reducer: order.reduce_only.then_some(*reducer),
                     },
                 );
+                request.placement_reserved = true;
             }
             Step::Cancel { ids } => {
                 for id in ids {
@@ -1356,7 +1393,11 @@ impl Coinbase {
             }
             return;
         }
-        let request = Request { command, step };
+        let request = Request {
+            command,
+            step,
+            placement_reserved: false,
+        };
         let (method, path, body) = match &request.step {
             Step::Place { payload, .. } => (Method::Post, ROOT.into(), Some(encode(payload))),
             Step::Edit { payload, .. } => {
@@ -1411,9 +1452,60 @@ impl Coinbase {
             .as_ref()
             .is_some_and(|job| job.command == command)
         {
-            let job = self.trading.active.take().expect("active job");
+            let mut job = self.trading.active.take().expect("active job");
             self.trading.waiting = false;
             let mut error: VenueError = error.into();
+            if let Some(report) = &mut job.placement_report {
+                let rows = report.plan.outcomes();
+                let uncertain =
+                    !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent));
+                let result = if uncertain {
+                    error.venue_message = Some(error.message.clone().into_boxed_str());
+                    error.message = UNKNOWN_TEXT.into();
+                    error.outcome = Some(Outcome::Unknown);
+                    cx.event(
+                        Level::Warn,
+                        "order.outcome_unknown",
+                        UNKNOWN_TEXT,
+                        vec![
+                            ("command", command.into()),
+                            (
+                                "elementIndex",
+                                u32::try_from(report.next_index)
+                                    .expect("bounded batch")
+                                    .into(),
+                            ),
+                            (
+                                "clientOrderId",
+                                rows[report.next_index]
+                                    .element
+                                    .client_order_id
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .into(),
+                            ),
+                            (
+                                "placedCount",
+                                u32::try_from(job.ids.len()).expect("bounded batch").into(),
+                            ),
+                        ],
+                    );
+                    ElementResult::Unknown {
+                        error: Box::new(error.clone()),
+                    }
+                } else {
+                    ElementResult::NotSent {
+                        error: Some(Box::new(error.clone())),
+                    }
+                };
+                report
+                    .plan
+                    .record(report.next_index, result)
+                    .expect("prepared placement element");
+                error = report
+                    .plan
+                    .attach(error.partial(&job.ids, rows.len(), report.next_index));
+            }
             // The replacement was the last step, so an empty queue means it was sent.
             if job.effective
                 && job.ids.is_empty()
@@ -1452,7 +1544,7 @@ impl Coinbase {
     }
 
     /// Refused at dispatch (signing or a dispatch-time check): Coinbase received nothing.
-    /// Reservation bookkeeping is kept as for a lost write; the key may belong to another request.
+    /// Only this attempt's reservation can be released; a duplicate key may name an older Unknown.
     pub(crate) fn trading_unsent(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1460,8 +1552,20 @@ impl Coinbase {
         error: &str,
     ) {
         self.private_after_write(cx);
-        self.placement_unresolved(cx, &request.step);
-        let error = format!("Coinbase write outcome requires reconciliation: {error}");
+        if request.placement_reserved
+            && let Step::Place { payload, .. } = &request.step
+        {
+            if self
+                .trading
+                .reductions
+                .get(&payload.client_order_id)
+                .is_some_and(|reservation| reservation.native_id.is_none())
+            {
+                self.trading.reductions.remove(&payload.client_order_id);
+            }
+            self.private_placement_finished(&payload.client_order_id);
+        }
+        let error = format!("Coinbase write was not sent: {error}");
         self.trading_finish_error(cx, request.command, not_sent(error));
     }
 
@@ -1541,6 +1645,18 @@ impl Coinbase {
                     job.effective = true;
                 }
                 if let Some(id) = id {
+                    if let Some(report) = &mut job.placement_report {
+                        report
+                            .plan
+                            .record(
+                                report.next_index,
+                                ElementResult::Placed {
+                                    order_ids: vec![id.clone()],
+                                },
+                            )
+                            .expect("prepared placement element");
+                        report.next_index += 1;
+                    }
                     job.ids.push(id);
                 }
                 self.trading_next(cx);

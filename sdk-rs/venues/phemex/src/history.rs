@@ -870,7 +870,7 @@ fn decode(cx: &Cx<'_, Pending>, request: &mut Request, text: &str) -> Option<()>
             let status = match row.ord_status {
                 "New" | "Untriggered" | "PartiallyFilled" => return Some(()),
                 "Filled" | "Triggered" => OrderStatus::Closed,
-                "Canceled" | "Rejected" => OrderStatus::Canceled,
+                "Canceled" | "Rejected" | "Deactivated" => OrderStatus::Canceled,
                 _ => return None,
             };
             let trigger = match row.stop_px_rp.as_ref() {
@@ -896,7 +896,7 @@ fn decode(cx: &Cx<'_, Pending>, request: &mut Request, text: &str) -> Option<()>
             };
             if row.peg_price_type == "TrailingStopPeg" {
                 kind = OrderType::TrailingStopLoss;
-            } else if !row.peg_price_type.is_empty() {
+            } else if !matches!(row.peg_price_type, "" | "UNSPECIFIED") {
                 return None;
             }
             if matches!(

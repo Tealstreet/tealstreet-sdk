@@ -78,7 +78,22 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
+| `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for Bybit `order.*` frames: `0` disables, `1` enables only with compiled protocol support and the venue declaration; other nonempty values refuse startup |
 | `EXCHANGE_ALERT_SLACK_WEBHOOK_URL`, `EXCHANGE_ALERT_CRITICAL_SLACK_WEBHOOK_URL` | unset | Deferred past cutover. Accepted and ignored |
+
+The production image compiles the `delegated-order-frames` feature but keeps its
+runtime switch off. Change the container environment and drain/restart the same
+image to change activation; this is not a hot-reload control. A restart drops
+sockets and memory-only delegated copies, so accounts require fresh admission
+and handover. Existing LOCAL/COSIGNED calls and the delegated legacy method path
+are independent of this order-frame switch.
+
+`GET /capabilities` and `/account/capabilities` expose
+`transports.accountWorkerWebSocket.delegatedOrderFramesV1` from that same runtime
+control. The box never advertises `delegatedOrderLedgerV1`; only the router owns
+that capability. Hosts must discover both per connection before passing a ticket
+to the outbox. See [order-frame activation](../../../docs/plans/callers/delegated-order-frames.md#rolling-activation)
+for deployment ordering and rollback.
 
 `TEALSTREET_WORKERS`, `TEALSTREET_GATEWAY_PORT` and `TEALSTREET_HEALTH_PORT`
 belong to the Bun gateway and have no meaning here. One process serves all
@@ -393,7 +408,11 @@ per-user ownership within 10 s; socket reconnects do not reopen missing authorit
 
 After enforcement, each account holds generation-bound authority. A fresh newer
 assertion can authorize a rebuilt account, but cannot revive an old account's
-queued work. Missing/expired ownership rejects new account, order and algo starts
+queued work. Init captures this authority before reconnect pacing and carries it
+through the engine lane and final IO guard. A newer same-name init with different
+settings supersedes an unfinished build; publication checks both the captured
+authority and init incarnation, so late results cannot replace the current account.
+Missing/expired ownership rejects new account, order and algo starts
 with the typed `ServerDraining` refusal (`venueUnavailable`, `notSent`). The final
 native HTTP handoff and every WebSocket send also check authority, including
 prepared HTTP, messages queued behind a socket handshake, and algo continuations.
@@ -542,6 +561,65 @@ Socket keepalive: the server sends a protocol-level WebSocket ping every 10s.
 With no inbound data for 30s, either a message or a pong, the socket is
 dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
+### DELEGATED handover
+
+When the shared Bybit opt-in declaration is enabled, authenticated connections
+may request a handover with `msg` data
+`{op:"delegated-key-req", accountName}`. The `msg` response has
+`{op:"delegated-key", accountName, attemptId, publicKey, bootId, expiresAtMs}`.
+The public key uses padded standard base64. An offer lasts 30 seconds, belongs
+to that connection and saved account name, and is replaced by another request
+for the same name. Each connection retains at most 64 unexpired offers.
+
+The matching init adds `signingMode:"delegated"` and
+`sealed:{attemptId, enc, ciphertext}`. This path checks the shared venue opt-in
+declaration and is limited to Bybit. Existing LOCAL/COSIGNED settings and engine
+options retain their original behavior. Plaintext credentials are never init
+settings or account fingerprints.
+
+The handover uses RFC 9180 base mode with X25519/HKDF-SHA256,
+HKDF-SHA256 and ChaCha20-Poly1305. The application info is
+`tealstreet/delegated-handover/v1`; associated data joins the attempt ID, process
+boot ID, exchange name and init key with `|`. `enc` and `ciphertext` are padded
+standard base64. Decrypted JSON contains `key`, `secret` and optional
+`passphrase`; its key must match the init key. The opener and parsed credential
+fields erase their owned buffers on drop. Handover parsing retains the JSON
+string contract, including escaped strings and optional or null `passphrase`.
+JSON input is limited to 12,272 bytes, consistent with the envelope limit.
+Opening fills the shared `delegated_memory::CandidateCopy` directly after its
+Bybit preparation succeeds. Handover replies use the current init registration,
+including its optional `instanceId`; clients without an ID retain the same bytes.
+
+Opening and subsequent join verification run in a spawned task. The existing
+socket select loop handles its completion, while continuing ping, close and
+drain handling. Until verification completes, commands for that account receive
+`verifying`, and the account is not joined or subscribed. Completion belongs to
+the captured user, socket and init generation; dispose, another init, another
+key request or socket close retires pending work. Verification failure leaves
+any running account unchanged.
+
+After opening, a temporary native Bybit account checks the supplied pair through
+the venue's normal private startup reads and is disposed before admission.
+An accepted pair starts a DELEGATED account when none exists, or joins the
+matching running DELEGATED account while retaining its existing signer. This
+does not compare secret material or replace an existing account's settings.
+The probe's router-lease generation remains attached through native construction
+and outbound IO. Its account is also disposed when the pending init is canceled.
+
+Verified admission binds the account's output to its socket-local generation
+before construction can defer replies. Joining a different native account retires
+the previous generation and refreshes the holder's outbox; joining the same
+account keeps its generation. Pending handover replies retain their separate
+registration lifecycle.
+
+Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
+message. Auth kinds are permanent refusals; rate, network, timeout and venue
+availability failures are transient. Replies retain the init's registration ID;
+clients without one retain the original envelope bytes. Existing rebuild
+refusal, settings replacement and early-subscription handling remain on the
+existing COSIGNED init path. Fixed synthetic interoperability and RFC test data
+live in `tests/data/`.
+
 ## Frames (claude-19pt8s, web hosted client)
 
 The browser host (`ExchangeServerWorker.ts`) forwards only TEXT frames to the
@@ -566,6 +644,50 @@ State that SCXF does not carry stays JSON, under the existing op names and shape
 
 - **`op:'store'` partial payloads:** these carry only the fields frames don't (`fetchedLeverage`, `balance.info`, `socketHealth`, `messageHandlerStats`, `activeChasers`, `activeTWAPs`, `ordersRisk`). They are merged over the frame store, which matches the worker's `_derivedStorePayload` in frame mode.
 - **Unchanged replies:** `error`, `warning`, `log`, `engine-event`, `command-progress`, `callMethod:done`, `exec-result`, `updatePositions:done`, `chaser:*` and `twap:*`.
+
+Account output captures a socket-local account generation before a callback,
+detached read, signer or frame pump can defer it. An accepted rebuilding init
+retires that generation before obtaining the replacement; dispose and orphan
+release retire it too. Both enqueue and socket dequeue check the captured
+generation and discard stale output, including delayed algo stop notices and
+already-queued frames and account-scoped init refusals, including signing-mode
+mismatches. Repeated init and re-snapshot of the same account keep their
+generation. Other accounts and session envelopes are unaffected.
+
+An optional string `init.instanceId` identifies the browser registration, not
+the account or its authority. It never enters engine options, fingerprints or
+rebuild comparisons. Account `msg` replies and remote `sign-req` frames echo it
+as `d.instanceId`, matching NX #9342's TypeScript reply envelope. Absent or empty
+IDs leave the original serialized bytes untouched.
+
+Rebuild refusals notify once per account, reason and registration ID, including
+when retries for registrations interleave. Without an ID, the legacy cache still
+notifies only when the last reason changes. Cache lifetime and clearing remain
+unchanged; this cache never changes fingerprints or rebuild admission.
+
+Each joined connection owns its reply output, so devices sharing one account
+receive their own IDs. Same-engine re-init and resume replace that connection's
+output before the new snapshot; queued frames and detached replies retain their
+captured output. Account-holder broadcasts stamp separately for each recipient.
+Each init refreshes fallback reply provenance after the connection's policy
+checks, even when rebuilding is refused or the venue is unsupported. Native
+disposal or join cleanup cannot restore an older registration. Explicit client
+disposal removes it. This metadata grants no engine or signing authority; outputs
+already captured by old clients, commands or callbacks keep their original ID
+while their account generation is current; retired generations are dropped.
+Retained records capture their source account fingerprint before deferral and
+are stored separately by user, name and fingerprint. Replay selects the actually
+joined fingerprint before stamping the new holder's ID, so retired credentials
+cannot donate a notice or overwrite another account's owed record through an
+empty registry slot. Same-fingerprint rebuilds preserve resume-owner, once-only
+and 24-hour retention rules. Session envelopes and all existing account/lease
+authority checks remain unchanged.
+
+A resumed signer can reattach before the browser re-inits. Its unsent signing
+requests wait in a queue bounded by the socket's outbound capacity until the
+same account's registration is known. An accepted replacement discards those
+old signing requests instead of attributing them to the replacement. Ordinary
+legacy account messages before re-init retain their existing delivery.
 
 How FrameServer notices map onto `msg`:
 

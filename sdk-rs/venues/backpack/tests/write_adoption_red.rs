@@ -110,6 +110,71 @@ fn pair(missing: bool) {
     )));
 }
 
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025.
+#[test]
+fn p0_write_unknown_child_halts_and_reports_once() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut e, _) = ready();
+    e.handle(2000.0, Event::Command(Command::PlaceOrders {
+        command: 713,
+        orders: serde_json::from_str(r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}]"#)?,
+    }));
+    let entry = requests(&mut e).pop().ok_or("entry missing")?;
+    assert!(
+        !entry
+            .body
+            .as_deref()
+            .ok_or("entry body missing")?
+            .contains("TriggerPrice")
+    );
+    reply(&mut e, &entry, 200, r#"{"id":"entry"}"#);
+    let tp = requests(&mut e).pop().ok_or("TP missing")?;
+    let body = tp.body.as_deref().ok_or("TP body missing")?;
+    assert!(body.contains("\"side\":\"Ask\""));
+    assert!(body.contains("\"triggerPrice\":\"150.00\""));
+    assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
+    reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
+    let after_failure = actions(&mut e);
+    assert!(after_failure.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
+    )));
+    let out = after_failure;
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 713,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::Unknown));
+    assert!(
+        failures[0]
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    assert_eq!(
+        failures[0]
+            .partial
+            .as_ref()
+            .ok_or("prior accepted ID missing")?
+            .order_ids,
+        ["entry"]
+    );
+    assert!(!out.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 713, .. }) | Action::Http(_)
+    )));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .all(|action| !matches!(action, Action::Http(_)))
+    );
+    Ok(())
+}
+
 #[test]
 fn p0_write_optional_child_failure_keeps_both_ids_and_fails_once()
 -> Result<(), Box<dyn std::error::Error>> {

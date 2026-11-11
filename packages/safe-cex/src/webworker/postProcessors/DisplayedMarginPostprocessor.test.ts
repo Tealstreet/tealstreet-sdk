@@ -1,4 +1,4 @@
-import type { DisplayedPosition, ExchangeName, ExchangeOptions, StoreData, Writable } from '../../types';
+import type { DisplayedPosition, StoreData, Writable } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
@@ -11,7 +11,7 @@ const pos = (side: PositionSide, notional: number | undefined): DisplayedPositio
 const createStore = (displayedPositions: DisplayedPosition[]): Writable<StoreData> =>
   ({ displayedPositions }) as Writable<StoreData>;
 
-const createProcessor = () => new DisplayedMarginPostprocessor('test-account', 'bybit' as ExchangeName, {} as ExchangeOptions);
+const createProcessor = () => new DisplayedMarginPostprocessor('test-account', 'bybit', { key: '', secret: '' });
 
 /**
  * Reference implementation: the exact formula the margin UI used inline before

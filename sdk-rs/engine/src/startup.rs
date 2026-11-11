@@ -182,7 +182,7 @@ impl PublicRetries {
             fields.push(("venueCode", code.into()));
         }
         if let Some(message) = error.venue_message {
-            fields.push(("venueMessage", message.into()));
+            fields.push(("venueMessage", message.into_string().into()));
         }
         if minimum_ms.is_finite() && minimum_ms > 0.0 {
             fields.push(("retryAfterMs", minimum_ms.into()));

@@ -106,8 +106,10 @@ fn required_amend_preparation_refusal_restores_only_unchanged_cancel_state() {
     }
 }
 
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025.
 #[test]
-fn hosted_unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids() {
+fn hosted_unknown_child_halts_and_keeps_native_metadata_and_ids()
+-> Result<(), Box<dyn std::error::Error>> {
     // ready() installs the local/device parity provider for every dispatched write.
     for status in [408, 429, 500, 503] {
         let (mut e, _) = ready();
@@ -126,6 +128,11 @@ fn hosted_unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids(
         );
         let out = actions(&mut e);
         let error = failure(&out, 722);
+        assert!(
+            error
+                .message
+                .contains("The outcome is unknown. Check Open Orders")
+        );
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         assert_eq!(error.venue_code.as_deref(), Some("NATIVE_UNAVAILABLE"));
         assert_eq!(error.venue_message.as_deref(), Some("native detail"));
@@ -144,6 +151,7 @@ fn hosted_unproven_child_stops_the_plan_and_keeps_native_metadata_and_prior_ids(
                 )
         )));
     }
+    Ok(())
 }
 
 struct Remote;

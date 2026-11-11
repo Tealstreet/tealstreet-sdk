@@ -4,6 +4,7 @@ import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
 import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { TwapWorkerContext } from './twap/TwapOwner';
 
 import throttle from 'lodash/throttle';
 
@@ -12,9 +13,11 @@ import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandO
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
+import { snapshotDelegatedSigningOptions } from '../exchanges/rust/delegatedSigningSnapshot';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { unsupportedVenueError } from '../unsupportedVenue';
+import { diagnosticConsole, diagnosticText, redactDiagnosticData } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
@@ -104,7 +107,7 @@ export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
   private readonly _accountName: string;
   private readonly _options: ExchangeOptions;
-  private readonly _ctx: Worker;
+  private readonly _ctx: TwapWorkerContext;
   private readonly _settings: AppSettingsWorkerType;
   private readonly _metadata: ExchangeMetadataWorkerType;
   private readonly _sessionKey: string;
@@ -167,7 +170,7 @@ export class ExchangeWorker {
   private _sentryReportCooldowns = new Map<string, { lastReportedAt: number; suppressedCount: number }>();
 
   constructor(
-    ctx: Worker,
+    ctx: TwapWorkerContext,
     accountName: string,
     exchangeName: ExchangeName,
     options: ExchangeOptions,
@@ -179,6 +182,7 @@ export class ExchangeWorker {
     this._exchangeName = exchangeName;
     this._accountName = accountName;
     // The worker owns the account's engine; a forwarded mirror flag would stop it from running one.
+    options = snapshotDelegatedSigningOptions(exchangeName, options);
     const { workerMirror: _workerMirror, ...ownedOptions } = options;
     this._options = ownedOptions;
     this._ctx = ctx;
@@ -201,7 +205,7 @@ export class ExchangeWorker {
     this._ctx.postMessage({
       op: 'log',
       data: [
-        JSON.stringify({
+        diagnosticText({
           level,
           message,
           context: { exchange: this._exchangeName, account: this._accountName, ...context },
@@ -258,40 +262,42 @@ export class ExchangeWorker {
           };
 
     try {
-      this._ctx.postMessage({
-        op: 'error',
-        data: [
-          message,
-          {
-            sendToSentry: effectiveSendToSentry,
-            suppressConsoleLog,
-            classified: classifiedError(error),
-            sentryData: {
-              error: serializableError,
-              tags: {
-                source: 'webworker',
-                module: 'ExchangeWorker',
-                exchange: this._exchangeName,
-                account: this._accountName,
-                // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
-                ...exchangeErrorTags(error),
-                tunnel_port: tunnelLanePort(),
-                ...splitExtra.sentryTags,
-                ...workerSentryControl.tags,
-              },
-              extra: {
-                ...splitExtra.extra,
-                ...splitExtra.sentryExtra,
-                ...workerSentryControl.extra,
-                ...(suppressedRepeatedReports > 0 ? { suppressedRepeatedReports } : {}),
+      this._ctx.postMessage(
+        redactDiagnosticData({
+          op: 'error',
+          data: [
+            message,
+            {
+              sendToSentry: effectiveSendToSentry,
+              suppressConsoleLog,
+              classified: classifiedError(error),
+              sentryData: {
+                error: serializableError,
+                tags: {
+                  source: 'webworker',
+                  module: 'ExchangeWorker',
+                  exchange: this._exchangeName,
+                  account: this._accountName,
+                  // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
+                  ...exchangeErrorTags(error),
+                  tunnel_port: tunnelLanePort(),
+                  ...splitExtra.sentryTags,
+                  ...workerSentryControl.tags,
+                },
+                extra: {
+                  ...splitExtra.extra,
+                  ...splitExtra.sentryExtra,
+                  ...workerSentryControl.extra,
+                  ...(suppressedRepeatedReports > 0 ? { suppressedRepeatedReports } : {}),
+                },
               },
             },
-          },
-        ],
-      });
+          ],
+        }),
+      );
     } catch (e) {
       // Fallback if postMessage fails
-      console.error('[ExchangeWorker] Failed to send error to main thread:', message, error, e);
+      diagnosticConsole.error('[ExchangeWorker] Failed to send error to main thread:', message, error, e);
     }
   }
 
@@ -402,7 +408,7 @@ export class ExchangeWorker {
         startupTimeout = setTimeout(() => {
           this._startTimedOut = isRust;
           const answered = (this._exchange as { lastReadFailure?: string } | undefined)?.lastReadFailure;
-          this._startAnswer = answered;
+          this._startAnswer = answered === undefined ? undefined : diagnosticText(answered);
           const error = new Error(
             `Exchange start timed out after ${startTimeoutMs / 1000}s${answered ? `; ${answered}` : ''}`,
           );
@@ -446,7 +452,7 @@ export class ExchangeWorker {
           isErrorReported(e) &&
           !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
       ) {
-        console.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
+        diagnosticConsole.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
         return false;
       }
       const detail = e instanceof Error && e.message ? `: ${e.message}` : '';
@@ -1325,7 +1331,9 @@ export class ExchangeWorker {
                 this._forwardLateReply(args[0], generation);
               }
             }
-          : Reflect.get(target, property),
+          : property === 'getTwapOwner' && target.getTwapOwner
+            ? () => (generation === this._generation && !this._stopped ? (target.getTwapOwner?.() ?? null) : null)
+            : Reflect.get(target, property),
     });
     this._handlers = this._handlerClasses.map(
       (Handler) =>
@@ -1414,7 +1422,7 @@ export class ExchangeWorker {
       this._ctx.postMessage({
         op: 'deactivate-status',
         data: true,
-        refusal: refusal ?? 'The exchange refused this key.',
+        refusal: diagnosticText(refusal ?? 'The exchange refused this key.'),
       });
     });
   }

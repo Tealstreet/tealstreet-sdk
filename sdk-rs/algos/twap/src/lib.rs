@@ -49,7 +49,7 @@ pub struct ChaserProgress {
     pub stopped: bool,
     /// Finished: its cancel has settled and its remainder is final.
     pub ended: bool,
-    /// Ended with a cancel that never proved its order gone.
+    /// A placement or cancellation has not proved whether an order remains open.
     pub order_may_be_open: bool,
 }
 
@@ -90,11 +90,61 @@ pub struct TwapOrderRequest {
 }
 
 /// Why a slice placement failed, and whether that proves no order exists.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SliceFailure {
-    pub message: String,
-    /// False when an order may be live: the slice still counts as executed.
-    pub nothing_placed: bool,
+pub type SliceFailure = safe_cex_engine::error::VenueError;
+
+fn unknown_outcome(mut error: SliceFailure) -> SliceFailure {
+    error.message = "The outcome is unknown. Check Open Orders".to_owned();
+    error.outcome = Some(safe_cex_engine::error::Outcome::Unknown);
+    error
+}
+
+fn has_unknown_outcome(error: &SliceFailure) -> bool {
+    use safe_cex_engine::write_plan::ElementResult;
+    error.outcome == Some(safe_cex_engine::error::Outcome::Unknown)
+        || error.elements.as_ref().is_some_and(|rows| {
+            rows.iter().any(|row| match &row.result {
+                ElementResult::Unknown { .. } => true,
+                ElementResult::NotSent { error: Some(error) } => has_unknown_outcome(error),
+                _ => false,
+            })
+        })
+}
+
+// A fully known native journal can omit the aggregate outcome after partial success.
+// Actual Unknown facts take precedence over aggregate refusal hints.
+fn known_refusal(error: &SliceFailure) -> bool {
+    !has_unknown_outcome(error)
+        && (matches!(
+            error.outcome,
+            Some(
+                safe_cex_engine::error::Outcome::NotSent
+                    | safe_cex_engine::error::Outcome::Rejected
+            )
+        ) || error.elements.as_ref().is_some_and(|rows| !rows.is_empty()))
+}
+
+fn retained_order_ids(error: &SliceFailure) -> Vec<String> {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut ids = error
+        .partial
+        .as_ref()
+        .map_or_else(Vec::new, |partial| partial.order_ids.clone());
+    if let Some(rows) = &error.elements {
+        for row in rows.iter() {
+            let row_ids = match &row.result {
+                ElementResult::Placed { order_ids } => order_ids.clone(),
+                ElementResult::Unknown { error }
+                | ElementResult::NotSent { error: Some(error) } => retained_order_ids(error),
+                _ => Vec::new(),
+            };
+            for id in row_ids {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    ids
 }
 
 /// The chaser a `useChaserOrders` slice starts, with the id TWAP tracks it by.
@@ -113,11 +163,18 @@ pub struct ChaserRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TwapEffect {
+    Outcome {
+        twap_id: String,
+        error: Box<safe_cex_engine::error::VenueError>,
+    },
+    /// Halt a child chaser without canceling or replacing its resting order.
+    HaltChaser { chaser_id: String },
     /// Place through the engine. With a `settle_token`, report the outcome to
-    /// [`TwapBook::placement_settled`]; without one the outcome is ignored.
+    /// [`TwapBook::placement_settled`]; without one report it to [`TwapBook::remainder_settled`].
     PlaceOrder {
         twap_id: String,
         settle_token: Option<u64>,
+        element_index: usize,
         request: TwapOrderRequest,
     },
     /// Stop the chaser and cancel its open order.
@@ -144,6 +201,7 @@ pub struct TwapBook {
 #[derive(Debug)]
 struct Entry {
     instance: TwapInstance,
+    owner_id: Option<String>,
     /// False once removed from the TS manager; the entry lingers only while
     /// in-flight placements or slice timeouts can still act.
     managed: bool,
@@ -231,7 +289,7 @@ impl TwapBook {
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
-        self.add(instance);
+        self.add(instance, None);
         if let Some(instance) = self.managed_mut(&id) {
             instance.start(env, view, effects);
         }
@@ -290,6 +348,26 @@ impl TwapBook {
         effects
     }
 
+    pub fn remainder_settled(
+        &mut self,
+        id: &str,
+        index: usize,
+        outcome: Result<Vec<String>, SliceFailure>,
+    ) -> Vec<TwapEffect> {
+        let mut effects = Vec::new();
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.instance.id == id)
+        {
+            entry
+                .instance
+                .remainder_settled(index, outcome, &mut effects);
+        }
+        self.settle(&mut effects);
+        effects
+    }
+
     /// The earliest timer deadline across the account's TWAPs.
     pub fn wake_at(&self) -> Option<f64> {
         self.entries
@@ -318,10 +396,12 @@ impl TwapBook {
         for entry in self.managed_entries() {
             let instance = &entry.instance;
             if instance.state.status != TwapStatus::Completed {
-                result.insert(
-                    instance.id.clone(),
-                    serde_json::json!({ "options": instance.options, "state": instance.state }),
-                );
+                let mut row =
+                    serde_json::json!({ "options": instance.options, "state": instance.state });
+                if let Some(owner_id) = &entry.owner_id {
+                    row["ownerId"] = Value::String(owner_id.clone());
+                }
+                result.insert(instance.id.clone(), row);
             }
         }
         Value::Object(result)
@@ -409,9 +489,10 @@ impl TwapBook {
     }
 
     /// `Map.set`: a known id keeps its position and takes the new instance.
-    fn add(&mut self, instance: TwapInstance) {
+    fn add(&mut self, instance: TwapInstance, owner_id: Option<String>) {
         let entry = Entry {
             instance,
+            owner_id,
             managed: true,
         };
         match self
@@ -467,12 +548,10 @@ impl TwapBook {
             }
             let running = entry.state.status == TwapStatus::Running;
             let id = entry.id.clone();
-            self.add(TwapInstance::new(
-                entry.id,
-                entry.options,
-                Some(entry.state),
-                env,
-            ));
+            self.add(
+                TwapInstance::new(entry.id, entry.options, Some(entry.state), env),
+                entry.owner_id,
+            );
             if let Some(instance) = self.managed_mut(&id) {
                 // Persisted at once, so the host sees which rows it adopted.
                 instance.mark_state_changed();
