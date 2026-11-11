@@ -408,7 +408,7 @@ export class ExchangeWorker {
         startupTimeout = setTimeout(() => {
           this._startTimedOut = isRust;
           const answered = (this._exchange as { lastReadFailure?: string } | undefined)?.lastReadFailure;
-          this._startAnswer = answered;
+          this._startAnswer = answered === undefined ? undefined : diagnosticText(answered);
           const error = new Error(
             `Exchange start timed out after ${startTimeoutMs / 1000}s${answered ? `; ${answered}` : ''}`,
           );
@@ -1422,7 +1422,7 @@ export class ExchangeWorker {
       this._ctx.postMessage({
         op: 'deactivate-status',
         data: true,
-        refusal: refusal ?? 'The exchange refused this key.',
+        refusal: diagnosticText(refusal ?? 'The exchange refused this key.'),
       });
     });
   }

@@ -12,6 +12,7 @@ export class ExchangeEmitter extends TinyEmitter {
   emit(event: string, ...args: unknown[]): this {
     const diagnostic =
       event === 'log' ||
+      event === 'exec-log' ||
       event === 'error' ||
       event === 'warning' ||
       event === 'engine-event' ||
