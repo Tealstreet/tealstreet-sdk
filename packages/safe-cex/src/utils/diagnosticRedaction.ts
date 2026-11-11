@@ -49,19 +49,22 @@ export function redactDiagnosticData<T>(input: T): T {
       }
     }
     const safe = stripDiagnosticUrlQueries(value);
-    const keys = safe.matchAll(/(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*/g);
-    for (const match of keys) {
-      const tail = safe.slice((match.index ?? 0) + match[0].length);
+    const keys = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*/g;
+    let match: RegExpExecArray | null;
+    while ((match = keys.exec(safe))) {
+      // Revisit the label's final separator or space as the next key's boundary.
+      keys.lastIndex--;
+      const tail = safe.slice(match.index + match[0].length);
       const omitted = /^(?:"\[REDACTED\]"|'\[REDACTED\]'|\[REDACTED\])(?=$|[\s,}\]&;])/.test(tail);
       if (isExchangeCredentialKey(match[1]) || (isCredentialKey(match[1]) && !omitted)) return '[REDACTED]';
     }
     // Truncated auth frames use exactly the structured operation-key/value policy.
     if (/(?:args|params)["']?\s*[:=]/i.test(safe)) {
-      const fields = safe.matchAll(
-        /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*["']?([A-Za-z0-9_.:-]+)/g,
-      );
-      for (const [, key, operation] of fields) {
-        if (isAuthOperationField(key, operation)) return '[REDACTED]';
+      // Inspect values without consuming them: a label's value may be the next key.
+      const fields = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(?=["']?([A-Za-z0-9_.:-]+))/g;
+      while ((match = fields.exec(safe))) {
+        fields.lastIndex--;
+        if (isAuthOperationField(match[1], match[2])) return '[REDACTED]';
       }
     }
     return safe;
