@@ -1871,3 +1871,14 @@ test('#3429 master restage retains current measured Hyperliquid and Weex headroo
   }
   assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
 });
+
+test('#3448 changed AsterDEX artifact retains measured plus 10 KiB reserve', () => {
+  // Merged-head CI run 43061512265, artifact 13873588589: optimized web/node 2,197,821 bytes.
+  const measured = 2_197_821;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.ok(cap >= minimumCap, `asterdex: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
