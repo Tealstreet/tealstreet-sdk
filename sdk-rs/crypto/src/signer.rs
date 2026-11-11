@@ -255,23 +255,23 @@ impl DecodedIdentity {
         if !self.key.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.credential")), self.key.into());
+                .insert(KeyRef(format!("{slot}.credential")), heap_material(self.key));
         }
         if !self.secret.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.signing")), self.secret.into());
+                .insert(KeyRef(format!("{slot}.signing")), heap_material(self.secret));
         }
         if let Some(passphrase) = self.passphrase {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.passphrase")), passphrase.into());
+                .insert(KeyRef(format!("{slot}.passphrase")), heap_material(passphrase));
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
                 let reference = Self::extra_ref(slot, name);
                 signer.roles.insert(reference.clone(), name);
-                signer.keys.insert(reference, bytes.into());
+                signer.keys.insert(reference, heap_material(bytes));
             }
         }
     }
@@ -293,10 +293,14 @@ enum Material {
     Heap(Zeroizing<Vec<u8>>),
     Protected(Box<dyn ProtectedBytes>),
 }
-#[cfg(not(target_arch = "wasm32"))]
-impl From<Zeroizing<Vec<u8>>> for Material {
-    fn from(bytes: Zeroizing<Vec<u8>>) -> Self {
-        Self::Heap(bytes)
+fn heap_material(bytes: Zeroizing<Vec<u8>>) -> Material {
+    #[cfg(target_arch = "wasm32")]
+    {
+        bytes
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Material::Heap(bytes)
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
@@ -483,7 +487,8 @@ impl LocalSigner {
                 self.algorithms.remove(&reference);
             }
         }
-        self.keys.insert(reference, Zeroizing::new(bytes).into());
+        self.keys
+            .insert(reference, heap_material(Zeroizing::new(bytes)));
     }
     pub fn from_setup(
         setup: LocalSetup,
@@ -813,7 +818,7 @@ impl LocalSigner {
         }
         self.redraw();
         self.keys
-            .insert(reference.clone(), Zeroizing::new(bytes).into());
+            .insert(reference.clone(), heap_material(Zeroizing::new(bytes)));
         self.algorithms.insert(reference, algorithm);
         Ok(())
     }
