@@ -252,6 +252,9 @@ fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -
     inner.handle = handle;
     inner.link = None;
     inner.delegated = Some(prepared.resident);
+    if venue == "bybit" {
+        testing::bind_identity(&mut account, &setup);
+    }
     testing::register(registry, &account);
     account
 }
