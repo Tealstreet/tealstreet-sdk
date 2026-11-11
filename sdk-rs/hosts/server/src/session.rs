@@ -1358,8 +1358,13 @@ impl Session {
                 "updatePositions:done",
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
-            (op @ ("exec" | "chaser:start" | "twap:start" | "twap:resume"), _, _)
-                if self.joined[&name].account.delegated.is_some() =>
+            (op, _, _)
+                if self.joined[&name].account.delegated.is_some()
+                    && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
+                        || op == "twap:state"
+                            && msg.data.as_array().is_some_and(|rows| {
+                                rows.iter().any(|row| row["state"]["status"] == "running")
+                            })) =>
             {
                 let message = format!(
                     "DelegatedActionUnavailable: DELEGATED {op} is unavailable; only place and reduce-only close are enabled"

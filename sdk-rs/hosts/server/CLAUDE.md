@@ -58,8 +58,8 @@ it before using the advertised partial set. Unsupported legacy method aliases
 also return `DelegatedActionUnavailable` before a native plan is produced. A
 close remains a placement with `reduceOnly: true`, using the existing outbox and
 venue enforcement. Queued-intent cancellation remains a separate router operation.
-Raw exec and chaser/TWAP starts or resumes also refuse, because they can launch
-unsupported actions outside method translation. Existing stop/cleanup controls
+Raw exec and chaser/TWAP starts, resumes or running-state restoration return the
+same named refusal. Paused TWAP restoration and existing stop/cleanup controls
 remain available; this does not resume or replay an interrupted intent.
 
 Bybit DELEGATED `order.submit` messages use the existing method translation,

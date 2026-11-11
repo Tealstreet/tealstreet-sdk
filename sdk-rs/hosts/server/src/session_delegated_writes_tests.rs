@@ -221,6 +221,18 @@ fn init(venue: &str) -> InitPayload {
 }
 
 fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -> Arc<Account> {
+    delegated_account_with_algo_inbox(registry, user, venue, tape).0
+}
+
+fn delegated_account_with_algo_inbox(
+    registry: &Registry,
+    user: &str,
+    venue: &str,
+    tape: Tape,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
     let mut setup = init("bybit");
     setup.key = format!("synthetic-key-{user}");
     let mut tape = tape;
@@ -242,7 +254,7 @@ fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -
         ServerConfig::default(),
     )
     .unwrap();
-    let (mut account, _) = testing::account_on(
+    let (mut account, inbox) = testing::account_on(
         testing::HeldLoad {
             placed: Arc::default(),
             load_after_ms: None,
@@ -261,7 +273,7 @@ fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -
     inner.link = None;
     inner.delegated = Some(prepared.resident);
     testing::register(registry, &account);
-    account
+    (account, inbox)
 }
 
 async fn joined(
