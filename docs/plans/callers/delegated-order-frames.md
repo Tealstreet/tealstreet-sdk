@@ -14,6 +14,29 @@ renumbering, capability names and the reply semantics below.
 
 ### Activation and binding
 
+Sam's 2026-11-11 activation policy permits DELEGATED with **place and reduce-only
+close** while amend, venue cancel, cancel-all and nuke remain unavailable. The
+host owns the per-user `DELEGATED_BYBIT` feature flag; the SDK introduces no
+server environment variable with that name. Use
+`outbox.activate(connection, { DELEGATED_BYBIT })` for explicit SDK admission.
+It requires the flag, the two transport/ledger proofs below, and only
+`delegatedOrderActionsV1.place === true` and `.close === 'reduceOnly'`. Later
+actions are not prerequisites. Missing place/close support refuses with a named
+activation error. The legacy low-level `connect` entry point remains for hosts
+that already completed their own admission; it does not perform feature discovery.
+
+`enqueueAction('place', params)` and `enqueueAction('close', params)` use the same
+durable single-order outbox. Close requires literal `params.reduceOnly === true`;
+it never silently changes a close into an opening placement. Unsupported actions
+reject with `DelegatedActionUnavailable` before persistence or a frame, and the
+server also rejects their legacy method aliases before native handoff. No path
+falls back to LOCAL or COSIGNED. `order.cancelQueued` remains the router's
+undispatched-intent cancellation, with its existing conservative uncertainty
+semantics; it is not a venue cancel capability.
+Raw exec and chaser/TWAP starts or resumes also refuse before entering their
+runtime, preventing an alternate route to unsupported venue actions. Existing
+stop and cleanup controls remain available.
+
 The server advertises `transports.accountWorkerWebSocket.delegatedOrderFramesV1`
 in `capabilities_json`. It is false by default and true only in a build with the
 `delegated-order-frames` Cargo feature, the existing Bybit DELEGATED flag, and
@@ -22,6 +45,9 @@ image compiles support and defaults the runtime switch to `0`; unset/empty also
 means off, and other values refuse startup. Change the container environment and
 use the existing drain/restart procedure with the same image to toggle it. It is
 not hot-reloaded. Both advertisement and order admission use that runtime control.
+The additive `delegatedOrderActionsV1` record advertises place and reduce-only
+close, with amend, cancel, cancelAll and nuke false. This action record describes
+implemented support; the frame switch still controls live admission.
 
 
 Hosts enable the outbox only when **both** that box advertisement and the

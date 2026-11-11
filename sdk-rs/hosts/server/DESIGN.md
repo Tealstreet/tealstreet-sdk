@@ -95,6 +95,14 @@ that capability. Hosts must discover both per connection before passing a ticket
 to the outbox. See [order-frame activation](../../../docs/plans/callers/delegated-order-frames.md#rolling-activation)
 for deployment ordering and rollback.
 
+`delegatedOrderActionsV1` advertises the partial action set allowed by Sam on
+2026-11-11: place and reduce-only close; amend, venue cancel, cancel-all and nuke
+are false and not activation prerequisites. The per-user `DELEGATED_BYBIT` flag
+belongs to the admitting host; there is no same-named server environment flag.
+The existing runtime frame switch and router-ledger proof remain necessary.
+Legacy unsupported DELEGATED method calls return `DelegatedActionUnavailable`
+before native handoff. LOCAL/COSIGNED retain their existing action translation.
+
 `TEALSTREET_WORKERS`, `TEALSTREET_GATEWAY_PORT` and `TEALSTREET_HEALTH_PORT`
 belong to the Bun gateway and have no meaning here. One process serves all
 connections.

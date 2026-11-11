@@ -48,6 +48,20 @@ private-read verification must complete before calling this entry point.
 
 ## DELEGATED order frames
 
+Sam's 2026-11-11 policy allows activation with place and reduce-only close before
+amend, venue cancel, cancel-all or nuke. The additive `delegatedOrderActionsV1`
+advertisement exposes exactly that partial set. The existing compiled feature,
+Bybit declaration, runtime frame switch, router ledger and per-connection
+ownership/registration checks remain required. `DELEGATED_BYBIT` is the host's
+per-user feature flag, not a new box environment variable. SDK `activate` checks
+it before using the advertised partial set. Unsupported legacy method aliases
+also return `DelegatedActionUnavailable` before a native plan is produced. A
+close remains a placement with `reduceOnly: true`, using the existing outbox and
+venue enforcement. Queued-intent cancellation remains a separate router operation.
+Raw exec and chaser/TWAP starts or resumes also refuse, because they can launch
+unsupported actions outside method translation. Existing stop/cleanup controls
+remain available; this does not resume or replay an interrupted intent.
+
 Bybit DELEGATED `order.submit` messages use the existing method translation,
 native command completion and order audit, with the intent UUIDv7 as both request
 ID and client order ID. Other modes keep `callMethod` unchanged. Pending joins

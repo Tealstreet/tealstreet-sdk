@@ -7,8 +7,53 @@ pub const ACK_MAX: usize = 4 * 1024;
 pub const OUTCOME_MAX: usize = 8 * 1024;
 pub const KEY_MAX: usize = 128;
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegatedActions {
+    place: bool,
+    close: Close,
+    amend: bool,
+    cancel: bool,
+    cancel_all: bool,
+    nuke: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum Close {
+    Unsupported,
+    ReduceOnly,
+}
+
+const PLACE_AND_CLOSE: DelegatedActions = DelegatedActions {
+    place: true,
+    close: Close::ReduceOnly,
+    amend: false,
+    cancel: false,
+    cancel_all: false,
+    nuke: false,
+};
+
+/// Sam's 2026-11-11 policy: later venue actions do not gate this protocol slice.
+fn activation_allowed(delegated_bybit: bool, actions: &DelegatedActions) -> bool {
+    delegated_bybit && actions.place && actions.close == Close::ReduceOnly
+}
+
 pub fn enabled() -> bool {
-    cfg!(feature = "delegated-order-frames") && crate::delegated::enabled("bybit")
+    cfg!(feature = "delegated-order-frames")
+        && activation_allowed(crate::delegated::enabled("bybit"), &PLACE_AND_CLOSE)
+}
+
+pub fn action_capabilities() -> DelegatedActions {
+    if enabled() {
+        PLACE_AND_CLOSE
+    } else {
+        DelegatedActions {
+            place: false,
+            close: Close::Unsupported,
+            ..PLACE_AND_CLOSE
+        }
+    }
 }
 
 /// The compiled protocol and venue opt-in are separate from rollout activation.
@@ -150,4 +195,36 @@ fn canonical_value(value: &Value, out: &mut String, depth: usize) -> Result<(), 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::*;
+
+    #[test]
+    fn place_and_reduce_only_close_activate_without_later_actions() {
+        assert!(activation_allowed(true, &PLACE_AND_CLOSE));
+        assert_eq!(
+            serde_json::to_value(PLACE_AND_CLOSE).unwrap(),
+            json!({
+                "place":true, "close":"reduceOnly", "amend":false,
+                "cancel":false, "cancelAll":false, "nuke":false,
+            })
+        );
+        assert!(!activation_allowed(false, &PLACE_AND_CLOSE));
+        assert!(!activation_allowed(
+            true,
+            &DelegatedActions {
+                place: false,
+                ..PLACE_AND_CLOSE
+            }
+        ));
+        assert!(!activation_allowed(
+            true,
+            &DelegatedActions {
+                close: Close::Unsupported,
+                ..PLACE_AND_CLOSE
+            }
+        ));
+    }
 }

@@ -1358,6 +1358,25 @@ impl Session {
                 "updatePositions:done",
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
+            (op @ ("exec" | "chaser:start" | "twap:start" | "twap:resume"), _, _)
+                if self.joined[&name].account.delegated.is_some() =>
+            {
+                let message = format!(
+                    "DelegatedActionUnavailable: DELEGATED {op} is unavailable; only place and reduce-only close are enabled"
+                );
+                if op == "exec" && msg.data.get("reqId").is_some() {
+                    self.send(envelope::msg(
+                        &name,
+                        "exec-result",
+                        json!({
+                            "reqId": msg.data["reqId"], "handled": true, "success": false,
+                            "error": message,
+                        }),
+                    ));
+                } else {
+                    self.send(envelope::error(Some(&name), &message));
+                }
+            }
             (op, _, _) if crate::algos::OPS.contains(&op) => {
                 let algos = self.joined[&name].account.algos.clone();
                 let sent = algos.is_some_and(|algos| {

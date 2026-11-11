@@ -44,6 +44,19 @@ fn runtime_switch_uses_the_same_executable_and_keeps_the_ledger_router_owned() {
         let transport = &capabilities["transports"]["accountWorkerWebSocket"];
         assert_eq!(transport["delegatedOrderFramesV1"], expected == "1");
         assert!(transport.get("delegatedOrderLedgerV1").is_none());
+        let supported = safe_cex_exchange_server::order_contract::enabled();
+        assert_eq!(transport["delegatedOrderActionsV1"]["place"], supported);
+        assert_eq!(
+            transport["delegatedOrderActionsV1"]["close"],
+            if supported {
+                "reduceOnly"
+            } else {
+                "unsupported"
+            }
+        );
+        for action in ["amend", "cancel", "cancelAll", "nuke"] {
+            assert_eq!(transport["delegatedOrderActionsV1"][action], false);
+        }
         return;
     }
     for value in [None, Some("0"), Some("1"), Some("invalid")] {

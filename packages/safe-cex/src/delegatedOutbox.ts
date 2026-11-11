@@ -1,5 +1,8 @@
+import type { DelegatedActivationCapabilities, DelegatedActivationFlags } from './delegatedActivation';
+
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
+import { DelegatedActivationError, requireDelegatedAction, requireDelegatedActivation } from './delegatedActivation';
 import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
@@ -87,12 +90,7 @@ export interface OutboxConnection extends OutboxScope {
   venue: 'bybit';
   signingMode: 'delegated';
   ready: boolean;
-  capabilities: {
-    /** Advertised by the admitted box. */
-    delegatedOrderFramesV1: boolean;
-    /** Advertised by the router; absent on older pass-through routers. */
-    delegatedOrderLedgerV1?: boolean;
-  };
+  capabilities: DelegatedActivationCapabilities;
   instanceId?: string;
   /**
    * True only for physical handoff; explicit false proves no send or buffering.
@@ -245,6 +243,7 @@ export class DelegatedOutbox {
   // Only current, durably completed rows can release capacity or retire.
   private readonly completedIntents = new Map<string, DelegatedIntent>();
   private connection?: Readonly<OutboxConnection>;
+  private activationConnection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
   private readonly outcomeSequences = new Map<string, number>();
@@ -322,7 +321,19 @@ export class DelegatedOutbox {
     this.scope = Object.freeze({ owner: options.owner, accountName: options.accountName });
   }
 
-  /** Connect only after this account's DELEGATED admission has completed. */
+  /** Explicit host admission for the place/reduce-only-close protocol slice. */
+  activate(connection: OutboxConnection, flags: DelegatedActivationFlags): Readonly<OutboxConnection> {
+    // Even a refused replacement retires the previous ticket and deferred work.
+    if (this.connection) this.disconnect(this.connection);
+    requireDelegatedActivation(connection.capabilities, flags);
+    if (!connection.ready)
+      throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'DELEGATED connection is not ready');
+    const captured = this.connect(connection);
+    this.activationConnection = captured;
+    return captured;
+  }
+
+  /** Low-level connection: the host must already have completed admission. */
   connect(connection: OutboxConnection): Readonly<OutboxConnection> {
     if (
       !this.active ||
@@ -338,7 +349,14 @@ export class DelegatedOutbox {
     this.outcomeSequences.clear();
     this.connection = Object.freeze({
       ...connection,
-      capabilities: Object.freeze({ ...connection.capabilities }),
+      capabilities: Object.freeze({
+        ...connection.capabilities,
+        ...(connection.capabilities.delegatedOrderActionsV1
+          ? {
+              delegatedOrderActionsV1: Object.freeze({ ...connection.capabilities.delegatedOrderActionsV1 }),
+            }
+          : {}),
+      }),
       instanceId: connection.instanceId || undefined,
     });
     return this.connection;
@@ -347,6 +365,7 @@ export class DelegatedOutbox {
   disconnect(connection: Readonly<OutboxConnection>): void {
     if (this.connection !== connection) return;
     this.connection = undefined;
+    this.activationConnection = undefined;
     for (const row of this.intents.values()) {
       if (row.state !== 'sending' && row.state !== 'acknowledged') continue;
       row.state = 'unknown';
@@ -366,6 +385,7 @@ export class DelegatedOutbox {
   close(): void {
     this.active = false;
     this.connection = undefined;
+    this.activationConnection = undefined;
     for (const row of this.intents.values()) {
       if (row.state !== 'sending' && row.state !== 'acknowledged') continue;
       row.state = 'unknown';
@@ -383,6 +403,17 @@ export class DelegatedOutbox {
       this.normalizeNotSent(row);
       return clone(row);
     });
+  }
+
+  async enqueueAction(action: string, params: Record<string, unknown>): Promise<string> {
+    const connection = this.connection;
+    if (!connection || this.activationConnection !== connection || !this.current(connection))
+      throw new DelegatedActivationError(
+        'delegatedConnectionNotAdmitted',
+        'DELEGATED action requires activation on this connection',
+      );
+    requireDelegatedAction(action, params);
+    return this.enqueue(params);
   }
 
   enqueue(params: Record<string, unknown>): Promise<string> {
@@ -734,8 +765,7 @@ export class DelegatedOutbox {
       if (!this.replayable(row)) unprovenNotSent(row);
     } else if (row.state === 'notSent') {
       const marked = row as DelegatedIntent & { readonly [delegatedNotSentBrand]?: true };
-      if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row))
-        delete row.noHandoffEvidence;
+      if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row)) delete row.noHandoffEvidence;
       else unprovenNotSent(row);
     } else {
       delete row.notSentEvidence;

@@ -396,6 +396,27 @@ pub fn translate_delegated(
             "DELEGATED methods are not enabled for this account",
         ));
     }
+    if matches!(
+        method,
+        "updateOrder"
+            | "amendOrder"
+            | "cancelOrders"
+            | "cancelOrder"
+            | "cancelSymbolOrders"
+            | "cancelAllOrders"
+            | "nuke"
+            | "nukePositions"
+            | "nukeOrders"
+            | "scheduleCancel"
+            | "cancelAccountOrders"
+    ) {
+        return Err(refused(
+            "DelegatedActionUnavailable",
+            format!(
+                "DELEGATED {method} is unavailable; only place and reduce-only close are enabled"
+            ),
+        ));
+    }
     translate(method, args, capabilities, open_order_symbols, public_only)
 }
 
