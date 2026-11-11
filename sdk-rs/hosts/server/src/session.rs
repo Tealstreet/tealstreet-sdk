@@ -1903,10 +1903,18 @@ impl Session {
         after_load: bool,
         order_frame: Option<OrderReceipt>,
     ) {
+        let mut completion = Pending {
+            request_id: request_id.clone(),
+            method: method.to_owned(),
+            reply,
+            group: group.clone(),
+            incomplete: false,
+            audit: None,
+        };
         if !self.joined[name].account.running.io_allowed() {
-            self.call_failure(
+            self.command_failure(
                 name,
-                request_id,
+                completion,
                 "ServerDraining",
                 "Router lease expired; no new work was sent",
                 Some("notSent"),
@@ -1921,9 +1929,9 @@ impl Session {
             match pool.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
                 Err(_) => {
-                    self.call_failure(
+                    self.command_failure(
                         name,
-                        request_id,
+                        completion,
                         "Error",
                         "too many account reads in flight; retry shortly",
                         None,
@@ -1945,9 +1953,9 @@ impl Session {
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
-            self.call_failure(
+            self.command_failure(
                 name,
-                request_id,
+                completion,
                 "Error",
                 "command IDs exhausted",
                 None,
@@ -1962,17 +1970,8 @@ impl Session {
             origin: format!("socket:{}/client:{}", self.socket, joined.client.id),
             fields,
         });
-        joined.client.pending.lock().unwrap().insert(
-            id,
-            Pending {
-                request_id: request_id.clone(),
-                method: method.to_owned(),
-                reply,
-                group: group.clone(),
-                incomplete: false,
-                audit,
-            },
-        );
+        completion.audit = audit;
+        joined.client.pending.lock().unwrap().insert(id, completion);
         let (client, handle) = (joined.client.id, joined.account.handle.clone());
         let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
@@ -2028,6 +2027,36 @@ impl Session {
                 }
             }
         });
+    }
+
+    fn command_failure(
+        &self,
+        name: &str,
+        pending: Pending,
+        kind: &str,
+        message: &str,
+        outcome: Option<&str>,
+        order_frame: Option<OrderReceipt>,
+    ) {
+        if pending.group.is_some() && matches!(pending.reply, methods::Reply::Action { .. }) {
+            // This proves only one leg was not dispatched. Another leg may be
+            // in flight: count every leg and let the group settle as unknown.
+            settle(
+                &self.account_out(name),
+                name,
+                pending,
+                Err(failure_detail(kind, message, false)),
+            );
+        } else {
+            self.call_failure(
+                name,
+                &pending.request_id,
+                kind,
+                message,
+                outcome,
+                order_frame,
+            );
+        }
     }
 
     fn reply_failure(

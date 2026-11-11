@@ -1032,6 +1032,9 @@ its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+Every cancel-all leg settles through its shared completion group, including
+pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
+cannot refuse the whole action after another leg may have crossed physical IO.
 Receipt counters share the existing registration lifecycle and size bounds.
 `order.actionCancelQueued` belongs to the router and never issues a venue cancel.
 Rejecting that frame uses the ordinary error envelope: it supplies no proof

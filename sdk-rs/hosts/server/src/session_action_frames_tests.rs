@@ -715,3 +715,124 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refusal() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = Arc::new(
+                Registry::new(
+                    crate::threads::EngineThreads::start(1).unwrap(),
+                    Duration::from_millis(1),
+                    Duration::from_secs(60),
+                )
+                .with_router_lease(crate::router_lease::Config {
+                    enforce: true,
+                    box_id: Some("test-box".into()),
+                    ..Default::default()
+                }),
+            );
+            let grant = |sequence, ttl| {
+                let now = crate::accounts::now_ms();
+                registry
+                    .router_leases
+                    .accept(&crate::router_lease::Heartbeat {
+                        r#box: "test-box".into(),
+                        issued_at: now,
+                        users: vec![crate::router_lease::Assertion {
+                            user_id: "A".into(),
+                            owner_epoch: 1,
+                            sequence,
+                            not_after: now + ttl,
+                        }],
+                    })
+                    .unwrap();
+            };
+            grant(1, 45_000);
+            let tape = Tape {
+                hold: true,
+                ..Default::default()
+            };
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let id = json!(action_key());
+            let deadline = crate::order_actions::ActionDeadline::new(
+                id.as_str().unwrap(),
+                0.0,
+                std::time::Instant::now(),
+            )
+            .unwrap();
+            let receipt = Some(OrderReceipt::Action {
+                seq: 1,
+                kind: "cancelAll",
+                deadline,
+            });
+            let group = Some(Arc::new(Mutex::new(Group {
+                remaining: 2,
+                failures: Vec::new(),
+            })));
+            session.send_command(
+                "synthetic-main",
+                &id,
+                "cancelAllOrders",
+                &group,
+                json!({"op":"cancelSymbolOrders","symbol":"BTCUSDT"}),
+                methods::Reply::Action {
+                    seq: 1,
+                    kind: "cancelAll",
+                },
+                false,
+                receipt,
+            );
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while tape.waiting.lock().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
+            // The first leg has crossed physical IO. Fence the account before the
+            // second leg: its definite local failure proves nothing about the first.
+            grant(2, 50);
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            assert!(!account.running.io_allowed());
+            session.send_command(
+                "synthetic-main",
+                &id,
+                "cancelAllOrders",
+                &group,
+                json!({"op":"cancelSymbolOrders","symbol":"ETHUSDT"}),
+                methods::Reply::Action {
+                    seq: 1,
+                    kind: "cancelAll",
+                },
+                false,
+                receipt,
+            );
+            assert_eq!(
+                group.as_ref().unwrap().lock().unwrap().remaining,
+                1,
+                "the unsent leg must settle through the group, awaiting the first leg"
+            );
+            while let Ok(text) = sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert!(
+                    !matches!(
+                        frame["t"].as_str(),
+                        Some("order.actionAck" | "order.actionOutcome")
+                    ),
+                    "one unsent leg cannot refuse the whole in-flight action: {frame}"
+                );
+            }
+            tape.finish_unknown();
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(outcome["d"]["outcome"], "unknown", "{outcome}");
+            assert_eq!(outcome["d"]["error"]["outcome"], "unknown");
+            assert_eq!(group.as_ref().unwrap().lock().unwrap().remaining, 0);
+            assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
