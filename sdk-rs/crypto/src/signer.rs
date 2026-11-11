@@ -284,28 +284,33 @@ pub trait ProtectedBytes: zeroize::Zeroize + Send + Sync {
     fn as_bytes(&self) -> &[u8];
 }
 
+// WASM keeps the original map value and drop glue; protected storage is native-only.
+#[cfg(target_arch = "wasm32")]
+type Material = Zeroizing<Vec<u8>>;
+
+#[cfg(not(target_arch = "wasm32"))]
 enum Material {
     Heap(Zeroizing<Vec<u8>>),
-    #[cfg(not(target_arch = "wasm32"))]
     Protected(Box<dyn ProtectedBytes>),
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl From<Zeroizing<Vec<u8>>> for Material {
     fn from(bytes: Zeroizing<Vec<u8>>) -> Self {
         Self::Heap(bytes)
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl Material {
     fn as_slice(&self) -> &[u8] {
         match self {
             Self::Heap(bytes) => bytes.as_slice(),
-            #[cfg(not(target_arch = "wasm32"))]
             Self::Protected(bytes) => bytes.as_bytes(),
         }
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for Material {
     fn drop(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Self::Protected(bytes) = self {
             bytes.zeroize();
         }
@@ -3524,3 +3529,10 @@ mod owned_address_setup_tests {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod protected_tests;
+
+#[cfg(all(test, target_arch = "wasm32"))]
+#[test]
+fn wasm_local_signer_keeps_plain_zeroizing_storage() {
+    let signer = LocalSigner::new();
+    let _: &HashMap<KeyRef, Zeroizing<Vec<u8>>> = &signer.keys;
+}
