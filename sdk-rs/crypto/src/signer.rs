@@ -10,22 +10,12 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
+mod material;
 mod primitives;
 pub use key_material::KeyEncoding;
-
-#[cfg(target_arch = "wasm32")]
-macro_rules! heap_material {
-    ($bytes:expr) => {
-        $bytes
-    };
-}
 #[cfg(not(target_arch = "wasm32"))]
-macro_rules! heap_material {
-    ($bytes:expr) => {
-        Material::Heap($bytes)
-    };
-}
-
+pub use material::ProtectedBytes;
+use material::{KeyMap, heap};
 /// Trusted provider setup only. Never place these values in venue/engine options.
 #[derive(Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,7 +23,6 @@ pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
-
 /// Trusted Lighter setup's public API-index principal, never wire material.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LighterPrincipal {
@@ -175,7 +164,6 @@ impl<'de> serde::Deserialize<'de> for Secret {
         <String as serde::Deserialize>::deserialize(deserializer).map(Self::new)
     }
 }
-
 /// Unicode White_Space trim into a fresh guarded buffer; the input is wiped on drop.
 fn trimmed(input: Secret) -> Secret {
     let Some(value) = input.0.as_deref() else {
@@ -187,7 +175,6 @@ fn trimmed(input: Secret) -> Secret {
     }
     Secret::new(text.to_owned())
 }
-
 // Decoded buffers stay guarded on every failure, including the second slot.
 struct DecodedIdentity {
     key: Zeroizing<Vec<u8>>,
@@ -266,77 +253,38 @@ impl DecodedIdentity {
     }
     fn install(self, signer: &mut LocalSigner, slot: &str) {
         if !self.key.is_empty() {
-            signer.keys.insert(
-                KeyRef(format!("{slot}.credential")),
-                heap_material!(self.key),
-            );
+            signer
+                .keys
+                .insert(KeyRef(format!("{slot}.credential")), heap!(self.key));
         }
         if !self.secret.is_empty() {
-            signer.keys.insert(
-                KeyRef(format!("{slot}.signing")),
-                heap_material!(self.secret),
-            );
+            signer
+                .keys
+                .insert(KeyRef(format!("{slot}.signing")), heap!(self.secret));
         }
         if let Some(passphrase) = self.passphrase {
-            signer.keys.insert(
-                KeyRef(format!("{slot}.passphrase")),
-                heap_material!(passphrase),
-            );
+            signer
+                .keys
+                .insert(KeyRef(format!("{slot}.passphrase")), heap!(passphrase));
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
                 let reference = Self::extra_ref(slot, name);
                 signer.roles.insert(reference.clone(), name);
-                signer.keys.insert(reference, heap_material!(bytes));
+                signer.keys.insert(reference, heap!(bytes));
             }
         }
     }
 }
 
-/// Optional native host storage for installed local signing material.
-/// The provider erases it before releasing the host buffer.
-#[cfg(not(target_arch = "wasm32"))]
-pub trait ProtectedBytes: zeroize::Zeroize + Send + Sync {
-    fn as_bytes(&self) -> &[u8];
-}
-
-// WASM keeps the original map value and drop glue; protected storage is native-only.
-#[cfg(target_arch = "wasm32")]
-type Material = Zeroizing<Vec<u8>>;
-
-#[cfg(not(target_arch = "wasm32"))]
-enum Material {
-    Heap(Zeroizing<Vec<u8>>),
-    Protected(Box<dyn ProtectedBytes>),
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl Material {
-    fn as_slice(&self) -> &[u8] {
-        match self {
-            Self::Heap(bytes) => bytes.as_slice(),
-            Self::Protected(bytes) => bytes.as_bytes(),
-        }
-    }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for Material {
-    fn drop(&mut self) {
-        if let Self::Protected(bytes) = self {
-            bytes.zeroize();
-        }
-    }
-}
-
 pub struct LocalSigner {
-    #[cfg(not(target_arch = "wasm32"))]
-    protected_storage: bool,
     /// This provider's setup lifetime. Re-drawn by every material mutation,
     /// which must stay `&mut self` (pre-`Arc`): a borrowed incarnation may not
     /// outlive a re-draw. `None` (host storage or allocation exhaustion) never reads a seal.
     incarnation: Option<Incarnation>,
     #[cfg(feature = "schnorr")]
     lighter_principal: Option<(KeyRef, LighterPrincipal)>,
-    keys: HashMap<KeyRef, Material>,
+    keys: KeyMap,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
     roles: HashMap<KeyRef, ExtraKey>,
@@ -351,12 +299,10 @@ pub struct LocalSigner {
 impl Default for LocalSigner {
     fn default() -> Self {
         Self {
-            #[cfg(not(target_arch = "wasm32"))]
-            protected_storage: false,
             incarnation: Incarnation::fresh().ok(),
             #[cfg(feature = "schnorr")]
             lighter_principal: None,
-            keys: HashMap::new(),
+            keys: KeyMap::new(),
             roles: HashMap::new(),
             algorithms: HashMap::new(),
             shared: HashMap::new(),
@@ -364,34 +310,11 @@ impl Default for LocalSigner {
     }
 }
 impl LocalSigner {
-    /// Move installed bytes to a host-owned protected allocation. Ref bindings,
-    /// policy and signing operations stay with this local provider. Setup seals
-    /// are retired for host-owned storage. Failure drops
-    /// and erases every completed allocation and every remaining input buffer.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn with_protected_storage(
-        mut self,
-        mut allocate: impl FnMut(&[u8]) -> Result<Box<dyn ProtectedBytes>, SignError>,
-    ) -> Result<Self, SignError> {
-        self.protected_storage = true;
-        self.incarnation = None;
-        let mut protected = HashMap::with_capacity(self.keys.len());
-        for (reference, bytes) in std::mem::take(&mut self.keys) {
-            protected.insert(reference, Material::Protected(allocate(bytes.as_slice())?));
-        }
-        self.keys = protected;
-        Ok(self)
-    }
     pub fn new() -> Self {
         Self::default()
     }
-    /// Ends every seal made under the previous material.
+    #[cfg(target_arch = "wasm32")]
     fn redraw(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if self.protected_storage {
-            self.incarnation = None;
-            return;
-        }
         self.incarnation = Incarnation::fresh().ok();
     }
     /// Seals the provider's own public-key answer for each declared Stark
@@ -493,8 +416,7 @@ impl LocalSigner {
                 self.algorithms.remove(&reference);
             }
         }
-        self.keys
-            .insert(reference, heap_material!(Zeroizing::new(bytes)));
+        self.keys.insert(reference, heap!(Zeroizing::new(bytes)));
     }
     pub fn from_setup(
         setup: LocalSetup,
@@ -824,7 +746,7 @@ impl LocalSigner {
         }
         self.redraw();
         self.keys
-            .insert(reference.clone(), heap_material!(Zeroizing::new(bytes)));
+            .insert(reference.clone(), heap!(Zeroizing::new(bytes)));
         self.algorithms.insert(reference, algorithm);
         Ok(())
     }
