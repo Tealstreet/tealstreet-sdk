@@ -111,7 +111,11 @@ see `docs/plans/callers/delegated-order-frames.md`. This module does not select 
 signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
 
 The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
-records. Unknown work, including pending queue cancellation, is retained for 24
+records. The in-memory completed index refers to the same objects in the live
+intent map and credits only durably completed records. Retirement removes both
+entries through one private helper. Capacity accounting and compaction prune
+stale index entries before use, so a stale entry cannot release capacity or
+participate in sorting. Unknown work, including pending queue cancellation, is retained for 24
 hours from its UUIDv7 Unix creation time, using the injected Unix clock across
 reloads (clock rollback can extend retention). At expiry it remains `unknown`,
 gains `retentionExpired: true`, stops pending queue cancellation, and emits the

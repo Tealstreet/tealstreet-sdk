@@ -972,9 +972,32 @@ export class DelegatedOutbox {
     );
   }
   private pendingCount(): number {
+    this.pruneCompletedIntents();
     return this.intents.size - this.completedIntents.size;
   }
+  private pruneCompletedIntents(): void {
+    for (const [id, row] of this.completedIntents) {
+      if (
+        row.intentId !== id ||
+        this.intents.get(id) !== row ||
+        !this.durable.has(id) ||
+        !this.completed(row)
+      )
+        this.completedIntents.delete(id);
+    }
+  }
+  private removeIntent(row: DelegatedIntent): void {
+    if (this.intents.get(row.intentId) !== row) return;
+    this.stopTimer(row.intentId);
+    // Drop the index first so it never outlives the live entry it credits.
+    this.completedIntents.delete(row.intentId);
+    this.intents.delete(row.intentId);
+    this.durable.delete(row.intentId);
+    this.persistedIntentKeys.delete(row.intentId);
+    this.outcomeSequences.delete(row.intentId);
+  }
   private async compact(): Promise<void> {
+    this.pruneCompletedIntents();
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
     // Caller keys remain reserved across completed-history retirement.
     const completed = [...this.completedIntents.values()].filter((row) => !row.callerSuppliedIntentId);
@@ -992,14 +1015,7 @@ export class DelegatedOutbox {
       sequence: this.sequence,
       retiredIntentIds: retired.map((row) => row.intentId),
     });
-    for (const row of retired) {
-      this.stopTimer(row.intentId);
-      this.intents.delete(row.intentId);
-      this.durable.delete(row.intentId);
-      this.persistedIntentKeys.delete(row.intentId);
-      this.completedIntents.delete(row.intentId);
-      this.outcomeSequences.delete(row.intentId);
-    }
+    for (const row of retired) this.removeIntent(row);
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.work.then(operation);
