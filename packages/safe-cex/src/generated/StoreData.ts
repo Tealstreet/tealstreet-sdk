@@ -1,6 +1,7 @@
 // Generated from safe-cex-types/src/store_model.rs. Do not edit.
 import type { DisplayedMargin } from './DisplayedMargin';
 import type { FetchedLeverage } from './FetchedLeverage';
+import type { PositionSettings } from './PositionSettings';
 import type { StoreDataLoaded } from './StoreDataLoaded';
 import type { StoreOptions } from './StoreOptions';
 import type { StoreUpdateIds } from './StoreUpdateIds';
@@ -31,6 +32,7 @@ export type StoreData = {
     };
     readonly userData?: unknown;
     readonly positions: Array<Position>;
+    readonly positionSettings: Record<string, PositionSettings>;
     readonly displayedPositions: DisplayedPosition[];
     readonly displayedMargin?: DisplayedMargin;
     readonly ordersRisk: Record<string, OrderRiskProfile[]>;
@@ -74,6 +76,7 @@ export const initialStoreData: StoreData = {
   "tickers": [],
   "orders": [],
   "positions": [],
+  "positionSettings": {},
   "displayedPositions": [],
   "displayedMargin": {
     "longExposure": 0,

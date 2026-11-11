@@ -8,6 +8,7 @@ import type {
   EngineConstruction,
   EngineEvent,
   EngineHealth,
+  EngineHelperCapabilities,
   EngineHost as EngineHostType,
   Transport,
   VenueErrorDetail,
@@ -32,6 +33,7 @@ import type {
   IncomeHistoryOptions,
   IncomeRecord,
   Market,
+  MarginType,
   NukeResult,
   OHLCVOptions,
   OptionChainQuery,
@@ -41,6 +43,7 @@ import type {
   OrderHistoryOptions,
   PlaceOrderOpts,
   Position,
+  PositionMode,
   PublicTrade,
   RemoteSignerRequest,
   RemoteSignerResponse,
@@ -74,6 +77,7 @@ import { assertEngineAccountRouting, createEngineTransport, withSecondaryReadKey
 import { withRequestsLog } from '../../transport/requestsLog';
 import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
@@ -700,6 +704,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private workerCapabilities?: Promise<void>;
+  private readonly helperCapabilities: Readonly<EngineHelperCapabilities>;
   private workerCapabilityRetryAt = 0;
   private stopWorkerCapabilitySync?: () => void;
 
@@ -1009,6 +1014,9 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = bridgeConstruction.spot;
     this.isDemo = bridgeConstruction.demo;
     this.applier = new FrameApplier(store);
+    this.helperCapabilities = bridgeConstruction.helpers ?? {};
+    if (this.helperCapabilities.resolveLeverageContext === true)
+      this.resolveLeverageContext = this.resolvePhemexLeverageContext;
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     this.forwardToWorker();
@@ -1230,7 +1238,7 @@ export class RustEngineExchange extends BaseExchange {
     } catch (error) {
       // A refused frame leaves no baseline to apply deltas to: drop them until a fresh snapshot.
       this.sourceBaseline = false;
-      console.error(`${this.name} source frame refused`, error);
+      diagnosticConsole.error(`${this.name} source frame refused`, error);
       if (!this.engineFailure) this.emitter.emit('frameFed:needsSnapshot');
       return;
     }
@@ -2303,7 +2311,7 @@ export class RustEngineExchange extends BaseExchange {
       frame = new Frame(buffer);
     } catch (error) {
       this.applier.invalidateMarketIdentity();
-      console.error('Invalid engine frame', error);
+      diagnosticConsole.error('Invalid engine frame', error);
       if (recover) this.recoverEngineFrame();
       return;
     }
@@ -2313,14 +2321,14 @@ export class RustEngineExchange extends BaseExchange {
       this.applier.apply(frame, !this.frameConsumerDecodesMarketData || this.feedBookListeners.size > 0);
     } catch (error) {
       needsSnapshot = error instanceof FrameApplyError;
-      console.error('Engine frame apply failed', error);
+      diagnosticConsole.error('Engine frame apply failed', error);
     }
     const read = <T>(section: () => T[]): T[] => {
       try {
         return section();
       } catch (error) {
         needsSnapshot = true;
-        console.error('Engine frame section failed', error);
+        diagnosticConsole.error('Engine frame section failed', error);
         return [];
       }
     };
@@ -2330,7 +2338,7 @@ export class RustEngineExchange extends BaseExchange {
       this.nativeLoaded = receivedLoaded;
     } catch (error) {
       needsSnapshot = true;
-      console.error('Engine status section failed', error);
+      diagnosticConsole.error('Engine status section failed', error);
     }
     const catalogChanged = previousMarkets !== this.store.markets;
     if (this.publicFeedObservers.size) {
@@ -2339,7 +2347,7 @@ export class RustEngineExchange extends BaseExchange {
         publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas() || frame.tickerObservations?.());
       } catch (error) {
         needsSnapshot = true;
-        console.error('Engine public feed section failed', error);
+        diagnosticConsole.error('Engine public feed section failed', error);
       }
       if (publicChanged)
         for (const observer of this.publicFeedObservers)
@@ -2434,7 +2442,7 @@ export class RustEngineExchange extends BaseExchange {
       this.applyEngineFrame(snapshot.frame, false, true);
       this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
     } catch (error) {
-      console.error('Engine frame recovery failed', error);
+      diagnosticConsole.error('Engine frame recovery failed', error);
     } finally {
       this.frameRecoveryPending = false;
     }
@@ -3063,7 +3071,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('invalid close size');
     }
     const amount = nativePositionSize(position, market);
-    if (!Number.isFinite(amount) || amount < 0) throw new Error('invalid close size');
+    if (amount === null || !Number.isFinite(amount) || amount < 0) throw new Error('invalid close size');
     if (amount === 0) return undefined;
     return {
       symbol: position.symbol,
@@ -3149,8 +3157,21 @@ export class RustEngineExchange extends BaseExchange {
     this.refuseWriteBeforeEngine();
     if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
-      for (const position of await this.fetchPositions()) {
-        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage, position.side);
+      const positions = await this.fetchPositions();
+      if (this.isDisposed) return;
+      const liveSymbols = new Set(positions.map((position) => position.symbol));
+      const flatSymbols = new Set(
+        Object.values(this.store.positionSettings ?? {})
+          .map((settings) => settings.symbol)
+          .filter((symbol) => !liveSymbols.has(symbol)),
+      );
+      for (const position of positions) {
+        if (this.isDisposed) return;
+        await this.setLeverage(position.symbol, leverage, position.side);
+      }
+      for (const symbol of flatSymbols) {
+        if (this.isDisposed) return;
+        await this.setLeverage(symbol, leverage);
       }
     }
   };
@@ -3519,7 +3540,64 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
-  fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+  resolveLeverageContext?: (symbol: string) => Promise<
+    | {
+        marginType: MarginType;
+        positionMode: PositionMode;
+        longLeverage: number;
+        shortLeverage: number;
+      }
+    | undefined
+  >;
+
+  private resolvePhemexLeverageContext = async (
+    symbol: string,
+  ): ReturnType<NonNullable<RustEngineExchange['resolveLeverageContext']>> => {
+    // Both hosted and browser workers already serve this raw leverage read.
+    const mirrored = this.routesToWorker;
+    const admitted = mirrored ? this.captureWorkerAdmission() : undefined;
+    const args: [string, boolean] = [symbol, true];
+    try {
+      const rails = mirrored
+        ? ((await this.callWorkerForOwner(admitted, 'fetchLeverageForSymbol', ...args)) as FetchedLeverage | null)
+        : await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
+      admitted?.('fetchLeverageForSymbol', args);
+      if (this.isDisposed) return undefined;
+      if (rails && rails.marginType !== undefined && rails.positionMode !== undefined) {
+        return {
+          marginType: rails.marginType,
+          positionMode: rails.positionMode,
+          longLeverage: rails.buyLeverage,
+          shortLeverage: rails.sellLeverage,
+        };
+      }
+    } catch (error) {
+      admitted?.('fetchLeverageForSymbol', args);
+      if ((error as { code?: string })?.code === 'WORKER_STOPPED') throw error;
+      this.emitAndLogError(error instanceof Error ? error : String(error));
+    }
+    if (this.isDisposed) return undefined;
+    const stored = this.store.positions.filter((position) => position.symbol === symbol);
+    const marginType = stored[0]?.marginType;
+    const positionMode = stored[0]?.positionMode;
+    if (marginType === undefined || positionMode === undefined) return undefined;
+    const long = stored.find((position) => position.side === PositionSide.Long) ?? stored[0];
+    const short = stored.find((position) => position.side === PositionSide.Short) ?? stored[0];
+    return { marginType, positionMode, longLeverage: Math.abs(long.leverage), shortLeverage: Math.abs(short.leverage) };
+  };
+
+  fetchLeverageForSymbol = async (symbol: string, fresh = false): Promise<FetchedLeverage | null> => {
+    // Phemex metadata confirmation must bypass cached rails, including while flat.
+    if (fresh && this.helperCapabilities.resolveLeverageContext === true) {
+      if (this.routesToWorker) {
+        const admitted = this.captureWorkerAdmission();
+        const args: [string, boolean] = [symbol, true];
+        const rails = await this.callWorkerForOwner(admitted, 'fetchLeverageForSymbol', ...args);
+        admitted?.('fetchLeverageForSymbol', args);
+        return rails as FetchedLeverage | null;
+      }
+      return this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
+    }
     const ready = this.capabilitiesFor('fetchLeverageForSymbol');
     const capabilities = ready instanceof Promise ? await ready : ready;
     try {

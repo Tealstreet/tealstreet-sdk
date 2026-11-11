@@ -1892,3 +1892,30 @@ test('#3300 pinned master merge c4d663622c01 retains measured ApeX Omni headroom
   assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
+
+test('#3429 Phemex current-head size has measured plus 10 KiB headroom', () => {
+  // CI run 42729630872, head a2be15368b4: web/node measured 2,125,299 bytes.
+  // Same pinned build after the shared-helper fix: web/node 2,127,824 bytes.
+  const measured = Math.max(2_125_299, 2_127_824);
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_138_112);
+  const cap = WASM_VENUE_OVERRIDES.phemex;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'phemex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'phemex'), /exceeds/);
+});
+
+test('#3429 master restage retains current measured Hyperliquid and Weex headroom', () => {
+  // Local merged head 1bb3f1352988; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  for (const [venue, measured] of [
+    ['hyperliquid', 2_238_274], ['hyperliquidspot', 2_238_274], ['weex', 1_993_725],
+  ]) {
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
+});
