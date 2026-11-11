@@ -15,6 +15,8 @@ impl ProtectedBytes for crate::delegated_memory::SecretCopy {
 /// One owner controls all provider handles, without exporting signing material.
 pub struct ResidentCopy {
     signer: Arc<ResidentSigner>,
+    #[cfg(test)]
+    test_provider: Option<Provider>,
 }
 
 struct ResidentSigner(Mutex<State>);
@@ -42,10 +44,28 @@ impl ResidentCopy {
                 signer: Some(signer),
                 deadline: None,
             }))),
+            #[cfg(test)]
+            test_provider: None,
+        }
+    }
+
+    // COSIGNED admission fixtures pass their remote provider through the probe.
+    #[cfg(test)]
+    pub(crate) fn test_provider(provider: Provider) -> Self {
+        Self {
+            signer: Arc::new(ResidentSigner(Mutex::new(State {
+                signer: None,
+                deadline: None,
+            }))),
+            test_provider: Some(provider),
         }
     }
 
     pub fn provider(&self) -> Provider {
+        #[cfg(test)]
+        if let Some(provider) = &self.test_provider {
+            return provider.clone();
+        }
         self.signer.clone()
     }
 

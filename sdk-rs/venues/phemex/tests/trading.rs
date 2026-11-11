@@ -431,6 +431,7 @@ fn explicit_stp_rejects_the_whole_batch_before_any_io() {
 #[test]
 fn unsupported_shared_commands_complete_with_error_without_io() {
     use safe_cex_engine::model::{CancelOrderRef, StpMode};
+    // Supported leverage reads are covered in leverage_context.rs.
     for unsupported in [
         Command::CancelOrdersWithSymbols {
             command: 1,
@@ -448,10 +449,6 @@ fn unsupported_shared_commands_complete_with_error_without_io() {
             command: 1,
             symbol: "BTCUSDT".into(),
             limit: Some(100),
-        },
-        Command::FetchLeverage {
-            command: 1,
-            symbol: "BTCUSDT".into(),
         },
     ] {
         let mut e = engine();

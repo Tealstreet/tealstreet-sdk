@@ -4118,6 +4118,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "rustls",
+ "ryu-js",
  "safe-cex-algo-twap",
  "safe-cex-algos",
  "safe-cex-chaser",
@@ -4237,6 +4238,7 @@ version = "0.1.0"
 dependencies = [
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venues",
  "serde",
  "serde_json",
 ]

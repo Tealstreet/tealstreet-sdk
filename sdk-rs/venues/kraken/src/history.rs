@@ -368,7 +368,7 @@ struct LedgerWire<'a> {
     #[serde(default, borrow)]
     id: Atom<'a>,
     #[serde(default, borrow)]
-    contract: Cow<'a, str>,
+    contract: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
     info: Cow<'a, str>,
     #[serde(borrow)]
@@ -783,9 +783,10 @@ impl Kraken {
         } else {
             &row.booking_uid.0
         };
+        let contract = row.contract.as_deref().unwrap_or_default();
         // Count native cash and position rows before filtering. Execution IDs
         // repeat across those legs and cannot be the paging identity.
-        let identity = format!("{id}|{}|{}", row.asset, row.contract);
+        let identity = format!("{id}|{}|{contract}", row.asset);
         if id.is_empty() || !request.observe(cx, time, &identity)? {
             return if id.is_empty() {
                 request.decode_reason = Some(HistoryDecodeReason::Identity);
@@ -794,10 +795,10 @@ impl Kraken {
                 Ok(())
             };
         }
-        if !row.asset.is_empty() && row.asset.eq_ignore_ascii_case(&row.contract) {
+        if !row.asset.is_empty() && row.asset.eq_ignore_ascii_case(contract) {
             return Ok(());
         }
-        let symbol = row.contract.to_ascii_uppercase();
+        let symbol = contract.to_ascii_uppercase();
         if !request.within(time, &symbol) {
             return Ok(());
         }

@@ -166,7 +166,7 @@ async fn admitted_reconnect_resets_retention_and_another_user_does_not() {
                         "B",
                         8,
                         ("synthetic-token".into(), u64::MAX),
-                        &outbox
+                        &|_| outbox.clone()
                     )
                     .is_empty()
             );
@@ -176,7 +176,7 @@ async fn admitted_reconnect_resets_retention_and_another_user_does_not() {
                 "A",
                 9,
                 ("synthetic-token".into(), u64::MAX),
-                &outbox,
+                &|_| outbox.clone(),
             );
             assert_eq!(resumed.len(), 1);
             advance(RETAIN).await;

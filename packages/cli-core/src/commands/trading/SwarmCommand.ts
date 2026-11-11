@@ -3,7 +3,8 @@ import { CommandCategory, type CommandContext, type CommandResult } from '../Com
 import { prepareCliOrder } from '../../order/prepareCliOrder';
 import { OrderSide, OrderType, OrderTimeInForce, type PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 import { adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { amountPrecisionOf } from '../../utils/marketPrecision';
+import { nativeAmountRules } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
+import { assertCloseLikeOrderAmount } from '@tealstreet/script-api-core/src/order/orderPricing';
 
 /**
  * `swarm <side> <size> into <count> [reduce] [irregular]` — fire N
@@ -143,7 +144,8 @@ export class SwarmCommand extends TradingBaseCommand {
       return this.error(`Market not found for ${symbol}`);
     }
 
-    const lotStep = amountPrecisionOf(market);
+    assertCloseLikeOrderAmount(totalContracts, { type: OrderType.Market, reduceOnly }, market, exchange.name);
+    const lotStep = nativeAmountRules(market, exchange.name).step;
     const slices = this.distribute(totalContracts, count, irregular, lotStep);
     if (slices.some((s) => s <= 0)) {
       return this.error(`swarm: total size too small to split into ${count} (precision ${lotStep})`);

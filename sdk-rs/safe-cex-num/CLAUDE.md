@@ -6,6 +6,11 @@ observations separate from body-specific non-decoder classifications. The
 numeric_output_invariant target checks native changed-bit refusals and nested
 paths; its compiling comparison fault must fail before exact restoration passes.
 
+`native_position_size` follows the nullable SDK sizing contract and returns
+`Option<f64>`: consistent native evidence wins, otherwise absent native derives;
+conflicting/unavailable evidence is None. The selection differential compares
+20,022 independently counted cases with the actual safe-cex helper.
+
 This crate hosts shared ECMAScript compatibility helpers below services and venues.
 BuiltinReference::prototype selects the actual native parent identity in the
 same retained realm. It reads metadata rather than the shadowable `__proto__`

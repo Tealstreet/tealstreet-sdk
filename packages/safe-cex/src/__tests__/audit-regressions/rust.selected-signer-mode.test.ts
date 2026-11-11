@@ -86,7 +86,7 @@ it('a malformed explicitly configured unused PayloadSigner retains strict valida
 it.each(aliases)('%s public-mode raw intent is unchanged while native signing stays disabled', (name) => {
   const setup = new DelegatedSignerSetup(name, options({ key: '', publicDataOnly: true,
     remoteSigner: remote(), payloadSigner: () => ({ signature: 'ab'.repeat(32) }) }));
-  expect(construct(setup, name)).toMatchObject({ payloadSigner: false,
+  expect(construct(setup, name)).toMatchObject({ remoteSigning: false, payloadSigner: false,
     publicMode: { requested: true, remoteSigner: true, payloadSigner: true } });
   setup.dispose();
 });

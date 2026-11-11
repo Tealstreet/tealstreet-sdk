@@ -776,6 +776,7 @@
     "price-not-set": "Price not set",
     "order-size-exceeds-available-margin": "Order size exceeds available margin",
     "order-size-must-be-greater-than-zero": "Order size must be greater than zero",
+    "order-size-unknown-units": "Order size cannot be converted to venue units",
     "orderbook-display-mode": "Display Mode",
     "depth-chart-center-overlay": "Center Overlay Market",
     "depth-chart-scale-overlay": "Scale Overlay Market",

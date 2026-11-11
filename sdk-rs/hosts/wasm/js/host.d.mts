@@ -325,7 +325,7 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'coinbase-jws' | 'backpack-ed25519' | 'orderly-ed25519' | 'kucoin-batch' | 'kraken-sha512' | 'kraken-challenge' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'coinbase-jws' | 'backpack-ed25519' | 'orderly-ed25519' | 'kucoin-batch' | 'apexomni-batch' | 'kraken-sha512' | 'kraken-challenge' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
@@ -436,6 +436,12 @@ export interface EngineHealth {
   lastPrivateMessage: number | null;
 }
 
+/** Optional SDK helpers declared by the venue before asynchronous engine startup. */
+export interface EngineHelperCapabilities {
+  resolveLeverageContext?: boolean;
+  fetchAlgoOrders?: boolean;
+}
+
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface EngineBridgeConstruction {
   spot: boolean;
@@ -447,6 +453,7 @@ export interface EngineBridgeConstruction {
   dispatchSigning:boolean;
   /** Declared read-key policy; absent installs the read key as before. */
   readCredentials?: 'validateOnly' | 'publicRead';
+  helpers?: EngineHelperCapabilities;
 }
 
 export interface EngineConstruction {
