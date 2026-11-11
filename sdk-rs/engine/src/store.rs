@@ -586,18 +586,6 @@ impl Store {
 
     /// Mutate a row of the current ticker table; rebuild cached indexes on replacement.
     pub fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
-        self.update_ticker_with_observations_at(index, 0, update);
-    }
-
-    /// Update a known ticker and record explicitly reported fields at the same clock.
-    /// Equivalent to update_ticker_at followed by observe_ticker_fields, without
-    /// another symbol lookup or recording a changed reference timestamp twice.
-    pub fn update_ticker_with_observations_at(
-        &mut self,
-        index: u32,
-        observed: u16,
-        update: impl FnOnce(&mut Ticker),
-    ) {
         let Some(ticker) = self.tickers.get_mut(index as usize) else {
             return;
         };
@@ -617,14 +605,11 @@ impl Store {
                 mask |= 1 << bit;
             }
         }
-        let seen = mask | observed;
-        if seen != 0 {
-            self.mark_references_seen(index, seen);
-            self.mark_observations_seen(index, seen);
-        }
         if mask == 0 {
             return;
         }
+        self.mark_references_seen(index, mask);
+        self.mark_observations_seen(index, mask);
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {
@@ -1800,6 +1785,9 @@ impl Store {
         w.end();
     }
 }
+
+// Isolate the combined path so unrelated venues retain the established updater.
+mod indexed_ticker_observations;
 
 #[cfg(test)]
 mod tests {
