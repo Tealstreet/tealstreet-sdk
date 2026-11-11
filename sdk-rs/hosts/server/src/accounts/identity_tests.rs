@@ -490,7 +490,7 @@ async fn parked_holder_prevents_implicit_settings_changes_and_renamed_resume_kee
                 "u",
                 9,
                 ("synthetic-token".into(), now_ms() + 60_000),
-                &outbox,
+                &|_| outbox.clone(),
             );
             assert_eq!(resumed.len(), 1);
             assert!(Arc::ptr_eq(&resumed[0], &account));

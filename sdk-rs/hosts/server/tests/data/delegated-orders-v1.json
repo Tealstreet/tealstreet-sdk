@@ -1,0 +1,57 @@
+{
+  "key": "018bcfe5-6800-7101-8101-010101010101",
+  "createdMs": 1700000000000,
+  "fingerprint": "32f302fae521ba7323470ad9358fb542231fbf163ef167bebeb46299978f9c3f",
+  "submit": {
+    "t": "order.submit",
+    "d": {
+      "accountName": "main",
+      "instanceId": "registration",
+      "intentId": "018bcfe5-6800-7101-8101-010101010101",
+      "seq": 1,
+      "params": {
+        "symbol": "BTCUSDT",
+        "side": "buy",
+        "type": "limit",
+        "amount": 0.001,
+        "price": 50000
+      },
+      "ageMs": 0,
+      "fingerprint": "32f302fae521ba7323470ad9358fb542231fbf163ef167bebeb46299978f9c3f"
+    }
+  },
+  "ack": {
+    "t": "order.ack",
+    "d": {
+      "accountName": "main",
+      "instanceId": "registration",
+      "intentId": "018bcfe5-6800-7101-8101-010101010101",
+      "seq": 1,
+      "received": true
+    }
+  },
+  "outcome": {
+    "t": "order.outcome",
+    "d": {
+      "accountName": "main",
+      "instanceId": "registration",
+      "intentId": "018bcfe5-6800-7101-8101-010101010101",
+      "seq": 1,
+      "outcomeSeq": 1,
+      "outcome": "placed",
+      "venueOrderId": "native-one",
+      "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+      "error": null
+    }
+  },
+  "cancelQueued": {
+    "t": "order.cancelQueued",
+    "d": {
+      "accountName": "main",
+      "instanceId": "registration",
+      "intentId": "018bcfe5-6800-7101-8101-010101010101",
+      "seq": 1,
+      "fingerprint": "32f302fae521ba7323470ad9358fb542231fbf163ef167bebeb46299978f9c3f"
+    }
+  }
+}

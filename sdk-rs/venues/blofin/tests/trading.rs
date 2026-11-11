@@ -1103,7 +1103,9 @@ fn settings_rejections_preserve_known_leverage() {
     assert_eq!(h.e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
 }
 #[test]
-fn split_sizing_preserves_native_quantity_and_stays_below_maximum() {
+fn legacy_split_sizing_uses_rounded_equal_lots_and_native_remainder() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 1000.9 of requested 1001); kept for exact TS parity per Sam's decision
+    // TS:2199-2220 yields 333.3 * 3 + 1.
     let mut h = Harness::new();
     h.seed();
     place(
@@ -1118,11 +1120,13 @@ fn split_sizing_preserves_native_quantity_and_stays_below_maximum() {
         .iter()
         .map(|p| p["size"].as_str().unwrap().parse::<f64>().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(
-        sizes.iter().map(|s| (s * 10.0).round() as u64).sum::<u64>(),
-        10010
-    );
+    assert_eq!(sizes, [333.3, 333.3, 333.3, 1.0]);
     assert!(sizes.iter().all(|s| *s <= 500.0));
+    let allocated_tenths = sizes
+        .iter()
+        .map(|size| (size * 10.0).round() as u64)
+        .sum::<u64>();
+    assert_eq!(allocated_tenths, 10_009);
 }
 #[test]
 fn grouped_normal_batches_keep_their_own_native_receipt_slices() {
@@ -1301,6 +1305,7 @@ fn cancel_one_combined_leg_recreates_only_its_sibling() {
     assert_eq!(p["slTriggerPriceType"], "mark");
     assert_eq!(p["slOrderPrice"], "54900");
 }
+
 #[test]
 fn normal_amend_preserves_brackets_before_fallback_children_exist() {
     let mut h = Harness::new();
@@ -1705,6 +1710,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
     let mut h = Harness {
         e,
         pending: vec![],
+        requests: vec![],
         actions: vec![],
         failures: vec![],
         private: SocketId(0),
@@ -2526,7 +2532,7 @@ fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
 
 // deaws2's live body.
 #[test]
-fn a_partly_succeeded_batch_with_an_already_gone_row_is_done() {
+fn a_partly_succeeded_cancel_envelope_stops_but_retains_applied_facts() {
     let mut h = Harness::new();
     h.open_private();
     h.seed();
@@ -2541,13 +2547,18 @@ fn a_partly_succeeded_batch_with_an_already_gone_row_is_done() {
     );
     h.collect();
     h.reply("cancel-batch-orders", r#"{"code":"2","msg":"Batch operation partially succeeded.","data":[{"orderId":"1000171264712","clientOrderId":"","msg":"Cancel failed as the order has been filled, triggered, canceled or does not exist.","code":"1000"},{"orderId":"1000171264711","clientOrderId":"x","msg":"Order canceled","code":"0"}]}"#);
+    // TS:2445-2463 treats every non-gone row under envelope 2 as a real failure.
+    assert!(done(&h));
+    let error = h.failures.last().unwrap();
     assert!(
-        !done(&h),
-        "{:?}",
-        h.actions
-            .iter()
-            .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
-            .count()
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
     );
+    assert!(error.elements.as_ref().unwrap().iter().all(|row| matches!(
+        row.result,
+        safe_cex_engine::write_plan::ElementResult::Applied { .. }
+    )));
     assert!(h.e.store().order("1000171264712").is_none());
 }

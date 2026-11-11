@@ -7,6 +7,8 @@ use safe_cex_native::{HttpRoute, RoutingPlan, WsRoute, WsRoutes};
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
+#[path = "delegated_negatives.rs"]
+mod delegated_negatives;
 #[path = "delegated_probe_more.rs"]
 mod more;
 
@@ -19,6 +21,7 @@ struct Fixture {
     private_reads: Arc<AtomicUsize>,
     gate: Arc<tokio::sync::Semaphore>,
     server: tokio::task::JoinHandle<()>,
+    rejected: Arc<AtomicUsize>,
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -26,12 +29,17 @@ impl Drop for Fixture {
     }
 }
 async fn fixture() -> Fixture {
+    fixture_with_auth(false).await
+}
+async fn fixture_with_auth(authenticate: bool) -> Fixture {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let code = Arc::new(AtomicUsize::new(0));
     let private_reads = Arc::new(AtomicUsize::new(0));
+    let rejected = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(tokio::sync::Semaphore::new(1000));
     let (codes, reads, wait) = (code.clone(), private_reads.clone(), gate.clone());
+    let proof_rejections = rejected.clone();
     let app = axum::Router::new().route("/ws", axum::routing::get(|ws: axum::extract::WebSocketUpgrade| async {
         ws.on_upgrade(|mut socket| async move {
             while let Some(Ok(frame)) = socket.recv().await {
@@ -44,11 +52,16 @@ async fn fixture() -> Fixture {
         })
     })).fallback(move |uri: Uri, headers: HeaderMap| {
         let (codes, reads, wait) = (codes.clone(), reads.clone(), wait.clone());
+        let rejected = proof_rejections.clone();
         async move {
             if headers.contains_key("x-bapi-api-key") {
                 assert!(headers.contains_key("x-bapi-sign"));
                 reads.fetch_add(1, Ordering::SeqCst);
                 wait.acquire().await.unwrap().forget();
+                if authenticate && !delegated_negatives::signed_read_is_valid(&uri, &headers) {
+                    rejected.fetch_add(1, Ordering::SeqCst);
+                    return axum::Json(json!({"retCode":10003,"retMsg":"synthetic refusal","result":{}})).into_response();
+                }
                 let code = codes.load(Ordering::SeqCst);
                 if code != 0 { return axum::Json(json!({"retCode":code,"retMsg":"synthetic refusal","result":{}})).into_response(); }
             }
@@ -94,6 +107,7 @@ async fn fixture() -> Fixture {
         private_reads,
         gate,
         server,
+        rejected,
     }
 }
 fn payload(session: &mut Session, id: Option<&str>) -> InitPayload {

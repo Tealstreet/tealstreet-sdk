@@ -35,7 +35,7 @@ async fn admitted(
     assert!(session.joined.contains_key(name));
 }
 
-async fn frame(sent: &mut tokio::sync::mpsc::Receiver<String>, op: &str) -> Value {
+async fn frame(sent: &mut crate::out::Receiver, op: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
@@ -48,11 +48,7 @@ async fn frame(sent: &mut tokio::sync::mpsc::Receiver<String>, op: &str) -> Valu
     .expect("expected account frame")
 }
 
-async fn snapshot(
-    session: &mut Session,
-    sent: &mut tokio::sync::mpsc::Receiver<String>,
-    label: &str,
-) -> Value {
+async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver, label: &str) -> Value {
     let account = session.joined[label].account.clone();
     tokio::time::timeout(Duration::from_secs(5), async {
         while !crate::session::account_loaded(&account.handle).await {

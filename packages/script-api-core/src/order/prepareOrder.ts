@@ -3,6 +3,7 @@ import type { ExchangeName, Market, Order, PlaceOrderOpts, Position, Ticker } fr
 import { OrderType } from '@tealstreet/safe-cex/src/types';
 import { downSizeReduceOrder } from './downSizeReduceOrder';
 import {
+  assertCloseLikeOrderAmount,
   assertMinimumPrice,
   isStopLikeOrderType,
   roundMarketOrderSize,
@@ -60,9 +61,10 @@ export const prepareOrder = <T extends { symbol: string; type: OrderType; amount
   { market, exchangeName }: OrderPolicyContext,
 ): PlaceOrderOpts => {
   const reduceOnly = (opts as { reduceOnly?: boolean }).reduceOnly === true;
+  assertCloseLikeOrderAmount(opts.amount, opts, market, exchangeName);
   const isReduceOnlyMarket = reduceOnly && opts.type === OrderType.Market;
   const amount = isReduceOnlyMarket
-    ? roundMarketOrderSize(opts.amount, market, { reduceOnly: true })
+    ? roundMarketOrderSize(opts.amount, market, { reduceOnly: true, exchangeName })
     : roundOrderSize(opts.amount, market, exchangeName);
 
   // A stop-like order with size 0 is a Full ("infinity") TP/SL covering the
@@ -70,7 +72,9 @@ export const prepareOrder = <T extends { symbol: string; type: OrderType; amount
   const infinityStop = opts.amount === 0 && isStopLikeOrderType(opts.type);
   if (infinityStop) {
     if (!exchangeName || !venueSupportsInfinityStops(exchangeName)) {
-      throw new ScriptValidationError(`'${exchangeName ?? 'this venue'}' does not support Full (Infinity) TP/SL orders`);
+      throw new ScriptValidationError(
+        `'${exchangeName ?? 'this venue'}' does not support Full (Infinity) TP/SL orders`,
+      );
     }
   } else if (!Number.isFinite(amount) || amount <= 0) {
     throw new ScriptValidationError(
@@ -89,7 +93,9 @@ export const prepareOrder = <T extends { symbol: string; type: OrderType; amount
 
   const source = opts as Record<string, unknown>;
   if (source.impliedVolatility !== undefined && !market.option) {
-    throw new ScriptValidationError(`impliedVolatility applies only to option markets, and '${opts.symbol}' is not one`);
+    throw new ScriptValidationError(
+      `impliedVolatility applies only to option markets, and '${opts.symbol}' is not one`,
+    );
   }
   const out: Record<string, unknown> = { ...source, amount };
   // Every price-bearing field rounds to the venue tick, including a standalone
@@ -123,6 +129,7 @@ export const clampReduceOnlyOrder = (
   const price = order.price || ticker?.mark || ticker?.last || 0;
   if (!price) return order;
   return downSizeReduceOrder(market, order, positions as Position[], restingOrders, price, {
+    exchangeName,
     locksPositionSize: venueReduceOrdersLockPositionSize(exchangeName),
   });
 };

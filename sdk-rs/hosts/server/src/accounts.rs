@@ -408,13 +408,32 @@ impl Account {
         }
     }
 
+    fn live_outboxes(&self) -> Vec<Outbox> {
+        self.holders
+            .lock()
+            .unwrap()
+            .by_id
+            .values()
+            .flatten()
+            .map(|live| live.outbox.clone())
+            .collect()
+    }
+
     /// Signing and the proxy token follow this socket, which already holds the account.
     pub fn sign_through_socket(&self, id: u64, outbox: Outbox, token: Option<(String, u64)>) {
         self.hold(id, Live { outbox, token });
     }
 
-    pub(crate) fn update_reply_outbox(&self, id: u64, outbox: Outbox) {
-        if let Some(Some(live)) = self.holders.lock().unwrap().by_id.get_mut(&id) {
+    pub(crate) fn update_reply_outbox(&self, id: u64, outbox: Outbox, label: &str) {
+        let mut holders = self.holders.lock().unwrap();
+        if let Some(Some(live)) = holders.by_id.get_mut(&id) {
+            live.outbox = outbox.clone();
+        }
+        if let Some(Some(live)) = holders
+            .labels
+            .get_mut(&id)
+            .and_then(|labels| labels.get_mut(label))
+        {
             live.outbox = outbox;
         }
     }
@@ -449,6 +468,8 @@ struct Parked {
     accounts: Vec<(Arc<Account>, u64)>,
     alias_until: Option<u64>,
 }
+
+type AccountEntries = HashMap<(String, String), Arc<Account>>;
 
 type PendingInits = Mutex<HashMap<(String, String), InitIncarnation>>;
 
@@ -536,7 +557,7 @@ pub struct Registry {
     pub user_drains: crate::user_drain::Users,
     pub router_leases: Arc<crate::router_lease::Users>,
     pub interruptions: Arc<crate::interruption::Notices>,
-    accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
+    accounts: Arc<Mutex<AccountEntries>>,
     pending_inits: PendingInits,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
@@ -566,6 +587,8 @@ pub struct Registry {
     /// Unit-test loopback routing; the normal construction and transport run unchanged.
     #[cfg(test)]
     construction_test_plans: HashMap<String, RoutingPlan>,
+    #[cfg(test)]
+    e2e_venue: Option<crate::delegated_e2e_io::MockVenue>,
 }
 
 /// A chart's forced reset repairs its upstream stream at most this often per account and topic.
@@ -787,9 +810,9 @@ pub(crate) fn routing_plan(init: &InitPayload, public_only: bool) -> Result<Rout
 /// differing fields stay readable). Two inits that would build the same engine
 /// share it, whatever else differs between the clients that sent them: a field
 /// another venue reads, a default sent explicitly, flags resolving alike.
-/// Hands a disposed account's stop notices and chase ends to one socket. A later,
+/// Hands a disposed account's stop notices and chase ends to its sockets. A later,
 /// fuller `Kept` repeats what came before it, so only what is new is sent.
-fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
+fn tell_through(account: &Account, outboxes: Vec<Outbox>) -> crate::algos::StopNotice {
     let name = account.name.clone();
     let told = Mutex::new((0, 0));
     Box::new(move |kept: crate::algos::Kept| {
@@ -800,7 +823,9 @@ fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
         };
         *told = (kept.notices.len(), kept.ends.len());
         for frame in new.frames(&name) {
-            outbox(frame);
+            for outbox in &outboxes {
+                outbox(frame.clone());
+            }
         }
     })
 }
@@ -889,7 +914,7 @@ impl Registry {
             user_drains: crate::user_drain::Users::default(),
             router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
             interruptions: Default::default(),
-            accounts: Mutex::default(),
+            accounts: Arc::default(),
             pending_inits: Mutex::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
@@ -910,6 +935,8 @@ impl Registry {
             repairs: Mutex::default(),
             #[cfg(test)]
             construction_test_plans: HashMap::new(),
+            #[cfg(test)]
+            e2e_venue: None,
         }
     }
 
@@ -1430,7 +1457,7 @@ impl Registry {
                 &replaced,
                 Disposal::Replaced,
                 "account replaced by a newer init",
-                Some(tell_through(&replaced, outbox)),
+                Some(tell_through(&replaced, replaced.live_outboxes())),
             );
         }
         Ok(account)
@@ -1544,6 +1571,8 @@ impl Registry {
             .cloned()
             .unwrap_or(plan);
         let authority = authority.clone();
+        #[cfg(test)]
+        let e2e_venue = self.e2e_venue.clone();
         let placed = self.threads.place(move |placement| {
             if let Err(error) = authority.check() {
                 let _ = spawned.send(Err(error));
@@ -1551,6 +1580,8 @@ impl Registry {
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
+            #[cfg(test)]
+            let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
             let result =
                 safe_cex_native::spawn_venue_account(&venue, &options, transport, signer, config)
                     .map(|(handle, task)| {
@@ -1729,7 +1760,7 @@ impl Registry {
         ))
     }
 
-    /// The stop notice for a session that resumed `from`, if it is still owed one.
+    /// The stop notice for the same fingerprint and session resumed `from`, if still owed.
     /// Another session's init must not cost the owner it, and a session that can't
     /// be the owner (a reopened tab, a second device) is told once between them.
     pub fn take_notice(
@@ -1759,17 +1790,27 @@ impl Registry {
     /// Where the algo host leaves a notice for a browser that is gone.
     pub(crate) fn keep_notice(&self, account: &Account, owner: &str) -> crate::algos::StopNotice {
         let notices = self.notices.clone();
-        let key = (
-            account.user.clone(),
-            account.registry_name().to_owned(),
-            account.fingerprint.clone(),
-        );
+        let accounts = Arc::downgrade(&self.accounts);
+        let key = (account.user.clone(), account.registry_name().to_owned());
+        let fingerprint = account.fingerprint.clone();
+        let notice_key = (key.0.clone(), key.1.clone(), fingerprint.clone());
         let owner = owner.to_owned();
         Box::new(move |kept| {
+            let Some(accounts) = accounts.upgrade() else {
+                return;
+            };
+            // Keep the ownership comparison and retained insertion atomic with replacement.
+            let accounts = accounts.lock().unwrap();
+            if accounts
+                .get(&key)
+                .is_some_and(|current| current.fingerprint != fingerprint)
+            {
+                return;
+            }
             let mut notices = notices.lock().unwrap();
             notices.retain(|_, record| record.at.elapsed() < NOTICE_TTL);
             notices.insert(
-                key.clone(),
+                notice_key.clone(),
                 StopRecord {
                     kept,
                     at: tokio::time::Instant::now(),
@@ -1832,15 +1873,7 @@ impl Registry {
             },
         );
         let name = account.name.clone();
-        let live: Vec<Outbox> = account
-            .holders
-            .lock()
-            .unwrap()
-            .by_id
-            .values()
-            .flatten()
-            .map(|live| live.outbox.clone())
-            .collect();
+        let live = account.live_outboxes();
         for outbox in &live {
             outbox(crate::envelope::algo_error(
                 &name,
@@ -1889,7 +1922,7 @@ impl Registry {
             account,
             disposal,
             "its key or connection settings changed",
-            Some(tell_through(account, outbox)),
+            Some(tell_through(account, vec![outbox])),
         );
     }
 
@@ -2236,7 +2269,7 @@ impl Registry {
         user: &str,
         holder: u64,
         token: (String, u64),
-        outbox: &Outbox,
+        outbox: &dyn Fn(&str) -> Outbox,
     ) -> Vec<Arc<Account>> {
         let mut parked = self.parked.lock().unwrap();
         let Some(entry) = parked.get_mut(resume_id) else {
@@ -2262,6 +2295,7 @@ impl Registry {
                     labels.into_keys().collect()
                 };
                 for label in labels {
+                    let outbox = outbox(&label);
                     let routed = if account.identity.is_some() {
                         let (outbox, label) = (outbox.clone(), label.clone());
                         Arc::new(move |text| {
@@ -2326,6 +2360,45 @@ pub mod testing {
         Arc::get_mut(account)
             .expect("identity is bound before sharing the test account")
             .identity = identity;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn e2e_registry(
+        user: &str,
+        venue: crate::delegated_e2e_io::MockVenue,
+    ) -> Arc<Registry> {
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        registry.e2e_venue = Some(venue);
+        // A missing override must fail locally rather than reach a venue.
+        let http = safe_cex_native::HttpRoute {
+            prefix: "in-memory://delegated-e2e".into(),
+            ..Default::default()
+        };
+        let ws = safe_cex_native::WsRoute {
+            host: Some("in-memory://delegated-e2e".into()),
+            ..Default::default()
+        };
+        registry.construction_test_plans.insert(
+            user.into(),
+            RoutingPlan {
+                http: http.clone(),
+                public_http: Some(http.clone()),
+                read_http: Some(http.clone()),
+                read_public_http: Some(http.clone()),
+                public_read_http: Some(http),
+                ws: safe_cex_native::WsRoutes {
+                    public: ws.clone(),
+                    private: ws.clone(),
+                    business: ws,
+                },
+                ..Default::default()
+            },
+        );
+        Arc::new(registry)
     }
 
     #[cfg(test)]
@@ -3639,7 +3712,8 @@ pub(crate) mod tests {
                 registry.park("r1".into(), "u", vec![(account, 7)]);
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let outbox: Outbox = Arc::new(|_| true);
-                let resumed = registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &outbox);
+                let resumed =
+                    registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &|_| outbox.clone());
                 assert_eq!(resumed.len(), 1);
                 tokio::time::sleep(Duration::from_secs(150)).await;
                 assert!(
@@ -3672,7 +3746,7 @@ pub(crate) mod tests {
                 let token = ("t".to_owned(), u64::MAX);
                 assert!(
                     registry
-                        .resume("r1", "u", 8, token.clone(), &outbox)
+                        .resume("r1", "u", 8, token.clone(), &|_| outbox.clone())
                         .is_empty(),
                     "nothing is parked while the old socket looks open"
                 );
@@ -3686,7 +3760,7 @@ pub(crate) mod tests {
                     .await
                     .unwrap();
                 old.await.unwrap();
-                let resumed = registry.resume("r1", "u", 8, token, &outbox);
+                let resumed = registry.resume("r1", "u", 8, token, &|_| outbox.clone());
                 assert_eq!(resumed.len(), 1, "resumed, not re-inited");
                 assert!(Arc::ptr_eq(&resumed[0], &account));
                 assert_eq!(account.holders.lock().unwrap().signing, Some(8));
@@ -4458,3 +4532,7 @@ mod delegated_accounts_tests;
 #[cfg(test)]
 #[path = "delegated_construction_tests.rs"]
 mod delegated_construction_tests;
+
+#[cfg(test)]
+#[path = "accounts/cosigned_admission_test_support.rs"]
+mod cosigned_admission_test_support;

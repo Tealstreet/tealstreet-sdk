@@ -46,6 +46,14 @@ pub struct ResidentCopy {
     identities: safe_cex_engine::signing::Identities,
 }
 impl ResidentCopy {
+    #[cfg(test)]
+    pub(crate) fn test_provider(provider: Provider) -> Self {
+        Self {
+            provider,
+            identities: Default::default(),
+        }
+    }
+
     /// Trusted host ingress, as with a remote account's provider.
     pub fn provider(&self) -> Provider {
         self.provider.clone()

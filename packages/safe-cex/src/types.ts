@@ -18,6 +18,7 @@ export type { StoreDataLoaded } from './generated/StoreDataLoaded';
 export type { StoreUpdateIds } from './generated/StoreUpdateIds';
 import type { FetchedLeverage } from './generated/FetchedLeverage';
 export type { FetchedLeverage } from './generated/FetchedLeverage';
+export type { PositionSettings } from './generated/PositionSettings';
 export type { DisplayedMargin } from './generated/DisplayedMargin';
 
 import type { ExchangeErrorKind } from './commandOutcome';
@@ -438,6 +439,7 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'kraken-sha512'
       | 'apexomni-base64'
+      | 'apexomni-batch'
       | 'bitunix-double-sha256'
       | 'backpack-ed25519'
       | 'orderly-ed25519'
