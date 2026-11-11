@@ -107,8 +107,11 @@ in-flight or acknowledged intent becomes `unknown`. Direct close also changes
 those retained entries to unknown immediately while fencing later work and callbacks.
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send
-adapter returns true only after socket handoff; false or a throw must guarantee
-neither a handoff nor buffering for a later connection. Queue cancellation after handoff remains unknown until a router
+adapter returns true only after socket handoff; only an explicit false guarantees
+neither handoff nor buffering for a later connection. A throw or any other non-true
+return supplies no such evidence: it becomes unknown immediately, loses its replay
+proof, and is never automatically submitted again, including after reconnect or restore.
+Queue cancellation after handoff remains unknown until a router
 receipt positively establishes non-forwarding. Legacy pending cancellations restore
 as unknown. Cancellation or expiry during a declined first send remains terminal
 and is published; a declined retry cannot erase a previous handoff.
@@ -130,7 +133,11 @@ see `docs/plans/callers/delegated-order-frames.md`. This module does not select 
 signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
 
 The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
-records. Unknown work, including pending queue cancellation, is retained for 24
+records. The in-memory completed index refers to the same objects in the live
+intent map and credits only durably completed records. Retirement removes both
+entries through one private helper. Capacity accounting and compaction prune
+stale index entries before use, so a stale entry cannot release capacity or
+participate in sorting. Unknown work, including pending queue cancellation, is retained for 24
 hours from its UUIDv7 Unix creation time, using the injected Unix clock across
 reloads (clock rollback can extend retention). At expiry it remains `unknown`,
 gains `retentionExpired: true`, stops pending queue cancellation, and emits the
@@ -389,6 +396,11 @@ binary lifecycle fixtures have separate evidence scopes. See phase 9 of
 merely because its name is registered in Rust.
 
 ## Exchange event listeners
+
+`utils/diagnosticRedaction.ts` makes detached diagnostic copies before console,
+log events, telemetry or retained diagnostic buffers receive them. It shares the
+HTTP diagnostic string policy; live command and market messages stay untouched.
+Its parity fixtures are pinned to the host diagnostic contract at `6fde9450cf`.
 
 `BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
 One throwing listener cannot starve later listeners for the same event; errors

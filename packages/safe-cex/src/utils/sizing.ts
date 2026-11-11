@@ -2,6 +2,7 @@ import { handleRoundingError } from '@tealstreet/math/src/handleRoundingError';
 import { roundToDefaultPrecision } from '@tealstreet/math/src/roundToDefaultPrecision';
 import { roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { Market } from '../types';
+import { diagnosticConsole } from './diagnosticRedaction';
 import { nativeAmountRules } from './nativeAmountRules';
 import { adjust } from './safe-math';
 
@@ -61,7 +62,7 @@ export const convertMarginToSizeCurrency = (
   // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
-      console.error('btcPrice is required for quanto markets');
+      diagnosticConsole.error('btcPrice is required for quanto markets');
       return 0;
     }
     const marginInQuote = handleRoundingError(margin * btcPrice);
@@ -79,7 +80,7 @@ export const convertSizeToMarginCurrency = (size: number, market: Market, price:
   // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
-      console.error('btcPrice is required for quanto markets');
+      diagnosticConsole.error('btcPrice is required for quanto markets');
       return 0;
     }
     const sizeInUsd = convertFromNativeSizeToQuote(size, market, price);
@@ -97,7 +98,7 @@ export const convertFromMarginToQuote = (margin: number, market: Market, price?:
   // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
-      console.error('btcPrice is required for quanto markets');
+      diagnosticConsole.error('btcPrice is required for quanto markets');
       return 0;
     }
     const marginInQuote = handleRoundingError(margin * btcPrice);
@@ -106,7 +107,7 @@ export const convertFromMarginToQuote = (margin: number, market: Market, price?:
   // END quanto support code
   if (market.isInverse) {
     if (!price) {
-      console.error('price is required for inverse markets');
+      diagnosticConsole.error('price is required for inverse markets');
       return 0;
     }
     return handleRoundingError(margin * price);
@@ -154,7 +155,7 @@ export const calculatePnlInMarginCurrency = (
   // Quanto (BTC-margined) support code; no current venue lists quanto markets
   if (market.info?.isQuanto) {
     if (!btcPrice) {
-      console.error('btcPrice is required for quanto markets');
+      diagnosticConsole.error('btcPrice is required for quanto markets');
       return 0;
     }
     longPnl = (units * (exitPrice - entryPrice)) / btcPrice;

@@ -18,6 +18,7 @@ import {
   setToken,
 } from './proxyTokenClient';
 import { isTokenExpired } from './proxyTokenExpiry';
+import { diagnosticConsole } from './utils/diagnosticRedaction';
 
 export { isTokenExpired } from './proxyTokenExpiry';
 export { lastProxyKeyFailure } from './proxyTokenClient';
@@ -152,7 +153,7 @@ export async function getProxyToken(): Promise<string> {
       return token;
     } catch (err) {
       if (generation !== tokenGeneration) throw new ProxyTokenUnavailableError('proxy token session changed');
-      console.error('[accessToken] Failed to get token via SharedWorker:', err);
+      diagnosticConsole.error('[accessToken] Failed to get token via SharedWorker:', err);
       return currentProxyToken;
     }
   }

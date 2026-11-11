@@ -3,6 +3,7 @@ import type { ExchangeName, RemoteSigner, RemoteSignerRequest, RemoteSignerRespo
 
 import axios, { AxiosHeaders, InternalAxiosRequestConfig } from 'axios';
 import { nanoid } from 'nanoid';
+import { diagnosticConsole } from './utils/diagnosticRedaction';
 
 import { tryParseJson } from './utils/tryParseJson';
 import { markRestSigned } from './utils/venueRestDiagnostics';
@@ -241,7 +242,7 @@ export const createRemoteSigningAdapter = (
 
     // Integrity check: warn if the signed URL has params baked in but params object is also set
     if (signedConfig.url?.includes('?') && signedConfig.params && Object.keys(signedConfig.params).length > 0) {
-      console.warn(
+      diagnosticConsole.warn(
         `[remoteSigningAdapter] ${exchangeName}: URL has query params AND params object set — possible double-serialization`,
         { url: signedConfig.url, params: signedConfig.params },
       );

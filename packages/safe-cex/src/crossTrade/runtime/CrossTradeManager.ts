@@ -3,6 +3,7 @@ import type { Market } from '../../types';
 import type { CrossTradeConfig, CrossTradeCopier } from '../types';
 
 import { OrderSide, PositionSide } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { loop } from '../../utils/loop';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { convertFromBaseSizeToNative } from '../../utils/sizing';
@@ -11,7 +12,7 @@ import { getCopierSymbolFromMaster } from '../getCopierSymbolFromMaster';
 import { getCopierWeightRatio } from '../getCopierWeightRatio';
 import { getMasterSymbolFromCopier } from '../getMasterSymbolFromCopier';
 
-const debug = (...args: unknown[]) => console.log('[CrossTradeManager]', ...args);
+const debug = (...args: unknown[]) => diagnosticConsole.log('[CrossTradeManager]', ...args);
 
 // Keep canonical quantities unrounded until the order's lot-step conversion.
 const baseSizeFromNative = (native: number, market: Market, price: number): number | null => {
@@ -90,7 +91,7 @@ export class CrossTradeManager {
     const holdMs = Math.min(UNCERTAIN_HOLD_MS * 2 ** (entry.holds - 1), UNCERTAIN_HOLD_MAX_MS);
     entry.mutedUntil = Date.now() + holdMs;
     this._failures.set(key, entry);
-    console.warn('[CrossTrade] holding after an uncertain placement', { source: 'cross-trade', symbol, holdMs });
+    diagnosticConsole.warn('[CrossTrade] holding after an uncertain placement', { source: 'cross-trade', symbol, holdMs });
   }
 
   private _recordSuccess(account: string, symbol: string) {
@@ -124,7 +125,7 @@ export class CrossTradeManager {
       return;
     }
     // A breadcrumb per attempt: these orders have no user action behind them in the page.
-    console.info('[CrossTrade] placing', {
+    diagnosticConsole.info('[CrossTrade] placing', {
       source: 'cross-trade',
       exchange: this._getExchange(account)?.name,
       symbol,
@@ -526,7 +527,7 @@ export class CrossTradeManager {
       try {
         await Promise.all(crossTradeConfigs.map(processConfig));
       } catch (e) {
-        console.error('Error in cross trade manager', e);
+        diagnosticConsole.error('Error in cross trade manager', e);
       }
 
       if (!this._loop || newLoop.isDisposed) return;
