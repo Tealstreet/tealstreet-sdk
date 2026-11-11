@@ -2037,7 +2037,6 @@ impl BitgetFutures {
 
     fn algo_payload(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Payload, String> {
         let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
-        let (plan, size) = self.plan_size(cx, o)?;
         let mut p = self.classic(cx, &o.symbol)?;
         p.client_oid = Some(mint(cx)?);
         p.reduce_only = (!cx.store.hedged()).then_some("YES");
@@ -2066,6 +2065,7 @@ impl BitgetFutures {
             ));
             p.callback_ratio = Some(num::format(ratio));
         } else {
+            let (plan, size) = self.plan_size(cx, o)?;
             p.plan_type = Some(plan);
             p.size = (size > 0.0).then(|| num::format(size));
             p.hold_side = Some(if cx.store.hedged() {
