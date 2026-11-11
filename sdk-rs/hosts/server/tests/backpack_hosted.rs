@@ -478,7 +478,7 @@ async fn backpack_private_payload_and_undeclared_venue_stay_refused() -> Result 
     assert!(
         safe_cex_remote_signer::remote_account(
             device.link,
-            "mexc",
+            "undeclared-fixture",
             None,
             r#"{"key":"fixture-key"}"#
         )
