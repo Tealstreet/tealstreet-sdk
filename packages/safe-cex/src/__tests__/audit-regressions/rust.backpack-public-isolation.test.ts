@@ -53,13 +53,14 @@ it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
 });
 
 it('backpack_private_payload_and_undeclared_venue_stay_refused', () => {
-  const venues: ExchangeName[] = ['backpack', 'weex'];
+  const venues: ExchangeName[] = ['backpack', 'weex', 'krakenspot'];
   for (const name of venues) {
     const create = () => new RustEngineExchange(name, { key: 'fixture-key', secret: '', payloadSigner: vi.fn() }, new DefaultStore());
     expect(create).toThrow();
     try { create(); } catch (error) {
       expect(error).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       if (name === 'backpack') expect(error).toHaveProperty('message', 'Backpack requires RemoteSigner Ed25519 custody');
+      if (name === 'krakenspot') expect(error).toHaveProperty('message', expect.stringContaining('delegated signing is unsupported in this build'));
     }
   }
 });
