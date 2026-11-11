@@ -7,6 +7,23 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
+test('#3317 Bybit throughput profile retains measured headroom for every alias', () => {
+  // 0c8e04fe5a, pinned Rust 1.99.0/bindgen 0.2.129/Binaryen 132 build.
+  const web = 2_483_240, node = 2_483_240;
+  const minimumCap = 2_494_464;
+  assert.equal(minimumCap, Math.ceil((Math.max(web, node) + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'bybit');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(web, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(node, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
 // #3317 run 42703052461 at 5d04ddb28ab (CI merge 46c64a76e282 has the identical tree).
 // Web sizes come from family jobs; node sizes were re-measured from sealed CI artifacts.
 for (const [family, aliases, web, node, minimumCap] of [
