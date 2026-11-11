@@ -2,6 +2,7 @@ import type { TwapWorkerContext } from '../twap/TwapOwner';
 
 import { Exchange } from '../../exchanges/base';
 import { ExchangeName } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
@@ -117,7 +118,7 @@ export abstract class BaseHandler {
 
           if (shouldReport) {
             const msg = `Markets still not loaded after ${PENDING_TIMEOUT_MS / 1000}s, keeping ${this._pendingUntilMarkets.length} pending subscriptions until they load`;
-            console.error(`[${this.constructor.name}] ${msg}`);
+            diagnosticConsole.error(`[${this.constructor.name}] ${msg}`);
             const error = new Error(msg);
             error.name = 'MarketsNotLoadedError';
             this._ctx.postMessage({
@@ -180,7 +181,7 @@ export abstract class BaseHandler {
     const waitedMs = this._firstPendingAt === null ? 0 : Date.now() - this._firstPendingAt;
     if (this._pendingReported) {
       const dropped = this._droppedPending ? `, ${this._droppedPending} oldest dropped past the bound` : '';
-      console.info(
+      diagnosticConsole.info(
         `[${this.constructor.name}] Markets loaded: applied ${this._pendingUntilMarkets.length} pending subscriptions after ${Math.floor(waitedMs / 1000)}s${dropped}`,
       );
     }

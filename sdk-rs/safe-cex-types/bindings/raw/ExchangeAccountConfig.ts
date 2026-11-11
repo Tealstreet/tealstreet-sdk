@@ -95,6 +95,11 @@ grvtSignerAddress?: string,
  */
 grvtTradingAccountId?: string, 
 /**
+ * Hosted CDP key algorithm; local custody infers it from key material.
+ * @ts-mutable
+ */
+coinbaseJwtAlgorithm?: "es256" | "edDsa", 
+/**
  * @ts-mutable
  */
 tealstreetProxy?: boolean, 

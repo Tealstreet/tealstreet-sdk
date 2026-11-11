@@ -4,6 +4,7 @@ mod account_wire;
 mod history;
 mod identity;
 mod income;
+mod leverage;
 mod public_candles;
 mod public_reads;
 mod public_trades;
@@ -207,6 +208,10 @@ impl PhemexPerpetuals {
     fn command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
+            return;
+        }
+        if let Command::FetchLeverage { symbol, .. } = command {
+            self.fetch_leverage(cx, symbol);
             return;
         }
         let Some(command) = self.trade_command(cx, command) else {
@@ -460,7 +465,13 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
-    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        _: f64,
+        _: &Pending,
+        response: Response<'_>,
+    ) {
         self.observe_rate_limit(now, &response);
     }
 
