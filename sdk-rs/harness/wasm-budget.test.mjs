@@ -1899,3 +1899,36 @@ test('#3391 (run 42561525825 at ec49cdd8159) retains measured wasm headroom', ()
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3391 run 43040714236 at 86083b569b50 retains exact-head measured wasm headroom', () => {
+  for (const [family, measured, job] of [
+    ['asterdex', 2_202_568, '130592610683'],
+    ['backpack', 2_042_111, '130592610542'],
+    ['binance', 2_275_818, '130592610355'],
+    ['bitrue', 1_914_290, '130592610293'],
+    ['bitunix', 1_931_905, '130592610314'],
+    ['blofin', 2_074_912, '130592610589'],
+    ['bybit', 2_334_515, '130592610614'],
+    ['coinbase', 2_109_666, '130592610708'],
+    ['cryptocom', 1_809_034, '130592610731'],
+    ['grvt', 1_993_609, '130592610826'],
+    ['kucoinspot', 2_469_164, '130592610751'],
+    ['lighter', 2_138_905, '130592610584'],
+    ['mexc', 1_932_648, '130592610566'],
+    ['okx', 2_057_769, '130592610711'],
+    ['orderly', 1_775_270, '130592610851'],
+    ['paradex', 2_307_308, '130592610816'],
+  ]) {
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const siblings = Object.keys(WASM_VENUE_OVERRIDES).filter(venue => venueFamily(venue) === family);
+    assert.ok(siblings.length > 0, family);
+    for (const venue of siblings) {
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= required, `${venue}: CI job ${job} measured ${measured}; needs ${required}`);
+      assert.equal(cap, WASM_VENUE_OVERRIDES[family], venue);
+      assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  }
+});
