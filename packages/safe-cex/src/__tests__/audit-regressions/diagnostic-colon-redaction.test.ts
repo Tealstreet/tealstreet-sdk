@@ -61,6 +61,8 @@ describe.each(credentialKeys)('colon-prefixed %s diagnostics', (key) => {
     expect(direct.message).not.toContain(material);
     expect(direct.stack).toBeTypeOf('string');
     expect(direct.stack).not.toContain(material);
+    expect(Object.keys(direct)).toEqual([]);
+    expect(JSON.stringify(direct)).toBe('{}');
   });
 
   it.each(consoleMethods)('never delivers material to the %s console sink', (method) => {
@@ -172,6 +174,8 @@ it('preserves ordinary colon context, Error fields and live-event identity', () 
   expect(safe.name).toBe(original.name);
   expect(safe.message).toBe(original.message);
   expect(safe.stack).toBe(original.stack);
+  expect(JSON.stringify(redactDiagnosticData(new Error('x')))).toBe('{}');
+  expect(Object.keys(redactDiagnosticData(new Error('x')))).toEqual([]);
   const emitter = new ExchangeEmitter('bybit');
   const listener = vi.fn();
   const payload = { message: message('token'), reqId: 'request-3436' };

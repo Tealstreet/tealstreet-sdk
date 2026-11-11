@@ -96,7 +96,7 @@ export function redactDiagnosticData<T>(input: T): T {
           (header && key === '1') || isCredentialKey(key) || (auth && /^(?:args|params)$/i.test(key))
             ? '[REDACTED]'
             : visit(child),
-        enumerable: true,
+        enumerable: !(value instanceof Error && /^(?:name|message|stack|cause)$/.test(key)),
         configurable: true,
         writable: true,
       });
@@ -115,7 +115,19 @@ export function redactDiagnosticData<T>(input: T): T {
 export function diagnosticText(value: unknown): string {
   try {
     const safe = redactDiagnosticData(value);
-    return typeof safe === 'string' ? safe : (JSON.stringify(safe) ?? String(safe));
+    return typeof safe === 'string'
+      ? safe
+      : (JSON.stringify(safe, (_key, child) =>
+          child instanceof Error
+            ? {
+                ...child,
+                name: child.name,
+                message: child.message,
+                stack: child.stack,
+                ...('cause' in child ? { cause: child.cause } : {}),
+              }
+            : child,
+        ) ?? String(safe));
   } catch {
     return '[unserializable diagnostic]';
   }
