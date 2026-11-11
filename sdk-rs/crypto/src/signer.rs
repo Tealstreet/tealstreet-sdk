@@ -266,19 +266,22 @@ impl DecodedIdentity {
     }
     fn install(self, signer: &mut LocalSigner, slot: &str) {
         if !self.key.is_empty() {
-            signer
-                .keys
-                .insert(KeyRef(format!("{slot}.credential")), heap_material!(self.key));
+            signer.keys.insert(
+                KeyRef(format!("{slot}.credential")),
+                heap_material!(self.key),
+            );
         }
         if !self.secret.is_empty() {
-            signer
-                .keys
-                .insert(KeyRef(format!("{slot}.signing")), heap_material!(self.secret));
+            signer.keys.insert(
+                KeyRef(format!("{slot}.signing")),
+                heap_material!(self.secret),
+            );
         }
         if let Some(passphrase) = self.passphrase {
-            signer
-                .keys
-                .insert(KeyRef(format!("{slot}.passphrase")), heap_material!(passphrase));
+            signer.keys.insert(
+                KeyRef(format!("{slot}.passphrase")),
+                heap_material!(passphrase),
+            );
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
