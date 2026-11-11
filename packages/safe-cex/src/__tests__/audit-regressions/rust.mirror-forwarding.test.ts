@@ -63,6 +63,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   fetchPositionMode: 'worker',
   fetchStpMode: 'worker',
   fetchLeverageForSymbol: 'worker',
+  resolveLeverageContext: 'worker',
   fetchSymbolMaxLeverage: 'worker',
   fetchAccountTier: 'worker',
   fetchOrderBook: 'worker',

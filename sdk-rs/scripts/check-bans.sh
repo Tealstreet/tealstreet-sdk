@@ -13,6 +13,8 @@ ban() {
   local hits
   hits=$(grep -rnE --include='*.rs' --include='Cargo.toml' "$pattern" "$@" 2>/dev/null \
     | sed -E "s/$allowed//g" | sed -E "${candle_wire:+/^hosts\/candle-server\//s/$candle_wire//g}" \
+    | sed -E "${order_contract_number:+/^hosts\/server\/src\/order_contract\.rs:[0-9]+:/s/$order_contract_number//g}" \
+    | sed -E "${order_contract_number:+/^hosts\/server\/Cargo\.toml:[0-9]+:ryu-js\.workspace = true$/d}" \
     | grep -E "$pattern" || true)
   if [[ -n $hits ]]; then
     echo "BANNED: $description"
@@ -30,7 +32,14 @@ ban 'JS-shaped value types' '\bJs[A-Z][A-Za-z]*\b|\bjs_runtime\b|\bJsValue\b' $c
 candle_wire='utf16_len|text\.encode_utf16\(\)\.count\(\)'
 ban 'UTF-16 string emulation' 'encode_utf16|from_utf16|[Uu]tf16' $crates
 candle_wire=':ryu-js\.workspace = true$|ryu_js::Buffer::new\(\)\.format_finite'
+# PR #3417 permits the number writer and contract documentation only in
+# hosts/server/src/order_contract.rs, plus its exact ryu-js.workspace = true
+# dependency line in hosts/server/Cargo.toml. Cross-language canonical JSON
+# identity requires the browser's JSON.stringify and server to hash identical
+# bytes: ECMAScript number formatting is required, not an emulation shortcut.
+order_contract_number='ryu_js::Buffer::new\(\)\.format_finite|ECMAScript'
 ban 'JS number formatting emulation' 'ryu[-_]js|js_number_string|to_precision|ECMAScript' $crates
+order_contract_number=
 candle_wire=
 ban 'emulated promises, microtasks or timers' '\bmicrotask|\bMicrotask|\bPromise[A-Z]?\b|setTimeout|setInterval' $crates
 ban 'Axios or BaseExchange facades' '\bAxios|\bBaseExchange\b|\bbase_exchange\b' $crates

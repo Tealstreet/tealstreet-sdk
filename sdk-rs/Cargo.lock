@@ -4118,6 +4118,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "rustls",
+ "ryu-js",
  "safe-cex-algo-twap",
  "safe-cex-algos",
  "safe-cex-chaser",

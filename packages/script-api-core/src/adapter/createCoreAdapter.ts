@@ -28,8 +28,10 @@ import { OrderStatus } from '@tealstreet/safe-cex/src/types';
 
 import { clampReduceOnlyOrder, prepareOrder } from '../order/prepareOrder';
 import {
+  assertCloseLikeOrderAmount,
   assertMinimumPrice,
   roundMarketCloseSize,
+  roundPercentageCloseSize,
   roundOrderPrice,
   roundOrderSizeToNearest,
 } from '../order/orderPricing';
@@ -388,7 +390,8 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           rounded.price = price;
         }
         if ('amount' in update && update.amount !== undefined) {
-          const amount = roundOrderSizeToNearest(update.amount, market);
+          assertCloseLikeOrderAmount(update.amount, order, market, exchange.name);
+          const amount = roundOrderSizeToNearest(update.amount, market, exchange.name);
           if (!Number.isFinite(amount) || amount < 0) {
             throw new ScriptValidationError(`updateOrder: invalid amount for '${order.symbol}': ${update.amount}`);
           }
@@ -413,6 +416,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       const summary = `closePosition ${opts.symbol}${opts.side ? ` ${opts.side}` : ''}`;
       const orderIds: string[] = [];
       try {
+        if (opts.amount !== undefined && opts.percent !== undefined) {
+          throw new ScriptValidationError('Set only one of close amount and percent');
+        }
         const candidates = ((host.getStore(account)?.positions ?? []) as Position[]).filter(
           (position) => position.symbol === opts.symbol && (!opts.side || position.side === opts.side),
         );
@@ -424,11 +430,20 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           // thousandfold on OKX's `DOGE-USDT-SWAP` and a fraction of the
           // position on a Bybit inverse market. `opts.amount` is already
           // native by contract; only the fallback needed converting.
-          const closeAmount = roundMarketCloseSize(opts.amount ?? nativePositionSize(position, market), market);
+          const exchange = requireExchange(account);
+          const amount =
+            opts.percent !== undefined
+              ? roundPercentageCloseSize(nativePositionSize(position, market), opts.percent, market, exchange.name)
+              : (opts.amount ?? nativePositionSize(position, market));
+          if (amount === null)
+            throw new ScriptValidationError(
+              `closePosition: native size is unknown for '${opts.symbol}'; refresh the position before closing`,
+            );
+          const closeAmount = roundMarketCloseSize(amount, market, exchange.name);
           if (!Number.isFinite(closeAmount) || closeAmount <= 0) {
             throw new ScriptValidationError(`closePosition: non-positive size for '${opts.symbol}'`);
           }
-          const placeOrder = requireMethod(requireExchange(account), 'placeOrder', account);
+          const placeOrder = requireMethod(exchange, 'placeOrder', account);
           const ids = await placeOrder({
             symbol: opts.symbol,
             side: position.side === 'long' ? 'sell' : 'buy',

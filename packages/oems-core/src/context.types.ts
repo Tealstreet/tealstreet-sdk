@@ -105,15 +105,10 @@ export interface OemsPositionRef extends OemsPositionAddress {
    * (`packages/script-api-core/src/order/positionSizing.ts`), which both
    * `getPositionNativeSize` and `getPositionNativeContracts` now call.
    *
-   * **This used to say "including the `extra.contractsNative` preference",
-   * meaning: return that value outright when it is non-zero.** That was the
-   * drift, written down as a requirement. `extra.contractsNative` can be
-   * STALE — `getPositionNativeSize.test.ts` pins a case where it reads 0.1
-   * against a real 0.4 — so the rule is `Math.max(fromExtra, derived)`, and a
-   * producer following the old wording sized every percentage close at a
-   * quarter. `resolvePlan.sizeClose` takes `full` straight from this field.
+   * Native evidence wins only when coherent with the current position; an
+   * unresolved conflict or unavailable quantity is null. Never select a maximum.
    */
-  readonly nativeContracts: number;
+  readonly nativeContracts: number | null;
   readonly entryPrice: number;
   /** From the symbol's ticker, not the position — safe-cex `Position` has no
    *  mark price of its own. */

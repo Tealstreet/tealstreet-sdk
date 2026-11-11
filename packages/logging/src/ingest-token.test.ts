@@ -110,6 +110,19 @@ describe('ingest token ownership', () => {
     expect(tokenOwners).toEqual([A, B]);
   });
 
+  it('treats the same subject in different tenants as different owners', async () => {
+    const firstTenant = 'auth0|synthetic-shared-subject';
+    const secondTenant = 'disrupt:auth0|synthetic-shared-subject';
+    start(firstTenant);
+    flush('first tenant event');
+    await vi.waitFor(() => expect(event('first tenant event')?.owner).toBe(firstTenant));
+    start(secondTenant);
+    flush('second tenant event');
+    await vi.waitFor(() => expect(event('second tenant event')).toBeDefined());
+    expect(event('second tenant event')).toMatchObject({ owner: secondTenant, streamOwner: secondTenant });
+    expect(tokenOwners).toEqual([firstTenant, secondTenant]);
+  });
+
   it('discards an A token that resolves after cleanup and a switch to B', async () => {
     const pendingA = Promise.withResolvers<Response>();
     mintToken = async (subject) => (subject === A ? pendingA.promise : tokenResponse(subject));

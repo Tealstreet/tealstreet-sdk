@@ -887,3 +887,22 @@ describe('user overrides', () => {
     expect(result.commands.map((command) => (command.args[0] as { amount: number }).amount)).toEqual([0.3, 30, 12]);
   });
 });
+
+describe('unknown native position quantity', () => {
+  it.each(['close_positions', 'reduce_positions'] as const)(
+    'refuses %s without guessing or using the fast path',
+    (kind) => {
+      const positions = context().positions.map((p) => ({ ...p, nativeContracts: null }));
+      const result = resolve(
+        plan({
+          kind,
+          scope: { symbols: ['BTCUSDT'] },
+          ...(kind === 'reduce_positions' ? { percent: 30 } : {}),
+        } as OemsIntent),
+        { positions },
+      );
+      expect(result.commands).toEqual([]);
+      expect(result.rejections[0].reason).toMatch(/unknown/i);
+    },
+  );
+});

@@ -78,12 +78,12 @@ Not in `vercel.json`. Set in Vercel **Project Settings → Functions**:
 ## Authoring conventions
 
 - **Whitelist IPs use shared display data.** Connect guides render
-  `src/components/ProxyFleetIps.tsx`, using the venue/region display policy in
-  `packages/proxy-ips-lists/src/whitelist.ts`: fleet first, legacy AWS second,
-  with WS/Bitunix extras retained. Generic guides offer venue/region selectors.
-  Copy in the web form uses the union unless a verified cap requires fleet only;
-  the legacy group then stays visible as optional. Do not paste lists or use
-  screenshots as data. Web's `newEgressIps.test.ts` pins the fleet against infra.
+  `src/components/ProxyFleetIps.tsx`, using the display policy in
+  `packages/proxy-ips-lists/src/whitelist.ts`: the current fleet is shown and
+  copied, with Bitunix's live passthrough IPs as the only venue-specific extras.
+  The retired AWS addresses must not reappear in the docs or account setup copy.
+  Do not paste lists or use screenshots as data. Web's
+  `newEgressIps.test.ts` pins the fleet against infra.
 
 - **CLI section ships from `apps/cli/CLAUDE.md`'s doc-sync table.** When CLI behavior changes, the matching `apps/documentation/cli/**` doc updates in the same commit. The table lives in `apps/cli/CLAUDE.md` — that's the source of truth for which doc pairs with which code surface, do not duplicate it here.
 - **Don't author from root `docs/**`\*\* — that tree is for internal design/agent notes only.

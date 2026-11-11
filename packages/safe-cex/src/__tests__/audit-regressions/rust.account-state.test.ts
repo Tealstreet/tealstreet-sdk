@@ -299,6 +299,25 @@ describe('Rust native current-account reads', () => {
     expect(main.tickers).toEqual(r.store.tickers);
   });
 
+  it('clears main-thread exposure when a forwarded native account snapshot omits closed positions', async () => {
+    const r = fixture();
+    const main = new DefaultStore();
+    const applier = new FrameApplier(main);
+    r.exchange.onFrame = (buffer) => applier.apply(new Frame(structuredClone(buffer)));
+    await r.start();
+    r.update({ positions: [position(), position('ETHUSDT')] });
+    await r.exchange.fetchPositions();
+    expect(main.positions.map((row) => row.symbol)).toEqual(['BTCUSDT', 'ETHUSDT']);
+    r.update({ positions: [position('ETHUSDT')] });
+    await r.exchange.fetchPositions();
+    expect(main.positions.map((row) => row.symbol)).toEqual(['ETHUSDT']);
+    r.update({ positions: [] });
+    await r.exchange.fetchPositions();
+    expect(main.positions).toEqual([]);
+    expect(main.serialize().positions).toEqual([]);
+    expect(r.store.positions).toEqual([]);
+  });
+
   it('does not consume or replay pending public book, candle and fill events', async () => {
     const r = fixture();
     await r.start();
@@ -1032,6 +1051,15 @@ describe('Rust native current-account reads', () => {
     r.store.update({ markets: [] });
     r.update({ positions: [position()] });
     await expect(r.exchange.nukePositions()).rejects.toThrow('BTCUSDT: market not found');
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
+  it('refuses a nuke close when native/derived size evidence disagrees', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [{ ...position(), extra: { contractsNative: 10 } }] });
+    await expect(r.exchange.nukePositions()).rejects.toThrow(/invalid close size|unknown/i);
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
     expect(r.exchange.isNuking).toBe(false);
   });

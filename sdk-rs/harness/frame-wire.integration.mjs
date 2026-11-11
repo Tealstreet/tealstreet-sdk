@@ -6,9 +6,32 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
-import { captureRustFill } from './comparison-policy.mjs';
+import { captureRustFill, captureTsSettings } from './comparison-policy.mjs';
 import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
 import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
+
+test('replay settings retain closed-symbol metadata and prefer current exposure settings', () => {
+  const store = new DefaultStore();
+  const position = {
+    id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: 'long', leverage: 20,
+    marginType: 'cross', contracts: 1, notional: 100, entryPrice: 100,
+    unrealizedPnl: 0, liquidationPrice: null,
+  };
+  store.addOrUpdatePositionsFull([position]);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 20, marginType: 'cross' }]);
+  store.addOrUpdatePositionsFull([]);
+  assert.deepEqual(store.positions, []);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 20, marginType: 'cross' }]);
+  store.addOrUpdatePositionsFull([{ ...position, leverage: 7, marginType: 'isolated' }]);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 7, marginType: 'isolated' }]);
+  store.updatePosition(position, { leverage: 3, marginType: 'cross' });
+  assert.equal(store.positionSettings[position.id].leverage, 7);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 3, marginType: 'cross' }]);
+  store.updatePosition(position, { leverage: 0 });
+  assert.deepEqual(captureTsSettings(store), []);
+  store.reset();
+  assert.deepEqual(captureTsSettings(store), []);
+});
 
 test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameApplier', () => {
   const directory = mkdtempSync(join(tmpdir(), 'safe-cex-frame-wire-'));
@@ -90,11 +113,16 @@ test('Rust revised sections preserve native fields and identity through the SDK'
       } else {
         assert.equal(row.extra.contractsNative, fixture.expectedNative);
       }
-      const ids = worker.positions.map((position) => position.id);
+      const expectedSettings = Object.fromEntries(worker.positions.map((position) => [position.id, {
+        id: position.id, symbol: position.symbol, side: position.side, leverage: position.leverage,
+        ...(position.marginType !== undefined ? { marginType: position.marginType } : {}),
+        ...(position.positionMode !== undefined ? { positionMode: position.positionMode } : {}),
+      }]));
       worker.addOrUpdatePositionsFull([]);
-      // Legacy merge/retain semantics: a full update without the symbol zeroes its row rather than removing it.
-      assert.deepEqual(worker.positions.map((position) => [position.id, position.contracts, position.notional]),
-        ids.map((id) => [id, 0, 0]));
+      assert.deepEqual(worker.positions, []);
+      assert.deepEqual(worker.serialize().positions, []);
+      assert.deepEqual({ ...worker.positionSettings }, expectedSettings);
+      assert.deepEqual(worker.serialize().positionSettings, expectedSettings);
     }
   });
   const read = (name) => {
