@@ -244,3 +244,10 @@ describe('a forged dropped count cannot ride along', () => {
     expect(withDropped({ positions: 3, apiSecret: 'sk-live' }).dropped).toEqual({ positions: 3 });
   });
 });
+
+it.each([null, NaN, Infinity])('preserves unknown native quantity through bounding and JSON: %s', (nativeContracts) => {
+  const bounded = boundOemsContext(context({ positions: [{ ...position(0), nativeContracts }] }));
+  expect(bounded.positions[0].nativeContracts).toBeNull();
+  expect(boundOemsContext(bounded).positions[0].nativeContracts).toBeNull();
+  expect(JSON.parse(JSON.stringify(bounded)).positions[0].nativeContracts).toBeNull();
+});

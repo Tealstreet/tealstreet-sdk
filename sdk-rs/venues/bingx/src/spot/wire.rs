@@ -520,7 +520,7 @@ pub struct Report {
     pub t: Option<Id>,
     #[serde(rename = "T", deserialize_with = "number")]
     pub time: f64,
-    #[serde(default)]
+    #[serde(default, rename = "C", alias = "c")]
     pub c: Option<String>,
     #[serde(default, deserialize_with = "number")]
     pub n: f64,

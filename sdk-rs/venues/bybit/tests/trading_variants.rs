@@ -2275,6 +2275,54 @@ fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
     }
 }
 
+fn assert_native_rate_limit_create_unknown(code: i64) {
+    for variant in [Variant::Spot, Variant::Demo] {
+        let mut h = ready(variant);
+        place(&mut h, 9069, vec![order("BTCUSDT", 0.1)]);
+        let path = if variant.is_spot() {
+            "/v5/order/create"
+        } else {
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/create-batch"
+        };
+        let request = h.take(path);
+        h.reply(
+            request.id,
+            200,
+            &format!(r#"{{"retCode":{code},"retMsg":"rate limited","result":{{}}}}"#),
+        );
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9069,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("one terminal create failure");
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(error.venue_code, Some(code.to_string()));
+        h.advance(1500.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "a released rate-limited create cannot fall back or resend"
+        );
+    }
+}
+
+#[test]
+fn native_system_frequency_limit_keeps_released_creates_unknown() {
+    assert_native_rate_limit_create_unknown(429);
+}
+
+#[test]
+fn native_legacy_ip_limit_keeps_released_creates_unknown() {
+    assert_native_rate_limit_create_unknown(10018);
+}
+
 fn demo_reduce_only_resting(h: &mut Harness) {
     let mut opts = order("BTCUSDT", 1.0);
     opts.reduce_only = Some(true);

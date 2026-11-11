@@ -1,0 +1,429 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "submit with an uncertain handoff",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "recorded box refusal before venue dispatch",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.ack",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "received": false
+          }
+        },
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "refused",
+            "venueOrderId": null,
+            "clientOrderId": null,
+            "error": {
+              "message": "not sent: expired",
+              "outcome": "notSent"
+            }
+          }
+        }
+      ],
+      "state": "notSent",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel an unrecorded key before dispatch",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel after a recorded placement",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.ack",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "received": true
+          }
+        },
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "placed",
+            "venueOrderId": "native-one",
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": null
+          }
+        }
+      ],
+      "state": "placed",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel after an uncertain handoff",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel an unretained expired key",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel while ledger persistence is unavailable",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "submit a pre-coverage key",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "submit during coverage quarantine",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "submit while ledger persistence is unavailable",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "submit an unretained expired key",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order result is not yet known",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "submit with a conflicting fingerprint",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Intent key already used for a different order",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "submit with a malformed box receipt",
+      "request": "submit",
+      "replies": [
+        {
+          "t": "order.outcome",
+          "d": {
+            "accountName": "main",
+            "instanceId": "registration",
+            "intentId": "018bcfe5-6800-7101-8101-010101010101",
+            "seq": 1,
+            "outcomeSeq": 41,
+            "outcome": "unknown",
+            "venueOrderId": null,
+            "clientOrderId": "018bcfe5-6800-7101-8101-010101010101",
+            "error": {
+              "message": "Order receipt was malformed",
+              "outcome": "unknown"
+            }
+          }
+        }
+      ],
+      "state": "unknown",
+      "cancelPending": false
+    },
+    {
+      "name": "cancel with an ordinary unbindable-request error",
+      "request": "cancelQueued",
+      "replies": [
+        {
+          "t": "msg",
+          "d": {
+            "op": "error",
+            "accountName": "main",
+            "data": ["not sent: invalid order binding"]
+          }
+        }
+      ],
+      "state": "canceled",
+      "cancelPending": true
+    }
+  ],
+  "routerContract": {
+    "pr": 9404,
+    "commit": "9f52873b76a64b4258ac38f51e70cd29a1e85941"
+  },
+  "boxReceipts": [
+    {
+      "name": "ordinary placement",
+      "frame": "{\"t\":\"order.outcome\",\"d\":{\"accountName\":\"main\",\"instanceId\":\"registration\",\"intentId\":\"018bcfe5-6800-7101-8101-010101010101\",\"seq\":1,\"outcomeSeq\":41,\"outcome\":\"placed\",\"venueOrderId\":\"native-one\",\"clientOrderId\":\"018bcfe5-6800-7101-8101-010101010101\",\"error\":null}}",
+      "routerKind": "outcome",
+      "outboxState": "placed"
+    },
+    {
+      "name": "escaped receipt kind",
+      "frame": "{\"t\":\"order\\u002eoutcome\",\"d\":{\"accountName\":\"main\",\"instanceId\":\"registration\",\"intentId\":\"018bcfe5-6800-7101-8101-010101010101\",\"seq\":1,\"outcomeSeq\":41,\"outcome\":\"placed\",\"venueOrderId\":\"native-one\",\"clientOrderId\":\"018bcfe5-6800-7101-8101-010101010101\",\"error\":null}}",
+      "routerKind": "outcome",
+      "outboxState": "placed"
+    },
+    {
+      "name": "reordered envelope",
+      "frame": "{\"d\": {\"accountName\": \"main\", \"instanceId\": \"registration\", \"intentId\": \"018bcfe5-6800-7101-8101-010101010101\", \"seq\": 1, \"outcomeSeq\": 41, \"outcome\": \"placed\", \"venueOrderId\": \"native-one\", \"clientOrderId\": \"018bcfe5-6800-7101-8101-010101010101\", \"error\": null}, \"t\": \"order.outcome\"}",
+      "routerKind": "outcome",
+      "outboxState": "placed"
+    },
+    {
+      "name": "non-string receipt kind",
+      "frame": "{\"t\": [\"order.outcome\"], \"d\": {\"accountName\": \"main\", \"instanceId\": \"registration\", \"intentId\": \"018bcfe5-6800-7101-8101-010101010101\", \"seq\": 1, \"outcomeSeq\": 41, \"outcome\": \"placed\", \"venueOrderId\": \"native-one\", \"clientOrderId\": \"018bcfe5-6800-7101-8101-010101010101\", \"error\": null}}",
+      "routerKind": "malformed",
+      "outboxState": "queued"
+    },
+    {
+      "name": "hostile receipt kind",
+      "frame": "{\"t\": {\"toString\": \"order.outcome\", \"valueOf\": null}, \"d\": {\"accountName\": \"main\", \"instanceId\": \"registration\", \"intentId\": \"018bcfe5-6800-7101-8101-010101010101\", \"seq\": 1, \"outcomeSeq\": 41, \"outcome\": \"placed\", \"venueOrderId\": \"native-one\", \"clientOrderId\": \"018bcfe5-6800-7101-8101-010101010101\", \"error\": null}}",
+      "routerKind": "malformed",
+      "outboxState": "queued"
+    },
+    {
+      "name": "unknown order kind",
+      "frame": "{\"t\":\"order.future\",\"d\":{\"accountName\":\"main\",\"instanceId\":\"registration\",\"intentId\":\"018bcfe5-6800-7101-8101-010101010101\",\"seq\":1,\"outcomeSeq\":41,\"outcome\":\"placed\",\"venueOrderId\":\"native-one\",\"clientOrderId\":\"018bcfe5-6800-7101-8101-010101010101\",\"error\":null}}",
+      "routerKind": "malformed",
+      "outboxState": "queued"
+    },
+    {
+      "name": "truncated receipt",
+      "frame": "{\"t\":\"order.outcome\",\"d\":{\"accountName\":\"main\",\"instanceId\":\"registration\",\"intentId\":\"018bcfe5-6800-7101-8101-010101010101\",\"seq\":1,\"outcomeSeq\":41,\"outcome\":\"placed\",\"venueOrderId\":\"native-one\",\"clientOrderId\":\"018bcfe5-6800-7101-8101-010101010101\",\"error\":null}",
+      "routerKind": "malformed",
+      "outboxState": "queued"
+    },
+    {
+      "name": "placement missing venue ID",
+      "frame": "{\"t\": \"order.outcome\", \"d\": {\"accountName\": \"main\", \"instanceId\": \"registration\", \"intentId\": \"018bcfe5-6800-7101-8101-010101010101\", \"seq\": 1, \"outcomeSeq\": 41, \"outcome\": \"placed\", \"venueOrderId\": null, \"clientOrderId\": \"018bcfe5-6800-7101-8101-010101010101\", \"error\": null}}",
+      "routerKind": "malformed",
+      "outboxState": "queued"
+    },
+    {
+      "name": "foreign client order ID",
+      "frame": "{\"t\": \"order.outcome\", \"d\": {\"accountName\": \"main\", \"instanceId\": \"registration\", \"intentId\": \"018bcfe5-6800-7101-8101-010101010101\", \"seq\": 1, \"outcomeSeq\": 41, \"outcome\": \"placed\", \"venueOrderId\": \"native-one\", \"clientOrderId\": \"foreign\", \"error\": null}}",
+      "routerKind": "malformed",
+      "outboxState": "queued"
+    },
+    {
+      "name": "hostile outcome kind",
+      "frame": "{\"t\": \"order.outcome\", \"d\": {\"accountName\": \"main\", \"instanceId\": \"registration\", \"intentId\": \"018bcfe5-6800-7101-8101-010101010101\", \"seq\": 1, \"outcomeSeq\": 41, \"outcome\": {\"toString\": \"placed\", \"valueOf\": null}, \"venueOrderId\": \"native-one\", \"clientOrderId\": \"018bcfe5-6800-7101-8101-010101010101\", \"error\": null}}",
+      "routerKind": "malformed",
+      "outboxState": "queued"
+    }
+  ]
+}

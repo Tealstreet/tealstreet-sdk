@@ -1111,9 +1111,13 @@ export class BaseExchange implements Exchange {
   };
 
   setAllLeverage = async (inputLeverage: number) => {
-    await forEachSeries(this.store.positions, async (position) => {
+    const symbols = new Set([
+      ...this.store.positions.map((position) => position.symbol),
+      ...Object.values(this.store.positionSettings ?? {}).map((settings) => settings.symbol),
+    ]);
+    await forEachSeries([...symbols], async (symbol) => {
       if (!this.isDisposed) {
-        await this.setLeverage(position.symbol, inputLeverage);
+        await this.setLeverage(symbol, inputLeverage);
       }
     });
   };
@@ -2606,7 +2610,9 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'coinbase-jws':
       case 'backpack-ed25519':
+      case 'apexomni-batch':
       case 'kraken-sha512':
       case 'orderly-ed25519':
       case 'grvt-order':

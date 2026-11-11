@@ -2,12 +2,17 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// Non-secret account fields the browser sends; there is never an API secret.
+/// Account settings and an optional encrypted handover; no plaintext API secret.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitPayload {
     pub account_name: String,
     pub exchange_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_mode: Option<String>,
+    /// Consumed on this connection; never included in serialized settings.
+    #[serde(default, skip_serializing)]
+    pub sealed: Option<crate::delegated::Sealed>,
     /// Reply provenance only; never an engine option or account fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
@@ -100,6 +105,10 @@ pub struct AccountMsg {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "t", content = "d", rename_all = "kebab-case")]
 pub enum Inbound {
+    #[serde(rename = "order.submit")]
+    OrderSubmit(crate::order_contract::OrderSubmit),
+    #[serde(rename = "order.cancelQueued")]
+    OrderCancelQueued(crate::order_contract::CancelQueued),
     Init(Box<InitPayload>),
     Msg(AccountMsg),
     SignRes(Value),
@@ -138,6 +147,8 @@ pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
     let kind = match frame["t"].as_str() {
         Some("msg") => "msg",
         Some("sign-req") => "sign-req",
+        Some("order.ack") => "order.ack",
+        Some("order.outcome") => "order.outcome",
         _ => return text,
     };
     let Some(data) = frame["d"].as_object_mut() else {
@@ -152,6 +163,18 @@ pub fn msg(account_name: &str, op: &str, data: Value) -> String {
         "msg",
         json!({"op": op, "accountName": account_name, "data": data}),
     )
+}
+
+pub fn order_frame(kind: &str, account_name: &str, mut data: Value) -> String {
+    data["accountName"] = account_name.into();
+    envelope(kind, data)
+}
+
+pub fn delegated_key(account_name: &str, offer: &crate::delegated::KeyOffer) -> String {
+    let mut data = serde_json::to_value(offer).expect("public offer serializes");
+    data["op"] = "delegated-key".into();
+    data["accountName"] = account_name.into();
+    envelope("msg", data)
 }
 
 pub fn frame(account_name: &str, seq: u64, snapshot: bool, scxf: &[u8]) -> String {
@@ -228,6 +251,15 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
             "accountName": account_name,
             "data": [message, {"forceToast": true, "initRefused": true}],
         }),
+    )
+}
+
+pub fn init_unverified(account_name: &str, transient: bool) -> String {
+    envelope(
+        "msg",
+        json!({"op":"error", "accountName":account_name,
+            "data":["Could not verify your key; account not attached",
+                {"forceToast":true, "initRefused":true, "kind":"unverified", "transient":transient}]}),
     )
 }
 

@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createReplayEntropy } from './replay-entropy.mjs';
 import { prepareRecordedHttp } from './recorded-http.mjs';
+import { replayPositions } from './bitget-anchor-positions.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -18,7 +19,7 @@ import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { captureReplayState, finalizeReplay } from './replay-finalize.mjs';
 import { credentialValues, findNoticeLeaks } from './notice-leaks.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
-import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
+import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, captureTsSettings, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -313,7 +314,7 @@ async function runRust() {
       tickers.apply(frame);
       for (const book of frame.books()) books.set(book.market, book);
       orders = frame.orders() ?? orders;
-      const positionUpdate = frame.positions();
+      const positionUpdate = replayPositions(frame, values.venue, isPrivate);
       if (positionUpdate) {
         positions = positionUpdate;
         positionGreeks = frame.positionGreeks();
@@ -789,16 +790,9 @@ async function runTs() {
             } : {}),
           },
           orders: receiver.orders.map((o) => ({ ...o })),
-          // Zero-size placeholders carry each market's leverage and margin type.
           positions: receiver.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
           flatPositionPnl: flatPositionPnl(receiver.positions),
-          settings: venue.tsSettings?.(exchange, store) ?? [
-            ...new Map(
-              receiver.positions
-                .filter((p) => p.leverage > 0)
-                .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
-            ).values(),
-          ],
+          settings: venue.tsSettings?.(exchange, store) ?? captureTsSettings(receiver),
           fills: executions.map(captureTsFill),
         }
       : undefined;

@@ -1233,7 +1233,6 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
 }
 
 #[test]
-#[ignore = "P8 remote zkLink adoption, owner codex-hcmq3f + claude-19pt8s; #1874 placement RED retained"]
 fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
     let mut e = ready();
     let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
@@ -1272,7 +1271,6 @@ fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
 }
 
 #[test]
-#[ignore = "P8 remote zkLink adoption, owner codex-hcmq3f + claude-19pt8s; #1874 placement RED retained"]
 fn p0_write_unlisted_native_code_is_explicitly_unknown() {
     let mut e = ready();
     let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);

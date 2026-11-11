@@ -8,6 +8,7 @@ import type {
   EngineConstruction,
   EngineEvent,
   EngineHealth,
+  EngineHelperCapabilities,
   EngineHost as EngineHostType,
   Transport,
   VenueErrorDetail,
@@ -32,6 +33,7 @@ import type {
   IncomeHistoryOptions,
   IncomeRecord,
   Market,
+  MarginType,
   NukeResult,
   OHLCVOptions,
   OptionChainQuery,
@@ -41,6 +43,7 @@ import type {
   OrderHistoryOptions,
   PlaceOrderOpts,
   Position,
+  PositionMode,
   PublicTrade,
   RemoteSignerRequest,
   RemoteSignerResponse,
@@ -700,6 +703,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private workerCapabilities?: Promise<void>;
+  private readonly helperCapabilities: Readonly<EngineHelperCapabilities>;
   private workerCapabilityRetryAt = 0;
   private stopWorkerCapabilitySync?: () => void;
 
@@ -871,6 +875,22 @@ export class RustEngineExchange extends BaseExchange {
       options = primaryOnly;
     }
     options = withSecondaryReadKeyPolicy(options);
+    const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
+      ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
+      : [];
+    // Empty saved fields are stripped too, but only an actual read key is worth a warning.
+    const ignoredCoinbaseReadOptions = coinbaseReadOptions.some(Boolean);
+    if (coinbaseReadOptions.some((value) => value !== undefined)) {
+      // The native JWT signer uses primary credentials; its egress must use the same account policy.
+      const {
+        secondary_key: _readKey,
+        secondary_secret: _readSecret,
+        secondary_passphrase: _readPassphrase,
+        secondaryProxyUrl: _readProxy,
+        ...effectiveOptions
+      } = options;
+      options = effectiveOptions;
+    }
     const lighterL1Address =
       deriveSignerSetupMapping(exchangeName) === 'lighter' && typeof options.key === 'string'
         ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0]
@@ -916,7 +936,8 @@ export class RustEngineExchange extends BaseExchange {
     const signerSetup =
       bridgeConstruction.dispatchSigning && !setupError
         ? delegated
-          ? new DelegatedSignerSetup(exchangeName, options)
+          ? new DelegatedSignerSetup(exchangeName,
+              deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options)
           : aster
             ? new LocalSignerSetup(
                 aster.setupOptions,
@@ -962,22 +983,6 @@ export class RustEngineExchange extends BaseExchange {
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };
-    const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
-      ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
-      : [];
-    // Empty saved fields are stripped too, but only an actual read key is worth a warning.
-    const ignoredCoinbaseReadOptions = coinbaseReadOptions.some(Boolean);
-    if (coinbaseReadOptions.some((value) => value !== undefined)) {
-      // The native JWT signer uses primary credentials; its egress must use the same account policy.
-      const {
-        secondary_key: _readKey,
-        secondary_secret: _readSecret,
-        secondary_passphrase: _readPassphrase,
-        secondaryProxyUrl: _readProxy,
-        ...effectiveOptions
-      } = options;
-      options = effectiveOptions;
-    }
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647) {
       signerSetup?.dispose();
@@ -1008,6 +1013,9 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = bridgeConstruction.spot;
     this.isDemo = bridgeConstruction.demo;
     this.applier = new FrameApplier(store);
+    this.helperCapabilities = bridgeConstruction.helpers ?? {};
+    if (this.helperCapabilities.resolveLeverageContext === true)
+      this.resolveLeverageContext = this.resolvePhemexLeverageContext;
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     this.forwardToWorker();
@@ -3062,7 +3070,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('invalid close size');
     }
     const amount = nativePositionSize(position, market);
-    if (!Number.isFinite(amount) || amount < 0) throw new Error('invalid close size');
+    if (amount === null || !Number.isFinite(amount) || amount < 0) throw new Error('invalid close size');
     if (amount === 0) return undefined;
     return {
       symbol: position.symbol,
@@ -3148,8 +3156,21 @@ export class RustEngineExchange extends BaseExchange {
     this.refuseWriteBeforeEngine();
     if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
-      for (const position of await this.fetchPositions()) {
-        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage, position.side);
+      const positions = await this.fetchPositions();
+      if (this.isDisposed) return;
+      const liveSymbols = new Set(positions.map((position) => position.symbol));
+      const flatSymbols = new Set(
+        Object.values(this.store.positionSettings ?? {})
+          .map((settings) => settings.symbol)
+          .filter((symbol) => !liveSymbols.has(symbol)),
+      );
+      for (const position of positions) {
+        if (this.isDisposed) return;
+        await this.setLeverage(position.symbol, leverage, position.side);
+      }
+      for (const symbol of flatSymbols) {
+        if (this.isDisposed) return;
+        await this.setLeverage(symbol, leverage);
       }
     }
   };
@@ -3518,7 +3539,64 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
-  fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+  resolveLeverageContext?: (symbol: string) => Promise<
+    | {
+        marginType: MarginType;
+        positionMode: PositionMode;
+        longLeverage: number;
+        shortLeverage: number;
+      }
+    | undefined
+  >;
+
+  private resolvePhemexLeverageContext = async (
+    symbol: string,
+  ): ReturnType<NonNullable<RustEngineExchange['resolveLeverageContext']>> => {
+    // Both hosted and browser workers already serve this raw leverage read.
+    const mirrored = this.routesToWorker;
+    const admitted = mirrored ? this.captureWorkerAdmission() : undefined;
+    const args: [string, boolean] = [symbol, true];
+    try {
+      const rails = mirrored
+        ? ((await this.callWorkerForOwner(admitted, 'fetchLeverageForSymbol', ...args)) as FetchedLeverage | null)
+        : await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
+      admitted?.('fetchLeverageForSymbol', args);
+      if (this.isDisposed) return undefined;
+      if (rails && rails.marginType !== undefined && rails.positionMode !== undefined) {
+        return {
+          marginType: rails.marginType,
+          positionMode: rails.positionMode,
+          longLeverage: rails.buyLeverage,
+          shortLeverage: rails.sellLeverage,
+        };
+      }
+    } catch (error) {
+      admitted?.('fetchLeverageForSymbol', args);
+      if ((error as { code?: string })?.code === 'WORKER_STOPPED') throw error;
+      this.emitAndLogError(error instanceof Error ? error : String(error));
+    }
+    if (this.isDisposed) return undefined;
+    const stored = this.store.positions.filter((position) => position.symbol === symbol);
+    const marginType = stored[0]?.marginType;
+    const positionMode = stored[0]?.positionMode;
+    if (marginType === undefined || positionMode === undefined) return undefined;
+    const long = stored.find((position) => position.side === PositionSide.Long) ?? stored[0];
+    const short = stored.find((position) => position.side === PositionSide.Short) ?? stored[0];
+    return { marginType, positionMode, longLeverage: Math.abs(long.leverage), shortLeverage: Math.abs(short.leverage) };
+  };
+
+  fetchLeverageForSymbol = async (symbol: string, fresh = false): Promise<FetchedLeverage | null> => {
+    // Phemex metadata confirmation must bypass cached rails, including while flat.
+    if (fresh && this.helperCapabilities.resolveLeverageContext === true) {
+      if (this.routesToWorker) {
+        const admitted = this.captureWorkerAdmission();
+        const args: [string, boolean] = [symbol, true];
+        const rails = await this.callWorkerForOwner(admitted, 'fetchLeverageForSymbol', ...args);
+        admitted?.('fetchLeverageForSymbol', args);
+        return rails as FetchedLeverage | null;
+      }
+      return this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
+    }
     const ready = this.capabilitiesFor('fetchLeverageForSymbol');
     const capabilities = ready instanceof Promise ? await ready : ready;
     try {

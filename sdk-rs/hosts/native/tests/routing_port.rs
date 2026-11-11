@@ -8,8 +8,10 @@ use serde::Deserialize;
 
 #[test]
 fn woo_private_relay_keeps_the_application_id_for_proxy_and_tunnel_accounts() {
-    // Shared routing support does not enable WOO on the native Hosted server.
-    assert!(safe_cex_native::resolve::rest_base_url("woo", false).is_err());
+    assert_eq!(
+        safe_cex_native::resolve::rest_base_url("woo", false).unwrap(),
+        "https://api.woox.io"
+    );
     for flags in [
         serde_json::json!({"tealstreetProxy": true}),
         serde_json::json!({"tealstreetTunnel": true}),
@@ -258,6 +260,11 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         "phemex",
         "https://api.phemex.com",
         Some("https://testnet-api.phemex.com"),
+    ),
+    (
+        "woo",
+        "https://api.woox.io",
+        Some("https://api.staging.woox.io"),
     ),
     // Bitunix's testnet is `x-simulated-trading` on the mainnet host.
     (

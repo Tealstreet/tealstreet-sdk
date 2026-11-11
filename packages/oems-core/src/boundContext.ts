@@ -45,9 +45,12 @@ const clip = (value: unknown, max: number): string => (typeof value === 'string'
 
 const clipName = (value: unknown): string => clip(value, OEMS_CONTEXT_LIMITS.stringChars);
 
-/** Required nonnullable numbers use zero for invalid input. Liquidation prices
- *  are nullable and preserve unknown separately below. */
-const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+/** Nullable measurements preserve unknown, including after a JSON round trip. */
+const nullableNum = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/** Required nonnullable numbers retain their existing invalid-input fallback. */
+const num = (value: unknown): number => nullableNum(value) ?? 0;
 
 const boundAccount = (account: OemsAccountRef): OemsAccountRef => ({
   name: clipName(account.name),
@@ -62,10 +65,10 @@ const boundPosition = (position: OemsPositionRef): OemsPositionRef => ({
   symbol: clipName(position.symbol),
   side: position.side === 'short' ? 'short' : 'long',
   contracts: num(position.contracts),
-  nativeContracts: num(position.nativeContracts),
+  nativeContracts: nullableNum(position.nativeContracts),
   entryPrice: num(position.entryPrice),
   markPrice: num(position.markPrice),
-  notional: num(position.notional),
+  notional: nullableNum(position.notional),
   unrealizedPnl: num(position.unrealizedPnl),
   liquidationPrice:
     typeof position.liquidationPrice === 'number' &&
@@ -101,7 +104,7 @@ const boundOrder = (order: OemsOrderRef): OemsOrderRef => ({
   amount: num(order.amount),
   filled: num(order.filled),
   remaining: num(order.remaining),
-  nativeRemaining: num(order.nativeRemaining),
+  nativeRemaining: nullableNum(order.nativeRemaining),
   price: num(order.price),
   reduceOnly: order.reduceOnly === true,
 });

@@ -6,7 +6,9 @@ import type { InternalAxiosRequestConfig } from 'axios';
 import axios, { AxiosHeaders } from 'axios';
 import qs from 'qs';
 
+import { signCoinbaseJwt } from './coinbaseHostedSigning';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
+import { finishApexOmniRequest, prepareApexOmniRequest, serializeApexOmni } from './apexomniHostedSigning';
 import { finishBackpackRequest, prepareBackpackRequest } from './backpackHostedSigning';
 import { signKrakenHttp } from './krakenHostedSigning';
 import { signHttpCapture } from '../../utils/signHttpCapture';
@@ -28,6 +30,24 @@ const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse',
 const BYBIT = new Set<ExchangeName>(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader']);
 const OKX = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const BITGET = new Set<ExchangeName>(['bitget', 'bitgetusdc', 'bitgetinverse']);
+
+const isMexcUnsignedRequest = (url = '') => {
+  const path = url.split('?')[0];
+  return ['/api/v1/contract/detail', '/api/v1/contract/ticker', '/api/v1/contract/depth', '/api/v1/contract/kline']
+    .some((endpoint) => path === endpoint || path.startsWith(`${endpoint}/`));
+};
+
+/** MEXC signs public key, integer milliseconds and the exact query or JSON bytes. */
+const prepareMexcRequest = (config: InternalAxiosRequestConfig, key: string, stampMs: number) => {
+  const method = config.method?.toUpperCase() || 'GET';
+  const stamp = String(Math.floor(stampMs));
+  const body = typeof config.data === 'string' ? config.data : config.data == null ? '' : JSON.stringify(config.data);
+  const query = config.params ? qs.stringify(config.params, { arrayFormat: 'repeat', sort: (a, b) => a.localeCompare(b) })
+    : (config.url ?? '').split('?')[1] ?? '';
+  // The body is already serialized. A second JSON transform would trim replay bytes.
+  return { config: { ...config, ...(method === 'GET' ? {} : { data: body || config.data, transformRequest: [(data: unknown) => data] }) }, stamp,
+    payload: `${key}${stamp}${method === 'GET' ? query : body}` };
+};
 
 /** Phemex's REST preimage `path ‖ query ‖ expiry ‖ body`, as the retired TS venue
  * built it: the decoded qs query without `?`, expiry in rounded seconds a minute on.
@@ -130,6 +150,39 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  if (name === 'apexomni') {
+    const xhr = axios.create({ paramsSerializer: { serialize: serializeApexOmni },
+      headers: { 'Content-Type': 'application/json, charset=utf-8' } });
+    xhr.interceptors.request.use(async (config) => {
+      const clock = host.hostedSigningClock();
+      const prepared = prepareApexOmniRequest(config, clock.stampMs);
+      if (!prepared) { markSkipRemoteSigning(config); return { ...config, headers: new AxiosHeaders() }; }
+      if (!primaryComplete) throw new Error('Signing credential is unavailable');
+      const output = await host.hostedSigning({ kind: 'http', ...clock,
+        payload: JSON.stringify({ contracts: [], payload: [{ bytes: Array.from(new TextEncoder().encode(prepared.payload)) }] }) });
+      const passphrase = output.headers?.find(([key]) => key === 'APEX-PASSPHRASE')?.[1];
+      if (!output.credential || !output.signature || !passphrase) throw new Error('Signing result is unavailable');
+      return finishApexOmniRequest(prepared, output.credential, output.signature, passphrase);
+    });
+    return signHttpCapture(xhr, request);
+  }
+  if (name === 'coinbase' || name === 'coinbasespot') {
+    const xhr = axios.create();
+    xhr.interceptors.request.use(async (config) => {
+      const url = new URL(config.url ?? '', config.baseURL ?? 'https://api.coinbase.com');
+      if (url.origin !== 'https://api.coinbase.com' || url.hash || url.username || url.password
+        || !url.pathname.startsWith('/api/v3/brokerage/')) throw new Error('Coinbase signing request refused');
+      if (url.pathname.startsWith('/api/v3/brokerage/market/')) { markSkipRemoteSigning(config); return config; }
+      if (!primaryComplete) throw new Error('Signing credential is unavailable');
+      const method = (config.method ?? 'get').toUpperCase();
+      const jwt = await signCoinbaseJwt(host, `${method} api.coinbase.com${url.pathname}`);
+      const headers = new AxiosHeaders(config.headers);
+      headers.delete('Authorization');
+      headers.set({ Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' });
+      return { ...config, headers };
+    });
+    return signHttpCapture(xhr, request);
+  }
   if (name === 'bitrue') {
     const recvWindow = Math.floor(Math.max(1, Math.min(options.extra?.recvWindow ?? 20_000, 60_000)));
     const xhr = axios.create({ baseURL: 'https://fapi.bitrue.com', timeout: recvWindow,
@@ -210,14 +263,16 @@ export const signHostedHttp = async (
   const bitunix = name === 'bitunix';
   const bingx = name === 'bingx';
   const phemex = name === 'phemex';
+  const mexc = name === 'mexc';
   const woo = name === 'woo';
   const cryptocom = name === 'cryptocom';
   const blofin = name === 'blofin';
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo && !cryptocom)
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo && !cryptocom && !mexc)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
-  const unsigned = cryptocom ? request.config.url?.includes('/public/') === true : woo ? request.config.url?.includes('/public/') === true : phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
+  const unsigned = mexc ? options.publicDataOnly === true || isMexcUnsignedRequest(request.config.url)
+    : cryptocom ? request.config.url?.includes('/public/') === true : woo ? request.config.url?.includes('/public/') === true : phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : bitunix ? isBitunixUnsignedRequest(request.config.url)
@@ -257,6 +312,7 @@ export const signHostedHttp = async (
     timeout: 20_000,
     paramsSerializer: {
       serialize: (params) => binance ? qs.stringify(params, { arrayFormat: 'repeat' })
+        : mexc ? qs.stringify(params, { arrayFormat: 'repeat', sort: (a, b) => a.localeCompare(b) })
         : bingx ? serializeBingxParams(params) : qs.stringify(params),
     },
     headers: okx ? {
@@ -271,7 +327,7 @@ export const signHostedHttp = async (
       'X-BX-APIKEY': credential,
       'X-SOURCE-KEY': 'Tealstreet',
       'Content-Type': 'application/json, charset=utf-8',
-    } : cryptocom ? { 'Content-Type': 'application/json' } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
+    } : mexc || cryptocom ? { 'Content-Type': 'application/json' } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
       'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
@@ -283,7 +339,20 @@ export const signHostedHttp = async (
       ...siteHeaders,
     },
   });
-  xhr.interceptors.request.use(okx ? async (config) => {
+  xhr.interceptors.request.use(mexc ? async (config) => {
+    if (isMexcUnsignedRequest(config.url)) markSkipRemoteSigning(config);
+    if (!credential) return config;
+    const prepared = prepareMexcRequest(config, credential, now());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    const headers = new AxiosHeaders(config.headers);
+    for (const [name, value] of output.headers ?? []) headers.set(name, value);
+    headers.set({ ApiKey: credential,
+      'Request-Time': prepared.stamp, Signature: output.signature,
+      'Recv-Window': String(Math.max(1, Math.min(20_000, options.extra?.recvWindow ?? 20_000))),
+      'Content-Type': 'application/json' });
+    return { ...prepared.config, headers };
+  } : okx ? async (config) => {
     // Market paths keep the existing local signing behavior. The skip flag
     // concerns the keyless transport roundtrip, not browser-held signing.
     if (isOkxPublicSigningRequest(config.url)) {
@@ -348,7 +417,7 @@ export const signHostedHttp = async (
   } : binance
     ? createBinanceRequestInterceptor(signingOptions, name, now)
     : createBybitRequestInterceptor(signingOptions, name, now, siteHeaders));
-  return signHttpCapture(xhr, request);
+  return signHttpCapture(xhr, request, { preserveSerializedBody: mexc });
 };
 
 export const signHostedWsAuth = async (
@@ -357,13 +426,15 @@ export const signHostedWsAuth = async (
 ): Promise<RemoteSignerResponse> => {
   const { toSign, outputFormat } = request.wsAuth ?? {};
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
+  if (outputFormat === 'coinbase-jwt' && request.exchangeName !== 'coinbase' && request.exchangeName !== 'coinbasespot') return { id: request.id, error: 'Unsupported WS auth output format' };
+  if (outputFormat === 'coinbase-jwt') return { id: request.id, wsAuthSignature: await signCoinbaseJwt(host) };
   if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
     || outputFormat === 'grvt-order' || outputFormat === 'grvt-address'
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
-    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'orderly-ed25519' && outputFormat !== 'kucoin-batch'
-    && outputFormat !== 'kraken-sha512' && outputFormat !== 'kraken-challenge')
+    && outputFormat !== 'coinbase-jws' && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'orderly-ed25519' && outputFormat !== 'kucoin-batch'
+    && outputFormat !== 'kraken-sha512' && outputFormat !== 'kraken-challenge' && outputFormat !== 'apexomni-batch')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');
