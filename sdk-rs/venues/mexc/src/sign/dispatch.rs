@@ -106,6 +106,7 @@ impl SignStep for Http {
             ("Signature", signature),
             ("Recv-Window", self.window.to_string()),
             ("Content-Type", "application/json".into()),
+            ("source", super::BROKER_CODE.into()),
         ];
         Ok(())
     }
