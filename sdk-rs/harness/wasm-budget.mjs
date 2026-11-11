@@ -213,6 +213,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3281 merge: max(d9b5310e7d1, 6c158931c59) for every parent cap.
 // Current master dominates; retain both parents' measurement provenance
 // and the #3281 measured-headroom regression (run 42422693183, 5025f1670c7).
+// #3391 run 43040714236 at 86083b569b50: exact-head failing family sizes + 10 KiB, rounded up.
+// Preserve larger existing caps; per-family byte measurements and job IDs are pinned in wasm-budget.test.mjs.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3300 post-#3306: run 42557412385, job 128966462873, CI merge 291f65994cda.
   // Optimized web/node measured 2,078,907 B; CI plus 10 KiB rounded up to KiB.
@@ -220,13 +222,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue apexomni, twice -Oz.
   apexomni: 2_103_296,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
-  asterdex: 2_201_600,
-  backpack: 2_040_832,
+  asterdex: 2_212_864,
+  backpack: 2_053_120,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
-  binance: 2_274_304,
+  binance: 2_286_592,
   bingx: 2_139_136,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
@@ -239,14 +241,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3299 merged 2ca7125e8ab: local optimized web/node 1,901,720 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitrue.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
-  bitrue: 1_912_832,
+  bitrue: 1_925_120,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
   // #3391 run 42561525825 at ec49cdd8159: 1,920,841 B + 10 KiB, rounded up; retain PR-parent cap.
-  bitunix: 1_931_264,
-  blofin: 2_072_576,
+  bitunix: 1_942_528,
+  blofin: 2_085_888,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   // #3391 run 42553793906 at 20f13e05df1: 2,320,705 B + 10 KiB, rounded up; retain PR-parent cap.
-  bybit: 2_331_648,
+  bybit: 2_344_960,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
   // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.
@@ -254,12 +256,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // measured web/node 2,094,041 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
   // measured 2,094,163 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
-  coinbase: 2_105_344,
-  cryptocom: 1_807_360,
+  coinbase: 2_120_704,
+  cryptocom: 1_819_648,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
-  grvt: 1_991_680,
+  grvt: 2_003_968,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -287,9 +289,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kraken: 2_256_896,
   krakenspot: 2_256_896,
   kucoin: 1_872_896,
-  kucoinspot: 2_462_720,
-  lighter: 2_137_088,
-  'lighter-robinhood': 2_137_088,
+  kucoinspot: 2_480_128,
+  lighter: 2_149_376,
+  'lighter-robinhood': 2_149_376,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
   // #3299 restage run 42558057739 at 5dec79811311, jobs 128968431838/128968431872:
@@ -297,11 +299,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3299 merged 2ca7125e8ab: local optimized web/node 1,920,015 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
-  mexc: 1_931_264,
-  okx: 2_053_120,
-  orderly: 1_773_568,
+  mexc: 1_943_552,
+  okx: 2_068_480,
+  orderly: 1_785_856,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
-  paradex: 2_306_048,
+  paradex: 2_318_336,
   // #3429 run 42729630872 at a2be15368b4: CI web/node 2,125,299 B.
   // Shared-helper fix: local web/node 2,127,824 B; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue phemex; measured + 10 KiB, rounded up.
