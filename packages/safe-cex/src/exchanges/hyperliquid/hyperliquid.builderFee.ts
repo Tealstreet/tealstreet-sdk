@@ -19,6 +19,7 @@ import {
   TEALSTREET_BUILDER_FEE,
 } from './hyperliquid.constants';
 import { reportEvent } from '../../telemetry';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { BASE_URLS, BuilderFeeApprovalResult, BuilderFeeCheckResult, Signature } from './hyperliquid.types';
 
 // Re-export for public API
@@ -211,7 +212,7 @@ export async function checkBuilderFeeApproved(
       maxFeeRateTenthsBps: feeValueTenthsBps,
     };
   } catch (error) {
-    console.error('Failed to check builder fee approval:', error);
+    diagnosticConsole.error('Failed to check builder fee approval:', error);
     return {
       approved: false,
       error: error instanceof Error ? error.message : 'Failed to reach Hyperliquid',

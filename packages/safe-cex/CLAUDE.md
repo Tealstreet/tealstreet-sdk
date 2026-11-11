@@ -375,6 +375,11 @@ merely because its name is registered in Rust.
 
 ## Exchange event listeners
 
+`utils/diagnosticRedaction.ts` makes detached diagnostic copies before console,
+log events, telemetry or retained diagnostic buffers receive them. It shares the
+HTTP diagnostic string policy; live command and market messages stay untouched.
+Its parity fixtures are pinned to the host diagnostic contract at `6fde9450cf`.
+
 `BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
 One throwing listener cannot starve later listeners for the same event; errors
 are reported through `console.error` with venue, event and original cause.
