@@ -188,30 +188,99 @@ pub fn settle(
     out.action_outcome(name, data);
 }
 
-/// An actor-queued nuke owns its original registration, including during a load
-/// wait. Dropping queued/aborted work settles uncertainty on that same output.
-pub struct NukeReceipt(Option<(Out, String, Value, u64)>);
-impl NukeReceipt {
-    pub fn new(out: Out, name: String, id: Value, seq: u64) -> Self {
-        Self(Some((out, name, id, seq)))
+/// Capture both expiry bounds at arrival. Neither actor queues nor private-load
+/// waits may reset the budget. The UUID's remaining lifetime also bounds the
+/// monotonic deadline, so a wall-clock rollback cannot extend it.
+#[derive(Clone, Copy)]
+pub(crate) struct ActionDeadline {
+    monotonic: std::time::Instant,
+    key_expires_at_ms: u64,
+}
+impl ActionDeadline {
+    pub(crate) fn new(id: &str, age_ms: f64, arrived: std::time::Instant) -> Option<Self> {
+        if !age_ms.is_finite() || !(0.0..10_000.0).contains(&age_ms) {
+            return None;
+        }
+        let created = crate::order_contract::key_time(id)?;
+        let key_age = crate::accounts::now_ms().checked_sub(created)?;
+        let key_remaining = 10_000_u64.checked_sub(key_age).filter(|ms| *ms > 0)?;
+        let remaining = std::time::Duration::from_secs_f64((10_000.0 - age_ms) / 1000.0)
+            .min(std::time::Duration::from_millis(key_remaining));
+        Some(Self {
+            monotonic: arrived + remaining,
+            key_expires_at_ms: created + 10_000,
+        })
     }
-    pub(crate) fn registration(&self) -> Option<Out> {
-        self.0.as_ref().map(|(out, ..)| out.clone())
+    pub(crate) fn expired(self) -> bool {
+        std::time::Instant::now() >= self.monotonic
+            || crate::accounts::now_ms() >= self.key_expires_at_ms
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct NukeGuard {
+    registration: Out,
+    deadline: ActionDeadline,
+}
+impl NukeGuard {
+    pub(crate) fn check(&self) -> Result<(), &'static str> {
+        if self.deadline.expired() {
+            Err("Action expired; no further nuke leg was sent")
+        } else if !self.registration.action_active() {
+            Err("Action registration retired; no further nuke leg was sent")
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn expired_outcome() -> Value {
+    // Expiry is a dispatch fence, not whole-intent evidence of non-forwarding.
+    json!({"message":"Action expired; check orders and positions","outcome":"unknown"})
+}
+
+/// An actor-queued nuke owns its original registration and expiry, including
+/// during load waits. Dropped work settles uncertainty on that same output.
+pub struct NukeReceipt {
+    guard: NukeGuard,
+    reply: Option<(String, Value, u64)>,
+}
+impl NukeReceipt {
+    pub(crate) fn new(
+        out: Out,
+        name: String,
+        id: Value,
+        seq: u64,
+        deadline: ActionDeadline,
+    ) -> Self {
+        Self {
+            guard: NukeGuard {
+                registration: out,
+                deadline,
+            },
+            reply: Some((name, id, seq)),
+        }
+    }
+    pub(crate) fn guard(&self) -> NukeGuard {
+        self.guard.clone()
+    }
+    pub(crate) fn expired(&self) -> bool {
+        self.guard.deadline.expired()
     }
     pub fn active(&self) -> bool {
-        self.0.as_ref().is_some_and(|(out, ..)| out.action_active())
+        self.reply.is_some() && self.guard.registration.action_active()
     }
     pub fn finish(mut self, result: Result<Value, Value>) {
-        if let Some((out, name, id, seq)) = self.0.take() {
-            settle(&out, &name, &id, seq, "nuke", result);
+        if let Some((name, id, seq)) = self.reply.take() {
+            settle(&self.guard.registration, &name, &id, seq, "nuke", result);
         }
     }
 }
 impl Drop for NukeReceipt {
     fn drop(&mut self) {
-        if let Some((out, name, id, seq)) = self.0.take() {
+        if let Some((name, id, seq)) = self.reply.take() {
             settle(
-                &out,
+                &self.guard.registration,
                 &name,
                 &id,
                 seq,
@@ -227,6 +296,63 @@ impl Drop for NukeReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn registered_action_result_reserves_binding_expansion_before_size_check() {
+        let (socket, mut sent, _) = Out::channel(4);
+        let result = json!(vec!["x".repeat(240); 32]);
+        settle(
+            &socket,
+            "main",
+            &json!("intent"),
+            1,
+            "amend",
+            Ok(result.clone()),
+        );
+        let unregistered = sent.recv().await.unwrap();
+        assert!(unregistered.len() <= crate::order_contract::OUTCOME_MAX);
+        let control: Value = serde_json::from_str(&unregistered).unwrap();
+        assert_eq!(control["d"]["outcome"], "applied");
+        // A bounded 128-byte ID can expand to 768 bytes in JSON.
+        let registration = "\u{001f}".repeat(128);
+        let bound = socket.with_instance_id(Some(&registration));
+        settle(&bound, "main", &json!("intent"), 1, "amend", Ok(result));
+        let registered = sent.recv().await.unwrap();
+        assert!(registered.len() <= crate::order_contract::OUTCOME_MAX);
+        let frame: Value = serde_json::from_str(&registered).unwrap();
+        assert_eq!(frame["d"]["instanceId"], registration);
+        assert_eq!(frame["d"]["outcome"], "unknown");
+        assert_eq!(frame["d"]["error"]["outcome"], "unknown");
+        assert!(frame["d"]["result"].is_null());
+    }
+    #[test]
+    fn nuke_deadline_guards_both_monotonic_and_uuid_expiry() {
+        use std::time::{Duration, Instant};
+        let future = Instant::now() + Duration::from_secs(10);
+        let wall = crate::accounts::now_ms();
+        assert!(
+            !ActionDeadline {
+                monotonic: future,
+                key_expires_at_ms: wall + 10_000
+            }
+            .expired()
+        );
+        // A wall-clock advance expires a key even with monotonic budget left.
+        assert!(
+            ActionDeadline {
+                monotonic: future,
+                key_expires_at_ms: wall - 1
+            }
+            .expired()
+        );
+        // A wall-clock rollback cannot revive an elapsed monotonic deadline.
+        assert!(
+            ActionDeadline {
+                monotonic: Instant::now() - Duration::from_millis(1),
+                key_expires_at_ms: wall + 10_000
+            }
+            .expired()
+        );
+    }
     #[tokio::test]
     async fn typed_action_results_preserve_uncertainty_and_not_sent() {
         for (kind, answer, expected) in [
@@ -263,7 +389,16 @@ mod tests {
     async fn retirement_rejects_a_deferred_nuke_and_drops_its_result() {
         let (out, mut sent, _) = Out::channel(4);
         let old = out.with_instance_id(Some("old"));
-        let receipt = NukeReceipt::new(old.clone(), "main".into(), json!("old-intent"), 1);
+        let receipt = NukeReceipt::new(
+            old.clone(),
+            "main".into(),
+            json!("old-intent"),
+            1,
+            ActionDeadline {
+                monotonic: std::time::Instant::now() + std::time::Duration::from_secs(10),
+                key_expires_at_ms: crate::accounts::now_ms() + 10_000,
+            },
+        );
         assert!(receipt.active());
         old.retire_order_receipts();
         assert!(!receipt.active());

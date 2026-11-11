@@ -3,6 +3,7 @@ use crate::order_actions::{self, CancelQueued, Request};
 
 impl Session {
     pub(super) async fn order_action(&mut self, request: Request) {
+        let arrived = std::time::Instant::now();
         let name = request.account_name.clone();
         let id = Value::String(request.intent_id.clone());
         let out = self.handover_out(&name);
@@ -57,6 +58,12 @@ impl Session {
                 return;
             }
         };
+        let Some(deadline) =
+            order_actions::ActionDeadline::new(&request.intent_id, request.age_ms, arrived)
+        else {
+            order_actions::refuse(&out, &name, &id, request.seq, "not sent: expired");
+            return;
+        };
         order_actions::acknowledge(&out, &name, &id, request.seq, true);
         self.call_inner(
             &name,
@@ -64,6 +71,7 @@ impl Session {
             Some(OrderReceipt::Action {
                 seq: request.seq,
                 kind: request.action.kind(),
+                deadline: Some(deadline),
             }),
         )
         .await;
@@ -119,13 +127,20 @@ impl Session {
         );
     }
 
-    pub(super) fn send_action_nuke(&self, name: &str, id: &Value, seq: u64) {
+    pub(super) fn send_action_nuke(
+        &self,
+        name: &str,
+        id: &Value,
+        seq: u64,
+        deadline: order_actions::ActionDeadline,
+    ) {
         let account = self.joined[name].account.clone();
         let receipt = crate::order_actions::NukeReceipt::new(
             self.account_out(name),
             name.to_owned(),
             id.clone(),
             seq,
+            deadline,
         );
         let Some(algos) = account.algos.clone() else {
             receipt.finish(Err(
@@ -139,6 +154,10 @@ impl Session {
         tokio::spawn(async move {
             let loaded =
                 methods::until_nuke_can_see(&account.handle, "all", methods::READ_WAIT).await;
+            if receipt.expired() {
+                receipt.finish(Err(order_actions::expired_outcome()));
+                return;
+            }
             if !receipt.active()
                 || !account.running.io_allowed()
                 || !registry.holds(&account, socket)

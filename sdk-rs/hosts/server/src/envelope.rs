@@ -153,6 +153,8 @@ pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
         Some("sign-req") => "sign-req",
         Some("order.ack") => "order.ack",
         Some("order.outcome") => "order.outcome",
+        Some("order.actionAck") => "order.actionAck",
+        Some("order.actionOutcome") => "order.actionOutcome",
         _ => return text,
     };
     let Some(data) = frame["d"].as_object_mut() else {

@@ -20,7 +20,12 @@ mod order_frames;
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
     Placement(u64),
-    Action { seq: u64, kind: &'static str },
+    Action {
+        seq: u64,
+        kind: &'static str,
+        // Reconstruction for pre-command errors alone omits this bound.
+        deadline: Option<crate::order_actions::ActionDeadline>,
+    },
 }
 
 /// Who connected, as verified before the upgrade.
@@ -1670,7 +1675,9 @@ impl Session {
                             client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
                             seq,
                         },
-                        OrderReceipt::Action { seq, kind } => methods::Reply::Action { seq, kind },
+                        OrderReceipt::Action { seq, kind, .. } => {
+                            methods::Reply::Action { seq, kind }
+                        }
                     };
                 }
             }
@@ -1684,7 +1691,7 @@ impl Session {
         for plan in plans {
             match plan {
                 Plan::Reply(result) => {
-                    if let Some(OrderReceipt::Action { seq, kind }) = order_frame {
+                    if let Some(OrderReceipt::Action { seq, kind, .. }) = order_frame {
                         crate::order_actions::settle(
                             &self.account_out(name),
                             name,
@@ -1702,8 +1709,19 @@ impl Session {
                     }
                 }
                 Plan::Nuke(mode) => {
-                    if let Some(OrderReceipt::Action { seq, .. }) = order_frame {
-                        self.send_action_nuke(name, &request_id, seq);
+                    if let Some(OrderReceipt::Action { seq, deadline, .. }) = order_frame {
+                        if let Some(deadline) = deadline {
+                            self.send_action_nuke(name, &request_id, seq, deadline);
+                        } else {
+                            crate::order_actions::settle(
+                                &self.account_out(name),
+                                name,
+                                &request_id,
+                                seq,
+                                "nuke",
+                                Err(crate::order_actions::expired_outcome()),
+                            );
+                        }
                         continue;
                     }
                     let handle = account.handle.clone();
@@ -1863,7 +1881,11 @@ impl Session {
     ) {
         let order_frame = match &reply {
             methods::Reply::Intent { seq, .. } => Some(OrderReceipt::Placement(*seq)),
-            methods::Reply::Action { seq, kind } => Some(OrderReceipt::Action { seq: *seq, kind }),
+            methods::Reply::Action { seq, kind } => Some(OrderReceipt::Action {
+                seq: *seq,
+                kind,
+                deadline: None,
+            }),
             _ => None,
         };
         if !self.joined[name].account.running.io_allowed() {

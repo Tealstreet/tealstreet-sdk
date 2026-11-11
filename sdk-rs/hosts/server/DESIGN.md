@@ -1017,9 +1017,13 @@ awaiting cancellation and closing legs; a partial/interrupted action stays
 unknown. Actor-queued nuke work carries the original registration and rechecks
 its liveness, account holder and IO authority after load waits and after the
 actor's store read. A server-owned account-port adapter also rechecks that
-registration before every later native command, including close legs after an
-awaited cancel. Retirement fences new legs and drops stale outcomes; already
-handed-off work remains uncertain. An aborted/abandoned nuke settles unknown on
+registration and both captured expiry bounds before every native command,
+including close legs after an awaited cancel. Nuke receipts carry the original
+monotonic age deadline and UUID expiry through startup and actor store waits;
+neither wait resets the budget. Expiry blocks every remaining native leg and
+returns unknown with an expired message, without inventing a notSent proof.
+Retirement fences new legs and drops stale outcomes; already handed-off work
+remains uncertain. An aborted/abandoned nuke settles unknown on
 its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or

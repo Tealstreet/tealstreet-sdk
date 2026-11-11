@@ -335,7 +335,7 @@ struct Port {
 /// suppressing the final receipt alone would still permit new retired writes.
 struct ActionNukePort {
     port: Rc<Port>,
-    registration: crate::out::Out,
+    guard: crate::order_actions::NukeGuard,
 }
 
 impl AccountPort for ActionNukePort {
@@ -349,13 +349,10 @@ impl AccountPort for ActionNukePort {
         self.port.next_command_id()
     }
     fn command(&self, command: Command) -> CommandFuture {
-        if !self.registration.action_active() {
-            return Box::pin(async {
-                Err(
-                    VenueError::new("Action registration retired; no further nuke leg was sent")
-                        .outcome(Outcome::Unknown),
-                )
-            });
+        if let Err(message) = self.guard.check() {
+            return Box::pin(
+                async move { Err(VenueError::new(message).outcome(Outcome::Unknown)) },
+            );
         }
         self.port.command(command)
     }
@@ -1107,6 +1104,10 @@ pub async fn run(
                     publish(&mut published);
                 }
                 Some(AlgoInput::Nuke { mode, request_id, action }) => {
+                    if action.as_ref().is_some_and(|receipt| receipt.expired()) {
+                        if let Some(receipt) = action { receipt.finish(Err(crate::order_actions::expired_outcome())); }
+                        continue;
+                    }
                     if !running.io_allowed() || action.as_ref().is_some_and(|receipt| !receipt.active()) {
                         if let Some(receipt) = action { receipt.finish(Err(crate::user_drain::refusal())); }
                         else { (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
@@ -1123,14 +1124,15 @@ pub async fn run(
                         loaded
                     });
                     let admission = running.user.get().map(|user| user.admit_cleanup());
-                    let nuke_cx = match action.as_ref().and_then(|receipt| receipt.registration()) {
-                        Some(registration) => AlgoCx::new(
-                            Rc::new(ActionNukePort { port: port.clone(), registration }),
+                    let nuke_cx = match action.as_ref().map(|receipt| receipt.guard()) {
+                        Some(guard) => AlgoCx::new(
+                            Rc::new(ActionNukePort { port: port.clone(), guard }),
                             cx.scope.clone(),
                         ),
                         None => cx.clone(),
                     };
                     let started = match admission.as_ref() {
+                        _ if action.as_ref().is_some_and(|receipt| receipt.expired()) => Err(crate::order_actions::expired_outcome()),
                         _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"})),
                         Some(Err(error)) => Err(error.clone()),
                         _ => match seen {

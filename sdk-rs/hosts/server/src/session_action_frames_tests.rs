@@ -382,3 +382,137 @@ async fn action_frames_use_the_captured_startup_runtime_gate() {
         }
     }).await;
 }
+
+// R1 exercises actual Out::send stamping, including router-only cancellation
+// and a pre-dispatch refusal, rather than only the unregistered fixture shapes.
+#[tokio::test]
+async fn action_fix_registered_replies_carry_the_captured_binding() {
+    tokio::task::LocalSet::new().run_until(async {
+        for payload in [
+            json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}}),
+            json!({"kind":"cancel","order":{"id":"resting-order","symbol":"BTCUSDT"}}),
+            json!({"kind":"cancelAll"}), json!({"kind":"nuke"}),
+        ] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry,"A","bybit",tape.clone(),true);
+            let (mut session,mut sent) = joined(registry.clone(),"A",account.clone()).await;
+            let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-A"));
+            session.join(account.clone(),bound).await;
+            let id = action_key();
+            let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
+            session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-A","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
+            let ack = action_frame(&mut sent,"order.actionAck").await;
+            let outcome = action_frame(&mut sent,"order.actionOutcome").await;
+            assert_eq!(ack["d"]["received"],true);
+            assert_eq!(outcome["d"]["outcome"],"applied");
+            let mut cancel = json!({"version":1,"accountName":"synthetic-main","instanceId":"reg-A","intentId":id,"seq":1,"fingerprint":fp});
+            session.handle(&json!({"t":"order.actionCancelQueued","d":cancel}).to_string()).await.unwrap();
+            let canceled = action_frame(&mut sent,"order.actionOutcome").await;
+            assert_eq!(canceled["d"]["outcome"],"unknown");
+            cancel["ageMs"] = json!(0); cancel["action"] = payload; cancel["version"] = json!(2);
+            session.handle(&json!({"t":"order.action","d":cancel}).to_string()).await.unwrap();
+            let refused_ack = action_frame(&mut sent,"order.actionAck").await;
+            let refused = action_frame(&mut sent,"order.actionOutcome").await;
+            assert_eq!(refused_ack["d"]["received"],false);
+            assert_eq!(refused["d"]["outcome"],"refused");
+            session.close(); registry.dispose(&account,Disposal::PageDisposed);
+            for reply in [ack,outcome,canceled,refused_ack,refused] {
+                assert_eq!(reply["d"]["instanceId"],"reg-A","{reply}");
+            }
+        }
+    }).await;
+}
+
+// Independent UUID-wall and forwarded-monotonic age controls. Both requests
+// are admitted while valid; private startup consumes their remaining budget.
+#[tokio::test]
+async fn action_fix_deferred_nuke_expires_without_any_physical_write() {
+    tokio::task::LocalSet::new().run_until(async {
+        let mut observed = Vec::new();
+        for clock in ["uuid","age","fresh"] {
+            let registry = crate::accounts::tests::registry(); let tape = Tape::default();
+            tape.defer_positions.store(true,std::sync::atomic::Ordering::SeqCst);
+            let account = delegated_account_with_algos(&registry,"A","bybit",tape.clone(),true);
+            let (out,mut sent,_) = Out::channel(256);
+            let mut session = Session::new(registry.clone(),Arc::new(Metrics::default()),Identity {
+                user:Some("A".into()),chat_handle:None,token:None,resume_from:None,resumable:false,
+            },out.clone());
+            session.order_frames_enabled = crate::order_contract::enabled();
+            crate::accounts::tests::hold_live(&account,session.socket,out.outbox());
+            session.join(account.clone(),out.with_instance_id(None)).await;
+            tokio::time::timeout(Duration::from_secs(3),async {
+                while tape.held_positions.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+            }).await.unwrap();
+            let hex = format!("{:012x}",crate::accounts::now_ms()-if clock=="uuid" {9500}else{0});
+            let id = format!("{}-{}-7101-8101-010101010101",&hex[..8],&hex[8..]);
+            let payload = json!({"kind":"nuke"});
+            let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
+            session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":if clock=="age" {9500}else{0},"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
+            assert_eq!(action_frame(&mut sent,"order.actionAck").await["d"]["received"],true);
+            assert!(tape.writes.lock().unwrap().is_empty());
+            tokio::time::sleep(Duration::from_millis(650)).await;
+            tape.release_positions();
+            let result = action_frame(&mut sent,"order.actionOutcome").await;
+            let writes = tape.writes.lock().unwrap().clone();
+            observed.push((clock,result,writes));
+            session.close(); registry.dispose(&account,Disposal::PageDisposed);
+        }
+        for (clock,result,writes) in observed {
+            if clock=="fresh" {
+                assert_eq!(result["d"]["outcome"],"applied","{result}");
+                assert_eq!(writes,vec!["cancel","create"]);
+            } else {
+                assert!(writes.is_empty(),"{clock}: expired deferred nuke dispatched {writes:?}; {result}");
+                assert_eq!(result["d"]["outcome"],"unknown","{result}");
+                assert_eq!(result["d"]["error"]["outcome"],"unknown");
+                assert!(result["d"]["error"]["message"].as_str().unwrap().contains("expired"));
+                assert!(result["d"]["result"].is_null());
+            }
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn action_fix_nuke_expiry_is_checked_between_each_native_leg() {
+    tokio::task::LocalSet::new().run_until(async {
+        let mut observed = Vec::new();
+        for clock in ["uuid","age","fresh"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape { hold:true,..Default::default() };
+            let account = delegated_account_with_algos(&registry,"A","bybit",tape.clone(),true);
+            let (mut session,mut sent) = joined(registry.clone(),"A",account.clone()).await;
+            let hex = format!("{:012x}",crate::accounts::now_ms()-if clock=="uuid" {9500}else{0});
+            let id = format!("{}-{}-7101-8101-010101010101",&hex[..8],&hex[8..]);
+            let payload = json!({"kind":"nuke"});
+            let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
+            session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":if clock=="age" {9500}else{0},"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
+            assert_eq!(action_frame(&mut sent,"order.actionAck").await["d"]["received"],true);
+            tokio::time::timeout(Duration::from_secs(3),async {
+                while tape.waiting.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+            }).await.expect("first cancel before expiry");
+            assert_eq!(*tape.writes.lock().unwrap(),vec!["cancel"]);
+            tokio::time::sleep(Duration::from_millis(650)).await;
+            tape.finish_unknown();
+            // A broken implementation emits another physical command here.
+            // Only the fresh control is allowed to reach the held close.
+            let close = tokio::time::timeout(Duration::from_millis(500),async {
+                while tape.waiting.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+            }).await.is_ok();
+            let writes = tape.writes.lock().unwrap().clone();
+            if !close && clock != "fresh" {
+                let result = action_frame(&mut sent,"order.actionOutcome").await;
+                assert_eq!(result["d"]["outcome"],"unknown","{result}");
+                assert_eq!(result["d"]["error"]["outcome"],"unknown");
+                assert!(result["d"]["error"]["message"].as_str().unwrap().contains("expired"));
+                assert!(result["d"]["result"].is_null());
+            }
+            observed.push((clock,close,writes));
+            session.close(); registry.dispose(&account,Disposal::PageDisposed);
+        }
+        for (clock,close,writes) in observed {
+            assert_eq!(close,clock=="fresh","{clock}: {writes:?}");
+            assert_eq!(writes,if clock=="fresh" {vec!["cancel","create"]}else{vec!["cancel"]});
+        }
+    }).await;
+}
