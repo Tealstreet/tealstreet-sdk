@@ -10,6 +10,7 @@
   "tickers": [],
   "orders": [],
   "positions": [],
+  "positionSettings": {},
   "displayedPositions": [],
   "displayedMargin": {
     "longExposure": 0.0,

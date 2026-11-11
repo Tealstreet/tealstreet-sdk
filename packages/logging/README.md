@@ -68,21 +68,23 @@ session. Call it on logout. Cleanup and user changes invalidate cached ingest
 tokens and pending token requests; a late response cannot authorize the next
 user's uploads. Uploads waiting on a token or compression stop when their session
 ends. Every buffered entry and pending batch retains its originating user and
-epoch. Cleanup or a user switch makes one best-effort flush of queued data using
-only that owner's already-held, valid ingest token; unavailable authorization,
-offline data and failed delivery are dropped without retry. Cookie-authenticated
-`/api/logs` cannot retain an old owner's authorization, so its old buffers are
-dropped. An in-flight batch cannot remove a newer user's queued work on completion.
+epoch. Cleanup or a user switch discards buffered data, including pending batches
+with an already-held, valid ingest token. This applies to both direct ingest and
+cookie-authenticated `/api/logs`; neither path starts a final upload after the
+owner's lifecycle ends. An in-flight batch cannot remove a newer user's queued
+work on completion.
 Restarting logging for the same active user preserves the queue and can reuse an
 unexpired token, and a stale cleanup cannot invalidate the current session.
 
 Intervals, visibility/online callbacks and upload drivers capture the same owner
 and epoch as their work; stale callbacks cannot flush a new owner's queue. Token
 reads, compression, retry backoff and HTTP responses recheck ownership before
-continuing. A final flush is the explicit exception: it retains its own captured
-authorization and entries, checks expiry after compression, and never reads a
-later owner's token. The two-user tests switch accounts while each deferral is
-pending, including while B's token is cached before A's final flush resumes.
+continuing. No deferred upload bypasses the current owner/generation check, even
+if the old token is still valid. Requests already sent cannot be recalled, but
+their late completion cannot retry or consume the new owner's work. The two-user
+tests switch accounts while each deferral is pending, without resetting module
+state between users. Logging restarted for the same user after logout creates a
+new generation; an active same-user restart preserves its existing generation.
 
 ### Web Worker Usage
 
