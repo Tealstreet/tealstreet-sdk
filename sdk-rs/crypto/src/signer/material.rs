@@ -13,7 +13,7 @@ macro_rules! heap {
 #[cfg(not(target_arch = "wasm32"))]
 macro_rules! heap {
     ($bytes:expr) => {
-        Material::Heap($bytes)
+        $crate::signer::material::Material::Heap($bytes)
     };
 }
 pub(super) use heap;
