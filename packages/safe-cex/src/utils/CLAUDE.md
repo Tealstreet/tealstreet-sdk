@@ -231,7 +231,12 @@ ordinary synchronization retains its local-UTC fallback and five-minute cadence.
 
 - `diagnosticRedaction.ts` — detached copies for console, log events, telemetry
   and retained diagnostics. Never use it to transform live command or market
-  messages; ordinary IDs and timestamps remain diagnostic context.
+  messages; ordinary IDs and timestamps remain diagnostic context. Complete
+  prefixed JSON is parsed before escape decoding and reserialized after redaction;
+  truncated auth text uses the same operation fields/namespaces as structured
+  frames. Header tuples require two strings and a valid HTTP header name, so
+  ordinary error argument arrays retain startup classification and phase metadata.
+  The shared diagnostic marker is `[REDACTED]`.
 - `httpFailure.ts` — `getHttpFailure` / `appendHttpFailure` / `describeHttpFailure`.
   The HOW adapter resolves non-2xx tunnel frames without axios' `settle()`, so a
   venue interceptor's SUCCESS handler receives the failure with its status

@@ -12,18 +12,40 @@ const isCredentialKey = (key: string): boolean => isDiagnosticSecretKey(key) || 
 const isAuthOperation = (value: unknown): boolean =>
   typeof value === 'string' && /(?:^|[._:-])(?:auth(?:ent\w*)?|login)(?:$|[._:-])/i.test(value);
 
+const isAuthOperationField = (key: string, value: unknown): boolean =>
+  /^(?:op|method|event|action|type)$/i.test(key) && isAuthOperation(value);
+
+const isCredentialHeaderTuple = (value: unknown): boolean =>
+  Array.isArray(value) &&
+  value.length === 2 &&
+  typeof value[0] === 'string' &&
+  typeof value[1] === 'string' &&
+  /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value[0]) &&
+  isCredentialKey(value[0]);
+
 /** Detached diagnostic copy. Never mutate the message still needed by trading. */
 export function redactDiagnosticData<T>(input: T): T {
   const seen = new WeakMap<object, unknown>();
   const text = (value: string): string => {
-    // Parse before decoding escapes so nested serialized frames keep their boundaries.
+    // Parse complete JSON before decoding escapes, including a log prefix.
+    // Bound failed suffix probes so malformed diagnostics cannot cause quadratic work.
     for (const candidate of [value, stripDiagnosticUrlQueries(value)]) {
-      if (!/^[\s]*[\[{]/.test(candidate)) continue;
-      try {
-        const parsed: unknown = JSON.parse(candidate);
-        if (parsed && typeof parsed === 'object') return JSON.stringify(visit(parsed));
-      } catch {
-        // Non-JSON console text still crosses the conservative text boundary below.
+      let attempts = 0;
+      for (const start of candidate.matchAll(/[\[{]/g)) {
+        if (++attempts > 16) break;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(candidate.slice(start.index));
+        } catch {
+          continue;
+        }
+        if (parsed && typeof parsed === 'object') {
+          const prefix = candidate.slice(0, start.index);
+          const safePrefix = prefix ? text(prefix) : '';
+          // A prefix can itself introduce positional auth values in the JSON suffix.
+          if (safePrefix === '[REDACTED]') return safePrefix;
+          return safePrefix + JSON.stringify(visit(parsed));
+        }
       }
     }
     const safe = stripDiagnosticUrlQueries(value);
@@ -33,12 +55,15 @@ export function redactDiagnosticData<T>(input: T): T {
       const omitted = /^(?:"\[REDACTED\]"|'\[REDACTED\]'|\[REDACTED\])(?=$|[\s,}\]&;])/.test(tail);
       if (isExchangeCredentialKey(match[1]) || (isCredentialKey(match[1]) && !omitted)) return '[REDACTED]';
     }
-    // A prefixed/truncated auth frame cannot be parsed safely. Do not retain its positional values.
-    if (
-      /(?:op|method|event|action)["']?\s*[:=]\s*["']?(?:user\.)?(?:auth\w*|login)\b/i.test(safe) &&
-      /(?:args|params)["']?\s*[:=]/i.test(safe)
-    )
-      return '[REDACTED]';
+    // Truncated auth frames use exactly the structured operation-key/value policy.
+    if (/(?:args|params)["']?\s*[:=]/i.test(safe)) {
+      const fields = safe.matchAll(
+        /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*["']?([A-Za-z0-9_.:-]+)/g,
+      );
+      for (const [, key, operation] of fields) {
+        if (isAuthOperationField(key, operation)) return '[REDACTED]';
+      }
+    }
     return safe;
   };
   const visit = (value: unknown): unknown => {
@@ -50,7 +75,7 @@ export function redactDiagnosticData<T>(input: T): T {
     if (seen.has(value)) return seen.get(value);
     const output: object = value instanceof Error ? new Error() : Array.isArray(value) ? [] : {};
     seen.set(value, output);
-    const header = Array.isArray(value) && typeof value[0] === 'string' && isCredentialKey(value[0]);
+    const header = isCredentialHeaderTuple(value);
     const entries =
       value instanceof Error
         ? Object.entries({
@@ -61,9 +86,7 @@ export function redactDiagnosticData<T>(input: T): T {
             ...('cause' in value ? { cause: value.cause } : {}),
           })
         : Object.entries(value);
-    const auth = entries.some(
-      ([key, operation]) => /^(?:op|method|event|action|type)$/i.test(key) && isAuthOperation(operation),
-    );
+    const auth = entries.some(([key, operation]) => isAuthOperationField(key, operation));
     for (const [key, child] of entries) {
       Object.defineProperty(output, stripDiagnosticUrlQueries(key), {
         value:

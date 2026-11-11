@@ -1,6 +1,6 @@
 import { setConnectionVisibility } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import { ExchangeName } from '../types';
-import { diagnosticConsole } from '../utils/diagnosticRedaction';
+import { diagnosticConsole, redactDiagnosticData } from '../utils/diagnosticRedaction';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../utils/wsDiagnostics';
@@ -666,7 +666,8 @@ if (typeof self !== 'undefined' && !self.document) {
         if (error.originalError) extra.originalErrorMessage = error.originalError?.message;
       }
 
-      const postMessage = (msg: any) => {
+      const postMessage = (input: unknown) => {
+        const msg = redactDiagnosticData(input);
         if (!shared) {
           (self as any).postMessage(msg);
         } else {
@@ -736,7 +737,8 @@ if (typeof self !== 'undefined' && !self.document) {
         if (reason.messagePreview) extra.messagePreview = reason.messagePreview;
       }
 
-      const postMessage = (msg: any) => {
+      const postMessage = (input: unknown) => {
+        const msg = redactDiagnosticData(input);
         if (!shared) {
           (self as any).postMessage(msg);
         } else {
