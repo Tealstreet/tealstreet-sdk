@@ -2142,10 +2142,16 @@ fn native_failure(
         code: Option<&'a serde_json::value::RawValue>,
         #[serde(borrow)]
         message: Option<&'a str>,
+        #[serde(borrow)]
+        error: Option<&'a serde_json::value::RawValue>,
     }
     let failure = serde_json::from_str::<Failure<'_>>(body).ok();
     let raw = failure.as_ref().and_then(|failure| failure.code);
     let text = raw.and_then(|raw| serde_json::from_str::<String>(raw.get()).ok());
+    let error_text = failure
+        .as_ref()
+        .and_then(|failure| failure.error)
+        .and_then(|raw| serde_json::from_str::<String>(raw.get()).ok());
     let code = raw
         .and_then(|raw| safe_cex_engine::classify::decode_int(raw.get()))
         .map(NativeCode::Int)
@@ -2156,6 +2162,7 @@ fn native_failure(
         message: failure
             .as_ref()
             .and_then(|failure| failure.message)
+            .or(error_text.as_deref())
             .unwrap_or(""),
     };
     let fact = cx.classify_write(context, table, Some(&native), message)?;
