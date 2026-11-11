@@ -19,3 +19,14 @@ Sources: [open positions](https://docs.kraken.com/api-reference/account-informat
 [position stream](https://docs.kraken.com/exchange/api-reference/futures-websocket/open_position),
 [linear contract specifications](https://support.mtf.kraken.com/hc/en-us/articles/25499987607837-Linear-Contract-Specifications),
 and [inverse versus linear examples](https://support.kraken.com/au/articles/360022829971-what-are-derivatives-other-frequently-asked-questions).
+
+The shared Position contract requires `notional: number | null`; its Rust
+counterpart uses `Option<f64>`. JSON null survives typed Store and numeric ingress.
+SDK exposure totals and leverage propagate unknown, combined-balance reads and
+notional-based sizing tokens refuse it, and CLI valuation displays use `—`.
+Position/chaser presence follows quantity. Inverse stop planners refuse unknown
+quote capacity before HTTP; a known independent native size remains usable.
+
+Hosted Rust CLI projections follow the same unknown-valuation display policy.
+Their close and percentage sizing call the shared native-size helper: a known
+independent native quantity remains usable; conflicting quantities refuse.

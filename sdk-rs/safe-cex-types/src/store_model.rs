@@ -962,7 +962,7 @@ mod strict_codecs {
         assert_eq!(wire.position.id, "wire");
         assert_eq!(wire.account, "wire-account");
         assert_eq!(wire.position.entry_price, 1.25);
-        assert_eq!(wire.position.notional, 2.5);
+        assert_eq!(wire.position.notional, Some(2.5));
         assert_eq!(wire.position.leverage, 3.75);
         assert_eq!(wire.position.contracts, 4.125);
         assert_eq!(wire.position.liquidation_price, Some(5.5));

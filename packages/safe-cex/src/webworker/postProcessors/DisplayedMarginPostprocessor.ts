@@ -14,7 +14,7 @@ export class DisplayedMarginPostprocessor extends BasePostprocessor {
 
     for (let i = 0; i < positions.length; i++) {
       const value = positions[i].notional;
-      const notional = Number.isFinite(value) ? Math.abs(value) : NaN;
+      const notional = typeof value === 'number' && Number.isFinite(value) ? Math.abs(value) : NaN;
       totalNotional += notional;
       if (positions[i].side === PositionSide.Long) {
         longExposure += notional;

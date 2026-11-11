@@ -1999,16 +1999,23 @@ impl BitgetFutures {
         let position = cx.store.positions().iter().find(|p| {
             p.symbol == o.symbol && p.side == protected_position(o.side) && p.contracts > 0.0
         });
-        let capacity = position.map_or(0.0, |p| {
-            floor_lot(
-                if self.inverse() {
-                    p.notional
-                } else {
-                    p.contracts
-                },
-                m.precision.amount,
-            )
-        });
+        let capacity = if let Some(position) = position {
+            let size = if self.inverse() {
+                position.notional
+            } else {
+                position.contracts
+            };
+            if !size.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            let capacity = floor_lot(size, m.precision.amount);
+            if !capacity.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            capacity
+        } else {
+            0.0
+        };
         let requested = num::adjust(o.amount, m.precision.amount);
         let size = if o.amount == 0.0 || capacity < m.precision.amount {
             0.0

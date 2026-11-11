@@ -538,7 +538,7 @@ export class ChaserOrderManager {
                   position.symbol === instance.options.symbol &&
                   position.side ===
                     (instance.options.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-                  position.notional !== 0,
+                  position.contracts !== 0,
               )
             ) {
               instance.markComplete();
@@ -890,7 +890,7 @@ export class ChaserOrderManager {
           (position) =>
             position.symbol === instance.options.symbol &&
             position.side === (instance.options.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-            position.notional !== 0,
+            position.contracts !== 0,
         )
       ) {
         instance.markComplete();

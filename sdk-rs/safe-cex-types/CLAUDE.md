@@ -316,9 +316,11 @@ private codecs and the Position serializer; `lib.rs` only re-exports the contrac
 Keep Position edits in that module so later type slices do not touch shared codecs.
 Position now owns the SDK declaration (and PositionSide/PositionMode/MarginType/
 OptionGreeks dependencies), published by `generate.cjs` into
-`packages/safe-cex/src/generated`. `liquidation_price` is `Option<f64>` but the
-wire property is required and nullable, not optional. The private decoder uses
-an explicit required nullable field reader. Run the scoped compiler/freshness
+`packages/safe-cex/src/generated`. `notional` and `liquidation_price` are
+`Option<f64>` with required nullable wire properties. Native engine valuation
+uses NaN for unknown; its JSON null must survive typed Position/Store decoding
+and raw, owned and borrowed numeric ingress without becoming zero. The private
+decoder uses an explicit required nullable field reader. Run the scoped compiler/freshness
 gate `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs` after generation.
 The legacy broad parity script still has unrelated missing capability-declaration
 coverage on this baseline; do not mistake it for the Position cutover gate.
@@ -341,4 +343,5 @@ postprocessor poisons only incomplete scopes; native codecs reject missing field
 its default is empty and old snapshots decode without it. The private record
 codec preserves required identity/leverage and optional margin/mode without
 adding exposure fields. Regenerate with the scoped `store` example and
-`store-generate.cjs`; Position and its display contract are unchanged.
+`store-generate.cjs`; PositionSettings does not replace Position or its display
+contract.
