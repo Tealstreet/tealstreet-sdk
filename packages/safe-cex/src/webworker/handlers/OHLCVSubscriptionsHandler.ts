@@ -4,6 +4,7 @@ import throttle from 'lodash/throttle';
 
 import { serializeCommandError } from '../../commandOutcome';
 import { Candle, OHLCVOptions } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
@@ -46,7 +47,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         // Skip if symbol doesn't exist on this exchange
         const markets = this._exchange.store.markets;
         if (!markets.some((m) => m.symbol === payload.data.symbol)) {
-          console.warn(
+          diagnosticConsole.warn(
             `[OHLCVSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription${
               payload.data.reset ? ' and its forced repair' : ''
             }`,

@@ -1,5 +1,6 @@
 use safe_cex_types::store_model::{
-    DisplayedMargin, FetchedLeverage, StoreData, StoreDataLoaded, StoreOptions, StoreUpdateIds,
+    DisplayedMargin, FetchedLeverage, PositionSettings, StoreData, StoreDataLoaded, StoreOptions,
+    StoreUpdateIds,
 };
 use std::{fs, path::Path};
 use ts_rs::{Config, TS};
@@ -28,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     export::<StoreDataLoaded>(&config, &raw, "StoreDataLoaded")?;
     export::<StoreUpdateIds>(&config, &raw, "StoreUpdateIds")?;
     export::<FetchedLeverage>(&config, &raw, "FetchedLeverage")?;
+    export::<PositionSettings>(&config, &raw, "PositionSettings")?;
     export::<DisplayedMargin>(&config, &raw, "DisplayedMargin")?;
     export::<StoreData>(&config, &raw, "StoreData")?;
     fs::write(

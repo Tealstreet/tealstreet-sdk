@@ -18,6 +18,7 @@ export type { StoreDataLoaded } from './generated/StoreDataLoaded';
 export type { StoreUpdateIds } from './generated/StoreUpdateIds';
 import type { FetchedLeverage } from './generated/FetchedLeverage';
 export type { FetchedLeverage } from './generated/FetchedLeverage';
+export type { PositionSettings } from './generated/PositionSettings';
 export type { DisplayedMargin } from './generated/DisplayedMargin';
 
 import type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';

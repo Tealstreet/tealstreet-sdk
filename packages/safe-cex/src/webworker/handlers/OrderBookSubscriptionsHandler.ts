@@ -5,6 +5,7 @@ import throttle from 'lodash/throttle';
 import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { serializeCommandError } from '../../commandOutcome';
 import { OrderBook } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
@@ -56,7 +57,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         // Skip if symbol doesn't exist on this exchange
         const markets = this._exchange.store.markets;
         if (!markets.some((m) => m.symbol === payload.data.symbol)) {
-          console.warn(
+          diagnosticConsole.warn(
             `[OrderBookSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription`,
           );
           return;
