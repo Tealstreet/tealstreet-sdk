@@ -62,6 +62,33 @@ it.each(['bitrue', 'polymarket'] as const)(
   },
 );
 
+for (const entry of ['constructor', 'factory']) {
+  it.each(['bitrue', 'polymarket'] as const)(
+    `%s ${entry} refuses before reading accessor-backed options`,
+    async (name) => {
+      const inspected = vi.fn(() => {
+        throw new Error('OUT constructor options must remain uninspected');
+      });
+      const options: ExchangeOptions = { key: '', secret: '' };
+      Object.defineProperties(options, {
+        publicDataOnly: { enumerable: true, get: inspected },
+        remoteSigner: { enumerable: true, get: inspected },
+        payloadSigner: { enumerable: true, get: inspected },
+      });
+      const unsupported = expect.objectContaining({
+        message: `${name} is unsupported in this build`,
+        kind: 'unsupported',
+        outcome: 'notSent',
+      });
+      const construct = async () => entry === 'constructor'
+        ? new RustEngineExchange(name, options, new DefaultStore())
+        : createExchange(name, options);
+      await expect(construct()).rejects.toEqual(unsupported);
+      expect(inspected).not.toHaveBeenCalled();
+    },
+  );
+}
+
 it('admitted public accounts still ignore unused signer contents', () => {
   const sign = vi.fn();
   expect(() =>

@@ -122,7 +122,7 @@ import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { AlgoControlWatch } from './algoControlWatch';
 import { mapAsterDEXSignerSetup } from './asterdexSignerSetup';
-import { assertBetaAccount, BETA_VENUES, isBetaVenue } from './betaVenues';
+import { assertBetaAccount, assertBetaVenue, BETA_VENUES, isBetaVenue } from './betaVenues';
 import {
   deriveBridgeConstruction,
   deriveEndpointSetupPolicy,
@@ -862,6 +862,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    assertBetaVenue(exchangeName);
     options = snapshotDelegatedSigningOptions(exchangeName, options);
     assertBetaAccount(exchangeName, options);
     const accountOptions = withoutDelegatedSigningSnapshot(options);

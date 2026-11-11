@@ -123,6 +123,13 @@ fn outside_beta_native_accounts_refuse_before_public_or_private_custody() {
     }
 }
 
+#[cfg(all(
+    feature = "kraken",
+    feature = "apexomni",
+    feature = "cryptocom",
+    feature = "mexc",
+    feature = "orderly"
+))]
 #[test]
 fn keyed_missing_callbacks_keep_adoption_and_configuration_refusals() {
     for venue in [
@@ -312,6 +319,12 @@ fn explicit_client_context_constructs_public_engines_with_unused_callback_intent
     }
 }
 
+#[cfg(all(
+    feature = "kraken",
+    feature = "coinbase",
+    feature = "txflow",
+    feature = "orderly"
+))]
 #[test]
 fn disabled_private_payload_checks_callback_configuration_before_admission() {
     use safe_cex_venues::{ConstructionContext, build_in_context, build_with_signer_in_context};
@@ -388,6 +401,7 @@ fn disabled_private_payload_checks_callback_configuration_before_admission() {
     }
 }
 
+#[cfg(any(feature = "mexc", feature = "bitunix"))]
 fn normalized_keyless_callbacks(venue: &str) {
     for key in ["", "   ", "\u{0085}\u{2003}"] {
         for (flag, intent) in [
@@ -408,18 +422,21 @@ fn normalized_keyless_callbacks(venue: &str) {
     }
 }
 
+#[cfg(feature = "mexc")]
 #[test]
 // TS #3320 fd43a168: exchanges/rust/localSignerSetup.ts:63-96 normalizes before derivePublicMode.
 fn review2_normalized_keyless_mexc_callbacks_are_public() {
     normalized_keyless_callbacks("mexc");
 }
 
+#[cfg(feature = "bitunix")]
 #[test]
 // TS #3320 fd43a168: exchanges/rust/localSignerSetup.ts:63-96 normalizes before derivePublicMode.
 fn review2_normalized_keyless_bitunix_callbacks_are_public() {
     normalized_keyless_callbacks("bitunix");
 }
 
+#[cfg(all(feature = "grvt", feature = "kucoin", feature = "kucoinspot"))]
 #[test]
 // TS #3320 fd43a168: exchanges/rust/delegatedSignerSetup.ts:74-86 refuses these modes before callbacks.
 fn review2_grvt_kucoin_payload_refusal_precedes_provider_validation() {
@@ -465,6 +482,7 @@ fn review2_grvt_kucoin_payload_refusal_precedes_provider_validation() {
     }
 }
 
+#[cfg(all(feature = "kraken", feature = "coinbase"))]
 #[test]
 // TS #3320 fd43a168: exchanges/rust/betaVenues.ts:84-95 validates callbacks before disabled modes.
 fn review2_kraken_coinbase_provider_validation_precedes_payload_refusal() {

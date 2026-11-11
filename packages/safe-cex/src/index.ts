@@ -114,6 +114,7 @@ export const createExchange = async (
   options: ExchangeOptions,
   store?: Store,
 ): Promise<BaseExchange> => {
+  assertBetaVenue(exchangeName);
   options = snapshotDelegatedSigningOptions(exchangeName, options);
   assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
