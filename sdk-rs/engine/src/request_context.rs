@@ -2360,7 +2360,12 @@ impl CommandWrites {
         if let Some((message, protection)) = presented {
             error.message = message;
             error.protection = protection;
-        } else if let Some(message) = &self.presentation {
+        } else if let Some(message) = &self.presentation
+            && error.outcome == Some(Outcome::Unknown)
+        {
+            // A caller-staged presentation names an uncertain outcome. A
+            // definite acceptance or rejection carries the venue's own words;
+            // overwriting it would hide a real refusal behind generic text.
             error.message = message.clone();
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();
