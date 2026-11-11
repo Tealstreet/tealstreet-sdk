@@ -218,16 +218,22 @@ impl ActionDeadline {
 }
 
 #[derive(Clone)]
-pub(crate) struct NukeGuard {
+pub(crate) struct ActionGuard {
     registration: Out,
     deadline: ActionDeadline,
 }
-impl NukeGuard {
+impl ActionGuard {
+    pub(crate) fn new(registration: Out, deadline: ActionDeadline) -> Self {
+        Self {
+            registration,
+            deadline,
+        }
+    }
     pub(crate) fn check(&self) -> Result<(), &'static str> {
         if self.deadline.expired() {
-            Err("Action expired; no further nuke leg was sent")
+            Err("Action expired; no further action command was sent")
         } else if !self.registration.action_active() {
-            Err("Action registration retired; no further nuke leg was sent")
+            Err("Action registration retired; no further action command was sent")
         } else {
             Ok(())
         }
@@ -242,7 +248,7 @@ pub(crate) fn expired_outcome() -> Value {
 /// An actor-queued nuke owns its original registration and expiry, including
 /// during load waits. Dropped work settles uncertainty on that same output.
 pub struct NukeReceipt {
-    guard: NukeGuard,
+    guard: ActionGuard,
     reply: Option<(String, Value, u64)>,
 }
 impl NukeReceipt {
@@ -254,14 +260,11 @@ impl NukeReceipt {
         deadline: ActionDeadline,
     ) -> Self {
         Self {
-            guard: NukeGuard {
-                registration: out,
-                deadline,
-            },
+            guard: ActionGuard::new(out, deadline),
             reply: Some((name, id, seq)),
         }
     }
-    pub(crate) fn guard(&self) -> NukeGuard {
+    pub(crate) fn guard(&self) -> ActionGuard {
         self.guard.clone()
     }
     pub(crate) fn expired(&self) -> bool {

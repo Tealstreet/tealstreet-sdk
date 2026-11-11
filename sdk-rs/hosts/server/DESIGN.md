@@ -1012,7 +1012,11 @@ bind UUIDv7 identity, version, action kind and target IDs in a separate canonica
 fingerprint domain. Placement's four frames and fingerprints are unchanged.
 
 Amend/cancel/cancel-all use the existing method translator, native command
-completion and audit. Nuke uses the account's existing native algo-host nuke,
+completion and audit. Internal action dispatch carries the original deadline
+through cancel-all symbol reads and command translation. Each native command
+rechecks both expiry bounds and its captured registration after any startup wait and
+immediately before dispatch. Expiry stays unknown without a notSent proof.
+Nuke uses the account's existing native algo-host nuke,
 awaiting cancellation and closing legs; a partial/interrupted action stays
 unknown. Actor-queued nuke work carries the original registration and rechecks
 its liveness, account holder and IO authority after load waits and after the

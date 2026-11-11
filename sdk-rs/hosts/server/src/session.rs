@@ -23,8 +23,7 @@ pub(super) enum OrderReceipt {
     Action {
         seq: u64,
         kind: &'static str,
-        // Reconstruction for pre-command errors alone omits this bound.
-        deadline: Option<crate::order_actions::ActionDeadline>,
+        deadline: crate::order_actions::ActionDeadline,
     },
 }
 
@@ -1608,6 +1607,7 @@ impl Session {
             }
         };
         let account = self.joined[name].account.clone();
+        let dispatch_out = self.account_out(name);
         let symbols = if method == "cancelAllOrders" {
             let mut symbols: Vec<String> = account
                 .handle
@@ -1628,6 +1628,24 @@ impl Session {
         } else {
             Vec::new()
         };
+        if let Some(OrderReceipt::Action {
+            seq,
+            kind,
+            deadline,
+        }) = order_frame
+            && let Err(message) =
+                crate::order_actions::ActionGuard::new(dispatch_out.clone(), deadline).check()
+        {
+            crate::order_actions::settle(
+                &dispatch_out,
+                name,
+                &request_id,
+                seq,
+                kind,
+                Err(json!({"message":message,"outcome":"unknown"})),
+            );
+            return;
+        }
         let plans = if account.delegated.is_some() {
             methods::translate_delegated(
                 &account.venue,
@@ -1668,6 +1686,8 @@ impl Session {
             }
         };
         if let Some(receipt) = order_frame {
+            // Reply maps completion only. Every command dispatch below carries
+            // the original receipt, including its immutable deadline.
             for plan in &mut plans {
                 if let Plan::Command { reply, .. } | Plan::AfterLoad { reply, .. } = plan {
                     *reply = match receipt {
@@ -1710,18 +1730,7 @@ impl Session {
                 }
                 Plan::Nuke(mode) => {
                     if let Some(OrderReceipt::Action { seq, deadline, .. }) = order_frame {
-                        if let Some(deadline) = deadline {
-                            self.send_action_nuke(name, &request_id, seq, deadline);
-                        } else {
-                            crate::order_actions::settle(
-                                &self.account_out(name),
-                                name,
-                                &request_id,
-                                seq,
-                                "nuke",
-                                Err(crate::order_actions::expired_outcome()),
-                            );
-                        }
+                        self.send_action_nuke(name, &request_id, seq, deadline);
                         continue;
                     }
                     let handle = account.handle.clone();
@@ -1856,12 +1865,26 @@ impl Session {
                         out.send(envelope::msg(&name, "callMethod:done", data));
                     });
                 }
-                Plan::AfterLoad { command, reply } => {
-                    self.send_command(name, &request_id, &method, &group, command, reply, true)
-                }
-                Plan::Command { command, reply } => {
-                    self.send_command(name, &request_id, &method, &group, command, reply, false)
-                }
+                Plan::AfterLoad { command, reply } => self.send_command(
+                    name,
+                    &request_id,
+                    &method,
+                    &group,
+                    command,
+                    reply,
+                    true,
+                    order_frame,
+                ),
+                Plan::Command { command, reply } => self.send_command(
+                    name,
+                    &request_id,
+                    &method,
+                    &group,
+                    command,
+                    reply,
+                    false,
+                    order_frame,
+                ),
             }
         }
     }
@@ -1878,16 +1901,8 @@ impl Session {
         mut command: Value,
         reply: methods::Reply,
         after_load: bool,
+        order_frame: Option<OrderReceipt>,
     ) {
-        let order_frame = match &reply {
-            methods::Reply::Intent { seq, .. } => Some(OrderReceipt::Placement(*seq)),
-            methods::Reply::Action { seq, kind } => Some(OrderReceipt::Action {
-                seq: *seq,
-                kind,
-                deadline: None,
-            }),
-            _ => None,
-        };
         if !self.joined[name].account.running.io_allowed() {
             self.call_failure(
                 name,
@@ -1921,6 +1936,12 @@ impl Session {
             None
         };
         let out = self.account_out(name);
+        let action_guard = match order_frame {
+            Some(OrderReceipt::Action { deadline, .. }) => Some(
+                crate::order_actions::ActionGuard::new(out.clone(), deadline),
+            ),
+            _ => None,
+        };
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
@@ -1957,6 +1978,21 @@ impl Session {
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
         let send = move || {
+            // Each leg keeps the original age/registration through any startup
+            // wait. Expiry cannot dispatch a write or prove the action not sent.
+            if let Some(guard) = &action_guard
+                && let Err(message) = guard.check()
+            {
+                if let Some(entry) = pending.lock().unwrap().remove(&id) {
+                    settle(
+                        &out,
+                        &name,
+                        entry,
+                        Err(json!({"message":message,"outcome":"unknown"})),
+                    );
+                }
+                return;
+            }
             let failure = match handle.input(client, &command.to_string()) {
                 Ok(true) => None,
                 // Not queued, so not submitted: a definite failure, never retried.

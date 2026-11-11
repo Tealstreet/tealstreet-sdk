@@ -335,7 +335,7 @@ struct Port {
 /// suppressing the final receipt alone would still permit new retired writes.
 struct ActionNukePort {
     port: Rc<Port>,
-    guard: crate::order_actions::NukeGuard,
+    guard: crate::order_actions::ActionGuard,
 }
 
 impl AccountPort for ActionNukePort {

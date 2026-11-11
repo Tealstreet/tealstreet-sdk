@@ -516,3 +516,202 @@ async fn action_fix_nuke_expiry_is_checked_between_each_native_leg() {
         }
     }).await;
 }
+
+#[tokio::test]
+async fn action_fix_cancel_all_expires_during_its_symbol_store_read() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut observed = Vec::new();
+            for clock in ["fresh", "uuid", "age"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account = delegated_account(&registry, "A", "bybit", tape.clone());
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                let hex = format!(
+                    "{:012x}",
+                    crate::accounts::now_ms() - if clock == "uuid" { 9500 } else { 0 }
+                );
+                let id = format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..]);
+                let payload = json!({"kind":"cancelAll"});
+                let fp = crate::order_contract::action_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+                let wire = json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main",
+                    "intentId":id,"seq":1,"ageMs":if clock=="age" {9500}else{0},"fingerprint":fp,"action":payload}}).to_string();
+                let handle = account.handle.clone();
+                // Poll both operations before yielding to the engine. The first
+                // actor read defers cancelAll's symbol read after admission.
+                let (delay_done, handled) = tokio::join!(biased;
+                    handle.read(|_| { std::thread::sleep(Duration::from_millis(650)); true }),
+                    session.handle(&wire)
+                );
+                assert_eq!(delay_done, Some(true));
+                handled.unwrap();
+                let ack = action_frame(&mut sent, "order.actionAck").await;
+                assert_eq!(ack["d"]["received"], true, "{clock}: {ack}");
+                let result = action_frame(&mut sent, "order.actionOutcome").await;
+                let writes = tape.writes.lock().unwrap().clone();
+                observed.push((clock, result, writes));
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+            for (clock, result, writes) in &observed {
+                if *clock == "fresh" {
+                    assert_eq!(result["d"]["outcome"], "applied", "{result}");
+                    assert_eq!(writes, &vec!["cancel"]);
+                } else {
+                    assert!(writes.is_empty(), "expired {clock} cancelAll wrote: {observed:?}");
+                    assert_eq!(result["d"]["outcome"], "unknown", "{result}");
+                    assert_eq!(result["d"]["error"]["outcome"], "unknown");
+                    assert!(result["d"]["error"]["message"].as_str().unwrap().contains("expired"));
+                    assert!(result["d"]["result"].is_null());
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for mode in ["fresh", "uuid", "age", "retired"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                tape.defer_positions
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                let account = delegated_account(&registry, "A", "bybit", tape.clone());
+                let (out, mut sent, _) = Out::channel(256);
+                let mut session = Session::new(
+                    registry.clone(),
+                    Arc::new(Metrics::default()),
+                    Identity {
+                        user: Some("A".into()),
+                        chat_handle: None,
+                        token: None,
+                        resume_from: None,
+                        resumable: false,
+                    },
+                    out.clone(),
+                );
+                session.order_frames_enabled = crate::order_contract::enabled();
+                crate::accounts::tests::hold_live(&account, session.socket, out.outbox());
+                session
+                    .join(account.clone(), out.with_instance_id(None))
+                    .await;
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while tape.held_positions.lock().unwrap().is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                let hex = format!(
+                    "{:012x}",
+                    crate::accounts::now_ms() - if mode == "uuid" { 9500 } else { 0 }
+                );
+                let id = json!(format!(
+                    "{}-{}-7101-8101-010101010101",
+                    &hex[..8],
+                    &hex[8..]
+                ));
+                let deadline = crate::order_actions::ActionDeadline::new(
+                    id.as_str().unwrap(),
+                    if mode == "age" { 9500.0 } else { 0.0 },
+                    std::time::Instant::now(),
+                )
+                .unwrap();
+                let receipt = Some(OrderReceipt::Action {
+                    seq: 1,
+                    kind: "cancelAll",
+                    deadline,
+                });
+                let group = Some(Arc::new(Mutex::new(Group {
+                    remaining: 2,
+                    failures: Vec::new(),
+                })));
+                // Exercise the actual per-command startup continuation with two
+                // legs from one original receipt, not just call_inner's read fence.
+                for symbol in ["BTCUSDT", "ETHUSDT"] {
+                    session.send_command(
+                        "synthetic-main",
+                        &id,
+                        "cancelAllOrders",
+                        &group,
+                        json!({"op":"cancelSymbolOrders","symbol":symbol}),
+                        methods::Reply::Action {
+                            seq: 1,
+                            kind: "cancelAll",
+                        },
+                        true,
+                        receipt,
+                    );
+                }
+                let pending = session.joined["synthetic-main"].client.pending.clone();
+                assert_eq!(pending.lock().unwrap().len(), 2);
+                assert!(tape.writes.lock().unwrap().is_empty());
+                tokio::time::sleep(Duration::from_millis(650)).await;
+                let mut session = Some(session);
+                let (keeper, _keeper_rx, _) = Out::channel(256);
+                if mode == "retired" {
+                    // A remains a live native account after its originating
+                    // registration retires; B completes a real action meanwhile.
+                    crate::accounts::tests::hold_live(&account, 9999, keeper.outbox());
+                    session.take().unwrap().close();
+                    let b_tape = Tape::default();
+                    let b = delegated_account(&registry, "B", "bybit", b_tape.clone());
+                    let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+                    action(&mut bob, json!({"kind":"cancelAll"}), 1, false).await;
+                    assert_eq!(
+                        action_frame(&mut b_sent, "order.actionOutcome").await["d"]["outcome"],
+                        "applied"
+                    );
+                    assert_eq!(*b_tape.writes.lock().unwrap(), vec!["cancel"]);
+                    bob.close();
+                    registry.dispose(&b, Disposal::PageDisposed);
+                    assert!(
+                        !deadline.expired(),
+                        "retirement must be tested independently of expiry"
+                    );
+                }
+                tape.release_positions();
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while !pending.lock().unwrap().is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("both captured command continuations settle");
+                if mode == "retired" {
+                    assert!(tape.writes.lock().unwrap().is_empty());
+                    while let Ok(text) = sent.try_recv() {
+                        let frame: Value = serde_json::from_str(&text).unwrap();
+                        assert_ne!(
+                            frame["t"], "order.actionOutcome",
+                            "stale A outcome: {frame}"
+                        );
+                    }
+                } else {
+                    let result = action_frame(&mut sent, "order.actionOutcome").await;
+                    if mode == "fresh" {
+                        assert_eq!(result["d"]["outcome"], "applied", "{result}");
+                        assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel", "cancel"]);
+                    } else {
+                        assert!(tape.writes.lock().unwrap().is_empty(), "{mode}: {result}");
+                        assert_eq!(result["d"]["outcome"], "unknown", "{result}");
+                        assert_eq!(result["d"]["error"]["outcome"], "unknown");
+                        assert!(
+                            result["d"]["error"]["message"]
+                                .as_str()
+                                .unwrap()
+                                .contains("expired")
+                        );
+                        assert!(result["d"]["result"].is_null());
+                    }
+                }
+                if let Some(session) = session {
+                    session.close();
+                }
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}

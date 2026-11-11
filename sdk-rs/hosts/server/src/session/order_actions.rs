@@ -71,7 +71,7 @@ impl Session {
             Some(OrderReceipt::Action {
                 seq: request.seq,
                 kind: request.action.kind(),
-                deadline: Some(deadline),
+                deadline,
             }),
         )
         .await;
