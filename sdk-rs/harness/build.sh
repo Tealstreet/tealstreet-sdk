@@ -57,7 +57,11 @@ family_args() {
     # Only the public-stream decode crate takes throughput defaults: the TxFlow
     # CPU gate measures that path; the venue crate keeps its size profile.
     build_args+=(--config 'profile.release.package.safe-cex-txflow-public-wire.opt-level=3')
-  elif [[ $family == bitget || $family == bybit ]]; then
+  elif [[ $family == bitget ]]; then
+    # Bitget's public steady workload needs full engine throughput under the
+    # strict Rust-not-slower-than-TS bound; measure its size independently.
+    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level=3')
+  elif [[ $family == bybit ]]; then
     # Public frame processing needs the engine's throughput profile; retain the
     # family's separate measured size budget and strict public CPU gate.
     build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level="s"')
