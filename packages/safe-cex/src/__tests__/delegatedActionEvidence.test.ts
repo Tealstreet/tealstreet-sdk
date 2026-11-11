@@ -82,6 +82,12 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   };
 }
 const cancel: DelegatedAction = { kind: 'cancel', order: { id: 'resting', symbol: 'BTCUSDT' } };
+const handoffActions: DelegatedAction[] = [
+  { kind: 'amend', order: { id: 'resting', symbol: 'BTCUSDT' }, update: { price: 51_000 } },
+  cancel,
+  { kind: 'cancelAll' },
+  { kind: 'nuke' },
+];
 function receipt(box: DelegatedOutbox, id: string, outcome: 'applied' | 'refused' | 'unknown', outcomeSeq = 1) {
   const row = box.entries().find((row) => row.intentId === id)!;
   return {
@@ -257,27 +263,105 @@ describe('action writes share the handoff evidence model', () => {
     expect(f.writes).toHaveLength(1);
     restored.close();
   });
-  it.each(['declined', 'throw'] as const)(
-    'preserves constructor evidence when the first %s send expires reentrantly',
-    async (how) => {
+  it.each(handoffActions)(
+    'N1 preserves positive evidence when an explicit false $kind handoff expires reentrantly',
+    async (action) => {
       const f = fixture();
       const box = await DelegatedOutbox.open(f.options);
+      let attempts = 0;
       box.connect({
         ...f.connection(),
         send() {
+          attempts++;
           f.advance(10_000);
-          if (how === 'throw') throw new Error('not handed off');
           return false;
         },
       });
-      await box.enqueueAction(cancel);
-      expect(box.entries()[0]).toMatchObject({
-        state: 'notSent',
-        cancelPending: false,
-        notSentEvidence: { kind: 'noHandoff', source: 'adapter', handedOff: false },
-      });
-      expect(f.writes).toHaveLength(0);
+      const id = await box.enqueueAction(action);
+      const assertNotSent = (current: DelegatedOutbox) => {
+        for (const row of [current.entries()[0], [...f.rows.values()][0]]) {
+          expect(row).toMatchObject({
+            intentId: id,
+            action,
+            state: 'notSent',
+            cancelPending: false,
+            notSentEvidence: { kind: 'noHandoff', source: 'adapter', handedOff: false, intentId: id },
+          });
+          expect(row).not.toHaveProperty('noHandoffEvidence');
+        }
+      };
+      assertNotSent(box);
+      await box.flush(box.connect(f.connection()));
+      assertNotSent(box);
       box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection()));
+      assertNotSent(restored);
+      expect(attempts).toBe(1);
+      expect(f.writes).toHaveLength(0);
+      restored.close();
+    },
+  );
+  it.each(
+    handoffActions.flatMap((action) =>
+      (['throw', 'undefined', 'null', 'zero', 'empty'] as const).flatMap((how) =>
+        [false, true].map((reentrantExpiry) => ({ kind: action.kind, action, how, reentrantExpiry })),
+      ),
+    ),
+  )(
+    'N1 keeps $kind unknown without evidence after $how (reentrant expiry: $reentrantExpiry)',
+    async ({ action, how, reentrantExpiry }) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const transport = f.connection();
+      let attempts = 0;
+      box.connect({
+        ...transport,
+        send(frame) {
+          attempts++;
+          // Bytes may have left before an adapter throws or violates its type.
+          transport.send(frame);
+          if (reentrantExpiry) f.advance(10_000);
+          if (how === 'throw') throw new Error('uncertain after socket handoff');
+          // Deliberately exercise runtime values outside the boolean contract.
+          return { undefined: undefined, null: null, zero: 0, empty: '' }[how] as unknown as boolean;
+        },
+      });
+      const id = key();
+      expect(await box.enqueueAction(action, { intentId: id })).toBe(id);
+      const identity = {
+        intentId: id,
+        seq: 1,
+        fingerprint: delegatedActionFingerprint('main', id, action, 1),
+        createdAt: 0,
+        callerSuppliedIntentId: true,
+      };
+      const assertUnknown = (current: DelegatedOutbox) => {
+        for (const row of [current.entries()[0], [...f.rows.values()][0]]) {
+          expect(row).toMatchObject({ ...identity, action, state: 'unknown', cancelPending: false });
+          expect(row).not.toHaveProperty('notSentEvidence');
+          expect(row).not.toHaveProperty('noHandoffEvidence');
+          expect(row.error?.outcome).not.toBe('notSent');
+        }
+      };
+      assertUnknown(box);
+      // Identity lookup, deadline expiry and reconnect cannot manufacture proof.
+      expect(await box.enqueueAction(action, { intentId: id })).toBe(id);
+      if (!reentrantExpiry) f.advance(10_000);
+      await box.flush(box.connect(f.connection()));
+      assertUnknown(box);
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(await restored.enqueueAction(action, { intentId: id })).toBe(id);
+      await restored.flush(restored.connect(f.connection()));
+      assertUnknown(restored);
+      expect(attempts).toBe(1);
+      expect(f.writes).toHaveLength(1);
+      expect(JSON.parse(f.writes[0])).toMatchObject({
+        t: 'order.action',
+        d: { intentId: id, action },
+      });
+      restored.close();
     },
   );
   it.each(['owner', 'seq', 'fingerprint'] as const)(
