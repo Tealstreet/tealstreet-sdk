@@ -1,17 +1,18 @@
 import throttle from 'lodash/throttle';
 
-import { Candle } from '../../types';
+import { Candle, OHLCVOptions } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
 interface SymbolIntervalSub {
   unsub: () => void;
-  throttleFn: any;
+  throttleFn?: ReturnType<typeof throttle<(candle: Candle) => void>>;
   // subIds.size IS the refcount — see OrderBookSubscriptionsHandler for why a
   // separate counter desyncs on a duplicate subId and strands the subscription.
   subIds: Set<string>;
   lastCandleTimestamp: number;
-  payloadDataBySubId: Map<string, any>;
+  payloadDataBySubId: Map<string, OHLCVOptions & { subId: string }>;
 }
 
 export class OHLCVSubscriptionsHandler extends BaseHandler {
@@ -41,7 +42,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         // Skip if symbol doesn't exist on this exchange
         const markets = this._exchange.store.markets;
         if (!markets.some((m) => m.symbol === payload.data.symbol)) {
-          console.warn(
+          diagnosticConsole.warn(
             `[OHLCVSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription${
               payload.data.reset ? ' and its forced repair' : ''
             }`,

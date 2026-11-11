@@ -622,6 +622,13 @@ pub enum VenueAction {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     },
+    /// Generated reported closed-PnL rows; raw journal reads use FetchClosedPositions.
+    FetchClosedPnl {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        account: String,
+    },
     /// The venue's raw account balance payload as JSON, or `null` before one
     /// is read, for hosts that expose it as `balance.info`.
     FetchBalanceInfo,
@@ -1908,6 +1915,7 @@ impl OrdersRefresh {
 struct IoCore {
     write_failure_text: Option<fn(&VenueError) -> String>,
     unknown_outcome_telemetry: Option<crate::UnknownOutcomeTelemetry>,
+    command_failure_summary: fn(&VenueError) -> Option<String>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2212,6 +2220,7 @@ impl Default for IoCore {
         Self {
             write_failure_text: None,
             unknown_outcome_telemetry: None,
+            command_failure_summary: |_| None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -3872,7 +3881,8 @@ impl crate::engine::CoreCx<'_> {
         seal: request_context_registry::Seal,
     ) -> Result<(), crate::request_context::Error> {
         let mut write_sealed = false;
-        let result = match seal {
+        let mut reports = Vec::new();
+        let mut result = match seal {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -3893,7 +3903,7 @@ impl crate::engine::CoreCx<'_> {
                         }
                         None => message,
                     };
-                    self.command_error(command, message);
+                    reports.push(message);
                 }
                 let mut error = error;
                 if let Some(present) = self.io.core.write_failure_text {
@@ -3902,6 +3912,27 @@ impl crate::engine::CoreCx<'_> {
                 Err(error)
             }
         };
+        // Presentation sees the final journal outcome, including engine-owned
+        // failures; it cannot change evidence, partial IDs or reconciliation.
+        if let Err(error) = &mut result
+            && let Some(summary) = (self.io.core.command_failure_summary)(error)
+        {
+            error.message = if error.message.is_empty() {
+                summary.clone()
+            } else {
+                format!("{summary}\nContext: {}", error.message)
+            };
+            for report in &mut reports {
+                *report = if report.is_empty() {
+                    summary.clone()
+                } else {
+                    format!("{summary}\nContext: {report}")
+                };
+            }
+        }
+        for message in reports {
+            self.command_error(command, message);
+        }
         // A credential-free route's auth-kind refusal is no credential evidence.
         let engine_unknown = self.io.core.request_contexts.engine_unknown(command);
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
@@ -4114,6 +4145,15 @@ pub use unknown_outcome::{
 };
 
 pub trait Venue {
+    /// Optional summary after outcome projection, preceding the command failure
+    /// and its warnings. Their original detail remains as context; facts are read-only.
+    fn command_failure_summary(_error: &VenueError) -> Option<String>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
     /// Optional static telemetry for an engine-sealed Unknown. Receives no venue,
     /// Cx, Store, Context or journal authority; returns only a bounded log event.
     fn unknown_outcome_telemetry() -> Option<UnknownOutcomeTelemetry>
@@ -4122,6 +4162,7 @@ pub trait Venue {
     {
         None
     }
+
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
@@ -4144,10 +4185,12 @@ pub trait Venue {
     }
 
     /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// Use raw `now` for scheduling, calibrated `protocol_now` for absolute dates.
     /// No Cx: this cannot send, publish financial rows or complete a command.
     fn observe_unproven_http_response(
         &mut self,
         _now: f64,
+        _protocol_now: f64,
         _pending: &Self::Pending,
         _response: Response<'_>,
     ) {
@@ -4156,6 +4199,10 @@ pub trait Venue {
     /// Drop only this generation's native command planning after the engine
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
+
+    /// Finish retained queues outside another command's HTTP delivery.
+    /// Context validation and journal projection still govern every completion.
+    fn finish_deferred_commands(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
 
     /// The engine retired this tracked Read root at its deadline. `pending`
     /// holds the continuations of its outstanding requests, already discarded
@@ -4997,6 +5044,7 @@ impl<V: Venue> Engine<V> {
         )?;
         core.write_failure_text = V::write_failure_text();
         core.unknown_outcome_telemetry = V::unknown_outcome_telemetry();
+        core.command_failure_summary = V::command_failure_summary;
         Ok(Self {
             venue,
             http_release,
@@ -5042,6 +5090,7 @@ impl<V: Venue> Engine<V> {
     }
 
     /// Trusted construction installs the provider handle; no key material enters the engine.
+    /// Replacing it retires queued signing and unclaimed signed packets.
     pub fn set_signer(
         &mut self,
         signer: Option<crate::signing::Provider>,
@@ -5054,6 +5103,14 @@ impl<V: Venue> Engine<V> {
         self.invalidate_address_setup()?;
         #[cfg(feature = "nonce-handoff")]
         self.invalidate_nonce_handoff();
+        let changed = match (&self.io.core.signer, &signer) {
+            (Some(previous), Some(next)) => !std::sync::Arc::ptr_eq(previous, next),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            self.io.core.signing.replace_provider();
+        }
         self.io.core.signer = signer;
         Ok(())
     }
@@ -6703,8 +6760,6 @@ impl<V: Venue> Engine<V> {
 
     #[inline(never)]
     fn finish_deferred_commands(&mut self, now: f64) {
-        #[cfg(not(feature = "order-locks"))]
-        let _ = now;
         // Deferred commands are engine-owned work, not part of the HTTP codec
         // whose callback just released the lock. Do not lend that codec's
         // attempt authority to an unrelated internal finalization.
@@ -6716,6 +6771,11 @@ impl<V: Venue> Engine<V> {
         let entry = self.io.core.command_entry.take();
         #[cfg(feature = "order-locks")]
         let order_response = self.io.core.order_response_token.take();
+        self.venue.finish_deferred_commands(&mut Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        });
         #[cfg(feature = "order-locks")]
         let ready = self.io.core.order_locks.ready();
         #[cfg(feature = "order-locks")]
@@ -7519,6 +7579,15 @@ impl<V: Venue> Engine<V> {
     #[inline(never)]
     fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
+        let revoked = self.io.core.signing.take_revoked();
+        if !revoked.is_empty() {
+            self.io.core.actions.retain(|action| !matches!(action,
+                Action::Sign { attempt, .. } if revoked.binary_search_by_key(&attempt.0, |id| id.0).is_ok()));
+        }
+        for attempt in revoked {
+            self.sign_completed(now, attempt, Err(crate::signing::SignError::Refused));
+            self.assert_live();
+        }
         for (outbound, error) in std::mem::take(&mut self.io.core.signing_admission) {
             self.sign_failed(now, outbound, error);
             self.assert_live();
@@ -7843,9 +7912,9 @@ impl<V: Venue> Engine<V> {
             if let Some(market) = self.store.market_index(symbol) {
                 // Recovering consumers may have missed the original invalidation frame.
                 if self.book(symbol).is_some() {
-                    book.write(market, &mut w);
+                    crate::book_output::write(book, market, &mut w);
                 } else {
-                    Book::default().write(market, &mut w);
+                    crate::book_output::write(&Book::default(), market, &mut w);
                 }
             }
         }
@@ -7969,11 +8038,11 @@ impl<V: Venue> Engine<V> {
                                 && &baseline.id == id
                                 && baseline.book.reset_generation() == book.reset_generation() =>
                         {
-                            book.write_delta(&baseline.book, market, &mut w);
+                            crate::book_output::write_delta(book, &baseline.book, market, &mut w);
                             baseline.book.clone_from(book);
                         }
                         baseline => {
-                            book.write(market, &mut w);
+                            crate::book_output::write(book, market, &mut w);
                             if let Some(baseline) = baseline {
                                 baseline.market = market;
                                 baseline.id.clone_from(id);
@@ -7992,10 +8061,10 @@ impl<V: Venue> Engine<V> {
                     }
                     continue;
                 }
-                book.write(market, &mut w);
+                crate::book_output::write(book, market, &mut w);
             } else {
                 // A lost sequence makes the old consumer book unusable immediately.
-                Book::default().write(market, &mut w);
+                crate::book_output::write(&Book::default(), market, &mut w);
                 #[cfg(feature = "book-deltas")]
                 self.book_baselines.remove(symbol);
             }
@@ -8009,42 +8078,9 @@ impl<V: Venue> Engine<V> {
                 Some((self.store.market_index(symbol)?, interval.as_str(), *candle))
             })
             .collect();
-        w.candles(&candles);
+        crate::candle_output::write(&mut w, &candles);
         let mut fills = std::mem::take(&mut self.io.core.fills);
-        if !fills.is_empty() {
-            w.begin_revision(section::FILLS, 2);
-            w.u32(fills.len() as u32);
-            let orders: Vec<u32> = fills.iter().map(|(f, _)| w.string(&f.order_id)).collect();
-            w.u32s(orders);
-            w.u32s(fills.iter().map(|(f, _)| {
-                self.store
-                    .market_index(&f.symbol)
-                    .unwrap_or(crate::wire::NONE)
-            }));
-            w.u32s(fills.iter().map(|(f, _)| f.side as u32));
-            w.pad();
-            for (f, _) in &fills {
-                w.f64s([f.price, f.amount]);
-            }
-            for (fill, _) in &fills {
-                let symbol = w.string(&fill.symbol);
-                w.u32(symbol);
-            }
-            for (fill, _) in &fills {
-                let id = w.optional_string(fill.id.as_deref());
-                w.u32(id);
-            }
-            w.pad();
-            w.f64s(fills.iter().map(|(_, financials)| {
-                financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
-            }));
-            w.f64s(
-                fills
-                    .iter()
-                    .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
-            );
-            w.end();
-        }
+        crate::fill_output::write_fills(&mut w, &fills, |symbol| self.store.market_index(symbol));
         let empty = w.is_empty();
         let frame = w.finish();
         #[cfg(feature = "book-deltas")]
@@ -8419,7 +8455,7 @@ mod streaming_tests {
     }
 
     #[test]
-    fn revision_two_fills_preserve_absent_identity_and_financial_values() {
+    fn revision_two_fills_emit_public_identity_and_absent_financial_values() {
         for financials in [
             None,
             Some(FillFinancials::default()),
@@ -8454,16 +8490,19 @@ mod streaming_tests {
                 expected.extend(value.to_le_bytes());
             }
             expected.extend(1u32.to_le_bytes()); // Stable raw symbol reference.
-            expected.extend(crate::wire::NONE.to_le_bytes()); // Missing execution identity.
+            expected.extend(0u32.to_le_bytes()); // Native-computed public event identity.
             expected.extend(f64::NAN.to_le_bytes());
             expected.extend(f64::NAN.to_le_bytes());
             assert_eq!(
                 fills, expected,
-                "revision two represents absent financials and identity explicitly"
+                "revision two represents public identity and absent financials explicitly"
             );
             assert_eq!(
                 crate::wire::fills(frame),
-                Some(vec![execution()]),
+                Some(vec![Fill {
+                    id: Some("9007199254740995".into()),
+                    ..execution()
+                }]),
                 "the native reader returns what the writer wrote"
             );
             assert!(engine.take_frame(1.).is_none(), "fill must flush once");
@@ -8516,7 +8555,7 @@ mod streaming_tests {
             .collect();
         assert_eq!(rows, [99., 1., 99., 1., 99., 1.]);
         assert_eq!(&fills[88..100], &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-        assert_eq!(&fills[100..112], &[255; 12]);
+        assert_eq!(&fills[100..112], &[0; 12]);
         let floats: Vec<_> = fills[112..]
             .as_chunks::<8>()
             .0
@@ -8624,6 +8663,42 @@ mod streaming_tests {
         assert!(matches!(engine.drain_actions().next(), Some(Action::Notice(
             Notice::CommandFailed { command: 8, error }
         )) if error.message == "read response lost" && error.outcome.is_none()));
+    }
+
+    #[test]
+    fn write_failure_text_and_summary_compose_once_without_changing_facts() {
+        let mut engine = frame_engine();
+        engine.io.core.write_failure_text = Some(|error| format!("MASTER: {}", error.message));
+        engine.io.core.command_failure_summary =
+            |error| (error.outcome == Some(crate::Outcome::Unknown)).then(|| "SUMMARY".to_owned());
+        let expected = VenueError::new("journal failure")
+            .kind(ErrorKind::Network)
+            .outcome(crate::Outcome::Unknown)
+            .venue_code("native-code")
+            .venue_message("native diagnostic");
+        Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            7,
+            None,
+            request_context_registry::Seal::Failure(
+                expected.clone(),
+                vec!["journal warning".into()],
+            ),
+        )
+        .unwrap();
+        let mut presented = expected;
+        presented.message = "SUMMARY\nContext: MASTER: journal failure".into();
+        assert!(
+            matches!(engine.drain_actions().collect::<Vec<_>>().as_slice(), [
+            Action::Notice(Notice::CommandError { command: 7, message }),
+            Action::Notice(Notice::CommandFailed { command: 7, error }),
+        ] if message == "SUMMARY\nContext: MASTER: journal warning" && *error == presented)
+        );
     }
 
     #[test]

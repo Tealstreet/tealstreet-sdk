@@ -560,6 +560,11 @@ fn candle(k: &Kline, rest: bool) -> Candle {
     }
 }
 impl Venue for BitunixFutures {
+    fn command_failure_summary(error: &VenueError) -> Option<String> {
+        (error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+            .then(|| "The outcome of this Bitunix write is unknown. Check Open Orders".to_owned())
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }
@@ -653,6 +658,12 @@ impl Venue for BitunixFutures {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            safe_cex_engine::VenueAction::FetchClosedPnl {
+                symbol,
+                from_ms,
+                to_ms,
+                account,
+            } => self.closed_pnl(cx, command, symbol, from_ms, to_ms, account),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

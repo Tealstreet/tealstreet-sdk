@@ -12,12 +12,12 @@ import { ChaserOrderManager } from './ChaserOrderManager';
 
 type Handler = (...args: any[]) => void;
 
-// Encode revision-zero rows independently so the real binary reader and fill
+// Encode revision-two rows independently so the real binary reader and fill
 // bridge participate in the chaser regression without requiring a WASM build.
 const createFillFrame = (fills: Array<{ orderId: string; market: number; amount: number }>): Frame => {
   const align8 = (value: number) => Math.ceil(value / 8) * 8;
   const strings = ['BTCUSDT', 'ETHUSDT', 'BTC', 'ETH', 'USDT', ...fills.map((fill) => fill.orderId)];
-  const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
+  const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
   const table = (kind: number, words: number[], numbers: number[]) => {
     const bytes = new Uint8Array(align8(words.length * 4) + numbers.length * 8);
     const view = new DataView(bytes.buffer);
@@ -35,6 +35,18 @@ const createFillFrame = (fills: Array<{ orderId: string; market: number; amount:
     [fills.length, ...fills.map((_, i) => 5 + i), ...fills.map((fill) => fill.market), ...fills.map(() => 0)],
     fills.flatMap((fill) => [100, fill.amount]),
   );
+  const fillSection = sections[sections.length - 1];
+  const fillBytes = new Uint8Array(fillSection.bytes.length + fills.length * 24);
+  fillBytes.set(fillSection.bytes);
+  const fillView = new DataView(fillBytes.buffer);
+  fills.forEach((fill, i) => {
+    fillView.setUint32(fillSection.bytes.length + i * 4, fill.market, true);
+    fillView.setUint32(fillSection.bytes.length + (fills.length + i) * 4, 5 + i, true);
+    fillView.setFloat64(fillSection.bytes.length + fills.length * 8 + i * 8, NaN, true);
+    fillView.setFloat64(fillSection.bytes.length + fills.length * 16 + i * 8, NaN, true);
+  });
+  fillSection.bytes = fillBytes;
+  fillSection.revision = 2;
   const encoded = strings.map((value) => new TextEncoder().encode(value));
   const stringBytes = new Uint8Array(
     align8(4 + (strings.length + 1) * 4 + encoded.reduce((size, value) => size + value.length, 0)),
@@ -57,6 +69,7 @@ const createFillFrame = (fills: Array<{ orderId: string; market: number; amount:
   let offset = 16;
   for (const section of sections) {
     view.setUint16(offset, section.kind, true);
+    view.setUint16(offset + 2, section.revision ?? 0, true);
     view.setUint32(offset + 4, section.bytes.length, true);
     new Uint8Array(buffer, offset + 8, section.bytes.length).set(section.bytes);
     offset += 8 + section.bytes.length;

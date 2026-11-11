@@ -11,6 +11,7 @@
 import { ethers } from 'ethers';
 
 import { reportEvent } from '../../telemetry';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import {
   builderFeeRateFromTenthsBps,
   getBuilderAddress,
@@ -220,7 +221,7 @@ export async function checkBuilderFeeApproved(
       maxFeeRateTenthsBps: feeValueTenthsBps,
     };
   } catch (error) {
-    console.error('Failed to check builder fee approval:', error);
+    diagnosticConsole.error('Failed to check builder fee approval:', error);
     return {
       approved: false,
       error: error instanceof Error ? error.message : 'Failed to reach Hyperliquid',

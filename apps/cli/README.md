@@ -60,10 +60,17 @@ ship CLI source; it downloads the matching binary from
 
 Config and runtime state are isolated by signed-in user and profile under
 `~/.tealstreet/profiles/<profile hash>/users/<user hash>/` (`~/.disrupt/` for Disrupt).
+Deferred commands, background writes and output stay bound to their starting login;
+switching users cancels their remaining work and reloads the footer for the new user.
+Cross-trade startup also cancels remaining account boots and disposes old connections.
 Login changes clear live exchanges and approvals; unknown-owner legacy files
 require re-entry. Signed-out local-only state persists separately and is never
 imported into an authenticated profile. See
 [`operations/config-files.md`](../documentation/cli/operations/config-files.md).
+They also stop and remove the old user's in-process chasers; late chase results
+are discarded before they can appear in the next user's listings or command result.
+Exchange output listeners retain their starting login, so old-login disposal notices
+and delayed output are discarded. Same-login account disposal still reports interrupted chases.
 An explicitly selected config symlink migrates only from a consistently owned
 target inside the source directory. Unsafe targets or an earlier skipped config
 require re-entry instead of silently completing migration.

@@ -706,7 +706,7 @@ fn orders(
     Ok(())
 }
 
-/// `POSITIONS` (revision 1, `Store::write_positions`): replaces the positions.
+/// `POSITIONS` (revision 2, `Store::write_positions`): replaces the positions.
 fn positions(
     store: &mut Store,
     _: &IngestState,
@@ -717,7 +717,7 @@ fn positions(
     const SIDE: [PositionSide; 2] = [PositionSide::Long, PositionSide::Short];
     const MARGIN: [MarginType; 2] = [MarginType::Isolated, MarginType::Cross];
     const MODE: [PositionMode; 2] = [PositionMode::Hedged, PositionMode::Oneway];
-    if section.revision != 1 {
+    if section.revision != 2 {
         return Err(IngestError("unsupported POSITIONS revision"));
     }
     let strings = &frame.strings;
@@ -731,7 +731,7 @@ fn positions(
         enums.push(c.u32()?);
     }
     c.align8();
-    let mut columns = [(); 9].map(|_| Vec::with_capacity(count));
+    let mut columns = [(); 11].map(|_| Vec::with_capacity(count));
     for column in &mut columns {
         for _ in 0..count {
             column.push(c.f64()?);
@@ -742,27 +742,71 @@ fn positions(
         ids.push(strings.required(c.u32()?)?.to_owned());
     }
     let mut positions = Vec::with_capacity(count);
+    let mut native_extras = Vec::with_capacity(count);
     for (i, id) in ids.into_iter().enumerate() {
         let packed = enums[i];
         let column = |n: usize| columns[n][i];
+        // Match wire.mjs exactly. Raw sizing columns 0/1/5 remain unfiltered;
+        // NaN is the optional/null sentinel, but infinities are never display data.
+        let finite = |n: usize, name| {
+            if column(n).is_finite() {
+                Ok(column(n))
+            } else {
+                Err(IngestError(name))
+            }
+        };
+        let optional_number = |n: usize, name| {
+            if column(n).is_nan() {
+                Ok(None)
+            } else {
+                finite(n, name).map(Some)
+            }
+        };
+        let leverage = finite(2, "invalid Position leverage")?;
+        let unrealized_pnl = finite(3, "invalid Position unrealizedPnl")?;
+        let liquidation_price = column(6);
+        if !liquidation_price.is_nan()
+            && (!liquidation_price.is_finite() || liquidation_price <= 0.)
+        {
+            return Err(IngestError("invalid Position liquidationPrice"));
+        }
+        let realized_pnl = optional_number(4, "invalid Position realizedPnl")?;
+        let margin_size = optional_number(7, "invalid Position marginSize")?;
+        let last_update = optional_number(8, "invalid Position lastUpdate")?;
+        // Presence, not the payload sentinel, decides absence. Match the JS
+        // decoder: ignore absent payloads, refuse every non-finite present one.
+        let native = |n: usize, bit: u32| {
+            if packed & (1_u32 << bit) == 0_u32 {
+                Ok(None)
+            } else if column(n).is_finite() {
+                Ok(Some(column(n)))
+            } else {
+                Err(IngestError(if n == 9 {
+                    "invalid Position contractsNative"
+                } else {
+                    "invalid Position unrealizedPnlNative"
+                }))
+            }
+        };
+        native_extras.push([native(9, 24)?, native(10, 25)?]);
         positions.push(Position {
             id,
             symbol: strings.required(c.u32()?)?.to_owned(),
             side: nth(&SIDE, packed & 0xff)?,
             entry_price: column(0),
             notional: column(1),
-            leverage: column(2),
+            leverage,
             margin_type: optional(&MARGIN, (packed >> 8) & 0xff)?,
             position_mode: optional(&MODE, (packed >> 16) & 0xff)?,
-            unrealized_pnl: column(3),
-            realized_pnl: present(column(4)),
+            unrealized_pnl,
+            realized_pnl,
             contracts: column(5),
-            liquidation_price: column(6),
-            margin_size: present(column(7)),
-            last_update: present(column(8)),
+            liquidation_price,
+            margin_size,
+            last_update,
         });
     }
-    store.set_positions(positions);
+    store.set_frame_positions(positions, native_extras);
     Ok(())
 }
 
@@ -1566,6 +1610,409 @@ pub(crate) mod tests {
         assert!(applied.orders && applied.positions);
         assert_eq!(store.orders(), source.orders());
         assert_eq!(store.positions(), source.positions());
+    }
+
+    fn native_position() -> crate::model::Position {
+        use crate::model::{Position, PositionSide};
+        Position {
+            id: "native-position".into(),
+            symbol: "BTCUSDT".into(),
+            side: PositionSide::Long,
+            entry_price: 100.,
+            notional: 30.,
+            leverage: 2.,
+            margin_type: None,
+            position_mode: None,
+            unrealized_pnl: -1.25,
+            realized_pnl: None,
+            contracts: 0.3,
+            liquidation_price: 80.,
+            margin_size: None,
+            last_update: None,
+        }
+    }
+
+    fn position_native_columns(store: &Store) -> Vec<(u32, [Option<f64>; 2])> {
+        let payload = sections_of(store, section::POSITIONS).remove(0);
+        let mut c = Cursor::new(&payload);
+        let count = c.u32().unwrap() as usize;
+        for _ in 0..count {
+            c.u32().unwrap();
+        }
+        let enums: Vec<_> = (0..count).map(|_| c.u32().unwrap()).collect();
+        c.align8();
+        for _ in 0..count * 9 {
+            c.f64().unwrap();
+        }
+        let sizes: Vec<_> = (0..count).map(|_| c.f64().unwrap()).collect();
+        (0..count)
+            .map(|i| {
+                let pnl = c.f64().unwrap();
+                (
+                    enums[i] >> 24,
+                    [
+                        (!sizes[i].is_nan()).then_some(sizes[i]),
+                        (!pnl.is_nan()).then_some(pnl),
+                    ],
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn position_frame_native_metadata_survives_missing_and_stale_target_markets() {
+        use crate::QuantityUnits;
+        for units in [
+            QuantityUnits::Base,
+            QuantityUnits::NativePlacement,
+            QuantityUnits::InverseNative,
+            QuantityUnits::InverseContractSized,
+        ] {
+            let mut source = Store::default();
+            let mut source_market = market("BTCUSDT");
+            source_market.contract_size = Some(0.1);
+            source_market.is_inverse = Some(matches!(
+                units,
+                QuantityUnits::InverseNative | QuantityUnits::InverseContractSized
+            ));
+            source.set_quantity_units(units);
+            source.set_markets(vec![source_market]);
+            source.set_positions(vec![native_position()]);
+            let expected = position_native_columns(&source);
+            for target_size in [None, Some(0.1), Some(0.01)] {
+                let mut target = Store::default();
+                target.set_quantity_units(QuantityUnits::InverseNative);
+                if let Some(size) = target_size {
+                    let mut m = market("BTCUSDT");
+                    m.contract_size = Some(size);
+                    m.is_inverse = Some(true);
+                    target.set_markets(vec![m]);
+                }
+                let mut writer = FrameWriter::new(Vec::new(), 0.0);
+                source.write(&source.account_snapshot(), &mut writer);
+                let bytes = writer.finish();
+                apply(
+                    &mut target,
+                    &mut IngestState::default(),
+                    &parse(&bytes).unwrap(),
+                    true,
+                )
+                .unwrap();
+                assert_eq!(
+                    position_native_columns(&target),
+                    expected,
+                    "units={units:?}, target size={target_size:?}"
+                );
+            }
+        }
+    }
+
+    fn explicit_position_frame(native: [f64; 2], presence: u32) -> Vec<u8> {
+        explicit_position_columns(
+            [
+                100.,
+                30.,
+                2.,
+                -1.25,
+                f64::NAN,
+                0.3,
+                80.,
+                f64::NAN,
+                f64::NAN,
+                native[0],
+                native[1],
+            ],
+            presence,
+        )
+    }
+
+    fn explicit_position_columns(columns: [f64; 11], presence: u32) -> Vec<u8> {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        let id = writer.string("incoming");
+        let symbol = writer.string("BTCUSDT");
+        writer.begin_revision(section::POSITIONS, 2);
+        writer.u32(1);
+        writer.u32(u32::MAX);
+        writer.u32(1 | presence << 24);
+        writer.pad();
+        writer.f64s(columns);
+        writer.u32(id);
+        writer.u32(symbol);
+        writer.end();
+        writer.finish()
+    }
+
+    #[test]
+    fn position_frame_numeric_matrix_matches_js_decoder() {
+        // Same table as wire.test.mjs, including raw sizing, null/absence,
+        // signed zero, and both native presence states. One bad row must not commit.
+        let values = [1., 0., -0., -1., f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+        let raw = [true; 7];
+        let finite = [true, true, true, true, false, false, false];
+        let optional = [true, true, true, true, true, false, false];
+        let liquidation = [true, false, false, false, true, false, false];
+        let fields = [
+            ("entryPrice", raw),
+            ("notional", raw),
+            ("leverage", finite),
+            ("unrealizedPnl", finite),
+            ("realizedPnl", optional),
+            ("contracts", raw),
+            ("liquidationPrice", liquidation),
+            ("marginSize", optional),
+            ("lastUpdate", optional),
+            ("contractsNative", finite),
+            ("unrealizedPnlNative", finite),
+        ];
+        let mut mismatches = Vec::new();
+        for presence in [0, 3] {
+            for (column, (name, allowed)) in fields.iter().enumerate() {
+                for (case, value) in values.into_iter().enumerate() {
+                    let mut columns = [1.; 11];
+                    columns[column] = value;
+                    let bytes = explicit_position_columns(columns, presence);
+                    let mut target = Store::default();
+                    target.set_positions(vec![native_position()]);
+                    let before = target.positions().to_vec();
+                    let result = apply(
+                        &mut target,
+                        &mut IngestState::default(),
+                        &parse(&bytes).unwrap(),
+                        false,
+                    );
+                    let accepted = allowed[case] || (column >= 9 && presence == 0);
+                    if result.is_ok() != accepted {
+                        mismatches.push(format!("{name}={value}, presence={presence}: {result:?}"));
+                    }
+                    match result {
+                        Err(error) if !accepted => {
+                            assert_eq!(error.0, format!("invalid Position {name}"));
+                            assert_eq!(target.positions(), before, "{name}={value}");
+                        }
+                        Ok(_) if accepted => {
+                            assert_eq!(target.positions()[0].id, "incoming");
+                            if column >= 9 {
+                                let native = position_native_columns(&target)[0].1;
+                                assert_eq!(native[column - 9], (presence == 3).then_some(value));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "{} mismatches: {mismatches:#?}",
+            mismatches.len()
+        );
+    }
+
+    #[test]
+    fn position_metadata_updates_preserve_native_values_and_sibling_alignment() {
+        use crate::QuantityUnits;
+        let mut source = Store::default();
+        source.set_quantity_units(QuantityUnits::NativePlacement);
+        let mut source_market = market("BTCUSDT");
+        source_market.contract_size = Some(0.1);
+        source.set_markets(vec![source_market]);
+        let first = native_position();
+        let mut sibling = first.clone();
+        sibling.id = "sibling".into();
+        sibling.contracts = 0.6;
+        source.set_positions(vec![first, sibling]);
+        let expected = position_native_columns(&source);
+        assert_eq!(expected, vec![(1, [Some(3.), None]), (1, [Some(6.), None])]);
+        for target_size in [None, Some(0.1), Some(0.01)] {
+            for operation in ["update", "upsert"] {
+                let mut target = Store::default();
+                target.set_quantity_units(QuantityUnits::NativePlacement);
+                if let Some(size) = target_size {
+                    let mut m = market("BTCUSDT");
+                    m.contract_size = Some(size);
+                    target.set_markets(vec![m]);
+                }
+                let mut writer = FrameWriter::new(Vec::new(), 0.);
+                source.write(&source.account_snapshot(), &mut writer);
+                let bytes = writer.finish();
+                apply(
+                    &mut target,
+                    &mut IngestState::default(),
+                    &parse(&bytes).unwrap(),
+                    true,
+                )
+                .unwrap();
+                if operation == "update" {
+                    target.update_positions(|p| {
+                        if p.id == "native-position" {
+                            p.leverage = 20.;
+                        }
+                    });
+                } else {
+                    let mut row = target.positions()[0].clone();
+                    row.leverage = 20.;
+                    target.upsert_position(row);
+                }
+                assert_eq!(target.positions()[0].leverage, 20.);
+                assert_eq!(
+                    position_native_columns(&target),
+                    expected,
+                    "{operation}, target size={target_size:?}"
+                );
+                target.update_positions(|p| {
+                    if p.id == "native-position" {
+                        p.contracts = 0.;
+                    }
+                });
+                assert_eq!(target.positions()[0].id, "sibling");
+                assert_eq!(position_native_columns(&target), expected[1..]);
+            }
+        }
+    }
+
+    #[test]
+    fn position_native_size_and_pnl_are_invalidated_independently() {
+        for operation in ["update", "upsert"] {
+            for field in ["size", "pnl", "symbol"] {
+                let mut target = Store::default();
+                target.set_quantity_units(crate::QuantityUnits::NativePlacement);
+                target.set_markets(vec![market("BTCUSDT"), market("ETHUSDT")]);
+                let bytes = explicit_position_frame([99., -99.], 3);
+                apply(
+                    &mut target,
+                    &mut IngestState::default(),
+                    &parse(&bytes).unwrap(),
+                    false,
+                )
+                .unwrap();
+                let update = |p: &mut crate::model::Position| match field {
+                    "size" => p.contracts = 0.7,
+                    "pnl" => p.unrealized_pnl = 42.,
+                    "symbol" => p.symbol = "ETHUSDT".into(),
+                    _ => unreachable!(),
+                };
+                if operation == "update" {
+                    target.update_positions(update);
+                } else {
+                    let mut row = target.positions()[0].clone();
+                    update(&mut row);
+                    target.upsert_position(row);
+                }
+                let expected = match field {
+                    "size" => (3, [Some(0.7), Some(-99.)]),
+                    "pnl" => (1, [Some(99.), None]),
+                    "symbol" => (1, [Some(0.3), None]),
+                    _ => unreachable!(),
+                };
+                assert_eq!(
+                    position_native_columns(&target),
+                    vec![expected],
+                    "{operation}, {field}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn position_frame_refuses_each_present_nonfinite_native_column_before_replacing_rows() {
+        for column in 0..2 {
+            for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut target = Store::default();
+                target.set_positions(vec![native_position()]);
+                let before = target.positions().to_vec();
+                let mut values = [3., -1.25];
+                values[column] = invalid;
+                let bytes = explicit_position_frame(values, 3);
+                assert!(
+                    apply(
+                        &mut target,
+                        &mut IngestState::default(),
+                        &parse(&bytes).unwrap(),
+                        false
+                    )
+                    .is_err(),
+                    "column={column}, invalid={invalid}"
+                );
+                assert_eq!(target.positions(), before);
+                // Just like JS, an unset presence bit makes even a non-finite payload absent.
+                let bytes = explicit_position_frame(values, 3 & !(1 << column));
+                apply(
+                    &mut target,
+                    &mut IngestState::default(),
+                    &parse(&bytes).unwrap(),
+                    false,
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn position_frame_presence_is_authoritative_and_native_updates_clear_it() {
+        let mut target = Store::default();
+        target.set_quantity_units(crate::QuantityUnits::NativePlacement);
+        target.set_markets(vec![market("BTCUSDT")]);
+        for presence in 0..4 {
+            // Zero and negative finite values are valid, and must not trigger fallback.
+            let bytes = explicit_position_frame([0., -2.5], presence);
+            apply(
+                &mut target,
+                &mut IngestState::default(),
+                &parse(&bytes).unwrap(),
+                false,
+            )
+            .unwrap();
+            assert_eq!(
+                position_native_columns(&target),
+                vec![(
+                    presence,
+                    [
+                        (presence & 1 != 0).then_some(0.),
+                        (presence & 2 != 0).then_some(-2.5)
+                    ]
+                )]
+            );
+        }
+        // Replacements, in-place updates, removals, reset and reinsertion must
+        // retire imported metadata and keep row alignment intact.
+        for operation in ["replace", "upsert", "update", "remove", "reset"] {
+            let bytes = explicit_position_frame([99., -99.], 3);
+            apply(
+                &mut target,
+                &mut IngestState::default(),
+                &parse(&bytes).unwrap(),
+                false,
+            )
+            .unwrap();
+            let mut row = target.positions()[0].clone();
+            row.contracts = 0.7;
+            match operation {
+                "replace" => target.set_positions(vec![row]),
+                "upsert" => target.upsert_position(row),
+                "update" => target.update_positions(|p| p.contracts = 0.7),
+                "remove" => {
+                    target.upsert_position(crate::model::Position {
+                        contracts: 0.,
+                        ..row.clone()
+                    });
+                    target.upsert_position(row);
+                }
+                "reset" => {
+                    target.reset_account();
+                    target.upsert_position(row);
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                position_native_columns(&target),
+                if matches!(operation, "update" | "upsert") {
+                    vec![(3, [Some(0.7), Some(-99.)])]
+                } else {
+                    vec![(1, [Some(0.7), None])]
+                },
+                "{operation}"
+            );
+        }
     }
 
     /// ORDERS' trigger word: bit 16 carries `native_algo` both ways, a word without it

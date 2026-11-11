@@ -569,6 +569,9 @@ for the OAuth callback.
 
 ### `audit` &nbsp; _(standalone-only)_ {#audit}
 
+Audit settings belong to the current login. An old chain resuming after a login
+change cannot toggle the new user's audit setting.
+
 Durable, append-only log of **write-ops** (orders / cancels / closes /
 leverage). **Off by default.** When on, each write-op appends a JSON line
 to `~/.tealstreet/audit.log` with timestamp, account, the command, and
@@ -597,6 +600,9 @@ use stays bounded; `audit tail` reads from the end and dips into the
 backup when needed. Source: `audit-log.ts`, `script-adapter.ts`.
 
 ### `footer` &nbsp; _(standalone-only)_ {#footer}
+
+Switching login clears the previous user's footer and loads the new user's saved
+layout. Pending redraws from the old login are discarded.
 
 Controls the persistent **bottom status footer** — a pinned line at the
 bottom of the terminal, above which your prompt and output live, showing
@@ -793,6 +799,9 @@ Detailed in [Operations → Listener](../operations/listener.md) and
 ---
 
 ## Cross-trade &nbsp; _(standalone-only)_ {#cross-trade}
+
+Changing login during account startup cancels the remaining boots and disposes
+the old connections. It cannot activate the new login's same-named accounts.
 
 Detailed in [Operations → Cross-trade](../operations/cross-trade.md). Top-level
 binary surface:

@@ -2,12 +2,13 @@ import throttle from 'lodash/throttle';
 
 import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { OrderBook } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
 interface SymbolSub {
   unsub: () => void;
-  throttleFn: any;
+  throttleFn: ReturnType<typeof throttle<(orderbook: OrderBook) => void>>;
   // subIds.size IS the refcount. A separate counter desyncs the moment the same
   // subId subscribes twice — Set.add is a no-op but the counter still climbs, and
   // the matching unsubscribe then leaves it stuck above zero, so the venue
@@ -25,7 +26,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
   // In dedicated worker mode this is a no-op (one session = one subId per symbol).
   private _subsBySymbol = new Map<string, SymbolSub>();
 
-  private _sendOrderBookUpdate = (data: any, o: OrderBook) => {
+  private _sendOrderBookUpdate = (data: { symbol: string; subId: string }, o: OrderBook) => {
     this._ctx.postMessage({ op: 'listenOrderBook', data: { ...data, orderbook: o } });
     // some ticker ws feed don't include BBO or are too slow so we inject it from OB if we can. Otherwise track price,
     // quick orders can be delayed or revert to using last price
@@ -51,7 +52,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         // Skip if symbol doesn't exist on this exchange
         const markets = this._exchange.store.markets;
         if (!markets.some((m) => m.symbol === payload.data.symbol)) {
-          console.warn(
+          diagnosticConsole.warn(
             `[OrderBookSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription`,
           );
           return;
