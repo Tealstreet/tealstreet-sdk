@@ -644,6 +644,11 @@ export class DelegatedOutbox {
       Number(data.outcomeSeq) <= (this.outcomeSequences.get(row.intentId) ?? 0)
     )
       return false;
+    // Queue-cancel uncertainty cannot erase a terminal business result or
+    // positive no-handoff proof. A refused outcome after ACK(false) can still
+    // attach its authoritative refusal message.
+    if (row.state === 'applied' && data.outcome !== 'applied') return false;
+    if (row.state === 'notSent' && storedNotSentEvidence(row) && data.outcome === 'unknown') return false;
     if (data.outcome === 'applied') {
       if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind)) return false;
       row.result = clone(data.result);

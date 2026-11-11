@@ -116,6 +116,59 @@ function key(n = 1) {
 }
 
 describe('action writes share the handoff evidence model', () => {
+  it.each(handoffActions)('preserves applied $kind after a later uncertain queue-cancel reply', async (action) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueueAction(action);
+    await box.cancel(id);
+    expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.action', 'order.actionCancelQueued']);
+    const applied = receipt(box, id, 'applied');
+    const result = action.kind === 'amend' ? { kind: action.kind, orderIds: ['amended'] } : { kind: action.kind };
+    applied.d.result = result;
+    await box.receive(c, applied);
+    await box.receive(c, receipt(box, id, 'unknown', 2));
+    expect(box.entries()[0]).toMatchObject({ state: 'applied', result });
+    expect([...f.rows.values()][0]).toMatchObject({ state: 'applied', result });
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0]).toMatchObject({ state: 'applied', result });
+    expect(f.writes).toHaveLength(2);
+    restored.close();
+  });
+  it.each(handoffActions)('preserves proven notSent $kind but accepts its later refusal message', async (action) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueueAction(action);
+    await box.receive(c, {
+      t: 'order.actionAck',
+      d: { version: 1, accountName: 'main', instanceId: 'registration', intentId: id, seq: 1, received: false },
+    });
+    await box.receive(c, receipt(box, id, 'unknown', 1));
+    expect(box.entries()[0].state).toBe('notSent');
+    await box.receive(c, receipt(box, id, 'refused', 2));
+    expect(box.entries()[0]).toMatchObject({
+      state: 'notSent',
+      error: { message: 'router proof', outcome: 'notSent' },
+    });
+    await box.receive(c, receipt(box, id, 'unknown', 3));
+    expect(box.entries()[0]).toMatchObject({
+      state: 'notSent',
+      error: { message: 'router proof', outcome: 'notSent' },
+    });
+    expect([...f.rows.values()][0]).toMatchObject({ state: 'notSent', notSentEvidence: { kind: 'routerRefusal' } });
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    await restored.flush(restored.connect(f.connection()));
+    expect(restored.entries()[0]).toMatchObject({
+      state: 'notSent',
+      error: { message: 'router proof', outcome: 'notSent' },
+    });
+    expect(f.writes).toHaveLength(1);
+    restored.close();
+  });
   it.each([undefined, 'unknown'] as const)(
     'requires positive proof for a placement refusal sharing the action store (%s)',
     async (errorOutcome) => {
