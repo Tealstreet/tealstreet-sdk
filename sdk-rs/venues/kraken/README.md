@@ -1,5 +1,72 @@
 # Kraken venue adapters
 
+## Futures hosted signing
+
+Kraken Futures (`kraken`) admits RemoteSigner through its explicit construction
+policy. Spot remains outside this activation. Local and hosted registry engines
+use provider-owned custody for private REST reads/writes and WS challenges;
+signing failures before transport remain NotSent, and ambiguous writes stay
+Unknown. The public `Kraken::new` local compatibility constructor is retained;
+registry construction uses `Kraken::with_signing` with opaque refs only.
+
+Native public-only startup discards unused primary identities before validation,
+so saved blank or key-only primary fields do not block unauthenticated market
+data. Private primary and secondary read credentials retain their validation.
+The SDK's shared explicit-public setup also ignores unused signing callbacks
+and grants no signing authority.
+
+Trusted native and private-capsule setup preserve construction refusal ordering:
+incomplete raw remote accounts refuse before secret decoding, and malformed
+private primary secrets retain Kraken's base64 diagnostic before provider
+installation. Explicit public setup discards unused primary material before
+decoding; secondary read validation remains active.
+
+REST signs the exact encoded form, optional frozen decimal nonce and path (without the
+`/derivatives` prefix) with SHA256 followed by HMAC-SHA512. WS signs SHA256 of
+the challenge with the same MAC. See Kraken's [REST authentication](https://support.kraken.com/ca/articles/360022635592-generate-authentication-strings-rest-api-derivatives)
+and [WS challenge signing](https://support.kraken.com/articles/360022635652-sign-challenge-websocket-api-derivatives).
+
+The device wire uses `ws-auth` / `kraken-sha512` and a closed
+`{slot: "primary" | "secondary", payload: string}` descriptor. Payload is the
+canonical preimage, never secret material or a key ref. The device resolves its
+own slot and returns `{credential, signature}` as JSON, where signature is
+canonical base64 of 64 MAC bytes. The origin checks the selected public
+credential and complete result before returning the atomic Present/hash/MAC
+batch. The existing `kraken-challenge` format remains a primary challenge API.
+Wrong-account replies, foreign refs, partial graphs, unavailable devices,
+cancellation and callback errors refuse without local-secret fallback.
+
+SDK/native registry custody uses the existing engine-owned opaque slot refs;
+caller-assigned `stableId` metadata and account migration are unnecessary.
+Local setup decodes base64 secrets. Provider REST omits the optional Futures
+`Nonce` header and signs `form + path`. [Kraken's Futures guide](https://docs.kraken.com/exchange/guides/futures/rest)
+describes supplied nonces as incrementing with only brief out-of-order tolerance,
+not as scoped to a connection or session. Independent per-engine counters would
+therefore be unsafe when sending a nonce on the same key. Omitting it avoids
+duplicates, arrival-order races and shared nonce state across local and hosted
+engines, including separate processes/WASM memories. This is a nonce-free mode,
+not a claim that generated nonces are unique across engines.
+
+The compatibility HTTP signing API preserves a supplied decimal `Nonce` header
+byte-for-byte, including u64 values beyond JS safe integers. If absent, it omits
+the optional nonce instead of creating a competing JS counter; [Kraken permits
+nonce-free Futures REST authentication](https://support.kraken.com/articles/360000906023-what-is-a-nonce-).
+Callers explicitly supplying nonces still own key-wide coordination: our managed
+nonce allocator shares state only within one native process or WASM module.
+The existing explicit-nonce recipe API and Spot nonce behavior are unchanged.
+
+Private PayloadSigner remains typed unsupported/NotSent: that callback's current
+`hmac-sha256` string contract cannot express Kraken's binary SHA256-to-HMAC-SHA512
+graph. Kraken Futures uses symmetric API keys rather than this SDK's wallet-agent
+cosigning modes. [Subaccounts have separately controlled API keys](https://support.kraken.com/ca/articles/360042809671-understanding-derivatives-subaccounts);
+configure that subaccount's matching device key instead of a separate agent key.
+
+NEEDS-NX: carry the new `kraken-sha512` format through to the updated SDK on the
+device; no new identity assignment or forwarding is required. The refused list
+derived from construction-rules by NX #9032 follows the explicit policy
+automatically. No ExchangeName or account-key field is added. WASM size caps are
+left to the lead's exact-head CI budget commit.
+
 ## Futures placement size parity
 
 Futures placement follows the legacy TS `kraken.exchange.ts:452-462`: round the
@@ -7,6 +74,15 @@ amount to its step and send one payload, even above the market's amount maximum.
 It does not split or cap that size. A native `invalidSize` reply remains a
 definite venue refusal, as in TS `:514-529`.
 KNOWN-ISSUE: TS sends above-max; venue refuses.
+
+## Futures account history
+
+Kraken's [account-log schema](https://docs.kraken.com/api-reference/account-history/get-account-log)
+allows a null `contract` on account-level entries. Null, missing and empty
+contracts retain the existing empty-symbol income mapping, including transfers
+derived from reported old/new balances. They do not fail the streamed history
+page or discard later trade rows. Nonnullable ledger identity, asset, date and
+description fields remain strict; no economic values are invented for nulls.
 
 ## Kraken Spot hosted signing
 

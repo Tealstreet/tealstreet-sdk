@@ -177,6 +177,45 @@ it('retains applied cancel batch counts and the unknown index without created or
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
 
+it.each(['placement', 'cancellation'] as const)('retains BloFin %s facts and attempted counts at the JS boundary after Unknown', async (intent) => {
+  const r = await fixture('blofin');
+  const message = 'The outcome is unknown. Check Open Orders';
+  const orderIds = intent === 'placement' ? ['accepted'] : [];
+  const detail: VenueErrorDetail = {
+    message,
+    kind: 'internal',
+    outcome: 'unknown',
+    partial: { orderIds, total: 3, failedIndex: 1 },
+    elements: [
+      intent === 'placement'
+        ? { index: 0, status: 'placed', orderIds: ['accepted'] }
+        : { index: 0, status: 'applied', effect: 'cancel', targetOrderId: 'accepted-cancel' },
+      { index: 1, status: 'unknown', error: { message, outcome: 'unknown' } },
+      { index: 2, status: 'notSent' },
+    ],
+  };
+  r.onCommand(({ command }) => [{ op: 'done', command, error: message, detail }]);
+  const result = intent === 'placement'
+    ? r.exchange.placeOrders(['first', 'second', 'third'].map((clientOrderId) => ({ ...order, clientOrderId })))
+    : r.exchange.cancelOrders(['accepted-cancel', 'unknown-cancel', 'untouched'].map((id) => ({
+      ...order, id, status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+    })));
+  const error = await result.catch((error: unknown) => error);
+  const expected = {
+    message,
+    outcome: 'unknown',
+    elements: detail.elements,
+    partialOrderIds: orderIds,
+    partialOrderCount: orderIds.length,
+    totalOrderCount: 3,
+    failedOrderIndex: 1,
+  };
+  expect(error).toBeInstanceOf(ExchangeError);
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+});
+
 it.each([1, 0, 2])('retains Hyperliquid applied cancellation counts with an Unknown row at index %s', async (failedIndex) => {
   const r = await fixture('hyperliquid');
   const detail: VenueErrorDetail = {
@@ -550,5 +589,67 @@ it('keeps an unsupported history read quiet but still rejects it, typed', async 
   expect(r.errors).not.toHaveBeenCalled();
   r.onCommand(({ command }) => [{ op: 'done', command, error: 'income read failed' }]);
   await r.exchange.fetchIncomeHistory({ incomeType: 'FUNDING_FEE' }).catch(() => undefined);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+});
+
+// Mirrors OKX's regular/algo recording pins: one accepted cancel and one 51412 row.
+it.each([false, true])('OKX applied cancel keeps Unknown counts without created IDs (algo=%s)', async (algo) => {
+  const r = await fixture('okx');
+  const events = vi.fn();
+  r.exchange.on('engine-event', events);
+  const nativeIds = algo ? ['91', '92'] : ['1', '2'];
+  const unknownMessage = `OKX cancellation target ${nativeIds[1]}: Cancellation timed out (code 51412). The outcome is unknown. Check Open Orders`;
+  const detail: VenueErrorDetail = {
+    message: 'Cancellation timed out (code 51412). The outcome is unknown. Check Open Orders',
+    kind: 'timeout',
+    outcome: 'unknown',
+    venueCode: '51412',
+    venueMessage: 'Cancellation timed out',
+    partial: { orderIds: [], total: 2, failedIndex: 1 },
+    elements: [
+      { index: 0, status: 'applied', effect: 'cancel', targetOrderId: nativeIds[0] },
+      {
+        index: 1, status: 'unknown', error: {
+          message: unknownMessage, kind: 'timeout', outcome: 'unknown',
+          venueCode: '51412', venueMessage: 'Cancellation timed out',
+        },
+      },
+    ],
+  };
+  r.onCommand(({ command }) => [
+    {
+      op: 'event', level: 'warn', code: 'order.outcome_unknown', message: unknownMessage,
+      fields: { command, index: 1, targetOrderId: nativeIds[1], venueCode: '51412' },
+    },
+    { op: 'done', command, error: detail.message, detail },
+  ]);
+  const targets = (algo ? ['91_sl', '92_sl'] : ['1', '2']).map((id) => ({
+    ...order, id, type: algo ? OrderType.StopLoss : OrderType.Limit,
+    status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  }));
+  const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ExchangeError);
+  expect(r.commands.findLast(({ op }) => op.startsWith('cancelOrders'))?.orders).toEqual(
+    targets.map(({ id, symbol, type }) => ({ id, symbol, type })),
+  );
+  const expected = {
+    message: detail.message,
+    outcome: 'unknown',
+    kind: 'timeout',
+    venueCode: '51412',
+    partialOrderIds: [],
+    partialOrderCount: 0,
+    totalOrderCount: 2,
+    failedOrderIndex: 1,
+    elements: detail.elements,
+  };
+  // The zero counts created IDs; the attempted cancellation remains uncertain.
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  const unknownEvents = events.mock.calls.filter(([event]) => event.code === 'order.outcome_unknown');
+  expect(unknownEvents).toEqual([[expect.objectContaining({
+    level: 'warn', code: 'order.outcome_unknown', message: unknownMessage,
+    fields: expect.objectContaining({ index: 1, targetOrderId: nativeIds[1], venueCode: '51412' }),
+  })]]);
   expect(r.errors).toHaveBeenCalledTimes(1);
 });

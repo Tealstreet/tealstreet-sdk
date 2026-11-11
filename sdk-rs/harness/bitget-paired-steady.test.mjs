@@ -9,6 +9,8 @@ import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './pe
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
 import { readBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
 import { BitgetOracleChanged } from './bitget-paired-oracle.mjs';
+import { Frame, SECTION } from '../hosts/wasm/js/wire.mjs';
+import { replayPositions } from './bitget-anchor-positions.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 const A = 'a'.repeat(40), B = 'b'.repeat(40), tree = 'c'.repeat(40), head = 'd'.repeat(40);
@@ -399,6 +401,33 @@ test('changed bytes still require both measured witnesses and the unchanged froz
     assert.equal(certificate.tip.originalReports.length, 8);
     assert.equal(certificate.anchor.originalReports.length, 8);
   }
+});
+
+test('a byte-changed build certifies against the original anchor with its empty legacy positions', async () => {
+  const data = fixture(1.01), reads = [];
+  assert.notEqual(data.evidence.archives.baseline.files['safe_cex_wasm_bg.wasm'],
+    data.evidence.archives.candidate.files['safe_cex_wasm_bg.wasm']);
+  const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
+    readEvidence: async name => {
+      reads.push(name);
+      // The collector must decode the selected module before it can return
+      // measured evidence. This used to throw for the pinned anchor even with
+      // zero positions; changed bytes could never reach certification.
+      const buffer = new ArrayBuffer(32), view = new DataView(buffer);
+      view.setUint32(0, 0x46584353, true);
+      view.setUint16(4, 1, true); view.setUint16(6, 1, true);
+      view.setUint16(16, SECTION.POSITIONS, true);
+      view.setUint16(18, name === 'anchor' ? 1 : 2, true);
+      view.setUint32(20, 8, true);
+      assert.equal(replayPositions(new Frame(buffer), 'bitget', false).count, 0);
+      return name === 'tip' ? data.evidence : anchorFixture(data).evidence;
+    } });
+  assert.deepEqual(reads, ['tip', 'anchor']);
+  assert.equal(certificate.anchorSource, BITGET_CUMULATIVE_ANCHOR);
+  assert.equal(certificate.steadyAccepted, true);
+  assert.equal(certificate.tip.originalReports.length, 8);
+  assert.equal(certificate.anchor.originalReports.length, 8);
+  assert.equal(hasPairedBitgetSteady(certificate, data.evidence.cohorts[1].evidence.report, B), true);
 });
 
 test('an unchanged TS oracle still certifies, while baseline Rust corruption still fails', async () => {

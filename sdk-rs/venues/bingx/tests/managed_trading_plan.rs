@@ -224,27 +224,35 @@ fn eight_serial_calls_keep_each_native_twenty_second_attempt() {
 }
 
 #[test]
-fn each_proven_signature_resend_has_a_fresh_window_within_the_complete_plan() {
+fn first_signature_resend_and_later_single_attempt_calls_keep_native_windows() {
     let mut engine = engine();
     place(&mut engine, 8);
     let mut now = START;
     let mut actions = collect(&mut engine, now);
     for index in 0..8 {
         let first = packet(&actions);
-        now += 19_000.;
-        actions = signature_refusal(&mut engine, &first, now);
-        let second = packet(&actions);
-        assert_eq!(second.timeout_ms, Some(20_000), "fresh attempt {index}");
+        let request = if index == 0 {
+            now += 19_000.;
+            actions = signature_refusal(&mut engine, &first, now);
+            let second = packet(&actions);
+            assert_eq!(
+                without_physical_signature(body(&first)),
+                without_physical_signature(body(&second))
+            );
+            assert_ne!(body(&first)["timestamp"], body(&second)["timestamp"]);
+            second
+        } else {
+            first
+        };
         assert_eq!(
-            without_physical_signature(body(&first)),
-            without_physical_signature(body(&second))
+            request.timeout_ms,
+            Some(20_000),
+            "fresh native window {index}"
         );
-        assert_ne!(body(&first)["timestamp"], body(&second)["timestamp"]);
         now += 19_000.;
-        actions = acknowledge(&mut engine, &second, now, 9_000 + index);
+        actions = acknowledge(&mut engine, &request, now, 9_000 + index);
     }
-    assert_eq!(now - START, 304_000.);
-    assert!(now - START < 320_000.);
+    assert_eq!(now - START, 171_000.);
     assert_eq!(
         ids(&actions),
         (9_000..9_008).map(|id| id.to_string()).collect::<Vec<_>>()
@@ -688,8 +696,10 @@ fn absent_cancel_keeps_the_row_until_a_fresh_managed_reconciliation_read() {
     assert!(e.store().orders().is_empty());
     assert!(failures(&done).is_empty());
 }
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:940-962.
 #[test]
-fn independent_cancel_sibling_survives_a_delivered_gateway_failure_without_retry() {
+fn independent_cancel_unknown_halts_the_sibling_without_retry() {
     let mut e = engine();
     e.store_mut()
         .set_orders(vec![open_order("old-a"), open_order("old-b")]);
@@ -708,26 +718,29 @@ fn independent_cancel_sibling_survives_a_delivered_gateway_failure_without_retry
         503,
         r#"{"code":100001,"msg":"Signature verification failed"}"#,
     );
-    let second = cancel_packet(&next);
-    assert_ne!(second.id, first.id);
-    assert!(second.url.contains("orderId=old-b"));
-    assert!(failures(&next).is_empty());
-    let done = respond(
-        &mut e,
-        &second,
-        START + 2.,
-        200,
-        r#"{"code":0,"data":{"orderId":"old-b","status":"CANCELED"}}"#,
-    );
-    assert_eq!(failures(&done).len(), 1);
-    assert_eq!(failures(&done)[0].outcome, Some(Outcome::Unknown));
+    assert!(writes(&next).is_empty(), "Unknown halts the action");
+    assert_eq!(failures(&next).len(), 1);
+    let error = &failures(&next)[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+    let rows = error.elements.as_ref().expect("complete cancel report");
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        &rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(matches!(
+        &rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
     assert_eq!(
         e.store().order("old-a").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
     );
     assert_eq!(
         e.store().order("old-b").unwrap().status,
-        safe_cex_engine::model::OrderStatus::Canceled
+        safe_cex_engine::model::OrderStatus::Open
     );
 }
 #[test]

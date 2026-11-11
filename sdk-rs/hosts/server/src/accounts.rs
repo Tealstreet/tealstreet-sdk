@@ -1,5 +1,6 @@
 //! Accounts keyed by `(userId, accountName)`: built once, shared by that user's
 //! sockets, disposed when the last holder (live socket or parked resume) lets go.
+use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 use crate::envelope::InitPayload;
 use crate::state::Log;
 use crate::threads::EngineThreads;
@@ -15,6 +16,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
+
+mod delegated_probe;
+pub(crate) use delegated_probe::ProbePermit;
 
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
 pub const PUBLIC_ACCOUNT: &str = "__pub_bybit";
@@ -58,7 +62,11 @@ pub struct Account {
     pub name: String,
     pub venue: String,
     pub handle: AccountHandle,
-    /// Present for every private account; public-only accounts have no signer.
+    /// Explicit construction mode, independent of a remote signer link.
+    public_only: bool,
+    /// Present for a DELEGATED private account.
+    pub delegated: Option<ResidentCopy>,
+    /// Present for COSIGNED private accounts only.
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
     pub fingerprint: String,
@@ -250,7 +258,7 @@ impl Account {
     }
 
     pub fn is_public(&self) -> bool {
-        self.link.is_none()
+        self.public_only
     }
 
     /// Live (not parked) sockets holding this account, other than `holder`.
@@ -332,9 +340,26 @@ impl Account {
         }
     }
 
+    fn live_outboxes(&self) -> Vec<Outbox> {
+        self.holders
+            .lock()
+            .unwrap()
+            .by_id
+            .values()
+            .flatten()
+            .map(|live| live.outbox.clone())
+            .collect()
+    }
+
     /// Signing and the proxy token follow this socket, which already holds the account.
     pub fn sign_through_socket(&self, id: u64, outbox: Outbox, token: Option<(String, u64)>) {
         self.hold(id, Live { outbox, token });
+    }
+
+    pub(crate) fn update_reply_outbox(&self, id: u64, outbox: Outbox) {
+        if let Some(Some(live)) = self.holders.lock().unwrap().by_id.get_mut(&id) {
+            live.outbox = outbox;
+        }
     }
 }
 
@@ -368,6 +393,8 @@ struct Parked {
     alias_until: Option<u64>,
 }
 
+type AccountEntries = HashMap<(String, String), Arc<Account>>;
+
 type PendingInits = Mutex<HashMap<(String, String), InitIncarnation>>;
 
 struct InitIncarnation {
@@ -380,6 +407,7 @@ struct InitIncarnation {
 struct InitAuthority {
     current: Arc<AtomicBool>,
     lease: Option<crate::router_lease::Permit>,
+    probe_lease: Option<crate::router_lease::Permit>,
 }
 
 impl InitAuthority {
@@ -389,6 +417,13 @@ impl InitAuthority {
         }
         if self.lease.as_ref().is_some_and(|lease| !lease.allowed()) {
             return Err("Router lease expired; initialization stopped".into());
+        }
+        if self
+            .probe_lease
+            .as_ref()
+            .is_some_and(|lease| !lease.allowed())
+        {
+            return Err("DELEGATED verification expired; initialization stopped".into());
         }
         Ok(())
     }
@@ -446,7 +481,7 @@ pub struct Registry {
     pub user_drains: crate::user_drain::Users,
     pub router_leases: Arc<crate::router_lease::Users>,
     pub interruptions: Arc<crate::interruption::Notices>,
-    accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
+    accounts: Arc<Mutex<AccountEntries>>,
     pending_inits: PendingInits,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
@@ -473,6 +508,11 @@ pub struct Registry {
     presence: Arc<Mutex<HashMap<String, Presence>>>,
     /// The last forced-reset repair of each (user, account, topic) in this process.
     repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
+    /// Unit-test loopback routing; the normal construction and transport run unchanged.
+    #[cfg(test)]
+    construction_test_plans: HashMap<String, RoutingPlan>,
+    #[cfg(test)]
+    e2e_venue: Option<crate::delegated_e2e_io::MockVenue>,
 }
 
 /// A chart's forced reset repairs its upstream stream at most this often per account and topic.
@@ -537,8 +577,9 @@ struct StopRecord {
     told_other: bool,
 }
 
-/// Stop notices by (user, account).
-type Notices = Arc<Mutex<HashMap<(String, String), StopRecord>>>;
+/// Stop notices by (user, account, source fingerprint), even while unregistered.
+type NoticeKey = (String, String, String);
+type Notices = Arc<Mutex<HashMap<NoticeKey, StopRecord>>>;
 
 /// How long an undelivered stop notice waits for the account's next init.
 pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -600,6 +641,12 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
             options.insert(field.into(), value.clone().into());
         }
     }
+    if init.exchange_name == "grvt"
+        && !public_only
+        && let Some(address) = init.grvt_signer_address.as_ref().filter(|v| !v.is_empty())
+    {
+        options.insert("grvtSignerAddress".into(), address.clone().into());
+    }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
     }
@@ -656,7 +703,7 @@ pub struct Prepared {
 }
 
 /// The account's resolved routing, as its engine thread receives it.
-fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, String> {
+pub(crate) fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, String> {
     let venue = &init.exchange_name;
     let transport_flags = AccountTransport {
         tealstreet_proxy: init.tealstreet_proxy,
@@ -671,6 +718,10 @@ fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, St
         resolve::account_transport(venue, &transport_flags).map_err(|error| error.to_string())?;
     // The Brazil site has its own host and `x-site-id` header.
     inputs.bybit_site_id = init.bybit_site_id.clone().filter(|site| !site.is_empty());
+    // WOO's private relay embeds the same public application ID as its engine.
+    if venue == "woo" {
+        inputs.application_id = init.application_id.clone().filter(|id| !id.is_empty());
+    }
     if public_only {
         inputs.public_data_only = Some(true);
         inputs.has_key = false;
@@ -687,9 +738,9 @@ fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, St
 /// differing fields stay readable). Two inits that would build the same engine
 /// share it, whatever else differs between the clients that sent them: a field
 /// another venue reads, a default sent explicitly, flags resolving alike.
-/// Hands a disposed account's stop notices and chase ends to one socket. A later,
+/// Hands a disposed account's stop notices and chase ends to its sockets. A later,
 /// fuller `Kept` repeats what came before it, so only what is new is sent.
-fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
+fn tell_through(account: &Account, outboxes: Vec<Outbox>) -> crate::algos::StopNotice {
     let name = account.name.clone();
     let told = Mutex::new((0, 0));
     Box::new(move |kept: crate::algos::Kept| {
@@ -700,7 +751,9 @@ fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
         };
         *told = (kept.notices.len(), kept.ends.len());
         for frame in new.frames(&name) {
-            outbox(frame);
+            for outbox in &outboxes {
+                outbox(frame.clone());
+            }
         }
     })
 }
@@ -785,7 +838,7 @@ impl Registry {
             user_drains: crate::user_drain::Users::default(),
             router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
             interruptions: Default::default(),
-            accounts: Mutex::default(),
+            accounts: Arc::default(),
             pending_inits: Mutex::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
@@ -804,6 +857,10 @@ impl Registry {
             notices: Arc::default(),
             presence: Arc::default(),
             repairs: Mutex::default(),
+            #[cfg(test)]
+            construction_test_plans: HashMap::new(),
+            #[cfg(test)]
+            e2e_venue: None,
         }
     }
 
@@ -915,13 +972,48 @@ impl Registry {
         public_only: bool,
         holder: u64,
     ) -> Option<String> {
+        self.rebuild_refusal_for_mode(user, init, public_only, holder, false)
+    }
+
+    /// Admission check shared by socket fast paths and trusted construction.
+    pub fn signing_mode_refusal(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        delegated: bool,
+    ) -> Option<String> {
+        let accounts = self.accounts.lock().unwrap();
+        let account = accounts.get(&(user.to_owned(), init.account_name.clone()))?;
+        if public_only && account.delegated.is_none() {
+            return None;
+        }
+        (!account.is_public() && account.delegated.is_some() != delegated)
+            .then(|| "Account signing mode differs; account not attached".to_owned())
+    }
+
+    fn rebuild_refusal_for_mode(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        holder: u64,
+        delegated: bool,
+    ) -> Option<String> {
+        if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
+            return Some(refusal);
+        }
         // Shared public data carries no signer or algos; it rebuilds as before.
         if public_only {
             return None;
         }
         let key = (user.to_owned(), init.account_name.clone());
         let account = self.accounts.lock().unwrap().get(&key).cloned()?;
-        let fingerprint = init.fingerprint();
+        let fingerprint = if delegated {
+            crate::delegated::fingerprint(init)
+        } else {
+            init.fingerprint()
+        };
         if account.fingerprint == fingerprint && !account.is_public() {
             return None;
         }
@@ -962,6 +1054,7 @@ impl Registry {
         let authority = InitAuthority {
             current: Arc::new(AtomicBool::new(true)),
             lease,
+            probe_lease: None,
         };
         authority.check()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1004,19 +1097,77 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
     ) -> Result<Arc<Account>, String> {
+        self.obtain_with_pair(user, init, public_only, holder, token, outbox, None, None)
+            .await
+    }
+
+    /// Host-only entry point after handover verification. Never opens socket data.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn obtain_delegated(
+        self: &Arc<Self>,
+        user: &str,
+        init: &InitPayload,
+        holder: u64,
+        token: Option<(String, u64)>,
+        outbox: Outbox,
+        pair: DelegatedPair,
+    ) -> Result<Arc<Account>, String> {
+        pair.validate(init)?;
+        self.obtain_with_pair(user, init, false, holder, token, outbox, Some(pair), None)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn obtain_with_pair(
+        self: &Arc<Self>,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        holder: u64,
+        token: Option<(String, u64)>,
+        outbox: Outbox,
+        pair: Option<DelegatedPair>,
+        proof: Option<ProbePermit>,
+    ) -> Result<Arc<Account>, String> {
         if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
         }
-        let fingerprint = init.fingerprint();
+        let delegated = pair.is_some();
+        if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
+            return Err(refusal);
+        }
+        let fingerprint = if delegated {
+            crate::delegated::fingerprint(init)
+        } else {
+            init.fingerprint()
+        };
         let mut attempt = self.begin_init(user, &init.account_name, public_only, &fingerprint)?;
+        let probed = proof.is_some();
+        if let Some(proof) = proof {
+            proof
+                .check(user, init)
+                .map_err(|_| "DELEGATED verification expired".to_owned())?;
+            attempt.authority.probe_lease = proof.lease;
+        }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
         if let Some(account) = existing {
+            if probed && (account.fingerprint != fingerprint || account.is_public()) {
+                return Err("DELEGATED account settings differ; account not attached".into());
+            }
+            if probed {
+                attempt.authority.check()?;
+            }
+            if !account.is_public() && account.delegated.is_some() != delegated {
+                return Err("Account signing mode differs; account not attached".into());
+            }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
                 account.hold(holder, Live { outbox, token });
                 return Ok(account);
             }
-            if let Some(refusal) = self.rebuild_refusal(user, init, public_only, holder) {
+            if let Some(refusal) =
+                self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
+            {
                 return Err(refusal);
             }
             // The Hyperliquid builder is per device (browser storage): a second
@@ -1051,6 +1202,7 @@ impl Registry {
                 holder,
                 outbox.clone(),
                 &attempt.authority,
+                pair,
             )
             .await?;
         let account = Arc::new(account);
@@ -1104,7 +1256,7 @@ impl Registry {
                 &replaced,
                 Disposal::Replaced,
                 "account replaced by a newer init",
-                Some(tell_through(&replaced, outbox)),
+                Some(tell_through(&replaced, replaced.live_outboxes())),
             );
         }
         Ok(account)
@@ -1121,33 +1273,51 @@ impl Registry {
         socket: u64,
         outbox: Outbox,
         authority: &InitAuthority,
+        pair: Option<DelegatedPair>,
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         self.pacer.admit().await;
         authority.check()?;
         let venue = init.exchange_name.clone();
-        let link = (!public_only).then(|| SignerLink::new(socket, outbox));
-        let Prepared {
-            plan,
-            options,
-            remote,
-        } = prepare(init, public_only, link.clone())?;
-        let signer = remote.as_ref().map(|remote| remote.provider.clone());
+        let delegated_build = pair.is_some();
+        let (link, plan, options, remote, signer, delegated) = if let Some(pair) = pair {
+            let PreparedDelegated {
+                plan,
+                options,
+                resident,
+            } = prepare_delegated(init, pair)?;
+            let signer = Some(resident.provider());
+            (None, plan, options, None, signer, Some(resident))
+        } else {
+            let link = (!public_only).then(|| SignerLink::new(socket, outbox));
+            let Prepared {
+                plan,
+                options,
+                remote,
+            } = prepare(init, public_only, link.clone())?;
+            let signer = remote.as_ref().map(|remote| remote.provider.clone());
+            (link, plan, options, remote, signer, None)
+        };
         let proxy_token = ProxyToken::new();
-        // Signer and public-only are one decision: a private account never builds
-        // from options without the remote provider (keyed construction).
-        assert_eq!(
-            signer.is_none(),
-            public_only,
-            "private accounts sign remotely"
-        );
+        // Preserve COSIGNED keyed construction; DELEGATED supplies its own provider.
+        if !delegated_build {
+            assert_eq!(
+                signer.is_none(),
+                public_only,
+                "private accounts sign remotely"
+            );
+        } else {
+            assert!(!public_only && signer.is_some() && link.is_none());
+        }
         // Public-only reads on a proxied venue need the proxy too.
         proxy_token.set(token);
         let tokens = proxy_token.provider();
         let mut config = self.engine_config.clone();
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
-        // A private account always signs through the browser (asserted above).
+        // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {
             "public"
+        } else if delegated_build {
+            "hosted_delegated"
         } else {
             "hosted_cosign"
         });
@@ -1183,7 +1353,15 @@ impl Registry {
             config.interest_observer = Some(self.public_topics.observer(&venue));
         }
         let (spawned, receive) = tokio::sync::oneshot::channel();
+        #[cfg(test)]
+        let plan = self
+            .construction_test_plans
+            .get(user)
+            .cloned()
+            .unwrap_or(plan);
         let authority = authority.clone();
+        #[cfg(test)]
+        let e2e_venue = self.e2e_venue.clone();
         let placed = self.threads.place(move |placement| {
             if let Err(error) = authority.check() {
                 let _ = spawned.send(Err(error));
@@ -1191,6 +1369,8 @@ impl Registry {
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
+            #[cfg(test)]
+            let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
             let result =
                 safe_cex_native::spawn_venue_account(&venue, &options, transport, signer, config)
                     .map(|(handle, task)| {
@@ -1228,6 +1408,8 @@ impl Registry {
             venue: init.exchange_name.clone(),
             handle,
             link,
+            public_only,
+            delegated,
             token: proxy_token,
             fingerprint,
             holders: Mutex::default(),
@@ -1326,17 +1508,18 @@ impl Registry {
         ))
     }
 
-    /// The stop notice for a session that resumed `from`, if it is still owed one.
+    /// The stop notice for the same fingerprint and session resumed `from`, if still owed.
     /// Another session's init must not cost the owner it, and a session that can't
     /// be the owner (a reopened tab, a second device) is told once between them.
     pub fn take_notice(
         &self,
         user: &str,
         name: &str,
+        fingerprint: &str,
         from: Option<&str>,
     ) -> Option<crate::algos::Kept> {
         let mut notices = self.notices.lock().unwrap();
-        let key = (user.to_owned(), name.to_owned());
+        let key = (user.to_owned(), name.to_owned(), fingerprint.to_owned());
         let record = notices.get_mut(&key)?;
         if record.at.elapsed() >= NOTICE_TTL {
             notices.remove(&key);
@@ -1355,13 +1538,27 @@ impl Registry {
     /// Where the algo host leaves a notice for a browser that is gone.
     pub(crate) fn keep_notice(&self, account: &Account, owner: &str) -> crate::algos::StopNotice {
         let notices = self.notices.clone();
+        let accounts = Arc::downgrade(&self.accounts);
         let key = (account.user.clone(), account.name.clone());
+        let fingerprint = account.fingerprint.clone();
+        let notice_key = (key.0.clone(), key.1.clone(), fingerprint.clone());
         let owner = owner.to_owned();
         Box::new(move |kept| {
+            let Some(accounts) = accounts.upgrade() else {
+                return;
+            };
+            // Keep the ownership comparison and retained insertion atomic with replacement.
+            let accounts = accounts.lock().unwrap();
+            if accounts
+                .get(&key)
+                .is_some_and(|current| current.fingerprint != fingerprint)
+            {
+                return;
+            }
             let mut notices = notices.lock().unwrap();
             notices.retain(|_, record| record.at.elapsed() < NOTICE_TTL);
             notices.insert(
-                key.clone(),
+                notice_key.clone(),
                 StopRecord {
                     kept,
                     at: tokio::time::Instant::now(),
@@ -1424,15 +1621,7 @@ impl Registry {
             },
         );
         let name = account.name.clone();
-        let live: Vec<Outbox> = account
-            .holders
-            .lock()
-            .unwrap()
-            .by_id
-            .values()
-            .flatten()
-            .map(|live| live.outbox.clone())
-            .collect();
+        let live = account.live_outboxes();
         for outbox in &live {
             outbox(crate::envelope::algo_error(
                 &name,
@@ -1481,7 +1670,7 @@ impl Registry {
             account,
             disposal,
             "its key or connection settings changed",
-            Some(tell_through(account, outbox)),
+            Some(tell_through(account, vec![outbox])),
         );
     }
 
@@ -1815,7 +2004,7 @@ impl Registry {
         user: &str,
         holder: u64,
         token: (String, u64),
-        outbox: &Outbox,
+        outbox: &dyn Fn(&str) -> Outbox,
     ) -> Vec<Arc<Account>> {
         let mut parked = self.parked.lock().unwrap();
         let Some(entry) = parked.get_mut(resume_id) else {
@@ -1834,7 +2023,7 @@ impl Registry {
                 account.hold(
                     holder,
                     Live {
-                        outbox: outbox.clone(),
+                        outbox: outbox(&account.name),
                         token: Some(token.clone()),
                     },
                 );
@@ -1880,6 +2069,65 @@ pub fn resume_id() -> String {
 pub mod testing {
     use super::*;
 
+    #[cfg(test)]
+    pub(crate) fn e2e_registry(
+        user: &str,
+        venue: crate::delegated_e2e_io::MockVenue,
+    ) -> Arc<Registry> {
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        registry.e2e_venue = Some(venue);
+        // A missing override must fail locally rather than reach a venue.
+        let http = safe_cex_native::HttpRoute {
+            prefix: "in-memory://delegated-e2e".into(),
+            ..Default::default()
+        };
+        let ws = safe_cex_native::WsRoute {
+            host: Some("in-memory://delegated-e2e".into()),
+            ..Default::default()
+        };
+        registry.construction_test_plans.insert(
+            user.into(),
+            RoutingPlan {
+                http: http.clone(),
+                public_http: Some(http.clone()),
+                read_http: Some(http.clone()),
+                read_public_http: Some(http.clone()),
+                public_read_http: Some(http),
+                ws: safe_cex_native::WsRoutes {
+                    public: ws.clone(),
+                    private: ws.clone(),
+                    business: ws,
+                },
+                ..Default::default()
+            },
+        );
+        Arc::new(registry)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn engine_count(registry: &Registry) -> usize {
+        registry.threads.accounts()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn probe_registry(plan: RoutingPlan) -> Arc<Registry> {
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        for user in ["alice", "bob"] {
+            registry
+                .construction_test_plans
+                .insert(user.into(), plan.clone());
+        }
+        Arc::new(registry)
+    }
+
     /// A private account of `user` named `name` on `venue`, held by no socket yet,
     /// and the inbox its algo host would read.
     pub fn account_on<V: safe_cex_engine::Venue + 'static>(
@@ -1904,6 +2152,8 @@ pub mod testing {
             name: name.into(),
             venue: venue_name.into(),
             handle,
+            public_only: link.is_none(),
+            delegated: None,
             link,
             token: ProxyToken::new(),
             fingerprint,
@@ -3001,33 +3251,33 @@ pub(crate) mod tests {
                 let (account, _algos) = held_account();
                 (registry.keep_notice(&account, "owner"))("stopped".into());
                 assert_eq!(
-                    registry.take_notice("other", "acct", Some("owner")),
+                    registry.take_notice("other", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "never another user's"
                 );
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", None)
+                        .take_notice("u", "acct", &account.fingerprint, None)
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "a second device, or a reopened tab, is told"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("elsewhere")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("elsewhere")),
                     None,
                     "and a page load after it is not told again"
                 );
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", Some("owner"))
+                        .take_notice("u", "acct", &account.fingerprint, Some("owner"))
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "the device that owned the chase still is"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "once"
                 );
@@ -3035,7 +3285,7 @@ pub(crate) mod tests {
                 (registry.keep_notice(&account, "owner"))("second".into());
                 assert_eq!(
                     registry
-                        .take_notice("u", "acct", Some("owner"))
+                        .take_notice("u", "acct", &account.fingerprint, Some("owner"))
                         .map(|kept| kept.summary())
                         .as_deref(),
                     Some("second"),
@@ -3044,7 +3294,7 @@ pub(crate) mod tests {
                 (registry.keep_notice(&account, "owner"))("stale".into());
                 tokio::time::sleep(NOTICE_TTL).await;
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")),
+                    registry.take_notice("u", "acct", &account.fingerprint, Some("owner")),
                     None,
                     "dropped after 24h"
                 );
@@ -3164,7 +3414,8 @@ pub(crate) mod tests {
                 registry.park("r1".into(), "u", vec![(account, 7)]);
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let outbox: Outbox = Arc::new(|_| true);
-                let resumed = registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &outbox);
+                let resumed =
+                    registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &|_| outbox.clone());
                 assert_eq!(resumed.len(), 1);
                 tokio::time::sleep(Duration::from_secs(150)).await;
                 assert!(
@@ -3197,7 +3448,7 @@ pub(crate) mod tests {
                 let token = ("t".to_owned(), u64::MAX);
                 assert!(
                     registry
-                        .resume("r1", "u", 8, token.clone(), &outbox)
+                        .resume("r1", "u", 8, token.clone(), &|_| outbox.clone())
                         .is_empty(),
                     "nothing is parked while the old socket looks open"
                 );
@@ -3211,7 +3462,7 @@ pub(crate) mod tests {
                     .await
                     .unwrap();
                 old.await.unwrap();
-                let resumed = registry.resume("r1", "u", 8, token, &outbox);
+                let resumed = registry.resume("r1", "u", 8, token, &|_| outbox.clone());
                 assert_eq!(resumed.len(), 1, "resumed, not re-inited");
                 assert!(Arc::ptr_eq(&resumed[0], &account));
                 assert_eq!(account.holders.lock().unwrap().signing, Some(8));
@@ -3363,6 +3614,10 @@ pub(crate) mod tests {
 
     pub(crate) fn signing_holder(account: &Account) -> Option<u64> {
         account.holders.lock().unwrap().signing
+    }
+
+    pub(crate) fn fail_signer(registry: &Registry, account: &Arc<Account>) {
+        registry.signer_failed(account);
     }
 
     #[tokio::test(start_paused = true)]
@@ -3783,6 +4038,68 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn woo_hosted_routing_resolves_before_loading_on_both_environments() {
+        for testnet in [false, true] {
+            for public_only in [false, true] {
+                for (proxy, tunnel) in [(false, false), (true, false), (false, true)] {
+                    let init = InitPayload {
+                        account_name: "fixture-woo".into(),
+                        exchange_name: "woo".into(),
+                        key: "fixture-key".into(),
+                        application_id: Some("fixture-app".into()),
+                        testnet: Some(testnet),
+                        tealstreet_proxy: Some(proxy),
+                        tealstreet_tunnel: Some(tunnel),
+                        ..InitPayload::default()
+                    };
+                    let plan = routing_plan(&init, public_only).unwrap();
+                    assert!(plan.ws.public.host.is_none());
+                    if testnet || !(proxy || tunnel) {
+                        assert!(plan.ws.private.host.is_none());
+                    } else {
+                        let relay =
+                            reqwest::Url::parse(plan.ws.private.host.as_ref().unwrap()).unwrap();
+                        assert_eq!(
+                            relay
+                                .query_pairs()
+                                .find(|(key, _)| key == "ts-relay")
+                                .unwrap()
+                                .1,
+                            "wss://wss.woox.io/v2/ws/private/stream/fixture-app"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn woo_hosted_relay_suffix_matches_the_engine_application_id() {
+        for application_id in [None, Some(""), Some("fixture-app")] {
+            let init = InitPayload {
+                account_name: "fixture-woo".into(),
+                exchange_name: "woo".into(),
+                key: "fixture-key".into(),
+                application_id: application_id.map(str::to_owned),
+                tealstreet_proxy: Some(true),
+                ..InitPayload::default()
+            };
+            let options = engine_options(&init, false);
+            let suffix = options["applicationId"].as_str().unwrap_or("undefined");
+            let plan = routing_plan(&init, false).unwrap();
+            let relay = reqwest::Url::parse(plan.ws.private.host.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                relay
+                    .query_pairs()
+                    .find(|(key, _)| key == "ts-relay")
+                    .unwrap()
+                    .1,
+                format!("wss://wss.woox.io/v2/ws/private/stream/{suffix}")
+            );
+        }
+    }
+
+    #[test]
     fn a_venue_with_no_hosted_origin_is_refused_in_plain_words() {
         let init = InitPayload {
             account_name: "a".into(),
@@ -3973,3 +4290,15 @@ pub(crate) mod tests {
         assert!(token.provider()().await.is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "delegated_accounts_tests.rs"]
+mod delegated_accounts_tests;
+
+#[cfg(test)]
+#[path = "delegated_construction_tests.rs"]
+mod delegated_construction_tests;
+
+#[cfg(test)]
+#[path = "accounts/cosigned_admission_test_support.rs"]
+mod cosigned_admission_test_support;

@@ -283,7 +283,7 @@ fn definitive_fallback_refusal_restores_exact_original_once() {
     }
 }
 
-fn check_restore_failure(case: &str) {
+fn check_restore_failure(case: &str, retry_after_seconds: Option<f64>) {
     let row = order("Take Profit Market", "120", "0");
     let (mut e, _) = setup(&row);
     let replacement = fallback_place(&mut e, &row);
@@ -305,7 +305,21 @@ fn check_restore_failure(case: &str) {
             },
         );
     } else if case == "rate_limited" {
-        reply(&mut e, restore, 429, "Too many requests");
+        let headers = retry_after_seconds
+            .map(|seconds| format!("Retry-After: {seconds}"))
+            .unwrap_or_default();
+        let now = safe_cex_engine::test_support::dispatch_now(&e).max(1000.0);
+        e.handle(
+            now,
+            Event::HttpResponse {
+                request: restore.id,
+                response: safe_cex_engine::Response {
+                    status: 429,
+                    headers: &headers,
+                    body: "Too many requests",
+                },
+            },
+        );
     } else {
         reply(
             &mut e,
@@ -337,12 +351,20 @@ fn check_restore_failure(case: &str) {
             !failure.message.contains("UNPROTECTED")
                 && !failure.message.contains("could not be restored")
         );
-        assert_eq!(
-            failure.kind,
-            Some(safe_cex_engine::ErrorKind::Rejected),
-            "serial root remains the earlier replacement refusal"
-        );
     }
+    assert_eq!(
+        failure.kind,
+        Some(if case == "rate_limited" {
+            safe_cex_engine::ErrorKind::RateLimited
+        } else {
+            safe_cex_engine::ErrorKind::Rejected
+        }),
+        "a later put-back 429 must retain its cooldown kind"
+    );
+    assert_eq!(
+        failure.retry_after_ms,
+        retry_after_seconds.map(|seconds| seconds * 1000.0)
+    );
     assert_eq!(
         a.iter()
             .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, .. })))
@@ -356,15 +378,17 @@ fn check_restore_failure(case: &str) {
 }
 #[test]
 fn definitive_restore_refusal_is_unprotected_without_retry() {
-    check_restore_failure("refused");
+    check_restore_failure("refused", None);
 }
 #[test]
 fn unknown_restore_is_uncertain_without_protection_or_retry() {
-    check_restore_failure("unknown");
+    check_restore_failure("unknown", None);
 }
 #[test]
 fn rate_limited_restore_is_uncertain_without_protection_or_retry() {
-    check_restore_failure("rate_limited");
+    for retry_after_seconds in [None, Some(30.0)] {
+        check_restore_failure("rate_limited", retry_after_seconds);
+    }
 }
 #[test]
 fn ambiguous_replacement_never_creates_a_second_protection() {

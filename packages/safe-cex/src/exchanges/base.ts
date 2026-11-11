@@ -71,6 +71,7 @@ import {
   ValidateAccountResult,
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
 import { adjust } from '../utils/safe-math';
 import { signHttpCapture } from '../utils/signHttpCapture';
@@ -1059,7 +1060,7 @@ export class BaseExchange implements Exchange {
 
   log = (message: string, severity: LogSeverity = LogSeverity.Info, engineEvent?: EngineEvent) => {
     if (this.options.tuning?.consoleLogging !== false) {
-      console.log(message, severity);
+      diagnosticConsole.log(message, severity);
     }
     if (engineEvent) this.emitter.emit('log', `[${this.name}] ${message}`, severity, engineEvent);
     else this.emitter.emit('log', `[${this.name}] ${message}`, severity);
@@ -1111,9 +1112,13 @@ export class BaseExchange implements Exchange {
   };
 
   setAllLeverage = async (inputLeverage: number) => {
-    await forEachSeries(this.store.positions, async (position) => {
+    const symbols = new Set([
+      ...this.store.positions.map((position) => position.symbol),
+      ...Object.values(this.store.positionSettings ?? {}).map((settings) => settings.symbol),
+    ]);
+    await forEachSeries([...symbols], async (symbol) => {
       if (!this.isDisposed) {
-        await this.setLeverage(position.symbol, inputLeverage);
+        await this.setLeverage(symbol, inputLeverage);
       }
     });
   };
@@ -1743,7 +1748,7 @@ export class BaseExchange implements Exchange {
     try {
       callback();
     } catch (error) {
-      console.error('Engine frame listener failed', error);
+      diagnosticConsole.error('Engine frame listener failed', error);
     }
   }
 
@@ -1782,7 +1787,7 @@ export class BaseExchange implements Exchange {
     } catch (error) {
       applier.invalidateMarketIdentity();
       rejected('frame', error);
-      console.error('Invalid engine frame', error);
+      diagnosticConsole.error('Invalid engine frame', error);
     }
     if (frame) {
       const decoded = frame;
@@ -1790,7 +1795,7 @@ export class BaseExchange implements Exchange {
         const capabilities = decoded.capabilities();
         if (capabilities) this.adoptEngineCapabilities(capabilities);
       } catch (error) {
-        console.error('Engine capabilities section failed', error);
+        diagnosticConsole.error('Engine capabilities section failed', error);
       }
       try {
         applier.apply(decoded);
@@ -1801,7 +1806,7 @@ export class BaseExchange implements Exchange {
           if (error.bookRejected) rejected('books', error);
           if (error.otherRejected) this.workerFrameRejectedSections.reject('frame', error);
         }
-        console.error('Engine frame apply failed', error);
+        diagnosticConsole.error('Engine frame apply failed', error);
       }
       const deliver = <T>(
         read: () => T[],
@@ -1815,7 +1820,7 @@ export class BaseExchange implements Exchange {
           if (applier.hasMarketIdentity) accept(rows);
         } catch (error) {
           rejected(section, error);
-          console.error('Engine frame section failed', error);
+          diagnosticConsole.error('Engine frame section failed', error);
           return;
         }
         for (const row of rows) this.dispatchFrameEvent(() => this.emitter.emit(event, row));
@@ -1885,7 +1890,7 @@ export class BaseExchange implements Exchange {
           this.dispatchFrameEvent(() => applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
         }
       })
-      .catch((error) => console.error('Engine frame recovery failed', error))
+      .catch((error) => diagnosticConsole.error('Engine frame recovery failed', error))
       .finally(() => {
         this.workerFrameRecoveryPending = false;
         if (this.workerFrameRecoveryQueued) {
@@ -1959,7 +1964,7 @@ export class BaseExchange implements Exchange {
           } else {
             // Only log actual errors, not expected states like retry_too_soon
             if (event.reason && event.reason !== 'retry_too_soon') {
-              console.error('reject in updatePositionsInWebworker', event.reason);
+              diagnosticConsole.error('reject in updatePositionsInWebworker', event.reason);
             }
             reject(new Error(event.reason || 'Unknown error in updatePositionsInWebworker'));
           }
@@ -2106,7 +2111,7 @@ export class BaseExchange implements Exchange {
       if (!this.store.loaded.positions) {
         return [];
       }
-      console.warn(`No positions found for ${symbol} on ${this.name}, fetching...`);
+      diagnosticConsole.warn(`No positions found for ${symbol} on ${this.name}, fetching...`);
       const newPromise = this.fetchPositions([symbol]);
       this._fetchPositionForSymbolPromise[symbol] = newPromise;
       foundPositions = await newPromise;
@@ -2175,7 +2180,7 @@ export class BaseExchange implements Exchange {
 
   emitAndLogError(err: string | Error | undefined | null, msg?: string, extraData?: Record<string, any>) {
     if (this.isDisposed) {
-      console.warn('exchange error (disposed, suppressing)', err);
+      diagnosticConsole.warn('exchange error (disposed, suppressing)', err);
       return;
     }
 
@@ -2184,8 +2189,8 @@ export class BaseExchange implements Exchange {
     const suppressConsoleLog = structuredExtraData.suppressConsoleLog === true;
 
     if (!suppressConsoleLog) {
-      console.error('exchange error', err);
-      console.trace();
+      diagnosticConsole.error('exchange error', err);
+      diagnosticConsole.trace();
     }
 
     let formattedMsg;
@@ -2606,7 +2611,10 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'coinbase-jws':
       case 'backpack-ed25519':
+      case 'apexomni-batch':
+      case 'kraken-sha512':
       case 'orderly-ed25519':
       case 'grvt-order':
       case 'grvt-address':

@@ -83,9 +83,10 @@ test('a set hold stops the release and names its reason; an empty one does not',
 
 const runsPath = `/repos/${REPO}/actions/workflows/rust.yml/runs?head_sha=${SHA}&event=push&branch=master&per_page=20`;
 const run = (overrides) => ({ id: 7, head_sha: SHA, head_branch: 'master', event: 'push', status: 'completed', conclusion: 'failure', ...overrides });
-const jobsPath = (id, page = 1) => `/repos/${REPO}/actions/runs/${id}/jobs?filter=latest&per_page=100&page=${page}`;
+const jobsPath = (id, page = 1) => `/repos/${REPO}/actions/runs/${id}/jobs?filter=latest&per_page=50&page=${page}`;
+const noSleep = async () => {};
 const job = (name, conclusion = 'success') => ({ name, status: 'completed', conclusion });
-const filler = Array.from({ length: 100 }, (_, i) => job(`Rust / replay gate (${i})`, 'failure'));
+const filler = Array.from({ length: 50 }, (_, i) => job(`Rust / replay gate (${i})`, 'failure'));
 
 test('the required coverage job certifies a master push run, even when CPU jobs are red', async () => {
   const ok = fakeApi({
@@ -93,7 +94,7 @@ test('the required coverage job certifies a master push run, even when CPU jobs 
     [`GET ${jobsPath(7)}`]: { status: 200, json: { jobs: filler } },
     [`GET ${jobsPath(7, 2)}`]: { status: 200, json: { jobs: [job('Rust / shared CPU certification', 'failure'), job('Rust / required coverage')] } },
   });
-  await assertCertified({ api: ok.api, repo: REPO, sha: SHA });
+  await assertCertified({ api: ok.api, repo: REPO, sha: SHA, sleep: noSleep });
 });
 
 test('a red, missing or unfinished required coverage job, or a run of the wrong kind, refuses', async () => {
@@ -111,15 +112,52 @@ test('a red, missing or unfinished required coverage job, or a run of the wrong 
       [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: runs } },
       [`GET ${jobsPath(7)}`]: { status: 200, json: { jobs } },
     });
-    await assert.rejects(assertCertified({ api, repo: REPO, sha: SHA }), /required coverage success; refusing/);
+    await assert.rejects(assertCertified({ api, repo: REPO, sha: SHA, sleep: noSleep }), /required coverage success; refusing/);
   }
   for (const routes of [
     { [`GET ${runsPath}`]: { status: 502, json: null } },
     { [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: [run()] } }, [`GET ${jobsPath(7)}`]: { status: 403, json: null } },
   ]) {
     const { api } = fakeApi(routes);
-    await assert.rejects(assertCertified({ api, repo: REPO, sha: SHA }), /HTTP (502|403)/);
+    await assert.rejects(assertCertified({ api, repo: REPO, sha: SHA, sleep: noSleep }), /HTTP (502|403)/);
   }
+});
+
+test('transient 5xx lookups are retried with backoff; a 4xx or a persistent 5xx still refuses', async () => {
+  let jobsCalls = 0;
+  const waits = [];
+  const flaky = fakeApi({
+    [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: [run()] } },
+    [`GET ${jobsPath(7)}`]: () => (++jobsCalls < 3 ? { status: 504, json: null } : { status: 200, json: { jobs: [job('Rust / required coverage')] } }),
+  });
+  await assertCertified({ api: flaky.api, repo: REPO, sha: SHA, sleep: async (ms) => waits.push(ms) });
+  assert.equal(jobsCalls, 3);
+  assert.deepEqual(waits, [2000, 4000]);
+
+  const down = fakeApi({
+    [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: [run()] } },
+    [`GET ${jobsPath(7)}`]: { status: 502, json: null },
+  });
+  await assert.rejects(assertCertified({ api: down.api, repo: REPO, sha: SHA, sleep: noSleep }), /HTTP 502/);
+  assert.equal(down.calls.filter((call) => call === `GET ${jobsPath(7)}`).length, 3);
+
+  const denied = fakeApi({
+    [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: [run()] } },
+    [`GET ${jobsPath(7)}`]: { status: 403, json: null },
+  });
+  await assert.rejects(assertCertified({ api: denied.api, repo: REPO, sha: SHA, sleep: noSleep }), /HTTP 403/);
+  assert.equal(denied.calls.filter((call) => call === `GET ${jobsPath(7)}`).length, 1);
+});
+
+test('a large re-run is paged at 50 jobs until the required coverage job appears', async () => {
+  const page = (n) => Array.from({ length: 50 }, (_, i) => job(`Rust / wasm family (${n}-${i})`, 'failure'));
+  const big = fakeApi({
+    [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: [run()] } },
+    [`GET ${jobsPath(7)}`]: { status: 200, json: { jobs: page(1) } },
+    [`GET ${jobsPath(7, 2)}`]: { status: 200, json: { jobs: page(2) } },
+    [`GET ${jobsPath(7, 3)}`]: { status: 200, json: { jobs: [job('Rust / required coverage')] } },
+  });
+  await assertCertified({ api: big.api, repo: REPO, sha: SHA, sleep: noSleep });
 });
 
 test('a release whose pin already carries the fingerprint is found, so the same inputs publish once', async () => {

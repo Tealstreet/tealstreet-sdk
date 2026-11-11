@@ -653,6 +653,15 @@ describe('createCoreAdapter', () => {
     expect(placeOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 2, reduceOnly: true }));
   });
 
+  it('refuses a default close when native size evidence disagrees', async () => {
+    const positions = [position({ contracts: 2, extra: { contractsNative: 1 } })];
+    const { host, placeOrder } = fakeHost({ getStore: () => ({ positions, markets: [market()] }) as never });
+    await expect(createCoreAdapter(host).closePosition({ symbol: 'BTCUSDT' } as never, 'main')).rejects.toThrow(
+      /unknown/i,
+    );
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
   it('leaves an explicitly supplied close amount alone — it is already native', async () => {
     const okx = market({ contractSize: 1000 } as never);
     const held = position({ contracts: 2000, notional: 120_000 });

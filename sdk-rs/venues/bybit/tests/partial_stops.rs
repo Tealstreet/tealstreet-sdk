@@ -2,6 +2,9 @@
 //! Payloads follow Bybit V5 order, position and trading-stop wire records.
 mod support;
 
+#[path = "partial_stops/proof_terminal.rs"]
+mod proof_terminal;
+
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{Command, Event, HttpRequest};
 use safe_cex_venue_bybit::{Endpoints, Variant};
@@ -2107,12 +2110,13 @@ fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation
         }})
         .to_string();
         h.respond("&orderId=partial", 200, &answer);
-        for _ in 0..3 {
+        // Three realtime reads, then the bounded history polls for an absent stop.
+        for _ in 0..8 {
             if h.result(91).is_some() {
                 break;
             }
             assert!(!h.has_request("/v5/position/trading-stop"));
-            h.advance(100.0);
+            h.advance(1_500.0);
             h.respond("&orderId=partial", 200, &answer);
         }
         assert!(!h.has_request("/v5/position/trading-stop"), "{refusal}");
