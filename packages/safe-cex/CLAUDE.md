@@ -157,6 +157,8 @@ Action outcomes are typed `applied`, proven `refused/notSent`, or `unknown`.
 Applied results survive later uncertain queue-cancel replies. A proven refusal
 also survives later uncertainty, while its subsequent authoritative refused
 outcome may supply the refusal message after a negative ACK.
+A replayed positive receipt ACK cannot revoke that refusal or clear its bound
+evidence, including after disconnect, close and restore.
 Partial, interrupted and unproven results stay unknown and never become
 resendable. Nuke uses the existing box account operation: stop algos, cancel
 orders and close positions, awaiting all legs. Its queued work carries the

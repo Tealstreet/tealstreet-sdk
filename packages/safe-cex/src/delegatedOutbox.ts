@@ -632,6 +632,9 @@ export class DelegatedOutbox {
     if (data.version !== 1 || !row.action) return false;
     if (kind === 'order.actionAck' && typeof data.received === 'boolean') {
       if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return false;
+      // A receipt ACK is not a business result and cannot revoke an existing
+      // whole-intent refusal, including evidence revalidated after restore.
+      if (data.received && row.state === 'notSent' && storedNotSentEvidence(row)) return false;
       if (row.retentionExpired && data.received) return false;
       if (data.received) row.state = 'acknowledged';
       else markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });

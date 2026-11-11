@@ -116,6 +116,76 @@ function key(n = 1) {
 }
 
 describe('action writes share the handoff evidence model', () => {
+  it.each(
+    handoffActions.flatMap((action) =>
+      (['ack', 'outcome'] as const).flatMap((proofSource) =>
+        [false, true].map((lateAck) => ({ action, kind: action.kind, proofSource, lateAck })),
+      ),
+    ),
+  )(
+    'R5 keeps proven $kind refusal from $proofSource across late ACK=$lateAck and restore',
+    async ({ action, proofSource, lateAck }) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueueAction(action);
+      await box.cancel(id);
+      const ack = (received: boolean, instanceId = 'registration') => ({
+        t: 'order.actionAck',
+        d: { version: 1, accountName: 'main', instanceId, intentId: id, seq: 1, received },
+      });
+      await box.receive(c, proofSource === 'ack' ? ack(false) : receipt(box, id, 'refused'));
+      const proven = box.entries()[0];
+      expect(proven).toMatchObject({ state: 'notSent', notSentEvidence: { kind: 'routerRefusal' } });
+      const observations: Record<string, DelegatedIntent> = {};
+      if (lateAck) await box.receive(c, ack(true));
+      observations.afterAck = box.entries()[0];
+      observations.durableAfterAck = structuredClone([...f.rows.values()][0]);
+      box.disconnect(c);
+      await box.flush(c); // Drain disconnect persistence without admitting another socket.
+      observations.afterDisconnect = box.entries()[0];
+      observations.durableAfterDisconnect = structuredClone([...f.rows.values()][0]);
+      box.close();
+      observations.afterClose = box.entries()[0];
+      observations.durableAfterClose = structuredClone([...f.rows.values()][0]);
+      const restored = await DelegatedOutbox.open(f.options);
+      observations.afterRestore = restored.entries()[0];
+      const next = restored.connect(f.connection('replacement'));
+      await restored.flush(next);
+      if (lateAck) await restored.receive(next, ack(true, 'replacement'));
+      observations.afterRestoredAck = restored.entries()[0];
+      observations.durableAfterRestoredAck = structuredClone([...f.rows.values()][0]);
+      for (const [stage, row] of Object.entries(observations)) {
+        expect(row, stage).toMatchObject({
+          state: 'notSent',
+          intentId: id,
+          seq: proven.seq,
+          fingerprint: proven.fingerprint,
+        });
+        expect(row.notSentEvidence, stage).toEqual(proven.notSentEvidence);
+        expect(row.error, stage).toEqual(proven.error);
+      }
+      // Receipt ACK replay must not obstruct the later authoritative message.
+      const refused = receipt(restored, id, 'refused', 2);
+      refused.d.instanceId = 'replacement';
+      refused.d.error!.message = 'Final refusal details';
+      await restored.receive(next, refused);
+      expect(restored.entries()[0]).toMatchObject({
+        state: 'notSent',
+        error: { message: 'Final refusal details', outcome: 'notSent' },
+        notSentEvidence: { kind: 'routerRefusal', receipt: 'outcome' },
+      });
+      expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.action', 'order.actionCancelQueued']);
+      restored.close();
+      const final = await DelegatedOutbox.open(f.options);
+      expect(final.entries()[0]).toMatchObject({
+        state: 'notSent',
+        error: { message: 'Final refusal details', outcome: 'notSent' },
+        notSentEvidence: { kind: 'routerRefusal', receipt: 'outcome' },
+      });
+      final.close();
+    },
+  );
   it.each(handoffActions)('preserves applied $kind after a later uncertain queue-cancel reply', async (action) => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -286,20 +356,23 @@ describe('action writes share the handoff evidence model', () => {
       restored.close();
     },
   );
-  it('accepts an action ACK after physical handoff and keeps its deadline unknown', async () => {
-    const f = fixture();
-    const box = await DelegatedOutbox.open(f.options);
-    const c = box.connect(f.connection());
-    const id = await box.enqueueAction(cancel);
-    await box.receive(c, {
-      t: 'order.actionAck',
-      d: { version: 1, accountName: 'main', instanceId: 'registration', intentId: id, seq: 1, received: true },
-    });
-    expect(box.entries()[0].state).toBe('acknowledged');
-    f.advance(10_000);
-    expect(box.entries()[0].state).toBe('unknown');
-    box.close();
-  });
+  it.each(handoffActions)(
+    'accepts a $kind ACK after physical handoff and keeps its deadline unknown',
+    async (action) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueueAction(action);
+      await box.receive(c, {
+        t: 'order.actionAck',
+        d: { version: 1, accountName: 'main', instanceId: 'registration', intentId: id, seq: 1, received: true },
+      });
+      expect(box.entries()[0].state).toBe('acknowledged');
+      f.advance(10_000);
+      expect(box.entries()[0].state).toBe('unknown');
+      box.close();
+    },
+  );
   it('replays only a positively declined first action handoff with persisted proof', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
