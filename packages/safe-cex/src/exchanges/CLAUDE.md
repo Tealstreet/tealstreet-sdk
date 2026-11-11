@@ -254,6 +254,8 @@ book baselines; known failure identities notify only matching subscribers.
 Unknown identities notify the affected stream kind broadly, and unreadable
 envelopes notify both kinds. Rejection-observer
 exceptions are isolated, and unsubscribe/dispose removes the rejection listener.
+If a native rejection observer disposes the exchange, frame processing stops
+before sibling data or frame forwarding is delivered.
 
 ### Common Startup Sequence
 

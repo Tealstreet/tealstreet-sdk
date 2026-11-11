@@ -2305,6 +2305,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private applyEngineFrame(buffer: ArrayBuffer, recover: boolean, snapshot = false) {
+    if (this.isDisposed) return;
     let frame: Frame | undefined;
     let notified: Set<string> | undefined;
     const rejected = (section: 'frame' | 'books' | 'candles', error: unknown) => {
@@ -2319,6 +2320,7 @@ export class RustEngineExchange extends BaseExchange {
       const signal = new WorkerFrameRecoveryScopes().reject(section, error, frame, symbols);
       if (section === 'frame' || section === 'books')
         this.dispatchFrameEvent(() => this.emitter.emit('workerBookFrameRejected', signal));
+      if (this.isDisposed) return;
       if (section === 'frame' || section === 'candles')
         this.dispatchFrameEvent(() => this.emitter.emit('workerCandleFrameRejected', signal));
     };
@@ -2341,7 +2343,9 @@ export class RustEngineExchange extends BaseExchange {
       if (error instanceof FrameApplyError && error.bookRejected) rejected('books', error);
       console.error('Engine frame apply failed', error);
     }
+    if (this.isDisposed) return;
     const read = <T>(section: () => T[], stream?: 'books' | 'candles'): T[] => {
+      if (this.isDisposed) return [];
       try {
         return section();
       } catch (error) {
@@ -2369,8 +2373,10 @@ export class RustEngineExchange extends BaseExchange {
         console.error('Engine public feed section failed', error);
       }
       if (publicChanged)
-        for (const observer of this.publicFeedObservers)
+        for (const observer of this.publicFeedObservers) {
           this.dispatchFrameEvent(() => observer.updated(catalogChanged));
+          if (this.isDisposed) return;
+        }
     }
     let sharedFailure: Error | undefined;
     let sendSharedSnapshot = false;
@@ -2397,18 +2403,22 @@ export class RustEngineExchange extends BaseExchange {
         this.startupFailure = sharedFailure;
       }
     }
-    for (const fill of read(() => this.applier.fills(decoded)))
+    for (const fill of read(() => this.applier.fills(decoded))) {
       this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
+      if (this.isDisposed) return;
+    }
     if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.size) {
       for (const { symbol, orderbook } of read(() => this.applier.books(decoded), 'books')) {
         const listeners = this.bookListeners.get(symbol);
         if (!this.capabilityRecord?.isolatedBookSubscriptions)
           listeners?.forEach((listener) => {
+            if (this.isDisposed) return;
             if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener))
               this.dispatchFrameEvent(() => listener(orderbook));
           });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
+            if (this.isDisposed) return;
             if (listeners.has(id) && (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener)))
               this.dispatchFrameEvent(() =>
                 listener({
@@ -2417,17 +2427,23 @@ export class RustEngineExchange extends BaseExchange {
                 }),
               );
           }
+        if (this.isDisposed) return;
       }
     }
+    if (this.isDisposed) return;
     if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.size) {
       for (const { symbol, interval, candle } of read(() => this.applier.candles(decoded), 'candles')) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
+          if (this.isDisposed) return;
           if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.has(listener))
             this.dispatchFrameEvent(() => listener(candle));
         });
+        if (this.isDisposed) return;
       }
     }
+    if (this.isDisposed) return;
     this.dispatchFrameEvent(() => this.onFrame?.(buffer, snapshot));
+    if (this.isDisposed) return;
     if (sharedFailure) {
       const failure = sharedFailure;
       this.dispatchFrameEvent(() => this.emitAndLogError(failure));

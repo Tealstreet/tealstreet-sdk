@@ -967,6 +967,81 @@ describe('direct public-data rejection observers', () => {
   beforeEach(() => vi.spyOn(console, 'error').mockImplementation(() => {}));
   afterEach(() => vi.restoreAllMocks());
 
+  it.each(['public', 'fill', 'book', 'candle'] as const)(
+    'stops sibling native deliveries when a %s callback disposes the exchange',
+    (kind) => {
+      const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+      const deliveredAfterDisposal: string[] = [];
+      const deliver = (stream: string) => {
+        if (exchange.isDisposed) deliveredAfterDisposal.push(stream);
+        else if (stream === kind) exchange.dispose();
+      };
+      exchange.observePublicFeed({ updated: () => deliver('public'), closed: vi.fn() });
+      exchange.on('fill', () => deliver('fill'));
+      const stopBook = exchange.listenOrderBook('BTCUSDT', () => deliver('book'));
+      const stopPeerBook = exchange.listenOrderBook('BTCUSDT', () => deliver('peer book'));
+      const stopCandle = exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, () => deliver('candle'));
+      const stopPeerCandle = exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, () => deliver('peer candle'));
+      const forward = vi.fn();
+      exchange.framesCarryMarketData = false;
+      exchange.onFrame = forward;
+      try {
+        receive(exchange, fixture());
+        expect(exchange.isDisposed).toBe(true);
+        expect(deliveredAfterDisposal).toEqual([]);
+        expect(forward).not.toHaveBeenCalled();
+      } finally {
+        stopBook();
+        stopPeerBook();
+        stopCandle();
+        stopPeerCandle();
+        exchange.dispose();
+      }
+    },
+  );
+
+  it.each(['book', 'candle', 'frame'] as const)(
+    'stops the native frame when a %s rejection observer disposes the exchange',
+    (kind) => {
+      const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+      const deliveredAfterDisposal: string[] = [];
+      const frameDelivered = vi.fn();
+      exchange.framesCarryMarketData = false;
+      exchange.onFrame = frameDelivered;
+      const record = (stream: string) => {
+        if (exchange.isDisposed) deliveredAfterDisposal.push(stream);
+      };
+      const rejected = vi.fn(() => exchange.dispose());
+      const stopCandle = exchange.listenOHLCV(
+        { symbol: 'BTCUSDT', interval: '1m' },
+        () => record('candle'),
+        kind === 'candle' ? rejected : () => record('candle rejection'),
+      );
+      const stopBook = exchange.listenOrderBook(
+        'BTCUSDT',
+        () => record('book'),
+        kind !== 'candle' ? rejected : () => record('book rejection'),
+      );
+      exchange.emitter.on('fill', () => record('fill'));
+      try {
+        receive(
+          exchange,
+          kind === 'frame'
+            ? new ArrayBuffer(0)
+            : fixture({ invalidBook: kind === 'book', invalidCandle: kind === 'candle' }),
+        );
+        expect(rejected).toHaveBeenCalledTimes(1);
+        expect(exchange.isDisposed).toBe(true);
+        expect(deliveredAfterDisposal).toEqual([]);
+        expect(frameDelivered).not.toHaveBeenCalled();
+      } finally {
+        stopBook();
+        stopCandle();
+        exchange.dispose();
+      }
+    },
+  );
+
   it.each([
     ['book', 'after registration'],
     ['candle', 'after registration'],
