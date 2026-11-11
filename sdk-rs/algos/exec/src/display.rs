@@ -1,7 +1,7 @@
 //! Read-only CLI projections of the account's engine frames.
 use crate::placement::{Placement, n};
 use crate::{Evaluation, failed, resolve, rows};
-use safe_cex_engine::num::calculate_position_account_leverage;
+use safe_cex_position_math::calculate_position_account_leverage;
 use serde_json::{Value, json};
 use std::sync::OnceLock;
 fn catalog() -> &'static [Value] {

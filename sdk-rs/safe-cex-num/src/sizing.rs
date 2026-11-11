@@ -212,7 +212,7 @@ pub fn convert_margin_risk_to_native_size(
     let exact = (quotient - nearest).abs() <= quotient.abs().max(1.0) * 1e-12;
     handle_rounding_error(if exact { nearest } else { quotient.floor() } * market.precision.amount)
 }
-pub use crate::position_math::{
+pub use safe_cex_position_math::{
     calculate_position_account_leverage, calculate_total_account_leverage, calculate_total_notional,
 };
 /// A borrowed source row, preserving the account or currency object shape.

@@ -534,9 +534,7 @@ pub fn oldest_cursor_id<S: AsRef<str>>(ids: &[S]) -> Option<String> {
     oldest
 }
 
-#[path = "../../engine/src/position_math.rs"]
-mod position_math;
-pub use position_math::{NativeSizeInputs, NativeSizeMarket, native_position_size};
+pub use safe_cex_position_math::{NativeSizeInputs, NativeSizeMarket, native_position_size};
 
 #[cfg(test)]
 mod tests {

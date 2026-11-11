@@ -37,7 +37,6 @@ mod order_output;
 pub mod order_read_cover;
 pub mod paging;
 mod placement_acks;
-mod position_math;
 mod position_output;
 pub mod protective_amend;
 mod protocol_clock;

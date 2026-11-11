@@ -1,4 +1,5 @@
-//! Pure position-value policy shared by native runtime and numeric contract tests.
+//! Pure position-value policy shared by engines, algos and numeric contract tests.
+#![no_std]
 /// Position quantities with independent native-unit evidence.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeSizeInputs {
