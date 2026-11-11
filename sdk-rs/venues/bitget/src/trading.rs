@@ -21,6 +21,10 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[cfg(test)]
+#[path = "protective_quote_tests.rs"]
+mod protective_quote_tests;
+
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
 /// Native wait for Classic/UTA account detection (scoped engine condition wait).
@@ -2367,11 +2371,16 @@ impl BitgetFutures {
         at: f64,
     ) {
         if last.is_some() || mark.is_some() {
-            self.trading
-                .references
-                .entry(symbol.into())
-                .or_default()
-                .update(last, mark, at);
+            // Borrow the usual seeded symbol instead of allocating a lookup key per ticker.
+            if let Some(quote) = self.trading.references.get_mut(symbol) {
+                quote.update(last, mark, at);
+            } else {
+                self.trading
+                    .references
+                    .entry(symbol.into())
+                    .or_default()
+                    .update(last, mark, at);
+            }
         }
     }
 
