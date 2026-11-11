@@ -43,7 +43,7 @@ test('HyroTrader main-thread CPU, process CPU, memory and warnings are unchanged
 });
 
 test('the HyroTrader override applies to raw small windows without changing other venues', () => {
-  const reference = samples(0.3);
+  const reference = samples(0.3, { retainedBytes: 100 });
   const candidate = samples(0.36);
   assert.deepEqual(policy.performanceVerdict(reference, candidate, 'hyrotrader').failures, []);
   assert.equal(policy.performanceVerdict(reference, samples(0.363), 'hyrotrader').failures.length, 1);
