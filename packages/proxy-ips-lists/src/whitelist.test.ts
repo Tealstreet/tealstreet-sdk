@@ -5,7 +5,6 @@ import {
   privateProxyIpsSingapore,
   privateProxyIpsTokyo,
   privateProxyIpsVultrTokyo,
-  wsProxyIps,
 } from './index';
 import { legacyExchangesRequireWsIp, legacyWhitelistIps } from './legacyWhitelist';
 import { whitelistIpGroups } from './whitelist';
@@ -19,14 +18,14 @@ it('uses legacy metadata region/default mappings and existing shared arrays, nev
   expect(legacyWhitelistIps('__proto__')).toEqual([]);
 });
 
-it('puts the fleet first then copies the selected legacy SG or JA addresses once', () => {
+it('copies only the current fleet even when a legacy region is selected', () => {
   for (const region of ['SG', 'JA']) {
     const result = whitelistIpGroups('bybit', region);
-    const legacy = region === 'SG' ? privateProxyIpsSingapore : privateProxyIpsTokyo;
     expect(result.fleet).toEqual(privateProxyIpsVultrTokyo);
-    expect(result.legacy).toEqual(legacy);
-    expect(result.copy).toEqual([...privateProxyIpsVultrTokyo, ...legacy]);
-    expect(new Set(result.copy).size).toBe(result.copy.length);
+    expect(result.legacy).toEqual([]);
+    expect(result.extras).toEqual([]);
+    expect(result.copy).toEqual(privateProxyIpsVultrTokyo);
+    expect(result.legacyOptional).toBe(false);
   }
 });
 
@@ -35,56 +34,35 @@ it('a venue with no AWS list copies only the fleet', () => {
   expect(whitelistIpGroups('polymarket').copy).toEqual(privateProxyIpsVultrTokyo);
 });
 
-it('retains Bitunix and declared WS extras in the union, without duplicating IPs', () => {
+it('keeps the live Bitunix passthrough extras, but no retired WS proxy extras', () => {
   expect(whitelistIpGroups('bitunix').copy).toEqual([
     ...privateProxyIpsVultrTokyo,
-    ...privateProxyIpsTokyo,
     '72.46.86.143',
     '202.182.126.32',
   ]);
+  expect(whitelistIpGroups('bitunix').extras).toEqual(['72.46.86.143', '202.182.126.32']);
   exchangesRequireWsIp.push('bybit');
   try {
-    expect(whitelistIpGroups('bybit').copy).toEqual([
-      ...privateProxyIpsVultrTokyo,
-      ...privateProxyIpsSingapore,
-      ...wsProxyIps,
-    ]);
+    expect(whitelistIpGroups('bybit').copy).toEqual(privateProxyIpsVultrTokyo);
+    expect(whitelistIpGroups('bybit').extras).toEqual([]);
   } finally {
     exchangesRequireWsIp.pop();
   }
 });
 
-describe('the verified BloFin 20-IP cap', () => {
-  it('copies the union at the boundary, fleet only above it, but keeps optional legacy addresses visible', () => {
-    const original = privateProxyIpsSingapore.length;
-    privateProxyIpsSingapore.push('192.0.2.1', '192.0.2.2', '192.0.2.3');
-    try {
-      expect(whitelistIpGroups('blofin').copy).toHaveLength(20);
-      expect(whitelistIpGroups('blofin').legacyOptional).toBe(false);
-      privateProxyIpsSingapore.push('192.0.2.5');
-      const over = whitelistIpGroups('blofin');
-      expect(over.copy).toEqual(privateProxyIpsVultrTokyo);
-      expect(over.legacy).toHaveLength(11);
-      expect(over.legacyOptional).toBe(true);
-      expect(over.limit).toBe(20);
-    } finally {
-      privateProxyIpsSingapore.splice(original);
-    }
-  });
-});
-
-it('MEXC has a documented 10-IP cap: its 14-IP union stays visible but copy is fleet-only', () => {
+it('MEXC copies the same fleet-only list; retired AWS addresses no longer make caps relevant', () => {
   const groups = whitelistIpGroups('mexc');
-  expect(groups.limit).toBe(10);
-  expect(groups.legacyOptional).toBe(true);
+  expect(privateProxyIpsVultrTokyo.length).toBeLessThanOrEqual(10);
+  expect(groups.limit).toBeUndefined();
+  expect(groups.legacyOptional).toBe(false);
   expect(groups.copy).toEqual(privateProxyIpsVultrTokyo);
-  expect(groups.legacy).toEqual(privateProxyIpsTokyo);
+  expect(groups.legacy).toEqual([]);
 });
 
-it('retains legacy WS egress even while the current Rust WS list is empty', () => {
+it('keeps historical legacy WS knowledge out of current whitelist copy', () => {
   expect(legacyExchangesRequireWsIp).toEqual(['coinbase', 'blofin', 'okx', 'okxeu', 'bitget']);
   for (const exchange of legacyExchangesRequireWsIp) {
-    expect(whitelistIpGroups(exchange).extras).toEqual(wsProxyIps);
-    expect(whitelistIpGroups(exchange).copy).toEqual(expect.arrayContaining(wsProxyIps));
+    expect(whitelistIpGroups(exchange).extras).toEqual([]);
+    expect(whitelistIpGroups(exchange).copy).toEqual(privateProxyIpsVultrTokyo);
   }
 });
