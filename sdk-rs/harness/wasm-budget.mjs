@@ -235,8 +235,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bingx: 2_139_136,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
-  bitget: 2_492_416,
-  bitgetusdc: 2_492_416,
+  // #3317 engine/host throughput profile: local optimized web/node 2,754,487 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitget.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
+  bitget: 2_764_800,
+  bitgetusdc: 2_764_800,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
@@ -252,7 +255,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3317 throughput profile at 0c8e04fe5a: optimized local web/node 2,483,240 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bybit.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
-  bybit: 2_494_464,
+  // #3317 run 43060399359, job 130665084604, artifact 13874660310:
+  // CI merge 2d1f87d77872 web/node 2,481,896 B; current CI size + 10 KiB, rounded up.
+  bybit: 2_492_416,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
   // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.

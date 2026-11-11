@@ -8,13 +8,31 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
 test('#3317 Bybit throughput profile retains measured headroom for every alias', () => {
-  // 0c8e04fe5a, pinned Rust 1.99.0/bindgen 0.2.129/Binaryen 132 build.
-  const web = 2_483_240, node = 2_483_240;
-  const minimumCap = 2_494_464;
+  // Run 43060399359/job 130665084604, sealed artifact 13874660310.
+  const web = 2_481_896, node = 2_481_896;
+  const minimumCap = 2_492_416;
   assert.equal(minimumCap, Math.ceil((Math.max(web, node) + 10 * 1024) / 1024) * 1024);
   for (const venue of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader']) {
     const family = venueFamily(venue);
     assert.equal(family, 'bybit');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(web, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(node, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
+test('#3317 Bitget throughput profile retains measured headroom for every alias', () => {
+  // #3317 engine/host throughput build, pinned Rust 1.99.0/bindgen 0.2.129/Binaryen 132.
+  const web = 2_754_487, node = 2_754_487;
+  const minimumCap = 2_764_800;
+  assert.equal(minimumCap, Math.ceil((Math.max(web, node) + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.bitgetusdc, WASM_VENUE_OVERRIDES.bitget);
+  for (const venue of ['bitget', 'bitgetusdc', 'bitgetinverse']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'bitget');
     const cap = WASM_VENUE_OVERRIDES[family];
     assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(web, 'venue', family), undefined);

@@ -1386,7 +1386,7 @@ jobs:
     needs: selection
     if: needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
-    # The fixed tip+anchor collection took 45m25s in #3317 before timeout;
+    # The tip+anchor job ran 45m25s in #3317 and timed out before certification;
     # retain room for original-producer proof/publication without shortening it.
     timeout-minutes: 60
     defaults:
