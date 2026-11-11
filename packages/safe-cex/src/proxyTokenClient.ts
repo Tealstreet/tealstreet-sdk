@@ -9,6 +9,7 @@
 import jwt from 'jsonwebtoken';
 
 import { isTokenExpired } from './proxyTokenExpiry';
+import { diagnosticConsole } from './utils/diagnosticRedaction';
 
 export { isTokenExpired } from './proxyTokenExpiry';
 
@@ -104,7 +105,7 @@ function initBroadcastChannel(): void {
       }
     };
   } catch (err) {
-    console.error('[ProxyTokenClient] Failed to create BroadcastChannel:', err);
+    diagnosticConsole.error('[ProxyTokenClient] Failed to create BroadcastChannel:', err);
   }
 }
 
@@ -340,7 +341,7 @@ export async function initializeProxyTokenClient(): Promise<void> {
     try {
       await fetchProxyToken();
     } catch (err) {
-      console.warn('[ProxyTokenClient] Initialization failed, will retry on demand:', err);
+      diagnosticConsole.warn('[ProxyTokenClient] Initialization failed, will retry on demand:', err);
     }
   }
 }

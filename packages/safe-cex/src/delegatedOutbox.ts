@@ -94,7 +94,10 @@ export interface OutboxConnection extends OutboxScope {
     delegatedOrderLedgerV1?: boolean;
   };
   instanceId?: string;
-  /** True only for physical handoff; false/throw means neither sent nor buffered for a later connection. */
+  /**
+   * True only for physical handoff; explicit false proves no send or buffering.
+   * Any other non-true value or a throw is unknown, never no-handoff evidence.
+   */
   send(frame: string): boolean;
 }
 
@@ -597,7 +600,7 @@ export class DelegatedOutbox {
     }
     // Set in-flight before invoking the synchronous adapter: a reentrant
     // deadline/disconnect must already treat this handoff as ambiguous.
-    const noHandoff = storedNoHandoffEvidence(row);
+    let noHandoff = storedNoHandoffEvidence(row);
     delete row.notSentEvidence;
     delete row.noHandoffEvidence;
     row.state = 'sending';
@@ -606,10 +609,11 @@ export class DelegatedOutbox {
     try {
       handedOff = connection.send(frame);
     } catch {
-      // The adapter contract guarantees a throw means no physical handoff.
+      // Failure after entering the adapter cannot prove that no bytes left.
+      noHandoff = undefined;
     }
-    if (!handedOff) {
-      if (noHandoff) {
+    if (handedOff !== true) {
+      if (handedOff === false && noHandoff) {
         row.state = row.cancelPending ? 'canceled' : 'queued';
         row.cancelPending = false;
         if (row.state === 'queued')
@@ -619,7 +623,7 @@ export class DelegatedOutbox {
     }
     this.changed(row);
     this.arm(row);
-    if (!handedOff && this.expired(row)) this.expire(row);
+    if (handedOff !== true && this.expired(row)) this.expire(row);
     // Keep the write-ahead sending record on storage failure after handoff.
     await this.persist(row).catch(() => undefined);
   }
@@ -776,9 +780,31 @@ export class DelegatedOutbox {
     );
   }
   private pendingCount(): number {
+    this.pruneCompletedIntents();
     return this.intents.size - this.completedIntents.size;
   }
+  private pruneCompletedIntents(): void {
+    for (const [id, row] of this.completedIntents) {
+      if (
+        row.intentId !== id ||
+        this.intents.get(id) !== row ||
+        !this.durable.has(id) ||
+        !this.completed(row)
+      )
+        this.completedIntents.delete(id);
+    }
+  }
+  private removeIntent(row: DelegatedIntent): void {
+    if (this.intents.get(row.intentId) !== row) return;
+    this.stopTimer(row.intentId);
+    // Drop the index first so it never outlives the live entry it credits.
+    this.completedIntents.delete(row.intentId);
+    this.intents.delete(row.intentId);
+    this.durable.delete(row.intentId);
+    this.outcomeSequences.delete(row.intentId);
+  }
   private async compact(): Promise<void> {
+    this.pruneCompletedIntents();
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
     const completed = [...this.completedIntents.values()];
     let insertionOrder: Map<string, number> | undefined;
@@ -794,13 +820,7 @@ export class DelegatedOutbox {
       sequence: this.sequence,
       retiredIntentIds: retired.map((row) => row.intentId),
     });
-    for (const row of retired) {
-      this.stopTimer(row.intentId);
-      this.intents.delete(row.intentId);
-      this.durable.delete(row.intentId);
-      this.completedIntents.delete(row.intentId);
-      this.outcomeSequences.delete(row.intentId);
-    }
+    for (const row of retired) this.removeIntent(row);
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.work.then(operation);
