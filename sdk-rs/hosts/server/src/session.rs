@@ -129,22 +129,19 @@ pub struct Session {
     next_verification: u64,
     verified: tokio::sync::mpsc::UnboundedSender<JoinCompletion>,
     verified_rx: Option<tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>>,
-    #[cfg(test)]
-    cosigned_admission_test: bool,
 }
 
 struct PendingVerification {
     generation: u64,
     task: tokio::task::JoinHandle<()>,
     out: Out,
-    #[cfg(test)]
     cosigned_link: Option<Arc<safe_cex_remote_signer::SignerLink>>,
+    _signer_output: Option<crate::out::OutputLifetime>,
 }
 
 impl Drop for PendingVerification {
     fn drop(&mut self) {
         self.task.abort();
-        #[cfg(test)]
         if let Some(link) = &self.cosigned_link {
             link.mark_unavailable();
         }
@@ -160,8 +157,6 @@ pub struct JoinCompletion {
     account_name: String,
     candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
     probe: Option<ProbedInit>,
-    #[cfg(test)]
-    cosigned: Option<cosigned_admission_test_support::Completion>,
 }
 
 struct ProbedInit {
@@ -278,8 +273,6 @@ impl Session {
             next_verification: 0,
             verified,
             verified_rx: Some(verified_rx),
-            #[cfg(test)]
-            cosigned_admission_test: false,
         }
     }
 
@@ -398,11 +391,18 @@ impl Session {
             > + Send
             + 'static,
     {
-        self.start_probe_verification(name, async move { (verify.await, None) });
+        self.start_probe_verification(name, None, async move { (verify.await, None) });
     }
 
-    fn start_probe_verification<F>(&mut self, name: String, verify: F)
-    where
+    fn start_probe_verification<F>(
+        &mut self,
+        name: String,
+        signer: Option<(
+            Arc<safe_cex_remote_signer::SignerLink>,
+            crate::out::OutputLifetime,
+        )>,
+        verify: F,
+    ) where
         F: std::future::Future<
                 Output = (
                     Result<crate::delegated::Credentials, crate::delegated::Refused>,
@@ -412,6 +412,7 @@ impl Session {
             + 'static,
     {
         self.cancel_verification(&name);
+        let (cosigned_link, signer_output) = signer.unzip();
         self.next_verification += 1;
         let generation = self.next_verification;
         let user = self.user().to_owned();
@@ -429,8 +430,6 @@ impl Session {
                 account_name,
                 candidate,
                 probe,
-                #[cfg(test)]
-                cosigned: None,
             });
         });
         self.pending_verifications.insert(
@@ -439,8 +438,8 @@ impl Session {
                 generation,
                 task,
                 out,
-                #[cfg(test)]
-                cosigned_link: None,
+                cosigned_link,
+                _signer_output: signer_output,
             },
         );
     }
@@ -467,92 +466,96 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
-        #[cfg(test)]
-        if let Some(probed) = completed.cosigned {
-            return self.complete_cosigned_test_admission(probed, out).await;
+        if !self.admission_token_valid() {
+            self.drop_early(&completed.account_name, "verification refused");
+            out.send(envelope::init_unverified(&completed.account_name, false));
+            return Ok(());
         }
         if let Some(probe) = completed.probe {
-            match (completed.candidate, probe.permit) {
-                (Ok(candidate), Ok(permit)) => {
-                    out = out.account(&completed.account_name);
-                    let account = self
-                        .registry
-                        .obtain_probed_delegated(
+            let candidate = completed.candidate.ok();
+            out = out.account(&completed.account_name);
+            let account = match probe.permit {
+                Ok(permit) => {
+                    self.registry
+                        .obtain_probed_join(
                             self.user(),
                             &probe.init,
                             self.socket,
                             self.identity.token.clone(),
                             out.outbox(),
-                            candidate.pair(),
+                            candidate.as_ref().map(crate::delegated::Credentials::pair),
                             permit,
                         )
-                        .await;
-                    drop(candidate);
-                    match account {
-                        Ok(account) => {
-                            self.metrics.note_init();
-                            if self
-                                .joined
-                                .get(&completed.account_name)
-                                .is_none_or(|joined| !Arc::ptr_eq(&joined.account, &account))
-                            {
-                                self.out.retire_account(&completed.account_name);
-                            }
-                            out = out.account(&completed.account_name);
-                            account.update_reply_outbox(self.socket, out.outbox());
-                            if let Some(joined) = self.joined.get_mut(&completed.account_name)
-                                && Arc::ptr_eq(&joined.account, &account)
-                            {
-                                let previous = std::mem::replace(&mut joined.out, out.clone());
-                                previous.retire_order_receipts();
-                                previous.finish_registration(&out);
-                                self.resnapshot(&completed.account_name).await;
-                            } else {
-                                if let Some(previous) = self.joined.remove(&completed.account_name)
-                                {
-                                    previous.out.retire_registration();
-                                    Self::leave_engine(previous);
-                                }
-                                self.join(account, out.clone()).await;
-                            }
-                            if self.joined.contains_key(&completed.account_name) {
-                                self.registry.interruptions.delegated_status(
-                                    self.user(),
-                                    &completed.account_name,
-                                    &out,
-                                    crate::interruption::DelegatedKeyStatus::KeyAvailable,
-                                );
-                                self.registry.interruptions.deliver(
-                                    self.user(),
-                                    &completed.account_name,
-                                    &out,
-                                );
-                                if let Some(kept) = self.registry.take_notice(
-                                    self.user(),
-                                    &completed.account_name,
-                                    &self.joined[&completed.account_name].account.fingerprint,
-                                    self.identity.resume_from.as_deref(),
-                                ) {
-                                    for frame in kept.frames(&completed.account_name) {
-                                        out.send(frame);
-                                    }
-                                }
-                            }
+                        .await
+                }
+                Err(refusal) => Err(refusal),
+            };
+            drop(candidate);
+            match account {
+                Ok(account) => {
+                    self.metrics.note_init();
+                    if self
+                        .joined
+                        .get(&completed.account_name)
+                        .is_none_or(|joined| !Arc::ptr_eq(&joined.account, &account))
+                    {
+                        self.out.retire_account(&completed.account_name);
+                    }
+                    out = out.account(&completed.account_name);
+                    account.sign_through_socket(
+                        self.socket,
+                        out.outbox(),
+                        self.identity.token.clone(),
+                    );
+                    if let Some(joined) = self.joined.get_mut(&completed.account_name)
+                        && Arc::ptr_eq(&joined.account, &account)
+                    {
+                        let previous = std::mem::replace(&mut joined.out, out.clone());
+                        previous.retire_order_receipts();
+                        previous.finish_registration(&out);
+                        self.resnapshot(&completed.account_name).await;
+                    } else {
+                        if let Some(previous) = self.joined.remove(&completed.account_name) {
+                            previous.out.retire_registration();
+                            Self::leave_engine(previous);
                         }
-                        Err(refusal) => {
-                            self.drop_early(&completed.account_name, "verification refused");
-                            out.send(envelope::init_unverified(
+                        self.join(account, out.clone()).await;
+                    }
+                    if self.joined.contains_key(&completed.account_name) {
+                        if self.joined[&completed.account_name]
+                            .account
+                            .delegated
+                            .is_some()
+                        {
+                            self.registry.interruptions.delegated_status(
+                                self.user(),
                                 &completed.account_name,
-                                refusal.transient,
-                            ));
+                                &out,
+                                crate::interruption::DelegatedKeyStatus::KeyAvailable,
+                            );
+                        }
+                        self.registry.interruptions.deliver(
+                            self.user(),
+                            &completed.account_name,
+                            &out,
+                        );
+                        if let Some(kept) = self.registry.take_notice(
+                            self.user(),
+                            &completed.account_name,
+                            &self.joined[&completed.account_name].account.fingerprint,
+                            self.identity.resume_from.as_deref(),
+                        ) {
+                            for frame in kept.frames(&completed.account_name) {
+                                out.send(frame);
+                            }
                         }
                     }
                 }
-                (_, permit) => {
+                Err(refusal) => {
                     self.drop_early(&completed.account_name, "verification refused");
                     out.send(envelope::init_unverified(
                         &completed.account_name,
-                        permit.err().is_some_and(|refusal| refusal.transient),
+                        refusal.transient,
                     ));
                 }
             }
@@ -568,14 +571,29 @@ impl Session {
         Ok(())
     }
 
-    fn delegated_init(&mut self, init: InitPayload) {
+    fn admission_token_valid(&self) -> bool {
+        self.identity.user.is_some()
+            && self
+                .identity
+                .token
+                .as_ref()
+                .is_some_and(|(_, expiry)| *expiry > now_ms())
+    }
+
+    fn admission_init(&mut self, init: InitPayload) {
         self.cancel_verification(&init.account_name);
-        if !crate::delegated::enabled(&init.exchange_name)
+        if !self.admission_token_valid()
+            || !crate::delegated::enabled(&init.exchange_name)
             || init.public_only == Some(true)
             || init.account_name.starts_with("__pub_")
             || self
                 .registry
-                .signing_mode_refusal(self.user(), &init, false, true)
+                .signing_mode_refusal(
+                    self.user(),
+                    &init,
+                    false,
+                    init.signing_mode.as_deref() == Some("delegated"),
+                )
                 .is_some()
             || self.pending_verifications.len() >= 64
         {
@@ -584,7 +602,44 @@ impl Session {
             self.refuse_handover(&init.account_name, false);
             return;
         }
-        self.open_probed_handover(init);
+        if init.signing_mode.as_deref() == Some("delegated") {
+            self.open_probed_handover(init);
+        } else if init.sealed.is_some() {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "verification refused");
+            self.refuse_handover(&init.account_name, false);
+        } else {
+            self.handovers.forget(&init.account_name);
+            self.open_probed_cosigned(init);
+        }
+    }
+
+    fn open_probed_cosigned(&mut self, init: InitPayload) {
+        let permit = self.registry.probe_permit(self.user(), &init);
+        let out = self.handover_out(&init.account_name);
+        let (signing_out, lifetime) = out.isolated();
+        let link = safe_cex_remote_signer::SignerLink::new(self.socket, signing_out.outbox());
+        let registry = self.registry.clone();
+        let user = self.user().to_owned();
+        let token = self.identity.token.clone();
+        self.start_probe_verification(
+            init.account_name.clone(),
+            Some((link.clone(), lifetime)),
+            async move {
+                let permit = match permit {
+                    Ok(permit) => {
+                        registry
+                            .probe_join(&user, &init, token, None, Some(link), permit)
+                            .await
+                    }
+                    Err(refusal) => Err(refusal),
+                };
+                (
+                    Err(crate::delegated::Refused),
+                    Some(ProbedInit { init, permit }),
+                )
+            },
+        );
     }
 
     fn open_probed_handover(&mut self, mut init: InitPayload) {
@@ -618,7 +673,7 @@ impl Session {
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
-        self.start_probe_verification(init.account_name.clone(), async move {
+        self.start_probe_verification(init.account_name.clone(), None, async move {
             let candidate = opening.open(
                 &init.exchange_name,
                 &init.key,
@@ -628,7 +683,7 @@ impl Session {
             let probe = match candidate.as_ref() {
                 Ok(candidate) => Some(ProbedInit {
                     permit: registry
-                        .probe_delegated(&user, &init, token, candidate, permit)
+                        .probe_join(&user, &init, token, Some(candidate), None, permit)
                         .await,
                     init,
                 }),
@@ -778,6 +833,10 @@ impl Session {
         if !self.identity.resumable {
             return;
         }
+        if self.identity.user.is_some() && !self.admission_token_valid() {
+            self.send(envelope::session(&self.resume_id, false));
+            return;
+        }
         if self
             .user_socket
             .as_ref()
@@ -810,9 +869,11 @@ impl Session {
                 && let Some(parked) = self.registry.take_over(&from, &user)
             {
                 let _ = tokio::time::timeout(TAKEOVER_WAIT, parked).await;
-                accounts = self
-                    .registry
-                    .resume(&from, &user, self.socket, token, &outbox);
+                if self.admission_token_valid() {
+                    accounts = self
+                        .registry
+                        .resume(&from, &user, self.socket, token, &outbox);
+                }
             }
             resumed = !accounts.is_empty();
             // `init` is logged either way; this tells a resume from a rebuild.
@@ -931,7 +992,6 @@ impl Session {
                         "Unauthenticated exchange-server sessions cannot sign",
                     ));
                 }
-                #[cfg(test)]
                 if self.pending_verifications.values().any(|pending| {
                     pending
                         .cosigned_link
@@ -1045,12 +1105,7 @@ impl Session {
             return Ok(());
         }
         if init.signing_mode.as_deref() == Some("delegated") {
-            self.delegated_init(init);
-            return Ok(());
-        }
-        #[cfg(test)]
-        if self.cosigned_admission_test && init.signing_mode.as_deref() == Some("cosigned") {
-            self.init_cosigned_test_admission(init);
+            self.admission_init(init);
             return Ok(());
         }
         self.handovers.forget(&init.account_name);
@@ -1060,6 +1115,22 @@ impl Session {
             return Ok(());
         }
         self.forget_disposed();
+        let admission_enabled = self.registry.join_admission_enabled(&init.exchange_name);
+        if !public_only && admission_enabled {
+            if !self.admission_token_valid() {
+                self.drop_early(&init.account_name, "verification refused");
+                self.refuse_handover(&init.account_name, false);
+                return Ok(());
+            }
+            if self
+                .joined
+                .get(&init.account_name)
+                .is_none_or(|joined| joined.account.fingerprint != init.fingerprint())
+            {
+                self.admission_init(init);
+                return Ok(());
+            }
+        }
         if let Some(refusal) =
             self.registry
                 .signing_mode_refusal(self.user(), &init, public_only, false)
@@ -5679,10 +5750,6 @@ mod tests {
 #[cfg(test)]
 #[path = "session_delegated_writes_tests.rs"]
 mod delegated_writes_tests;
-
-#[cfg(test)]
-#[path = "session/cosigned_admission_test_support.rs"]
-mod cosigned_admission_test_support;
 
 #[cfg(test)]
 #[path = "session/tests/delegated_e2e.rs"]

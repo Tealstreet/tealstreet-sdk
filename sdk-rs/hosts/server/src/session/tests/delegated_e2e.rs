@@ -72,7 +72,7 @@ fn connection(registry: Arc<Registry>) -> (Session, crate::out::Receiver) {
             Identity {
                 user: Some(USER.into()),
                 chat_handle: None,
-                token: None,
+                token: Some(("synthetic-proxy-token".into(), u64::MAX)),
                 resume_from: None,
                 resumable: false,
             },
