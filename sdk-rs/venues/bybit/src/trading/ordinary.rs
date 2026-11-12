@@ -152,7 +152,7 @@ fn unknown_outcome(mut error: VenueError) -> VenueError {
 
 impl Run {
     fn failure(&mut self, error: VenueError) -> VenueError {
-        let error = unknown_outcome(error);
+        // Mutation call sites normalize Unknowns; proof reads retain their diagnostics.
         match &mut self.writes {
             Some(writes) => writes.attach(error),
             None => error,
@@ -1173,12 +1173,11 @@ impl BybitLinear {
             self.leg_decision(cx, id, &mut active, response)
         };
         let decision = match decision {
-            Decision::Failed(error) => {
+            Decision::Failed(error)
+                if !matches!(active.leg.planned.call, Call::PartialProof(_)) =>
+            {
                 let error = unknown_outcome(error);
-                if response.status == 200
-                    && error.outcome == Some(Outcome::Unknown)
-                    && !matches!(active.leg.planned.call, Call::PartialProof(_))
-                {
+                if response.status == 200 && error.outcome == Some(Outcome::Unknown) {
                     cx.event(
                         safe_cex_engine::log::Level::Warn,
                         "order.outcome_unknown",
@@ -1723,9 +1722,14 @@ impl BybitLinear {
         let error = if run.continue_on_error
             && !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
         {
-            unknown_outcome(error.outcome(Outcome::Unknown))
+            error.outcome(Outcome::Unknown)
         } else {
             error
+        };
+        let error = if matches!(active.leg.planned.call, Call::PartialProof(_)) {
+            error
+        } else {
+            unknown_outcome(error)
         };
         if error.outcome == Some(Outcome::NotSent)
             && matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
