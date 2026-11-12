@@ -2193,6 +2193,11 @@ public API. Run `corepack yarn types:generate`, then
 script bundle. The Position-only compiler gate is
 `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs`.
 
+Position notional is required `number | null`. Unknown native valuation survives
+JSON as null; numeric consumers must propagate unknown or refuse, including
+notional-based totals, ratios and sizing. Quantity remains independent and drives
+position presence. Shared helpers return null for incomplete valuations.
+
 The native engine owns Position display normalization and native sizing extras.
 Positions use SCXF section revision 2 with eleven numeric columns and required
 ID/symbol references; the host refuses older Position sections. Deploy matching

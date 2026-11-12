@@ -768,6 +768,27 @@ describe('ChaserOrderManager', () => {
     expect(manager.instances).not.toContain(instance);
   });
 
+  it.each([{ notional: null, mode: 'direct' }, { notional: NaN, mode: 'direct' }, { notional: null, mode: 'update' }, { notional: NaN, mode: 'update' }])('uses flat quantity with unknown notional $notional via $mode', async ({notional, mode}) => {
+    const { emit, exchange, store } = createMockExchange();
+    Object.assign(store, { positions: [{
+      id: 'p', symbol: 'BTCUSDT', side: PositionSide.Short, contracts: 1,
+      entryPrice: 100, notional, leverage: 1, unrealizedPnl: 0, liquidationPrice: null,
+    }] });
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT', size: 1, side: OrderSide.Buy, reduceOnly: true, maxAttempts: 10, delay: 250,
+    });
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(instance.isStopped).toBe(false);
+    Object.assign(store, { positions: [{ ...store.positions[0], contracts: 0 }] });
+    if (mode === 'direct') manager.checkAndMarkIfComplete(instance);
+    else await emit('update', store);
+    expect(instance.isStopped).toBe(true);
+    await emit('update', store);
+    expect(manager.instances).not.toContain(instance);
+  });
+
   it('stops non-reduce chasers when the target position size is reached', async () => {
     const { emit, exchange, store } = createMockExchange();
     (exchange as any).name = 'bybitdemo';
