@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
-mod delegated_probe;
-pub(crate) use delegated_probe::ProbePermit;
+mod admission;
+pub(crate) use admission::ProbePermit;
 
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
 pub const PUBLIC_ACCOUNT: &str = "__pub_bybit";
@@ -408,6 +408,7 @@ struct InitAuthority {
     current: Arc<AtomicBool>,
     lease: Option<crate::router_lease::Permit>,
     probe_lease: Option<crate::router_lease::Permit>,
+    probe_expires_at: Option<u64>,
 }
 
 impl InitAuthority {
@@ -423,7 +424,18 @@ impl InitAuthority {
             .as_ref()
             .is_some_and(|lease| !lease.allowed())
         {
-            return Err("DELEGATED verification expired; initialization stopped".into());
+            return Err("Account verification expired; initialization stopped".into());
+        }
+        Ok(())
+    }
+
+    fn check_admission(&self) -> Result<(), String> {
+        self.check()?;
+        if self
+            .probe_expires_at
+            .is_some_and(|expiry| expiry <= now_ms())
+        {
+            return Err("Account verification expired; initialization stopped".into());
         }
         Ok(())
     }
@@ -455,7 +467,7 @@ impl InitAttempt<'_> {
     ) -> Result<Option<Arc<Account>>, String> {
         // Serialize the final check and insertion with a newer init's admission.
         let mut pending = self.pending.lock().unwrap();
-        self.authority.check()?;
+        self.authority.check_admission()?;
         let replaced = accounts
             .lock()
             .unwrap()
@@ -508,6 +520,9 @@ pub struct Registry {
     presence: Arc<Mutex<HashMap<String, Presence>>>,
     /// The last forced-reset repair of each (user, account, topic) in this process.
     repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
+    /// Seeded test accounts can retain their pre-admission fixture setup.
+    #[cfg(any(test, feature = "test-support"))]
+    join_admission_override: Option<bool>,
     /// Unit-test loopback routing; the normal construction and transport run unchanged.
     #[cfg(test)]
     construction_test_plans: HashMap<String, RoutingPlan>,
@@ -857,6 +872,8 @@ impl Registry {
             notices: Arc::default(),
             presence: Arc::default(),
             repairs: Mutex::default(),
+            #[cfg(any(test, feature = "test-support"))]
+            join_admission_override: None,
             #[cfg(test)]
             construction_test_plans: HashMap::new(),
             #[cfg(test)]
@@ -1055,8 +1072,9 @@ impl Registry {
             current: Arc::new(AtomicBool::new(true)),
             lease,
             probe_lease: None,
+            probe_expires_at: None,
         };
-        authority.check()?;
+        authority.check_admission()?;
         let key = (user.to_owned(), name.to_owned());
         {
             let mut pending = self.pending_inits.lock().unwrap();
@@ -1146,17 +1164,18 @@ impl Registry {
         if let Some(proof) = proof {
             proof
                 .check(user, init)
-                .map_err(|_| "DELEGATED verification expired".to_owned())?;
+                .map_err(|_| "Account verification expired".to_owned())?;
             attempt.authority.probe_lease = proof.lease;
+            attempt.authority.probe_expires_at = proof.token_expires_at;
         }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
         if let Some(account) = existing {
             if probed && (account.fingerprint != fingerprint || account.is_public()) {
-                return Err("DELEGATED account settings differ; account not attached".into());
+                return Err("Account settings differ; account not attached".into());
             }
             if probed {
-                attempt.authority.check()?;
+                attempt.authority.check_admission()?;
             }
             if !account.is_public() && account.delegated.is_some() != delegated {
                 return Err("Account signing mode differs; account not attached".into());
@@ -1206,7 +1225,7 @@ impl Registry {
             )
             .await?;
         let account = Arc::new(account);
-        if let Err(error) = attempt.authority.check() {
+        if let Err(error) = attempt.authority.check_admission() {
             account.handle.dispose();
             if let Some(link) = &account.link {
                 link.mark_unavailable();
@@ -1276,7 +1295,7 @@ impl Registry {
         pair: Option<DelegatedPair>,
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         self.pacer.admit().await;
-        authority.check()?;
+        authority.check_admission()?;
         let venue = init.exchange_name.clone();
         let delegated_build = pair.is_some();
         let (link, plan, options, remote, signer, delegated) = if let Some(pair) = pair {
@@ -1363,7 +1382,7 @@ impl Registry {
         #[cfg(test)]
         let e2e_venue = self.e2e_venue.clone();
         let placed = self.threads.place(move |placement| {
-            if let Err(error) = authority.check() {
+            if let Err(error) = authority.check_admission() {
                 let _ = spawned.send(Err(error));
                 return;
             }
@@ -1996,8 +2015,9 @@ impl Registry {
         Some(wait)
     }
 
-    /// Takes back a parked session for the same user; the new socket becomes
-    /// the holder and signer owner. False for unknown, expired or foreign ids.
+    /// Takes back parked COSIGNED accounts for the same user. DELEGATED
+    /// accounts retain their parked holder until their original expiry and use
+    /// fresh admission. Unknown, expired and foreign ids return no accounts.
     pub fn resume(
         &self,
         resume_id: &str,
@@ -2013,7 +2033,10 @@ impl Registry {
         if entry.user != user || entry.alias_until.is_some() {
             return Vec::new();
         }
-        let accounts = std::mem::take(&mut entry.accounts);
+        let accounts = entry
+            .accounts
+            .extract_if(.., |(account, _)| account.delegated.is_none())
+            .collect::<Vec<_>>();
         entry.alias_until = Some(now_ms() + 2 * self.resume_grace.as_millis() as u64);
         drop(parked);
         accounts
@@ -2067,6 +2090,12 @@ pub fn resume_id() -> String {
 /// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
+    /// Synthetic venue fixtures have no real private-startup transport. The
+    /// production declaration remains the default for admission fixtures.
+    pub fn set_join_admission(registry: &mut super::Registry, enabled: bool) {
+        registry.join_admission_override = Some(enabled);
+    }
+
     use super::*;
 
     #[cfg(test)]
@@ -3155,11 +3184,13 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn registry() -> Arc<Registry> {
-        Arc::new(Registry::new(
+        let mut registry = Registry::new(
             EngineThreads::start(1).unwrap(),
             Duration::from_millis(1),
             Duration::from_secs(60),
-        ))
+        );
+        testing::set_join_admission(&mut registry, false);
+        Arc::new(registry)
     }
 
     #[tokio::test]
@@ -4298,7 +4329,3 @@ mod delegated_accounts_tests;
 #[cfg(test)]
 #[path = "delegated_construction_tests.rs"]
 mod delegated_construction_tests;
-
-#[cfg(test)]
-#[path = "accounts/cosigned_admission_test_support.rs"]
-mod cosigned_admission_test_support;

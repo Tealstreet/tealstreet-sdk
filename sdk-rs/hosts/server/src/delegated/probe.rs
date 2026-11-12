@@ -38,19 +38,16 @@ impl Drop for ProbeActor {
 }
 
 pub(crate) async fn run<T: Transport + 'static>(
-    prepared: super::PreparedDelegated,
+    venue: &str,
+    options: &str,
+    provider: safe_cex_engine::signing::Provider,
     transport: T,
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
-    let (handle, task) = safe_cex_native::spawn_venue_account(
-        "bybit",
-        &prepared.options,
-        transport,
-        Some(prepared.resident.provider()),
-        config,
-    )
-    .map_err(|_| ProbeRefusal::INVALID)?;
+    let (handle, task) =
+        safe_cex_native::spawn_venue_account(venue, options, transport, Some(provider), config)
+            .map_err(|_| ProbeRefusal::INVALID)?;
     let mut actor = ProbeActor { handle, task };
     let result = async {
         let mut link = actor

@@ -44,11 +44,6 @@ pub struct ResidentCopy {
     provider: Provider,
 }
 impl ResidentCopy {
-    #[cfg(test)]
-    pub(crate) fn test_provider(provider: Provider) -> Self {
-        Self { provider }
-    }
-
     /// Trusted host ingress, as with a remote account's provider.
     pub fn provider(&self) -> Provider {
         self.provider.clone()

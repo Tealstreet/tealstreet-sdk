@@ -367,7 +367,7 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
                 alice.out.with_instance_id(Some("alice-new")),
             );
             let mut verified = alice.take_verified();
-            alice.start_probe_verification("synthetic-main".into(), async move {
+            alice.start_probe_verification("synthetic-main".into(), None, async move {
                 (
                     Ok(candidate),
                     Some(ProbedInit {
