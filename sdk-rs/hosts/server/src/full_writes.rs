@@ -156,6 +156,12 @@ pub(crate) fn translate(
 ) -> Option<Result<Vec<Plan>, Refused>> {
     let value = args.first().cloned().unwrap_or(Value::Null);
     Some(match method {
+        "delegatedCancelAccountOrders" if caps.nuke_account_cancel => {
+            Ok(vec![command("cancelAccountOrders", json!({}))])
+        }
+        "delegatedCancelAccountOrders" => Err(refused(
+            "Account-wide cancellation is unavailable for this venue",
+        )),
         "delegatedSetStpMode"
             if caps.stp_controls
                 && matches!(
@@ -435,6 +441,46 @@ pub(crate) fn placement_capabilities(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn full_write_account_cancel_uses_only_the_native_capability() {
+        let base = Capabilities::default();
+        assert!(
+            translate("delegatedCancelAccountOrders", &[], &base)
+                .unwrap()
+                .is_err()
+        );
+        let caps = Capabilities {
+            nuke_account_cancel: true,
+            ..base
+        };
+        let plans = translate("delegatedCancelAccountOrders", &[], &caps)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plans.len(), 1);
+        match &plans[0] {
+            Plan::Command {
+                command,
+                reply: Reply::Unit,
+            } => {
+                assert_eq!(command, &json!({"op":"cancelAccountOrders"}));
+                let mut wire = command.clone();
+                wire["command"] = 1.into();
+                assert!(matches!(
+                    safe_cex_engine::command::decode_command(&wire.to_string()).unwrap(),
+                    safe_cex_engine::Command::Venue {
+                        action: safe_cex_engine::VenueAction::CancelAccountOrders,
+                        ..
+                    }
+                ));
+            }
+            _ => panic!("account cancel must use a native unit-completion command"),
+        }
+        assert!(
+            crate::methods::translate("delegatedCancelAccountOrders", &[], &caps, &[], false)
+                .is_err(),
+            "legacy LOCAL/COSIGNED must not acquire the typed-only method"
+        );
+    }
     #[test]
     fn full_write_leverage_fanout_retains_delisted_published_settings() {
         let mut store = Store::default();

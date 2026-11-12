@@ -23,7 +23,7 @@ export type DelegatedAction =
   | { kind: 'setMarginType'; isolated: boolean; symbol?: string }
   | { kind: 'setPositionMode'; hedged: boolean; symbol?: string }
   | { kind: 'close'; order: DelegatedOrderParams & { reduceOnly: true } }
-  | { kind: 'closeAll' | 'nukeOrders' | 'stopAlgos' }
+  | { kind: 'closeAll' | 'nukeOrders' | 'stopAlgos' | 'cancelAccountOrders' }
   | { kind: 'scheduleCancel'; time: number | null }
   | { kind: 'setStpMode'; mode: 'EXPIRE_TAKER' | 'EXPIRE_MAKER' | 'EXPIRE_BOTH' }
   | { kind: 'setAccountTier'; tier: 'standard' | 'premium' | 'plus' };
@@ -116,6 +116,7 @@ export function isDelegatedAction(value: unknown): value is DelegatedAction {
     case 'closeAll':
     case 'nukeOrders':
     case 'stopAlgos':
+    case 'cancelAccountOrders':
       return keys(value, ['kind']);
     case 'scheduleCancel':
       return (

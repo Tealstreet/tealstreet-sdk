@@ -207,6 +207,7 @@ operations on an incapable account return a proven pre-dispatch refusal.
 | Native amend | Existing `amend {order,update}` |
 | Single/batch venue cancel | Existing `cancel {order}`, or `cancelOrders {orders:[{id,symbol,type?}]}` |
 | Cancel symbol / account | `cancelSymbol {symbol}`; `cancelAll {symbols?:string[]}` adds explicit coverage to known and attempted symbols |
+| Native account-wide cancel (also used internally by nuke) | `cancelAccountOrders {}`; requires `nukeAccountCancel`, with no symbol-census fallback |
 | Symbol/hedge leverage | `setLeverage {symbol,leverage,side?:'long'|'short'}` |
 | All leverage | `setAllLeverage {leverage}`; native account setting or positions/known published rails fan-out |
 | Margin / position mode | `setMarginType {isolated,symbol?}`; `setPositionMode {hedged,symbol?}` |
@@ -237,6 +238,11 @@ UTF-8 frame limit still applies. Use explicit intents for larger work; a transpo
 retry never splits or automatically replays it. Single `cancel` also retains an
 optional order type for protective routing and requires the expanded flags when
 that context is supplied.
+
+`cancelAccountOrders` invokes only the native account-wide cancellation command,
+and refuses before dispatch if the venue lacks `nukeAccountCancel`. It does not
+stop algos or approximate account coverage with currently observed symbols.
+Its internal method translation is DELEGATED-only; LOCAL/COSIGNED are unchanged.
 
 Algo actions preserve the existing native algo protocol, including interruption
 restore pauses and drain admission. Their ACK means admitted, not completed.

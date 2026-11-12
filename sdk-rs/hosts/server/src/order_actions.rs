@@ -96,6 +96,7 @@ pub enum Action {
     CloseAll {},
     NukeOrders {},
     StopAlgos {},
+    CancelAccountOrders {},
     ScheduleCancel {
         time: Value,
     },
@@ -128,6 +129,7 @@ impl Action {
             Self::CloseAll {} => "closeAll",
             Self::NukeOrders {} => "nukeOrders",
             Self::StopAlgos {} => "stopAlgos",
+            Self::CancelAccountOrders {} => "cancelAccountOrders",
             Self::ScheduleCancel { .. } => "scheduleCancel",
             Self::SetStpMode { .. } => "setStpMode",
             Self::SetAccountTier { .. } => "setAccountTier",
@@ -272,6 +274,7 @@ impl Action {
             Self::CloseAll {} => Ok(("nukePositions", vec![])),
             Self::NukeOrders {} => Ok(("nukeOrders", vec![])),
             Self::StopAlgos {} => Ok(("stopAccountAlgos", vec![])),
+            Self::CancelAccountOrders {} => Ok(("delegatedCancelAccountOrders", vec![])),
             Self::ScheduleCancel { time } => {
                 if !time.is_null()
                     && !time.as_f64().is_some_and(|v| {
@@ -380,8 +383,15 @@ pub fn settle(
                 "cancel" | "cancelAll" | "nuke" | "closeAll" | "nukeOrders" | "stopAlgos" => {
                     Some(json!({"kind":kind}))
                 }
-                "cancelOrders" | "cancelSymbol" | "setLeverage" | "setAllLeverage"
-                | "setMarginType" | "setPositionMode" | "scheduleCancel" | "setStpMode"
+                "cancelOrders"
+                | "cancelSymbol"
+                | "cancelAccountOrders"
+                | "setLeverage"
+                | "setAllLeverage"
+                | "setMarginType"
+                | "setPositionMode"
+                | "scheduleCancel"
+                | "setStpMode"
                 | "setAccountTier"
                     if result.is_null() =>
                 {

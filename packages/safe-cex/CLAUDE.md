@@ -173,7 +173,7 @@ records. See `docs/plans/callers/delegated-action-frames.md` and the shared
 `delegated-actions-v1.json` fixture.
 
 The additive full-write vocabulary uses the same v1 action frames. Batch and
-protective placements, reduce-only close, settings, symbol/batch cancellation,
+protective placements, reduce-only close, settings, symbol/batch/account cancellation,
 close-only/stop-only nukes and native algo/EXEC operations additionally require
 `delegatedFullWriteActionsV1` and `delegatedFullWriteLedgerV1`, together with the
 four existing flags on the admitted ticket. Old four-action routers confer no
@@ -184,6 +184,8 @@ Accepted long-lived jobs keep their account scope; queued admission and EXEC
 continuations keep their captured registration/deadline fences. The complete
 closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
 LOCAL and COSIGNED method forwarding is unchanged.
+Native account-wide cancellation requires the venue's `nukeAccountCancel`
+capability; it never falls back to an incomplete symbol census.
 
 ## Mirror CI invariants (don't "clean these up")
 
