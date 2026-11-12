@@ -139,7 +139,7 @@ fn domain_native_field_identity_supplement() {
         numbers(
             &[
                 v.entry_price,
-                v.notional,
+                v.notional.unwrap(),
                 v.leverage,
                 v.unrealized_pnl,
                 v.contracts,

@@ -1,8 +1,58 @@
-//! A temporary native account observes the venue's existing private startup.
+//! Shared admission checks through a temporary native private account.
 use safe_cex_engine::ErrorKind;
 use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
+
+// Explicit staging entries. Adding one requires the matching offline suite;
+// this test-only catalog does not gate runtime admission or change rollout declarations.
+#[cfg(test)]
+pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] =
+    &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProbeOutcome {
+    Accepted,
+    Invalid,
+    Transient,
+}
+
+/// Venue-independent classification of the engine's existing read result.
+/// Missing classification is uncertainty, never successful admission.
+pub(crate) fn classify(result: Result<(), Option<ErrorKind>>) -> ProbeOutcome {
+    match result {
+        Ok(()) => ProbeOutcome::Accepted,
+        Err(Some(
+            ErrorKind::AuthInvalid
+            | ErrorKind::AuthExpired
+            | ErrorKind::AuthPermission
+            | ErrorKind::InvalidInput
+            | ErrorKind::Unsupported
+            | ErrorKind::Rejected
+            | ErrorKind::InsufficientBalance,
+        )) => ProbeOutcome::Invalid,
+        Err(
+            None
+            | Some(
+                ErrorKind::RateLimited
+                | ErrorKind::Network
+                | ErrorKind::Timeout
+                | ErrorKind::VenueUnavailable
+                | ErrorKind::Internal,
+            ),
+        ) => ProbeOutcome::Transient,
+    }
+}
+
+impl ProbeOutcome {
+    fn into_result(self) -> Result<(), ProbeRefusal> {
+        match self {
+            Self::Accepted => Ok(()),
+            Self::Invalid => Err(ProbeRefusal::INVALID),
+            Self::Transient => Err(ProbeRefusal::TRANSIENT),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
@@ -14,14 +64,7 @@ impl ProbeRefusal {
 
     fn classified(kind: ErrorKind) -> Self {
         Self {
-            transient: matches!(
-                kind,
-                ErrorKind::RateLimited
-                    | ErrorKind::Network
-                    | ErrorKind::Timeout
-                    | ErrorKind::VenueUnavailable
-                    | ErrorKind::Internal
-            ),
+            transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
         }
     }
 }
@@ -39,15 +82,39 @@ impl Drop for ProbeActor {
 
 pub(crate) async fn run<T: Transport + 'static>(
     venue: &str,
-    options: &str,
+    options_json: &str,
     provider: safe_cex_engine::signing::Provider,
     transport: T,
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
-    let (handle, task) =
-        safe_cex_native::spawn_venue_account(venue, options, transport, Some(provider), config)
-            .map_err(|_| ProbeRefusal::INVALID)?;
+    let options: safe_cex_venues::EngineOptions =
+        serde_json::from_str(options_json).map_err(|_| ProbeRefusal::INVALID)?;
+    if options.frame_fed
+        || options
+            .construction(venue)
+            .public_data_only
+            .unwrap_or(options.public_data_only)
+        || options.signing.as_ref().is_none_or(|identities| {
+            identities
+                .primary
+                .as_ref()
+                .is_none_or(|identity| identity.signing_ref().is_err())
+        })
+    {
+        return Err(ProbeRefusal::INVALID);
+    }
+    if !allowed() {
+        return Err(ProbeRefusal::TRANSIENT);
+    }
+    let (handle, task) = safe_cex_native::spawn_venue_account(
+        venue,
+        options_json,
+        transport,
+        Some(provider),
+        config,
+    )
+    .map_err(|_| ProbeRefusal::INVALID)?;
     let mut actor = ProbeActor { handle, task };
     let result = async {
         let mut link = actor
@@ -72,7 +139,7 @@ pub(crate) async fn run<T: Transport + 'static>(
                         loaded.markets && loaded.balance && loaded.orders && loaded.positions
                     }).await;
                     match loaded {
-                        Some(true) => return Ok(()),
+                        Some(true) => return classify(Ok(())).into_result(),
                         Some(false) => {},
                         None => return Err(ProbeRefusal::TRANSIENT),
                     }
@@ -120,6 +187,118 @@ fn notice_refusal(text: &str) -> Option<ProbeRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Clone, Default)]
+    struct Requests(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl Transport for Requests {
+        fn prepare_http(
+            &self,
+            request: safe_cex_engine::HttpRequest,
+            _: safe_cex_engine::request_context::RoutingIntent,
+        ) -> safe_cex_native::HttpPrepareFuture {
+            self.0.lock().unwrap().push(request.url);
+            Box::pin(async { Err(safe_cex_native::HttpPrepareError::Unsupported) })
+        }
+        fn connect(
+            &self,
+            _: safe_cex_engine::SocketId,
+            url: String,
+            _: safe_cex_native::Events,
+        ) -> tokio::sync::mpsc::UnboundedSender<String> {
+            self.0.lock().unwrap().push(url);
+            tokio::sync::mpsc::unbounded_channel().0
+        }
+        fn request(&self, request: safe_cex_engine::HttpRequest, events: safe_cex_native::Events) {
+            // Record and refuse legacy requests as well as managed preparations; no network IO.
+            self.0.lock().unwrap().push(request.url);
+            let _ = events.send(safe_cex_native::HostEvent::HttpFailed(
+                request.id,
+                "synthetic transport refusal".into(),
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn venue_declaration_probe_uses_the_requested_engine() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                crate::delegated::with_test_declaration(
+                    serde_json::json!({"venues": {
+                        "bybit": {"delegated": {"enabled": true}},
+                        "binance": {"delegated": {"enabled": true}}
+                    }}),
+                    async {
+                        let init = crate::envelope::InitPayload {
+                            account_name: "fixture".into(),
+                            exchange_name: "binance".into(),
+                            key: "synthetic-key".into(),
+                            ..Default::default()
+                        };
+                        let pair = crate::delegated::DelegatedPair::new(
+                            init.key.clone(),
+                            safe_cex_crypto::signer::Secret::new("synthetic".into()),
+                            None,
+                        );
+                        let prepared = crate::delegated::prepare_delegated(&init, pair)
+                            .unwrap_or_else(|_| panic!("enabled fixture venue prepares"));
+                        let requests = Requests::default();
+                        let _result = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            run(
+                                &init.exchange_name,
+                                &prepared.options,
+                                prepared.resident.provider(),
+                                requests.clone(),
+                                ServerConfig::default(),
+                                Arc::new(|| true),
+                            ),
+                        )
+                        .await;
+                        let requests = requests.0.lock().unwrap();
+                        assert!(!requests.is_empty());
+                        assert!(
+                            requests.iter().all(|url| url.contains("binance")),
+                            "{requests:?}"
+                        );
+                    },
+                )
+                .await;
+            })
+            .await;
+    }
+
+    #[test]
+    fn classifier_requires_success_and_refuses_unknown_results() {
+        assert_eq!(classify(Ok(())), ProbeOutcome::Accepted);
+        assert_eq!(classify(Err(None)), ProbeOutcome::Transient);
+        for kind in [
+            ErrorKind::AuthInvalid,
+            ErrorKind::AuthExpired,
+            ErrorKind::AuthPermission,
+            ErrorKind::InvalidInput,
+            ErrorKind::Unsupported,
+            ErrorKind::Rejected,
+            ErrorKind::InsufficientBalance,
+        ] {
+            assert_eq!(classify(Err(Some(kind))), ProbeOutcome::Invalid);
+        }
+        for kind in [
+            ErrorKind::RateLimited,
+            ErrorKind::Network,
+            ErrorKind::Timeout,
+            ErrorKind::VenueUnavailable,
+            ErrorKind::Internal,
+        ] {
+            assert_eq!(classify(Err(Some(kind))), ProbeOutcome::Transient);
+        }
+        for notice in [
+            r#"{"type":"startupFailed","detail":{"message":"success"}}"#,
+            r#"{"type":"startupFailed","detail":{"kind":"futureKind"}}"#,
+        ] {
+            assert!(notice_refusal(notice).unwrap().transient);
+        }
+    }
+
     #[test]
     fn probe_uses_error_kinds_and_never_error_text() {
         for kind in [
@@ -154,3 +333,7 @@ mod tests {
         assert!(notice_refusal(r#"{"type":"event","message":"authInvalid"}"#).is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "probe_tests.rs"]
+mod venue_tests;

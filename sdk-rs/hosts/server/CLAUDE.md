@@ -39,8 +39,8 @@ keys, symbol lists, request payloads, credentials, or per-user breakdowns.
 ## DELEGATED construction
 
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
-handover pair. Admission follows `delegated.enabled` in construction-rules.json
-(exact `bybit` only). The account retains the existing LocalSigner provider,
+handover pair. Admission follows the exact venue's `delegated.enabled` in construction-rules.json;
+only `bybit` is currently opted in. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
@@ -54,7 +54,7 @@ connection and COSIGNED resumes retain their existing snapshot path.
 
 ## DELEGATED order frames
 
-Bybit DELEGATED `order.submit` messages use the existing method translation,
+DELEGATED `order.submit` messages use the existing method translation,
 native command completion and order audit, with the intent UUIDv7 as both request
 ID and client order ID. Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
