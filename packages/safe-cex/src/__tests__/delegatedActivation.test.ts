@@ -1,3 +1,4 @@
+import type { DelegatedAction } from '../delegatedActions';
 import type { OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 
 import { describe, expect, it } from 'vitest';
@@ -56,6 +57,83 @@ describe('DELEGATED place and reduce-only close activation', () => {
     expect(JSON.parse(f.writes[1]).d.params.reduceOnly).toBe(true);
     f.box.close();
   });
+
+  it('does not mistake dedicated-action support for place/close activation scope', async () => {
+    const f = await fixture();
+    const connection = {
+      ...f.connection,
+      capabilities: {
+        ...f.connection.capabilities,
+        delegatedActivationScopeV1: undefined,
+        delegatedOrderActionsV1: true,
+        delegatedOrderActionLedgerV1: true,
+      },
+    };
+    expect(() => f.box.activate(connection, { DELEGATED_BYBIT: true })).toThrow(
+      expect.objectContaining({ code: 'delegatedPlaceUnavailable' }),
+    );
+    expect(f.box.entries()).toEqual([]);
+    expect(f.writes).toEqual([]);
+    f.box.close();
+  });
+
+  it('keeps placement and every dedicated action available on the same admitted ticket', async () => {
+    const f = await fixture();
+    const connection = {
+      ...f.connection,
+      capabilities: {
+        ...f.connection.capabilities,
+        delegatedOrderActionsV1: true,
+        delegatedOrderActionLedgerV1: true,
+      },
+    };
+    const ticket = f.box.activate(connection, { DELEGATED_BYBIT: true });
+    expect(ticket.capabilities.delegatedOrderActionsV1).toBe(true);
+    expect(ticket.capabilities.delegatedActivationScopeV1?.close).toBe('reduceOnly');
+    await f.box.enqueueAction('place', params);
+    await f.box.enqueueAction('close', { ...params, reduceOnly: true });
+    const actions: DelegatedAction[] = [
+      { kind: 'amend', order: { id: 'existing', symbol: 'BTCUSDT' }, update: { price: 50001 } },
+      { kind: 'cancel', order: { id: 'existing', symbol: 'BTCUSDT' } },
+      { kind: 'cancelAll' },
+      { kind: 'nuke' },
+    ];
+    for (const action of actions) {
+      await expect(f.box.enqueueAction(action.kind, params)).rejects.toMatchObject({
+        code: 'delegatedActionUnavailable',
+      });
+      await f.box.enqueueAction(action);
+    }
+    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual([
+      'order.submit',
+      'order.submit',
+      ...actions.map(() => 'order.action'),
+    ]);
+    expect(f.writes.slice(2).map((frame) => JSON.parse(frame).d.action)).toEqual(actions);
+    f.box.close();
+  });
+
+  it.each(['delegatedOrderActionsV1', 'delegatedOrderActionLedgerV1'] as const)(
+    'activation scope does not override the dedicated-action %s gate',
+    async (capability) => {
+      const f = await fixture();
+      const connection = {
+        ...f.connection,
+        capabilities: {
+          ...f.connection.capabilities,
+          delegatedOrderActionsV1: true,
+          delegatedOrderActionLedgerV1: true,
+          [capability]: false,
+        },
+      };
+      f.box.activate(connection, { DELEGATED_BYBIT: true });
+      await f.box.enqueueAction({ kind: 'cancelAll' });
+      expect(f.writes).toEqual([]);
+      await f.box.enqueueAction('close', { ...params, reduceOnly: true });
+      expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(['order.submit']);
+      f.box.close();
+    },
+  );
 
   it.each([
     { flag: false, place: true, reason: 'delegatedBybitDisabled' },
@@ -170,6 +248,59 @@ describe('DELEGATED place and reduce-only close activation', () => {
     const { d } = JSON.parse(f.writes[0]);
     expect(d.params.reduceOnly).toBe(true);
     expect(reads).toBe(1);
+    expect(stored.every((value) => JSON.stringify(value) === JSON.stringify(d.params))).toBe(true);
+    expect(d.fingerprint).toBe(delegatedIntentFingerprint(d.accountName, d.intentId, d.params, d.seq));
+    f.box.close();
+  });
+
+  it.each([undefined, false])('validates the JSON replacement close flag (%s)', async (reduceOnly) => {
+    const f = await fixture();
+    let captures = 0;
+    const close = {
+      ...params,
+      reduceOnly: true,
+      toJSON() {
+        captures++;
+        return { ...params, reduceOnly };
+      },
+    };
+    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    await expect(f.box.enqueueAction('close', close)).rejects.toMatchObject({
+      code: 'delegatedReduceOnlyRequired',
+    });
+    expect(captures).toBe(1);
+    expect(f.box.entries()).toEqual([]);
+    expect(f.writes).toEqual([]);
+    f.box.close();
+  });
+
+  it('keeps the captured close stable while persistence is deferred', async () => {
+    const f = await fixture();
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stored: Record<string, unknown>[] = [];
+    f.options.storage.put = async (_scope, row) => {
+      stored.push(structuredClone(row.params));
+      entered();
+      await gate;
+    };
+    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    const close = { ...params, reduceOnly: true };
+    const pending = f.box.enqueueAction('close', close);
+    await started;
+    close.reduceOnly = false;
+    close.amount = 10;
+    release();
+    await pending;
+    const { d } = JSON.parse(f.writes[0]);
+    expect(d.params).toEqual({ ...params, reduceOnly: true });
+    expect(stored.length).toBeGreaterThan(0);
     expect(stored.every((value) => JSON.stringify(value) === JSON.stringify(d.params))).toBe(true);
     expect(d.fingerprint).toBe(delegatedIntentFingerprint(d.accountName, d.intentId, d.params, d.seq));
     f.box.close();
