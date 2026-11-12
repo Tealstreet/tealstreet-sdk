@@ -28,7 +28,7 @@ async function fixture(owner = 'alice') {
   const capabilities = {
     delegatedOrderFramesV1: true,
     delegatedOrderLedgerV1: true,
-    delegatedOrderActionsV1: actions,
+    delegatedActivationScopeV1: actions,
   };
   const connection = {
     owner,
@@ -66,7 +66,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
       ...f.connection,
       capabilities: {
         ...f.connection.capabilities,
-        delegatedOrderActionsV1: { ...f.connection.capabilities.delegatedOrderActionsV1, place },
+        delegatedActivationScopeV1: { ...f.connection.capabilities.delegatedActivationScopeV1, place },
       },
     };
     expect(() => f.box.activate(connection, { DELEGATED_BYBIT: flag })).toThrow(
@@ -100,7 +100,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
       ...f.connection,
       capabilities: {
         ...f.connection.capabilities,
-        delegatedOrderActionsV1: { ...f.connection.capabilities.delegatedOrderActionsV1, close },
+        delegatedActivationScopeV1: { ...f.connection.capabilities.delegatedActivationScopeV1, close },
       },
     };
     expect(() => f.box.activate(connection, { DELEGATED_BYBIT: true })).toThrow(
@@ -206,9 +206,9 @@ describe('DELEGATED place and reduce-only close activation', () => {
   it('captures action capabilities and requires new admission after discovery changes', async () => {
     const f = await fixture();
     const ticket = f.box.activate(f.connection, { DELEGATED_BYBIT: true });
-    f.connection.capabilities.delegatedOrderActionsV1.place = false;
-    expect(ticket.capabilities.delegatedOrderActionsV1?.place).toBe(true);
-    expect(Object.isFrozen(ticket.capabilities.delegatedOrderActionsV1)).toBe(true);
+    f.connection.capabilities.delegatedActivationScopeV1.place = false;
+    expect(ticket.capabilities.delegatedActivationScopeV1?.place).toBe(true);
+    expect(Object.isFrozen(ticket.capabilities.delegatedActivationScopeV1)).toBe(true);
     await f.box.enqueueAction('close', { ...params, reduceOnly: true });
     expect(f.writes).toHaveLength(1);
     expect(() => f.box.activate(f.connection, { DELEGATED_BYBIT: true })).toThrow(

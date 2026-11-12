@@ -49,7 +49,7 @@ private-read verification must complete before calling this entry point.
 ## DELEGATED order frames
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
-amend, venue cancel, cancel-all or nuke. The additive `delegatedOrderActionsV1`
+amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
 advertisement exposes exactly that partial set. The existing compiled feature,
 Bybit declaration, runtime frame switch, router ledger and per-connection
 ownership/registration checks remain required. `DELEGATED_BYBIT` is the host's
@@ -77,3 +77,46 @@ clones. Replacing or retiring that registration also retires its order receipts;
 successful same-resident re-verification follows the same replacement lifecycle.
 Existing method/signing envelopes retain their lifecycle. Sequence exhaustion
 signals reconnect without wrapping the counter.
+
+
+## DELEGATED action frames v1
+
+The additive `order.action` family dispatches amend, venue cancel, cancel-all and
+nuke on the admitted Bybit DELEGATED account. `delegatedOrderActionsV1` follows
+the existing feature/Bybit gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
+activation. Each session captures activation at creation; changes require the
+existing box drain/restart and fresh admission. Hosts also require the router's separate
+`delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
+bind UUIDv7 identity, version, action kind and target IDs in a separate canonical
+fingerprint domain. Placement's four frames and fingerprints are unchanged.
+
+Amend/cancel/cancel-all use the existing method translator, native command
+completion and audit. Internal action dispatch carries the original deadline
+through cancel-all symbol reads and command translation. Each native command
+rechecks both expiry bounds and its captured registration after any startup wait and
+immediately before dispatch. Expiry stays unknown without a notSent proof.
+Nuke uses the account's existing native algo-host nuke,
+awaiting cancellation and closing legs; a partial/interrupted action stays
+unknown. Actor-queued nuke work carries the original registration and rechecks
+its liveness, account holder and IO authority after load waits and after the
+actor's store read. A server-owned account-port adapter also rechecks that
+registration and both captured expiry bounds before every native command,
+including close legs after an awaited cancel. Nuke receipts carry the original
+monotonic age deadline and UUID expiry through startup and actor store waits;
+neither wait resets the budget. Expiry blocks every remaining native leg and
+returns unknown with an expired message, without inventing a notSent proof.
+Retirement fences new legs and drops stale outcomes; already handed-off work
+remains uncertain. An aborted/abandoned nuke settles unknown on
+its captured output, never another owner's registration.
+
+Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
+`unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+Every cancel-all leg settles through its shared completion group, including
+pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
+cannot refuse the whole action after another leg may have crossed physical IO.
+Receipt counters share the existing registration lifecycle and size bounds.
+`order.actionCancelQueued` belongs to the router and never issues a venue cancel.
+Rejecting that frame uses the ordinary error envelope: it supplies no proof
+about an earlier action and cannot fabricate an action refusal or negative ACK.
+See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
+`tests/data/delegated-actions-v1.json` contract.

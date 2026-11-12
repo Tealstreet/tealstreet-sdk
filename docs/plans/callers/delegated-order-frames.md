@@ -10,6 +10,10 @@ The router integration pins NX #9404 at `9f52873b76`
 (`9f52873b76a64b4258ac38f51e70cd29a1e85941`): frame shapes, socket
 renumbering, capability names and the reply semantics below.
 
+Account amendments, venue cancellations, cancel-all and nuke use the additive
+[versioned action protocol](delegated-action-frames.md); `order.submit` remains
+placement-only and `order.cancelQueued` remains a router queue operation.
+
 ## DESIGN
 
 ### Activation and binding
@@ -20,14 +24,14 @@ host owns the per-user `DELEGATED_BYBIT` feature flag; the SDK introduces no
 server environment variable with that name. Use
 `outbox.activate(connection, { DELEGATED_BYBIT })` for explicit SDK admission.
 It requires the flag, the two transport/ledger proofs below, and only
-`delegatedOrderActionsV1.place === true` and `.close === 'reduceOnly'`. Later
+`delegatedActivationScopeV1.place === true` and `.close === 'reduceOnly'`. Later
 actions are not prerequisites. Missing place/close support refuses with a named
 activation error. The legacy low-level `connect` entry point remains for hosts
 that already completed their own admission; it does not perform feature discovery.
 
 `enqueueAction('place', params)` and `enqueueAction('close', params)` use the same
 durable single-order outbox. Close requires literal `params.reduceOnly === true`;
-it never silently changes a close into an opening placement. Unsupported actions
+it never silently changes a close into an opening placement. Unsupported string actions
 reject with `DelegatedActionUnavailable` before persistence or a frame, and the
 server also rejects their legacy method aliases before native handoff. No path
 falls back to LOCAL or COSIGNED. `order.cancelQueued` remains the router's
@@ -45,9 +49,12 @@ image compiles support and defaults the runtime switch to `0`; unset/empty also
 means off, and other values refuse startup. Change the container environment and
 use the existing drain/restart procedure with the same image to toggle it. It is
 not hot-reloaded. Both advertisement and order admission use that runtime control.
-The additive `delegatedOrderActionsV1` record advertises place and reduce-only
+The additive `delegatedActivationScopeV1` record advertises place and reduce-only
 close, with amend, cancel, cancelAll and nuke false. This action record describes
-implemented support; the frame switch still controls live admission.
+implemented support; the frame switch still controls live admission. The separate
+boolean `delegatedOrderActionsV1` retains dedicated-action protocol support.
+The typed `enqueueAction(action, options)` API and its action-ledger gate remain
+available independently of this partial activation scope.
 
 
 Hosts enable the outbox only when **both** that box advertisement and the

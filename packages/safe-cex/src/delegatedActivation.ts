@@ -1,5 +1,5 @@
 /** Capabilities of this protocol slice, separate from transport/ledger readiness. */
-export interface DelegatedOrderActionsV1 {
+export interface DelegatedActivationScopeV1 {
   place?: boolean;
   close?: 'reduceOnly' | 'unsupported';
   amend?: boolean;
@@ -11,7 +11,9 @@ export interface DelegatedOrderActionsV1 {
 export interface DelegatedActivationCapabilities {
   delegatedOrderFramesV1: boolean;
   delegatedOrderLedgerV1?: boolean;
-  delegatedOrderActionsV1?: DelegatedOrderActionsV1;
+  delegatedOrderActionsV1?: boolean;
+  delegatedOrderActionLedgerV1?: boolean;
+  delegatedActivationScopeV1?: DelegatedActivationScopeV1;
 }
 
 export interface DelegatedActivationFlags {
@@ -60,9 +62,9 @@ export function requireDelegatedActivation(
       'delegatedOrderLedgerUnavailable',
       'DELEGATED requires the router ledger on this connection',
     );
-  if (capabilities.delegatedOrderActionsV1?.place !== true)
+  if (capabilities.delegatedActivationScopeV1?.place !== true)
     throw new DelegatedActivationError('delegatedPlaceUnavailable', 'DELEGATED place capability is unavailable');
-  if (capabilities.delegatedOrderActionsV1.close !== 'reduceOnly')
+  if (capabilities.delegatedActivationScopeV1.close !== 'reduceOnly')
     throw new DelegatedActivationError(
       'delegatedCloseUnavailable',
       'DELEGATED reduce-only close capability is unavailable',

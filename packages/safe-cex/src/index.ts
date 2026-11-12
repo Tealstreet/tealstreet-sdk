@@ -29,13 +29,28 @@ export {
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
 
-export { DelegatedOutbox, createDelegatedIntentId, markDelegatedNotSent } from './delegatedOutbox';
 export { DelegatedActivationError, requireDelegatedActivation, requireDelegatedAction } from './delegatedActivation';
 export type {
   DelegatedActivationFlags,
   DelegatedActivationCapabilities,
-  DelegatedOrderActionsV1,
+  DelegatedActivationScopeV1,
 } from './delegatedActivation';
+export {
+  DelegatedOutbox,
+  DelegatedIntentError,
+  createDelegatedIntentId,
+  markDelegatedNotSent,
+} from './delegatedOutbox';
+export { delegatedActionFingerprint } from './delegatedActions';
+export type {
+  DelegatedAction,
+  DelegatedActionResult,
+  DelegatedActionOutcome,
+  DelegatedActionRequestFrame,
+  DelegatedActionAckFrame,
+  DelegatedActionOutcomeFrame,
+  DelegatedActionCancelQueuedFrame,
+} from './delegatedActions';
 export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
 export type {
   DelegatedOrderBinding,
@@ -46,6 +61,7 @@ export type {
 } from './delegatedOrderFrames';
 export type {
   DelegatedIntent,
+  EnqueueOptions,
   DelegatedNotSentEvidence,
   StoredDelegatedNotSentEvidence,
   IntentState,
@@ -286,6 +302,7 @@ export {
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
+export type { BuilderFeeApprovalGuard } from './exchanges/hyperliquid/hyperliquid.builderFee';
 
 export type {
   BuilderFeeApprovalResult,

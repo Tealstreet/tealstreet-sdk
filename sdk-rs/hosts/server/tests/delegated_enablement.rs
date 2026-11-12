@@ -28,6 +28,10 @@ fn compiled_order_frames_are_not_advertised_without_runtime_opt_in() {
         capabilities["transports"]["accountWorkerWebSocket"]["delegatedOrderFramesV1"],
         false
     );
+    assert_eq!(
+        capabilities["transports"]["accountWorkerWebSocket"]["delegatedOrderActionsV1"],
+        false
+    );
     assert!(
         capabilities["transports"]["accountWorkerWebSocket"]
             .get("delegatedOrderLedgerV1")
@@ -43,11 +47,13 @@ fn runtime_switch_uses_the_same_executable_and_keeps_the_ledger_router_owned() {
         let capabilities = safe_cex_exchange_server::http::capabilities_json();
         let transport = &capabilities["transports"]["accountWorkerWebSocket"];
         assert_eq!(transport["delegatedOrderFramesV1"], expected == "1");
+        assert_eq!(transport["delegatedOrderActionsV1"], expected == "1");
+        assert!(transport.get("delegatedOrderActionLedgerV1").is_none());
         assert!(transport.get("delegatedOrderLedgerV1").is_none());
         let supported = safe_cex_exchange_server::order_contract::enabled();
-        assert_eq!(transport["delegatedOrderActionsV1"]["place"], supported);
+        assert_eq!(transport["delegatedActivationScopeV1"]["place"], supported);
         assert_eq!(
-            transport["delegatedOrderActionsV1"]["close"],
+            transport["delegatedActivationScopeV1"]["close"],
             if supported {
                 "reduceOnly"
             } else {
@@ -55,7 +61,7 @@ fn runtime_switch_uses_the_same_executable_and_keeps_the_ledger_router_owned() {
             }
         );
         for action in ["amend", "cancel", "cancelAll", "nuke"] {
-            assert_eq!(transport["delegatedOrderActionsV1"][action], false);
+            assert_eq!(transport["delegatedActivationScopeV1"][action], false);
         }
         return;
     }

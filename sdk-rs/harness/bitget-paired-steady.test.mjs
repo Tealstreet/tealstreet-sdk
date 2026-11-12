@@ -390,7 +390,7 @@ test('unchanged disposition cannot waive correctness, memory or process CPU fail
 });
 
 test('changed bytes still require both measured witnesses and the unchanged frozen bound', async () => {
-  for (const q of [1.023, 1.024, 1.0343978501725235]) {
+  for (const q of [1, 1.023]) {
     const data = fixture(q), reads = [];
     const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
       readEvidence: async name => { reads.push(name); return name === 'tip' ? data.evidence : anchorFixture(data).evidence; } });
@@ -400,6 +400,26 @@ test('changed bytes still require both measured witnesses and the unchanged froz
     assert.equal(certificate.measured, undefined);
     assert.equal(certificate.tip.originalReports.length, 8);
     assert.equal(certificate.anchor.originalReports.length, 8);
+  }
+});
+
+test('a complete rejected tip never collects an anchor that cannot rescue it', async () => {
+  for (const [q, rA] of [[1.024, .85], [1.0343978501725235, .85],
+    [1.0278628752799848 / 1.0225747088093846, 1.0225747088093846]]) {
+    const data = fixture(q, rA), reads = [];
+    await assert.rejects(readBitgetSteadyCertificate({ authority: data.authority, manifest,
+      readEvidence: async name => {
+        reads.push(name);
+        assert.equal(name, 'tip', 'rejected tip must not start an anchor build or replay');
+        return data.evidence;
+      } }), error => {
+      assert.equal(error.disposition, 'REJECTED');
+      assert.equal(error.certificate, null, 'a lone rejected witness is never a certificate');
+      assert.equal(error.tip.steadyAccepted, false);
+      assert.equal(error.tip.originalReports.length, 8, 'validate the complete tip before rejecting');
+      return true;
+    });
+    assert.deepEqual(reads, ['tip']);
   }
 });
 
