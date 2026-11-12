@@ -1349,7 +1349,8 @@ async fn exec_review_f1_fences_deferred_shared_factory_handoffs_without_stopping
                 assert_eq!(accepted["d"]["outcome"], "unknown");
                 assert!(account.running.jobs().1 > 0, "EXEC must reach its sleep deferral before retirement/expiry");
                 assert!(tape.writes.lock().unwrap().is_empty());
-                if control == "retired" { session.close(); }
+                let mut remaining_session = Some(session);
+                if control == "retired" { remaining_session.take().unwrap().close(); }
                 assert!(account.running.io_allowed(), "keep the account live so only the action fence can stop its continuation");
                 tokio::time::sleep(Duration::from_millis(1800)).await;
                 let writes = tape.writes.lock().unwrap().clone();
@@ -1367,7 +1368,8 @@ async fn exec_review_f1_fences_deferred_shared_factory_handoffs_without_stopping
                     }).await.expect("Bob's independent EXEC still signs and sends");
                     bob.close(); registry.dispose(&b, Disposal::PageDisposed);
                 }
-                session.close(); registry.dispose(&account, Disposal::PageDisposed);
+                if let Some(session) = remaining_session { session.close(); }
+                registry.dispose(&account, Disposal::PageDisposed);
                 if control == "live" {
                     assert!(!writes.is_empty(), "{command}: positive handoff must sign and send");
                     assert!(!jobs.0.is_empty(), "accepted long-lived jobs keep account scope");
