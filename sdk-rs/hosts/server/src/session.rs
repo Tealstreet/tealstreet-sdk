@@ -516,6 +516,12 @@ impl Session {
                                 self.join(account, out.clone()).await;
                             }
                             if self.joined.contains_key(&completed.account_name) {
+                                self.registry.interruptions.delegated_status(
+                                    self.user(),
+                                    &completed.account_name,
+                                    &out,
+                                    crate::interruption::DelegatedKeyStatus::KeyAvailable,
+                                );
                                 self.registry.interruptions.deliver(
                                     self.user(),
                                     &completed.account_name,
@@ -1450,8 +1456,17 @@ impl Session {
     fn issue_handover(&mut self, name: &str, venue: &str) {
         match self.handovers.issue(name, venue, crate::accounts::now_ms()) {
             Ok(offer) => {
-                self.handover_out(name)
-                    .send(envelope::delegated_key(name, &offer));
+                let out = self.handover_out(name);
+                if out.send(envelope::delegated_key(name, &offer))
+                    && !self.joined.contains_key(name)
+                {
+                    self.registry.interruptions.delegated_status(
+                        self.user(),
+                        name,
+                        &out,
+                        crate::interruption::DelegatedKeyStatus::WaitingForKey,
+                    );
+                }
             }
             Err(_) => {
                 self.drop_early(name, "delegated init refused");
