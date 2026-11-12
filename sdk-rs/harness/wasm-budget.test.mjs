@@ -7,6 +7,19 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
+test('#3397 Orderly CI run 43192535364 retains measured 10 KiB headroom', () => {
+  // Job 131096463465, artifact 13932495107; identical optimized web/Node modules.
+  // SHA-256 e249271d883327d158591bfa298c49a23b60d4d25e105938ed86adfbc9927b3d.
+  const measured = 1_768_995;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.orderly;
+  assert.equal(minimumCap, 1_779_712);
+  assert.ok(cap >= minimumCap, `orderly: ${cap} must retain ${minimumCap} bytes`);
+  assert.equal(wasmBudgetError(measured, 'venue', 'orderly'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'orderly'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'orderly'), /exceeds/);
+});
+
 // Local optimized web/node bytes match at merge fcee82e27df; Rust 1.99.0,
 // wasm-bindgen 0.2.129 and Binaryen 132. Preserve both parent floors.
 for (const [venue, measured, minimumCap] of [
