@@ -84,6 +84,7 @@ impl Registry {
         let lease = permit.lease.clone();
         #[cfg(test)]
         let e2e_venue = self.e2e_venue.clone();
+        let venue = init.exchange_name.clone();
         let work = async {
             self.pacer.admit().await;
             permit.check(user, init)?;
@@ -96,13 +97,13 @@ impl Registry {
                     }
                     let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || lease.as_ref().is_none_or(|permit| permit.allowed()));
                     let transport = NetworkTransport::with_routing(prepared.plan.clone(), token_provider.provider())
-                        .with_venue("bybit").with_io_guard(allowed.clone());
+                        .with_venue(&venue).with_io_guard(allowed.clone());
                     #[cfg(test)]
                     let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
                     tokio::select! {
                         biased;
                         _ = result.closed() => {},
-                        answer = crate::delegated::probe::run(prepared, transport, config, allowed) => { let _ = result.send(answer); }
+                        answer = crate::delegated::probe::run(&venue, prepared, transport, config, allowed) => { let _ = result.send(answer); }
                     }
                 });
             });

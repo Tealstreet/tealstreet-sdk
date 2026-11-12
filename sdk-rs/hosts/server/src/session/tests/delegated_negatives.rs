@@ -141,7 +141,7 @@ impl Drop for RunningAccount {
 fn handover(session: &mut Session, key: &str, secret: &str, id: Option<&str>) -> InitPayload {
     let offer = session
         .handovers
-        .issue("acct", crate::accounts::now_ms())
+        .issue("acct", "bybit", crate::accounts::now_ms())
         .unwrap();
     let sealed = crate::delegated::tests::seal(
         &offer,
@@ -187,7 +187,7 @@ async fn delegated_candidates_preserve_the_running_account() {
                 "new-attempt" => {
                     let fresh = candidate
                         .handovers
-                        .issue("acct", crate::accounts::now_ms())
+                        .issue("acct", "bybit", crate::accounts::now_ms())
                         .unwrap();
                     init.sealed.as_mut().unwrap().attempt_id = fresh.attempt_id;
                 }

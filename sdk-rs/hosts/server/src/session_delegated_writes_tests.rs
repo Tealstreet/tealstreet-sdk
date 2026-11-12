@@ -706,3 +706,33 @@ async fn disabled_order_frames_refuse_even_an_existing_delegated_resident() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn venue_declaration_controls_existing_order_admission() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for opted_in in [false, true] {
+                crate::delegated::with_test_declaration(
+                    json!({"venues": {
+                        "bybit": {"delegated": {"enabled": true}},
+                        "binance": {"delegated": {"enabled": opted_in}}
+                    }}),
+                    async {
+                        let registry = crate::accounts::tests::registry();
+                        let account =
+                            delegated_account(&registry, "fixture", "binance", Tape::default());
+                        let (mut session, _sent) =
+                            joined(registry.clone(), "fixture", account.clone()).await;
+                        assert_eq!(
+                            session.order_admitted("synthetic-main", None),
+                            cfg!(feature = "delegated-order-frames") && opted_in
+                        );
+                        session.close();
+                        registry.dispose(&account, Disposal::PageDisposed);
+                    },
+                )
+                .await;
+            }
+        })
+        .await;
+}

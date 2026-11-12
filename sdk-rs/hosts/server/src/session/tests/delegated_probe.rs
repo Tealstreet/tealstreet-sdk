@@ -137,7 +137,7 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
 fn payload(session: &mut Session, id: Option<&str>) -> InitPayload {
     let offer = session
         .handovers
-        .issue("acct", crate::accounts::now_ms())
+        .issue("acct", "bybit", crate::accounts::now_ms())
         .unwrap();
     let sealed = crate::delegated::tests::seal(
         &offer,
@@ -262,13 +262,13 @@ async fn handover_binding_negatives_never_start_a_private_probe() {
             "replay" => {
                 session
                     .handovers
-                    .issue("acct", crate::accounts::now_ms())
+                    .issue("acct", "bybit", crate::accounts::now_ms())
                     .unwrap();
             }
             "boot" => {
                 let mut offer = session
                     .handovers
-                    .issue("acct", crate::accounts::now_ms())
+                    .issue("acct", "bybit", crate::accounts::now_ms())
                     .unwrap();
                 offer.boot_id = "synthetic-other-boot";
                 init.sealed = Some(crate::delegated::tests::seal(
