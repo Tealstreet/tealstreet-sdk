@@ -75,7 +75,7 @@ async fn apply_settings_is_required_even_when_only_the_delegated_copy_holds_the_
                     .accounts
                     .lock()
                     .unwrap()
-                    .get(&("A".into(), changed.account_name))
+                    .get(&("A".into(), account.registry_name().to_owned()))
                     .is_some_and(|current| Arc::ptr_eq(current, &account))
             );
             registry.dispose(&account, Disposal::PageDisposed);

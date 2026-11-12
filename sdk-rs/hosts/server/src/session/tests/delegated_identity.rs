@@ -209,7 +209,7 @@ async fn separately_verified_delegated_keys_with_equal_labels_keep_separate_acto
 }
 
 #[tokio::test]
-async fn parked_aliases_resume_one_identity_under_the_same_verified_user() {
+async fn parked_aliases_require_fresh_admission_under_the_same_verified_user() {
     let f = fixture().await;
     let (mut original, _sent) = user_session(f.registry.clone(), "alice");
     let mut results = original.take_verified();
@@ -232,11 +232,38 @@ async fn parked_aliases_resume_one_identity_under_the_same_verified_user() {
     let (mut resumed, _sent) = user_session(f.registry.clone(), "alice");
     resumed.identity.resume_from = Some(resume);
     resumed.open().await;
-    assert_eq!(resumed.joined.len(), 2);
+    assert!(
+        resumed.joined.is_empty(),
+        "DELEGATED cannot resume without a fresh handover"
+    );
+    assert!(
+        account.has_parked_holders(),
+        "the original grace holder remains"
+    );
+    let mut resumed_results = resumed.take_verified();
     for label in ["first", "second"] {
+        let reads = f.private_reads.load(Ordering::SeqCst);
+        admitted(
+            &mut resumed,
+            label,
+            "synthetic-key",
+            label,
+            &mut resumed_results,
+        )
+        .await;
+        assert!(
+            f.private_reads.load(Ordering::SeqCst) > reads,
+            "each alias needs fresh proof"
+        );
         assert!(Arc::ptr_eq(&account, &resumed.joined[label].account));
         assert!(f.registry.held("alice", label, resumed.socket).is_some());
     }
+    assert_eq!(resumed.joined.len(), 2);
+    assert!(
+        account.has_parked_holders(),
+        "admission cannot replace the original grace timer"
+    );
+    assert!(foreign.joined.is_empty());
     assert_eq!(f.registry.account_count(), 1);
 }
 
