@@ -85,6 +85,22 @@ override. Absence preserves existing signer selection; this metadata does not
 activate DELEGATED writes or replace admission. Unknown modes (including null)
 are refused as `invalidInput` / `notSent` during conversion and factory creation.
 
+Sam's 2026-11-11 policy allows activation with place and reduce-only close before
+the other venue actions exist. `activate(connection, { DELEGATED_BYBIT })` checks
+the host-owned feature flag, the captured box/router transport proofs, and only
+the advertised `delegatedActivationScopeV1` place/close capabilities. Amend, venue
+cancel, cancel-all and nuke are not activation prerequisites. A failed activation
+retires the old ticket, including deferred work, and throws a named reason.
+The existing low-level `connect` API still requires prior host admission.
+`enqueueAction(actionName, params)` permits place or a close with literal
+`reduceOnly: true` and visibly refuses every other string action before storage
+or a frame; it never chooses another signing mode. Supported string actions
+capture JSON parameters once before validation; fingerprints, persistence and
+handoff use those captured values. A close requires literal `reduceOnly: true`
+in the captured payload. Router queued-intent cancellation keeps its separate
+existing semantics. These admission helpers do not alter handoff, deadline,
+restore, evidence or replay rules below.
+
 `DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
 submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
@@ -155,6 +171,46 @@ accepted for migration). `put` preserves checkpoint metadata. Compaction failure
 keeps records until a later flush retries. Unrelated retirement failure never
 rejects enqueue or hides its durable intent ID after handoff. Close the old
 outbox before replacing it with a new writer for the same scope.
+
+## DELEGATED account actions
+
+`DelegatedOutbox.enqueueAction(action, options)` retains the separate typed
+action API, gated by the boolean `delegatedOrderActionsV1`, independently of
+`delegatedActivationScopeV1`. It adds the versioned `order.action` family for
+amend, venue cancel, cancel-all and nuke. Existing `enqueue` placement frames and
+`cancelQueued` semantics stay unchanged. Action writes/receipts require both
+`delegatedOrderActionsV1` (box) and `delegatedOrderActionLedgerV1` (router), as well
+as the existing two placement/ledger flags and completed DELEGATED admission.
+The action-specific fingerprint includes its version, kind, target IDs/symbols
+and update values in a distinct canonical domain. UUIDv7 intent IDs use the same
+router dedupe namespace across both families; never reuse one for another action.
+Both entry points accept optional `{intentId}` with a canonical caller UUIDv7.
+Identical retries are durable identity lookups: preserve sequence, canonical
+payload/fingerprint, deadline and handoff evidence, and never submit again.
+Different action/targets or placement family rejects `intentConflict`; a failed
+original put rejects an identity retry as `intentNotDurable`. A later state-put
+failure never erases the original identity's durability or authorizes replay.
+The additive
+`callerSuppliedIntentId: true` reservation survives completed-history retirement
+and restore under the same 1,056-record bound. `enqueueAction` shares placement's
+not-sent and replay evidence constructors; no direct not-sent assignment is
+permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
+action unknown; queue cancellation is explicit, never a venue cancel.
+
+Action outcomes are typed `applied`, proven `refused/notSent`, or `unknown`.
+Applied results survive later uncertain queue-cancel replies. A proven refusal
+also survives later uncertainty, while its subsequent authoritative refused
+outcome may supply the refusal message after a negative ACK.
+A replayed positive receipt ACK cannot revoke that refusal or clear its bound
+evidence, including after disconnect, close and restore.
+Partial, interrupted and unproven results stay unknown and never become
+resendable. Nuke uses the existing box account operation: stop algos, cancel
+orders and close positions, awaiting all legs. Its queued work carries the
+original registration and rechecks it after load/store waits; retirement drops
+stale replies. Action persistence uses version-2 rows with the exact action and
+result, retaining atomic scoped checkpoints/retirement and all version-1 placement
+records. See `docs/plans/callers/delegated-action-frames.md` and the shared
+`delegated-actions-v1.json` fixture.
 
 ## Mirror CI invariants (don't "clean these up")
 
@@ -2176,6 +2232,11 @@ public API. Run `corepack yarn types:generate`, then
 `corepack yarn generate:script-types`; never edit generated declarations or the
 script bundle. The Position-only compiler gate is
 `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs`.
+
+Position notional is required `number | null`. Unknown native valuation survives
+JSON as null; numeric consumers must propagate unknown or refuse, including
+notional-based totals, ratios and sizing. Quantity remains independent and drives
+position presence. Shared helpers return null for incomplete valuations.
 
 The native engine owns Position display normalization and native sizing extras.
 Positions use SCXF section revision 2 with eleven numeric columns and required

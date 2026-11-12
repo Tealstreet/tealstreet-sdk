@@ -450,7 +450,10 @@ impl MexcFutures {
         error: VenueError,
     ) {
         if error.outcome == Some(Outcome::NotSent) {
-            let _ = cx.present_plan_failure(&request.plan, error.message.clone());
+            // The venue path's composed message for a definite transport
+            // refusal on a protective amend; override because the outcome
+            // is `NotSent`, which the gated entry point would drop.
+            let _ = cx.override_plan_failure_message(&request.plan, error.message.clone());
         }
         let _ = cx.finish_plan_failed_call(&request.plan, &request.slot, &request.context);
         if let Some(run) = self

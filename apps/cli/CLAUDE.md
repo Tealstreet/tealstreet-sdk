@@ -526,7 +526,8 @@ yarn logs          # Tail ~/.tealstreet/cli.log
   explicitly `false` (the gate is `enabled !== false`, set via `footer
 off`). `footer-segments.ts` is pure and unit-tested,
   the impure live snapshot (`buildFooterState`) lives in `repl.ts` and is
-  injected via `setFooterRenderer`.
+  injected via `setFooterRenderer`. A null/nonfinite position notional renders
+  `—` for PnL percentage while preserving known currency PnL; it is never zero.
 - **Footer `script` segments are hard read-only.** A `{type:'script',
 name}` footer segment auto-runs the named script ~1×/sec
   (`runFooterScript` in `repl.ts`). Because of that cadence it runs with

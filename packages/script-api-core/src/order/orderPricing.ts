@@ -5,10 +5,13 @@ import { roundToNearestMultiple, roundToNearestMultipleDown } from '@tealstreet/
 import { roundCloseSize, roundMarketOrderSize as roundMarketOrderSizeToStep } from './rounding';
 import { exchangeMetadata, getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { OrderType as OrderTypes } from '@tealstreet/safe-cex/src/types';
+import { venueUsesBaseAmountRails } from '@tealstreet/safe-cex/src/utils/nativeAmountRules';
 import { DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
 import { assertNativeReduceAmount, nativeAmountRules } from './nativeAmountRules';
 import { ScriptValidationError } from './ScriptValidationError';
 import { shouldRoundSizeDown } from './shouldRoundSizeDown';
+
+export { venueUsesBaseAmountRails } from '@tealstreet/safe-cex/src/utils/nativeAmountRules';
 
 /**
  * Venue-correct price/size rounding — the one place `apps/web` states it.
@@ -152,7 +155,7 @@ export const assertCloseLikeOrderAmount = (
   market: NativeAmountMarket,
   exchangeName?: string,
 ): void => {
-  if (exchangeName !== 'mexc') return;
+  if (!venueUsesBaseAmountRails(exchangeName)) return;
   const protective = isStopLikeOrderType(order.type);
   if (!protective && !order.reduceOnly && !order.close) return;
   if (amount === 0 && protective && venueSupportsInfinityStops(exchangeName)) return;

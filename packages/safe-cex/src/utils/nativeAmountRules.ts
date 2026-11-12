@@ -9,6 +9,14 @@ export type NativeAmountMarket = Pick<Market, 'symbol' | 'contractSize' | 'isInv
   limits?: { amount?: { max?: number } };
 };
 
+/** Whether amount precision and limits need base-to-native conversion for this venue.
+ * MEXC publishes base units while placement takes contracts; market validity is checked separately.
+ * Missing or unrecognised names retain the existing native-rails default. */
+// Adding another base-amount-rail venue requires widening this type predicate and
+// auditing hard-coded MEXC messages in callers, e.g. tealstreet-next's
+// chartBracketAmount.ts: 'Cannot place MEXC bracket'.
+export const venueUsesBaseAmountRails = (exchangeName?: string): exchangeName is 'mexc' => exchangeName === 'mexc';
+
 /** MEXC publishes base-sized amount rails while placement takes native contracts. */
 export const nativeAmountRules = (
   market: NativeAmountMarket,
@@ -18,7 +26,7 @@ export const nativeAmountRules = (
   basePerContract?: number;
   maximum?: number;
 } => {
-  if (exchangeName !== 'mexc') return { step: market.precision?.amount || DEFAULT_AMOUNT_PRECISION };
+  if (!venueUsesBaseAmountRails(exchangeName)) return { step: market.precision?.amount || DEFAULT_AMOUNT_PRECISION };
   const size = market.contractSize;
   if (size === undefined || !Number.isFinite(size) || size <= 0 || market.isInverse) {
     throw new Error(`MEXC order units are unknown for '${market.symbol}'`);
@@ -42,7 +50,7 @@ export const sameNativeAmount = (a: number, b: number): boolean =>
 
 /** A reduce must preserve the requested native quantity or refuse before sending. */
 export const assertNativeReduceAmount = (amount: number, market: NativeAmountMarket, exchangeName?: string): void => {
-  if (exchangeName !== 'mexc') return;
+  if (!venueUsesBaseAmountRails(exchangeName)) return;
   const { step, maximum } = nativeAmountRules(market, exchangeName);
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error(`Invalid MEXC native order size for '${market.symbol}'`);

@@ -1,5 +1,10 @@
+import type { DelegatedAction, DelegatedActionResult } from './delegatedActions';
+import type { DelegatedActivationCapabilities, DelegatedActivationFlags } from './delegatedActivation';
+
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
+import { delegatedActionFingerprint, isDelegatedAction, isDelegatedActionResult } from './delegatedActions';
+import { DelegatedActivationError, requireDelegatedAction, requireDelegatedActivation } from './delegatedActivation';
 import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
@@ -9,6 +14,7 @@ import {
   delegatedIntentTime,
 } from './delegatedOrderFrames';
 
+export type { DelegatedAction, DelegatedActionResult, DelegatedActionOutcome } from './delegatedActions';
 export { createDelegatedIntentId } from './delegatedOrderFrames';
 
 export interface OutboxScope {
@@ -20,7 +26,7 @@ const delegatedReplayBrand = Symbol('delegatedReplay');
 type ProvenNotSent = 'notSent' & { readonly [delegatedNotSentBrand]: true };
 export type DelegatedReplayableIntent = DelegatedIntent & { readonly [delegatedReplayBrand]: true };
 export type IntentState =
-  'queued' | 'sending' | 'acknowledged' | 'placed' | 'refused' | 'unknown' | ProvenNotSent | 'canceled';
+  'queued' | 'sending' | 'acknowledged' | 'applied' | 'placed' | 'refused' | 'unknown' | ProvenNotSent | 'canceled';
 
 export type DelegatedNotSentEvidence =
   | { kind: 'noHandoff'; source: 'local'; attempted: false }
@@ -44,7 +50,9 @@ export type StoredDelegatedNotSentEvidence = Readonly<DelegatedNotSentEvidence &
 export type StoredDelegatedNoHandoffEvidence = Readonly<NoHandoffEvidence & EvidenceBinding>;
 
 export interface DelegatedIntent extends OutboxScope {
-  version: 1;
+  version: 1 | 2;
+  action?: DelegatedAction;
+  result?: DelegatedActionResult;
   fingerprint: string;
   intentId: string;
   /** Caller keys remain reserved after their completed history ages. */
@@ -89,12 +97,7 @@ export interface OutboxConnection extends OutboxScope {
   venue: 'bybit';
   signingMode: 'delegated';
   ready: boolean;
-  capabilities: {
-    /** Advertised by the admitted box. */
-    delegatedOrderFramesV1: boolean;
-    /** Advertised by the router; absent on older pass-through routers. */
-    delegatedOrderLedgerV1?: boolean;
-  };
+  capabilities: DelegatedActivationCapabilities;
   instanceId?: string;
   /**
    * True only for physical handoff; explicit false proves no send or buffering.
@@ -112,29 +115,13 @@ const STATES: readonly string[] = [
   'sending',
   'acknowledged',
   'placed',
+  'applied',
   'refused',
   'unknown',
   'notSent',
   'canceled',
 ];
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-
-export interface EnqueueOptions {
-  intentId: string;
-}
-
-export class DelegatedIntentError extends Error {
-  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable') {
-    super(
-      {
-        invalidIntentId: 'Caller intent id must be a canonical UUIDv7',
-        intentConflict: 'Intent id is already bound to different parameters',
-        intentNotDurable: 'Original intent was not persisted; it cannot be submitted again',
-      }[code],
-    );
-    this.name = 'DelegatedIntentError';
-  }
-}
 
 function readNotSentEvidence(value: unknown): DelegatedNotSentEvidence | undefined {
   if (!record(value)) return;
@@ -254,6 +241,23 @@ export function markDelegatedReplayable(
   return true;
 }
 
+export interface EnqueueOptions {
+  intentId: string;
+}
+
+export class DelegatedIntentError extends Error {
+  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable') {
+    super(
+      {
+        invalidIntentId: 'Caller intent id must be a canonical UUIDv7',
+        intentConflict: 'Intent id is already bound to different parameters',
+        intentNotDurable: 'Original intent was not persisted; it cannot be submitted again',
+      }[code],
+    );
+    this.name = 'DelegatedIntentError';
+  }
+}
+
 export class DelegatedOutbox {
   private readonly scope: Readonly<OutboxScope>;
   private readonly intents = new Map<string, DelegatedIntent>();
@@ -267,6 +271,7 @@ export class DelegatedOutbox {
   // Only current, durably completed rows can release capacity or retire.
   private readonly completedIntents = new Map<string, DelegatedIntent>();
   private connection?: Readonly<OutboxConnection>;
+  private activationConnection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
   private readonly outcomeSequences = new Map<string, number>();
@@ -286,7 +291,7 @@ export class DelegatedOutbox {
     for (const saved of [...rows]) {
       const row = clone(saved);
       if (
-        row.version !== 1 ||
+        ![1, 2].includes(row.version) ||
         row.owner !== box.scope.owner ||
         row.accountName !== box.scope.accountName ||
         delegatedIntentTime(row.intentId) < 0 ||
@@ -304,11 +309,21 @@ export class DelegatedOutbox {
         box.intents.has(row.intentId)
       )
         throw new Error('Invalid persisted intent');
-      if (row.fingerprint !== delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq))
-        throw new Error('Persisted fingerprint differs');
+      if (
+        (row.version === 2 &&
+          (!isDelegatedAction(row.action) || Object.keys(row.params).length > 0 || row.state === 'placed')) ||
+        (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
+      )
+        throw new Error('Invalid persisted action');
+      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind)))
+        throw new Error('Invalid persisted action result');
+      const fingerprint = row.action
+        ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
+        : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
+      if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
       box.sequence = Math.max(box.sequence, row.seq);
       // JSON cannot carry the private runtime brand. Validate and reissue it.
-      if (row.state === 'notSent') {
+      if (row.state === 'notSent' || row.state === 'refused') {
         const proof = storedNotSentEvidence(row);
         if (proof) markDelegatedNotSent(row, proof);
         else unprovenNotSent(row);
@@ -345,7 +360,19 @@ export class DelegatedOutbox {
     this.scope = Object.freeze({ owner: options.owner, accountName: options.accountName });
   }
 
-  /** Connect only after this account's DELEGATED admission has completed. */
+  /** Explicit host admission for the place/reduce-only-close protocol slice. */
+  activate(connection: OutboxConnection, flags: DelegatedActivationFlags): Readonly<OutboxConnection> {
+    // Even a refused replacement retires the previous ticket and deferred work.
+    if (this.connection) this.disconnect(this.connection);
+    requireDelegatedActivation(connection.capabilities, flags);
+    if (!connection.ready)
+      throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'DELEGATED connection is not ready');
+    const captured = this.connect(connection);
+    this.activationConnection = captured;
+    return captured;
+  }
+
+  /** Low-level connection: the host must already have completed admission. */
   connect(connection: OutboxConnection): Readonly<OutboxConnection> {
     if (
       !this.active ||
@@ -361,7 +388,14 @@ export class DelegatedOutbox {
     this.outcomeSequences.clear();
     this.connection = Object.freeze({
       ...connection,
-      capabilities: Object.freeze({ ...connection.capabilities }),
+      capabilities: Object.freeze({
+        ...connection.capabilities,
+        ...(connection.capabilities.delegatedActivationScopeV1
+          ? {
+              delegatedActivationScopeV1: Object.freeze({ ...connection.capabilities.delegatedActivationScopeV1 }),
+            }
+          : {}),
+      }),
       instanceId: connection.instanceId || undefined,
     });
     return this.connection;
@@ -370,6 +404,7 @@ export class DelegatedOutbox {
   disconnect(connection: Readonly<OutboxConnection>): void {
     if (this.connection !== connection) return;
     this.connection = undefined;
+    this.activationConnection = undefined;
     for (const row of this.intents.values()) {
       if (row.state !== 'sending' && row.state !== 'acknowledged') continue;
       row.state = 'unknown';
@@ -389,6 +424,7 @@ export class DelegatedOutbox {
   close(): void {
     this.active = false;
     this.connection = undefined;
+    this.activationConnection = undefined;
     for (const row of this.intents.values()) {
       if (row.state !== 'sending' && row.state !== 'acknowledged') continue;
       row.state = 'unknown';
@@ -408,25 +444,55 @@ export class DelegatedOutbox {
     });
   }
 
+  enqueueAction(action: string, params: Record<string, unknown>): Promise<string>;
+  enqueueAction(action: DelegatedAction, options?: EnqueueOptions): Promise<string>;
+  async enqueueAction(
+    action: string | DelegatedAction,
+    paramsOrOptions?: Record<string, unknown> | EnqueueOptions,
+  ): Promise<string> {
+    if (typeof action === 'string') {
+      const connection = this.connection;
+      if (!connection || this.activationConnection !== connection || !this.current(connection))
+        throw new DelegatedActivationError(
+          'delegatedConnectionNotAdmitted',
+          'DELEGATED action requires activation on this connection',
+        );
+      if (action !== 'place' && action !== 'close') requireDelegatedAction(action, {});
+      const params = clone(paramsOrOptions as Record<string, unknown>);
+      requireDelegatedAction(action, params);
+      return this.enqueue(params);
+    }
+    if (!isDelegatedAction(action)) throw new Error('Invalid delegated action');
+    return this.enqueueIntent({}, clone(action), paramsOrOptions as EnqueueOptions | undefined);
+  }
+
   async enqueue(params: Record<string, unknown>, options?: EnqueueOptions): Promise<string> {
+    return this.enqueueIntent(params, undefined, options);
+  }
+
+  private enqueueIntent(
+    params: Record<string, unknown>,
+    action?: DelegatedAction,
+    options?: EnqueueOptions,
+  ): Promise<string> {
     const createdAt = this.options.clock.now();
-    if (!this.active) throw new Error('Outbox is closed or full');
+    if (!this.active) return Promise.reject(new Error('Outbox is closed or full'));
     if (!params || Array.isArray(params) || typeof params !== 'object' || params.clientOrderId !== undefined)
-      throw new Error('Outbox owns the client order id');
+      return Promise.reject(new Error('Outbox owns the client order id'));
     if (options !== undefined) {
       try {
         if (typeof options?.intentId !== 'string') throw new Error('Invalid key');
         delegatedIntentTime(options.intentId);
       } catch {
-        throw new DelegatedIntentError('invalidIntentId');
+        return Promise.reject(new DelegatedIntentError('invalidIntentId'));
       }
       const existing = this.intents.get(options.intentId);
       if (existing) {
-        if (
-          existing.fingerprint !==
-          delegatedIntentFingerprint(this.scope.accountName, existing.intentId, params, existing.seq)
-        )
-          throw new DelegatedIntentError('intentConflict');
+        const fingerprint = action
+          ? delegatedActionFingerprint(this.scope.accountName, existing.intentId, action, existing.seq)
+          : delegatedIntentFingerprint(this.scope.accountName, existing.intentId, params, existing.seq);
+        if (!!existing.action !== !!action || existing.fingerprint !== fingerprint)
+          return Promise.reject(new DelegatedIntentError('intentConflict'));
         // Serialize behind the original put: a retry must not report durability
         // before that write commits, or turn its failure into another submission.
         return this.serial(async () => {
@@ -460,15 +526,18 @@ export class DelegatedOutbox {
       }
     }
     if (this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
-      throw new Error('Outbox is closed or full');
+      return Promise.reject(new Error('Outbox is closed or full'));
     const intentId =
       options?.intentId ?? createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
     if (this.intents.has(intentId) || !Number.isSafeInteger(this.sequence + 1))
       return Promise.reject(new Error('Intent id or sequence exhausted'));
     const row: DelegatedIntent = {
       ...this.scope,
-      version: 1,
-      fingerprint: delegatedIntentFingerprint(this.scope.accountName, intentId, params, this.sequence + 1),
+      version: action ? 2 : 1,
+      ...(action ? { action } : {}),
+      fingerprint: action
+        ? delegatedActionFingerprint(this.scope.accountName, intentId, action, this.sequence + 1)
+        : delegatedIntentFingerprint(this.scope.accountName, intentId, params, this.sequence + 1),
       intentId,
       ...(options ? { callerSuppliedIntentId: true as const } : {}),
       seq: this.sequence + 1,
@@ -524,23 +593,41 @@ export class DelegatedOutbox {
     return this.serial(async () => {
       if (!this.current(connection)) return;
       let parsed: unknown = frame;
+      let wireSize: number | undefined;
       if (typeof parsed === 'string') {
+        // Bound the actual received bytes before parsing can discard whitespace
+        // or normalize escaped text. ACKs get their smaller bound below.
+        if (parsed.length > DELEGATED_OUTCOME_MAX) return;
+        wireSize = utf8ToBytes(parsed).length;
+        if (wireSize > DELEGATED_OUTCOME_MAX) return;
         try {
           parsed = JSON.parse(parsed);
         } catch {
           return;
         }
       }
-      if (!record(parsed) || (parsed.t !== 'order.ack' && parsed.t !== 'order.outcome') || !record(parsed.d)) return;
+      if (
+        !record(parsed) ||
+        !['order.ack', 'order.outcome', 'order.actionAck', 'order.actionOutcome'].includes(
+          typeof parsed.t === 'string' ? parsed.t : '',
+        ) ||
+        !record(parsed.d)
+      )
+        return;
       const d = parsed.d;
       if (d.accountName !== this.scope.accountName || d.instanceId !== connection.instanceId) return;
-      const size = utf8ToBytes(JSON.stringify(parsed)).length;
-      if (size > (parsed.t === 'order.ack' ? DELEGATED_ACK_MAX : DELEGATED_OUTCOME_MAX)) return;
+      const size = wireSize ?? utf8ToBytes(JSON.stringify(parsed)).length;
+      if (
+        size > (parsed.t === 'order.ack' || parsed.t === 'order.actionAck' ? DELEGATED_ACK_MAX : DELEGATED_OUTCOME_MAX)
+      )
+        return;
       const data = d;
       if (typeof data.intentId !== 'string') return;
       const row = this.intents.get(data.intentId);
       if (!row || data.seq !== row.seq) return;
-      if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
+      if (row.action) {
+        if (!this.actionCurrent(connection) || !this.actionReceipt(row, parsed.t, data)) return;
+      } else if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
         if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return;
         if (row.retentionExpired && data.received) return;
         if (data.received) row.state = 'acknowledged';
@@ -566,7 +653,9 @@ export class DelegatedOutbox {
         )
           return;
         this.outcomeSequences.set(row.intentId, Number(data.outcomeSeq));
-        row.state = data.outcome;
+        // A refusal without admitted no-forwarding evidence is uncertainty,
+        // never a terminal result. Only the constructor below can prove it.
+        row.state = data.outcome === 'refused' ? 'unknown' : data.outcome;
         delete row.retentionExpired;
         if (record(data.error) && typeof data.error.message === 'string') {
           row.error = { message: data.error.message };
@@ -592,6 +681,73 @@ export class DelegatedOutbox {
     });
   }
 
+  private actionReceipt(row: DelegatedIntent, kind: unknown, data: Record<string, unknown>): boolean {
+    if (data.version !== 1 || !row.action) return false;
+    if (kind === 'order.actionAck' && typeof data.received === 'boolean') {
+      if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return false;
+      // A receipt ACK is not a business result and cannot revoke an existing
+      // whole-intent refusal, including evidence revalidated after restore.
+      if (data.received && row.state === 'notSent' && storedNotSentEvidence(row)) return false;
+      if (row.retentionExpired && data.received) return false;
+      if (data.received) row.state = 'acknowledged';
+      else markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
+      delete row.retentionExpired;
+      return true;
+    }
+    if (
+      kind !== 'order.actionOutcome' ||
+      !Number.isSafeInteger(data.outcomeSeq) ||
+      Number(data.outcomeSeq) <= (this.outcomeSequences.get(row.intentId) ?? 0)
+    )
+      return false;
+    // Queue-cancel uncertainty cannot erase a terminal business result or
+    // positive no-handoff proof. A refused outcome after ACK(false) can still
+    // attach its authoritative refusal message.
+    if (row.state === 'applied' && data.outcome !== 'applied') return false;
+    if (row.state === 'notSent' && storedNotSentEvidence(row) && data.outcome === 'unknown') return false;
+    if (data.outcome === 'applied') {
+      if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind)) return false;
+      row.result = clone(data.result);
+      row.state = 'applied';
+      delete row.error;
+    } else {
+      if (
+        data.result !== null ||
+        !record(data.error) ||
+        typeof data.error.message !== 'string' ||
+        [...data.error.message].length > 512
+      )
+        return false;
+      if (data.outcome === 'refused' && data.error.outcome === 'notSent') {
+        row.error = { message: data.error.message };
+        // result:null plus this admitted router refusal proves the whole action
+        // was not handed off. Normalize it to the shared intent evidence shape.
+        markDelegatedNotSent(row, {
+          kind: 'routerRefusal',
+          receipt: 'outcome',
+          outcome: 'refused',
+          errorOutcome: 'notSent',
+          venueOrderId: null,
+        });
+      } else if (data.outcome === 'unknown' && data.error.outcome === 'unknown') {
+        row.state = 'unknown';
+        row.error = { message: data.error.message, outcome: 'unknown' };
+      } else return false;
+      delete row.result;
+    }
+    delete row.retentionExpired;
+    this.outcomeSequences.set(row.intentId, Number(data.outcomeSeq));
+    return true;
+  }
+
+  private actionCurrent(connection: Readonly<OutboxConnection>): boolean {
+    return (
+      this.current(connection) &&
+      connection.capabilities.delegatedOrderActionsV1 === true &&
+      connection.capabilities.delegatedOrderActionLedgerV1 === true
+    );
+  }
+
   cancel(intentId: string): Promise<void> {
     const row = this.intents.get(intentId);
     const handedOff =
@@ -599,6 +755,8 @@ export class DelegatedOutbox {
     if (!this.active || !row || (row.state !== 'queued' && !handedOff)) return Promise.resolve();
     row.cancelPending = handedOff;
     row.state = row.cancelPending ? 'unknown' : 'canceled';
+    if (row.action && row.cancelPending)
+      row.error = { message: 'Action awaits router confirmation', outcome: 'unknown' };
     this.stopTimer(intentId);
     this.changed(row);
     this.arm(row);
@@ -628,7 +786,12 @@ export class DelegatedOutbox {
   }
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
-    if (!this.current(connection) || !this.replayable(row) || this.sent.get(row.intentId) === connection) return;
+    if (
+      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !this.replayable(row) ||
+      this.sent.get(row.intentId) === connection
+    )
+      return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -649,15 +812,15 @@ export class DelegatedOutbox {
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!this.current(connection) || !this.replayable(row)) return;
+    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !this.replayable(row)) return;
     if (this.expired(row)) {
       this.expire(row);
       return;
     }
-    const frame = this.frame(connection, 'order.submit', {
+    const frame = this.frame(connection, row.action ? 'order.action' : 'order.submit', {
+      ...(row.action ? { version: 1, action: row.action } : { params: row.params }),
       intentId: row.intentId,
       fingerprint: row.fingerprint,
-      params: row.params,
       seq: row.seq,
       ageMs: this.options.clock.now() - row.createdAt,
     });
@@ -706,12 +869,18 @@ export class DelegatedOutbox {
   }
 
   private async sendCancellation(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
-    if (!this.current(connection) || !row.cancelPending || this.canceled.get(row.intentId) === connection) return;
+    if (
+      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !row.cancelPending ||
+      this.canceled.get(row.intentId) === connection
+    )
+      return;
     await this.persist(row);
-    if (!this.current(connection) || !row.cancelPending) return;
+    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !row.cancelPending) return;
     if (
       connection.send(
-        this.frame(connection, 'order.cancelQueued', {
+        this.frame(connection, row.action ? 'order.actionCancelQueued' : 'order.cancelQueued', {
+          ...(row.action ? { version: 1 } : {}),
           intentId: row.intentId,
           seq: row.seq,
           fingerprint: row.fingerprint,
@@ -809,6 +978,8 @@ export class DelegatedOutbox {
   private normalizeNotSent(row: DelegatedIntent): void {
     if (row.state === 'queued') {
       if (!this.replayable(row)) unprovenNotSent(row);
+    } else if (row.state === 'refused') {
+      unprovenNotSent(row);
     } else if (row.state === 'notSent') {
       const marked = row as DelegatedIntent & { readonly [delegatedNotSentBrand]?: true };
       if (marked[delegatedNotSentBrand] === true && storedNotSentEvidence(row)) delete row.noHandoffEvidence;
@@ -850,6 +1021,7 @@ export class DelegatedOutbox {
     return (
       !row.cancelPending &&
       (row.retentionExpired === true ||
+        row.state === 'applied' ||
         row.state === 'placed' ||
         row.state === 'refused' ||
         row.state === 'notSent' ||
@@ -862,12 +1034,7 @@ export class DelegatedOutbox {
   }
   private pruneCompletedIntents(): void {
     for (const [id, row] of this.completedIntents) {
-      if (
-        row.intentId !== id ||
-        this.intents.get(id) !== row ||
-        !this.durable.has(id) ||
-        !this.completed(row)
-      )
+      if (row.intentId !== id || this.intents.get(id) !== row || !this.durable.has(id) || !this.completed(row))
         this.completedIntents.delete(id);
     }
   }
@@ -884,6 +1051,7 @@ export class DelegatedOutbox {
   private async compact(): Promise<void> {
     this.pruneCompletedIntents();
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
+    // Caller keys remain reserved across completed-history retirement.
     const completed = [...this.completedIntents.values()].filter((row) => !row.callerSuppliedIntentId);
     if (completed.length <= COMPLETED_HISTORY) return;
     let insertionOrder: Map<string, number> | undefined;
