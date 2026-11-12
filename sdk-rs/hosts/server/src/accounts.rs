@@ -395,12 +395,13 @@ struct Parked {
 
 type AccountEntries = HashMap<(String, String), Arc<Account>>;
 
-type PendingInits = Mutex<HashMap<(String, String), InitIncarnation>>;
+type PendingInits = Arc<Mutex<HashMap<(String, String), InitIncarnation>>>;
 
 struct InitIncarnation {
     fingerprint: String,
     public_only: bool,
     attempts: Vec<Arc<AtomicBool>>,
+    probes: Vec<Arc<AtomicBool>>,
 }
 
 #[derive(Clone)]
@@ -408,12 +409,20 @@ struct InitAuthority {
     current: Arc<AtomicBool>,
     lease: Option<crate::router_lease::Permit>,
     probe_lease: Option<crate::router_lease::Permit>,
+    probe_current: Option<Arc<AtomicBool>>,
 }
 
 impl InitAuthority {
     fn check(&self) -> Result<(), String> {
         if !self.current.load(Ordering::Acquire) {
             return Err("Account init superseded; initialization stopped".into());
+        }
+        if self
+            .probe_current
+            .as_ref()
+            .is_some_and(|current| !current.load(Ordering::Acquire))
+        {
+            return Err("Account settings changed during verification".into());
         }
         if self.lease.as_ref().is_some_and(|lease| !lease.allowed()) {
             return Err("Router lease expired; initialization stopped".into());
@@ -434,6 +443,8 @@ struct InitAttempt<'a> {
     key: (String, String),
     authority: InitAuthority,
     published: bool,
+    /// Keep the reset registration alive through construction and publication.
+    _probe: Option<ProbePermit>,
 }
 
 impl InitAttempt<'_> {
@@ -442,7 +453,7 @@ impl InitAttempt<'_> {
             incarnation
                 .attempts
                 .retain(|current| !Arc::ptr_eq(current, &self.authority.current));
-            if incarnation.attempts.is_empty() {
+            if incarnation.attempts.is_empty() && incarnation.probes.is_empty() {
                 pending.remove(&self.key);
             }
         }
@@ -839,7 +850,7 @@ impl Registry {
             router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
             interruptions: Default::default(),
             accounts: Arc::default(),
-            pending_inits: Mutex::default(),
+            pending_inits: Arc::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
             threads,
@@ -962,9 +973,8 @@ impl Registry {
         &self.threads
     }
 
-    /// Why `holder`'s init of an account must not rebuild it: another live
-    /// socket holds that account under a different fingerprint, and disposing
-    /// it would stop that client's account and algos (two clients would flap).
+    /// Private settings changes require an explicit admitted-client action.
+    /// Live/parked sockets and resident copies keep their existing settings.
     pub fn rebuild_refusal(
         &self,
         user: &str,
@@ -1003,23 +1013,26 @@ impl Registry {
         if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
             return Some(refusal);
         }
-        // Shared public data carries no signer or algos; it rebuilds as before.
-        if public_only {
-            return None;
-        }
         let key = (user.to_owned(), init.account_name.clone());
         let account = self.accounts.lock().unwrap().get(&key).cloned()?;
+        // Shared public data carries no signer or algos; it rebuilds as before.
+        if account.is_public() {
+            return None;
+        }
         let fingerprint = if delegated {
             crate::delegated::fingerprint(init)
         } else {
             init.fingerprint()
         };
-        if account.fingerprint == fingerprint && !account.is_public() {
+        if account.fingerprint == fingerprint && !public_only {
             return None;
         }
         let others = account.live_holders_besides(holder);
         // Joins the live account instead (see `obtain`).
-        if others.is_empty() || same_but_builder(&account.fingerprint, &fingerprint) {
+        if !public_only
+            && !others.is_empty()
+            && same_but_builder(&account.fingerprint, &fingerprint)
+        {
             return None;
         }
         let differs = differing_fields(&account.fingerprint, &fingerprint);
@@ -1029,7 +1042,7 @@ impl Registry {
             differs.join(", ")
         ));
         Some(format!(
-            "{} is open in another window or on another device with different settings ({}). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",
+            "{} is already running with different settings ({}). The change was not applied. Join with the current settings and use apply-settings before reinitializing.",
             init.account_name,
             differs.join(", ")
         ))
@@ -1055,6 +1068,7 @@ impl Registry {
             current: Arc::new(AtomicBool::new(true)),
             lease,
             probe_lease: None,
+            probe_current: None,
         };
         authority.check()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1066,6 +1080,7 @@ impl Registry {
                     fingerprint: fingerprint.to_owned(),
                     public_only,
                     attempts: vec![],
+                    probes: vec![],
                 });
             if incarnation.fingerprint != fingerprint || incarnation.public_only != public_only {
                 for previous in &incarnation.attempts {
@@ -1082,12 +1097,12 @@ impl Registry {
             key,
             authority,
             published: false,
+            _probe: None,
         })
     }
 
     /// The account this user's `init` names, built or reused. Reuse requires an
-    /// identical fingerprint; otherwise the old account is disposed first, but
-    /// never while another live socket holds it (see `rebuild_refusal`).
+    /// identical fingerprint; private settings changes require `apply_settings`.
     pub async fn obtain(
         self: &Arc<Self>,
         user: &str,
@@ -1147,7 +1162,9 @@ impl Registry {
             proof
                 .check(user, init)
                 .map_err(|_| "DELEGATED verification expired".to_owned())?;
-            attempt.authority.probe_lease = proof.lease;
+            attempt.authority.probe_lease = proof.lease.clone();
+            attempt.authority.probe_current = Some(proof.current.clone());
+            attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
@@ -1672,6 +1689,43 @@ impl Registry {
             "its key or connection settings changed",
             Some(tell_through(account, vec![outbox])),
         );
+    }
+
+    /// Reset only the live admitted holder's current account; retire older joins.
+    pub(crate) fn apply_settings(
+        &self,
+        account: &Arc<Account>,
+        holder: u64,
+        outbox: Outbox,
+    ) -> bool {
+        let key = (account.user.clone(), account.name.clone());
+        let mut pending = self.pending_inits.lock().unwrap();
+        let mut accounts = self.accounts.lock().unwrap();
+        if account.is_public()
+            || !account.running.io_allowed()
+            || account.handle.disposal_cause().is_some()
+            || !accounts
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, account))
+        {
+            return false;
+        }
+        let mut holders = account.holders.lock().unwrap();
+        if !holders.by_id.get(&holder).is_some_and(Option::is_some) {
+            return false;
+        }
+        accounts.remove(&key);
+        *holders = Holders::default();
+        if let Some(incarnation) = pending.remove(&key) {
+            for current in incarnation.attempts.iter().chain(&incarnation.probes) {
+                current.store(false, Ordering::Release);
+            }
+        }
+        drop(holders);
+        drop(accounts);
+        drop(pending);
+        self.stop_for_new_settings(account, outbox, Disposal::SettingsChanged);
+        true
     }
 
     fn dispose_for(
@@ -3533,7 +3587,7 @@ pub(crate) mod tests {
                         .unwrap_err();
                     assert!(refused.contains("enableSpotMarkets"), "{refused}");
                     assert!(
-                        refused.contains("close it there, or reload both"),
+                        refused.contains("use apply-settings before reinitializing"),
                         "{refused}"
                     );
                 }
@@ -3543,8 +3597,8 @@ pub(crate) mod tests {
                     "same settings join"
                 );
                 assert!(
-                    registry.rebuild_refusal("u", &other, false, 7).is_none(),
-                    "the holder itself changing its settings rebuilds"
+                    registry.rebuild_refusal("u", &other, false, 7).is_some(),
+                    "the holder itself must explicitly apply new settings"
                 );
                 assert!(algos.try_recv().is_err(), "the live holder's algos run on");
                 assert_eq!(account.holders.lock().unwrap().signing, Some(7));
@@ -3556,9 +3610,9 @@ pub(crate) mod tests {
                     .cloned();
                 assert!(current.is_some_and(|current| Arc::ptr_eq(&current, &account)));
 
-                // Once that client is gone (parked only), the new settings rebuild as before.
+                // A parked client still holds its settings.
                 registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
-                assert!(registry.rebuild_refusal("u", &other, false, 8).is_none());
+                assert!(registry.rebuild_refusal("u", &other, false, 8).is_some());
             })
             .await;
     }
@@ -3963,7 +4017,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn the_sole_holder_changing_its_builder_rebuilds() {
+    async fn the_sole_holder_changing_its_builder_requires_an_explicit_action() {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let registry = registry();
@@ -3985,7 +4039,7 @@ pub(crate) mod tests {
                 };
                 // Holder 7 is the only live holder: nothing to join, so its own change is no join.
                 assert!(account.live_holders_besides(7).is_empty());
-                assert!(registry.rebuild_refusal("u", &assigned, false, 7).is_none());
+                assert!(registry.rebuild_refusal("u", &assigned, false, 7).is_some());
                 assert!(same_but_builder(
                     &account.fingerprint,
                     &assigned.fingerprint()
@@ -4302,3 +4356,109 @@ mod delegated_construction_tests;
 #[cfg(test)]
 #[path = "accounts/cosigned_admission_test_support.rs"]
 mod cosigned_admission_test_support;
+
+#[cfg(test)]
+mod apply_settings_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn apply_settings_retires_even_preconstruction_proofs_without_crossing_users() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    ..Default::default()
+                };
+                let proof = registry.probe_permit("u", &init).unwrap();
+                let other_user = registry.probe_permit("other", &init).unwrap();
+                let attempt = registry
+                    .begin_init("u", "acct", false, &init.fingerprint())
+                    .unwrap();
+                let (account, _algos) = tests::held_account_with(
+                    Some(SignerLink::new(7, Arc::new(|_| true))),
+                    init.fingerprint(),
+                );
+                testing::register(&registry, &account);
+                assert!(proof.check("u", &init).is_ok());
+                assert!(registry.apply_settings(&account, 7, Arc::new(|_| true)));
+                assert!(proof.check("u", &init).is_err());
+                assert!(attempt.authority.check().is_err());
+                assert!(other_user.check("other", &init).is_ok());
+                let replacement = registry.probe_permit("u", &init).unwrap();
+                drop(proof);
+                drop(attempt);
+                assert!(
+                    replacement.check("u", &init).is_ok(),
+                    "old cleanup cannot retire the new generation"
+                );
+                drop(replacement);
+                drop(other_user);
+                assert!(
+                    registry.pending_inits.lock().unwrap().is_empty(),
+                    "registrations must be reclaimed"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn apply_settings_is_required_for_live_and_parked_holders() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for parked in [false, true] {
+                    let registry = tests::registry();
+                    let init = InitPayload {
+                        account_name: "acct".into(),
+                        exchange_name: "bitget".into(),
+                        ..Default::default()
+                    };
+                    let (account, mut algos) = tests::held_account_with(
+                        Some(SignerLink::new(7, Arc::new(|_| true))),
+                        init.fingerprint(),
+                    );
+                    testing::register(&registry, &account);
+                    if parked {
+                        registry.park("resume".into(), "u", vec![(account.clone(), 7)]);
+                    }
+                    let changed = InitPayload {
+                        enable_spot_markets: Some(true),
+                        ..init.clone()
+                    };
+                    for holder in [7, 8] {
+                        assert!(
+                            registry
+                                .rebuild_refusal("u", &changed, false, holder)
+                                .is_some(),
+                            "parked={parked}, holder={holder}"
+                        );
+                        assert!(
+                            registry
+                                .obtain("u", &changed, false, holder, None, Arc::new(|_| true))
+                                .await
+                                .is_err()
+                        );
+                        let public = InitPayload {
+                            public_only: Some(true),
+                            ..changed.clone()
+                        };
+                        assert!(
+                            registry
+                                .rebuild_refusal("u", &public, true, holder)
+                                .is_some(),
+                            "public fallback must not bypass an explicit settings action"
+                        );
+                    }
+                    assert!(algos.try_recv().is_err());
+                    assert!(account.handle.disposal_cause().is_none());
+                    assert!(
+                        registry.rebuild_refusal("u", &init, false, 8).is_none(),
+                        "identical settings still join"
+                    );
+                    registry.dispose(&account, Disposal::PageDisposed);
+                }
+            })
+            .await;
+    }
+}

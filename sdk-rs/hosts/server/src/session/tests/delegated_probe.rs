@@ -128,6 +128,92 @@ fn payload(session: &mut Session, id: Option<&str>) -> InitPayload {
         ..Default::default()
     }
 }
+
+#[tokio::test]
+async fn apply_settings_allows_verified_delegated_settings_reinitialization() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut results = session.take_verified();
+    let first = payload(&mut session, Some("admitted"));
+    session.init(first).await.unwrap();
+    finish(&mut session, &mut results).await;
+    let original = session.joined["acct"].account.clone();
+    let mut changed = payload(&mut session, Some("candidate"));
+    changed.enable_spot_markets = Some(true);
+    session.init(changed.clone()).await.unwrap();
+    finish(&mut session, &mut results).await;
+    assert!(Arc::ptr_eq(&session.joined["acct"].account, &original));
+    assert!(original.handle.disposal_cause().is_none());
+    while sent.try_recv().is_ok() {}
+    session
+        .handle(r#"{"t":"apply-settings","d":{"accountName":"acct","instanceId":"admitted"}}"#)
+        .await
+        .unwrap();
+    assert!(!session.joined.contains_key("acct"));
+    assert_eq!(f.registry.account_count(), 0);
+    assert_eq!(
+        original.handle.disposal_cause(),
+        Some(safe_cex_native::DisposalCause::Stopped)
+    );
+    let mut replacement = payload(&mut session, Some("replacement"));
+    replacement.enable_spot_markets = Some(true);
+    let fingerprint = crate::delegated::fingerprint(&replacement);
+    session.init(replacement).await.unwrap();
+    finish(&mut session, &mut results).await;
+    let rebuilt = &session.joined["acct"].account;
+    assert!(!Arc::ptr_eq(rebuilt, &original));
+    assert!(rebuilt.delegated.is_some());
+    assert_eq!(rebuilt.fingerprint, fingerprint);
+    f.registry.dispose(rebuilt, Disposal::PageDisposed);
+    session.close();
+}
+
+#[tokio::test]
+async fn apply_settings_retires_a_join_proof_deferred_before_the_reset() {
+    let f = fixture().await;
+    let (mut owner, _) = user_session(f.registry.clone(), "alice");
+    let mut admitted = owner.take_verified();
+    let first = payload(&mut owner, Some("admitted"));
+    owner.init(first).await.unwrap();
+    finish(&mut owner, &mut admitted).await;
+    let original = owner.joined["acct"].account.clone();
+    f.gate.forget_permits(f.gate.available_permits());
+    let before = f.private_reads.load(Ordering::SeqCst);
+    let (mut pending, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut completed = pending.take_verified();
+    let candidate = payload(&mut pending, Some("pending"));
+    pending.init(candidate).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while f.private_reads.load(Ordering::SeqCst) == before {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("candidate is waiting in a private read");
+    owner
+        .handle(r#"{"t":"apply-settings","d":{"accountName":"acct","instanceId":"admitted"}}"#)
+        .await
+        .unwrap();
+    assert!(!f.registry.holds(&original, owner.socket));
+    f.gate.add_permits(1000);
+    finish(&mut pending, &mut completed).await;
+    assert!(
+        !pending.joined.contains_key("acct"),
+        "a pre-reset proof cannot restore the stopped settings"
+    );
+    let replies: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|text| serde_json::from_str(&text).unwrap())
+        .collect();
+    assert!(
+        replies
+            .iter()
+            .any(|f| f["d"]["data"][1]["initRefused"] == true),
+        "{replies:?}"
+    );
+    assert_eq!(f.registry.account_count(), 0);
+    pending.close();
+    owner.close();
+}
 async fn finish(
     session: &mut Session,
     results: &mut tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>,

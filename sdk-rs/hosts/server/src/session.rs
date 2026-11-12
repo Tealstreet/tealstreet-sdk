@@ -16,6 +16,7 @@ use tokio::task::JoinHandle;
 
 mod order_actions;
 mod order_frames;
+mod settings;
 
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
@@ -901,6 +902,12 @@ impl Session {
                 self.order_cancel_queued(cancel);
             }
             Inbound::Init(init) => self.init(*init).await?,
+            Inbound::ApplySettings(request) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated settings action rejected"));
+                }
+                self.apply_settings(request);
+            }
             Inbound::Msg(msg) => {
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
@@ -1074,7 +1081,7 @@ impl Session {
             self.resnapshot(&init.account_name).await;
             return Ok(());
         }
-        // Another live socket holds it with other settings: keep both as they are.
+        // Existing private settings stay until an admitted client explicitly resets them.
         if let Some(refusal) =
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
@@ -2601,6 +2608,7 @@ mod tests {
     use super::*;
     use safe_cex_remote_signer::Outbox;
 
+    mod apply_settings;
     mod delegated_probe;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
