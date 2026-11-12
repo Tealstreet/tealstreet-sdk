@@ -47,6 +47,43 @@ fn resident_account(registry: &Registry, user: &str) -> Arc<Account> {
 }
 
 #[tokio::test]
+async fn apply_settings_is_required_even_when_only_the_delegated_copy_holds_the_account() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let account = resident_account(&registry, "A");
+            let changed = InitPayload {
+                enable_spot_markets: Some(true),
+                ..init()
+            };
+            assert!(account.holders.lock().unwrap().by_id.is_empty());
+            assert!(
+                registry
+                    .rebuild_refusal_for_mode("A", &changed, false, 8, true)
+                    .is_some()
+            );
+            let result = registry
+                .obtain_delegated("A", &changed, 8, None, Arc::new(|_| true), pair())
+                .await;
+            assert!(
+                result.is_err(),
+                "the resident account must not be rebuilt implicitly"
+            );
+            assert!(account.handle.disposal_cause().is_none());
+            assert!(
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .get(&("A".into(), changed.account_name))
+                    .is_some_and(|current| Arc::ptr_eq(current, &account))
+            );
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn cosigned_cannot_attach_to_or_rebuild_a_delegated_engine() {
     tokio::task::LocalSet::new().run_until(async {
         let registry = tests::registry(); let init = init(); let account = resident_account(&registry, "A");

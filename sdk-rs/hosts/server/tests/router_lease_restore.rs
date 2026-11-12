@@ -77,6 +77,11 @@ async fn owner_released_marker_pauses_a_fresh_destinations_restored_twap() {
     restored_state(Some(interruption::Reason::OwnerReleased)).await;
 }
 #[tokio::test]
+async fn delegated_restart_marker_restores_client_twap_paused_then_explicitly_resumes() {
+    let reason = serde_json::from_value(json!("waiting-for-key")).expect("typed restart reason");
+    restored_state(Some(reason)).await;
+}
+#[tokio::test]
 async fn normal_restore_without_a_marker_keeps_its_running_state() {
     restored_state(None).await;
 }
