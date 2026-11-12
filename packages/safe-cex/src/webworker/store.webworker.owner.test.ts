@@ -443,29 +443,32 @@ describe.each(['account', 'anonymous'] as const)('SharedWorker %s publication ow
     expect(p.context.postMessage).toHaveBeenCalledWith(current);
   });
 
-  it('never targets another owner when a subscription id is reused there during the deferral', async () => {
-    const { default: start } = await import('./store.webworker');
-    const p = port(start);
-    const q = port(start);
-    await p.send(ownerA());
-    await q.send(ownerA());
-    const subscription: StoreWorkerPayload = {
-      op: 'subscribeOrderBook',
-      instanceId: 'A',
-      data: { subId: 'reused', symbol: 'BTCUSDT' },
-    };
-    await q.send(subscription);
-    const current = { op: 'listenOrderBook', data: { subId: 'reused', owner: 'A', update: 1 } };
-    fixture.workers[0].context.postMessage(current);
-    expect(q.context.postMessage).toHaveBeenCalledWith(current);
-    expect(p.context.postMessage).not.toHaveBeenCalledWith(current);
-    const stale = { op: 'listenOrderBook', data: { subId: 'reused', owner: 'A', update: 2 } };
-    const pending = deferredPublication(fixture.workers[0].context, stale);
-    await p.send({ op: 'dispose', instanceId: 'A' });
-    await p.send(ownerB());
-    await p.send({ ...subscription, instanceId: 'B' });
-    pending.release();
-    await pending.done;
-    expect(p.context.postMessage).not.toHaveBeenCalledWith(stale);
-  });
+  it.each(['listenOrderBook', 'listenOrderBook:rejected', 'listenOHLCV:rejected'])(
+    'never targets another owner for deferred %s when a subscription id is reused',
+    async (op) => {
+      const { default: start } = await import('./store.webworker');
+      const p = port(start);
+      const q = port(start);
+      await p.send(ownerA());
+      await q.send(ownerA());
+      const subscription: StoreWorkerPayload = {
+        op: 'subscribeOrderBook',
+        instanceId: 'A',
+        data: { subId: 'reused', symbol: 'BTCUSDT' },
+      };
+      await q.send(subscription);
+      const current = { op, data: { subId: 'reused', owner: 'A', update: 1 } };
+      fixture.workers[0].context.postMessage(current);
+      expect(q.context.postMessage).toHaveBeenCalledWith(current);
+      expect(p.context.postMessage).not.toHaveBeenCalledWith(current);
+      const stale = { op, data: { subId: 'reused', owner: 'A', update: 2 } };
+      const pending = deferredPublication(fixture.workers[0].context, stale);
+      await p.send({ op: 'dispose', instanceId: 'A' });
+      await p.send(ownerB());
+      await p.send({ ...subscription, instanceId: 'B' });
+      pending.release();
+      await pending.done;
+      expect(p.context.postMessage).not.toHaveBeenCalledWith(stale);
+    },
+  );
 });
