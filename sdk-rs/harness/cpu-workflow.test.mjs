@@ -10,28 +10,29 @@ const job = (text, name) => {
   return match[1];
 };
 
-test('Bitget fixed tip and anchor collection leaves time to finish its certificate', () => {
-  // #3317, run 42778780656/job 129707396005: all sixteen cohorts finished,
-  // but the 45-minute deadline canceled the original producer before its
-  // certificate finished. Keep the observed complete trace plus the same
-  // twelve-minute reserve used by the producer-binding coordinator jobs.
-  const started = Date.parse('2026-11-10T08:05:55Z');
-  const completed = Date.parse('2026-11-10T08:51:20Z');
-  const completeTraceMs = completed - started;
-  const proofReserveMs = 12 * 60_000;
+test('Bitget bounded collection leaves time to publish original-attempt evidence', () => {
+  // #3317: master 93ce5a61df moved collection into bitget-paired-run.mjs.
+  // Its deadline publishes a refusal instead of letting the job cancel evidence;
+  // keep the bounded runner and its ten-minute setup/teardown/upload reserve.
+  const runner = readFileSync(new URL('./bitget-paired-run.mjs', import.meta.url), 'utf8');
+  const deadline = /timeoutMs = (\d+) \* 60_000/.exec(runner);
+  assert.ok(deadline, 'the collector needs an explicit bounded deadline');
+  const collectionMinutes = Number(deadline[1]);
+  assert.equal(collectionMinutes, 35);
   const verify = text => {
     const paired = job(text, 'bitget-paired');
     const timeout = /^    timeout-minutes: (\d+)$/m.exec(paired);
     assert.ok(timeout, 'the physical producer needs a bounded job window');
-    assert.ok(Number(timeout[1]) * 60_000 >= completeTraceMs + proofReserveMs,
-      'the fixed two-witness trace and proof reserve must fit before the job deadline');
-    assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-ci\.mjs --out/);
+    assert.equal(Number(timeout[1]), 45);
+    assert.ok(Number(timeout[1]) - collectionMinutes >= 10,
+      'the collector must leave an evidence-publication reserve');
+    assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
     assert.doesNotMatch(paired, /continue-on-error|gh run rerun|retries|retry:/);
   };
   verify(source);
   const deadlineRegression = source.replace(job(source, 'bitget-paired'),
-    job(source, 'bitget-paired').replace(/timeout-minutes: \d+/, 'timeout-minutes: 45'));
-  assert.throws(() => verify(deadlineRegression), /fixed two-witness trace/);
+    job(source, 'bitget-paired').replace(/timeout-minutes: \d+/, 'timeout-minutes: 35'));
+  assert.throws(() => verify(deadlineRegression));
 });
 function verifyWorkflow(text) {
   const first = job(text, 'gate'), plan = job(text, 'cpu-plan'), certify = job(text, 'cpu-certify'), final = job(text, 'cpu-final');
