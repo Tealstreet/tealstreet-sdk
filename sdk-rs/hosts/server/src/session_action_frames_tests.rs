@@ -1266,6 +1266,28 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
             assert!(replies.iter().all(|v| v["t"] != "order.actionAck" || v["d"]["received"] != true));
             assert!(tape.writes.lock().unwrap().is_empty(), "{case}");
         }
+
+        // An unsupported payload is not permission to bypass admission, hashing
+        // or age bounds, nor to stamp a rejection on another registration.
+        for control in ["binding", "fingerprint", "age", "sequence"] {
+            let id = action_key();
+            let payload = json!({"kind":"futureWrite"});
+            let canonical = format!("tealstreet/delegated-action/v1\0{}", json!({"accountName":"synthetic-main","action":payload,"intentId":id,"seq":1,"version":1}));
+            let fp: String = safe_cex_crypto::sha256(canonical.as_bytes()).iter().map(|v| format!("{v:02x}")).collect();
+            let mut frame = json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-v1","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}});
+            match control {
+                "binding" => frame["d"]["instanceId"] = json!("someone-else"),
+                "fingerprint" => frame["d"]["fingerprint"] = json!("0".repeat(64)),
+                "age" => frame["d"]["ageMs"] = json!(10_000),
+                _ => frame["d"]["seq"] = json!(0),
+            }
+            session.handle(&frame.to_string()).await.unwrap();
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["outcome"], "refused", "{control}: {result}");
+            assert_eq!(result["d"]["error"]["outcome"], "notSent", "{control}");
+            assert_eq!(result["d"]["instanceId"], "reg-v1");
+            assert!(tape.writes.lock().unwrap().is_empty());
+        }
         session.close(); registry.dispose(&account, Disposal::PageDisposed);
     }).await;
 }
