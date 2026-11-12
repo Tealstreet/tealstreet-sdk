@@ -8,7 +8,7 @@ custody: its private user WebSocket needs the L2 API secret, not a signature. Se
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
 and test-only replay/reference implementations remain independent dependencies.
-Historical Rust-adapter fixtures mock only beta admission through
+Historical Rust-adapter fixtures mock both beta admission entry guards through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
