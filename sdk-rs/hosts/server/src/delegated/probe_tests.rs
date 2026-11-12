@@ -475,43 +475,50 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
         .await;
 }
 
-#[test]
-fn admission_hmac_handover_is_single_use_and_bound_to_the_attempt_and_pair() {
+#[tokio::test]
+async fn admission_hmac_handover_is_single_use_and_bound_to_the_attempt_and_pair() {
     for &venue in VENUES {
-        let mut handovers = crate::delegated::Handovers::default();
-        let offer = handovers.issue("pending", 0).unwrap();
-        let bytes = json!({"key":KEY,"secret":SECRET,"passphrase":PASS}).to_string();
-        let sealed = crate::delegated::tests::seal(&offer, venue, KEY, bytes.as_bytes());
-        let opening = handovers.take("pending", &sealed, 1).unwrap();
-        assert!(opening.open(venue, KEY, &sealed, 1).is_ok());
-        assert!(
-            handovers.take("pending", &sealed, 1).is_err(),
-            "{venue}: consumed attempt"
-        );
-        let next = handovers.issue("pending", 2).unwrap();
-        assert!(
-            handovers.take("pending", &sealed, 3).is_err(),
-            "{venue}: earlier attempt"
-        );
-        let mut rebound = sealed.clone();
-        rebound.attempt_id = next.attempt_id;
-        let opening = handovers.take("pending", &rebound, 3).unwrap();
-        assert!(
-            opening.open(venue, KEY, &rebound, 3).is_err(),
-            "{venue}: new attempt cannot open prior handover"
-        );
-        let offer = handovers.issue("pending", 4).unwrap();
-        let other =
-            json!({"key":"synthetic-other-key","secret":"synthetic-other-material"}).to_string();
-        let sealed = crate::delegated::tests::seal(&offer, venue, KEY, other.as_bytes());
-        assert!(
-            handovers
-                .take("pending", &sealed, 5)
-                .unwrap()
-                .open(venue, KEY, &sealed, 5)
-                .is_err(),
-            "{venue}: different pair"
-        );
+        crate::delegated::with_test_declaration(
+            json!({"venues": {venue: {"delegated": {"enabled": true}}}}),
+            async {
+                let mut handovers = crate::delegated::Handovers::default();
+                let offer = handovers.issue("pending", venue, 0).unwrap();
+                let bytes = json!({"key":KEY,"secret":SECRET,"passphrase":PASS}).to_string();
+                let sealed = crate::delegated::tests::seal(&offer, venue, KEY, bytes.as_bytes());
+                let opening = handovers.take("pending", &sealed, 1).unwrap();
+                assert!(opening.open(venue, KEY, &sealed, 1).is_ok());
+                assert!(
+                    handovers.take("pending", &sealed, 1).is_err(),
+                    "{venue}: consumed attempt"
+                );
+                let next = handovers.issue("pending", venue, 2).unwrap();
+                assert!(
+                    handovers.take("pending", &sealed, 3).is_err(),
+                    "{venue}: earlier attempt"
+                );
+                let mut rebound = sealed.clone();
+                rebound.attempt_id = next.attempt_id;
+                let opening = handovers.take("pending", &rebound, 3).unwrap();
+                assert!(
+                    opening.open(venue, KEY, &rebound, 3).is_err(),
+                    "{venue}: new attempt cannot open prior handover"
+                );
+                let offer = handovers.issue("pending", venue, 4).unwrap();
+                let other =
+                    json!({"key":"synthetic-other-key","secret":"synthetic-other-material"})
+                        .to_string();
+                let sealed = crate::delegated::tests::seal(&offer, venue, KEY, other.as_bytes());
+                assert!(
+                    handovers
+                        .take("pending", &sealed, 5)
+                        .unwrap()
+                        .open(venue, KEY, &sealed, 5)
+                        .is_err(),
+                    "{venue}: different pair"
+                );
+            },
+        )
+        .await;
     }
 }
 

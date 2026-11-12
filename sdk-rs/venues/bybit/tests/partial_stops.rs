@@ -3103,3 +3103,55 @@ fn partial_replacement_and_put_back_preserve_each_native_trigger_source() {
         }
     }
 }
+
+fn check_unknown_notional_stop(profile: Profile) {
+    for value in [20.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = ready(profile);
+        seed(
+            &mut h,
+            profile,
+            "Sell",
+            "StopLoss",
+            "MarkPrice",
+            false,
+            true,
+        );
+        h.engine
+            .store_mut()
+            .update_positions(|p| p.notional = value);
+        h.requests.clear();
+        h.command(Command::PlaceOrders {
+                command: 92,
+                orders: vec![serde_json::from_value(serde_json::json!({
+                    "symbol":profile.symbol(),"type":"stop_market","side":"sell","amount":7,"price":90,"reduceOnly":true
+                })).unwrap()],
+            });
+        if profile.inverse() && !value.is_finite() {
+            assert!(
+                h.requests.is_empty(),
+                "unknown inverse capacity must refuse: {:?}",
+                h.requests
+            );
+            assert!(h.result(92).unwrap().is_err());
+        } else {
+            assert!(
+                h.requests
+                    .iter()
+                    .any(|r| r.url.contains("/v5/position/trading-stop"))
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_notional_refuses_inverse_stop_selection_before_http() {
+    check_unknown_notional_stop(PROFILES[3]);
+}
+#[test]
+fn unknown_notional_refuses_combined_inverse_stop_selection_before_http() {
+    check_unknown_notional_stop(PROFILES[4]);
+}
+#[test]
+fn unknown_notional_keeps_linear_stop_selection_in_known_base_units() {
+    check_unknown_notional_stop(PROFILES[0]);
+}

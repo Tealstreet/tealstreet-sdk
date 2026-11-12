@@ -1499,7 +1499,11 @@ impl WeexFutures {
         {
             error.message = context::unknown_message(&error.message);
             error.presents = true;
-            let _ = cx.present_plan_failure(&request.plan, &error.message);
+            // The venue path already composed a batch-unknown summary over
+            // `error.message`. Replace the projected text on any outcome
+            // (the aggregate failure here can be `Rejected`), not only
+            // `Unknown`.
+            let _ = cx.override_plan_failure_message(&request.plan, &error.message);
             cx.command_error(request.command, &error.message);
             let placed = job
                 .journal

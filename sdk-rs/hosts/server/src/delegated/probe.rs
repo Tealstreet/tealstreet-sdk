@@ -5,7 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // Explicit staging entries. Adding one requires the matching offline suite;
-// this catalog does not enable a signing mode or change a rollout declaration.
+// this test-only catalog does not gate runtime admission or change rollout declarations.
+#[cfg(test)]
 pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] =
     &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
 
@@ -87,9 +88,6 @@ pub(crate) async fn run<T: Transport + 'static>(
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
-    if !PRIVATE_STARTUP_VENUES.contains(&venue) {
-        return Err(ProbeRefusal::INVALID);
-    }
     let options: safe_cex_venues::EngineOptions =
         serde_json::from_str(options_json).map_err(|_| ProbeRefusal::INVALID)?;
     if options.frame_fed
@@ -189,6 +187,86 @@ fn notice_refusal(text: &str) -> Option<ProbeRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Clone, Default)]
+    struct Requests(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl Transport for Requests {
+        fn prepare_http(
+            &self,
+            request: safe_cex_engine::HttpRequest,
+            _: safe_cex_engine::request_context::RoutingIntent,
+        ) -> safe_cex_native::HttpPrepareFuture {
+            self.0.lock().unwrap().push(request.url);
+            Box::pin(async { Err(safe_cex_native::HttpPrepareError::Unsupported) })
+        }
+        fn connect(
+            &self,
+            _: safe_cex_engine::SocketId,
+            url: String,
+            _: safe_cex_native::Events,
+        ) -> tokio::sync::mpsc::UnboundedSender<String> {
+            self.0.lock().unwrap().push(url);
+            tokio::sync::mpsc::unbounded_channel().0
+        }
+        fn request(&self, request: safe_cex_engine::HttpRequest, events: safe_cex_native::Events) {
+            // Record and refuse legacy requests as well as managed preparations; no network IO.
+            self.0.lock().unwrap().push(request.url);
+            let _ = events.send(safe_cex_native::HostEvent::HttpFailed(
+                request.id,
+                "synthetic transport refusal".into(),
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn venue_declaration_probe_uses_the_requested_engine() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                crate::delegated::with_test_declaration(
+                    serde_json::json!({"venues": {
+                        "bybit": {"delegated": {"enabled": true}},
+                        "binance": {"delegated": {"enabled": true}}
+                    }}),
+                    async {
+                        let init = crate::envelope::InitPayload {
+                            account_name: "fixture".into(),
+                            exchange_name: "binance".into(),
+                            key: "synthetic-key".into(),
+                            ..Default::default()
+                        };
+                        let pair = crate::delegated::DelegatedPair::new(
+                            init.key.clone(),
+                            safe_cex_crypto::signer::Secret::new("synthetic".into()),
+                            None,
+                        );
+                        let prepared = crate::delegated::prepare_delegated(&init, pair)
+                            .unwrap_or_else(|_| panic!("enabled fixture venue prepares"));
+                        let requests = Requests::default();
+                        let _result = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            run(
+                                &init.exchange_name,
+                                &prepared.options,
+                                prepared.resident.provider(),
+                                requests.clone(),
+                                ServerConfig::default(),
+                                Arc::new(|| true),
+                            ),
+                        )
+                        .await;
+                        let requests = requests.0.lock().unwrap();
+                        assert!(!requests.is_empty());
+                        assert!(
+                            requests.iter().all(|url| url.contains("binance")),
+                            "{requests:?}"
+                        );
+                    },
+                )
+                .await;
+            })
+            .await;
+    }
+
     #[test]
     fn classifier_requires_success_and_refuses_unknown_results() {
         assert_eq!(classify(Ok(())), ProbeOutcome::Accepted);

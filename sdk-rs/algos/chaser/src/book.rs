@@ -482,7 +482,7 @@ impl ChaserBook {
         !self.store().positions.iter().any(|position| {
             position.symbol == chase.options.symbol
                 && position.side == side
-                && position.notional != 0.0
+                && position.contracts != 0.0
         })
     }
 
