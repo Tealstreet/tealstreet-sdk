@@ -26,6 +26,7 @@ import { createHyperliquidRequestValidator } from './hyperliquid-protocol.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
+import { bingxspot } from './bingxspot.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import {
@@ -1749,6 +1750,7 @@ export const VENUES = {
         };
       }),
   },
+  bingxspot,
   bingx: {
     rust: 'bingx',
     virtualPrivateClock: true,
