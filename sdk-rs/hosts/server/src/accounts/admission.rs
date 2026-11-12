@@ -7,6 +7,9 @@ pub(crate) struct ProbePermit {
     fingerprint: String,
     pub(super) lease: Option<crate::router_lease::Permit>,
     pub(super) token_expires_at: Option<u64>,
+    pub(super) current: Arc<AtomicBool>,
+    pending: PendingInits,
+    account_name: String,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
@@ -19,10 +22,27 @@ impl ProbePermit {
         {
             return Err(ProbeRefusal::INVALID);
         }
-        if self.lease.as_ref().is_some_and(|lease| !lease.allowed()) {
+        if !self.current.load(Ordering::Acquire)
+            || self.lease.as_ref().is_some_and(|lease| !lease.allowed())
+        {
             return Err(ProbeRefusal::TRANSIENT);
         }
         Ok(())
+    }
+}
+
+impl Drop for ProbePermit {
+    fn drop(&mut self) {
+        let key = (self.user.clone(), self.account_name.clone());
+        let mut pending = self.pending.lock().unwrap();
+        if let Some(incarnation) = pending.get_mut(&key) {
+            incarnation
+                .probes
+                .retain(|current| !Arc::ptr_eq(current, &self.current));
+            if incarnation.attempts.is_empty() && incarnation.probes.is_empty() {
+                pending.remove(&key);
+            }
+        }
     }
 }
 
@@ -57,11 +77,28 @@ impl Registry {
         if self.router_leases.enforced() && lease.is_none() {
             return Err(ProbeRefusal::TRANSIENT);
         }
+        let fingerprint = admission_fingerprint(init);
+        let current = Arc::new(AtomicBool::new(true));
+        let mut pending = self.pending_inits.lock().unwrap();
+        pending
+            .entry((user.into(), init.account_name.clone()))
+            .or_insert_with(|| InitIncarnation {
+                fingerprint: fingerprint.clone(),
+                public_only: false,
+                attempts: vec![],
+                probes: vec![],
+            })
+            .probes
+            .push(current.clone());
+        drop(pending);
         let permit = ProbePermit {
             user: user.into(),
-            fingerprint: admission_fingerprint(init),
+            fingerprint,
             lease,
             token_expires_at: None,
+            current,
+            pending: self.pending_inits.clone(),
+            account_name: init.account_name.clone(),
         };
         permit.check(user, init)?;
         Ok(permit)
@@ -176,11 +213,13 @@ impl Registry {
         if let Some(pair) = &pair {
             pair.validate(init).map_err(|_| ProbeRefusal::INVALID)?;
         }
-        if let Some(account) = self
+        let existing = self
             .accounts
             .lock()
             .unwrap()
             .get(&(user.into(), init.account_name.clone()))
+            .cloned();
+        if let Some(account) = existing
             && (account.is_public()
                 || account.delegated.is_some() != delegated
                 || account.fingerprint != proof.fingerprint)
