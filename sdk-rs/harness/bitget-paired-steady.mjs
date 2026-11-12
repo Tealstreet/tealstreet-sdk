@@ -229,7 +229,16 @@ export function assessBitgetUnchangedBytes({ authority, evidence }) {
   } catch (error) { return { valid: false, errors: [error.message], certificate: null }; }
 }
 
-/** Unchanged builds stop at the tip packages; changed builds retain both witnesses. */
+export class BitgetTipRejected extends Error {
+  constructor(tip) {
+    super(`Bitget paired steady: complete tip rejected (Rust/TS=${tip.pooled.candidate.rustTsRatio}, q=${tip.q}); anchor cannot rescue it`);
+    this.disposition = 'REJECTED';
+    this.certificate = null;
+    this.tip = tip;
+  }
+}
+
+/** Accepted changed builds need both witnesses; a complete failed tip cannot be rescued. */
 export async function readBitgetSteadyCertificate({ authority, readEvidence, manifest }) {
   insist(authorities.has(authority) && authority.witness === 'tip', 'issued tip authority required');
   const tipEvidence = await readEvidence('tip', authority);
@@ -241,6 +250,7 @@ export async function readBitgetSteadyCertificate({ authority, readEvidence, man
   }
   const tip = assessBitgetPairedSteady({ authority, evidence: tipEvidence, manifest });
   insist(tip.valid, tip.errors.join('\n'));
+  if (!tip.certificate.steadyAccepted) throw new BitgetTipRejected(tip.certificate);
   const anchorAuthority = bitgetAnchorAuthority(authority);
   const anchor = assessBitgetPairedSteady({ authority: anchorAuthority,
     evidence: await readEvidence('anchor', anchorAuthority), manifest });

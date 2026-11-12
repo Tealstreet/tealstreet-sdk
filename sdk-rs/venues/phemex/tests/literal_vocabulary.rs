@@ -292,6 +292,73 @@ fn history(row: Value, streamed: bool) -> Result<Vec<Value>, String> {
     done(&actions).map(|body| serde_json::from_str(&body).unwrap())
 }
 
+// https://phemex-docs.github.io/#common-order-fields: RPI remains a restricted TIF.
+#[test]
+fn rpi_post_only_survives_private_stream_and_rest_census() {
+    for native in ["PostOnly", "RPIPostOnly"] {
+        for rest in [false, true] {
+            let (mut e, socket) = authenticated("OneWay");
+            let mut row = live_row("post-only");
+            row["timeInForce"] = json!(native);
+            if rest {
+                let actions = command(
+                    &mut e,
+                    Command::Venue {
+                        command: 1,
+                        action: safe_cex_engine::VenueAction::RefreshOrders {
+                            symbols: Some(vec!["BTCUSDT".into()]),
+                        },
+                    },
+                );
+                let read = requests(&actions)
+                    .into_iter()
+                    .find(|r| r.url.contains("/g-orders/activeList"))
+                    .expect("REST census");
+                respond(&mut e, &read, json!({"code":0,"data":{"rows":[row]}}));
+            } else {
+                ws_orders(&mut e, socket, vec![row]);
+            }
+            let order = e.store().order("post-only").expect("visible limit order");
+            assert_eq!(order.kind, OrderType::Limit);
+            assert_eq!(order.status, OrderStatus::Open);
+            assert_eq!(order.remaining, 0.1);
+            assert_eq!(
+                order.time_in_force,
+                Some(TimeInForce::PostOnly),
+                "{native}, rest={rest}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rpi_post_only_survives_client_id_lookup_without_mutating_store() {
+    for native in ["PostOnly", "RPIPostOnly"] {
+        let mut e = engine();
+        let actions = command(
+            &mut e,
+            Command::Query {
+                command: 1,
+                query: safe_cex_engine::Query::OrderByClientId {
+                    symbol: "BTCUSDT".into(),
+                    client_order_id: "caller".into(),
+                },
+            },
+        );
+        let read = requests(&actions).remove(0);
+        let mut row = live_row("post-only");
+        row["clOrdID"] = json!("caller");
+        row["transactTimeNs"] = json!(2_000_000_000_u64);
+        row["timeInForce"] = json!(native);
+        let actions = respond(&mut e, &read, json!([row]));
+        let result: Value = serde_json::from_str(&done(&actions).unwrap()).unwrap();
+        assert_eq!(result["found"], true);
+        assert_eq!(result["order"]["id"], "post-only");
+        assert_eq!(result["order"]["timeInForce"], "PostOnly", "{native}");
+        assert!(e.store().orders().is_empty());
+    }
+}
+
 #[test]
 fn deactivated_stop_history_is_terminal_cancelled() {
     for streamed in [false, true] {

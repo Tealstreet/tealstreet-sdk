@@ -390,7 +390,7 @@ impl OrderRow<'_> {
                 "GoodTillCancel" => Some(TimeInForce::GoodTillCancel),
                 "ImmediateOrCancel" => Some(TimeInForce::ImmediateOrCancel),
                 "FillOrKill" => Some(TimeInForce::FillOrKill),
-                "PostOnly" => Some(TimeInForce::PostOnly),
+                "PostOnly" | "RPIPostOnly" => Some(TimeInForce::PostOnly),
                 _ => None,
             },
             last_update: if self.version() > 0 {

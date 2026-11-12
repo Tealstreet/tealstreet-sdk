@@ -38,7 +38,7 @@ pub struct PositionExtra {
     pub unrealized_pnl_native: Option<f64>,
 }
 
-/// Canonical SDK position. liquidationPrice is required and null when the threshold is unavailable.
+/// Canonical SDK position. Notional and liquidationPrice are required and nullable when unknown.
 /// contracts is the whole base-unit quantity; extra.contractsNative retains native placement units.
 /// marginSize is absolute quote-currency margin when published by the venue; cross margin may be zero.
 #[derive(Debug, Clone, PartialEq, TS)]
@@ -50,7 +50,8 @@ pub struct Position {
     #[ts(as = "PositionSide")]
     pub side: ModelField<PositionSide>,
     pub entry_price: f64,
-    pub notional: f64,
+    #[ts(type = "number | null")]
+    pub notional: Option<f64>,
     pub leverage: f64,
     #[ts(as = "Option<MarginType>")]
     pub margin_type: ModelField<MarginType>,
@@ -122,7 +123,7 @@ mod strict_codecs {
         }
     }
 
-    fn required_nullable_price<'de, D: serde::Deserializer<'de>>(
+    fn required_nullable_number<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<f64>, D::Error> {
         serde::Deserialize::deserialize(deserializer)
@@ -137,7 +138,8 @@ mod strict_codecs {
         #[serde(default)]
         side: ModelField<PositionSide>,
         entry_price: f64,
-        notional: f64,
+        #[serde(deserialize_with = "required_nullable_number")]
+        notional: Option<f64>,
         leverage: f64,
         #[serde(default)]
         margin_type: ModelField<MarginType>,
@@ -147,7 +149,7 @@ mod strict_codecs {
         #[serde(default)]
         realized_pnl: ModelField<f64>,
         contracts: f64,
-        #[serde(deserialize_with = "required_nullable_price")]
+        #[serde(deserialize_with = "required_nullable_number")]
         liquidation_price: Option<f64>,
         #[serde(default)]
         margin_size: ModelField<f64>,
