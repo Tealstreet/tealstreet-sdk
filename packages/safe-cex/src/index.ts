@@ -280,6 +280,7 @@ export {
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
+export type { BuilderFeeApprovalGuard } from './exchanges/hyperliquid/hyperliquid.builderFee';
 
 export type {
   BuilderFeeApprovalResult,
