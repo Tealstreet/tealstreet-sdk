@@ -663,3 +663,47 @@ async fn fixround_superseded_settings_keep_the_resident_account() {
         })
         .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn public_fallback_cannot_reset_identity_settings_through_a_label() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for parked in [false, true] {
+                let registry = tests::registry();
+                let original = init();
+                let account = account(&registry, "u", &original);
+                let alias = InitPayload {
+                    account_name: "phone label".into(),
+                    ..original.clone()
+                };
+                for init in [&original, &alias] {
+                    registry
+                        .obtain("u", init, false, 7, None, Arc::new(|_| true))
+                        .await
+                        .unwrap();
+                }
+                if parked {
+                    registry.park("resume".into(), "u", vec![(account.clone(), 7)]);
+                }
+                for label in [&original.account_name, &alias.account_name] {
+                    let public = InitPayload {
+                        account_name: label.clone(),
+                        public_only: Some(true),
+                        ..original.clone()
+                    };
+                    for holder in [7, 8] {
+                        assert!(
+                            registry.rebuild_refusal("u", &public, true, holder).is_some(),
+                            "public fallback must not bypass explicit settings: parked={parked}, holder={holder}, alias={}",
+                            label == &alias.account_name,
+                        );
+                    }
+                    assert!(registry.rebuild_refusal("other", &public, true, 7).is_none());
+                }
+                assert!(account.handle.disposal_cause().is_none());
+                assert_eq!(registry.account_count(), 1);
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
