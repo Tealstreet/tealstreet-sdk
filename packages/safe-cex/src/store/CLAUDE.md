@@ -80,7 +80,8 @@ indexes. Keep those ticker rows without synthesizing markets or filtering them.
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths
 must not depend on postprocessors happening to reconstruct a field after
-serialization.
+serialization. Unknown displayed-margin sides and totals remain explicit `null`
+through serialization; only an absent entire margin record uses unloaded defaults.
 
 **A field added to `store.stub.ts` MUST also be added to `serialize()`.**
 `apps/web`'s IndexedDB warm-boot cache validates snapshots with

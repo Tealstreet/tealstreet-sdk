@@ -26,6 +26,42 @@ async fn action_frame(sent: &mut crate::out::Receiver, kind: &str) -> Value {
 }
 
 #[tokio::test]
+async fn dedicated_actions_coexist_with_partial_activation_on_the_same_session() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            call(
+                &mut session,
+                "legacy-cancel",
+                "cancelOrders",
+                json!([[{"id":"resting-order","symbol":"BTCUSDT"}]]),
+            )
+            .await;
+            let refused = reply(&mut sent, "legacy-cancel").await;
+            assert_eq!(refused["success"], false);
+            assert_eq!(refused["result"]["name"], "DelegatedActionUnavailable");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            let id = action(
+                &mut session,
+                json!({"kind":"cancel","order":{"id":"resting-order","symbol":"BTCUSDT"}}),
+                1,
+                false,
+            )
+            .await;
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["intentId"], id);
+            assert_eq!(result["d"]["outcome"], "applied");
+            assert_eq!(tape.writes.lock().unwrap().as_slice(), &["cancel"]);
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn action_frames_use_real_native_amend_cancel_cancel_all_and_nuke_paths() {
     tokio::task::LocalSet::new().run_until(async {
         for (kind, payload, expected) in [
