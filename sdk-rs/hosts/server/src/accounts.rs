@@ -433,6 +433,8 @@ struct InitAttempt<'a> {
     pending: &'a PendingInits,
     key: (String, String),
     authority: InitAuthority,
+    /// Admission only: an account can subsequently be held by other tokens.
+    expires_at_ms: Option<u64>,
     published: bool,
 }
 
@@ -456,6 +458,7 @@ impl InitAttempt<'_> {
         // Serialize the final check and insertion with a newer init's admission.
         let mut pending = self.pending.lock().unwrap();
         self.authority.check()?;
+        crate::auth::Verifier::check_expiry(self.expires_at_ms, now_ms())?;
         let replaced = accounts
             .lock()
             .unwrap()
@@ -1041,7 +1044,9 @@ impl Registry {
         name: &str,
         public_only: bool,
         fingerprint: &str,
+        expires_at_ms: Option<u64>,
     ) -> Result<InitAttempt<'_>, String> {
+        crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
         let lease = if public_only {
             None
         } else {
@@ -1081,6 +1086,7 @@ impl Registry {
             pending: &self.pending_inits,
             key,
             authority,
+            expires_at_ms,
             published: false,
         })
     }
@@ -1129,6 +1135,8 @@ impl Registry {
         pair: Option<DelegatedPair>,
         proof: Option<ProbePermit>,
     ) -> Result<Arc<Account>, String> {
+        let expires_at_ms = token.as_ref().map(|(_, expires)| *expires);
+        crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
         if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
         }
@@ -1141,7 +1149,13 @@ impl Registry {
         } else {
             init.fingerprint()
         };
-        let mut attempt = self.begin_init(user, &init.account_name, public_only, &fingerprint)?;
+        let mut attempt = self.begin_init(
+            user,
+            &init.account_name,
+            public_only,
+            &fingerprint,
+            expires_at_ms,
+        )?;
         let probed = proof.is_some();
         if let Some(proof) = proof {
             proof
@@ -1162,6 +1176,7 @@ impl Registry {
                 return Err("Account signing mode differs; account not attached".into());
             }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
+                crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
                 account.hold(holder, Live { outbox, token });
                 return Ok(account);
             }
@@ -1180,6 +1195,7 @@ impl Registry {
                     "init {} from socket {holder} joins the live account; only its hyperliquidBuilder differs",
                     init.account_name
                 ));
+                crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
                 account.hold(holder, Live { outbox, token });
                 return Ok(account);
             }
@@ -1206,7 +1222,9 @@ impl Registry {
             )
             .await?;
         let account = Arc::new(account);
-        if let Err(error) = attempt.authority.check() {
+        if let Err(error) = attempt.authority.check().and_then(|()| {
+            crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()).map_err(str::to_owned)
+        }) {
             account.handle.dispose();
             if let Some(link) = &account.link {
                 link.mark_unavailable();
@@ -1277,6 +1295,7 @@ impl Registry {
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         self.pacer.admit().await;
         authority.check()?;
+        crate::auth::Verifier::check_expiry(token.as_ref().map(|(_, expires)| *expires), now_ms())?;
         let venue = init.exchange_name.clone();
         let delegated_build = pair.is_some();
         let (link, plan, options, remote, signer, delegated) = if let Some(pair) = pair {
@@ -2010,7 +2029,10 @@ impl Registry {
         let Some(entry) = parked.get_mut(resume_id) else {
             return Vec::new();
         };
-        if entry.user != user || entry.alias_until.is_some() {
+        if entry.user != user
+            || entry.alias_until.is_some()
+            || crate::auth::Verifier::check_expiry(Some(token.1), now_ms()).is_err()
+        {
             return Vec::new();
         }
         let accounts = std::mem::take(&mut entry.accounts);
@@ -2625,7 +2647,7 @@ pub(crate) mod tests {
                 );
                 grant_init_owner(&registry, 1);
                 let mut old = registry
-                    .begin_init("u", "acct", false, "synthetic-A")
+                    .begin_init("u", "acct", false, "synthetic-A", None)
                     .unwrap();
                 let (old_account, _old_inbox) = held_account_with(
                     Some(SignerLink::new(7, Arc::new(|_| true))),
@@ -2678,7 +2700,7 @@ pub(crate) mod tests {
             .run_until(async {
                 let registry = registry();
                 let mut old = registry
-                    .begin_init("u", "acct", false, "synthetic-A")
+                    .begin_init("u", "acct", false, "synthetic-A", None)
                     .unwrap();
                 let (old_account, _old_inbox) = held_account_with(
                     Some(SignerLink::new(7, Arc::new(|_| true))),
@@ -2697,7 +2719,7 @@ pub(crate) mod tests {
                     .await
                 );
                 let mut new = registry
-                    .begin_init("u", "acct", false, "synthetic-B")
+                    .begin_init("u", "acct", false, "synthetic-B", None)
                     .unwrap();
                 let (fresh, _fresh_inbox) = held_account_with(
                     Some(SignerLink::new(8, Arc::new(|_| true))),
@@ -2705,7 +2727,7 @@ pub(crate) mod tests {
                 );
                 assert!(new.publish(&registry.accounts, &fresh).unwrap().is_none());
                 let next = registry
-                    .begin_init("u", "acct", false, "synthetic-B")
+                    .begin_init("u", "acct", false, "synthetic-B", None)
                     .unwrap();
                 assert!(
                     new.authority.check().is_ok(),

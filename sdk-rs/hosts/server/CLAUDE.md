@@ -38,6 +38,13 @@ keys, symbol lists, request payloads, credentials, or per-user breakdowns.
 
 ## DELEGATED construction
 
+Authenticated admissions and socket commands recheck the token expiry captured
+by `auth::Verifier`, shared by COSIGNED and DELEGATED. Init, re-init, resume,
+verification completion and deferred startup dispatch do not extend that expiry.
+The existing socket close remains at expiry plus `TOKEN_GRACE` (30 seconds);
+the grace permits reconnection, not new admissions or commands. Expiry belongs
+to the requesting socket and never fences another holder's account transport.
+
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
 handover pair. Admission follows `delegated.enabled` in construction-rules.json
 (exact `bybit` only). The account retains the existing LocalSigner provider,

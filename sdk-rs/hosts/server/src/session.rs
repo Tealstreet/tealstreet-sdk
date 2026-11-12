@@ -236,6 +236,14 @@ impl Close {
 }
 
 impl Session {
+    fn token_expires_at_ms(&self) -> Option<u64> {
+        self.identity.token.as_ref().map(|(_, expires)| *expires)
+    }
+
+    fn token_expired(&self) -> bool {
+        crate::auth::Verifier::check_expiry(self.token_expires_at_ms(), now_ms()).is_err()
+    }
+
     pub fn new(
         registry: Arc<Registry>,
         metrics: Arc<Metrics>,
@@ -462,6 +470,14 @@ impl Session {
             return Ok(());
         };
         self.cancel_verification(&completed.account_name);
+        if self.token_expired() {
+            self.drop_early(&completed.account_name, "admission expired");
+            out.send(envelope::error(
+                Some(&completed.account_name),
+                crate::auth::TOKEN_EXPIRED,
+            ));
+            return Ok(());
+        }
         if self.moved_by_drain() {
             self.moved = true;
             return Err(Close::Moved);
@@ -771,6 +787,10 @@ impl Session {
         if !self.identity.resumable {
             return;
         }
+        if self.token_expired() {
+            self.send(envelope::session(&self.resume_id, false));
+            return;
+        }
         if self
             .user_socket
             .as_ref()
@@ -800,12 +820,15 @@ impl Session {
                     .resume(&from, &user, self.socket, token.clone(), &outbox);
             // Not parked yet: the old socket dropped without a close frame. Close it now.
             if accounts.is_empty()
+                && !self.token_expired()
                 && let Some(parked) = self.registry.take_over(&from, &user)
             {
                 let _ = tokio::time::timeout(TAKEOVER_WAIT, parked).await;
-                accounts = self
-                    .registry
-                    .resume(&from, &user, self.socket, token, &outbox);
+                if !self.token_expired() {
+                    accounts = self
+                        .registry
+                        .resume(&from, &user, self.socket, token, &outbox);
+                }
             }
             resumed = !accounts.is_empty();
             // `init` is logged either way; this tells a resume from a rebuild.
@@ -832,6 +855,20 @@ impl Session {
     }
 
     pub async fn handle(&mut self, text: &str) -> Result<(), Close> {
+        if self.token_expired() {
+            // Refusal does not shorten TOKEN_GRACE. Init replies keep the
+            // request's registration without changing the current holder.
+            let name = envelope::account_name(text);
+            let out = match serde_json::from_str::<Inbound>(text) {
+                Ok(Inbound::Init(init)) => self.out.with_instance_id(init.instance_id.as_deref()),
+                _ => name
+                    .as_deref()
+                    .map(|name| self.account_out(name))
+                    .unwrap_or_else(|| self.out.clone()),
+            };
+            out.send(envelope::error(name.as_deref(), crate::auth::TOKEN_EXPIRED));
+            return Ok(());
+        }
         let Ok(message) = serde_json::from_str::<Inbound>(text) else {
             if let Ok(frame) = serde_json::from_str::<Value>(text)
                 && frame["t"]
@@ -994,6 +1031,13 @@ impl Session {
 
     async fn init(&mut self, init: InitPayload) -> Result<(), Close> {
         let out = self.out.with_instance_id(init.instance_id.as_deref());
+        if self.token_expired() {
+            out.send(envelope::error(
+                Some(&init.account_name),
+                crate::auth::TOKEN_EXPIRED,
+            ));
+            return Ok(());
+        }
         let authenticated = self.identity.user.is_some();
         let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
         if !authenticated && let Some(reason) = unauthenticated_init_refusal(&init) {
@@ -1190,8 +1234,13 @@ impl Session {
     }
 
     async fn client(&self, account: &Arc<Account>, out: Out) -> Result<Client, &'static str> {
+        crate::auth::Verifier::check_expiry(self.token_expires_at_ms(), now_ms())?;
         let id = self.registry.next_id();
         let link = account.handle.join(id, true).await?;
+        if self.token_expired() {
+            account.handle.leave(id);
+            return Err(crate::auth::TOKEN_EXPIRED);
+        }
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let draining = Arc::new(AtomicBool::new(false));
         let hold = (!account.is_public()).then(|| Hold {
@@ -1221,6 +1270,9 @@ impl Session {
     /// one stops forwarding frames and leaves once its replies are in. False when
     /// no new client could join.
     async fn resnapshot(&mut self, name: &str) -> bool {
+        if self.token_expired() {
+            return false;
+        }
         let Some((account, out)) = self
             .joined
             .get(name)
@@ -1559,6 +1611,10 @@ impl Session {
     }
 
     fn input(&self, name: &str, command: Value) -> bool {
+        if self.token_expired() {
+            self.send(envelope::error(Some(name), crate::auth::TOKEN_EXPIRED));
+            return false;
+        }
         let joined = &self.joined[name];
         match joined
             .account
@@ -1740,6 +1796,16 @@ impl Session {
                         !methods::until_nuke_can_see(&handle, "all", std::time::Duration::ZERO)
                             .await
                             .is_ok();
+                    if self.token_expired() {
+                        self.reply_failure(
+                            name,
+                            &request_id,
+                            "AuthExpired",
+                            crate::auth::TOKEN_EXPIRED,
+                            Some("notSent"),
+                        );
+                        continue;
+                    }
                     if waiting {
                         self.send(envelope::algo_error(
                             name,
@@ -1776,11 +1842,21 @@ impl Session {
                     // Off the socket loop: the wait must not hold the signatures loading needs.
                     let (out, name, request_id) =
                         (self.account_out(name), name.to_owned(), request_id.clone());
+                    let expires_at_ms = self.token_expires_at_ms();
                     tokio::spawn(async move {
                         let refused =
                             match methods::until_nuke_can_see(&handle, mode, methods::READ_WAIT)
                                 .await
                             {
+                                Ok(())
+                                    if crate::auth::Verifier::check_expiry(
+                                        expires_at_ms,
+                                        now_ms(),
+                                    )
+                                    .is_err() =>
+                                {
+                                    crate::auth::TOKEN_EXPIRED.to_owned()
+                                }
                                 Ok(()) if algos.send(input).is_ok() => return,
                                 Ok(()) => "nuke is unavailable for this account".to_owned(),
                                 Err(refused) => refused.message,
@@ -1976,7 +2052,19 @@ impl Session {
         let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
+        let expires_at_ms = self.token_expires_at_ms();
         let send = move || {
+            if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
+                if let Some(entry) = pending.lock().unwrap().remove(&id) {
+                    settle(
+                        &out,
+                        &name,
+                        entry,
+                        Err(failure_detail("AuthExpired", message, false)),
+                    );
+                }
+                return;
+            }
             // Each leg keeps the original age/registration through any startup
             // wait. Expiry cannot dispatch a write or prove the action not sent.
             if let Some(guard) = &action_guard
