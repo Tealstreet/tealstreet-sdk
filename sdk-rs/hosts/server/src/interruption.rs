@@ -223,6 +223,27 @@ impl Notices {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delegated_restart_reason_reuses_the_bounded_interruption_marker() {
+        let raw = serde_json::json!({
+            "reason": "waiting-for-key", "fromBox": "01", "at": 1000
+        })
+        .to_string();
+        let marker = Marker::parse(&raw, 1000).expect("typed restart reason");
+        assert_eq!(
+            serde_json::to_value(&marker).unwrap()["reason"],
+            "waiting-for-key"
+        );
+        assert!(Marker::parse(&raw.replace("1000", "6001"), 1000).is_none());
+        let notice: serde_json::Value = serde_json::from_str(&marker.notice("acct", "01")).unwrap();
+        assert!(
+            notice["d"]["data"][0]
+                .as_str()
+                .unwrap()
+                .contains("waiting for your key")
+        );
+    }
     #[tokio::test(start_paused = true)]
     async fn acknowledgements_are_job_account_user_and_epoch_scoped_with_bounded_marker_lifetime() {
         let notices = Arc::new(Notices::default());

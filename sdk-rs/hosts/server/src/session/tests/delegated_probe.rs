@@ -11,6 +11,8 @@ use std::time::Duration;
 mod delegated_negatives;
 #[path = "delegated_probe_more.rs"]
 mod more;
+#[path = "delegated_restart.rs"]
+mod restart;
 
 struct Fixture {
     registry: Arc<Registry>,
