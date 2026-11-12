@@ -65,30 +65,19 @@ async fn partial_activation_cancel_all_refuses_without_waiting_for_a_busy_store(
             let tape = Tape::default();
             let account = delegated_account(&registry, "A", "bybit", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
-            let (release, wait) = std::sync::mpsc::channel();
-            let (entered, read_started) = tokio::sync::oneshot::channel();
             let handle = account.handle.clone();
-            let blocker = tokio::spawn(async move {
-                handle
-                    .read(move |_| {
-                        let _ = entered.send(());
-                        wait.recv_timeout(Duration::from_secs(5)).unwrap();
-                        true
-                    })
-                    .await
-            });
-            tokio::time::timeout(Duration::from_secs(2), read_started)
-                .await
-                .unwrap()
-                .unwrap();
-            let completed = {
-                let work = call(&mut session, "busy-legacy", "cancelAllOrders", json!([]));
-                tokio::pin!(work);
-                std::future::poll_fn(|cx| std::task::Poll::Ready(work.as_mut().poll(cx).is_ready()))
-                    .await
-            };
-            release.send(()).unwrap();
-            assert_eq!(blocker.await.unwrap(), Some(true));
+            // Poll both before the local actor can answer the first read.
+            // A legacy refusal needs no store result.
+            let (read_done, completed) = tokio::join!(biased;
+                handle.read(|_| true),
+                async {
+                    let work = call(&mut session, "busy-legacy", "cancelAllOrders", json!([]));
+                    tokio::pin!(work);
+                    std::future::poll_fn(|cx| std::task::Poll::Ready(work.as_mut().poll(cx).is_ready()))
+                        .await
+                }
+            );
+            assert_eq!(read_done, Some(true));
             if completed {
                 let result = reply(&mut sent, "busy-legacy").await;
                 assert_eq!(result["success"], false);
