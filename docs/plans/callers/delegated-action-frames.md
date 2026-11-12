@@ -291,6 +291,15 @@ cannot manufacture a completed venue write. The router records the unknown
 outcome and must never re-forward the action. EXEC receives the intent as its
 `reqId`, rather than accepting a second caller-controlled correlation ID.
 
+Typed `chaser:start` validation closes the nested `terminate` shape to `type`,
+`value` and optional `anchorPrice`; types are `price`, `percent` or `usd`.
+Size, maxAttempts, optional delay and termination numbers must be finite and
+nonnegative. Optional booleans, bounded identity strings and origin values are
+checked before native decoding. Unknown nested fields or malformed scalar values
+return the existing v1 typed `unsupported` outcome with no positive ACK, job or
+native write. This stricter wire boundary leaves legacy native chaser parsing
+and native cadence unchanged; existing valid optional shapes remain supported.
+
 Queued algo admission captures the original registration and deadline and checks
 both before and after the actor's store read. A typed EXEC uses the resident
 account port for factory identity and shared parallel/nuke counters, while its

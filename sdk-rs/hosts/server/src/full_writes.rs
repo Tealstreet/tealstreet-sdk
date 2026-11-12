@@ -227,23 +227,8 @@ pub(crate) fn algo(op: &str, data: &Value) -> Result<(), &'static str> {
                 && v.get("symbol").is_none_or(|v| v.as_str().is_some_and(text))
         }),
         "chaser:start" => {
-            data.as_object().is_some_and(|v| {
-                v.keys().all(|k| {
-                    matches!(
-                        k.as_str(),
-                        "symbol"
-                            | "size"
-                            | "side"
-                            | "maxAttempts"
-                            | "reduceOnly"
-                            | "origin"
-                            | "accountName"
-                            | "terminate"
-                            | "clientId"
-                            | "delay"
-                    )
-                })
-            }) && serde_json::from_value::<safe_cex_chaser::ChaserOptions>(data.clone()).is_ok()
+            chaser_options(data)
+                && serde_json::from_value::<safe_cex_chaser::ChaserOptions>(data.clone()).is_ok()
         }
         "twap:start" => {
             twap_options(data)
@@ -288,6 +273,56 @@ pub(crate) fn algo_account_matches(op: &str, data: &Value, account: &str) -> boo
 fn only(v: &Value, fields: &[&str]) -> bool {
     v.as_object()
         .is_some_and(|v| v.keys().all(|k| fields.contains(&k.as_str())))
+}
+/// The typed v1 boundary is closed even where legacy native serde is lenient.
+/// Validate compatibility fields (including delay) before native decoding can
+/// discard them; keep existing native chaser cadence and legacy parsing intact.
+fn chaser_options(v: &Value) -> bool {
+    if !only(
+        v,
+        &[
+            "symbol",
+            "size",
+            "side",
+            "maxAttempts",
+            "reduceOnly",
+            "delay",
+            "origin",
+            "accountName",
+            "terminate",
+            "clientId",
+        ],
+    ) || !v["symbol"].as_str().is_some_and(text)
+        || !nonnegative(&v["size"])
+        || !nonnegative(&v["maxAttempts"])
+        || !matches!(v["side"].as_str(), Some("buy" | "sell"))
+    {
+        return false;
+    }
+    if v.get("delay").is_some_and(|v| !nonnegative(v))
+        || v.get("reduceOnly").is_some_and(|v| !v.is_boolean())
+        || v.get("origin")
+            .is_some_and(|v| !matches!(v.as_str(), Some("web" | "cli" | "webhook" | "automation")))
+    {
+        return false;
+    }
+    for key in ["accountName", "clientId"] {
+        if v.get(key).is_some_and(|v| !v.as_str().is_some_and(text)) {
+            return false;
+        }
+    }
+    v.get("terminate").is_none_or(|terminate| {
+        only(terminate, &["type", "value", "anchorPrice"])
+            && matches!(
+                terminate["type"].as_str(),
+                Some("price" | "percent" | "usd")
+            )
+            && nonnegative(&terminate["value"])
+            && terminate.get("anchorPrice").is_none_or(nonnegative)
+    })
+}
+fn nonnegative(v: &Value) -> bool {
+    v.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)
 }
 fn market(v: &Value) -> bool {
     only(v, &["symbol"]) && v["symbol"].as_str().is_some_and(text)
