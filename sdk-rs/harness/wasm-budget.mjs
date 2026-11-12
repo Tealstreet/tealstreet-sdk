@@ -269,9 +269,17 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
   // Master 05241cd0f4 changes no Hyperliquid build inputs; keep both parent provenance blocks.
   // Current CI run 42565604601, merge ec8633c44e98: web/node 2,225,586 B + 10 KiB, rounded up.
+  // #3433 run 42742356027 at CI merge 972f1282ea16: web/node 2,236,421 B.
+  // Current measured size + 10 KiB, rounded up to KiB; both aliases share the family.
+  // #3433 branch 1547c3b2e287: optimized local web/node 2,237,725 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
   // #3429 merged head 1bb3f1352988: local optimized web/node 2,238,274 B; +10 KiB rounded up.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; both aliases share the compiled family.
+  // #3433 merge b57d4ab06df2 + master 4d399f716231: optimized local web/node 2,238,332 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up to KiB.
   hyperliquid: 2_248_704,
   hyperliquidspot: 2_248_704,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
@@ -295,7 +303,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3299 merged 2ca7125e8ab: local optimized web/node 1,920,015 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
-  mexc: 1_931_264,
+  // #3433 head 99eed37c13cc: fresh optimized web/node 1,927,409 B + 10 KiB, rounded up to KiB.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 (two -Oz passes).
+  mexc: 1_938_432,
   okx: 2_053_120,
   orderly: 1_773_568,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
@@ -309,9 +320,17 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   txflow: 1_934_336,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
+  // #3433 run 42742356027 at CI merge 972f1282ea16: web/node 1,991,688 B.
+  // Current measured size + 10 KiB, rounded up to KiB.
+  // #3433 branch 1547c3b2e287: optimized local web/node 1,993,200 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
   // #3429 merged head 1bb3f1352988: local optimized web/node 1,993,725 B; +10 KiB rounded up.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; current measured headroom per rule 17.
+  // #3433 merge b57d4ab06df2 + master 4d399f716231: optimized local web/node 1,993,711 B.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up to KiB.
   weex: 2_003_968,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.

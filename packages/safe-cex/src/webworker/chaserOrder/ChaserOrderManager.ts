@@ -12,6 +12,7 @@ import {
   PositionSide,
   StoreData,
 } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { getTickerPredictedBestAsk } from '../../utils/getTickerPredictedBestAsk';
 import { getTickerPredictedBestBid } from '../../utils/getTickerPredictedBestBid';
 import { adjust } from '../../utils/safe-math';
@@ -292,7 +293,7 @@ export class ChaserOrderManager {
     } catch (e) {
       if (exchange.isDisposed) return [];
       placementError = e;
-      console.error(e);
+      diagnosticConsole.error(e);
       this.log(`placeOrder exception: ${e}`, instance);
     }
 

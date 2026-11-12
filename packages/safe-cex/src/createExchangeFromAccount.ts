@@ -6,6 +6,7 @@ import { assertBetaVenue } from './exchanges/rust/betaVenues';
 import { createExchange } from './index';
 import { getTransport } from './transport/registry';
 import { resolveAccountTransport } from './transport/tealstreet/transportResolution';
+import { diagnosticConsole } from './utils/diagnosticRedaction';
 
 type KucoinBrokerConfig = NonNullable<NonNullable<ExchangeOptions['extra']>['kucoinBroker']>;
 
@@ -104,7 +105,7 @@ export function accountToExchangeOptions(
     throw new Error(`[${account.exchange}] Invalid metadata: requiresCors and forbidCors are both true`);
   }
   if (metadata.enforceWsTunnel && metadata.supportsTunnel === false) {
-    console.warn(
+    diagnosticConsole.warn(
       `[${account.exchange}] Metadata warning: enforceWsTunnel is true but supportsTunnel is false. ` +
         `enforceWsTunnel takes precedence — tunnel will be enabled.`,
     );
