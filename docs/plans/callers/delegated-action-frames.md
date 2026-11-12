@@ -343,3 +343,54 @@ from the captured protective command shape plus native completion, never from an
 ACK or a missing reply. The SDK accepts it only for a protection-only request;
 ordinary empty placement results and interrupted protection writes stay unknown.
 No venue order ID is invented.
+
+
+## Algo parameter amendments in v1
+
+`algo {op:'chaser:amend',data:{id,options:ChaserOrderOptions}}` and
+`algo {op:'twap:amend',data:{id,options:TwapOptions}}` extend the existing v1
+`order.action` vocabulary. There is no version bump, new connection, generic
+method fallback or browser signing round trip. They require the same six
+captured capabilities as other full-write actions. Older boxes/ledgers must
+answer typed `unsupported`; a capability flag never authorizes discarding a
+new operation or field.
+
+An amendment explicitly retires the identified job and starts a replacement
+with a **new job ID**. `options.size` is the caller's requested **remaining
+quantity**, not a new lifetime total; the server never subtracts fills from a
+possibly stale client snapshot. Symbol, side, reduce-only intent and account
+cannot change. The caller must reconcile fills before choosing that quantity.
+The account's existing native factories validate and run the replacement.
+
+For a chase, the old factory must finish cleanup with positive proof that no
+old order may remain open before a replacement can start. An unresolved cleanup
+never starts another chase. Pending replacements retain the original registration,
+UUID deadline and monotonic age bound and count toward drain/release work.
+Retiring that registration, expiry or a later stop/nuke cancels the pending
+replacement. It cannot return on reconnect. Amendments refuse while an EXEC
+continuation/nuke is outstanding; a later EXEC supersedes pending replacements
+because it can stop jobs through the same native factories. Each account has
+at most 50 pending chase replacements.
+
+For a TWAP, amendment refuses **before stopping the old schedule** while any
+account slice placement, its own in-flight slice, current limit order or child
+chase is unsettled. Once quiescent, stop and replacement creation run together
+inside normal user/box admission. A slice's chaser cannot be amended independently
+of its parent TWAP. This avoids overlapping schedules or abandoning an old child.
+Invalid replacement parameters and identity changes also refuse before mutation.
+
+A refusal before any old job is touched carries proven `refused/notSent`.
+Once retirement starts, any failure is `unknown`, including expiry before the
+new job starts. Even successful factory admission returns `unknown`, never
+`applied`: the venue writes and future execution are asynchronous. The ordinary
+account `msg` event `algo:amended` carries
+`{op:'chaser:amend'|'twap:amend',previousId,id}` to correlate a successfully
+admitted replacement; it is not proof of fills or successful execution and is
+not a durable receipt. Store and lifecycle events describe the actual jobs.
+A lost event or an unknown action never permits replay.
+
+Margin mode, position mode, schedule cancellation, STP, account tier,
+`stopAlgos`, chaser start/terminate and TWAP start/pause/resume/stop/cleanup/state
+are already members of this full-write v1 vocabulary. Their venue capabilities
+remain authoritative: Bybit refuses schedule/STP/tier before native dispatch.
+LOCAL and COSIGNED dispatch and the shared algo crates are unchanged.

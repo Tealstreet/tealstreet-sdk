@@ -14,10 +14,18 @@ type State = Omit<TwapState, 'activeMarket'> & { activeMarket: { symbol: string 
 export type DelegatedAlgoAction =
   | { kind: 'algo'; op: 'exec'; data: { command: string; symbol?: string } }
   | { kind: 'algo'; op: 'chaser:start'; data: ChaserOrderOptions }
+  | { kind: 'algo'; op: 'chaser:amend'; data: { id: string; options: ChaserOrderOptions } }
+  | { kind: 'algo'; op: 'twap:amend'; data: { id: string; options: Options } }
   | { kind: 'algo'; op: 'chaser:terminate' | 'twap:resume' | 'twap:pause' | 'twap:stop' | 'twap:cleanup'; data: string }
   | { kind: 'algo'; op: 'chaser:terminateAll'; data: Record<string, never> }
   | { kind: 'algo'; op: 'twap:start'; data: Options }
   | { kind: 'algo'; op: 'twap:state'; data: { id: string; ownerId?: string; options: Options; state: State }[] };
+/** Correlation only: factory admission does not prove execution or fills. */
+export interface DelegatedAlgoAmendedEvent {
+  op: 'chaser:amend' | 'twap:amend';
+  previousId: string;
+  id: string;
+}
 const optionsFields = [
   'accountName',
   'activeMarket',
@@ -106,6 +114,18 @@ export function isDelegatedAlgoAction(v: Record<string, unknown>): v is Record<s
   if (!keys(v, ['kind', 'op', 'data'])) return false;
   const d = v.data;
   switch (v.op) {
+    case 'chaser:amend':
+    case 'twap:amend':
+      return (
+        record(d) &&
+        keys(d, ['id', 'options']) &&
+        target(d.id) &&
+        isDelegatedAlgoAction({
+          kind: 'algo',
+          op: v.op === 'chaser:amend' ? 'chaser:start' : 'twap:start',
+          data: d.options,
+        })
+      );
     case 'exec':
       return (
         record(d) &&

@@ -17,7 +17,13 @@ pub const MAX_CAP_MS: u64 = 86_400_000;
 pub fn starts_job(op: &str) -> bool {
     matches!(
         op,
-        "chaser:start" | "twap:start" | "twap:resume" | "twap:state" | "exec"
+        "chaser:start"
+            | "chaser:amend"
+            | "twap:start"
+            | "twap:amend"
+            | "twap:resume"
+            | "twap:state"
+            | "exec"
     )
 }
 

@@ -192,6 +192,18 @@ Accepted long-lived jobs keep their account scope; queued admission and EXEC
 continuations keep their captured registration/deadline fences. The complete
 closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
 LOCAL and COSIGNED method forwarding is unchanged.
+
+Typed `chaser:amend` / `twap:amend` are explicit stop-and-replace operations:
+the caller supplies remaining quantity, immutable account/symbol/side/reduce-only
+intent and full replacement options; the replacement gets a new job ID. They
+reuse the account's native factories in the host and keep wire version 1.
+Chase cleanup must positively settle before replacement; TWAPs with unsettled
+slices/children refuse before schedule mutation. Deferred replacements retain
+their original registration/deadline and participate in drain/release accounting.
+Later stop/nuke/EXEC work, expiry or retired authority prevents replacement.
+An `algo:amended` account event correlates old/new IDs; it never changes the
+outbox's unknown action into applied or replayable. See the same caller contract
+for detailed bounds and refusal semantics.
 Native account-wide cancellation requires the venue's `nukeAccountCancel`
 capability; it never falls back to an incomplete symbol census.
 

@@ -16,6 +16,7 @@ const actions: DelegatedAction[] = [
   { kind: 'cancelAll' },
   { kind: 'nuke' },
   ...fullWrites.map(({ action }) => action as unknown as DelegatedAction),
+  ...amendments.map(({ action }) => action as unknown as DelegatedAction),
 ];
 function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const writes: string[] = [];
@@ -94,7 +95,11 @@ describe('DELEGATED versioned actions', () => {
     expect(sent.d.version).toBe(1);
     expect(sent.d.action).not.toHaveProperty('version');
     const frame = outcome(id, action);
-    Object.assign(frame.d, { outcome: 'unsupported', result: null, error: { message: 'Unsupported v1 field', outcome: 'unsupported' } });
+    Object.assign(frame.d, {
+      outcome: 'unsupported',
+      result: null,
+      error: { message: 'Unsupported v1 field', outcome: 'unsupported' },
+    });
     for (const invalid of [
       { ...frame.d, version: 2 },
       { ...frame.d, seq: 2 },
@@ -108,7 +113,10 @@ describe('DELEGATED versioned actions', () => {
     expect(box.entries()[0]).toMatchObject({ state: 'unsupported', error: { outcome: 'unsupported' } });
     expect(box.entries()[0].notSentEvidence).toBeUndefined();
     // Later queue uncertainty / stale business results cannot revoke rejection.
-    await box.receive(c, { ...frame, d: { ...frame.d, outcomeSeq: 42, outcome: 'unknown', error: { message: 'uncertain', outcome: 'unknown' } } });
+    await box.receive(c, {
+      ...frame,
+      d: { ...frame.d, outcomeSeq: 42, outcome: 'unknown', error: { message: 'uncertain', outcome: 'unknown' } },
+    });
     await box.receive(c, { ...outcome(id, action), d: { ...outcome(id, action).d, outcomeSeq: 43 } });
     expect(box.entries()[0].state).toBe('unsupported');
     box.close();
@@ -378,7 +386,6 @@ describe('DELEGATED versioned actions', () => {
   });
 });
 
-
 describe('DELEGATED v1 algo replacement amendments', () => {
   it.each(amendments)('accepts and fingerprints $action.op inside v1', ({ action, fingerprint }) => {
     expect(isDelegatedAction(action)).toBe(true);
@@ -398,7 +405,9 @@ describe('DELEGATED v1 algo replacement amendments', () => {
   });
   it.each(amendments)('closes $action.op replacement options and outer fields', ({ action }) => {
     expect(isDelegatedAction({ ...action, data: { ...action.data, future: true } })).toBe(false);
-    expect(isDelegatedAction({ ...action, data: { ...action.data, options: { ...action.data.options, future: true } } })).toBe(false);
+    expect(
+      isDelegatedAction({ ...action, data: { ...action.data, options: { ...action.data.options, future: true } } }),
+    ).toBe(false);
     expect(isDelegatedAction({ ...action, data: { ...action.data, id: '' } })).toBe(false);
   });
 });

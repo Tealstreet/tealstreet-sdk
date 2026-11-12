@@ -4,6 +4,8 @@ use crate::methods::{Plan, Refused, Reply};
 use safe_cex_engine::{Capabilities, Store};
 use serde_json::{Value, json};
 
+pub(crate) mod unique_json;
+
 pub(crate) fn text(v: &str) -> bool {
     !v.is_empty() && v.len() <= 256
 }
@@ -219,6 +221,19 @@ pub(crate) fn all_leverage(store: &Store, leverage: f64) -> Result<Vec<Plan>, Re
 /// These are typed op variants, never arbitrary callMethod or raw engine JSON.
 pub(crate) fn algo(op: &str, data: &Value) -> Result<(), &'static str> {
     let valid = match op {
+        "chaser:amend" | "twap:amend" => {
+            only(data, &["id", "options"])
+                && data["id"].as_str().is_some_and(text)
+                && algo(
+                    if op == "chaser:amend" {
+                        "chaser:start"
+                    } else {
+                        "twap:start"
+                    },
+                    &data["options"],
+                )
+                .is_ok()
+        }
         "exec" => data.as_object().is_some_and(|v| {
             v.keys().all(|k| matches!(k.as_str(), "command" | "symbol"))
                 && v.get("command")
@@ -259,6 +274,10 @@ pub(crate) fn algo(op: &str, data: &Value) -> Result<(), &'static str> {
 }
 pub(crate) fn algo_account_matches(op: &str, data: &Value, account: &str) -> bool {
     match op {
+        "twap:amend" => data["options"]["accountName"] == account,
+        "chaser:amend" => data["options"]
+            .get("accountName")
+            .is_none_or(|v| v == account),
         "twap:start" => data["accountName"] == account,
         "chaser:start" => data.get("accountName").is_none_or(|v| v == account),
         "twap:state" => data.as_array().is_some_and(|rows| {

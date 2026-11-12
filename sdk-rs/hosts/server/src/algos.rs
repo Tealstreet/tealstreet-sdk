@@ -16,6 +16,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
+mod amend;
+
 /// What a session asks of an account's algos.
 pub enum AlgoInput {
     Op {
@@ -946,12 +948,17 @@ pub async fn run(
         Box::new(twap.clone()),
         Box::new(exec.clone()),
     ]);
+    let mut amendments = amend::Amendments::default();
+    let pending_amends = amendments.pending.clone();
+    let mut amend_tick = tokio::time::interval(Duration::from_millis(25));
+    amend_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut published = String::new();
     // On its own task, since `feed.next()` must not be cancelled by a timer. Stopped
     // chases count until their cleanup ends: it may still need a signature.
     {
         let (book, twap, exec, name) = (book.clone(), twap.clone(), exec.clone(), name.clone());
         let running = running.clone();
+        let pending_amends = pending_amends.clone();
         cx.spawn(async move {
             let mut every = tokio::time::interval(RECOUNT_EVERY);
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -960,7 +967,7 @@ pub async fn run(
                 running.refresh(
                     &book.active_chasers(),
                     &twap.active_twaps(&name),
-                    exec.pending_operations() + twap.pending_placements(),
+                    exec.pending_operations() + twap.pending_placements() + pending_amends.get(),
                 );
             }
         });
@@ -991,6 +998,11 @@ pub async fn run(
     // the algos and leaves the account running.
     let ended = loop {
         tokio::select! {
+            _ = amend_tick.tick(), if !amendments.is_empty() => {
+                amendments.poll(&cx, &book, &running);
+                running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements() + pending_amends.get());
+                publish(&mut published);
+            }
             batch = feed.next() => {
                 let Some(batch) = batch else { break None };
                 for notice in &batch.notices {
@@ -1036,7 +1048,7 @@ pub async fn run(
                     if let Some(signer) = &link_signer { signer.mark_unavailable(); }
                     return;
                 }
-                Some(AlgoInput::Op { op, mut data, origin, action }) => {
+                Some(AlgoInput::Op { op, mut data, origin, mut action }) => {
                     if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
@@ -1078,17 +1090,28 @@ pub async fn run(
                         port.emit("error", serde_json::to_string(error).unwrap());
                         continue;
                     }
-                    let dispatch = || {
+                    let mut dispatch = || {
                         // Factory identity/counters belong to the resident account.
                         // Only this EXEC's adapter carries the action command port
                         // and rechecks its fence before deferred factory handoffs.
-                        let result = if op == "exec" && let Some(receipt) = action.as_ref() {
+                        match op.as_str() {
+                            "chaser:terminate" => { if let Ok(id) = serde_json::from_str::<String>(&data) { amendments.cancel(Some(&id)); } }
+                            "chaser:terminateAll" | "exec" => amendments.cancel(None),
+                            _ => {}
+                        }
+                        let result = if matches!(op.as_str(), "chaser:amend" | "twap:amend") && action.is_some() {
+                            let receipt = action.take().unwrap();
+                            if exec.pending_operations() != 0 {
+                                receipt.finish(Err(serde_json::json!({"message":"EXEC work is unsettled; no amendment sent","outcome":"notSent"})));
+                            } else { amendments.start(&op, &data, receipt, &cx, &book, &twap, &running); }
+                            Some(Ok(()))
+                        } else if op == "exec" && let Some(receipt) = action.as_ref() {
                             let guard = receipt.guard();
                             let command_port = Rc::new(ActionNukePort { port: port.clone(), guard: guard.clone() });
                             Some(exec.handle_guarded(&data, &cx, command_port,
                                 Rc::new(move || guard.check().map_err(str::to_owned))))
                         } else { registry.dispatch(&op, &data, &cx) };
-                        running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
+                        running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements() + pending_amends.get());
                         result
                     };
                     let dispatched = if crate::user_drain::starts_job(&op) {
@@ -1161,6 +1184,7 @@ pub async fn run(
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
+                            amendments.cancel(None);
                             exec.nuke(mode, &nuke_cx)
                         }
                         _ => Err(serde_json::json!({
@@ -1169,7 +1193,7 @@ pub async fn run(
                         })),
                         },
                     };
-                    running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
+                    running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements() + pending_amends.get());
                     drop(admission);
                     let (port, name, who) = (port.clone(), name.clone(), who.clone());
                     let action_started = action.is_some();

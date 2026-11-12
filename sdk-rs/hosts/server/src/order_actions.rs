@@ -108,6 +108,7 @@ pub enum Action {
     },
     Algo {
         op: String,
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize")]
         data: Value,
     },
 }
