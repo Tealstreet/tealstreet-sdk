@@ -355,3 +355,131 @@ async fn partial_activation_native_market_restore_is_refused() {
 async fn partial_activation_native_chaser_restore_is_refused() {
     native_restore_is_refused(true).await;
 }
+
+fn decoded_restored_twap(
+    id: &str,
+    status: Value,
+    expected: safe_cex_algo_twap::TwapStatus,
+) -> Value {
+    let mut row = restored_twap(id, "running", false);
+    row["state"]["status"] = status;
+    let parsed: safe_cex_algo_twap::PersistedTwap =
+        serde_json::from_value(row.clone()).expect("valid complete runtime restore row");
+    assert_eq!(parsed.state.status, expected);
+    row
+}
+
+#[tokio::test]
+async fn partial_activation_decoded_running_restore_is_visibly_refused() {
+    for status in [json!("running"), json!({"running":null})] {
+        let row = decoded_restored_twap(
+            "decoded-running",
+            status,
+            safe_cex_algo_twap::TwapStatus::Running,
+        );
+        restore_is_refused(json!([row])).await;
+    }
+}
+
+#[tokio::test]
+async fn partial_activation_mixed_decoded_restore_is_visibly_refused() {
+    restore_is_refused(json!([
+        decoded_restored_twap(
+            "decoded-paused",
+            json!({"paused":null}),
+            safe_cex_algo_twap::TwapStatus::Paused
+        ),
+        decoded_restored_twap(
+            "decoded-running",
+            json!({"running":null}),
+            safe_cex_algo_twap::TwapStatus::Running
+        ),
+    ]))
+    .await;
+}
+
+#[tokio::test]
+async fn partial_activation_decoded_paused_restore_preserves_dispatch() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let (account, mut inbox) =
+                delegated_account_with_algo_inbox(&registry, "A", "bybit", tape.clone());
+            let (mut session, _sent) = joined(registry.clone(), "A", account.clone()).await;
+            while inbox.try_recv().is_ok() {}
+            let rows = json!([decoded_restored_twap(
+                "decoded-paused",
+                json!({"paused":null}),
+                safe_cex_algo_twap::TwapStatus::Paused
+            )]);
+            send_algo(&mut session, "twap:state", rows.clone()).await;
+            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+                panic!("missing paused restore dispatch");
+            };
+            assert_eq!(op, "twap:state");
+            assert_eq!(data, rows.to_string());
+            assert_eq!(origin, format!("socket:{}", session.socket));
+            assert!(tape.writes.lock().unwrap().is_empty());
+            session.close();
+            drop(inbox);
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn partial_activation_decoded_row_restore_is_visibly_refused() {
+    let row = decoded_restored_twap(
+        "decoded-row",
+        json!("running"),
+        safe_cex_algo_twap::TwapStatus::Running,
+    );
+    let row = json!([row["id"], null, row["options"], row["state"]]);
+    let parsed: safe_cex_algo_twap::PersistedTwap =
+        serde_json::from_value(row.clone()).expect("valid complete runtime restore row");
+    assert_eq!(parsed.state.status, safe_cex_algo_twap::TwapStatus::Running);
+    restore_is_refused(json!([row])).await;
+}
+
+#[tokio::test]
+async fn partial_activation_cosigned_decoded_running_restore_preserves_dispatch() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let (account, mut inbox) = testing::account_on(
+                testing::HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: Some(0.),
+                    ticker: true,
+                },
+                ("A", "synthetic-main", "bybit"),
+                Some(SignerLink::new(0, Arc::new(|_| false))),
+                init("bybit").fingerprint(),
+                Arc::new(crate::algos::Running::new(Arc::new(
+                    tokio::sync::watch::channel(0).0,
+                ))),
+            );
+            testing::register(&registry, &account);
+            let (mut session, _sent) = joined(registry.clone(), "A", account.clone()).await;
+            while inbox.try_recv().is_ok() {}
+            let rows = json!([decoded_restored_twap(
+                "cosigned-decoded-running",
+                json!({"running":null}),
+                safe_cex_algo_twap::TwapStatus::Running
+            )]);
+            send_algo(&mut session, "twap:state", rows.clone()).await;
+            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+                panic!("missing COSIGNED restore dispatch");
+            };
+            assert_eq!(op, "twap:state");
+            assert_eq!(data, rows.to_string());
+            assert_eq!(origin, format!("socket:{}", session.socket));
+            assert!(account.delegated.is_none());
+            assert!(account.link.is_some());
+            session.close();
+            drop(inbox);
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}

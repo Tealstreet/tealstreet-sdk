@@ -6,6 +6,7 @@ use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
 use crate::state::{Log, Metrics};
+use safe_cex_algo_twap::{PersistedTwap, TwapStatus};
 use safe_cex_engine::capabilities::CancelAll;
 use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use serde_json::{Value, json};
@@ -1363,7 +1364,11 @@ impl Session {
                     && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
                         || op == "twap:state"
                             && msg.data.as_array().is_some_and(|rows| {
-                                rows.iter().any(|row| row["state"]["status"] == "running")
+                                rows.iter().any(|row| {
+                                    serde_json::from_value::<PersistedTwap>(row.clone()).is_ok_and(
+                                        |entry| entry.state.status == TwapStatus::Running,
+                                    )
+                                })
                             })) =>
             {
                 let message = format!(
