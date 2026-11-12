@@ -78,6 +78,11 @@ fn all_families_use_the_existing_provider_and_refuse_other_keys_and_statements()
 #[test]
 fn closed_statement_codec_and_non_transaction_messages() {
     let proof = statement("attempt-1");
+    // Independent SHA-256 fixture over the specified binary field layout.
+    assert_eq!(
+        safe_cex_crypto::hex(&proof.digest()),
+        "ad40a6f83222d4a33403234f3b12553dbfe7c0e60a00b7e3b71c76dbef5523a1"
+    );
     let json = serde_json::to_string(&proof).unwrap();
     assert_eq!(Statement::from_json(&json).unwrap(), proof);
     assert!(Statement::from_json(&json.replace("tealstreet-admission-v1", "transaction")).is_err());

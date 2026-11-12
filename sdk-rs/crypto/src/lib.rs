@@ -36,6 +36,7 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
+pub mod admission;
 pub mod ed25519;
 pub mod eip712;
 pub mod es256;
