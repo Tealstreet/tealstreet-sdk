@@ -31,7 +31,6 @@ let visibilityListener: (() => void) | undefined;
 let onlineListener: (() => void) | undefined;
 let uploadInProgress = false;
 let pendingLogBatches: LogBatch[] = [];
-let activeLogBatch: LogBatch | undefined;
 
 const LOG_FLUSH_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 5;
@@ -104,7 +103,6 @@ export const resetLoggingStateForTests = () => {
   logQueue = [];
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
-  activeLogBatch = undefined;
   uploadInProgress = false;
   resetLogIngestToken();
 };
@@ -195,34 +193,17 @@ export const dumpLogQueue = () => {
   void drainLogBatches();
 };
 
-function retireLoggingOwner() {
-  const owner = { userId: localUserId, epoch: logIngestTokenEpoch };
-  const entries = [
-    ...pendingLogBatches.filter((batch) => batch !== activeLogBatch).flatMap((batch) => batch.entries),
-    ...logQueue,
-  ].filter((entry) => sameLoggingOwner(entry.owner, owner));
+function discardLoggingOwnerWork() {
+  // A held token does not authorize deferred work after its lifecycle ends.
+  // In-flight uploads also recheck their captured owner after each await.
   logQueue = [];
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
-  const token = cachedLogIngestToken;
-  const origin = getLogIngestOrigin();
-  // A final attempt can use only the old owner's already-held authorization.
-  // Cookie-authenticated fallback cannot preserve ownership after a switch.
-  if (
-    entries.length &&
-    token &&
-    sameLoggingOwner(token, owner) &&
-    token.expiresAt > Date.now() &&
-    origin &&
-    isPageReadyForLogging(true)
-  ) {
-    void sendToGrafana({ owner, entries }, { token: { ...token }, origin });
-  }
 }
 
 export const startLoggingToGrafana = (userId: string, username?: string) => {
   if (userId !== localUserId) {
-    retireLoggingOwner();
+    discardLoggingOwnerWork();
     resetLogIngestToken();
   }
   localUserId = userId;
@@ -272,7 +253,7 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
       clearInterval(activeFlushInterval);
       flushInterval = undefined;
       if (isCurrentOwner()) {
-        retireLoggingOwner();
+        discardLoggingOwnerWork();
         localUserId = '';
         localUsername = undefined;
         resetLogIngestToken();
@@ -289,10 +270,10 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
   };
 };
 
-const isPageReadyForLogging = (includeHidden = false) => {
+const isPageReadyForLogging = () => {
   const isVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
   const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
-  return (includeHidden || isVisible) && isOnline;
+  return isVisible && isOnline;
 };
 
 const getLogIngestOrigin = () => {
@@ -357,15 +338,12 @@ const drainLogBatches = async () => {
           pendingLogBatches.shift();
           continue;
         }
-        activeLogBatch = batch;
         const complete = await sendToGrafana(batch);
-        activeLogBatch = undefined;
         if (!complete) return;
         pendingLogBatches = pendingLogBatches.filter((pending) => pending !== batch);
       }
     }
   } finally {
-    activeLogBatch = undefined;
     uploadInProgress = false;
     if (!isLoggingOwnerCurrent(owner.userId, owner.epoch) && pendingLogBatches.length > 0) {
       void drainLogBatches();
@@ -373,16 +351,10 @@ const drainLogBatches = async () => {
   }
 };
 
-const sendToGrafana = async (
-  batch: LogBatch,
-  retiring?: { token: OwnedLogIngestToken; origin: string },
-): Promise<boolean> => {
+const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
   const { userId, epoch: ownerEpoch } = batch.owner;
   const queue = batch.entries.filter((entry) => sameLoggingOwner(entry.owner, batch.owner)).map((entry) => entry.value);
-  const isAuthorized = () =>
-    retiring
-      ? sameLoggingOwner(retiring.token, batch.owner) && retiring.token.expiresAt > Date.now()
-      : isLoggingOwnerCurrent(userId, ownerEpoch);
+  const isAuthorized = () => isLoggingOwnerCurrent(userId, ownerEpoch);
   // Skip logging in development unless explicitly forced
   // Default to logging if process is undefined (e.g., in web workers)
   let isDevelopment = false;
@@ -401,10 +373,10 @@ const sendToGrafana = async (
   }
   if (queue.length === 0) return true;
 
-  const maxRetries = retiring ? 0 : MAX_RETRIES;
+  const maxRetries = MAX_RETRIES;
   for (let retries = 0; retries <= maxRetries; retries++) {
     if (!isAuthorized()) return true;
-    if (!isPageReadyForLogging(Boolean(retiring))) return false;
+    if (!isPageReadyForLogging()) return false;
     const reportMetrics = Date.now() - lastMetricsReportAt >= METRICS_REPORT_INTERVAL_MS;
     const metricsSnapshot = reportMetrics ? { ...loggingMetrics } : undefined;
     const nr = {
@@ -435,10 +407,10 @@ const sendToGrafana = async (
     try {
       loggingMetrics.uploadsStarted++;
       const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
-      const logIngestOrigin = retiring?.origin ?? getLogIngestOrigin();
+      const logIngestOrigin = getLogIngestOrigin();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (logIngestOrigin) {
-        const token = retiring?.token.token ?? (await getLogIngestToken(baseUrl, batch.owner));
+        const token = await getLogIngestToken(baseUrl, batch.owner);
         if (!token || !isAuthorized()) return true;
         headers.Authorization = `Bearer ${token}`;
       }

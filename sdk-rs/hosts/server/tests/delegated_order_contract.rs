@@ -99,11 +99,11 @@ fn frozen_order_frames_key_epoch_and_canonical_fingerprint() {
 }
 
 #[test]
-fn capability_advertisement_matches_the_compiled_activation_gate() {
+fn capability_advertisement_matches_the_runtime_activation_gate() {
     assert_eq!(
         safe_cex_exchange_server::http::capabilities_json()["transports"]["accountWorkerWebSocket"]
             ["delegatedOrderFramesV1"],
-        cfg!(feature = "delegated-order-frames")
+        contract::runtime_enabled()
     );
     assert_eq!(
         contract::enabled(),

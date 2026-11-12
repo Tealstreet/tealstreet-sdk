@@ -6,6 +6,7 @@ use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
 use crate::state::{Log, Metrics};
+use safe_cex_algo_twap::{PersistedTwap, TwapStatus};
 use safe_cex_engine::capabilities::CancelAll;
 use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use serde_json::{Value, json};
@@ -14,7 +15,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 
+mod order_actions;
 mod order_frames;
+mod settings;
+
+#[derive(Clone, Copy)]
+pub(super) enum OrderReceipt {
+    Placement(u64),
+    Action {
+        seq: u64,
+        kind: &'static str,
+        deadline: crate::order_actions::ActionDeadline,
+    },
+}
 
 /// Who connected, as verified before the upgrade.
 #[derive(Clone)]
@@ -110,27 +123,26 @@ pub struct Session {
     early: HashMap<String, Vec<Topic>>,
     /// Moved off a draining box: its accounts are released, never parked here.
     moved: bool,
+    /// Captured at connection creation; deployments drain/restart to change it.
+    order_frames_enabled: bool,
     handovers: crate::delegated::Handovers,
     pending_verifications: HashMap<String, PendingVerification>,
     next_verification: u64,
     verified: tokio::sync::mpsc::UnboundedSender<JoinCompletion>,
     verified_rx: Option<tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>>,
-    #[cfg(test)]
-    cosigned_admission_test: bool,
 }
 
 struct PendingVerification {
     generation: u64,
     task: tokio::task::JoinHandle<()>,
     out: Out,
-    #[cfg(test)]
     cosigned_link: Option<Arc<safe_cex_remote_signer::SignerLink>>,
+    _signer_output: Option<crate::out::OutputLifetime>,
 }
 
 impl Drop for PendingVerification {
     fn drop(&mut self) {
         self.task.abort();
-        #[cfg(test)]
         if let Some(link) = &self.cosigned_link {
             link.mark_unavailable();
         }
@@ -146,8 +158,6 @@ pub struct JoinCompletion {
     account_name: String,
     candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
     probe: Option<ProbedInit>,
-    #[cfg(test)]
-    cosigned: Option<cosigned_admission_test_support::Completion>,
 }
 
 struct ProbedInit {
@@ -258,13 +268,12 @@ impl Session {
             refused: HashMap::new(),
             early: HashMap::new(),
             moved: false,
+            order_frames_enabled: crate::order_contract::runtime_enabled(),
             handovers: crate::delegated::Handovers::default(),
             pending_verifications: HashMap::new(),
             next_verification: 0,
             verified,
             verified_rx: Some(verified_rx),
-            #[cfg(test)]
-            cosigned_admission_test: false,
         }
     }
 
@@ -383,11 +392,18 @@ impl Session {
             > + Send
             + 'static,
     {
-        self.start_probe_verification(name, async move { (verify.await, None) });
+        self.start_probe_verification(name, None, async move { (verify.await, None) });
     }
 
-    fn start_probe_verification<F>(&mut self, name: String, verify: F)
-    where
+    fn start_probe_verification<F>(
+        &mut self,
+        name: String,
+        signer: Option<(
+            Arc<safe_cex_remote_signer::SignerLink>,
+            crate::out::OutputLifetime,
+        )>,
+        verify: F,
+    ) where
         F: std::future::Future<
                 Output = (
                     Result<crate::delegated::Credentials, crate::delegated::Refused>,
@@ -397,6 +413,7 @@ impl Session {
             + 'static,
     {
         self.cancel_verification(&name);
+        let (cosigned_link, signer_output) = signer.unzip();
         self.next_verification += 1;
         let generation = self.next_verification;
         let user = self.user().to_owned();
@@ -414,8 +431,6 @@ impl Session {
                 account_name,
                 candidate,
                 probe,
-                #[cfg(test)]
-                cosigned: None,
             });
         });
         self.pending_verifications.insert(
@@ -424,8 +439,8 @@ impl Session {
                 generation,
                 task,
                 out,
-                #[cfg(test)]
-                cosigned_link: None,
+                cosigned_link,
+                _signer_output: signer_output,
             },
         );
     }
@@ -452,86 +467,96 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
-        #[cfg(test)]
-        if let Some(probed) = completed.cosigned {
-            return self.complete_cosigned_test_admission(probed, out).await;
+        if !self.admission_token_valid() {
+            self.drop_early(&completed.account_name, "verification refused");
+            out.send(envelope::init_unverified(&completed.account_name, false));
+            return Ok(());
         }
         if let Some(probe) = completed.probe {
-            match (completed.candidate, probe.permit) {
-                (Ok(candidate), Ok(permit)) => {
-                    out = out.account(&completed.account_name);
-                    let account = self
-                        .registry
-                        .obtain_probed_delegated(
+            let candidate = completed.candidate.ok();
+            out = out.account(&completed.account_name);
+            let account = match probe.permit {
+                Ok(permit) => {
+                    self.registry
+                        .obtain_probed_join(
                             self.user(),
                             &probe.init,
                             self.socket,
                             self.identity.token.clone(),
                             out.outbox(),
-                            candidate.pair(),
+                            candidate.as_ref().map(crate::delegated::Credentials::pair),
                             permit,
                         )
-                        .await;
-                    drop(candidate);
-                    match account {
-                        Ok(account) => {
-                            self.metrics.note_init();
-                            if self
-                                .joined
-                                .get(&completed.account_name)
-                                .is_none_or(|joined| !Arc::ptr_eq(&joined.account, &account))
-                            {
-                                self.out.retire_account(&completed.account_name);
-                            }
-                            out = out.account(&completed.account_name);
-                            account.update_reply_outbox(self.socket, out.outbox());
-                            if let Some(joined) = self.joined.get_mut(&completed.account_name)
-                                && Arc::ptr_eq(&joined.account, &account)
-                            {
-                                let previous = std::mem::replace(&mut joined.out, out.clone());
-                                previous.retire_order_receipts();
-                                previous.finish_registration(&out);
-                                self.resnapshot(&completed.account_name).await;
-                            } else {
-                                if let Some(previous) = self.joined.remove(&completed.account_name)
-                                {
-                                    previous.out.retire_registration();
-                                    Self::leave_engine(previous);
-                                }
-                                self.join(account, out.clone()).await;
-                            }
-                            if self.joined.contains_key(&completed.account_name) {
-                                self.registry.interruptions.deliver(
-                                    self.user(),
-                                    &completed.account_name,
-                                    &out,
-                                );
-                                if let Some(kept) = self.registry.take_notice(
-                                    self.user(),
-                                    &completed.account_name,
-                                    &self.joined[&completed.account_name].account.fingerprint,
-                                    self.identity.resume_from.as_deref(),
-                                ) {
-                                    for frame in kept.frames(&completed.account_name) {
-                                        out.send(frame);
-                                    }
-                                }
-                            }
+                        .await
+                }
+                Err(refusal) => Err(refusal),
+            };
+            drop(candidate);
+            match account {
+                Ok(account) => {
+                    self.metrics.note_init();
+                    if self
+                        .joined
+                        .get(&completed.account_name)
+                        .is_none_or(|joined| !Arc::ptr_eq(&joined.account, &account))
+                    {
+                        self.out.retire_account(&completed.account_name);
+                    }
+                    out = out.account(&completed.account_name);
+                    account.sign_through_socket(
+                        self.socket,
+                        out.outbox(),
+                        self.identity.token.clone(),
+                    );
+                    if let Some(joined) = self.joined.get_mut(&completed.account_name)
+                        && Arc::ptr_eq(&joined.account, &account)
+                    {
+                        let previous = std::mem::replace(&mut joined.out, out.clone());
+                        previous.retire_order_receipts();
+                        previous.finish_registration(&out);
+                        self.resnapshot(&completed.account_name).await;
+                    } else {
+                        if let Some(previous) = self.joined.remove(&completed.account_name) {
+                            previous.out.retire_registration();
+                            Self::leave_engine(previous);
                         }
-                        Err(refusal) => {
-                            self.drop_early(&completed.account_name, "verification refused");
-                            out.send(envelope::init_unverified(
+                        self.join(account, out.clone()).await;
+                    }
+                    if self.joined.contains_key(&completed.account_name) {
+                        if self.joined[&completed.account_name]
+                            .account
+                            .delegated
+                            .is_some()
+                        {
+                            self.registry.interruptions.delegated_status(
+                                self.user(),
                                 &completed.account_name,
-                                refusal.transient,
-                            ));
+                                &out,
+                                crate::interruption::DelegatedKeyStatus::KeyAvailable,
+                            );
+                        }
+                        self.registry.interruptions.deliver(
+                            self.user(),
+                            &completed.account_name,
+                            &out,
+                        );
+                        if let Some(kept) = self.registry.take_notice(
+                            self.user(),
+                            &completed.account_name,
+                            &self.joined[&completed.account_name].account.fingerprint,
+                            self.identity.resume_from.as_deref(),
+                        ) {
+                            for frame in kept.frames(&completed.account_name) {
+                                out.send(frame);
+                            }
                         }
                     }
                 }
-                (_, permit) => {
+                Err(refusal) => {
                     self.drop_early(&completed.account_name, "verification refused");
                     out.send(envelope::init_unverified(
                         &completed.account_name,
-                        permit.err().is_some_and(|refusal| refusal.transient),
+                        refusal.transient,
                     ));
                 }
             }
@@ -547,14 +572,29 @@ impl Session {
         Ok(())
     }
 
-    fn delegated_init(&mut self, init: InitPayload) {
+    fn admission_token_valid(&self) -> bool {
+        self.identity.user.is_some()
+            && self
+                .identity
+                .token
+                .as_ref()
+                .is_some_and(|(_, expiry)| *expiry > now_ms())
+    }
+
+    fn admission_init(&mut self, init: InitPayload) {
         self.cancel_verification(&init.account_name);
-        if !crate::delegated::enabled(&init.exchange_name)
+        if !self.admission_token_valid()
+            || !crate::delegated::enabled(&init.exchange_name)
             || init.public_only == Some(true)
             || init.account_name.starts_with("__pub_")
             || self
                 .registry
-                .signing_mode_refusal(self.user(), &init, false, true)
+                .signing_mode_refusal(
+                    self.user(),
+                    &init,
+                    false,
+                    init.signing_mode.as_deref() == Some("delegated"),
+                )
                 .is_some()
             || self.pending_verifications.len() >= 64
         {
@@ -563,7 +603,44 @@ impl Session {
             self.refuse_handover(&init.account_name, false);
             return;
         }
-        self.open_probed_handover(init);
+        if init.signing_mode.as_deref() == Some("delegated") {
+            self.open_probed_handover(init);
+        } else if init.sealed.is_some() {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "verification refused");
+            self.refuse_handover(&init.account_name, false);
+        } else {
+            self.handovers.forget(&init.account_name);
+            self.open_probed_cosigned(init);
+        }
+    }
+
+    fn open_probed_cosigned(&mut self, init: InitPayload) {
+        let permit = self.registry.probe_permit(self.user(), &init);
+        let out = self.handover_out(&init.account_name);
+        let (signing_out, lifetime) = out.isolated();
+        let link = safe_cex_remote_signer::SignerLink::new(self.socket, signing_out.outbox());
+        let registry = self.registry.clone();
+        let user = self.user().to_owned();
+        let token = self.identity.token.clone();
+        self.start_probe_verification(
+            init.account_name.clone(),
+            Some((link.clone(), lifetime)),
+            async move {
+                let permit = match permit {
+                    Ok(permit) => {
+                        registry
+                            .probe_join(&user, &init, token, None, Some(link), permit)
+                            .await
+                    }
+                    Err(refusal) => Err(refusal),
+                };
+                (
+                    Err(crate::delegated::Refused),
+                    Some(ProbedInit { init, permit }),
+                )
+            },
+        );
     }
 
     fn open_probed_handover(&mut self, mut init: InitPayload) {
@@ -597,7 +674,7 @@ impl Session {
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
-        self.start_probe_verification(init.account_name.clone(), async move {
+        self.start_probe_verification(init.account_name.clone(), None, async move {
             let candidate = opening.open(
                 &init.exchange_name,
                 &init.key,
@@ -607,7 +684,7 @@ impl Session {
             let probe = match candidate.as_ref() {
                 Ok(candidate) => Some(ProbedInit {
                     permit: registry
-                        .probe_delegated(&user, &init, token, candidate, permit)
+                        .probe_join(&user, &init, token, Some(candidate), None, permit)
                         .await,
                     init,
                 }),
@@ -757,6 +834,10 @@ impl Session {
         if !self.identity.resumable {
             return;
         }
+        if self.identity.user.is_some() && !self.admission_token_valid() {
+            self.send(envelope::session(&self.resume_id, false));
+            return;
+        }
         if self
             .user_socket
             .as_ref()
@@ -789,9 +870,11 @@ impl Session {
                 && let Some(parked) = self.registry.take_over(&from, &user)
             {
                 let _ = tokio::time::timeout(TAKEOVER_WAIT, parked).await;
-                accounts = self
-                    .registry
-                    .resume(&from, &user, self.socket, token, &outbox);
+                if self.admission_token_valid() {
+                    accounts = self
+                        .registry
+                        .resume(&from, &user, self.socket, token, &outbox);
+                }
             }
             resumed = !accounts.is_empty();
             // `init` is logged either way; this tells a resume from a rebuild.
@@ -838,6 +921,34 @@ impl Session {
         };
         let authenticated = self.identity.user.is_some();
         match message {
+            Inbound::OrderAction(request) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                if text.len() > crate::order_contract::SUBMIT_MAX {
+                    self.handover_out(&request.account_name)
+                        .send(envelope::error(
+                            Some(&request.account_name),
+                            "not sent: action exceeds size limit",
+                        ));
+                    return Ok(());
+                }
+                self.order_action(request).await;
+            }
+            Inbound::OrderActionCancelQueued(cancel) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                if text.len() > crate::order_contract::ACK_MAX {
+                    self.handover_out(&cancel.account_name)
+                        .send(envelope::error(
+                            Some(&cancel.account_name),
+                            "not sent: action queue cancellation exceeds size limit",
+                        ));
+                    return Ok(());
+                }
+                self.action_cancel_queued(cancel);
+            }
             Inbound::OrderSubmit(submit) => {
                 if !authenticated {
                     return Err(Close::Policy("Unauthenticated order rejected"));
@@ -859,6 +970,12 @@ impl Session {
                 self.order_cancel_queued(cancel);
             }
             Inbound::Init(init) => self.init(*init).await?,
+            Inbound::ApplySettings(request) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated settings action rejected"));
+                }
+                self.apply_settings(request);
+            }
             Inbound::Msg(msg) => {
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
@@ -876,7 +993,6 @@ impl Session {
                         "Unauthenticated exchange-server sessions cannot sign",
                     ));
                 }
-                #[cfg(test)]
                 if self.pending_verifications.values().any(|pending| {
                     pending
                         .cosigned_link
@@ -990,12 +1106,7 @@ impl Session {
             return Ok(());
         }
         if init.signing_mode.as_deref() == Some("delegated") {
-            self.delegated_init(init);
-            return Ok(());
-        }
-        #[cfg(test)]
-        if self.cosigned_admission_test && init.signing_mode.as_deref() == Some("cosigned") {
-            self.init_cosigned_test_admission(init);
+            self.admission_init(init);
             return Ok(());
         }
         self.handovers.forget(&init.account_name);
@@ -1005,6 +1116,22 @@ impl Session {
             return Ok(());
         }
         self.forget_disposed();
+        let admission_enabled = self.registry.join_admission_enabled(&init.exchange_name);
+        if !public_only && admission_enabled {
+            if !self.admission_token_valid() {
+                self.drop_early(&init.account_name, "verification refused");
+                self.refuse_handover(&init.account_name, false);
+                return Ok(());
+            }
+            if self
+                .joined
+                .get(&init.account_name)
+                .is_none_or(|joined| joined.account.fingerprint != init.fingerprint())
+            {
+                self.admission_init(init);
+                return Ok(());
+            }
+        }
         if let Some(refusal) =
             self.registry
                 .signing_mode_refusal(self.user(), &init, public_only, false)
@@ -1032,7 +1159,7 @@ impl Session {
             self.resnapshot(&init.account_name).await;
             return Ok(());
         }
-        // Another live socket holds it with other settings: keep both as they are.
+        // Existing private settings stay until an admitted client explicitly resets them.
         if let Some(refusal) =
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
@@ -1267,8 +1394,11 @@ impl Session {
         };
         if msg.op == "delegated-key-req" {
             self.cancel_verification(&name);
-            if crate::delegated::enabled("bybit") {
-                self.issue_handover(&name);
+            if let Some(venue) = self
+                .handover_venue(&name, &msg.data)
+                .filter(|venue| crate::delegated::enabled(venue))
+            {
+                self.issue_handover(&name, &venue);
             } else {
                 self.handovers.forget(&name);
                 self.drop_early(&name, "delegated init refused");
@@ -1355,6 +1485,34 @@ impl Session {
                 "updatePositions:done",
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
+            (op, _, _)
+                if self.joined[&name].account.delegated.is_some()
+                    && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
+                        || op == "twap:state"
+                            && msg.data.as_array().is_some_and(|rows| {
+                                rows.iter().any(|row| {
+                                    serde_json::from_value::<PersistedTwap>(row.clone()).is_ok_and(
+                                        |entry| entry.state.status == TwapStatus::Running,
+                                    )
+                                })
+                            })) =>
+            {
+                let message = format!(
+                    "DelegatedActionUnavailable: DELEGATED {op} is unavailable; only place and reduce-only close are enabled"
+                );
+                if op == "exec" && msg.data.get("reqId").is_some() {
+                    self.send(envelope::msg(
+                        &name,
+                        "exec-result",
+                        json!({
+                            "reqId": msg.data["reqId"], "handled": true, "success": false,
+                            "error": message,
+                        }),
+                    ));
+                } else {
+                    self.send(envelope::error(Some(&name), &message));
+                }
+            }
             (op, _, _) if crate::algos::OPS.contains(&op) => {
                 let algos = self.joined[&name].account.algos.clone();
                 let sent = algos.is_some_and(|algos| {
@@ -1378,11 +1536,37 @@ impl Session {
         }
     }
 
-    fn issue_handover(&mut self, name: &str) {
-        match self.handovers.issue(name, crate::accounts::now_ms()) {
+    /// Old unjoined callers can omit the venue while just one declaration is enabled.
+    /// Multiple declarations require an explicit target instead of guessing one.
+    fn handover_venue(&self, name: &str, data: &Value) -> Option<String> {
+        if let Some(venue) = data.get("exchangeName") {
+            return venue.as_str().map(str::to_owned);
+        }
+        if let Some(joined) = self.joined.get(name) {
+            return Some(joined.account.venue.clone());
+        }
+        let venues = crate::delegated::enabled_venues();
+        if venues.len() == 1 {
+            venues.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    fn issue_handover(&mut self, name: &str, venue: &str) {
+        match self.handovers.issue(name, venue, crate::accounts::now_ms()) {
             Ok(offer) => {
-                self.handover_out(name)
-                    .send(envelope::delegated_key(name, &offer));
+                let out = self.handover_out(name);
+                if out.send(envelope::delegated_key(name, &offer))
+                    && !self.joined.contains_key(name)
+                {
+                    self.registry.interruptions.delegated_status(
+                        self.user(),
+                        name,
+                        &out,
+                        crate::interruption::DelegatedKeyStatus::WaitingForKey,
+                    );
+                }
             }
             Err(_) => {
                 self.drop_early(name, "delegated init refused");
@@ -1542,7 +1726,7 @@ impl Session {
         self.call_inner(name, data, None).await;
     }
 
-    async fn call_inner(&mut self, name: &str, data: Value, order_frame: Option<u64>) {
+    async fn call_inner(&mut self, name: &str, data: Value, order_frame: Option<OrderReceipt>) {
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
         let method = data
             .get("method")
@@ -1565,7 +1749,11 @@ impl Session {
             }
         };
         let account = self.joined[name].account.clone();
-        let symbols = if method == "cancelAllOrders" {
+        let dispatch_out = self.account_out(name);
+        let symbols = if method == "cancelAllOrders"
+            && (account.delegated.is_none()
+                || matches!(order_frame, Some(OrderReceipt::Action { .. })))
+        {
             let mut symbols: Vec<String> = account
                 .handle
                 .read(|store| {
@@ -1585,7 +1773,29 @@ impl Session {
         } else {
             Vec::new()
         };
-        let plans = if account.delegated.is_some() {
+        if let Some(OrderReceipt::Action {
+            seq,
+            kind,
+            deadline,
+        }) = order_frame
+            && let Err(message) =
+                crate::order_actions::ActionGuard::new(dispatch_out.clone(), deadline).check()
+        {
+            crate::order_actions::settle(
+                &dispatch_out,
+                name,
+                &request_id,
+                seq,
+                kind,
+                Err(json!({"message":message,"outcome":"unknown"})),
+            );
+            return;
+        }
+        // Dedicated action frames have their own admission and ledger contract.
+        // Legacy calls retain the narrower place/close activation scope.
+        let plans = if account.delegated.is_some()
+            && !matches!(order_frame, Some(OrderReceipt::Action { .. }))
+        {
             methods::translate_delegated(
                 &account.venue,
                 &method,
@@ -1624,12 +1834,19 @@ impl Session {
                 return;
             }
         };
-        if let Some(seq) = order_frame {
+        if let Some(receipt) = order_frame {
+            // Reply maps completion only. Every command dispatch below carries
+            // the original receipt, including its immutable deadline.
             for plan in &mut plans {
-                if let Plan::Command { reply, .. } = plan {
-                    *reply = methods::Reply::Intent {
-                        client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
-                        seq,
+                if let Plan::Command { reply, .. } | Plan::AfterLoad { reply, .. } = plan {
+                    *reply = match receipt {
+                        OrderReceipt::Placement(seq) => methods::Reply::Intent {
+                            client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
+                            seq,
+                        },
+                        OrderReceipt::Action { seq, kind, .. } => {
+                            methods::Reply::Action { seq, kind }
+                        }
                     };
                 }
             }
@@ -1642,12 +1859,29 @@ impl Session {
         });
         for plan in plans {
             match plan {
-                Plan::Reply(result) => self.send(envelope::msg(
-                    name,
-                    "callMethod:done",
-                    json!({"requestId": request_id, "success": true, "result": result}),
-                )),
+                Plan::Reply(result) => {
+                    if let Some(OrderReceipt::Action { seq, kind, .. }) = order_frame {
+                        crate::order_actions::settle(
+                            &self.account_out(name),
+                            name,
+                            &request_id,
+                            seq,
+                            kind,
+                            Ok(result),
+                        );
+                    } else {
+                        self.send(envelope::msg(
+                            name,
+                            "callMethod:done",
+                            json!({"requestId":request_id,"success":true,"result":result}),
+                        ));
+                    }
+                }
                 Plan::Nuke(mode) => {
+                    if let Some(OrderReceipt::Action { seq, deadline, .. }) = order_frame {
+                        self.send_action_nuke(name, &request_id, seq, deadline);
+                        continue;
+                    }
                     let handle = account.handle.clone();
                     // Asked of the whole account, so a page running its own legs after
                     // `algos` is told too: its positions read then waits the same 30s.
@@ -1674,6 +1908,7 @@ impl Session {
                     let input = crate::algos::AlgoInput::Nuke {
                         mode,
                         request_id: request_id.clone(),
+                        action: None,
                     };
                     if !waiting || mode == "algos" {
                         if algos.send(input).is_err() {
@@ -1779,12 +2014,26 @@ impl Session {
                         out.send(envelope::msg(&name, "callMethod:done", data));
                     });
                 }
-                Plan::AfterLoad { command, reply } => {
-                    self.send_command(name, &request_id, &method, &group, command, reply, true)
-                }
-                Plan::Command { command, reply } => {
-                    self.send_command(name, &request_id, &method, &group, command, reply, false)
-                }
+                Plan::AfterLoad { command, reply } => self.send_command(
+                    name,
+                    &request_id,
+                    &method,
+                    &group,
+                    command,
+                    reply,
+                    true,
+                    order_frame,
+                ),
+                Plan::Command { command, reply } => self.send_command(
+                    name,
+                    &request_id,
+                    &method,
+                    &group,
+                    command,
+                    reply,
+                    false,
+                    order_frame,
+                ),
             }
         }
     }
@@ -1801,15 +2050,20 @@ impl Session {
         mut command: Value,
         reply: methods::Reply,
         after_load: bool,
+        order_frame: Option<OrderReceipt>,
     ) {
-        let order_frame = match &reply {
-            methods::Reply::Intent { seq, .. } => Some(*seq),
-            _ => None,
+        let mut completion = Pending {
+            request_id: request_id.clone(),
+            method: method.to_owned(),
+            reply,
+            group: group.clone(),
+            incomplete: false,
+            audit: None,
         };
         if !self.joined[name].account.running.io_allowed() {
-            self.call_failure(
+            self.command_failure(
                 name,
-                request_id,
+                completion,
                 "ServerDraining",
                 "Router lease expired; no new work was sent",
                 Some("notSent"),
@@ -1824,9 +2078,9 @@ impl Session {
             match pool.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
                 Err(_) => {
-                    self.call_failure(
+                    self.command_failure(
                         name,
-                        request_id,
+                        completion,
                         "Error",
                         "too many account reads in flight; retry shortly",
                         None,
@@ -1839,12 +2093,18 @@ impl Session {
             None
         };
         let out = self.account_out(name);
+        let action_guard = match order_frame {
+            Some(OrderReceipt::Action { deadline, .. }) => Some(
+                crate::order_actions::ActionGuard::new(out.clone(), deadline),
+            ),
+            _ => None,
+        };
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
-            self.call_failure(
+            self.command_failure(
                 name,
-                request_id,
+                completion,
                 "Error",
                 "command IDs exhausted",
                 None,
@@ -1859,22 +2119,28 @@ impl Session {
             origin: format!("socket:{}/client:{}", self.socket, joined.client.id),
             fields,
         });
-        joined.client.pending.lock().unwrap().insert(
-            id,
-            Pending {
-                request_id: request_id.clone(),
-                method: method.to_owned(),
-                reply,
-                group: group.clone(),
-                incomplete: false,
-                audit,
-            },
-        );
+        completion.audit = audit;
+        joined.client.pending.lock().unwrap().insert(id, completion);
         let (client, handle) = (joined.client.id, joined.account.handle.clone());
         let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
         let send = move || {
+            // Each leg keeps the original age/registration through any startup
+            // wait. Expiry cannot dispatch a write or prove the action not sent.
+            if let Some(guard) = &action_guard
+                && let Err(message) = guard.check()
+            {
+                if let Some(entry) = pending.lock().unwrap().remove(&id) {
+                    settle(
+                        &out,
+                        &name,
+                        entry,
+                        Err(json!({"message":message,"outcome":"unknown"})),
+                    );
+                }
+                return;
+            }
             let failure = match handle.input(client, &command.to_string()) {
                 Ok(true) => None,
                 // Not queued, so not submitted: a definite failure, never retried.
@@ -1884,12 +2150,11 @@ impl Session {
             if let Some(message) = failure
                 && let Some(pending) = pending.lock().unwrap().remove(&id)
             {
-                settle(
-                    &out,
-                    &name,
-                    pending,
-                    Err(failure_detail("Error", &message, false)),
-                );
+                let mut detail = failure_detail("Error", &message, false);
+                if matches!(pending.reply, methods::Reply::Action { .. }) {
+                    detail["outcome"] = "notSent".into();
+                }
+                settle(&out, &name, pending, Err(detail));
             }
         };
         let Some((handle, pending, out, name)) = waiter else {
@@ -1911,6 +2176,36 @@ impl Session {
                 }
             }
         });
+    }
+
+    fn command_failure(
+        &self,
+        name: &str,
+        pending: Pending,
+        kind: &str,
+        message: &str,
+        outcome: Option<&str>,
+        order_frame: Option<OrderReceipt>,
+    ) {
+        if pending.group.is_some() && matches!(pending.reply, methods::Reply::Action { .. }) {
+            // This proves only one leg was not dispatched. Another leg may be
+            // in flight: count every leg and let the group settle as unknown.
+            settle(
+                &self.account_out(name),
+                name,
+                pending,
+                Err(failure_detail(kind, message, false)),
+            );
+        } else {
+            self.call_failure(
+                name,
+                &pending.request_id,
+                kind,
+                message,
+                outcome,
+                order_frame,
+            );
+        }
     }
 
     fn reply_failure(
@@ -2063,6 +2358,10 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             }
         }
     };
+    if let methods::Reply::Action { kind, seq } = &pending.reply {
+        crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
+        return;
+    }
     if let methods::Reply::Intent {
         client_order_id,
         seq,
@@ -2081,7 +2380,9 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
     let data = match outcome {
         Ok(result) => {
             let result = match pending.reply {
-                methods::Reply::Result | methods::Reply::Intent { .. } => result,
+                methods::Reply::Result
+                | methods::Reply::Intent { .. }
+                | methods::Reply::Action { .. } => result,
                 methods::Reply::Unit => Value::Null,
                 methods::Reply::OrderIds => methods::worker_order_ids(result),
                 methods::Reply::Placed { client_order_id } => {
@@ -2449,6 +2750,7 @@ mod tests {
     use super::*;
     use safe_cex_remote_signer::Outbox;
 
+    mod apply_settings;
     mod delegated_probe;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
@@ -2462,7 +2764,7 @@ mod tests {
         let mut completed = session.take_verified();
         let offer = session
             .handovers
-            .issue("acct", crate::accounts::now_ms())
+            .issue("acct", "bybit", crate::accounts::now_ms())
             .unwrap();
         let sealed = crate::delegated::tests::seal(
             &offer,
@@ -2756,15 +3058,13 @@ mod tests {
             .await
             .unwrap();
         let frame = sent.try_recv().expect("a handover key response");
-        let mut frame: Value = serde_json::from_str(&frame).unwrap();
-        if !crate::delegated::enabled("bybit") {
+        let frame: Value = serde_json::from_str(&frame).unwrap();
+        if crate::delegated::enabled_venues().is_empty() {
             assert_eq!(frame["d"]["op"], "error");
             assert_eq!(frame["d"]["data"][1]["initRefused"], true);
             assert_eq!(frame["d"]["data"][1]["kind"], "unverified");
-            // The account-build change owns the opt-in declaration. Also pin
-            // the exact offer envelope while that flag remains off here.
-            session.issue_handover("acct");
-            frame = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            session.close();
+            return;
         }
         assert_eq!(frame["t"], "msg");
         assert_eq!(frame["d"]["op"], "delegated-key");
@@ -2782,6 +3082,7 @@ mod tests {
         session.close();
     }
     mod delegated_instance_id;
+    mod delegated_venue_admission;
     mod instance_id;
 
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
@@ -4616,7 +4917,7 @@ mod tests {
                 let frame = sent.try_recv().expect("the refusal frame");
                 assert_eq!(
                     frame,
-                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is open in another window or on another device with different settings (enableSpotMarkets). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
+                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is already running with different settings (enableSpotMarkets). The change was not applied. Join with the current settings and use apply-settings before reinitializing.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
                 );
                 assert!(sent.try_recv().is_err(), "retries are quiet");
                 assert_eq!(crate::accounts::tests::signing(&account), Some(7));
@@ -5485,10 +5786,6 @@ mod tests {
 #[cfg(test)]
 #[path = "session_delegated_writes_tests.rs"]
 mod delegated_writes_tests;
-
-#[cfg(test)]
-#[path = "session/cosigned_admission_test_support.rs"]
-mod cosigned_admission_test_support;
 
 #[cfg(test)]
 #[path = "session/tests/delegated_e2e.rs"]

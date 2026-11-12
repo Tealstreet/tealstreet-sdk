@@ -1,7 +1,7 @@
 //! Shared store models used by the Store contract; source: packages/safe-cex/src/types.ts.
 use crate::{
     Balance, MarginType, Market, Order, OrderRiskProfile, OrderSide, Position, PositionMode,
-    RequestOutcomeCounts, Ticker, deserialize_present,
+    PositionSide, RequestOutcomeCounts, Ticker, deserialize_present,
 };
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -229,9 +229,15 @@ pub struct FetchedLeverage {
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct DisplayedMargin {
-    pub long_exposure: f64,
-    pub short_exposure: f64,
-    pub total_notional: f64,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    #[ts(type = "number | null")]
+    pub long_exposure: Option<f64>,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    #[ts(type = "number | null")]
+    pub short_exposure: Option<f64>,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    #[ts(type = "number | null")]
+    pub total_notional: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -243,6 +249,29 @@ pub struct StoreUpdateIds {
     /// @ts-mutable
     #[serde(rename = "orders")]
     pub orders: f64,
+}
+
+/// Last reported per-position settings, separate from current exposure.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct PositionSettings {
+    pub id: String,
+    pub symbol: String,
+    pub side: PositionSide,
+    pub leverage: f64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub margin_type: Option<MarginType>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub position_mode: Option<PositionMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -287,6 +316,9 @@ pub struct StoreData {
     #[ts(type = "unknown", optional)]
     pub user_data: Option<Value>,
     pub positions: Vec<Position>,
+    #[serde(default)]
+    #[ts(type = "Record<string, PositionSettings>")]
+    pub position_settings: IndexMap<String, PositionSettings>,
     #[serde(rename = "displayedPositions")]
     #[ts(type = "DisplayedPosition[]")]
     pub displayed_positions: Vec<DisplayedPosition>,
@@ -361,14 +393,15 @@ pub fn initial_store_data() -> StoreData {
         tickers: vec![],
         orders: vec![],
         positions: vec![],
+        position_settings: IndexMap::new(),
         displayed_positions: vec![],
         stark_config: None,
         zk_link_config: None,
         user_data: None,
         displayed_margin: Some(DisplayedMargin {
-            long_exposure: 0.0,
-            short_exposure: 0.0,
-            total_notional: 0.0,
+            long_exposure: Some(0.0),
+            short_exposure: Some(0.0),
+            total_notional: Some(0.0),
         }),
         orders_risk: IndexMap::new(),
         active_chasers: vec![],
@@ -404,7 +437,33 @@ pub fn initial_store_data() -> StoreData {
 
 // Private wire companions keep serde metadata without exposing permissive decoders.
 mod strict_codecs {
-    use super::{MarginType, PositionMode, deserialize_present};
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::PositionSettings")]
+    #[serde(rename_all = "camelCase")]
+    struct WirePositionSettings {
+        id: String,
+        symbol: String,
+        side: PositionSide,
+        leverage: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        margin_type: Option<MarginType>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        position_mode: Option<PositionMode>,
+    }
+    impl<'de> serde::Deserialize<'de> for super::PositionSettings {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WirePositionSettings::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+    use super::{MarginType, PositionMode, PositionSide, deserialize_present};
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::StoreDataLoaded")]
     #[serde(rename_all = "camelCase")]
@@ -471,9 +530,12 @@ mod strict_codecs {
     #[serde(remote = "super::DisplayedMargin")]
     #[serde(rename_all = "camelCase")]
     struct WireDisplayedMargin {
-        long_exposure: f64,
-        short_exposure: f64,
-        total_notional: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        long_exposure: Option<f64>,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        short_exposure: Option<f64>,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        total_notional: Option<f64>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::DisplayedMargin {
@@ -501,9 +563,9 @@ mod strict_codecs {
     use super::StoreData;
     use super::{
         ActiveChaser, ActiveTWAP, Balance, DisplayedMargin, DisplayedPosition, FetchedLeverage,
-        IndexMap, Market, Order, OrderRiskProfile, OrderSide, Position, RequestOutcomeCounts,
-        SliceAction, StoreDataLoaded, StoreOptions, StoreUpdateIds, TaskOrigin, Ticker, TwapStatus,
-        Value,
+        IndexMap, Market, Order, OrderRiskProfile, OrderSide, Position, PositionSettings,
+        RequestOutcomeCounts, SliceAction, StoreDataLoaded, StoreOptions, StoreUpdateIds,
+        TaskOrigin, Ticker, TwapStatus, Value,
     };
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::TaskOrigin")]
@@ -900,7 +962,7 @@ mod strict_codecs {
         assert_eq!(wire.position.id, "wire");
         assert_eq!(wire.account, "wire-account");
         assert_eq!(wire.position.entry_price, 1.25);
-        assert_eq!(wire.position.notional, 2.5);
+        assert_eq!(wire.position.notional, Some(2.5));
         assert_eq!(wire.position.leverage, 3.75);
         assert_eq!(wire.position.contracts, 4.125);
         assert_eq!(wire.position.liquidation_price, Some(5.5));
@@ -1080,6 +1142,8 @@ mod strict_codecs {
         #[serde(rename = "userData")]
         user_data: Option<Value>,
         positions: Vec<Position>,
+        #[serde(default)]
+        position_settings: IndexMap<String, PositionSettings>,
         #[serde(rename = "displayedPositions")]
         displayed_positions: Vec<DisplayedPosition>,
         #[serde(
@@ -1238,6 +1302,9 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<StoreDataLoaded>("StoreDataLoaded");
             crate::strict_decode::tests::record::<StoreOptions>("StoreOptions");
             crate::strict_decode::tests::record::<FetchedLeverage>("FetchedLeverage");
+            crate::strict_decode::tests::record::<super::super::PositionSettings>(
+                "PositionSettings",
+            );
             crate::strict_decode::tests::record::<DisplayedMargin>("DisplayedMargin");
             crate::strict_decode::tests::record::<StoreUpdateIds>("StoreUpdateIds");
         }

@@ -437,16 +437,15 @@ const HyrotraderMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/logos/HYROTRADER/full-white.svg',
   enabled: false,
   enabledInDev: true,
-  // Keep preview/prod dark until the private REST/WS path has either Hyro HTTPS
-  // origins or a Tealstreet relay. Local dev can still test the simulator
-  // directly over plain HTTP.
-  enableInPreview: false,
+  // Hyro now fronts the production simulator at a TLS hostname with Tealstreet
+  // browser CORS, so preview can run direct while production stays explicitly dark.
+  enableInPreview: true,
   forbidCors: false,
   enforceWsTunnel: false,
   supportsTunnel: false,
   privateProxyIps: [],
   privateProxyRegions: {},
-  latencyDomain: 'hyrotrader-simulator',
+  latencyDomain: 'sim-bybit.hyro.trade',
 };
 
 const BybitSpotMetadata: ExchangeMetadata = {

@@ -160,7 +160,30 @@ describe('queued ingest ownership', () => {
     expect(minted).toEqual([A, B]);
   });
 
-  it('flushes queued A data once with its held token on a direct owner switch', async () => {
+  for (const queued of ['raw', 'pending'] as const) {
+    for (const transition of ['direct switch', 'logout then switch', 'logout then relogin'] as const) {
+      it(`discards ${queued} entries with a cached token on ${transition}`, async () => {
+        const stop = start(A);
+        flush('warm-A');
+        await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
+        if (queued === 'pending') online.onLine = false;
+        utils.logInfo('obsolete-A');
+        if (queued === 'pending') utils.dumpLogQueue();
+        online.onLine = true;
+
+        if (transition !== 'direct switch') stop();
+        const nextOwner = transition === 'logout then relogin' ? A : B;
+        start(nextOwner);
+        flush('new-session');
+        await vi.waitFor(() => expect(event('new-session')?.owner).toBe(nextOwner));
+
+        expect(attempts.flatMap((entry) => entry.lines).some((line) => line.endsWith('obsolete-A'))).toBe(false);
+        expect(minted).toEqual([A, nextOwner]);
+      });
+    }
+  }
+
+  it('discards queued A data despite its held token on a direct owner switch', async () => {
     start(A);
     flush('warm-A');
     await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
@@ -168,12 +191,12 @@ describe('queued ingest ownership', () => {
     start(B);
     flush('current-B');
     await vi.waitFor(() => expect(event('current-B')?.owner).toBe(B));
-    await vi.waitFor(() => expect(event('last-A')?.owner).toBe(A));
+    expect(event('last-A')).toBeUndefined();
     expect(minted).toEqual([A, B]);
-    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('last-A')))).toHaveLength(1);
+    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('last-A')))).toHaveLength(0);
   });
 
-  it('drops the retiring batch after one failed flush without retry or token refetch', async () => {
+  it('discards cleanup leftovers without a final attempt, retry or token refetch', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const stop = start(A);
     flush('warm-A');
@@ -184,27 +207,27 @@ describe('queued ingest ownership', () => {
     start(B);
     flush('current-B');
     await vi.waitFor(() => expect(event('current-B')?.owner).toBe(B));
-    await vi.waitFor(() =>
-      expect(errors).toHaveBeenCalledWith(expect.stringContaining('Dropping batch after 0 retries')),
-    );
     flush('next-B');
     await vi.waitFor(() => expect(event('next-B')?.owner).toBe(B));
     expect(event('refused-A')).toBeUndefined();
-    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('refused-A')))).toHaveLength(1);
+    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('refused-A')))).toHaveLength(0);
+    expect(errors).not.toHaveBeenCalled();
     expect(minted).toEqual([A, B]);
   });
 
-  it('attempts the final held-token flush even when the page becomes hidden', async () => {
+  it('discards hidden cleanup leftovers without starting compression or an upload', async () => {
     const stop = start(A);
     flush('warm-A');
     await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
     vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'hidden' }));
     vi.stubGlobal('window', new EventTarget());
+    vi.mocked(compression.compress).mockClear();
     utils.logInfo('hidden-final-A');
     stop();
-    await vi.waitFor(() => expect(event('hidden-final-A')?.owner).toBe(A));
+    expect(compression.compress).not.toHaveBeenCalled();
+    expect(event('hidden-final-A')).toBeUndefined();
     expect(minted).toEqual([A]);
-    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('hidden-final-A')))).toHaveLength(1);
+    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('hidden-final-A')))).toHaveLength(0);
   });
 
   it('drops offline leftovers even when A has a held token', async () => {
@@ -372,7 +395,7 @@ describe('queued ingest ownership', () => {
     expect(minted).toEqual([A, B]);
   });
 
-  it('uses only the captured A token when B starts during the final flush compression', async () => {
+  it('drops A when cleanup and B login happen during held-token compression', async () => {
     const stop = start(A);
     flush('warm-A');
     await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
@@ -383,47 +406,39 @@ describe('queued ingest ownership', () => {
       await release.promise;
       return realCompression.compress(data);
     });
-    utils.logInfo('retiring-A');
-    stop();
+    flush('retiring-A');
     await entered.promise;
+    stop();
     start(B);
     flush('retirement-B');
-    await vi.waitFor(() => expect(event('retirement-B')?.owner).toBe(B));
     release.resolve();
-    await vi.waitFor(() => expect(event('retiring-A')?.owner).toBe(A));
-    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('retiring-A')))).toHaveLength(1);
-    expect(event('retiring-A')?.lines.some((line) => line.endsWith('retirement-B'))).toBe(false);
+    await vi.waitFor(() => expect(event('retirement-B')?.owner).toBe(B));
+    expect(event('retiring-A')).toBeUndefined();
+    expect(attempts.filter((entry) => entry.lines.some((line) => line.endsWith('retiring-A')))).toHaveLength(0);
     expect(event('retirement-B')?.lines.some((line) => line.endsWith('retiring-A'))).toBe(false);
     expect(minted).toEqual([A, B]);
   });
 
-  it('drops the final A flush if its captured token expires while B starts during compression', async () => {
+  it('drops previous-session A work when A logs in again during compression', async () => {
     const stop = start(A);
     flush('warm-A');
     await vi.waitFor(() => expect(event('warm-A')?.owner).toBe(A));
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const now = Date.now();
     vi.mocked(compression.compress).mockImplementationOnce(async (data) => {
       entered.resolve();
       await release.promise;
       return realCompression.compress(data);
     });
-    utils.logInfo('expired-retiring-A');
-    stop();
+    flush('previous-session-A');
     await entered.promise;
-    const pendingCompression = vi.mocked(compression.compress).mock.results.at(-1);
-    if (!pendingCompression || pendingCompression.type !== 'return') throw new Error('A compression not pending');
-    start(B);
-    vi.spyOn(Date, 'now').mockReturnValue(now + 601_000);
-    flush('expiry-B');
-    await vi.waitFor(() => expect(event('expiry-B')?.owner).toBe(B));
+    stop();
+    start(A);
+    flush('new-session-A');
     release.resolve();
-    await pendingCompression.value;
-    flush('expiry-next-B');
-    await vi.waitFor(() => expect(event('expiry-next-B')?.owner).toBe(B));
-    expect(event('expired-retiring-A')).toBeUndefined();
-    expect(minted).toEqual([A, B]);
+    await vi.waitFor(() => expect(event('new-session-A')?.owner).toBe(A));
+    expect(event('previous-session-A')).toBeUndefined();
+    expect(minted).toEqual([A, A]);
   });
 
   it('drops an A retry when B starts during its backoff timer', async () => {

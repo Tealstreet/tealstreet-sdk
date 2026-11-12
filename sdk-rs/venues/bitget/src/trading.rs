@@ -2045,16 +2045,23 @@ impl BitgetFutures {
         let position = cx.store.positions().iter().find(|p| {
             p.symbol == o.symbol && p.side == protected_position(o.side) && p.contracts > 0.0
         });
-        let capacity = position.map_or(0.0, |p| {
-            floor_lot(
-                if self.inverse() {
-                    p.notional
-                } else {
-                    p.contracts
-                },
-                m.precision.amount,
-            )
-        });
+        let capacity = if let Some(position) = position {
+            let size = if self.inverse() {
+                position.notional
+            } else {
+                position.contracts
+            };
+            if !size.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            let capacity = floor_lot(size, m.precision.amount);
+            if !capacity.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            capacity
+        } else {
+            0.0
+        };
         let requested = num::adjust(o.amount, m.precision.amount);
         let size = if o.amount == 0.0 || capacity < m.precision.amount {
             0.0
@@ -2076,7 +2083,6 @@ impl BitgetFutures {
 
     fn algo_payload(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Payload, String> {
         let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
-        let (plan, size) = self.plan_size(cx, o)?;
         let mut p = self.classic(cx, &o.symbol)?;
         p.client_oid = Some(mint(cx)?);
         p.reduce_only = (!cx.store.hedged()).then_some("YES");
@@ -2105,6 +2111,7 @@ impl BitgetFutures {
             ));
             p.callback_ratio = Some(num::format(ratio));
         } else {
+            let (plan, size) = self.plan_size(cx, o)?;
             p.plan_type = Some(plan);
             p.size = (size > 0.0).then(|| num::format(size));
             p.hold_side = Some(if cx.store.hedged() {
