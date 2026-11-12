@@ -456,7 +456,8 @@ export class DelegatedOutbox {
           'delegatedConnectionNotAdmitted',
           'DELEGATED action requires activation on this connection',
         );
-      const params = paramsOrOptions as Record<string, unknown>;
+      if (action !== 'place' && action !== 'close') requireDelegatedAction(action, {});
+      const params = clone(paramsOrOptions as Record<string, unknown>);
       requireDelegatedAction(action, params);
       return this.enqueue(params);
     }

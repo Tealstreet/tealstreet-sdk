@@ -72,7 +72,10 @@ retires the old ticket, including deferred work, and throws a named reason.
 The existing low-level `connect` API still requires prior host admission.
 `enqueueAction(actionName, params)` permits place or a close with literal
 `reduceOnly: true` and visibly refuses every other string action before storage
-or a frame; it never chooses another signing mode. Router queued-intent cancellation keeps its separate
+or a frame; it never chooses another signing mode. Supported string actions
+capture JSON parameters once before validation; fingerprints, persistence and
+handoff use those captured values. A close requires literal `reduceOnly: true`
+in the captured payload. Router queued-intent cancellation keeps its separate
 existing semantics. These admission helpers do not alter handoff, deadline,
 restore, evidence or replay rules below.
 

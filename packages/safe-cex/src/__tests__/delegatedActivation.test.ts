@@ -2,6 +2,7 @@ import type { OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 
 import { describe, expect, it } from 'vitest';
 
+import { delegatedIntentFingerprint } from '../delegatedOrderFrames';
 import { DelegatedOutbox } from '../delegatedOutbox';
 
 const params = { symbol: 'BTCUSDT', side: 'buy', type: 'market', amount: 0.001 };
@@ -126,6 +127,53 @@ describe('DELEGATED place and reduce-only close activation', () => {
       f.box.close();
     },
   );
+
+  it.each(['inherited', 'non-enumerable'] as const)(
+    'refuses a serialized close whose %s reduce-only flag disappears',
+    async (kind) => {
+      const f = await fixture();
+      const stored: unknown[] = [];
+      f.options.storage.put = async (_scope, row) => {
+        stored.push(structuredClone(row));
+      };
+      const close =
+        kind === 'inherited'
+          ? Object.assign(Object.create({ reduceOnly: true }), params)
+          : Object.defineProperty({ ...params }, 'reduceOnly', { value: true, enumerable: false });
+      f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+      await expect(f.box.enqueueAction('close', close)).rejects.toMatchObject({
+        code: 'delegatedReduceOnlyRequired',
+      });
+      expect(stored).toEqual([]);
+      expect(f.box.entries()).toEqual([]);
+      expect(f.writes).toEqual([]);
+      f.box.close();
+    },
+  );
+
+  it('captures a changing close getter once before validation, fingerprinting and persistence', async () => {
+    const f = await fixture();
+    const stored: Record<string, unknown>[] = [];
+    f.options.storage.put = async (_scope, row) => {
+      stored.push(structuredClone(row.params));
+    };
+    let reads = 0;
+    const close = {
+      ...params,
+      get reduceOnly() {
+        return ++reads === 1;
+      },
+    };
+    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    await f.box.enqueueAction('close', close);
+    expect(f.writes).toHaveLength(1);
+    const { d } = JSON.parse(f.writes[0]);
+    expect(d.params.reduceOnly).toBe(true);
+    expect(reads).toBe(1);
+    expect(stored.every((value) => JSON.stringify(value) === JSON.stringify(d.params))).toBe(true);
+    expect(d.fingerprint).toBe(delegatedIntentFingerprint(d.accountName, d.intentId, d.params, d.seq));
+    f.box.close();
+  });
 
   it.each(['delegatedOrderFramesV1', 'delegatedOrderLedgerV1'] as const)(
     'keeps %s required per connection',
