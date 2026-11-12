@@ -1811,7 +1811,10 @@ impl Backpack {
         }
         if error.outcome == Some(Outcome::Unknown) {
             if let Some(managed) = &request.managed {
-                let _ = cx.present_plan_failure(&managed.plan, &error.message);
+                // The venue path has already composed its own user-facing
+                // message for an unknown write; keep it verbatim. The local
+                // outcome gate here is intentional and must not be dropped.
+                let _ = cx.override_plan_failure_message(&managed.plan, &error.message);
             }
             cx.notice(Level::Warn, "backpack.write.unknown", &error.message);
         }
