@@ -67,6 +67,62 @@ test('an owner hook without a current owner starts algos unowned, never legacy',
   }
 });
 
+test('live algo ownership fences timers, EXEC wakeups and completions after startup', () => {
+  for (const wake of ['timer', 'completion']) {
+    for (const transition of ['unchanged', 'generation', 'returning', 'logout', 'throw']) {
+      let current = { ownerId: 'A', generation: 7 };
+      const created = { ...current };
+      let steps = 0;
+      let freed = 0;
+      let started = false;
+      const r = rig({ ownsEngine: true }, {
+        algoStart() {}, algoStartOwned() {},
+        algoDeadline: () => steps ? undefined : 10,
+        algoRunning: () => true,
+        algoEmits: () => '[]',
+        algoAdvance() { steps++; return '[]'; },
+        httpEnd() { steps++; return '[]'; },
+        free() { freed++; },
+      });
+      r.host.algoStart('acct', created, () => {
+        if (started && transition === 'throw') throw new Error('owner unavailable');
+        return current?.ownerId === created.ownerId && current?.generation === created.generation;
+      });
+      started = true;
+      if (transition === 'generation') current = { ownerId: 'A', generation: 8 };
+      if (transition === 'returning') {
+        current = { ownerId: 'B', generation: 8 };
+        current = { ownerId: 'A', generation: 9 };
+      }
+      if (transition === 'logout') current = null;
+      if (wake === 'timer') r.advance(10);
+      else r.host.run(r.host.invoke(r.engine.httpEnd, 1, 10));
+      assert.equal(steps, transition === 'unchanged' ? 1 : 0, `${wake}/${transition}`);
+      assert.equal(r.host.dead, transition !== 'unchanged', `${wake}/${transition}`);
+      assert.equal(freed, transition === 'unchanged' ? 0 : 1);
+      r.host.dispose();
+    }
+  }
+});
+
+test('signer microtasks cannot outlive the algo creation binding', async () => {
+  for (const changed of [false, true]) {
+    let owner = 7, signed = 0;
+    const r = rig({ signer: () => { signed++; return { receipt: {}, values: [[1]] }; } }, {
+      useExternalSigner() {}, algoStart() {}, algoStartOwned() {},
+      algoDeadline: () => undefined, algoRunning: () => true,
+      signed: () => '[]', signFailed: () => '[]', algoEmits: () => '[]',
+    });
+    r.host.algoStart('acct', { ownerId: 'A', generation: 7 }, () => owner === 7);
+    r.host.execute({ op: 'sign', attempt: 7, work: { receipt: {}, context: {}, operations: [{ kind: 'present', key: 'fixture' }] }, timeoutMs: 1000 });
+    if (changed) owner = 8;
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.equal(signed, changed ? 0 : 1);
+    assert.equal(r.host.dead, changed);
+    r.host.dispose();
+  }
+});
+
 test('deadlines validate without sending commands; only the effective wait enters native JSON', async () => {
   for (const invalid of [0, -1, NaN, Infinity, 1.5, 2_147_483_648, '100', null]) {
     assert.throws(() => rig({ commandTimeoutMs: invalid }), RangeError);
