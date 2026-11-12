@@ -118,6 +118,66 @@ async fn settle() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn captured_start_cannot_adopt_the_binding_refreshed_after_its_check() {
+    LocalSet::new()
+        .run_until(async {
+            for (owner_id, generation) in [("A", 7), ("B", 8), ("A", 8), ("A", 9)] {
+                let initial = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "A".into(),
+                    generation: 7,
+                };
+                let replacement = safe_cex_algo_twap::TwapOwner {
+                    owner_id: owner_id.into(),
+                    generation,
+                };
+                let changed = initial != replacement;
+                let owner = Rc::new(RefCell::new(initial.clone()));
+                let armed = Rc::new(Cell::new(false));
+                let port = Rc::new(Port::default());
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory =
+                    TwapFactory::with_owner("a", initial, cx.clone(), Rc::new(Chasers::default()))
+                        .guard_owner(Rc::new({
+                            let owner = owner.clone();
+                            let armed = armed.clone();
+                            move || {
+                                let snapshot = owner.borrow().clone();
+                                if armed.replace(false) {
+                                    *owner.borrow_mut() = replacement.clone();
+                                }
+                                snapshot
+                            }
+                        }));
+                let captured = factory.capture_owner();
+                armed.set(true);
+                let result =
+                    captured.start(serde_json::from_str(&twap_options(json!({}))).unwrap());
+                settle().await;
+                assert_eq!(
+                    result.is_err(),
+                    changed,
+                    "captured start adopted {owner_id}/{generation}"
+                );
+                assert_eq!(
+                    placed_amounts(&port),
+                    if changed { vec![] } else { vec![0.5] }
+                );
+                if changed {
+                    assert!(factory.active_twaps("a").is_empty());
+                    factory
+                        .capture_owner()
+                        .start(serde_json::from_str(&twap_options(json!({}))).unwrap())
+                        .unwrap();
+                    settle().await;
+                    assert_eq!(placed_amounts(&port), vec![0.5], "fresh owner control");
+                }
+                cx.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn binding_changes_during_slice_deferral_drop_the_retired_schedule() {
     LocalSet::new()
         .run_until(async {
