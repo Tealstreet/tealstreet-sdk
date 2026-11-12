@@ -14,6 +14,14 @@ use std::sync::{
 };
 use tokio::sync::mpsc;
 
+async fn assert_pending<F: std::future::Future>(mut task: std::pin::Pin<&mut F>) {
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(task.as_mut().poll(cx)))
+            .await
+            .is_pending()
+    );
+}
+
 fn key() -> PublicKey {
     PublicKey::new(Family::Ed25519, &ed25519::public_key(&[7; 32]).unwrap()).unwrap()
 }
@@ -236,7 +244,7 @@ async fn registration_fetch_is_fixed_scoped_and_refuses_invalid_responses() {
         let fake=Fake::default();
         let task=fetch_lighter_registered_key(&fake,Network::Mainnet,12,4,Arc::new(||true));
         tokio::pin!(task);
-        assert!(futures_util::poll!(&mut task).is_pending());
+        assert_pending(task.as_mut()).await;
         let request=answer(&fake,data,status);
         assert_eq!(request.url,"https://mainnet.zklighter.elliot.ai/api/v1/apikeys?account_index=12&api_key_index=4");
         assert!(request.body.is_none() && request.headers.is_empty() && request.signer_headers.is_empty());
@@ -257,7 +265,7 @@ async fn registration_drops_a_response_after_owner_replacement_and_cancels_on_dr
         Arc::new(move || captured.load(Ordering::SeqCst) == 11),
     );
     tokio::pin!(task);
-    assert!(futures_util::poll!(&mut task).is_pending());
+    assert_pending(task.as_mut()).await;
     current.store(22, Ordering::SeqCst); // second owner while the first owner's read awaits IO
     answer(&fake, body(12, 4), 200);
     assert!(task.await.is_err());
@@ -269,7 +277,7 @@ async fn registration_drops_a_response_after_owner_replacement_and_cancels_on_dr
         4,
         Arc::new(|| true),
     ));
-    assert!(futures_util::poll!(&mut task).is_pending());
+    assert_pending(task.as_mut()).await;
     drop(task);
     assert!(fake.pending.lock().unwrap().as_ref().unwrap().1.is_closed());
     let (request, events) = fake.pending.lock().unwrap().take().unwrap();
@@ -294,7 +302,7 @@ async fn registration_drops_prepared_work_after_owner_replacement() {
         Arc::new(move || captured.load(Ordering::SeqCst) == 11),
     );
     tokio::pin!(task);
-    assert!(futures_util::poll!(&mut task).is_pending());
+    assert_pending(task.as_mut()).await;
     current.store(22, Ordering::SeqCst);
     gate.notify_one();
     assert!(task.await.is_err());
