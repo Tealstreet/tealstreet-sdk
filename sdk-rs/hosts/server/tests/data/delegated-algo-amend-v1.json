@@ -1,0 +1,44 @@
+[
+  {
+    "action": {
+      "kind": "algo",
+      "op": "chaser:amend",
+      "data": {
+        "id": "prior-job",
+        "options": {
+          "symbol": "BTCUSDT",
+          "size": 0.001,
+          "side": "buy",
+          "maxAttempts": 10,
+          "delay": 500
+        }
+      }
+    },
+    "fingerprint": "0b836b33bb902947b051b9a08fe7bc237e15ae69971a6f399c9f2c4497b7a821"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "twap:amend",
+      "data": {
+        "id": "prior-job",
+        "options": {
+          "accountName": "main",
+          "activeMarket": {
+            "symbol": "BTCUSDT"
+          },
+          "size": 0.004,
+          "duration": 10,
+          "ordersCount": 2,
+          "side": "buy",
+          "chaserDelay": 0,
+          "reduceOnly": false,
+          "randomnessPercentage": 0,
+          "useLimitOrders": false,
+          "useChaserOrders": false
+        }
+      }
+    },
+    "fingerprint": "17eba7b9124e529c4b5bd8af309659ef2bfc114ac8a148541db1f005b82263d2"
+  }
+]

@@ -4,6 +4,7 @@ import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delega
 import { describe, expect, it } from 'vitest';
 
 import golden from '../../../../sdk-rs/hosts/server/tests/data/delegated-actions-v1.json';
+import amendments from '../../../../sdk-rs/hosts/server/tests/data/delegated-algo-amend-v1.json';
 import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
 import { delegatedActionFingerprint, isDelegatedAction, isDelegatedFullWriteAction } from '../delegatedActions';
 import { DelegatedOutbox } from '../delegatedOutbox';
@@ -374,5 +375,30 @@ describe('DELEGATED versioned actions', () => {
     expect(g.writes).toHaveLength(1);
     expect([...f.rows.values()].filter((r) => r.owner === 'alice')).toHaveLength(1);
     bob.close();
+  });
+});
+
+
+describe('DELEGATED v1 algo replacement amendments', () => {
+  it.each(amendments)('accepts and fingerprints $action.op inside v1', ({ action, fingerprint }) => {
+    expect(isDelegatedAction(action)).toBe(true);
+    expect(delegatedActionFingerprint('main', golden.key, action as unknown as DelegatedAction, 1)).toBe(fingerprint);
+  });
+  it.each(amendments)('sends $action.op through the admitted v1 outbox only', async ({ action }) => {
+    for (const admitted of [false, true]) {
+      const f = setup();
+      f.connection.ready = admitted;
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection);
+      await box.enqueueAction(action as unknown as DelegatedAction);
+      expect(f.writes).toHaveLength(admitted ? 1 : 0);
+      if (admitted) expect(JSON.parse(f.writes[0])).toMatchObject({ t: 'order.action', d: { version: 1, action } });
+      box.close();
+    }
+  });
+  it.each(amendments)('closes $action.op replacement options and outer fields', ({ action }) => {
+    expect(isDelegatedAction({ ...action, data: { ...action.data, future: true } })).toBe(false);
+    expect(isDelegatedAction({ ...action, data: { ...action.data, options: { ...action.data.options, future: true } } })).toBe(false);
+    expect(isDelegatedAction({ ...action, data: { ...action.data, id: '' } })).toBe(false);
   });
 });
