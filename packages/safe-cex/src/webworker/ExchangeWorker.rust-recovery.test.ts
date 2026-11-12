@@ -534,6 +534,40 @@ describe('Rust worker engine ownership', () => {
     expect(sources[1].algoOps).toEqual([]);
   });
 
+  it.each(['unchanged', 'generation', 'returning', 'logout'] as const)(
+    'keeps an already-started worker on its initiating algo binding: %s', async (change) => {
+      algosBuild = true;
+      let owner: { ownerId: string; generation: number } | null = { ownerId: 'A', generation: 7 };
+      const { worker } = createWorker({}, 'same-name', () => owner);
+      await start(worker);
+      worker.handlePayload({ op: 'exec', data: { reqId: 'before', symbol: market.symbol, command: 'sleep 1; buy 1' } });
+      expect(sources[0].algoOwner).toEqual({ ownerId: 'A', generation: 7 });
+      if (change === 'generation') owner = { ownerId: 'A', generation: 8 };
+      if (change === 'returning') {
+        owner = { ownerId: 'B', generation: 8 };
+        owner = { ownerId: 'A', generation: 9 };
+      }
+      if (change === 'logout') owner = null;
+      worker.handlePayload({ op: 'exec', data: { reqId: 'after', symbol: market.symbol, command: 'buy 1' } });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sources).toHaveLength(1);
+      expect(sources[0].algoOps).toHaveLength(change === 'unchanged' ? 2 : 1);
+      expect((worker.exchange as RustEngineExchange).isDisposed).toBe(change !== 'unchanged');
+    },
+  );
+
+  it('drops recovery queued before an owner transition', async () => {
+    algosBuild = true;
+    let owner = { ownerId: 'A', generation: 7 };
+    const { worker } = createWorker({}, 'same-name', () => owner);
+    await start(worker);
+    await panic(sources[0]);
+    owner = { ownerId: 'B', generation: 8 };
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sources).toHaveLength(1);
+    expect(worker.isRecovering).toBe(false);
+  });
+
   it('refuses exec visibly on an engine build without algos', async () => {
     const { worker, messages } = createWorker();
     await start(worker);
