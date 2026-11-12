@@ -20,6 +20,54 @@ test('#3397 Orderly CI run 43192535364 retains measured 10 KiB headroom', () => 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'orderly'), /exceeds/);
 });
 
+// Fresh CI run 43319466529, composition b9f5256efe4c5a0370478f9d2309a84c35d3750b:
+// tree equals merge 1663c1a885eeb476556fb6a957e351f8a9354b66.
+// Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 (two -Oz passes).
+// Web/Node and replay copies match for all archived families. KuCoin Spot's
+// web-size refusal (job 131536920530) occurs before its artifact is uploaded.
+for (const [venue, measured, minimumCap] of [
+  ['apexomni', 2_082_984, 2_094_080],
+  ['asterdex', 2_211_866, 2_223_104],
+  ['backpack', 2_029_683, 2_040_832],
+  ['binance', 2_260_506, 2_271_232],
+  ['bingx', 2_119_360, 2_129_920],
+  ['bitget', 2_470_849, 2_481_152],
+  ['bitrue', 1_896_666, 1_907_712],
+  ['bitunix', 1_942_779, 1_953_792],
+  ['blofin', 2_053_666, 2_064_384],
+  ['bybit', 2_331_426, 2_341_888],
+  ['coinbase', 2_103_069, 2_113_536],
+  ['cryptocom', 1_804_182, 1_814_528],
+  ['grvt', 1_990_869, 2_001_920],
+  ['hyperliquid', 2_225_121, 2_235_392],
+  ['kraken', 2_261_215, 2_272_256],
+  ['kucoin', 1_853_689, 1_864_704],
+  ['kucoinspot', 2_464_041, 2_475_008],
+  ['lighter', 2_147_689, 2_158_592],
+  ['mexc', 1_947_286, 1_957_888],
+  ['okx', 2_038_817, 2_050_048],
+  ['orderly', 1_770_708, 1_781_760],
+  ['paradex', 2_297_964, 2_309_120],
+  ['phemex', 2_125_631, 2_136_064],
+  ['polymarket', 1_652_282, 1_662_976],
+  ['txflow', 1_916_148, 1_927_168],
+  ['weex', 2_011_369, 2_022_400],
+  ['woo', 2_657_521, 2_668_544],
+]) {
+  test(`#3397 merged 1663c1a885: ${venue} retains fresh measured headroom`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const aliases = Object.keys(WASM_VENUE_OVERRIDES).filter((name) => venueFamily(name) === venue);
+    assert.ok(aliases.includes(venue));
+    for (const alias of aliases) {
+      const cap = WASM_VENUE_OVERRIDES[alias];
+      assert.ok(cap >= minimumCap, `${alias}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured, 'venue', alias), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', alias), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', alias), /exceeds/);
+    }
+  });
+}
+
 // Local optimized web/node bytes match at merge fcee82e27df; Rust 1.99.0,
 // wasm-bindgen 0.2.129 and Binaryen 132. Preserve both parent floors.
 for (const [venue, measured, minimumCap] of [
