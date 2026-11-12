@@ -36,10 +36,14 @@ const p: Position = { id: 'p', symbol: 'BTC', side: PositionSide.Long, entryPric
  notional: 1, leverage: 1, unrealizedPnl: 0, contracts: 1, liquidationPrice: null,
  marginType: MarginType.Cross, positionMode: PositionMode.OneWay };
 const n: number | null = p.liquidationPrice;
+const unknownNotional: Position = { ...p, notional: null };
+const notional: number | null = p.notional;
+const unsafeNotional: number = p.notional;
 const unsafe: number = p.liquidationPrice;
 p.contracts = 2;
 const side: Position['side'] = 'long';
 const missing: Position = { id: 'p', symbol: 'BTC', side: PositionSide.Long, entryPrice: 1, notional: 1, leverage: 1, unrealizedPnl: 0, contracts: 1 };
+const missingNotional: Position = { id: 'p', symbol: 'BTC', side: PositionSide.Long, entryPrice: 1, leverage: 1, unrealizedPnl: 0, contracts: 1, liquidationPrice: null };
 `;
   const configFile = path.join(root, 'packages/safe-cex/tsconfig.json');
   const config = ts.readConfigFile(configFile, ts.sys.readFile);
@@ -50,7 +54,7 @@ const missing: Position = { id: 'p', symbol: 'BTC', side: PositionSide.Long, ent
     ? ts.createSourceFile(file, source, version, true) : original(file, version, ...args);
   const program = ts.createProgram([fixture], { ...parsed.options, incremental: false }, host);
   const diagnostics = ts.getPreEmitDiagnostics(program);
-  // These four invalid uses must fail without suppressing compiler diagnostics.
+  // These invalid uses must fail without suppressing compiler diagnostics.
   // This also fails on unexpected dependency errors or a weakened public type.
   const lineOf = text => source.slice(0, source.indexOf(text)).split('\n').length;
   assert.deepEqual(diagnostics.map(d => ({
@@ -59,9 +63,11 @@ const missing: Position = { id: 'p', symbol: 'BTC', side: PositionSide.Long, ent
     line: d.file && d.start !== undefined
       ? d.file.getLineAndCharacterOfPosition(d.start).line + 1 : undefined,
   })), [
+    { file: fixture, code: 2322, line: lineOf('const unsafeNotional:') },
     { file: fixture, code: 2322, line: lineOf('const unsafe:') },
     { file: fixture, code: 2540, line: lineOf('p.contracts =') },
     { file: fixture, code: 2322, line: lineOf('const side:') },
     { file: fixture, code: 2741, line: lineOf('const missing:') },
+    { file: fixture, code: 2741, line: lineOf('const missingNotional:') },
   ]);
 });

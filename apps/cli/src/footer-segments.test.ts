@@ -16,6 +16,12 @@ const baseState = (over: Partial<FooterState> = {}): FooterState => ({
 const r = (seg: FooterSegment, state: FooterState): string => strip(renderSegment(seg, state));
 
 describe('renderSegment', () => {
+  it.each([null, NaN, Infinity, -Infinity])('renders unknown notional %s as an unknown percentage', (notional) => {
+    const state = baseState({ position: {
+      side: 'long', size: '2 BTC', entryPrice: 100, notional, unrealizedPnl: 10,
+    } });
+    expect(r({ type: 'pnl' }, state)).toBe('uPnL +$10 (—)');
+  });
   it('connection shows a dot, plus a word for non-connected states', () => {
     expect(r({ type: 'connection' }, baseState({ connection: 'connected' }))).toBe('●');
     expect(r({ type: 'connection' }, baseState({ connection: 'connecting' }))).toBe('● connecting');

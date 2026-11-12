@@ -262,7 +262,8 @@ print(chalk.green('✓ Operation complete'));
 **Pinned surfaces** (one shared ANSI scroll region, `src/scroll-region.ts`):
 the transient **top alert bar** (`status-line.ts`, warn/error/critical, dims)
 and the always-on **bottom footer** (`footer.ts` + `footer-segments.ts`,
-user-customizable segments). Both no-op on non-TTY.
+user-customizable segments). Both no-op on non-TTY. The PnL segment preserves
+known currency PnL and shows `—` for its percentage when valuation is unknown.
 
 **Command tracing**: write-ops can be recorded to a durable append-only
 `~/.tealstreet/audit.log` with per-invocation `runId` + fill attribution

@@ -688,3 +688,12 @@ refuse with `invalidInput` / `notSent`. Collision detection reads the market
 catalog independently of ticker readiness; missing tickers cannot authorize
 a write on the focused market. Use the full market symbol or the
 command's supported leading-symbol form to disambiguate.
+
+## Unknown position valuation
+
+Position presence follows contracts, independent of valuation. Position cards,
+position/margin tables and cross-account totals show `—` for unknown notional
+and derived leverage/percentages. An incomplete scope poisons its total without
+hiding a known opposite scope. `$totallongusd`, `$totalshortusd`, `$totallong`,
+`$totalshort` and `$margin` refuse when their required notionals are unknown;
+known zero and empty exposure sums remain zero.
