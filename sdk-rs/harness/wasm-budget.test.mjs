@@ -1929,3 +1929,17 @@ for (const [family, aliases, web, node, minimumCap] of [
     }
   });
 }
+
+test('#3472 merged-head Bybit retains fresh measured plus 10 KiB reserve', () => {
+  // Source f6a275af12092d378f8812f5260b4a3a07b7b0ee, build.sh --venue bybit.
+  // Rust1.99, bindgen0.2.129, Binaryen132 twice-Oz: web/node each 2,332,186 B.
+  // SHA256 2f99b9639875bdb29dfde985745ca9f91b1e3903dcbd3b9052e2a788548d6db2.
+  const measured = Math.max(2_332_186, 2_332_186);
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_342_912);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});

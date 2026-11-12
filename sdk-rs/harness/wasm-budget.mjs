@@ -257,7 +257,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125392, CI source cca7b8337ad3:
   // web/Node 2,330,713 B; current measured maximum + 10 KiB, rounded up.
   // Nullable valuation plus inverse quote-capacity refusals remain in this family.
-  bybit: 2_341_888,
+  // #3472 source f6a275af12092d378f8812f5260b4a3a07b7b0ee: fresh optimized web/node 2,332,186 B.
+  // build.sh --venue bybit; Rust1.99, bindgen0.2.129, Binaryen132 twice-Oz.
+  // SHA256 2f99b9639875bdb29dfde985745ca9f91b1e3903dcbd3b9052e2a788548d6db2.
+  // Generated from wasm-budget-venue.json: ceil((max(web,node) + 10 KiB) / KiB).
+  bybit: 2_342_912,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
   // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.
