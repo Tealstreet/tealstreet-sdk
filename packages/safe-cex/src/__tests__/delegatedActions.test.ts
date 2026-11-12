@@ -386,7 +386,9 @@ describe('DELEGATED versioned actions', () => {
 
 describe('DELEGATED existing v1 lifecycle scope', () => {
   it.each(['chaser', 'twap'])('rejects deferred %s parameter amendment before durable enqueue', async (family) => {
-    const start = fullWrites.find(({ action }) => 'op' in action && action.op === `${family}:start`)!.action as { data: unknown };
+    const start = fullWrites.find(({ action }) => 'op' in action && action.op === `${family}:start`)!.action as {
+      data: unknown;
+    };
     const payload = { kind: 'algo', op: `${family}:amend`, data: { id: 'resident-job', options: start.data } };
     expect(isDelegatedAction(payload)).toBe(false);
     const f = setup();

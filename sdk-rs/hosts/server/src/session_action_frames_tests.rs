@@ -1768,6 +1768,9 @@ async fn j6b_duplicate_algo_fields_are_typed_unsupported_before_ack_or_native_io
                 let (mut session,mut sent)=joined(registry.clone(),"A",account.clone()).await;
                 let id=action_key();
                 let mut payload=json!({"kind":"algo","op":format!("{family}:start"),"data":j6b_options(family)});
+                if duplicate=="object" && family=="chaser" {
+                    payload["data"]["terminate"]=json!({"type":"price","value":51000});
+                }
                 if duplicate=="array" {
                     let cases: Vec<Value>=serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json")).unwrap();
                     payload=cases.into_iter().find(|c| c["action"]["op"]=="twap:state").unwrap()["action"].clone();
@@ -1776,7 +1779,7 @@ async fn j6b_duplicate_algo_fields_are_typed_unsupported_before_ack_or_native_io
                 let wire=json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}}).to_string();
                 let wire=match duplicate {
                     "object" if family=="twap"=>wire.replacen("\"activeMarket\":","\"activeMarket\":{\"future\":true},\"activeMarket\":",1),
-                    "object"=>wire.replacen("\"data\":","\"data\":{\"future\":true},\"data\":",1),
+                    "object"=>wire.replacen("\"terminate\":","\"terminate\":{\"future\":true},\"terminate\":",1),
                     _=>wire.replacen("\"size\":","\"size\":{},\"size\":",1),
                 };
                 assert!(crate::order_actions::decode_request(&wire).is_err(),"{family}/{duplicate}: ambiguous raw schema accepted");
