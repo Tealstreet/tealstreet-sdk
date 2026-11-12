@@ -20,7 +20,7 @@ use crate::{
 
 /// The account's chaser runtime, as TWAP slices use it.
 pub trait TwapChasers {
-    /// An `Err` is the refusal the client sees as an error log.
+    /// An `Err` refuses child admission before dispatch and is logged to the client.
     fn start_with_id(&self, cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String>;
     fn progress(&self, chaser_id: &str) -> Option<ChaserProgress>;
     /// Stop further writes after an uncertain TWAP outcome; current and late orders stay.
@@ -542,8 +542,9 @@ impl TwapMarketView for CxView<'_> {
     }
 
     fn start_chaser(&self, request: &ChaserRequest) -> Result<(), String> {
+        self.chasers.start_with_id(self.cx, request)?;
         self.chaser_dispatched.set(true);
-        self.chasers.start_with_id(self.cx, request)
+        Ok(())
     }
 
     fn amount_step(&self, symbol: &str) -> Option<f64> {

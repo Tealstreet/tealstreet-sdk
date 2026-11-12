@@ -749,6 +749,75 @@ impl TwapChasers for RefusingChasers {
 }
 
 #[tokio::test(start_paused = true)]
+async fn typed_start_counts_only_accepted_chaser_admission_as_dispatch() {
+    LocalSet::new()
+        .run_until(async {
+            for (refused, change) in [(false, false), (true, false), (false, true), (true, true)] {
+                let initial = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "A".into(),
+                    generation: 7,
+                };
+                let reads = Rc::new(Cell::new(0));
+                let port = Rc::new(Port::default());
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let accepted = Rc::new(Chasers::default());
+                let chasers: Rc<dyn TwapChasers> = if refused {
+                    Rc::new(RefusingChasers)
+                } else {
+                    accepted.clone()
+                };
+                let factory = TwapFactory::with_owner("a", initial.clone(), cx.clone(), chasers)
+                    .guard_owner(Rc::new({
+                        let reads = reads.clone();
+                        move || {
+                            reads.set(reads.get() + 1);
+                            // capture + initial check/refresh precede child admission.
+                            if change && reads.get() >= 4 {
+                                safe_cex_algo_twap::TwapOwner {
+                                    owner_id: "B".into(),
+                                    generation: 8,
+                                }
+                            } else {
+                                initial.clone()
+                            }
+                        }
+                    }));
+                let result = factory.capture_owner().start(
+                    serde_json::from_str(&twap_options(json!({"useChaserOrders":true}))).unwrap(),
+                );
+                assert!(placed_amounts(&port).is_empty());
+                assert_eq!(accepted.started.borrow().len(), usize::from(!refused));
+                if !change {
+                    assert_eq!(
+                        port.emits
+                            .borrow()
+                            .iter()
+                            .filter(|(op, data)| op == "error" && data == &json!("chaser refused"))
+                            .count(),
+                        usize::from(refused)
+                    );
+                }
+                if change {
+                    let error = result.expect_err("retired starts must refuse");
+                    assert_eq!(
+                        error.outcome,
+                        Some(if refused {
+                            safe_cex_engine::error::Outcome::NotSent
+                        } else {
+                            safe_cex_engine::error::Outcome::Unknown
+                        })
+                    );
+                    assert!(factory.active_twaps("a").is_empty());
+                } else {
+                    assert_eq!(factory.active_twaps("a")[0]["id"], result.unwrap());
+                }
+                cx.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_refused_chase_slice_is_not_counted() {
     LocalSet::new()
         .run_until(async {
