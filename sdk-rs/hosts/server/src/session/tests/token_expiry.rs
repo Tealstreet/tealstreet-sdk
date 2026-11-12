@@ -1,4 +1,49 @@
 use super::*;
+use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue};
+use std::sync::atomic::AtomicUsize;
+
+/// Full startup readiness, with a count at the actual venue command boundary.
+struct ReadyLater {
+    commands: Arc<AtomicUsize>,
+    ready: Arc<AtomicBool>,
+}
+
+impl Venue for ReadyLater {
+    type Pending = ();
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        cx.set_timer(5.);
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+    fn on_timer(&mut self, cx: &mut Cx<'_, ()>, timer: TimerId) {
+        if !self.ready.load(Ordering::SeqCst) {
+            cx.set_timer(5.);
+            return;
+        }
+        crate::accounts::testing::HeldLoad {
+            placed: Arc::default(),
+            load_after_ms: None,
+            ticker: false,
+        }
+        .on_timer(cx, timer);
+        cx.store.set_balance(Default::default());
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+        if let Command::CancelSymbolOrders { command, .. } = command {
+            self.commands.fetch_add(1, Ordering::SeqCst);
+            cx.done(command, "[]".to_owned());
+        }
+    }
+    fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
 
 fn expire(session: &mut Session) {
     session.identity.token.as_mut().unwrap().1 = now_ms();
@@ -214,34 +259,105 @@ async fn token_expiry_stops_a_command_waiting_for_startup() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = crate::accounts::tests::registry();
-            let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
-            let (account, _placed) = crate::accounts::tests::held_load_account(link, Some(500.));
-            crate::accounts::tests::register(&registry, &account);
-            registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
-            let (mut session, mut sent) = sign_silent_session(registry);
-            session.open().await;
-            session.identity.token.as_mut().unwrap().1 = now_ms() + 100;
-            session.send_command(
-                "acct",
-                &json!("startup-cancel"),
-                "cancelAllOrders",
-                &None,
-                json!({"op":"cancelSymbolOrders","symbol":"BTCUSDT"}),
-                methods::Reply::Unit,
-                true,
-                None,
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-            expired_reply(&mut sent);
-            assert!(
-                session.joined["acct"]
-                    .client
-                    .pending
-                    .lock()
-                    .unwrap()
-                    .is_empty()
-            );
-            session.close();
+            let ready = Arc::new(AtomicBool::new(false));
+            let mut waiting = Vec::new();
+            // Bob logs in while Alice's command still waits for startup. Neither
+            // the reply nor its captured expiry may be donated to Bob's session.
+            for (user, expired) in [("alice", true), ("bob", false)] {
+                let commands = Arc::new(AtomicUsize::new(0));
+                let init = acct_init();
+                let (account, _inbox) = crate::accounts::testing::account_on(
+                    ReadyLater {
+                        commands: commands.clone(),
+                        ready: ready.clone(),
+                    },
+                    (user, "acct", "bybit"),
+                    Some(safe_cex_remote_signer::SignerLink::new(
+                        7,
+                        Arc::new(|_| true),
+                    )),
+                    init.fingerprint(),
+                    Arc::default(),
+                );
+                crate::accounts::tests::register(&registry, &account);
+                let (mut session, sent) = user_session(registry.clone(), user);
+                session.init(init).await.unwrap();
+                assert!(
+                    !account
+                        .handle
+                        .read(|store| store.loaded().balance)
+                        .await
+                        .unwrap()
+                );
+                if expired {
+                    session.identity.token.as_mut().unwrap().1 = now_ms() + 100;
+                }
+                session.send_command(
+                    "acct",
+                    &json!(user),
+                    "cancelAllOrders",
+                    &None,
+                    json!({"op":"cancelSymbolOrders","symbol":"BTCUSDT"}),
+                    methods::Reply::Unit,
+                    true,
+                    None,
+                );
+                waiting.push((expired, account, commands, session, sent));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            ready.store(true, Ordering::SeqCst);
+            for (expired, account, commands, session, mut sent) in waiting {
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    loop {
+                        if commands.load(Ordering::SeqCst) > 0
+                            || session.joined["acct"]
+                                .client
+                                .pending
+                                .lock()
+                                .unwrap()
+                                .is_empty()
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .expect("dispatch or refusal after startup");
+                assert!(
+                    account
+                        .handle
+                        .read(|store| {
+                            let loaded = store.loaded();
+                            loaded.markets && loaded.balance && loaded.orders && loaded.positions
+                        })
+                        .await
+                        .unwrap(),
+                    "startup really completed"
+                );
+                assert_eq!(
+                    commands.load(Ordering::SeqCst),
+                    usize::from(!expired),
+                    "venue dispatch, expired={expired}"
+                );
+                if expired {
+                    expired_reply(&mut sent);
+                    assert!(
+                        session.joined["acct"]
+                            .client
+                            .pending
+                            .lock()
+                            .unwrap()
+                            .is_empty()
+                    );
+                } else {
+                    assert!(
+                        std::iter::from_fn(|| sent.try_recv().ok())
+                            .all(|frame| !frame.contains("Tealstreet proxy token expired"))
+                    );
+                }
+                session.close();
+            }
         })
         .await;
 }
