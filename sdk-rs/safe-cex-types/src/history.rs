@@ -202,8 +202,13 @@ pub enum ClosedPnlEntryLeverage {
     Variant1(String),
 }
 
+fn required_nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[ts(optional_fields)]
 pub struct ClosedPnlEntry {
     /// @ts-mutable
     #[serde(rename = "provenance")]
@@ -213,44 +218,53 @@ pub struct ClosedPnlEntry {
     pub symbol: String,
     /// @ts-mutable
     #[serde(rename = "notional")]
+    #[serde(deserialize_with = "required_nullable")]
     #[ts(inline)]
-    pub notional: ClosedPnlEntryNotional,
+    pub notional: Option<ClosedPnlEntryNotional>,
     /// @ts-mutable
     #[serde(rename = "entryPrice")]
+    #[serde(deserialize_with = "required_nullable")]
     #[ts(inline)]
-    pub entry_price: ClosedPnlEntryEntryPrice,
+    pub entry_price: Option<ClosedPnlEntryEntryPrice>,
     /// @ts-mutable
     #[serde(rename = "exitPrice")]
+    #[serde(deserialize_with = "required_nullable")]
     #[ts(inline)]
-    pub exit_price: ClosedPnlEntryExitPrice,
+    pub exit_price: Option<ClosedPnlEntryExitPrice>,
     /// @ts-mutable
     #[serde(rename = "unrealizedPnl")]
+    #[serde(deserialize_with = "required_nullable")]
     #[ts(inline)]
-    pub unrealized_pnl: ClosedPnlEntryUnrealizedPnl,
+    pub unrealized_pnl: Option<ClosedPnlEntryUnrealizedPnl>,
     /// @ts-mutable
     #[serde(rename = "side")]
     pub side: String,
     /// @ts-mutable
     #[serde(rename = "fees")]
+    #[serde(deserialize_with = "required_nullable")]
     #[ts(inline)]
-    pub fees: ClosedPnlEntryFees,
+    pub fees: Option<ClosedPnlEntryFees>,
     /// @ts-mutable
     #[serde(rename = "time")]
-    pub time: f64,
+    #[serde(deserialize_with = "required_nullable")]
+    pub time: Option<f64>,
     /// @ts-mutable
     #[serde(rename = "closedTime")]
-    pub closed_time: f64,
+    #[serde(deserialize_with = "required_nullable")]
+    pub closed_time: Option<f64>,
     /// @ts-mutable
     #[serde(rename = "account")]
     pub account: String,
     /// @ts-mutable
     #[serde(rename = "contracts")]
+    #[serde(deserialize_with = "required_nullable")]
     #[ts(inline)]
-    pub contracts: ClosedPnlEntryContracts,
+    pub contracts: Option<ClosedPnlEntryContracts>,
     /// @ts-mutable
     #[serde(rename = "leverage")]
+    #[serde(deserialize_with = "required_nullable")]
     #[ts(inline)]
-    pub leverage: ClosedPnlEntryLeverage,
+    pub leverage: Option<ClosedPnlEntryLeverage>,
 }
 
 /// @ts-union
@@ -481,27 +495,36 @@ mod strict_codecs {
         #[serde(rename = "symbol")]
         symbol: String,
         #[serde(rename = "notional")]
-        notional: ClosedPnlEntryNotional,
+        #[serde(deserialize_with = "required_nullable")]
+        notional: Option<ClosedPnlEntryNotional>,
         #[serde(rename = "entryPrice")]
-        entry_price: ClosedPnlEntryEntryPrice,
+        #[serde(deserialize_with = "required_nullable")]
+        entry_price: Option<ClosedPnlEntryEntryPrice>,
         #[serde(rename = "exitPrice")]
-        exit_price: ClosedPnlEntryExitPrice,
+        #[serde(deserialize_with = "required_nullable")]
+        exit_price: Option<ClosedPnlEntryExitPrice>,
         #[serde(rename = "unrealizedPnl")]
-        unrealized_pnl: ClosedPnlEntryUnrealizedPnl,
+        #[serde(deserialize_with = "required_nullable")]
+        unrealized_pnl: Option<ClosedPnlEntryUnrealizedPnl>,
         #[serde(rename = "side")]
         side: String,
         #[serde(rename = "fees")]
-        fees: ClosedPnlEntryFees,
+        #[serde(deserialize_with = "required_nullable")]
+        fees: Option<ClosedPnlEntryFees>,
         #[serde(rename = "time")]
-        time: f64,
+        #[serde(deserialize_with = "required_nullable")]
+        time: Option<f64>,
         #[serde(rename = "closedTime")]
-        closed_time: f64,
+        #[serde(deserialize_with = "required_nullable")]
+        closed_time: Option<f64>,
         #[serde(rename = "account")]
         account: String,
         #[serde(rename = "contracts")]
-        contracts: ClosedPnlEntryContracts,
+        #[serde(deserialize_with = "required_nullable")]
+        contracts: Option<ClosedPnlEntryContracts>,
         #[serde(rename = "leverage")]
-        leverage: ClosedPnlEntryLeverage,
+        #[serde(deserialize_with = "required_nullable")]
+        leverage: Option<ClosedPnlEntryLeverage>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::ClosedPnlEntry {

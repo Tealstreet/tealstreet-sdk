@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../../store/store.interface';
@@ -1125,7 +1126,7 @@ export class BinanceExchange extends BaseExchange {
         if (Array.isArray(data)) rows.push(...data);
       }
 
-      return deriveBinanceClosedPositions(rows, opts.accountName || '').sort((a, b) => b.closedTime - a.closedTime);
+      return deriveBinanceClosedPositions(rows, opts.accountName || '').sort(compareClosedPnlTimes);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return [];

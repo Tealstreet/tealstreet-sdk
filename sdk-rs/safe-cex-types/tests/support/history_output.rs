@@ -21,7 +21,8 @@ pub fn fixture() -> HistoryOutput {
         ]"#).unwrap(),
         closed: serde_json::from_str(r#"[
             {"provenance":"venue","symbol":"BTC","notional":20,"entryPrice":10,"exitPrice":12,"unrealizedPnl":2,"side":"long","fees":0,"time":1,"closedTime":2,"account":"fixture","contracts":2,"leverage":1},
-            {"provenance":"derived","symbol":"BTC","notional":"20.00","entryPrice":"10.00","exitPrice":"12.00","unrealizedPnl":"2.00","side":"short","fees":"0.00","time":3,"closedTime":4,"account":"fixture","contracts":"2.00","leverage":"1.00"}
+            {"provenance":"derived","symbol":"BTC","notional":"20.00","entryPrice":"10.00","exitPrice":"12.00","unrealizedPnl":"2.00","side":"short","fees":"0.00","time":3,"closedTime":4,"account":"fixture","contracts":"2.00","leverage":"1.00"},
+            {"provenance":"venue","symbol":"BTC","notional":null,"entryPrice":null,"exitPrice":null,"unrealizedPnl":null,"side":"long","fees":null,"time":null,"closedTime":null,"account":"fixture","contracts":null,"leverage":null}
         ]"#).unwrap(),
         income: serde_json::from_str(r#"[
             {"symbol":"BTC","incomeType":"RAW_PNL","income":12,"asset":"USD","timestamp":1,"tranId":"bill-1","category":"realized_pnl"},
