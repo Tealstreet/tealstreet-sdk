@@ -1657,7 +1657,10 @@ impl Session {
         };
         let account = self.joined[name].account.clone();
         let dispatch_out = self.account_out(name);
-        let symbols = if method == "cancelAllOrders" {
+        let symbols = if method == "cancelAllOrders"
+            && (account.delegated.is_none()
+                || matches!(order_frame, Some(OrderReceipt::Action { .. })))
+        {
             let mut symbols: Vec<String> = account
                 .handle
                 .read(|store| {
