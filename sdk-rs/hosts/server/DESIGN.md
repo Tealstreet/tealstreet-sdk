@@ -523,12 +523,12 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
 
 All application messages are JSON text frames of the form `{"t": <type>, "d": <data>}`.
 
-### Client to server (unchanged from today)
+### Client to server
 
 | `t` | `d` | Behaviour |
 |---|---|---|
 | `init` | `InitPayload` (same fields as `server.ts`) | Builds a new account or re-snapshots matching settings; changing an existing private account requires `apply-settings` |
-| `apply-settings` | `{accountName, instanceId?}` | An admitted private client explicitly stops its current account before reinitializing with new settings |
+| `apply-settings` | `{accountName, instanceId}` | An admitted private client explicitly stops its current account before reinitializing with new settings |
 | `msg` | `{op, data?, accountName, instanceId?}` | Account op, see below |
 | `sign-res` | `{id, config?, wsAuthSignature?, error?}`, with `ts` as a sidecar | Goes to the signer (4yjlw0) |
 | `echo-res` | `{id}` | Echo RTT sample |
@@ -561,6 +561,8 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 `apply-settings` reuses the settings-disposal path: algos stop with the recorded
 reason "its key or connection settings changed" (`settings_changed`). It accepts
 only the current live account/registration with unexpired socket authority.
+The nonempty `instanceId` must match the admitted init. A legacy client can first
+repeat its unchanged init with an ID to bind the same account without restarting it.
 Pending verification replies `verifying`; unadmitted, stale or fenced clients
 cannot reset an account. Live and parked holders, and a DELEGATED resident copy
 without a socket, prevent an ordinary init from changing private settings.

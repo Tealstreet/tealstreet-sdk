@@ -7,11 +7,12 @@ impl Session {
             pending.out.send(envelope::error(Some(&name), "verifying"));
             return;
         }
-        let admitted = self
-            .identity
-            .token
-            .as_ref()
-            .is_some_and(|(_, expires)| *expires > now_ms())
+        let admitted = request.instance_id.is_some()
+            && self
+                .identity
+                .token
+                .as_ref()
+                .is_some_and(|(_, expires)| *expires > now_ms())
             && !self.router_fenced()
             && !self.moved_by_drain()
             && self.joined.get(&name).is_some_and(|joined| {

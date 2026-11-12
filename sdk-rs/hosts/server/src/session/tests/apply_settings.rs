@@ -177,7 +177,10 @@ async fn apply_settings_refuses_pending_missing_other_user_and_stale_registratio
                         }),
                     );
                 }
-                let init = acct_init();
+                let init = InitPayload {
+                    instance_id: Some("current".into()),
+                    ..acct_init()
+                };
                 let account = crate::accounts::testing::trading_account(&registry, "u", &init);
                 let (mut owner, _) = user_session(registry.clone(), "u");
                 owner.init(init.clone()).await.unwrap();
@@ -219,7 +222,11 @@ async fn apply_settings_refuses_pending_missing_other_user_and_stale_registratio
                     None
                 };
                 attempt
-                    .handle(&request((case == "stale-registration").then_some("old")))
+                    .handle(&request(Some(if case == "stale-registration" {
+                        "old"
+                    } else {
+                        "current"
+                    })))
                     .await
                     .unwrap();
                 let replies = frames(&mut sent);
@@ -254,4 +261,56 @@ async fn apply_settings_rejects_an_unauthenticated_connection() {
         session.handle(&request(None)).await,
         Err(Close::Policy(_))
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn apply_settings_requires_a_registration_binding_even_on_legacy_init() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let init = acct_init();
+            let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+            let (mut session, mut sent) = user_session(registry.clone(), "u");
+            session.init(init.clone()).await.unwrap();
+            frames(&mut sent);
+            session.handle(&request(None)).await.unwrap();
+            let replies = frames(&mut sent);
+            assert!(
+                registry.holds(&account, session.socket),
+                "an unbound reset cannot target a later registration"
+            );
+            assert!(account.handle.disposal_cause().is_none());
+            assert!(
+                replies.iter().any(|f| f["d"]["op"] == "error"
+                    && f["d"]["data"][0] == "apply settings refused: account not admitted"),
+                "{replies:?}"
+            );
+            session
+                .init(InitPayload {
+                    instance_id: Some("bound".into()),
+                    ..init
+                })
+                .await
+                .unwrap();
+            session.handle(&request(Some("bound"))).await.unwrap();
+            assert!(
+                !registry.holds(&account, session.socket),
+                "a current admitted registration is the working control"
+            );
+            let next = InitPayload {
+                instance_id: Some("next".into()),
+                ..acct_init()
+            };
+            let replacement = crate::accounts::testing::trading_account(&registry, "u", &next);
+            session.init(next).await.unwrap();
+            for stale in [None, Some("bound")] {
+                session.handle(&request(stale)).await.unwrap();
+                assert!(registry.holds(&replacement, session.socket));
+                assert!(replacement.handle.disposal_cause().is_none());
+            }
+            session.handle(&request(Some("next"))).await.unwrap();
+            assert!(!registry.holds(&replacement, session.socket));
+            session.close();
+        })
+        .await;
 }

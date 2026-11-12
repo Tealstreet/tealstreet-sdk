@@ -106,6 +106,7 @@ pub struct AccountMsg {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplySettings {
     pub account_name: String,
+    /// Missing bindings deserialize so the handler can visibly refuse them.
     pub instance_id: Option<String>,
 }
 
