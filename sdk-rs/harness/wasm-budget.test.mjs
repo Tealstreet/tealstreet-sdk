@@ -2013,3 +2013,22 @@ for (const [family, aliases, web, node, minimumCap] of [
     }
   });
 }
+
+// #3302 run 43319605083, CI merge fb0f9b777241; pinned build inputs match a3275d876624.
+// AsterDEX web: job 131537312211; Node: artifact 13990380922.
+// Hyperliquid/WEEX web and Node: artifacts 13989992769 / 13989702631.
+for (const [venue, measured] of [
+  ['asterdex', 2_245_672],
+  ['hyperliquid', 2_224_643],
+  ['hyperliquidspot', 2_224_643],
+  ['weex', 2_010_797],
+]) {
+  test(`#3302 current merged ${venue} artifact retains measured plus 10 KiB reserve`, () => {
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}

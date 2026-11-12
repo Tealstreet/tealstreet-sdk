@@ -234,7 +234,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Shared engine valuation/native-size policy; retain unknown instead of a partial value.
   // #3448 head 9a736b2a6bf1: run 43198030267/job 131114624468, artifact 13934600864.
   // Optimized web/Node 2,211,230 B + 10 KiB, rounded up to KiB.
-  asterdex: 2_242_560,
+  // #3302 run 43319605083, CI merge fb0f9b777241: optimized web/Node 2,245,672 B.
+  // Job 131537312211 / artifact 13990380922; current bytes + 10 KiB, rounded up.
+  asterdex: 2_256_896,
   backpack: 2_040_832,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
