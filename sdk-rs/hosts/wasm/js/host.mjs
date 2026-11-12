@@ -517,10 +517,20 @@ export class EngineHost {
     finally { this.handlers.onDead?.(this.deadError); }
   }
 
+  checkAlgoOwner() {
+    if (this.disposed) return false;
+    if (!this.algoOwnerCurrent) return true;
+    let current = false;
+    try { current = this.algoOwnerCurrent() === true; } catch { /* An unavailable owner retires this host. */ }
+    if (current) return true;
+    this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
+    return false;
+  }
+
   // Preserve native argument counts without per-message closures or rest arrays.
   invoke(fn, a, b, c, d) {
     this.assertHttpHandoffIdle();
-    if (this.disposed) return;
+    if (!this.checkAlgoOwner()) return;
     try {
       // Failure is sticky and only engine calls set it: a passed post-call check
       // covers this call unless an engine call ran outside invoke since.
@@ -827,11 +837,14 @@ export class EngineHost {
 
   /** Start this account's Rust algos (chaser, TWAP, exec) on an `algos` engine
    * build. Their replies reach `handlers.onAlgoEmit(op, data)`. */
-  algoStart(accountName, twapOwner) {
+  algoStart(accountName, twapOwner, isOwnerCurrent) {
     this.assertHttpHandoffIdle();
-    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (!this.checkAlgoOwner()) throw this.deadError ?? new EngineDisposedError();
+    if (isOwnerCurrent !== undefined && typeof isOwnerCurrent !== 'function')
+      throw new TypeError('Algo owner check must be a function');
     if (typeof this.engine.algoStart !== 'function')
       throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
+    this.algoOwnerCurrent = isOwnerCurrent;
     if (twapOwner !== undefined) {
       const bound = twapOwner && typeof twapOwner.ownerId === 'string' && twapOwner.ownerId
         && Number.isSafeInteger(twapOwner.generation) && twapOwner.generation >= 0;
@@ -849,7 +862,7 @@ export class EngineHost {
     this.armAlgos();
   }
 
-  get algosRunning() { return this.algosStarted && !this.disposed; }
+  get algosRunning() { return this.checkAlgoOwner() && this.algosStarted; }
 
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if the engine refuses it. */
   algoOp(op, data) {
@@ -992,6 +1005,7 @@ export class EngineHost {
     this.algosStarted = false;
     attempt(() => this.abandonAlgoStopAll());
     attempt(() => this.algosStopped?.resolve?.());
+    this.algoOwnerCurrent = undefined;
     attempt(() => this.transport.dispose?.());
     // Release provider-owned keys on normal disposal instead of retaining the
     // wasm allocation (and an injected callback) until garbage collection.
@@ -1105,7 +1119,7 @@ export class EngineHost {
         catch { finish(undefined, 'unavailable'); return; }
         if (settled) { clearTimer(); return; }
         Promise.resolve().then(() => {
-          if (controller.signal.aborted || this.disposed) return;
+          if (controller.signal.aborted || !this.checkAlgoOwner()) return;
           if (!execute) { finish(undefined, 'unavailable'); return; }
           executing = true;
           return execute({ signal: controller.signal });
@@ -1360,7 +1374,7 @@ export class EngineHost {
 
   execute(action) {
     this.assertHttpHandoffIdle();
-    if (this.disposed) return;
+    if (!this.checkAlgoOwner()) return;
     const { engine, transport } = this;
     switch (action?.op) {
       case 'retireAddressSetup':

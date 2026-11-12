@@ -1169,6 +1169,13 @@ export class ExchangeWorker {
     this._ctx.postMessage({ op: 'store', data: unavailable });
   }
 
+  private _twapOwnerCurrent(): boolean {
+    const owner = this._twapOwner;
+    const current = captureTwapOwner(this._ctx.getTwapOwner && (() => this._ctx.getTwapOwner!()));
+    if (owner === undefined || owner === null) return current === owner;
+    return !!current && current.ownerId === owner.ownerId && current.generation === owner.generation;
+  }
+
   private _handleEngineDead(error: Error) {
     // Startup belongs to store.webworker's !started cleanup. Never race it by
     // scheduling a replacement before that initial start has returned.
@@ -1182,7 +1189,8 @@ export class ExchangeWorker {
       this._invalidateReadiness();
       return;
     }
-    const cannotRecover = this._recoveryAttempted || this._options.publicFeed?.mode === 'shared';
+    const ownerCurrent = this._twapOwnerCurrent();
+    const cannotRecover = !ownerCurrent || this._recoveryAttempted || this._options.publicFeed?.mode === 'shared';
     this._started = false;
     this._recovering = true;
     this._activeTickerSymbols = [...(this._exchange?.getActiveTickerSymbols() ?? [])];
@@ -1208,7 +1216,9 @@ export class ExchangeWorker {
       this._stopped = true;
       this._recovering = false;
       const message =
-        this._options.publicFeed?.mode === 'shared'
+        !ownerCurrent
+          ? 'TWAP owner changed; reinitialize the account worker.'
+          : this._options.publicFeed?.mode === 'shared'
           ? 'Rust shared public feed requires a fresh provider attachment and account init after engine failure.'
           : 'Rust engine recovery exhausted; reinitialize the account to retry.';
       this._ctx.postMessage({ op: 'warning', data: [message] });
@@ -1279,6 +1289,11 @@ export class ExchangeWorker {
 
   private async _recoverEngine(token: number) {
     if (token !== this._startupToken || this._stopped) return;
+    if (!this._twapOwnerCurrent()) {
+      this.dispose();
+      this._ctx.postMessage({ op: 'warning', data: ['TWAP owner changed; reinitialize the account worker.'] });
+      return;
+    }
     const previousUpdateIds = this._recoveryUpdateIds ?? this._store.serialize().updateIds;
     this._store = new DefaultStore();
     this._store.update({
@@ -1298,6 +1313,11 @@ export class ExchangeWorker {
     this._ctx.postMessage({ op: 'store', data: this._sanitizeForPostMessage(this._store.serialize()) });
     const started = await this.start();
     if (token !== this._startupToken || this._stopped) return;
+    if (!this._twapOwnerCurrent()) {
+      this.dispose();
+      this._ctx.postMessage({ op: 'warning', data: ['TWAP owner changed; reinitialize the account worker.'] });
+      return;
+    }
     if (!started && this.retryTimedOutStart()) return;
     if (!started || this._exchange?.isDisposed) {
       this.dispose();

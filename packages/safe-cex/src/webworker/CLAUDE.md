@@ -488,11 +488,20 @@ forwarded to the engine.
 The local Rust engine receives the same provider before startup. The worker
 captures its owner at construction and refuses owned algo startup if that owner
 or generation changes during startup. `EngineHost.algoStart(accountName,
-twapOwner?)` passes a present `{ ownerId: string, generation: number }` as JSON
+twapOwner?, isOwnerCurrent?)` passes a present `{ ownerId: string, generation: number }` as JSON
 to the additive WASM `algoStartOwned(accountName, twapOwnerJson, now, wall)`.
 Absent providers use the existing `algoStart` ABI and its interim account-name
 restore behavior. Explicit null/invalid owners fail closed. The declaration in
 `hosts/wasm/js/host.d.mts` is authored API source, not generated wasm bindings.
+
+The adapter also supplies a live check against the copied startup binding.
+Cached routes, engine entries, action dispatch and deferred signer callbacks
+recheck it. A changed/unavailable owner retires the entire host, cancels its
+timers and transport preparations, releases its engine and refuses queued work;
+it never rebinds that engine to the new owner or runs stale cleanup cancels.
+Unchanged owners keep their schedules. New workers are required after a change.
+Automatic recovery checks the initiating binding before queueing reconstruction,
+at its delayed execution and after startup; changed owners cannot recover that worker.
 
 Once bound, legacy rows with neither top-level tag never resume. The wrapper
 posts a `warning` message `TWAP <symbol> restore cancelled-for-owner-change:

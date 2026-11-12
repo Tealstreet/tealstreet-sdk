@@ -582,8 +582,9 @@ export class EngineHost {
   /** Undefined for an engine without `health()`. */
   health(): EngineHealth | undefined;
   /** Start this account's Rust algos on an `algos` engine build; the host then
-   * keeps their timer armed and delivers replies to `onAlgoEmit`. */
-  algoStart(accountName: string, twapOwner?: Readonly<{ ownerId: string; generation: number }> | null): void;
+   * keeps their timer armed and delivers replies to `onAlgoEmit`.
+   * A false/throwing live owner check permanently retires the entire host before further work. */
+  algoStart(accountName: string, twapOwner?: Readonly<{ ownerId: string; generation: number }> | null, isOwnerCurrent?: () => boolean): void;
   /** Started and not yet stopped or disposed. */
   readonly algosRunning: boolean;
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if refused. */
