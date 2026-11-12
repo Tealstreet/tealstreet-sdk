@@ -54,7 +54,7 @@ pub fn prepare_delegated(
     pair.validate(init)?;
     let memory = crate::delegated_memory::DelegatedMemory::prepare(
         &init.exchange_name,
-        safe_cex_remote_signer::delegated_enabled(&init.exchange_name),
+        crate::delegated::enabled(&init.exchange_name),
     )
     .map_err(|_| "DELEGATED setup unavailable".to_owned())?;
     let plan = routing_plan(init, false)?;
