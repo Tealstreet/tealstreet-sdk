@@ -29,7 +29,8 @@ export type DelegatedAction =
   | { kind: 'setAccountTier'; tier: 'standard' | 'premium' | 'plus' };
 export type { DelegatedOrderParams } from './delegatedWriteParams';
 export type DelegatedActionResult =
-  | { kind: 'amend' | 'place' | 'close'; orderIds: string[] }
+  | { kind: 'amend' | 'close'; orderIds: string[] }
+  | { kind: 'place'; orderIds: string[]; protectionApplied?: true }
   | { kind: Exclude<DelegatedAction['kind'], 'amend' | 'place' | 'close' | 'algo'> };
 
 /** Old action ledgers attest only the original four kinds. */
@@ -162,9 +163,26 @@ export function isDelegatedAction(value: unknown): value is DelegatedAction {
   );
 }
 
-export function isDelegatedActionResult(value: unknown, kind: DelegatedAction['kind']): value is DelegatedActionResult {
+export function isDelegatedActionResult(
+  value: unknown,
+  kind: DelegatedAction['kind'],
+  action?: DelegatedAction,
+): value is DelegatedActionResult {
   if (!record(value) || value.kind !== kind || kind === 'algo') return false;
   if (kind !== 'amend' && kind !== 'place' && kind !== 'close') return keys(value, ['kind']);
+  if (kind === 'place' && value.protectionApplied === true)
+    return (
+      keys(value, ['kind', 'orderIds', 'protectionApplied']) &&
+      Array.isArray(value.orderIds) &&
+      value.orderIds.length === 0 &&
+      action?.kind === 'place' &&
+      action.orders.length > 0 &&
+      action.orders.every(
+        (order) =>
+          order.reduceOnly === true &&
+          ['stop_market', 'take_profit_market', 'trailing_stop_market'].includes(order.type),
+      )
+    );
   return (
     keys(value, ['kind', 'orderIds']) &&
     Array.isArray(value.orderIds) &&

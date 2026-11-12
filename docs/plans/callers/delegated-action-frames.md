@@ -268,3 +268,18 @@ flags and remains subject to the native protective-amend guard. Ordinary orders
 whose venue requires a positive amount still refuse before dispatch. Price
 updates remain strictly positive. The original positive-amount amend contract
 and its existing fingerprints are unchanged.
+
+DELEGATED placement translation also enforces LOCAL's execution-control
+capabilities before any batch leg: unsupported STP, options, Bybit BBO/tick
+controls and a venue's refusal of caller slippage are whole-intent pre-dispatch
+refusals. This covers both `place`/`close` actions and the existing `order.submit`
+family; a venue cannot silently discard a requested execution constraint.
+
+A completed, explicit reduce-only protection-only placement may have no native
+order ID: Bybit's trading-stop command accepts a setting and the stream supplies
+the protection row later. After authoritative native completion, that case returns
+`{kind:"place",orderIds:[],protectionApplied:true}`. The marker is derived only
+from the captured protective command shape plus native completion, never from an
+ACK or a missing reply. The SDK accepts it only for a protection-only request;
+ordinary empty placement results and interrupted protection writes stay unknown.
+No venue order ID is invented.

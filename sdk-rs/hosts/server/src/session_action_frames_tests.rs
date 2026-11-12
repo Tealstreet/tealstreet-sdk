@@ -640,6 +640,8 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                         methods::Reply::Action {
                             seq: 1,
                             kind: "cancelAll",
+                            unit: true,
+                            idless_protection: false,
                         },
                         true,
                         receipt,
@@ -780,6 +782,8 @@ async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refus
                 methods::Reply::Action {
                     seq: 1,
                     kind: "cancelAll",
+                    unit: true,
+                    idless_protection: false,
                 },
                 false,
                 receipt,
@@ -806,6 +810,8 @@ async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refus
                 methods::Reply::Action {
                     seq: 1,
                     kind: "cancelAll",
+                    unit: true,
+                    idless_protection: false,
                 },
                 false,
                 receipt,
@@ -972,6 +978,11 @@ async fn full_write_protection_shapes_reach_native_signing_without_a_forced_call
             let result = action_frame(&mut sent, "order.actionOutcome").await;
             assert_eq!(result["d"]["outcome"], "applied", "{order}: {result}");
             assert!(!tape.writes.lock().unwrap().is_empty(), "{order}");
+            if matches!(order["type"].as_str(), Some("stop_market" | "take_profit_market" | "trailing_stop_market")) {
+                assert_eq!(result["d"]["result"]["protectionApplied"], true);
+                assert_eq!(result["d"]["result"]["orderIds"], json!([]));
+                assert!(tape.requests.lock().unwrap().iter().any(|r| r["path"].as_str().is_some_and(|p| p.ends_with("/position/trading-stop"))));
+            }
             assert!(account.link.is_none());
             session.close(); registry.dispose(&account, Disposal::PageDisposed);
         }
@@ -991,6 +1002,8 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
         reply: methods::Reply::Action {
             kind: "setAllLeverage",
             seq: 1,
+            unit: true,
+            idless_protection: false,
         },
         group: Some(group.clone()),
         incomplete: false,
@@ -1020,19 +1033,13 @@ async fn full_write_algo_queued_for_alice_is_dropped_when_bob_replaces_the_login
         let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
         let (keeper, _kept, _) = Out::channel(256);
         crate::accounts::tests::hold_live(&a, 9999, keeper.outbox());
-        // Stop A's native actor between admission and execution, while retaining
-        // the account through another holder. Disposal alone cannot prove safety.
-        let (entered, waiting) = tokio::sync::oneshot::channel();
-        let (release, gate) = std::sync::mpsc::channel();
-        let handle = a.handle.clone();
-        let blocked = tokio::spawn(async move {
-            handle.read(move |_| { let _ = entered.send(()); gate.recv().unwrap(); }).await
-        });
-        waiting.await.unwrap();
+        // This fixture's actors share the current LocalSet. The typed algo
+        // admission path contains no pending await: it enqueues the Op and
+        // returns before that actor can execute. Retire A before yielding.
         action(&mut alice, json!({"kind":"algo","op":"exec","data":{"command":"buy 0.001","symbol":"BTCUSDT"}}), 1, false).await;
-        action_frame(&mut a_sent, "order.actionAck").await;
+        assert!(a_tape.writes.lock().unwrap().is_empty());
         alice.close();
-        release.send(()).unwrap(); blocked.await.unwrap();
+        tokio::task::yield_now().await;
         action(&mut bob, json!({"kind":"algo","op":"exec","data":{"command":"buy 0.001","symbol":"BTCUSDT"}}), 1, false).await;
         assert_eq!(action_frame(&mut b_sent, "order.actionOutcome").await["d"]["outcome"], "unknown");
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -1045,4 +1052,70 @@ async fn full_write_algo_queued_for_alice_is_dropped_when_bob_replaces_the_login
         }
         bob.close(); registry.dispose(&a, Disposal::PageDisposed); registry.dispose(&b, Disposal::PageDisposed);
     }).await;
+}
+
+#[tokio::test]
+async fn full_write_execution_constraints_are_never_silently_dropped_or_partially_sent() {
+    tokio::task::LocalSet::new().run_until(async {
+        for (field, value) in [("stpMode", json!("EXPIRE_TAKER")), ("impliedVolatility", json!(0.5))] {
+            let registry = crate::accounts::tests::registry(); let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let good = json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":50000});
+            let mut unsupported = good.clone(); unsupported[field] = value.clone();
+            action(&mut session, json!({"kind":"place","orders":[good,unsupported.clone()]}), 1, false).await;
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["outcome"], "refused", "{field}: {result}");
+            assert_eq!(result["d"]["error"]["outcome"], "notSent");
+            assert!(tape.writes.lock().unwrap().is_empty(), "whole batch refuses before first write");
+            // The existing single-placement family has the same LOCAL guard.
+            let id = action_key();
+            let fp = crate::order_contract::fingerprint("synthetic-main", &id, &unsupported, 1).unwrap();
+            session.handle(&json!({"t":"order.submit","d":{"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"params":unsupported}}).to_string()).await.unwrap();
+            let result = action_frame(&mut sent, "order.outcome").await;
+            assert_eq!(result["d"]["outcome"], "refused", "{field}: {result}");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn full_write_keeps_local_unit_reply_semantics_after_native_completion() {
+    let (out, mut sent, _) = Out::channel(8);
+    let pending = |unit| Pending {
+        request_id: json!("setting"),
+        method: "setLeverage".into(),
+        reply: methods::Reply::Action {
+            kind: "setLeverage",
+            seq: 1,
+            unit,
+            idless_protection: false,
+        },
+        group: None,
+        incomplete: false,
+        audit: None,
+    };
+    // Bybit's complete trading plan returns an empty ID array for a setting.
+    // The existing method translator maps that native completion to unit.
+    settle(&out, "main", pending(true), Ok(json!([])));
+    assert_eq!(
+        action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"],
+        "applied"
+    );
+    settle(
+        &out,
+        "main",
+        pending(true),
+        Err(json!({"message":"interrupted","outcome":"unknown"})),
+    );
+    assert_eq!(
+        action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"],
+        "unknown"
+    );
+    settle(&out, "main", pending(false), Ok(json!([])));
+    assert_eq!(
+        action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"],
+        "unknown"
+    );
 }

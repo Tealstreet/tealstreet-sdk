@@ -358,6 +358,12 @@ pub fn settle(
     match answer {
         Ok(result) => {
             let applied = match kind {
+                "place"
+                    if result["protectionApplied"] == true
+                        && result["orderIds"].as_array().is_some_and(Vec::is_empty) =>
+                {
+                    Some(json!({"kind":"place","orderIds":[],"protectionApplied":true}))
+                }
                 "amend" | "place" | "close" => {
                     let ids = result.as_array().or_else(|| result["orderIds"].as_array());
                     ids.filter(|ids| {

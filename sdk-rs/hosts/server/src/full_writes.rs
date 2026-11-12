@@ -382,6 +382,56 @@ fn setting_symbols(store: &Store) -> Result<Vec<String>, Refused> {
     Ok(symbols)
 }
 
+pub(crate) fn protection_only(command: &Value) -> bool {
+    command["orders"].as_array().is_some_and(|orders| {
+        !orders.is_empty()
+            && orders.iter().all(|order| {
+                order["reduceOnly"] == true
+                    && matches!(
+                        order["type"].as_str(),
+                        Some("stop_market" | "take_profit_market" | "trailing_stop_market")
+                    )
+            })
+    })
+}
+
+/// Match LOCAL's execution-control admission before translating any batch leg.
+/// A venue must never silently drop a requested execution constraint.
+pub(crate) fn placement_capabilities(
+    method: &str,
+    args: &[Value],
+    caps: &Capabilities,
+) -> Result<(), Refused> {
+    let first = args.first().unwrap_or(&Value::Null);
+    let orders = match method {
+        "placeOrders" => first.as_array().map(Vec::as_slice).unwrap_or(&[]),
+        "placeOrder" | "placeOrderWithClientOrderId" => std::slice::from_ref(first),
+        _ => return Ok(()),
+    };
+    for order in orders {
+        if order.get("stpMode").is_some() && !caps.stp_controls {
+            return Err(refused("This venue does not support stpMode"));
+        }
+        if order.get("impliedVolatility").is_some() && !caps.options {
+            return Err(refused("Options are not enabled on this account"));
+        }
+        let bybit_controls =
+            order.get("bybitBbo").is_some() || order.get("bybitSlippageToleranceTicks").is_some();
+        if bybit_controls && !caps.bybit_execution_controls {
+            return Err(refused(
+                "This venue does not support Bybit execution controls",
+            ));
+        }
+        if caps.reject_client_slippage && (bybit_controls || order.get("maxSlippagePct").is_some())
+        {
+            return Err(refused(
+                "This venue does not support client-defined slippage",
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

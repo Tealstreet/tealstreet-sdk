@@ -1728,15 +1728,20 @@ impl Session {
             // Reply maps completion only. Every command dispatch below carries
             // the original receipt, including its immutable deadline.
             for plan in &mut plans {
-                if let Plan::Command { reply, .. } | Plan::AfterLoad { reply, .. } = plan {
+                if let Plan::Command { reply, command } | Plan::AfterLoad { reply, command } = plan
+                {
                     *reply = match receipt {
                         OrderReceipt::Placement(seq) => methods::Reply::Intent {
                             client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
                             seq,
                         },
-                        OrderReceipt::Action { seq, kind, .. } => {
-                            methods::Reply::Action { seq, kind }
-                        }
+                        OrderReceipt::Action { seq, kind, .. } => methods::Reply::Action {
+                            seq,
+                            kind,
+                            unit: matches!(reply, methods::Reply::Unit),
+                            idless_protection: kind == "place"
+                                && crate::full_writes::protection_only(command),
+                        },
                     };
                 }
             }
@@ -2242,13 +2247,39 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             } else {
                 Err(failure_detail(
                     "Error",
-                    &format!("{name} cancel-all failed: {}", group.failures.join("; ")),
+                    &format!(
+                        "{name} {} failed: {}",
+                        if pending.method == "setAllLeverage" {
+                            "leverage update"
+                        } else {
+                            "cancel-all"
+                        },
+                        group.failures.join("; ")
+                    ),
                     false,
                 ))
             }
         }
     };
-    if let methods::Reply::Action { kind, seq } = &pending.reply {
+    if let methods::Reply::Action {
+        kind,
+        seq,
+        unit,
+        idless_protection,
+    } = &pending.reply
+    {
+        // Unit-returning methods already discard native result bodies on LOCAL /
+        // COSIGNED. Keep that mapping after an authoritative native completion;
+        // never turn an error or absent completion into a unit success.
+        let outcome = outcome.map(|value| {
+            if *unit {
+                Value::Null
+            } else if *idless_protection && value.as_array().is_some_and(Vec::is_empty) {
+                json!({"orderIds":[],"protectionApplied":true})
+            } else {
+                value
+            }
+        });
         crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
         return;
     }

@@ -7,6 +7,7 @@ import golden from '../../../../sdk-rs/hosts/server/tests/data/delegated-actions
 import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
 import { delegatedActionFingerprint, isDelegatedAction, isDelegatedFullWriteAction } from '../delegatedActions';
 import { DelegatedOutbox } from '../delegatedOutbox';
+import { OrderSide, OrderType } from '../types';
 
 const actions: DelegatedAction[] = [
   { kind: 'amend', order: { id: 'existing', symbol: 'BTCUSDT' }, update: { price: 50001, amount: 0.002 } },
@@ -82,6 +83,35 @@ const outcome = (id: string, action: DelegatedAction, seq = 1) => ({
 });
 
 describe('DELEGATED versioned actions', () => {
+  it('accepts an identified native protection effect without inventing order IDs, and refuses it for ordinary placements', async () => {
+    for (const protection of [false, true]) {
+      const f = setup();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection);
+      const action: DelegatedAction = {
+        kind: 'place',
+        orders: [
+          {
+            symbol: 'BTCUSDT',
+            type: protection ? OrderType.StopLoss : OrderType.Limit,
+            side: OrderSide.Sell,
+            amount: 0.001,
+            price: 49000,
+            reduceOnly: true,
+          },
+        ],
+      };
+      const id = await box.enqueueAction(action);
+      const reply = outcome(id, action);
+      await box.receive(c, {
+        ...reply,
+        d: { ...reply.d, result: { kind: 'place', orderIds: [], protectionApplied: true } },
+      });
+      expect(box.entries()[0].state).toBe(protection ? 'applied' : 'sending');
+      box.close();
+    }
+  });
+
   it.each(fullWrites)('pins full-write canonical hash for $method', ({ action, fingerprint }) => {
     expect(isDelegatedFullWriteAction(action as unknown as DelegatedAction)).toBe(true);
     expect(delegatedActionFingerprint('main', golden.key, action as unknown as DelegatedAction, 1)).toBe(fingerprint);

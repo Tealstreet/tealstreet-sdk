@@ -55,17 +55,16 @@ pub enum Reply {
     /// The TS method returns `undefined`, not the engine result.
     Unit,
     /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
-    Placed {
-        client_order_id: String,
-    },
+    Placed { client_order_id: String },
     /// An order frame using the same single-order command and audit path.
-    Intent {
-        client_order_id: String,
-        seq: u64,
-    },
+    Intent { client_order_id: String, seq: u64 },
     Action {
         kind: &'static str,
         seq: u64,
+        /// Preserve the existing method's native-result-to-unit mapping.
+        unit: bool,
+        /// Known protection writes may complete without a venue order ID.
+        idless_protection: bool,
     },
     /// `updateOrder`: the worker bridge's `WorkerOrderIds`, which the main-thread
     /// mirror decodes (`decodeWorkerOrderIds`); a bare array would throw there.
@@ -405,6 +404,7 @@ pub fn translate_delegated(
             "DELEGATED methods are not enabled for this account",
         ));
     }
+    crate::full_writes::placement_capabilities(method, args, capabilities)?;
     if let Some(plan) = crate::full_writes::translate(method, args, capabilities) {
         return plan;
     }

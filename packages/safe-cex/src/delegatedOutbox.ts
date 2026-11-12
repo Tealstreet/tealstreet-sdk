@@ -325,7 +325,7 @@ export class DelegatedOutbox {
         (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
       )
         throw new Error('Invalid persisted action');
-      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind)))
+      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
         throw new Error('Invalid persisted action result');
       const fingerprint = row.action
         ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
@@ -660,7 +660,7 @@ export class DelegatedOutbox {
     if (row.state === 'applied' && data.outcome !== 'applied') return false;
     if (row.state === 'notSent' && storedNotSentEvidence(row) && data.outcome === 'unknown') return false;
     if (data.outcome === 'applied') {
-      if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind)) return false;
+      if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind, row.action)) return false;
       row.result = clone(data.result);
       row.state = 'applied';
       delete row.error;
@@ -990,12 +990,7 @@ export class DelegatedOutbox {
   }
   private pruneCompletedIntents(): void {
     for (const [id, row] of this.completedIntents) {
-      if (
-        row.intentId !== id ||
-        this.intents.get(id) !== row ||
-        !this.durable.has(id) ||
-        !this.completed(row)
-      )
+      if (row.intentId !== id || this.intents.get(id) !== row || !this.durable.has(id) || !this.completed(row))
         this.completedIntents.delete(id);
     }
   }
