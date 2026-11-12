@@ -7,8 +7,12 @@ use safe_cex_native::{HttpRoute, RoutingPlan, WsRoute, WsRoutes};
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
+#[path = "delegated_negatives.rs"]
+mod delegated_negatives;
 #[path = "delegated_probe_more.rs"]
 mod more;
+#[path = "delegated_restart.rs"]
+mod restart;
 
 struct Fixture {
     registry: Arc<Registry>,
@@ -16,6 +20,7 @@ struct Fixture {
     private_reads: Arc<AtomicUsize>,
     gate: Arc<tokio::sync::Semaphore>,
     server: tokio::task::JoinHandle<()>,
+    rejected: Arc<AtomicUsize>,
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -23,12 +28,17 @@ impl Drop for Fixture {
     }
 }
 async fn fixture() -> Fixture {
+    fixture_with_auth(false).await
+}
+async fn fixture_with_auth(authenticate: bool) -> Fixture {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let code = Arc::new(AtomicUsize::new(0));
     let private_reads = Arc::new(AtomicUsize::new(0));
+    let rejected = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(tokio::sync::Semaphore::new(1000));
     let (codes, reads, wait) = (code.clone(), private_reads.clone(), gate.clone());
+    let proof_rejections = rejected.clone();
     let app = axum::Router::new().route("/ws", axum::routing::get(|ws: axum::extract::WebSocketUpgrade| async {
         ws.on_upgrade(|mut socket| async move {
             while let Some(Ok(frame)) = socket.recv().await {
@@ -41,11 +51,16 @@ async fn fixture() -> Fixture {
         })
     })).fallback(move |uri: Uri, headers: HeaderMap| {
         let (codes, reads, wait) = (codes.clone(), reads.clone(), wait.clone());
+        let rejected = proof_rejections.clone();
         async move {
             if headers.contains_key("x-bapi-api-key") {
                 assert!(headers.contains_key("x-bapi-sign"));
                 reads.fetch_add(1, Ordering::SeqCst);
                 wait.acquire().await.unwrap().forget();
+                if authenticate && !delegated_negatives::signed_read_is_valid(&uri, &headers) {
+                    rejected.fetch_add(1, Ordering::SeqCst);
+                    return axum::Json(json!({"retCode":10003,"retMsg":"synthetic refusal","result":{}})).into_response();
+                }
                 let code = codes.load(Ordering::SeqCst);
                 if code != 0 { return axum::Json(json!({"retCode":code,"retMsg":"synthetic refusal","result":{}})).into_response(); }
             }
@@ -91,12 +106,13 @@ async fn fixture() -> Fixture {
         private_reads,
         gate,
         server,
+        rejected,
     }
 }
 fn payload(session: &mut Session, id: Option<&str>) -> InitPayload {
     let offer = session
         .handovers
-        .issue("acct", crate::accounts::now_ms())
+        .issue("acct", "bybit", crate::accounts::now_ms())
         .unwrap();
     let sealed = crate::delegated::tests::seal(
         &offer,
@@ -113,6 +129,99 @@ fn payload(session: &mut Session, id: Option<&str>) -> InitPayload {
         sealed: Some(sealed),
         ..Default::default()
     }
+}
+
+#[tokio::test]
+async fn apply_settings_allows_verified_delegated_settings_reinitialization() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut results = session.take_verified();
+    let first = payload(&mut session, Some("admitted"));
+    session.init(first).await.unwrap();
+    finish(&mut session, &mut results).await;
+    let original = session.joined["acct"].account.clone();
+    let mut changed = payload(&mut session, Some("candidate"));
+    changed.enable_spot_markets = Some(true);
+    session.init(changed.clone()).await.unwrap();
+    finish(&mut session, &mut results).await;
+    assert!(Arc::ptr_eq(&session.joined["acct"].account, &original));
+    assert!(original.handle.disposal_cause().is_none());
+    while sent.try_recv().is_ok() {}
+    session
+        .handle(r#"{"t":"apply-settings","d":{"accountName":"acct","instanceId":"admitted"}}"#)
+        .await
+        .unwrap();
+    assert!(!session.joined.contains_key("acct"));
+    assert_eq!(f.registry.account_count(), 0);
+    assert_eq!(
+        original.handle.disposal_cause(),
+        Some(safe_cex_native::DisposalCause::Stopped)
+    );
+    let mut replacement = payload(&mut session, Some("replacement"));
+    replacement.enable_spot_markets = Some(true);
+    let fingerprint = crate::delegated::fingerprint(&replacement);
+    session.init(replacement).await.unwrap();
+    finish(&mut session, &mut results).await;
+    let rebuilt = &session.joined["acct"].account;
+    assert!(!Arc::ptr_eq(rebuilt, &original));
+    assert!(rebuilt.delegated.is_some());
+    assert_eq!(rebuilt.fingerprint, fingerprint);
+    f.registry.dispose(rebuilt, Disposal::PageDisposed);
+    session.close();
+}
+
+#[tokio::test]
+async fn apply_settings_retires_a_join_proof_deferred_before_the_reset() {
+    let f = fixture().await;
+    let (mut owner, _) = user_session(f.registry.clone(), "alice");
+    let mut admitted = owner.take_verified();
+    let first = payload(&mut owner, Some("admitted"));
+    owner.init(first).await.unwrap();
+    finish(&mut owner, &mut admitted).await;
+    let original = owner.joined["acct"].account.clone();
+    f.gate.forget_permits(f.gate.available_permits());
+    let before = f.private_reads.load(Ordering::SeqCst);
+    let (mut pending, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut completed = pending.take_verified();
+    let candidate = payload(&mut pending, Some("pending"));
+    pending.init(candidate).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while f.private_reads.load(Ordering::SeqCst) == before {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("candidate is waiting in a private read");
+    owner
+        .handle(r#"{"t":"apply-settings","d":{"accountName":"acct","instanceId":"admitted"}}"#)
+        .await
+        .unwrap();
+    assert!(!f.registry.holds(&original, owner.socket));
+    f.gate.add_permits(1000);
+    finish(&mut pending, &mut completed).await;
+    assert!(
+        !pending.joined.contains_key("acct"),
+        "a pre-reset proof cannot restore the stopped settings"
+    );
+    let replies: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|text| serde_json::from_str(&text).unwrap())
+        .collect();
+    assert!(
+        replies
+            .iter()
+            .any(|f| f["d"]["data"][1]["initRefused"] == true),
+        "{replies:?}"
+    );
+    assert!(
+        !replies
+            .iter()
+            .any(|f| f["d"]["op"] == "delegated:status"
+                && f["d"]["data"]["status"] == "key-available"),
+        "a proof from before the settings reset cannot announce key availability: {replies:?}"
+    );
+    assert_eq!(f.registry.account_count(), 0);
+    pending.close();
+    owner.close();
 }
 async fn finish(
     session: &mut Session,
@@ -221,13 +330,13 @@ async fn handover_binding_negatives_never_start_a_private_probe() {
             "replay" => {
                 session
                     .handovers
-                    .issue("acct", crate::accounts::now_ms())
+                    .issue("acct", "bybit", crate::accounts::now_ms())
                     .unwrap();
             }
             "boot" => {
                 let mut offer = session
                     .handovers
-                    .issue("acct", crate::accounts::now_ms())
+                    .issue("acct", "bybit", crate::accounts::now_ms())
                     .unwrap();
                 offer.boot_id = "synthetic-other-boot";
                 init.sealed = Some(crate::delegated::tests::seal(

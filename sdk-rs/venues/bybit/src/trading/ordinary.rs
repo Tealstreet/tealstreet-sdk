@@ -1101,7 +1101,9 @@ impl BybitLinear {
         let plan = run.plan.clone();
         match decision {
             Decision::ProofPoll(axis) => {
-                let planned = run.partial.as_ref().unwrap().proof(axis);
+                let flow = run.partial.as_ref().unwrap();
+                let planned = flow.proof(axis);
+                let delay_ms = flow.poll_delay_ms(axis);
                 run.queue.push_front(Leg {
                     planned,
                     intent: LegIntent::Command,
@@ -1112,7 +1114,7 @@ impl BybitLinear {
                         &plan,
                         &active.slot,
                         &active.context,
-                        100,
+                        delay_ms,
                         partial_call(Operation::Read, 1),
                     )
                     .is_err()
@@ -1486,7 +1488,11 @@ impl BybitLinear {
                 matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
             })
         {
-            let _ = cx.present_plan_failure(&run.plan, error.message.clone());
+            // A transport refusal on the cancel-partial-stop leg surfaces as
+            // `NotSent`. The venue path has already composed the right
+            // user-facing message for the partial put-back; replace the raw
+            // transport text on this definite outcome.
+            let _ = cx.override_plan_failure_message(&run.plan, error.message.clone());
         }
         if matches
             && run

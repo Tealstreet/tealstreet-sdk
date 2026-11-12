@@ -9,6 +9,8 @@ import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './pe
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
 import { readBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
 import { BitgetOracleChanged } from './bitget-paired-oracle.mjs';
+import { Frame, SECTION } from '../hosts/wasm/js/wire.mjs';
+import { replayPositions } from './bitget-anchor-positions.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 const A = 'a'.repeat(40), B = 'b'.repeat(40), tree = 'c'.repeat(40), head = 'd'.repeat(40);
@@ -388,7 +390,7 @@ test('unchanged disposition cannot waive correctness, memory or process CPU fail
 });
 
 test('changed bytes still require both measured witnesses and the unchanged frozen bound', async () => {
-  for (const q of [1.023, 1.024, 1.0343978501725235]) {
+  for (const q of [1, 1.023]) {
     const data = fixture(q), reads = [];
     const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
       readEvidence: async name => { reads.push(name); return name === 'tip' ? data.evidence : anchorFixture(data).evidence; } });
@@ -399,6 +401,53 @@ test('changed bytes still require both measured witnesses and the unchanged froz
     assert.equal(certificate.tip.originalReports.length, 8);
     assert.equal(certificate.anchor.originalReports.length, 8);
   }
+});
+
+test('a complete rejected tip never collects an anchor that cannot rescue it', async () => {
+  for (const [q, rA] of [[1.024, .85], [1.0343978501725235, .85],
+    [1.0278628752799848 / 1.0225747088093846, 1.0225747088093846]]) {
+    const data = fixture(q, rA), reads = [];
+    await assert.rejects(readBitgetSteadyCertificate({ authority: data.authority, manifest,
+      readEvidence: async name => {
+        reads.push(name);
+        assert.equal(name, 'tip', 'rejected tip must not start an anchor build or replay');
+        return data.evidence;
+      } }), error => {
+      assert.equal(error.disposition, 'REJECTED');
+      assert.equal(error.certificate, null, 'a lone rejected witness is never a certificate');
+      assert.equal(error.tip.steadyAccepted, false);
+      assert.equal(error.tip.originalReports.length, 8, 'validate the complete tip before rejecting');
+      return true;
+    });
+    assert.deepEqual(reads, ['tip']);
+  }
+});
+
+test('a byte-changed build certifies against the original anchor with its empty legacy positions', async () => {
+  const data = fixture(1.01), reads = [];
+  assert.notEqual(data.evidence.archives.baseline.files['safe_cex_wasm_bg.wasm'],
+    data.evidence.archives.candidate.files['safe_cex_wasm_bg.wasm']);
+  const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
+    readEvidence: async name => {
+      reads.push(name);
+      // The collector must decode the selected module before it can return
+      // measured evidence. This used to throw for the pinned anchor even with
+      // zero positions; changed bytes could never reach certification.
+      const buffer = new ArrayBuffer(32), view = new DataView(buffer);
+      view.setUint32(0, 0x46584353, true);
+      view.setUint16(4, 1, true); view.setUint16(6, 1, true);
+      view.setUint16(16, SECTION.POSITIONS, true);
+      view.setUint16(18, name === 'anchor' ? 1 : 2, true);
+      view.setUint32(20, 8, true);
+      assert.equal(replayPositions(new Frame(buffer), 'bitget', false).count, 0);
+      return name === 'tip' ? data.evidence : anchorFixture(data).evidence;
+    } });
+  assert.deepEqual(reads, ['tip', 'anchor']);
+  assert.equal(certificate.anchorSource, BITGET_CUMULATIVE_ANCHOR);
+  assert.equal(certificate.steadyAccepted, true);
+  assert.equal(certificate.tip.originalReports.length, 8);
+  assert.equal(certificate.anchor.originalReports.length, 8);
+  assert.equal(hasPairedBitgetSteady(certificate, data.evidence.cohorts[1].evidence.report, B), true);
 });
 
 test('an unchanged TS oracle still certifies, while baseline Rust corruption still fails', async () => {

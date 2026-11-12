@@ -152,6 +152,11 @@ Inverse contracts have a price-dependent base size, so fractional amounts use
 up to eight significant digits rather than a fixed decimal count. Small nonzero
 positions and remaining order sizes stay visible.
 
+Unknown position valuation displays as `—` in position cards and position/margin
+tables, including derived leverage, PnL percentages and incomplete account totals.
+Known quantities and currency PnL remain visible. The footer also shows `—` for
+the PnL percentage until a known nonzero valuation is available.
+
 ---
 
 ## Command audit & tracing {#audit-tracing}

@@ -476,14 +476,20 @@ describe('DefaultStore', () => {
     });
 
     describe('createEmptyPositionFrom', () => {
-      it('should create empty position with zero values', () => {
+      it('keeps settings without creating financial zero values', () => {
         const position = createPosition();
         const emptyPosition = store.createEmptyPositionFrom(position);
-        expect(emptyPosition.contracts).toBe(0);
-        expect(emptyPosition.entryPrice).toBe(0);
-        expect(emptyPosition.notional).toBe(0);
-        expect(emptyPosition.unrealizedPnl).toBe(0);
-        expect(emptyPosition.liquidationPrice).toBeNull();
+        expect(emptyPosition.leverage).toBe(position.leverage);
+        for (const field of [
+          'contracts',
+          'entryPrice',
+          'notional',
+          'unrealizedPnl',
+          'liquidationPrice',
+          'marginSize',
+        ]) {
+          expect(emptyPosition).not.toHaveProperty(field);
+        }
       });
 
       it('should preserve position id and symbol', () => {
@@ -495,17 +501,17 @@ describe('DefaultStore', () => {
     });
 
     describe('addOrUpdatePositionsFull', () => {
-      it('retains unknown liquidation as null when an omitted position closes', () => {
+      it('removes an omitted position rather than fabricating liquidation or exposure', () => {
         store.addOrUpdatePosition(createPosition({ liquidationPrice: null }));
         for (let refresh = 0; refresh < 2; refresh++) {
           store.addOrUpdatePositionsFull([]);
-          expect(store.positions).toHaveLength(1);
-          expect(store.positions[0]).toMatchObject({ contracts: 0, liquidationPrice: null });
-          expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+          expect(store.positions).toEqual([]);
+          expect(JSON.parse(JSON.stringify(store.serialize())).positions).toEqual([]);
+          expect(store.positionSettings['position-1'].leverage).toBe(10);
         }
       });
 
-      it('should update provided positions and empty others', () => {
+      it('updates provided positions and removes omitted rows', () => {
         store.addOrUpdatePosition(createPosition({ id: 'pos-1' }));
         store.addOrUpdatePosition(createPosition({ id: 'pos-2', contracts: 2 }));
         store.addOrUpdatePositionsFull([createPosition({ id: 'pos-1', contracts: 5 })]);
@@ -513,10 +519,11 @@ describe('DefaultStore', () => {
         const pos1 = store.positions.find((p) => p.id === 'pos-1');
         const pos2 = store.positions.find((p) => p.id === 'pos-2');
         expect(pos1?.contracts).toBe(5);
-        expect(pos2?.contracts).toBe(0); // emptied because not in the update
+        expect(pos2).toBeUndefined();
+        expect(store.positionSettings['pos-2'].leverage).toBe(10);
       });
 
-      it('retains closed-symbol settings with zero exposure after an empty full refresh', () => {
+      it('retains closed-symbol settings separately after an empty full refresh', () => {
         store.addOrUpdatePosition(
           createPosition({
             id: 'closed',
@@ -528,24 +535,17 @@ describe('DefaultStore', () => {
         );
         const version = store.updateIds.positions;
         store.addOrUpdatePositionsFull([]);
-        expect(store.positions).toEqual([
-          createPosition({
-            id: 'closed',
-            leverage: 20,
-            marginType: MarginType.Isolated,
-            positionMode: PositionMode.Hedged,
-            entryPrice: 0,
-            notional: 0,
-            unrealizedPnl: 0,
-            contracts: 0,
-            liquidationPrice: null,
-            marginSize: 0,
-            info: undefined,
-            extra: undefined,
-          }),
-        ]);
+        expect(store.positions).toEqual([]);
+        expect(store.positionSettings.closed).toEqual({
+          id: 'closed',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          leverage: 20,
+          marginType: MarginType.Isolated,
+          positionMode: PositionMode.Hedged,
+        });
         expect(store.updateIds.positions).toBe(version + 1);
-        expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+        expect(JSON.parse(JSON.stringify(store.serialize())).positionSettings.closed.leverage).toBe(20);
       });
 
       it('merges matching rows in place and retains their omitted optional settings', () => {
@@ -565,15 +565,14 @@ describe('DefaultStore', () => {
         );
       });
 
-      it('adds producer rows while retaining omitted rows with unknown liquidation', () => {
+      it('adds producer rows while retaining only omitted settings', () => {
         store.addOrUpdatePosition(createPosition({ id: 'old' }));
         const row = createPosition({ id: 'current', contracts: 5, liquidationPrice: null });
         store.addOrUpdatePositionsFull([row]);
-        expect(store.positions.map((position) => position.id)).toEqual(['old', 'current']);
-        expect(store.positions[0].contracts).toBe(0);
-        expect(store.positions[0].leverage).toBe(10);
-        expect(store.positions[1]).toEqual(row);
-        expect(store.positions[1]).not.toBe(row);
+        expect(store.positions.map((position) => position.id)).toEqual(['current']);
+        expect(store.positionSettings.old.leverage).toBe(10);
+        expect(store.positions[0]).toEqual(row);
+        expect(store.positions[0]).not.toBe(row);
         expect(
           JSON.parse(JSON.stringify(store.serialize())).positions.every(
             (position: Position) => position.liquidationPrice === null,
@@ -875,6 +874,15 @@ describe('DefaultStore', () => {
       expect(serialized.latency).toBe(100);
       expect(serialized.tickers.length).toBe(1);
       expect(serialized.markets.length).toBe(1);
+    });
+
+    it('preserves explicit unknown margin fields rather than defaulting them to zero', () => {
+      store.update({ displayedMargin: { longExposure: null, shortExposure: 250, totalNotional: null } });
+      expect(store.serialize().displayedMargin).toEqual({
+        longExposure: null,
+        shortExposure: 250,
+        totalNotional: null,
+      });
     });
 
     it('should return copies not references', () => {

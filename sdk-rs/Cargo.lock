@@ -4098,6 +4098,7 @@ dependencies = [
 name = "safe-cex-engine"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-position-math",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4118,6 +4119,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "rustls",
+ "ryu-js",
  "safe-cex-algo-twap",
  "safe-cex-algos",
  "safe-cex-chaser",
@@ -4146,6 +4148,7 @@ dependencies = [
  "safe-cex-algos",
  "safe-cex-chaser",
  "safe-cex-engine",
+ "safe-cex-position-math",
  "serde_json",
  "tokio",
 ]
@@ -4186,12 +4189,17 @@ dependencies = [
  "num-bigint 0.4.8",
  "num-traits",
  "ryu-js",
+ "safe-cex-position-math",
  "safe-cex-types",
  "serde",
  "serde_json",
  "trybuild",
  "zerovec",
 ]
+
+[[package]]
+name = "safe-cex-position-math"
+version = "0.1.0"
 
 [[package]]
 name = "safe-cex-remote-signer"

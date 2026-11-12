@@ -14,6 +14,13 @@ pub struct Out {
     owner: Option<Owner>,
     instance_id: Option<Arc<str>>,
     pending_signs: Option<Arc<Mutex<PendingSigns>>>,
+    order_receipts: Arc<Mutex<OrderReceipts>>,
+}
+
+#[derive(Default)]
+struct OrderReceipts {
+    sequence: u64,
+    retired: bool,
 }
 
 enum PendingSigns {
@@ -26,6 +33,15 @@ enum PendingSigns {
 struct Owner {
     current: Arc<Mutex<Weak<()>>>,
     captured: Arc<()>,
+}
+
+/// Retires one temporary producer without retiring an account's output.
+pub(crate) struct OutputLifetime(Owner);
+
+impl Drop for OutputLifetime {
+    fn drop(&mut self) {
+        *self.0.current.lock().unwrap() = Weak::new();
+    }
 }
 
 impl Owner {
@@ -57,6 +73,11 @@ pub struct Receiver {
 }
 
 impl Receiver {
+    #[cfg(test)]
+    pub(crate) fn queued(&self) -> usize {
+        self.rx.len()
+    }
+
     pub async fn recv(&mut self) -> Option<String> {
         loop {
             if let Some(text) = self.rx.recv().await?.into_current() {
@@ -75,6 +96,21 @@ impl Receiver {
 }
 
 impl Out {
+    pub(crate) fn isolated(&self) -> (Self, OutputLifetime) {
+        let captured = Arc::new(());
+        let owner = Owner {
+            current: Arc::new(Mutex::new(Arc::downgrade(&captured))),
+            captured,
+        };
+        (
+            Self {
+                owner: Some(owner.clone()),
+                ..self.clone()
+            },
+            OutputLifetime(owner),
+        )
+    }
+
     pub fn channel(capacity: usize) -> (Self, Receiver, Arc<Notify>) {
         let (tx, rx) = mpsc::channel(capacity);
         let overflow = Arc::new(Notify::new());
@@ -86,6 +122,7 @@ impl Out {
                 owner: None,
                 instance_id: None,
                 pending_signs: None,
+                order_receipts: Arc::default(),
             },
             Receiver { rx },
             overflow,
@@ -124,8 +161,69 @@ impl Out {
         Self {
             instance_id: instance_id.filter(|id| !id.is_empty()).map(Arc::from),
             pending_signs: None,
+            order_receipts: Arc::default(),
             ..self.clone()
         }
+    }
+
+    pub(crate) fn order_binding(&self, instance_id: Option<&str>) -> bool {
+        self.pending_signs.is_none()
+            && !self.order_receipts.lock().unwrap().retired
+            && instance_id.is_none_or(|id| !id.is_empty() && id.len() <= 128)
+            && self.instance_id.as_deref() == instance_id
+    }
+
+    pub(crate) fn order_receipt_binding_bounded(&self) -> bool {
+        self.instance_id.as_deref().is_none_or(|id| id.len() <= 128)
+    }
+
+    pub(crate) fn order_outcome(&self, name: &str, data: serde_json::Value) -> bool {
+        self.sequenced_outcome("order.outcome", name, data)
+    }
+
+    pub(crate) fn action_active(&self) -> bool {
+        self.owner.as_ref().is_none_or(|owner| owner.is_current())
+            && self.order_binding(self.instance_id.as_deref())
+    }
+    pub(crate) fn action_outcome(&self, name: &str, data: serde_json::Value) -> bool {
+        self.sequenced_outcome("order.actionOutcome", name, data)
+    }
+    fn sequenced_outcome(&self, kind: &str, name: &str, mut data: serde_json::Value) -> bool {
+        let mut receipts = self.order_receipts.lock().unwrap();
+        if receipts.retired {
+            return false;
+        }
+        let Some(next) = receipts
+            .sequence
+            .checked_add(1)
+            .filter(|next| *next <= 9_007_199_254_740_991)
+        else {
+            self.overflow.notify_one();
+            self.send(crate::envelope::error(
+                Some(name),
+                "Order receipt sequence exhausted; reconnect",
+            ));
+            return false;
+        };
+        receipts.sequence = next;
+        data["outcomeSeq"] = next.into();
+        let text = crate::envelope::order_frame(kind, name, data.clone());
+        // The registration ID is inserted by send; reserve its full bounded
+        // UTF-8/JSON expansion before exposing a result to the router.
+        let size = self.instance_id.as_deref().map_or(text.len(), |id| {
+            crate::envelope::with_instance_id(text.clone(), id).len()
+        });
+        if kind == "order.actionOutcome" && size > crate::order_contract::OUTCOME_MAX {
+            data["outcome"] = "unknown".into();
+            data["result"] = serde_json::Value::Null;
+            data["error"] = serde_json::json!({"message":"Action result exceeds receipt limit","outcome":"unknown"});
+            return self.send(crate::envelope::order_frame(kind, name, data));
+        }
+        self.send(text)
+    }
+
+    pub(crate) fn retire_order_receipts(&self) {
+        self.order_receipts.lock().unwrap().retired = true;
     }
 
     /// A resumed signer can reconnect before init supplies the new registration.
@@ -133,6 +231,7 @@ impl Out {
         Self {
             instance_id: None,
             pending_signs: Some(Arc::new(Mutex::new(PendingSigns::Waiting(Vec::new())))),
+            order_receipts: Arc::default(),
             ..self.clone()
         }
     }
@@ -161,6 +260,7 @@ impl Out {
     }
 
     pub(crate) fn retire_registration(&self) {
+        self.retire_order_receipts();
         if let Some(pending) = &self.pending_signs {
             *pending.lock().unwrap() = PendingSigns::Retired;
         }
@@ -304,6 +404,50 @@ mod tests {
             assert_eq!(requests, usize::from(!replace));
             assert_eq!(pending.send(request.into()), !replace);
         }
+    }
+
+    #[tokio::test]
+    async fn order_receipt_bookkeeping_is_fixed_and_exhaustion_does_not_wrap() {
+        assert!(std::mem::size_of::<OrderReceipts>() <= 16);
+        let (out, mut sent, overflow) = Out::channel(1);
+        for i in 0..=OUTBOUND_CAPACITY {
+            assert!(out.order_outcome(
+                &format!("account-{i}"),
+                serde_json::json!({"outcome":"refused"})
+            ));
+            let frame: serde_json::Value =
+                serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            assert_eq!(frame["d"]["outcomeSeq"], i + 1);
+        }
+        assert_eq!(Arc::strong_count(&out.order_receipts), 1);
+        out.order_receipts.lock().unwrap().sequence = 9_007_199_254_740_991;
+        assert!(!out.order_outcome("acct", serde_json::json!({"outcome":"unknown"})));
+        overflow.notified().await;
+        let frame: serde_json::Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        assert_eq!(frame["d"]["op"], "error");
+        assert_eq!(
+            out.order_receipts.lock().unwrap().sequence,
+            9_007_199_254_740_991
+        );
+    }
+
+    #[tokio::test]
+    async fn order_receipts_follow_registration_lifetimes() {
+        let (socket, mut sent, _) = Out::channel(8);
+        let first = socket.with_instance_id(Some("first"));
+        let second = socket.with_instance_id(Some("second"));
+        for (out, expected) in [(&first, 1), (&first, 2), (&second, 1)] {
+            assert!(out.order_outcome("acct", serde_json::json!({"outcome":"unknown"})));
+            let frame: serde_json::Value =
+                serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            assert_eq!(frame["d"]["outcomeSeq"], expected);
+        }
+        first.retire_registration();
+        assert!(!first.order_outcome("acct", serde_json::json!({"outcome":"unknown"})));
+        assert!(sent.try_recv().is_err());
+        assert!(second.order_outcome("acct", serde_json::json!({"outcome":"unknown"})));
+        let frame: serde_json::Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        assert_eq!(frame["d"]["outcomeSeq"], 2);
     }
 
     #[tokio::test]

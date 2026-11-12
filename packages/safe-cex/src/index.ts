@@ -28,6 +28,50 @@ export {
 
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
+
+export { DelegatedActivationError, requireDelegatedActivation, requireDelegatedAction } from './delegatedActivation';
+export type {
+  DelegatedActivationFlags,
+  DelegatedActivationCapabilities,
+  DelegatedActivationScopeV1,
+} from './delegatedActivation';
+export {
+  DelegatedOutbox,
+  DelegatedIntentError,
+  createDelegatedIntentId,
+  markDelegatedNotSent,
+} from './delegatedOutbox';
+export { delegatedActionFingerprint } from './delegatedActions';
+export type {
+  DelegatedAction,
+  DelegatedActionResult,
+  DelegatedActionOutcome,
+  DelegatedActionRequestFrame,
+  DelegatedActionAckFrame,
+  DelegatedActionOutcomeFrame,
+  DelegatedActionCancelQueuedFrame,
+} from './delegatedActions';
+export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
+export type {
+  DelegatedOrderBinding,
+  DelegatedOrderSubmitFrame,
+  DelegatedOrderAckFrame,
+  DelegatedOrderOutcomeFrame,
+  DelegatedOrderCancelQueuedFrame,
+} from './delegatedOrderFrames';
+export type {
+  DelegatedIntent,
+  EnqueueOptions,
+  DelegatedNotSentEvidence,
+  StoredDelegatedNotSentEvidence,
+  IntentState,
+  OutboxConnection,
+  OutboxOptions,
+  OutboxScope,
+  OutboxStorage,
+  OutboxSnapshot,
+  OutboxCompaction,
+} from './delegatedOutbox';
 export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
 export { describeStoppedAlgos, nukeWarning } from './nukeResult';
 export type { HistoryCompleteness, HistoricalRows } from './historyCompleteness';
@@ -258,6 +302,7 @@ export {
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
+export type { BuilderFeeApprovalGuard } from './exchanges/hyperliquid/hyperliquid.builderFee';
 
 export type {
   BuilderFeeApprovalResult,

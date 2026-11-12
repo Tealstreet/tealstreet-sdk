@@ -534,44 +534,7 @@ pub fn oldest_cursor_id<S: AsRef<str>>(ids: &[S]) -> Option<String> {
     oldest
 }
 
-/// The TypeScript input shape, with `extra.contractsNative` flattened.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NativeSizeInputs {
-    pub contracts: f64,
-    pub notional: Option<f64>,
-    pub contracts_native: Option<f64>,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NativeSizeMarket {
-    pub contract_size: Option<f64>,
-    pub is_inverse: Option<bool>,
-}
-
-fn or_default(value: Option<f64>, fallback: f64) -> f64 {
-    value
-        .filter(|v| *v != 0.0 && !v.is_nan())
-        .unwrap_or(fallback)
-}
-
-/// Inverse handling is sizing only; price/PnL remains unsolved and refused.
-pub fn native_position_size(position: &NativeSizeInputs, market: &NativeSizeMarket) -> f64 {
-    let from_extra = or_default(position.contracts_native, 0.0).abs();
-    let contract_size = or_default(market.contract_size, 1.0);
-    let source = if market.is_inverse.unwrap_or(false) {
-        position.notional
-    } else {
-        Some(position.contracts)
-    };
-    let derived = or_default(source, 0.0).abs() / contract_size;
-    if from_extra.is_nan() || derived.is_nan() {
-        f64::NAN
-    } else if derived == 0.0 && from_extra == 0.0 {
-        0.0
-    } else {
-        from_extra.max(derived)
-    }
-}
+pub use safe_cex_position_math::{NativeSizeInputs, NativeSizeMarket, native_position_size};
 
 #[cfg(test)]
 mod tests {
@@ -643,9 +606,13 @@ mod tests {
     }
 
     #[test]
-    fn native_sizing_uses_notional_only_for_inverse() {
-        let p = NativeSizeInputs {
-            contracts: 2.0,
+    fn native_sizing_requires_coherent_evidence() {
+        assert_eq!(
+            native_position_size(&NativeSizeInputs::default(), &NativeSizeMarket::default()),
+            None
+        );
+        let mut p = NativeSizeInputs {
+            contracts: Some(2.0),
             notional: Some(100.0),
             contracts_native: Some(0.1),
         };
@@ -653,20 +620,32 @@ mod tests {
             contract_size: Some(0.01),
             is_inverse: Some(false),
         };
-        assert_eq!(native_position_size(&p, &m), 200.0);
+        assert_eq!(native_position_size(&p, &m), None);
+        p.contracts_native = Some(200.0);
+        assert_eq!(native_position_size(&p, &m), Some(200.0));
+        p.contracts_native = None;
+        assert_eq!(native_position_size(&p, &m), Some(200.0));
         m.is_inverse = Some(true);
-        assert_eq!(native_position_size(&p, &m), 10000.0);
+        assert_eq!(native_position_size(&p, &m), Some(10000.0));
         m.contract_size = Some(f64::NAN);
-        assert_eq!(native_position_size(&p, &m), 100.0);
+        assert_eq!(native_position_size(&p, &m), None);
         m.contract_size = Some(f64::INFINITY);
-        let p = NativeSizeInputs {
-            notional: Some(f64::INFINITY),
-            ..p
-        };
-        assert!(native_position_size(&p, &m).is_nan());
-        let p = NativeSizeInputs::default();
+        assert_eq!(native_position_size(&p, &m), None);
         m.contract_size = Some(-1.0);
-        assert_eq!(native_position_size(&p, &m).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(native_position_size(&p, &m), None);
+        m = NativeSizeMarket::default();
+        p = NativeSizeInputs {
+            contracts: Some(f64::NAN),
+            ..NativeSizeInputs::default()
+        };
+        assert_eq!(native_position_size(&p, &m), None);
+        p.contracts_native = Some(3.0);
+        assert_eq!(native_position_size(&p, &m), Some(3.0));
+        p.contracts = Some(0.0);
+        p.contracts_native = Some(0.0);
+        assert_eq!(native_position_size(&p, &m), Some(0.0));
+        p.contracts = Some(1.0);
+        assert_eq!(native_position_size(&p, &m), None);
     }
 }
 

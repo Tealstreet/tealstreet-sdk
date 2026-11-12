@@ -21,7 +21,7 @@ impl DelegatedPair {
         }
     }
     pub(crate) fn validate(&self, init: &InitPayload) -> Result<(), String> {
-        if !safe_cex_remote_signer::delegated_enabled(&init.exchange_name) {
+        if !crate::delegated::enabled(&init.exchange_name) {
             return Err("DELEGATED is not enabled for this venue".into());
         }
         if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
@@ -44,6 +44,11 @@ pub struct ResidentCopy {
     provider: Provider,
 }
 impl ResidentCopy {
+    #[cfg(test)]
+    pub(crate) fn test_provider(provider: Provider) -> Self {
+        Self { provider }
+    }
+
     /// Trusted host ingress, as with a remote account's provider.
     pub fn provider(&self) -> Provider {
         self.provider.clone()
@@ -108,4 +113,33 @@ pub(crate) fn fingerprint(init: &InitPayload) -> String {
         serde_json::from_str(&init.fingerprint()).expect("fingerprint object");
     fields["hostedSigningMode"] = "delegated".into();
     fields.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn venue_declaration_controls_existing_private_construction() {
+        for opted_in in [false, true] {
+            crate::delegated::with_test_declaration(
+                json!({"venues": {
+                    "bybit": {"delegated": {"enabled": false}},
+                    "binance": {"delegated": {"enabled": opted_in}}
+                }}),
+                async {
+                    let init = InitPayload {
+                        account_name: "fixture".into(),
+                        exchange_name: "binance".into(),
+                        key: "synthetic-key".into(),
+                        ..Default::default()
+                    };
+                    let pair =
+                        DelegatedPair::new(init.key.clone(), Secret::new("synthetic".into()), None);
+                    assert_eq!(prepare_delegated(&init, pair).is_ok(), opted_in);
+                },
+            )
+            .await;
+        }
+    }
 }

@@ -436,6 +436,12 @@ export interface EngineHealth {
   lastPrivateMessage: number | null;
 }
 
+/** Optional SDK helpers declared by the venue before asynchronous engine startup. */
+export interface EngineHelperCapabilities {
+  resolveLeverageContext?: boolean;
+  fetchAlgoOrders?: boolean;
+}
+
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface EngineBridgeConstruction {
   spot: boolean;
@@ -447,6 +453,7 @@ export interface EngineBridgeConstruction {
   dispatchSigning:boolean;
   /** Declared read-key policy; absent installs the read key as before. */
   readCredentials?: 'validateOnly' | 'publicRead';
+  helpers?: EngineHelperCapabilities;
 }
 
 export interface EngineConstruction {

@@ -1,4 +1,5 @@
 import type { TransportProvider } from './types';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 
 const warnedWsRoute = new Set<string>();
 
@@ -36,7 +37,7 @@ export const directTransport: TransportProvider = {
     // direct, so say so once rather than let a venue's own warning blame the user.
     if (options.tealstreetWsRoute && !warnedWsRoute.has(exchange)) {
       warnedWsRoute.add(exchange);
-      console.warn(
+      diagnosticConsole.warn(
         `[${exchange}] tealstreetWsRoute requested but the direct transport is active; connecting directly. ` +
           'Register a transport with setDefaultTransport() or pass ExchangeOptions.transport.',
       );
