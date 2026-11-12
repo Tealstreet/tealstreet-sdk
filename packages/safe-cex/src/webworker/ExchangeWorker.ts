@@ -441,7 +441,7 @@ export class ExchangeWorker {
       });
 
       const result = await Promise.race([startPromise, timeoutPromise, cancelledPromise]);
-      if (result === 'cancelled' || startupToken !== this._startupToken || this._exchange?.isDisposed) {
+      if (result === 'cancelled' || startupToken !== this._startupToken) {
         return false;
       }
 
@@ -449,6 +449,7 @@ export class ExchangeWorker {
         this.dispose();
         return false;
       }
+      if (this._exchange?.isDisposed) return false;
 
       // The engine's Rust algos run this account's chasers, TWAPs and CLI;
       // start them before the buffered ops that drive them.
@@ -464,6 +465,11 @@ export class ExchangeWorker {
       this._started = true;
       return true;
     } catch (e) {
+      // Command fencing can retire the adapter before startup resolves or rejects.
+      if (!this._twapOwnerCurrent()) {
+        this.dispose();
+        return false;
+      }
       if (
         // Only the worker's own stop is quiet. An exchange that disposed itself because its
         // start failed (a refused key) must report it, or nothing downstream can react.

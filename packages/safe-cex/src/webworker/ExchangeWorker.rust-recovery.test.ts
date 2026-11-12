@@ -566,6 +566,56 @@ describe('Rust worker engine ownership', () => {
     },
   );
 
+  it.each(['unchanged', 'owner', 'generation', 'returning', 'logout', 'unowned', 'promoted', 'legacy'] as const)(
+    'fences an admitted write across its startup readiness wait: %s',
+    async (change) => {
+      algosBuild = true;
+      let owner: { ownerId: string; generation: number } | null =
+        change === 'unowned' || change === 'promoted' ? null : { ownerId: 'A', generation: 7 };
+      let crossedReadiness = false;
+      setWasmEngineLoader(async () => ({
+        WasmEngine: class extends ControlledEngine {
+          constructor(...args: ConstructorParameters<typeof ControlledEngine>) {
+            super(...args);
+            const takeFrame = this.takeFrame;
+            this.takeFrame = (now, marketOnly) => {
+              const frame = takeFrame(now, marketOnly);
+              if (frame && this.started && !crossedReadiness) {
+                crossedReadiness = true;
+                if (change === 'owner') owner = { ownerId: 'B', generation: 8 };
+                if (change === 'generation') owner = { ownerId: 'A', generation: 8 };
+                if (change === 'returning') {
+                  owner = { ownerId: 'B', generation: 8 };
+                  owner = { ownerId: 'A', generation: 9 };
+                }
+                if (change === 'logout') owner = null;
+                if (change === 'promoted') owner = { ownerId: 'A', generation: 7 };
+              }
+              return frame;
+            };
+          }
+        },
+      }));
+      const { worker, messages } = createWorker({}, 'same-name', change === 'legacy' ? undefined : () => owner);
+      worker.handlePayload(placeOrder('readiness-order', 'original-client'));
+      expect(worker.exchange).toBeNull();
+      const pending = worker.start();
+      await vi.advanceTimersByTimeAsync(250);
+      const allowed = change === 'unchanged' || change === 'unowned' || change === 'legacy';
+      expect(crossedReadiness).toBe(true);
+      expect(sources[0].commands.filter((command) => command.op === 'placeOrders')).toHaveLength(allowed ? 1 : 0);
+      expect(await pending).toBe(allowed);
+      expect(replies(messages, 'readiness-order')).toHaveLength(1);
+      expect(replies(messages, 'readiness-order')[0].data).toMatchObject(
+        allowed ? { success: true, result: ['accepted-id'] } : { success: false, result: { outcome: 'notSent' } },
+      );
+      if (!allowed) {
+        expect(sources[0].freed).toBe(true);
+        expect(sources[0].algoDisposals).toBe(0);
+      }
+    },
+  );
+
   it.each(['unchanged', 'owner', 'generation', 'returning', 'logout', 'unowned', 'legacy'] as const)(
     'retires a changed startup binding before later commands: %s',
     async (change) => {

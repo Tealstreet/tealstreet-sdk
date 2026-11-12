@@ -493,6 +493,9 @@ Retired buffered work is refused, never treated as initially unowned work.
 The adapter keeps the construction binding separately from its live provider;
 startup and later worker entry retire a changed binding before accepting work.
 An initially unowned worker remains allowed only while its binding stays unowned.
+Calls already admitted into startup or preflight waits recheck that binding at
+native command handoff; retired calls refuse as `notSent` and retire the host
+without running stale algo cleanup cancels.
 `EngineHost.algoStart(accountName,
 twapOwner?, isOwnerCurrent?)` passes a present `{ ownerId: string, generation: number }` as JSON
 to the additive WASM `algoStartOwned(accountName, twapOwnerJson, now, wall)`.

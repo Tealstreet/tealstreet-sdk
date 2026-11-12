@@ -2721,6 +2721,15 @@ export class RustEngineExchange extends BaseExchange {
         ...(timing ? { onStage: timing.mark } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       };
+      // A call admitted before readiness must still belong to this engine at handoff.
+      if (!this.algoOwnerCurrent(this.twapOwnerBinding)) {
+        const message = `${this.name} ${command.op} was not sent: owner changed; recreate the account worker`;
+        const error = new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+        // Retire without algo cleanup cancels, including before startAlgos installs its check.
+        this.host.dispose();
+        this.receiveEngineFailure(error);
+        throw error;
+      }
       return (await (Object.keys(options).length
         ? this.host.command(command, options)
         : this.host.command(command))) as T;
