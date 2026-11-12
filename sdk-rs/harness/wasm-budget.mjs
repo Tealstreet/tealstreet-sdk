@@ -264,7 +264,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125555, CI source cca7b8337ad3:
   // web/Node 1,942,038 B; current measured maximum + 10 KiB, rounded up.
   // Shared native-size policy must retain unknown/conflicting quantity refusals.
-  bitunix: 1_952_768,
+  // #3438 run 43204071123, artifact 13937985101, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,942,715 B; measured + 10 KiB rounded up; shared aliases equal.
+  bitunix: 1_953_792,
   // Nullable history output: local optimized web/node 2,070,435 B.
   // SAFE_CEX_WASM_OPT=required build.sh --venue blofin; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).
@@ -295,7 +297,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // CI size plus 10 KiB, rounded up to the KiB.
   // #3438 merged-head local build.sh --venue grvt: web/node 1,988,047 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  grvt: 1_998_848,
+  // #3438 run 43204071123, artifact 13936313617, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,990,569 B; measured + 10 KiB rounded up; shared aliases equal.
+  grvt: 2_000_896,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -352,16 +356,22 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kucoin: 1_878_016,
   // #3438 merged-head local build.sh --venue kucoinspot: web/node 2,461,646 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  kucoinspot: 2_471_936,
+  // #3438 run 43204071123, artifact 13936822120, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,462,504 B; measured + 10 KiB rounded up; shared aliases equal.
+  kucoinspot: 2_472_960,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
   // web/Node 2,146,773 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no signing or admission expansion.
-  lighter: 2_157_568,
+  // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,147,387 B; measured + 10 KiB rounded up; shared aliases equal.
+  lighter: 2_158_592,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  'lighter-robinhood': 2_157_568,
+  // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,147,387 B; measured + 10 KiB rounded up; shared aliases equal.
+  'lighter-robinhood': 2_158_592,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
   // #3299 restage run 42558057739 at 5dec79811311, jobs 128968431838/128968431872:
@@ -379,7 +389,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125322, CI source cca7b8337ad3:
   // web/Node 1,946,379 B; current measured maximum + 10 KiB, rounded up.
   // Shared native sizing with current master broker behavior retained.
-  mexc: 1_956_864,
+  // #3438 run 43204071123, artifact 13937850519, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,947,010 B; measured + 10 KiB rounded up; shared aliases equal.
+  mexc: 1_957_888,
   // Nullable history output: local optimized web/node 2,052,533 B.
   // SAFE_CEX_WASM_OPT=required build.sh --venue okx; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).
@@ -404,7 +416,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   phemex: 2_139_136,
   // #3438 merged-head local build.sh --venue polymarket: web/node 1,647,100 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  polymarket: 1_657_856,
+  // #3438 run 43204071123, artifact 13937575821, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,651,961 B; measured + 10 KiB rounded up; shared aliases equal.
+  polymarket: 1_662_976,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   // #3438 merged-head local build.sh --venue txflow: web/node 1,928,662 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -438,7 +452,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
   // #3442 CI run 42749390151, job 129609649777 at ded39a35466: web/node 2,654,237 B.
   // Current CI size + 10 KiB, rounded up to KiB.
-  woo: 2_665_472,
+  // #3438 run 43204071123, artifact 13937331538, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,655,496 B; measured + 10 KiB rounded up; shared aliases equal.
+  woo: 2_666_496,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

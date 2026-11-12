@@ -2002,3 +2002,29 @@ for (const [family, aliases, web, node, minimumCap] of [
     }
   });
 }
+
+// #3438 run 43204071123; source 0340fd57a506 has head 7464a40315bc's exact tree.
+// Original-attempt artifacts: verified ZIP digests, manifest hashes and equal web/Node bytes.
+for (const [family, artifact, measured] of [
+  ['bitunix', 13937985101, 1_942_715],
+  ['grvt', 13936313617, 1_990_569],
+  ['kucoinspot', 13936822120, 2_462_504],
+  ['lighter', 13936986915, 2_147_387],
+  ['mexc', 13937850519, 1_947_010],
+  ['polymarket', 13937575821, 1_651_961],
+  ['woo', 13937331538, 2_655_496],
+]) {
+  test(`#3438 ${family} artifact ${artifact} retains integrated-build headroom`, () => {
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${family}: ${cap} < ${minimumCap}`);
+    const aliases = family === 'lighter' ? [family, 'lighter-robinhood'] : [family];
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      assert.equal(WASM_VENUE_OVERRIDES[venue], cap, venue);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
