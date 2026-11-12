@@ -6,6 +6,7 @@ use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
 use crate::state::{Log, Metrics};
+use safe_cex_algo_twap::{PersistedTwap, TwapStatus};
 use safe_cex_engine::capabilities::CancelAll;
 use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use serde_json::{Value, json};
@@ -1484,6 +1485,34 @@ impl Session {
                 "updatePositions:done",
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
+            (op, _, _)
+                if self.joined[&name].account.delegated.is_some()
+                    && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
+                        || op == "twap:state"
+                            && msg.data.as_array().is_some_and(|rows| {
+                                rows.iter().any(|row| {
+                                    serde_json::from_value::<PersistedTwap>(row.clone()).is_ok_and(
+                                        |entry| entry.state.status == TwapStatus::Running,
+                                    )
+                                })
+                            })) =>
+            {
+                let message = format!(
+                    "DelegatedActionUnavailable: DELEGATED {op} is unavailable; only place and reduce-only close are enabled"
+                );
+                if op == "exec" && msg.data.get("reqId").is_some() {
+                    self.send(envelope::msg(
+                        &name,
+                        "exec-result",
+                        json!({
+                            "reqId": msg.data["reqId"], "handled": true, "success": false,
+                            "error": message,
+                        }),
+                    ));
+                } else {
+                    self.send(envelope::error(Some(&name), &message));
+                }
+            }
             (op, _, _) if crate::algos::OPS.contains(&op) => {
                 let algos = self.joined[&name].account.algos.clone();
                 let sent = algos.is_some_and(|algos| {
@@ -1722,7 +1751,10 @@ impl Session {
         };
         let account = self.joined[name].account.clone();
         let dispatch_out = self.account_out(name);
-        let symbols = if method == "cancelAllOrders" {
+        let symbols = if method == "cancelAllOrders"
+            && (account.delegated.is_none()
+                || matches!(order_frame, Some(OrderReceipt::Action { .. })))
+        {
             let mut symbols: Vec<String> = account
                 .handle
                 .read(|store| {
@@ -1760,7 +1792,11 @@ impl Session {
             );
             return;
         }
-        let plans = if account.delegated.is_some() {
+        // Dedicated action frames have their own admission and ledger contract.
+        // Legacy calls retain the narrower place/close activation scope.
+        let plans = if account.delegated.is_some()
+            && !matches!(order_frame, Some(OrderReceipt::Action { .. }))
+        {
             methods::translate_delegated(
                 &account.venue,
                 &method,

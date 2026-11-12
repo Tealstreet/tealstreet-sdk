@@ -50,6 +50,19 @@ fn runtime_switch_uses_the_same_executable_and_keeps_the_ledger_router_owned() {
         assert_eq!(transport["delegatedOrderActionsV1"], expected == "1");
         assert!(transport.get("delegatedOrderActionLedgerV1").is_none());
         assert!(transport.get("delegatedOrderLedgerV1").is_none());
+        let supported = safe_cex_exchange_server::order_contract::enabled();
+        assert_eq!(transport["delegatedActivationScopeV1"]["place"], supported);
+        assert_eq!(
+            transport["delegatedActivationScopeV1"]["close"],
+            if supported {
+                "reduceOnly"
+            } else {
+                "unsupported"
+            }
+        );
+        for action in ["amend", "cancel", "cancelAll", "nuke"] {
+            assert_eq!(transport["delegatedActivationScopeV1"][action], false);
+        }
         return;
     }
     for value in [None, Some("0"), Some("1"), Some("invalid")] {
