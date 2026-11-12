@@ -378,6 +378,12 @@ chase is unsettled. Once quiescent, stop and replacement creation run together
 inside normal user/box admission. A slice's chaser cannot be amended independently
 of its parent TWAP. This avoids overlapping schedules or abandoning an old child.
 Invalid replacement parameters and identity changes also refuse before mutation.
+Paused TWAPs must use explicit resume; amendment cannot unpause them. Restored
+TWAPs lack a complete live child-order history, so their parameter amendment
+refuses without mutation: reconcile, explicitly stop, then start a fresh job.
+The host records child IDs at native factory creation and retains unresolved
+children even after they disappear from the active list. Only positive final
+cleanup can release that history; missing/unknown child progress refuses.
 
 A refusal before any old job is touched carries proven `refused/notSent`.
 Once retirement starts, any failure is `unknown`, including expiry before the

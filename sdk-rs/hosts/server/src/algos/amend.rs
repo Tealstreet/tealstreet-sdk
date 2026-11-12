@@ -12,10 +12,10 @@ struct Pending {
     receipt: Box<NukeReceipt>,
 }
 
-#[derive(Default)]
 pub(super) struct Amendments {
     chases: Vec<Pending>,
     pub pending: Rc<Cell<usize>>,
+    history: Rc<super::children::TwapHistory>,
 }
 
 fn finish(receipt: NukeReceipt, message: &str, outcome: &str) {
@@ -45,6 +45,13 @@ fn completed(cx: &AlgoCx, op: &str, old: &str, new: Result<String, String>, rece
 }
 
 impl Amendments {
+    pub fn new(history: Rc<super::children::TwapHistory>) -> Self {
+        Self {
+            chases: Vec::new(),
+            pending: Rc::default(),
+            history,
+        }
+    }
     pub fn is_empty(&self) -> bool {
         self.chases.is_empty()
     }
@@ -127,6 +134,14 @@ impl Amendments {
                 finish(*receipt, "TWAP is no longer active", "notSent");
                 return;
             };
+            if old["status"] != "running" || !self.history.amendable(id) {
+                finish(
+                    *receipt,
+                    "TWAP is paused or its restored/child history is unproven; use explicit resume/stop and reconcile before a fresh start",
+                    "notSent",
+                );
+                return;
+            }
             // TWAP stop leaves its already-created orders alone. Refuse before
             // touching the schedule unless there is no unsettled slice or child.
             let busy = twap.pending_placements() != 0

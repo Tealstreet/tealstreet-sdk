@@ -198,7 +198,10 @@ the caller supplies remaining quantity, immutable account/symbol/side/reduce-onl
 intent and full replacement options; the replacement gets a new job ID. They
 reuse the account's native factories in the host and keep wire version 1.
 Chase cleanup must positively settle before replacement; TWAPs with unsettled
-slices/children refuse before schedule mutation. Deferred replacements retain
+slices/children refuse before schedule mutation. Paused and restored TWAPs cannot
+use amendment to bypass explicit lifecycle admission or missing order history.
+The host retains uncertain child IDs until positively settled, even after the
+active child row disappears. Deferred replacements retain
 their original registration/deadline and participate in drain/release accounting.
 Later stop/nuke/EXEC work, expiry or retired authority prevents replacement.
 An `algo:amended` account event correlates old/new IDs; it never changes the
