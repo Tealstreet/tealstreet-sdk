@@ -315,7 +315,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kraken: 2_271_232,
   krakenspot: 2_271_232,
   kucoin: 1_872_896,
-  kucoinspot: 2_462_720,
+  // #3372 head 5f32a22a8c6c: CI run 43303561061/job 131481481601, artifact 13983990723.
+  // CI merge c75a34b4bd34 (base dda0e1868f38): optimized web/Node 2,463,988 B.
+  // Current measured size + 10 KiB, rounded up; historical provenance/tests retained.
+  kucoinspot: 2_475_008,
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
   // web/Node 2,146,773 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no signing or admission expansion.

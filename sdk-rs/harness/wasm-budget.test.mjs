@@ -1966,3 +1966,15 @@ for (const [family, aliases, web, node, minimumCap] of [
     }
   });
 }
+
+
+test('#3372 CI run 43303561061 retains current KuCoin Spot reserve', () => {
+  // Head 5f32a22a8c6c, CI merge c75a34b4bd34, job 131481481601, artifact 13983990723.
+  const measured = 2_463_988;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_475_008);
+  const cap = WASM_VENUE_OVERRIDES.kucoinspot;
+  assert.ok(cap >= minimumCap, 'KuCoin Spot retains the current CI measurement plus 10 KiB');
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'kucoinspot'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'kucoinspot'), /exceeds/);
+});
