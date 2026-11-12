@@ -19,7 +19,10 @@ commit the deployment IP or credentials. The browser SDK reads these public
 
 Public/private WS overrides are optional when the deployment uses the matching
 `/v5/public/linear` and `/v5/private` paths on the REST authority; the SDK derives
-those URLs. All three final URLs must be present and valid before native startup.
+those URLs. Ordinary browser accounts default production/challenge REST to
+`https://sim-bybit.hyro.trade`; `NEXT_PUBLIC_HYROTRADER_PROD_*` values override
+that default. Explicit demo accounts still need their separate simulator map.
+All three final URLs must be present and valid before native startup.
 The `NEXT_PUBLIC_*` origins are browser-visible; real challenge keys and secrets
 come from the user's account, never a production build-time credential variable.
 The shared demo account's disposable credentials belong only to its separate
@@ -59,8 +62,9 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 
 ## Browser reachability and beta gates
 
-Hyro remains development-only. Preview/production enablement, mobile gates and
-transport defaults are unchanged. HTTPS pages cannot use the separate simulator's
+Hyro is admitted in development and preview by the existing metadata. Production
+availability and mobile remain disabled, and transport defaults are unchanged.
+HTTPS pages cannot use the separate simulator's
 plain HTTP/WS URLs directly. Prefer Hyro-provided HTTPS/WSS and the required CORS
 and WS-origin configuration. A Tealstreet TLS relay is a separate, conditional
 proposal, not enabled by this SDK change. TLS to a relay does not encrypt a plain
@@ -82,5 +86,5 @@ Connection URLs, headers and binary contents are omitted. `WsDiagnosticEvent` is
 the SDK, and the worker posts `{ op: 'ws-diagnostic', data: [event] }`.
 
 Account UX, consuming that event in the web Requests Log, and the beta user
-document belong to the NX web workstream. No preview/production promotion should
-happen before reachability and that smoke pass are approved.
+document belong to the NX web workstream. Production promotion requires separate
+approval after reachability and that smoke pass are accepted.
