@@ -29,7 +29,7 @@ const delegatedReplayBrand = Symbol('delegatedReplay');
 type ProvenNotSent = 'notSent' & { readonly [delegatedNotSentBrand]: true };
 export type DelegatedReplayableIntent = DelegatedIntent & { readonly [delegatedReplayBrand]: true };
 export type IntentState =
-  'queued' | 'sending' | 'acknowledged' | 'applied' | 'placed' | 'refused' | 'unknown' | ProvenNotSent | 'canceled';
+  'queued' | 'sending' | 'acknowledged' | 'applied' | 'placed' | 'refused' | 'unsupported' | 'unknown' | ProvenNotSent | 'canceled';
 
 export type DelegatedNotSentEvidence =
   | { kind: 'noHandoff'; source: 'local'; attempted: false }
@@ -53,6 +53,7 @@ export type StoredDelegatedNotSentEvidence = Readonly<DelegatedNotSentEvidence &
 export type StoredDelegatedNoHandoffEvidence = Readonly<NoHandoffEvidence & EvidenceBinding>;
 
 export interface DelegatedIntent extends OutboxScope {
+  /** Persistence schema: action rows use 2; every typed WS action uses v1. */
   version: 1 | 2;
   action?: DelegatedAction;
   result?: DelegatedActionResult;
@@ -70,7 +71,7 @@ export interface DelegatedIntent extends OutboxScope {
   /** Unknown history expired after 24 hours; never evidence of non-forwarding. */
   retentionExpired?: boolean;
   venueOrderId?: string;
-  error?: { message: string; outcome?: 'unknown' | ProvenNotSent };
+  error?: { message: string; outcome?: 'unknown' | 'unsupported' | ProvenNotSent };
 }
 export interface OutboxStorage {
   load(scope: Readonly<OutboxScope>): Promise<DelegatedIntent[] | OutboxSnapshot>;
@@ -128,6 +129,7 @@ const STATES: readonly string[] = [
   'placed',
   'applied',
   'refused',
+  'unsupported',
   'unknown',
   'notSent',
   'canceled',
@@ -327,6 +329,17 @@ export class DelegatedOutbox {
         throw new Error('Invalid persisted action');
       if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
         throw new Error('Invalid persisted action result');
+      if (
+        row.state === 'unsupported' &&
+        (!row.action ||
+          row.result !== undefined ||
+          row.cancelPending ||
+          !record(row.error) ||
+          row.error.outcome !== 'unsupported' ||
+          typeof row.error.message !== 'string' ||
+          [...row.error.message].length > 512)
+      )
+        throw new Error('Invalid persisted unsupported action');
       const fingerprint = row.action
         ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
         : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
@@ -658,6 +671,7 @@ export class DelegatedOutbox {
     // positive no-handoff proof. A refused outcome after ACK(false) can still
     // attach its authoritative refusal message.
     if (row.state === 'applied' && data.outcome !== 'applied') return false;
+    if (row.state === 'unsupported' && data.outcome !== 'unsupported') return false;
     if (row.state === 'notSent' && storedNotSentEvidence(row) && data.outcome === 'unknown') return false;
     if (data.outcome === 'applied') {
       if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind, row.action)) return false;
@@ -683,6 +697,10 @@ export class DelegatedOutbox {
           errorOutcome: 'notSent',
           venueOrderId: null,
         });
+      } else if (data.outcome === 'unsupported' && data.error.outcome === 'unsupported') {
+        // A closed-schema rejection is terminal, but is never a replay brand.
+        row.state = 'unsupported';
+        row.error = { message: data.error.message, outcome: 'unsupported' };
       } else if (data.outcome === 'unknown' && data.error.outcome === 'unknown') {
         row.state = 'unknown';
         row.error = { message: data.error.message, outcome: 'unknown' };
@@ -980,6 +998,7 @@ export class DelegatedOutbox {
         row.state === 'applied' ||
         row.state === 'placed' ||
         row.state === 'refused' ||
+        row.state === 'unsupported' ||
         row.state === 'notSent' ||
         row.state === 'canceled')
     );

@@ -191,6 +191,35 @@ surface. Its version, canonical domain, UUIDv7 namespace, ten-second admission
 bounds, durable claim-before-forward rule, no-replay rule and registration fence
 are unchanged. `order.submit` remains byte-compatible.
 
+The entire typed DELEGATED API has one wire version: **v1**. Every added
+operation belongs additively to v1; operations have no individual version field.
+A future v2 is reserved for a major protocol redesign, not another write verb.
+The existing version-2 *storage row* discriminator distinguishes actions from
+placement records and is not a WS API version.
+
+A bounded, authenticated v1 action whose operation or fields are not supported
+fails closed before any dispatch, returning `order.actionOutcome` with
+`version:1`, `outcome:"unsupported"`, `result:null`, and
+`error:{message:"Unsupported v1 action schema",outcome:"unsupported"}`.
+This includes unknown envelope/request/action fields, nested order/target/update
+fields, unknown algo operations, and unknown nested algo fields. Invalid action
+shapes also receive this schema rejection. The server validates registration,
+UUIDv7, sequence, age and the fingerprint over the untouched raw action first;
+it never strips unknown fields and executes a recognized subset. Invalid or
+unbounded identity/binding data still receives the existing generic error or
+admission refusal and never dispatches. A schema rejection emits no positive ACK.
+
+The SDK preserves `unsupported` as a terminal result across persistence and
+restore. It never brands that result as replayable or forwards the intent again;
+later uncertainty or an inconsistent applied receipt cannot revoke it. The NX
+router must preserve and durably record this outcome under the same v1 identity,
+forward no rejected request, and return the same typed rejection for unknown
+operations/fields it detects itself. This is only a pre-dispatch rejection of
+that exact intent: an already-forwarded or uncertain ledger row must remain
+uncertain, never be reclassified as unsupported by a newer schema check.
+Queue-cancel rejections must not fabricate
+proof about an earlier action; the existing queue-cancel contract is unchanged.
+
 Expanded operations additionally require the box's
 `delegatedFullWriteActionsV1` and the router's `delegatedFullWriteLedgerV1`,
 both explicitly true on the captured admitted connection, together with the four

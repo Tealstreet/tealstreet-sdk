@@ -864,7 +864,7 @@ impl Session {
                         ));
                     return Ok(());
                 }
-                self.order_action(request).await;
+                self.order_action(request, text).await;
             }
             Inbound::OrderActionCancelQueued(cancel) => {
                 if !authenticated {

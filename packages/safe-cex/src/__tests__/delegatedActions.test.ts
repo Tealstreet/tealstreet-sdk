@@ -94,6 +94,15 @@ describe('DELEGATED versioned actions', () => {
     expect(sent.d.action).not.toHaveProperty('version');
     const frame = outcome(id, action);
     Object.assign(frame.d, { outcome: 'unsupported', result: null, error: { message: 'Unsupported v1 field', outcome: 'unsupported' } });
+    for (const invalid of [
+      { ...frame.d, version: 2 },
+      { ...frame.d, seq: 2 },
+      { ...frame.d, result: { kind: action.kind } },
+      { ...frame.d, error: { message: 'Not a schema rejection', outcome: 'notSent' } },
+    ]) {
+      await box.receive(c, { ...frame, d: invalid });
+      expect(box.entries()[0].state).toBe('sending');
+    }
     await box.receive(c, frame);
     expect(box.entries()[0]).toMatchObject({ state: 'unsupported', error: { outcome: 'unsupported' } });
     expect(box.entries()[0].notSentEvidence).toBeUndefined();
@@ -102,6 +111,10 @@ describe('DELEGATED versioned actions', () => {
     await box.receive(c, { ...outcome(id, action), d: { ...outcome(id, action).d, outcomeSeq: 43 } });
     expect(box.entries()[0].state).toBe('unsupported');
     box.close();
+    const saved = structuredClone(f.rows.get(`alice:${id}`)!);
+    f.rows.set(`alice:${id}`, { ...saved, result: { kind: 'setAllLeverage' } });
+    await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('Invalid persisted unsupported action');
+    f.rows.set(`alice:${id}`, saved);
     const restored = await DelegatedOutbox.open(f.options);
     const connection = restored.connect(f.connection);
     expect(restored.entries()[0].state).toBe('unsupported');
@@ -240,6 +253,7 @@ describe('DELEGATED versioned actions', () => {
     const id = await box.enqueueAction(action);
     const request = JSON.parse(f.writes[0]);
     expect(request).toMatchObject({ t: 'order.action', d: { version: 1, intentId: id, action } });
+    expect(request.d.action).not.toHaveProperty('version');
     expect(request.d.fingerprint).toBe(delegatedActionFingerprint('main', id, action, 1));
     expect([...f.rows.values()][0]).toMatchObject({ version: 2, action });
     await box.receive(c, outcome(id, action));

@@ -157,7 +157,8 @@ not-sent and replay evidence constructors; no direct not-sent assignment is
 permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
 action unknown; queue cancellation is explicit, never a venue cancel.
 
-Action outcomes are typed `applied`, proven `refused/notSent`, or `unknown`.
+Action outcomes are typed `applied`, proven `refused/notSent`, `unsupported`
+for a pre-dispatch schema rejection, or `unknown`.
 Applied results survive later uncertain queue-cancel replies. A proven refusal
 also survives later uncertainty, while its subsequent authoritative refused
 outcome may supply the refusal message after a negative ACK.
@@ -171,6 +172,13 @@ stale replies. Action persistence uses version-2 rows with the exact action and
 result, retaining atomic scoped checkpoints/retirement and all version-1 placement
 records. See `docs/plans/callers/delegated-action-frames.md` and the shared
 `delegated-actions-v1.json` fixture.
+
+The entire typed DELEGATED WS API is one version, v1. New operations extend v1
+additively, without per-operation versions; v2 is reserved for a major redesign.
+Unknown operations or fields must fail closed with a typed `unsupported` outcome,
+never silent omission or execution of the known subset. Unsupported outcomes
+remain terminal across restore without creating replay evidence. Storage row
+versions are independent of the wire version.
 
 The additive full-write vocabulary uses the same v1 action frames. Batch and
 protective placements, reduce-only close, settings, symbol/batch/account cancellation,

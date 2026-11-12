@@ -41,6 +41,7 @@ export const isDelegatedFullWriteAction = (action: DelegatedAction): boolean =>
   (action.kind === 'amend' && action.update.amount === 0);
 export type DelegatedActionOutcome =
   | { outcome: 'applied'; result: DelegatedActionResult; error: null }
+  | { outcome: 'unsupported'; result: null; error: { message: string; outcome: 'unsupported' } }
   | { outcome: 'refused'; result: null; error: { message: string; outcome: 'notSent' } }
   | { outcome: 'unknown'; result: null; error: { message: string; outcome: 'unknown' } };
 

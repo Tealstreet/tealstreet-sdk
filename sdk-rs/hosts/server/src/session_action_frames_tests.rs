@@ -1226,7 +1226,7 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
         let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
         let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-v1"));
         session.join(account.clone(), bound).await;
-        for case in ["kind", "actionField", "opVersion", "targetField", "updateField", "orderField", "bboField", "algoOp", "algoData", "twapMarket", "requestField", "envelopeField"] {
+        for case in ["kind", "duplicateKind", "actionField", "opVersion", "targetField", "updateField", "orderField", "bboField", "algoOp", "algoData", "twapMarket", "requestField", "envelopeField"] {
             let mut payload = match case {
                 "kind" => json!({"kind":"futureWrite"}),
                 "targetField" => json!({"kind":"cancel","order":{"id":"resting-order","symbol":"BTCUSDT","future":true}}),
@@ -1253,7 +1253,11 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
             let mut frame = json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-v1","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}});
             if case == "requestField" { frame["d"]["future"] = json!(true); }
             if case == "envelopeField" { frame["future"] = json!(true); }
-            session.handle(&frame.to_string()).await.unwrap();
+            let wire = frame.to_string();
+            let wire = if case == "duplicateKind" {
+                wire.replace(r#""action":{"kind":"cancelAll"}"#, r#""action":{"kind":"futureWrite","kind":"cancelAll"}"#)
+            } else { wire };
+            session.handle(&wire).await.unwrap();
             // Rejection is synchronous; do not hide a generic error behind a timeout.
             let replies: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok()).map(|v| serde_json::from_str(&v).unwrap()).collect();
             let result = replies.iter().find(|v| v["t"] == "order.actionOutcome").unwrap_or_else(|| panic!("{case}: missing typed unsupported: {replies:?}"));

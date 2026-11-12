@@ -306,6 +306,22 @@ impl Action {
     }
 }
 
+/// Decode only routing/binding metadata first. Unsupported payloads remain raw
+/// until their identity has been checked; unknown fields are never discarded
+/// on a path that can execute a native write.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireRequest {
+    pub version: u8,
+    pub account_name: String,
+    pub instance_id: Option<String>,
+    pub intent_id: String,
+    pub seq: u64,
+    pub age_ms: f64,
+    pub fingerprint: String,
+    pub action: Value,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Request {
@@ -346,6 +362,30 @@ pub fn refuse(out: &Out, name: &str, id: &Value, seq: u64, message: &str) {
         seq,
         "",
         Err(json!({"message":message,"outcome":"notSent"})),
+    );
+}
+
+/// Decode the original text strictly after admission/hash validation. Never
+/// execute a schema normalized through Value (which collapses duplicate tags).
+pub(crate) fn decode_request(text: &str) -> Result<Request, serde_json::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Frame {
+        #[serde(rename = "t")]
+        _kind: String,
+        d: Request,
+    }
+    serde_json::from_str::<Frame>(text).map(|frame| frame.d)
+}
+
+/// Schema rejection is terminal but never fabricates replay/no-handoff brands.
+/// Only the bound, authenticated pre-dispatch path may emit this outcome.
+pub fn unsupported(out: &Out, name: &str, id: &Value, seq: u64) {
+    out.action_outcome(
+        name,
+        json!({"version":1,"intentId":id,"seq":seq,
+        "outcome":"unsupported","result":null,
+        "error":{"message":"Unsupported v1 action schema","outcome":"unsupported"}}),
     );
 }
 

@@ -1,8 +1,8 @@
 use super::*;
-use crate::order_actions::{self, CancelQueued, Request};
+use crate::order_actions::{self, CancelQueued, WireRequest};
 
 impl Session {
-    pub(super) async fn order_action(&mut self, request: Request) {
+    pub(super) async fn order_action(&mut self, request: WireRequest, text: &str) {
         let arrived = std::time::Instant::now();
         let name = request.account_name.clone();
         let id = Value::String(request.intent_id.clone());
@@ -36,11 +36,10 @@ impl Session {
         {
             Some("not sent: expired")
         } else {
-            let action = serde_json::to_value(&request.action).unwrap_or(Value::Null);
-            match crate::order_contract::action_fingerprint(
+            match crate::order_contract::action_wire_fingerprint(
                 &name,
                 &request.intent_id,
-                &action,
+                &request.action,
                 request.seq,
             ) {
                 Ok(fp) if fp == request.fingerprint => None,
@@ -51,10 +50,15 @@ impl Session {
             order_actions::refuse(&out, &name, &id, request.seq, message);
             return;
         }
-        let (method, args) = match request.action.call() {
+        let Ok(decoded) = order_actions::decode_request(text) else {
+            order_actions::unsupported(&out, &name, &id, request.seq);
+            return;
+        };
+        let action = decoded.action;
+        let (method, args) = match action.call() {
             Ok(call) => call,
-            Err(message) => {
-                order_actions::refuse(&out, &name, &id, request.seq, message);
+            Err(_) => {
+                order_actions::unsupported(&out, &name, &id, request.seq);
                 return;
             }
         };
@@ -64,7 +68,7 @@ impl Session {
             order_actions::refuse(&out, &name, &id, request.seq, "not sent: expired");
             return;
         };
-        if let crate::order_actions::Action::Algo { op, data } = &request.action {
+        if let crate::order_actions::Action::Algo { op, data } = &action {
             if !crate::full_writes::algo_account_matches(op, data, &name) {
                 order_actions::refuse(
                     &out,
@@ -116,7 +120,7 @@ impl Session {
             json!({"requestId":request.intent_id,"method":method,"args":args}),
             Some(OrderReceipt::Action {
                 seq: request.seq,
-                kind: request.action.kind(),
+                kind: action.kind(),
                 deadline,
             }),
         )
