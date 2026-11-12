@@ -133,16 +133,18 @@ for (const path of [
   'sdk-rs/harness/bitget-cpu-profile.mjs',
   'sdk-rs/harness/bitget-profile-names.py',
 ]) {
-  test(`diagnostic helper edits and removal preserve the fingerprint: ${path}`, () => {
+  test('retired diagnostic names do not exempt new build inputs: ' + path, () => {
     const root = tree();
     const file = join(root, path);
-    writeFileSync(file, 'diagnostic');
+    const absent = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+    writeFileSync(file, 'new build input');
     const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
-    writeFileSync(file, 'diagnostic\n');
-    assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, 'diagnostic edit');
-    assert.ok(!betaWasmInputPaths(root).includes(path), path);
+    assert.notEqual(before, absent, 'adding an input');
+    assert.ok(betaWasmInputPaths(root).includes(path), path);
+    writeFileSync(file, 'changed build input');
+    assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, 'editing an input');
     rmSync(file);
-    assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, 'diagnostic removal');
+    assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, absent, 'removing an input');
   });
 }
 
@@ -165,6 +167,20 @@ test('Bitget diagnostic exclusions do not hide other harness files or documentat
 
 const REPO = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const read = (rel) => readFileSync(join(REPO, rel), 'utf8');
+
+test('temporary Bitget diagnostics and their workflow job are retired', () => {
+  const workflow = read('.github/workflows/rust.yml');
+  for (const name of ['bitget-cpu-composition.mjs', 'bitget-cpu-profile.mjs', 'bitget-profile-names.py']) {
+    const path = 'sdk-rs/harness/' + name;
+    assert.ok(!existsSync(join(REPO, path)), path);
+    assert.ok(!workflow.includes(path), path);
+  }
+  assert.doesNotMatch(workflow, /^  bitget-cpu-profile:/m);
+  assert.match(workflow, /^  bitget-paired:/m);
+  assert.ok(workflow.includes('node sdk-rs/harness/bitget-paired-ci.mjs'));
+  assert.ok(workflow.includes('cargo test --locked --workspace'));
+  assert.ok(!workflow.includes('--exclude safe-cex-venue-bitget'));
+});
 
 /** Relative module specifiers a file imports: static, side-effect and literal dynamic imports. */
 const specifiers = (text) =>

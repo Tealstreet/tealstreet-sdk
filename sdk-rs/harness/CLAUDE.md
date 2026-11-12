@@ -18,18 +18,8 @@ missing the 10%-faster target is a warning; nightly certification files cpu-regr
   Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and
   multiple runs on one night must not hide the previous night.
 
-Bitget CPU investigation uses `bitget-cpu-profile.mjs` only in an original CI
-attempt on `fix/bitget-cpu`. It profiles production modules separately from the
-certificate, retains steady-window markers, and accepts WASM symbol names only
-after proving identical optimized non-custom sections. Diagnostic profiles never
-certify a gate or change its fixed comparison policy.
-
-`bitget-cpu-composition.mjs` separately measures the clean automatic composition
-with pinned #3426 against the fixed anchor using the unchanged gate and cohort
-order. Its synthetic commit is diagnostic only and cannot issue a certificate;
-#3426 still needs its own authenticated certification after incorporating the fix.
-
-Both diagnostic entrypoints and `bitget-profile-names.py` are excluded from the
-beta-WASM build-input fingerprint through `HARNESS_NOT_BUILT`. Their edits or
-removal cannot invalidate a production pin. Build and shipped-host code must not
-depend on these diagnostic helpers.
+The temporary Bitget profiling/composition job and its helpers were retired after
+retaining their diagnostic artifacts in PR #3452. Fingerprint policy remains
+unchanged. Diagnostic profiles never certify a gate or change its fixed
+comparison policy; #3426 still needs its own authenticated certification after
+incorporating the optimization.
