@@ -3,7 +3,10 @@ import type { OemsIntent, OemsIntentKind, OemsOrderScope, OemsPlan, OemsPosition
 import type { OemsWriteMethod } from './surface';
 
 import { roundCloseSize, roundToStep } from '@tealstreet/script-api-core/src/order/rounding';
-import { assertCloseLikeOrderAmount } from '@tealstreet/script-api-core/src/order/orderPricing';
+import {
+  assertCloseLikeOrderAmount,
+  venueUsesBaseAmountRails,
+} from '@tealstreet/script-api-core/src/order/orderPricing';
 import { sameNativeAmount } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
 
 const nativeAmountProblem = (
@@ -365,7 +368,9 @@ const sizeClose = (
   if (problem) return { reason: problem };
   const rounded = Math.min(roundCloseSize(requested, market.amountStep), full);
   if (
-    context.accounts.some((account) => account.name === position.account && account.exchange === 'mexc') &&
+    context.accounts.some(
+      (account) => account.name === position.account && venueUsesBaseAmountRails(account.exchange),
+    ) &&
     !sameNativeAmount(requested, rounded)
   ) {
     return {

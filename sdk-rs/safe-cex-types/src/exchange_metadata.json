@@ -533,7 +533,7 @@
       "requiresApiKeyIndex": false,
       "enabled": false,
       "enabledInDev": true,
-      "enableInPreview": false,
+      "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
       "orderbookTickDelay": 60,
@@ -621,7 +621,7 @@
       "exchangeName": "hyrotrader",
       "supportsOptionsToggle": false,
       "supportsInverseToggle": false,
-      "latencyDomain": "hyrotrader-simulator",
+      "latencyDomain": "sim-bybit.hyro.trade",
       "features": {
         "kline": true,
         "orderbook": true,

@@ -59,19 +59,37 @@ function verifyWorkflow(text) {
 
 test('all required suite names certify unconditionally, with no separate remeasurement runner', () => verifyWorkflow(source));
 
-test('Bitget paired producer is mandatory, bounded, source-selected and independently certified', () => {
-  const paired = job(source, 'bitget-paired');
+function verifyBitgetProducer(text) {
+  const paired = job(text, 'bitget-paired');
   assert.match(paired, /name: Rust \/ Bitget counterbalanced steady CPU/);
-  verifyWorkflow(source);
+  verifyWorkflow(text);
+  assert.match(paired, /^    timeout-minutes: 45$/m);
   assert.match(paired, /CARGO_BUILD_JOBS: 4/);
   assert.match(paired, /node-version: 22/);
   assert.match(paired, /Public counterbalanced Bitget steady CPU/);
-  assert.match(paired, /bitget-paired-ci\.mjs --out/);
+  assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
   assert.match(paired, /name: bitget-paired-steady/);
-  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: always\(\)/);
+  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: success\(\) \|\| failure\(\)/);
   assert.doesNotMatch(paired, /--baseline|--candidate|--tolerance|--threshold|continue-on-error|workflow_dispatch:/);
-  assert.match(job(source, 'cpu-plan'), /needs: \[selection, gate, bitget-paired\]/);
-  assert.match(job(source, 'cpu-certify'), /needs: \[selection, gate, bitget-paired, cpu-plan\]/);
+  assert.match(job(text, 'cpu-plan'), /needs: \[selection, gate, bitget-paired\]/);
+  assert.match(job(text, 'cpu-certify'), /needs: \[selection, gate, bitget-paired, cpu-plan\]/);
+}
+
+test('Bitget paired producer is mandatory, bounded, source-selected and independently certified', () => verifyBitgetProducer(source));
+
+test('Bitget workflow guard rejects a bypassed deadline or canceled/missing failure evidence', () => {
+  verifyBitgetProducer(source);
+  for (const [before, after] of [
+    ['bitget-paired-run.mjs --out', 'bitget-paired-ci.mjs --out'],
+    ['if: success() || failure()', 'if: always()'],
+    ['if: success() || failure()', 'if: success()'],
+    ['timeout-minutes: 45', 'timeout-minutes: 90'],
+    ['run: node sdk-rs/harness/bitget-paired-run.mjs', 'continue-on-error: true\n        run: node sdk-rs/harness/bitget-paired-run.mjs'],
+  ]) {
+    const paired = job(source, 'bitget-paired'), changed = paired.replace(before, after);
+    assert.notEqual(changed, paired, `mutation must apply: ${before}`);
+    assert.throws(() => verifyBitgetProducer(source.replace(paired, changed)), before);
+  }
 });
 
 test('workflow controls reject skipped final checks, a revived second runner and suite/local bypasses', () => {

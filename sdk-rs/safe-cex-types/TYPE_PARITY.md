@@ -4,9 +4,10 @@
 
 Position and its enum/Greeks dependency closure now generate the public SDK
 modules under `packages/safe-cex/src/generated`; `types.ts` re-exports them.
-`liquidationPrice` is required `number | null` (`Option<f64>` in the shared Rust
-contract). No public Position field was removed or renamed. The historical
-P0/P1a tables below document the earlier spike and are not a claim that every
+`notional` and `liquidationPrice` are required `number | null`
+(`Option<f64>` in the shared Rust contract). Unknown valuation stays null
+through JSON and typed Store decoding; known zero stays zero. No public Position
+field was removed or renamed. The historical P0/P1a tables below document the earlier spike and are not a claim that every
 current public type has completed cutover. See
 [`TYPE_OWNERSHIP_P1.md`](../../docs/plans/TYPE_OWNERSHIP_P1.md) for the current
 per-type comparison and consumer census.

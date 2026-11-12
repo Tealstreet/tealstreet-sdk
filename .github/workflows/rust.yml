@@ -359,6 +359,11 @@ jobs:
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
             command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
+          # The default workspace does not enable the opt-in order frame protocol.
+          - check: delegated-order-frames
+            command: |
+              cargo clippy --locked -p safe-cex-exchange-server --features delegated-order-frames --all-targets -j2 -- -D warnings
+              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-exchange-server --features delegated-order-frames --lib --tests -j2 -- --test-threads=2
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
@@ -1431,9 +1436,9 @@ jobs:
       - name: Public counterbalanced Bitget steady CPU
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/bitget-paired-ci.mjs --out '${{ runner.temp }}/bitget-paired-steady'
+        run: node sdk-rs/harness/bitget-paired-run.mjs --out '${{ runner.temp }}/bitget-paired-steady'
       - name: Retain counterbalanced Bitget steady evidence
-        if: always()
+        if: success() || failure()
         uses: actions/upload-artifact@v7
         with:
           name: bitget-paired-steady

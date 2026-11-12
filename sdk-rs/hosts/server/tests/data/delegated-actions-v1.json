@@ -1,0 +1,271 @@
+{
+  "version": 1,
+  "key": "018bcfe5-6800-7101-8101-010101010101",
+  "cases": [
+    {
+      "name": "amend",
+      "action": {
+        "kind": "amend",
+        "order": {
+          "id": "existing",
+          "symbol": "BTCUSDT"
+        },
+        "update": {
+          "price": 50001,
+          "amount": 0.002
+        }
+      },
+      "fingerprint": "a8fe37d3063fb32097ac393b5b39f9922f8e334c4cf4bbf975930d34d374e58d",
+      "request": {
+        "t": "order.action",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "ageMs": 0,
+          "fingerprint": "a8fe37d3063fb32097ac393b5b39f9922f8e334c4cf4bbf975930d34d374e58d",
+          "action": {
+            "kind": "amend",
+            "order": {
+              "id": "existing",
+              "symbol": "BTCUSDT"
+            },
+            "update": {
+              "price": 50001,
+              "amount": 0.002
+            }
+          }
+        }
+      },
+      "ack": {
+        "t": "order.actionAck",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "received": true
+        }
+      },
+      "outcome": {
+        "t": "order.actionOutcome",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "outcomeSeq": 41,
+          "outcome": "applied",
+          "result": {
+            "kind": "amend",
+            "orderIds": ["changed"]
+          },
+          "error": null
+        }
+      },
+      "cancelQueued": {
+        "t": "order.actionCancelQueued",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "fingerprint": "a8fe37d3063fb32097ac393b5b39f9922f8e334c4cf4bbf975930d34d374e58d"
+        }
+      }
+    },
+    {
+      "name": "cancel",
+      "action": {
+        "kind": "cancel",
+        "order": {
+          "id": "existing",
+          "symbol": "BTCUSDT"
+        }
+      },
+      "fingerprint": "136633d0e4ae57b170713298983a2fbd05bace43f2fc691be8ef6eb98aa8a408",
+      "request": {
+        "t": "order.action",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "ageMs": 0,
+          "fingerprint": "136633d0e4ae57b170713298983a2fbd05bace43f2fc691be8ef6eb98aa8a408",
+          "action": {
+            "kind": "cancel",
+            "order": {
+              "id": "existing",
+              "symbol": "BTCUSDT"
+            }
+          }
+        }
+      },
+      "ack": {
+        "t": "order.actionAck",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "received": true
+        }
+      },
+      "outcome": {
+        "t": "order.actionOutcome",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "outcomeSeq": 41,
+          "outcome": "applied",
+          "result": {
+            "kind": "cancel"
+          },
+          "error": null
+        }
+      },
+      "cancelQueued": {
+        "t": "order.actionCancelQueued",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "fingerprint": "136633d0e4ae57b170713298983a2fbd05bace43f2fc691be8ef6eb98aa8a408"
+        }
+      }
+    },
+    {
+      "name": "cancelAll",
+      "action": {
+        "kind": "cancelAll"
+      },
+      "fingerprint": "41508d12d2d13aa149df2e7f79cc29f3bc3f032b8d016813c18ccdb42d076ec9",
+      "request": {
+        "t": "order.action",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "ageMs": 0,
+          "fingerprint": "41508d12d2d13aa149df2e7f79cc29f3bc3f032b8d016813c18ccdb42d076ec9",
+          "action": {
+            "kind": "cancelAll"
+          }
+        }
+      },
+      "ack": {
+        "t": "order.actionAck",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "received": true
+        }
+      },
+      "outcome": {
+        "t": "order.actionOutcome",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "outcomeSeq": 41,
+          "outcome": "applied",
+          "result": {
+            "kind": "cancelAll"
+          },
+          "error": null
+        }
+      },
+      "cancelQueued": {
+        "t": "order.actionCancelQueued",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "fingerprint": "41508d12d2d13aa149df2e7f79cc29f3bc3f032b8d016813c18ccdb42d076ec9"
+        }
+      }
+    },
+    {
+      "name": "nuke",
+      "action": {
+        "kind": "nuke"
+      },
+      "fingerprint": "e13a538c8d5f01687ffa3959259f8c07773fc86f82de8616a04a0f7816bd991d",
+      "request": {
+        "t": "order.action",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "ageMs": 0,
+          "fingerprint": "e13a538c8d5f01687ffa3959259f8c07773fc86f82de8616a04a0f7816bd991d",
+          "action": {
+            "kind": "nuke"
+          }
+        }
+      },
+      "ack": {
+        "t": "order.actionAck",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "received": true
+        }
+      },
+      "outcome": {
+        "t": "order.actionOutcome",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "outcomeSeq": 41,
+          "outcome": "applied",
+          "result": {
+            "kind": "nuke"
+          },
+          "error": null
+        }
+      },
+      "cancelQueued": {
+        "t": "order.actionCancelQueued",
+        "d": {
+          "version": 1,
+          "accountName": "main",
+          "instanceId": "registration",
+          "intentId": "018bcfe5-6800-7101-8101-010101010101",
+          "seq": 1,
+          "fingerprint": "e13a538c8d5f01687ffa3959259f8c07773fc86f82de8616a04a0f7816bd991d"
+        }
+      }
+    }
+  ]
+}
