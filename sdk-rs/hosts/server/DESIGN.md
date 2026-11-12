@@ -78,7 +78,7 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
-| `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for Bybit `order.*` frames: `0` disables, `1` enables only with compiled protocol support and the venue declaration; other nonempty values refuse startup |
+| `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for declared venues' `order.*` frames: `0` disables, `1` enables only with compiled protocol support and the venue declaration; other nonempty values refuse startup |
 | `EXCHANGE_ALERT_SLACK_WEBHOOK_URL`, `EXCHANGE_ALERT_CRITICAL_SLACK_WEBHOOK_URL` | unset | Deferred past cutover. Accepted and ignored |
 
 The production image compiles the `delegated-order-frames` feature but keeps its
@@ -523,11 +523,12 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
 
 All application messages are JSON text frames of the form `{"t": <type>, "d": <data>}`.
 
-### Client to server (unchanged from today)
+### Client to server
 
 | `t` | `d` | Behaviour |
 |---|---|---|
-| `init` | `InitPayload` (same fields as `server.ts`) | Builds the account, or keeps a resumed account whose init fingerprint is identical and sends it a snapshot instead |
+| `init` | `InitPayload` (same fields as `server.ts`) | Builds a new account or re-snapshots matching settings; changing an existing private account requires `apply-settings` |
+| `apply-settings` | `{accountName, instanceId}` | An admitted private client explicitly stops its current account before reinitializing with new settings |
 | `msg` | `{op, data?, accountName, instanceId?}` | Account op, see below |
 | `sign-res` | `{id, config?, wsAuthSignature?, error?}`, with `ts` as a sidecar | Goes to the signer (4yjlw0) |
 | `echo-res` | `{id}` | Echo RTT sample |
@@ -557,15 +558,39 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `echo` | `{id, pad}` | Echo probe every `SIGNER_ECHO_PROBE_MS`, default unchanged |
 | `pong` | `{accounts: string[], ...linkReport}` | Reply to `ping` |
 
+`apply-settings` reuses the settings-disposal path: algos stop with the recorded
+reason "its key or connection settings changed" (`settings_changed`). It accepts
+only the current live account/registration with unexpired socket authority.
+The nonempty `instanceId` must match the admitted init. A legacy client can first
+repeat its unchanged init with an ID to bind the same account without restarting it.
+Pending verification replies `verifying`; unadmitted, stale or fenced clients
+cannot reset an account. Live and parked holders, and a DELEGATED resident copy
+without a socket, prevent an ordinary init from changing private settings.
+The comparison uses normalized engine and routing settings; fields ignored by
+the venue do not create a settings change.
+
+The action replies `msg` with `op:"applySettings:done"` and
+`data:{success:true,requiresInit:true}` on the admitted registration. This means
+the reset was initiated, not that a replacement was admitted or all venue work
+settled. The caller then sends a normal init (including fresh DELEGATED handover
+and verification when applicable). The action carries no credentials or new
+settings, and older pending joins cannot restore the reset account. Existing
+init generations, account outputs and settings stop notices retain ownership.
+
 Socket keepalive: the server sends a protocol-level WebSocket ping every 10s.
 With no inbound data for 30s, either a message or a pong, the socket is
 dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 ### DELEGATED handover
 
-When the shared Bybit opt-in declaration is enabled, authenticated connections
+When a venue's shared opt-in declaration is enabled, authenticated connections
 may request a handover with `msg` data
-`{op:"delegated-key-req", accountName}`. The `msg` response has
+`{op:"delegated-key-req", accountName, data:{exchangeName}}`.
+The optional `data.exchangeName` selects the target venue. Without it, a joined
+account supplies its venue; an unjoined legacy caller can omit it only when
+exactly one venue declaration is enabled. An ambiguous or disabled target is
+refused. Only Bybit is currently opted in, so legacy requests retain their wire
+behavior. The `msg` response has
 `{op:"delegated-key", accountName, attemptId, publicKey, bootId, expiresAtMs}`.
 The public key uses padded standard base64. An offer lasts 30 seconds, belongs
 to that connection and saved account name, and is replaced by another request
@@ -573,7 +598,7 @@ for the same name. Each connection retains at most 64 unexpired offers.
 
 The matching init adds `signingMode:"delegated"` and
 `sealed:{attemptId, enc, ciphertext}`. This path checks the shared venue opt-in
-declaration and is limited to Bybit. Existing LOCAL/COSIGNED settings and engine
+declaration for the requested venue. Existing LOCAL/COSIGNED settings and engine
 options retain their original behavior. Plaintext credentials are never init
 settings or account fingerprints.
 
@@ -586,8 +611,9 @@ standard base64. Decrypted JSON contains `key`, `secret` and optional
 fields erase their owned buffers on drop. Handover parsing retains the JSON
 string contract, including escaped strings and optional or null `passphrase`.
 JSON input is limited to 12,272 bytes, consistent with the envelope limit.
-Opening fills the shared `delegated_memory::CandidateCopy` directly after its
-Bybit preparation succeeds. Handover replies use the current init registration,
+Opening fills the shared `delegated_memory::CandidateCopy` directly after the
+requested venue's preparation succeeds. The offer retains its target venue,
+which must still be enabled and match the init when opened. Handover replies use the current init registration,
 including its optional `instanceId`; clients without an ID retain the same bytes.
 
 Opening and subsequent join verification run in a spawned task. The existing
@@ -598,7 +624,7 @@ the captured user, socket and init generation; dispose, another init, another
 key request or socket close retires pending work. Verification failure leaves
 any running account unchanged.
 
-After opening, a temporary native Bybit account checks the supplied pair through
+After opening, a temporary native account for the requested venue checks the supplied pair through
 the venue's normal private startup reads and is disposed before admission.
 An accepted pair starts a DELEGATED account when none exists, or joins the
 matching running DELEGATED account while retaining its existing signer. This
@@ -619,6 +645,24 @@ clients without one retain the original envelope bytes. Existing rebuild
 refusal, settings replacement and early-subscription handling remain on the
 existing COSIGNED init path. Fixed synthetic interoperability and RFC test data
 live in `tests/data/`.
+
+The shared startup admission runner also has staged entries for `binance`,
+`okx`, `bitget`, `blofin` and `kucoin`. It runs the selected venue's existing
+native private startup with either the remote provider or the local provider;
+it does not build a second set of REST requests. Its result classifier uses
+engine `ErrorKind` values: authentication failures are invalid, rate limits and
+transport failures are transient, and complete private startup is accepted.
+Unclassified startup failures remain transient refusals. Public-only and
+frame-fed accounts cannot satisfy this check.
+
+Entries are separate from rollout declarations. These five entries leave all
+activation flags off. The offline admission suite must cover each entry before
+it can be enabled: valid startup, a different signing key, a prior signature,
+a consumed response, a different handed-over pair, and a reused sealed handover.
+The suite verifies the actual native HTTP signatures against synthetic venue
+responses. Existing Bybit session tests additionally cover resident-account and
+registration preservation. These offline checks do not replace live venue
+validation or the existing server-origin and signing requirements for rollout.
 
 ## Frames (claude-19pt8s, web hosted client)
 
@@ -818,7 +862,8 @@ Sessions and resume (same semantics as today):
   - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
 - **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts the parked accounts. It then receives `session {resumed:true}`.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
-  - A different fingerprint disposes the account and rebuilds it.
+  - A different private fingerprint is refused until an admitted client uses
+    `apply-settings`; parked clients and resident copies keep their settings.
 - **Resume alias:** a used `resumeId` stays valid as an alias for 120s, which is `RESUME_ALIAS_MS`.
 - **Grace expiry:** parked accounts are disposed with the reason `no browser for 60s`, recorded in the order audit log. No browser is attached to tell, so when chases or TWAPs were running the registry keeps one notice per (user, account) and sends it as an `error` on that account's next init; it is dropped once delivered or after 24 hours.
 - **Stop notices name their algo.** Every "Chase on X stopped: …" or "TWAP on X stopped: …" (live, break-glass, SIGTERM, grace expiry, failed signer) is its own `error`, `data: [message, {forceToast: true, algo: {kind: "chase"|"twap", id}}]`, where `id` is the algo's `activeChasers`/`activeTWAPs` row id, so the page dedupes exactly. Errors the page missed still arrive joined in one notice without `algo`.
