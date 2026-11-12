@@ -28,3 +28,8 @@ certify a gate or change its fixed comparison policy.
 with pinned #3426 against the fixed anchor using the unchanged gate and cohort
 order. Its synthetic commit is diagnostic only and cannot issue a certificate;
 #3426 still needs its own authenticated certification after incorporating the fix.
+
+Both diagnostic entrypoints and `bitget-profile-names.py` are excluded from the
+beta-WASM build-input fingerprint through `HARNESS_NOT_BUILT`. Their edits or
+removal cannot invalidate a production pin. Build and shipped-host code must not
+depend on these diagnostic helpers.

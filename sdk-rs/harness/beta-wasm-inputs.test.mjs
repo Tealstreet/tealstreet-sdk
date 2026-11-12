@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -125,6 +125,41 @@ test('harness files that only gate or measure a release leave the fingerprint al
     const counted = betaWasmInputs(root, TOOLCHAIN).fingerprint;
     writeFileSync(join(root, path), 'new');
     assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, counted, path);
+  }
+});
+
+for (const path of [
+  'sdk-rs/harness/bitget-cpu-composition.mjs',
+  'sdk-rs/harness/bitget-cpu-profile.mjs',
+  'sdk-rs/harness/bitget-profile-names.py',
+]) {
+  test(`diagnostic helper edits and removal preserve the fingerprint: ${path}`, () => {
+    const root = tree();
+    const file = join(root, path);
+    writeFileSync(file, 'diagnostic');
+    const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+    writeFileSync(file, 'diagnostic\n');
+    assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, 'diagnostic edit');
+    assert.ok(!betaWasmInputPaths(root).includes(path), path);
+    rmSync(file);
+    assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, 'diagnostic removal');
+  });
+}
+
+test('Bitget diagnostic exclusions do not hide other harness files or documentation', () => {
+  const root = tree();
+  for (const path of [
+    'sdk-rs/harness/bitget-cpu-runtime.mjs',
+    'sdk-rs/harness/bitget-profile-names-extra.py',
+    'sdk-rs/harness/nested/bitget-cpu-profile.mjs',
+    'sdk-rs/harness/CLAUDE.md',
+  ]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), 'production');
+    const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+    assert.ok(betaWasmInputPaths(root).includes(path), path);
+    writeFileSync(join(root, path), 'production\n');
+    assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, path);
   }
 });
 

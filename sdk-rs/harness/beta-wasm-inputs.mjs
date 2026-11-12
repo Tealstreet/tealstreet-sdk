@@ -33,6 +33,8 @@ export const HARNESS_NOT_BUILT = Object.freeze([
   /^sdk-rs\/harness\/ci-result\.mjs$/,
   /^sdk-rs\/harness\/cpu-[^/]+\.mjs$/,
   /^sdk-rs\/harness\/bitget-paired-[^/]+\.mjs$/,
+  /^sdk-rs\/harness\/bitget-cpu-(composition|profile)\.mjs$/,
+  /^sdk-rs\/harness\/bitget-profile-names\.py$/,
   /^sdk-rs\/harness\/family-measure\.mjs$/,
   /^sdk-rs\/harness\/wasm-budget\.mjs$/,
 ]);
