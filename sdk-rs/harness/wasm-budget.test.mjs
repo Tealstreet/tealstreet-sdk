@@ -1883,6 +1883,19 @@ test('#3448 changed AsterDEX artifact retains measured plus 10 KiB reserve', () 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
 
+test('#3448 master merge 9a736b2a6bf1 retains fresh AsterDEX artifact reserve', () => {
+  // CI run 43198030267, artifact 13934600864; source tree matches head 9a736b2a6bf1.
+  // Optimized web and Node modules both measure 2,211,230 bytes.
+  const measured = Math.max(2_211_230, 2_211_230);
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_222_080);
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.ok(cap >= minimumCap, `asterdex: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
+
 // #3425 run 43176700451; CI source cca7b8337ad3 has the dbff6fc75827 merge tree.
 // Web and Node bytes come from the same original-attempt job per family.
 for (const [family, aliases, web, node, minimumCap] of [
