@@ -924,6 +924,20 @@ impl Session {
             let name = envelope::account_name(text);
             let out = match serde_json::from_str::<Inbound>(text) {
                 Ok(Inbound::Init(init)) => self.out.with_instance_id(init.instance_id.as_deref()),
+                Ok(Inbound::Msg(AccountMsg {
+                    op,
+                    account_name: Some(name),
+                    data,
+                })) if op == "callMethod" => {
+                    self.reply_failure(
+                        &name,
+                        &data.get("requestId").cloned().unwrap_or(Value::Null),
+                        "AuthExpired",
+                        crate::auth::TOKEN_EXPIRED,
+                        Some("notSent"),
+                    );
+                    return Ok(());
+                }
                 _ => name
                     .as_deref()
                     .map(|name| self.account_out(name))
