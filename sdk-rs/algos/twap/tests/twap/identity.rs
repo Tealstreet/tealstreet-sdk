@@ -68,3 +68,24 @@ fn matching_identity_does_not_accept_inconsistent_persisted_labels() {
     book.handle("twap:state", &json!([row]), &mut env, &view);
     assert!(book.ids().next().is_none());
 }
+
+#[test]
+fn fixround_unbound_book_refuses_identity_tagged_schedules() {
+    let (mut env, view) = (Env::new(), View::default());
+    for status in ["paused", "running"] {
+        let mut tagged = persisted("foreign", status, env.now);
+        tagged["ownerId"] = "identity-A".into();
+        let mut book = TwapBook::new("test-account");
+        let effects = book.handle("twap:state", &json!([tagged]), &mut env, &view);
+        assert!(book.ids().next().is_none());
+        assert!(placements(&effects).is_empty());
+        assert!(placements(&book.wake(&mut env, &view)).is_empty());
+        book.handle(
+            "twap:state",
+            &json!([persisted("legacy", "paused", env.now)]),
+            &mut env,
+            &view,
+        );
+        assert_eq!(book.ids().collect::<Vec<_>>(), ["legacy"]);
+    }
+}

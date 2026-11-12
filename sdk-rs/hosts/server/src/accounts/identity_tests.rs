@@ -538,3 +538,128 @@ async fn label_lookup_selects_the_requested_holder_across_identity_modes() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn fixround_fatal_signer_notices_reach_each_live_alias() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for switch_user in [false, true] {
+                let registry = tests::registry();
+                let first = init();
+                let (mut account, mut algos) = testing::account_on(
+                    testing::HeldLoad {
+                        placed: Arc::default(),
+                        load_after_ms: Some(0.),
+                        ticker: true,
+                    },
+                    ("u", &first.account_name, &first.exchange_name),
+                    Some(SignerLink::new(0, Arc::new(|_| true))),
+                    first.fingerprint(),
+                    Arc::new(crate::algos::Running::new(registry.algos_ended.clone())),
+                );
+                Arc::get_mut(&mut account).unwrap().identity =
+                    identity::digest("u", &first).unwrap();
+                testing::register(&registry, &account);
+                let mut outputs = Vec::new();
+                for (holder, label) in [(7, "first"), (7, "second"), (8, "parked"), (9, "legacy")] {
+                    let (out, sent, _) = crate::out::Out::channel(16);
+                    let out = out
+                        .account(label)
+                        .with_account_label(label)
+                        .with_instance_id(Some(label));
+                    account.hold_registration(holder, out.outbox(), None, label);
+                    outputs.push((label, out, sent));
+                }
+                account.holders.lock().unwrap().labels.remove(&9);
+                registry.park("parked-resume".into(), "u", vec![(account.clone(), 8)]);
+                registry.signer_failed(&account);
+                let crate::algos::AlgoInput::Dispose {
+                    stopped: Some(stopped),
+                    ..
+                } = algos.recv().await.unwrap()
+                else {
+                    panic!("fatal signing supplies a captured stop callback");
+                };
+                if switch_user {
+                    let other = self::account(&registry, "v", &first);
+                    let (next, mut next_sent, _) = crate::out::Out::channel(16);
+                    let next = next.account("first").with_account_label("first");
+                    other.hold_registration(7, next.outbox(), None, "first");
+                    for (label, out, _) in &outputs {
+                        out.retire_account(label);
+                    }
+                    stopped(crate::algos::Kept::from("synthetic algo stopped"));
+                    for (_, _, sent) in &mut outputs {
+                        assert!(sent.try_recv().is_err(), "retired user output is dropped");
+                    }
+                    assert!(
+                        next_sent.try_recv().is_err(),
+                        "the new user receives no old stop notice"
+                    );
+                    assert!(next.send(crate::envelope::error(Some("first"), "fresh user control")));
+                    assert!(next_sent.try_recv().unwrap().contains("fresh user control"));
+                    registry.dispose(&other, Disposal::PageDisposed);
+                    continue;
+                }
+                stopped(crate::algos::Kept::from("synthetic algo stopped"));
+                for (label, _, mut sent) in outputs {
+                    if label == "parked" {
+                        assert!(sent.try_recv().is_err());
+                        continue;
+                    }
+                    for expected in ["Remote signing failed repeatedly", "synthetic algo stopped"] {
+                        let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+                        assert_eq!(frame["d"]["accountName"], label);
+                        assert_eq!(frame["d"]["instanceId"], label);
+                        assert!(frame["d"]["data"][0].as_str().unwrap().contains(expected));
+                    }
+                    assert!(sent.try_recv().is_err());
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn fixround_superseded_settings_keep_the_resident_account() {
+    use std::future::Future;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let mut original = init();
+            original.signing_mode = Some("delegated".into());
+            let account = account(&registry, "u", &original);
+            account.hold_registration(7, Arc::new(|_| true), None, &original.account_name);
+            registry.pacer.admit().await;
+            let changed = InitPayload {
+                enable_spot_markets: Some(true),
+                ..original.clone()
+            };
+            let apply = registry.apply_settings(
+                "u",
+                &changed,
+                account.clone(),
+                7,
+                Some(("synthetic-token".into(), now_ms() + 60_000)),
+                Arc::new(|_| true),
+            );
+            tokio::pin!(apply);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    apply.as_mut().poll(cx).is_pending()
+                ))
+                .await
+            );
+            let superseding = registry
+                .begin_init("u", account.registry_name(), false, &account.fingerprint)
+                .unwrap();
+            tokio::time::advance(Duration::from_secs(1)).await;
+            assert!(matches!(apply.await, Err(error) if error.contains("superseded")));
+            assert!(account.handle.disposal_cause().is_none());
+            assert!(registry.held("u", &original.account_name, 7).is_some());
+            assert_eq!(registry.account_count(), 1);
+            drop(superseding);
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}

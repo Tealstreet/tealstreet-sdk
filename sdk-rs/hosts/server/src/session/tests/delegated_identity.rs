@@ -421,3 +421,55 @@ async fn verified_identity_change_preserves_another_alias() {
 async fn verified_identity_change_preserves_another_holder() {
     replaced_identity_releases_only_its_label(false, true).await;
 }
+
+#[tokio::test]
+async fn fixround_refused_alias_join_preserves_the_running_label() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for fill_clients in [false, true] {
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "first".into(),
+                    exchange_name: "bybit".into(),
+                    key: "synthetic-key".into(),
+                    ..Default::default()
+                };
+                let account = crate::accounts::testing::trading_account(&registry, "alice", &init);
+                let (mut session, _sent) = user_session(registry.clone(), "alice");
+                session.init(init.clone()).await.unwrap();
+                let mut clients = Vec::new();
+                if fill_clients {
+                    for id in 10_000..10_256 {
+                        match account.handle.join(id, false).await {
+                            Ok(client) => clients.push(client),
+                            Err(error) => {
+                                assert_eq!(error, "account client limit reached");
+                                break;
+                            }
+                        }
+                    }
+                    assert!(clients.len() < 256, "the native client limit was reached");
+                }
+                session
+                    .init(InitPayload {
+                        account_name: "second".into(),
+                        ..init
+                    })
+                    .await
+                    .unwrap();
+                assert!(registry.held("alice", "first", session.socket).is_some());
+                assert_eq!(session.joined.contains_key("second"), !fill_clients);
+                assert_eq!(
+                    registry.held("alice", "second", session.socket).is_some(),
+                    !fill_clients
+                );
+                assert!(account.handle.disposal_cause().is_none());
+                assert_eq!(registry.account_count(), 1);
+                session.close();
+                for (index, _) in clients.iter().enumerate() {
+                    account.handle.leave(10_000 + index as u64);
+                }
+            }
+        })
+        .await;
+}
