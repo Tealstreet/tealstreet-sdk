@@ -182,6 +182,16 @@ impl TwapFactory {
         }
         let cx = &self.inner.cx;
         Inner::refresh_owner(&self.inner, cx);
+        if self
+            .captured_owner
+            .as_ref()
+            .is_some_and(|owner| self.inner.book.borrow().owner.as_ref() != Some(owner))
+        {
+            return Err(
+                "TWAP start cancelled-for-owner-change: authenticated connection binding changed"
+                    .into(),
+            );
+        }
         let (started, effects) = {
             let mut env = self.inner.env.borrow_mut();
             env.now = cx.now_ms();

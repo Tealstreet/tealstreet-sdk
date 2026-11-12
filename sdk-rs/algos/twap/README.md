@@ -6,6 +6,8 @@ The owner must come from the host session, independently of account names and
 incoming saved rows. Dispose the old account scope and construct a new factory
 when that owner or generation changes, or use `guard_owner` in a shared host
 to drop retired schedules and ignore their deferred placement completions.
+Typed starts keep their captured binding through the book's owner refresh;
+a replacement binding refuses that start before creating a row or placing a slice.
 
 New TWAPs persist `ownerId` and `ownerGeneration` from that trusted snapshot.
 A restore must match both tags and the account name. Foreign rows, stale
