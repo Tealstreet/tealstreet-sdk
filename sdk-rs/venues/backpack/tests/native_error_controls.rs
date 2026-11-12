@@ -8,8 +8,7 @@ use support::managed::*;
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
-const UNKNOWN_MESSAGE: &str =
-    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders";
+const UNKNOWN_MESSAGE: &str = ENGINE_UNKNOWN_TEXT;
 
 fn assert_unknown(error: &VenueError) {
     assert_eq!(error.outcome, Some(Outcome::Unknown));

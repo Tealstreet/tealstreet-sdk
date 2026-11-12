@@ -1309,10 +1309,7 @@ fn write_failures_keep_classification_and_unknown_guidance() {
             "{status} {body}: {}",
             error.message
         );
-        assert_eq!(
-            error.message,
-            "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
-        );
+        assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
     }
 }
 

@@ -25,7 +25,7 @@ pub(crate) const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders
 
 fn with_unknown_guidance(mut error: VenueError) -> VenueError {
     if error.outcome == Some(Outcome::Unknown) {
-        error.message = format!("HTTP response does not prove the write outcome. {UNKNOWN_TEXT}");
+        error.message = UNKNOWN_TEXT.into();
     }
     error
 }
