@@ -24,6 +24,24 @@ fn statuses(sent: &mut crate::out::Receiver) -> Vec<Value> {
 }
 
 #[tokio::test]
+async fn delegated_restart_key_availability_does_not_require_a_retained_marker() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut done = session.take_verified();
+    let init = payload(&mut session, Some("admitted-without-marker"));
+    session.init(init).await.unwrap();
+    finish(&mut session, &mut done).await;
+    let ready = statuses(&mut sent);
+    assert_eq!(
+        ready.len(),
+        1,
+        "an expired or absent marker cannot leave key status stuck waiting"
+    );
+    assert_eq!(ready[0]["d"]["data"]["status"], "key-available");
+    session.close();
+}
+
+#[tokio::test]
 async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
     let f = fixture().await;
     record_restart(&f, "alice");
