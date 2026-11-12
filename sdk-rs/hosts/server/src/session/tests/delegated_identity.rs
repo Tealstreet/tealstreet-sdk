@@ -7,7 +7,7 @@ mod orders;
 fn named_payload(session: &mut Session, name: &str, key: &str, id: &str) -> InitPayload {
     let offer = session
         .handovers
-        .issue(name, crate::accounts::now_ms())
+        .issue(name, "bybit", crate::accounts::now_ms())
         .unwrap();
     let plaintext = json!({"key":key,"secret":"synthetic-secret"});
     InitPayload {
