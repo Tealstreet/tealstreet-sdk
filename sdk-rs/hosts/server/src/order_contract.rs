@@ -40,12 +40,16 @@ fn activation_allowed(delegated_bybit: bool, actions: &DelegatedActions) -> bool
 }
 
 pub fn enabled() -> bool {
-    cfg!(feature = "delegated-order-frames")
-        && activation_allowed(crate::delegated::enabled("bybit"), &PLACE_AND_CLOSE)
+    cfg!(feature = "delegated-order-frames") && !crate::delegated::enabled_venues().is_empty()
+}
+
+/// Per-account admission checks the joined account's actual venue.
+pub fn enabled_for(venue: &str) -> bool {
+    cfg!(feature = "delegated-order-frames") && crate::delegated::enabled(venue)
 }
 
 pub fn action_capabilities() -> DelegatedActions {
-    if enabled() {
+    if activation_allowed(enabled_for("bybit"), &PLACE_AND_CLOSE) {
         PLACE_AND_CLOSE
     } else {
         DelegatedActions {

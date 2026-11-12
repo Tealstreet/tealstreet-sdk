@@ -283,22 +283,22 @@ impl Stamp<'_> {
         }
     }
 }
-// Unusable liquidation metadata must not discard an otherwise valid position update.
-fn optional_liquidation_price<'de, D: serde::Deserializer<'de>>(
+// Unusable price metadata must not discard an otherwise valid position update.
+fn optional_position_price<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<f64>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum LiquidationPrice {
+    enum PositionPrice {
         Number(
             #[serde(deserialize_with = "safe_cex_engine::de::lenient_optional_number")] Option<f64>,
         ),
         Unusable(serde::de::IgnoredAny),
     }
 
-    Ok(match LiquidationPrice::deserialize(deserializer)? {
-        LiquidationPrice::Number(value) => value,
-        LiquidationPrice::Unusable(_) => None,
+    Ok(match PositionPrice::deserialize(deserializer)? {
+        PositionPrice::Number(value) => value,
+        PositionPrice::Unusable(_) => None,
     })
 }
 
@@ -315,14 +315,18 @@ struct PositionWire<'a> {
     balance: Option<f64>,
     #[serde(default, alias = "entry_price", deserialize_with = "wire::number")]
     price: f64,
-    #[serde(default, alias = "mark_price", deserialize_with = "wire::number")]
-    mark_price: f64,
+    #[serde(
+        default,
+        alias = "mark_price",
+        deserialize_with = "optional_position_price"
+    )]
+    mark_price: Option<f64>,
     #[serde(default, alias = "pnl", deserialize_with = "wire::number")]
     unrealized_pnl: f64,
     #[serde(
         default,
         alias = "liquidation_threshold",
-        deserialize_with = "optional_liquidation_price"
+        deserialize_with = "optional_position_price"
     )]
     liquidation_price: Option<f64>,
     #[serde(default, deserialize_with = "wire::optional_number")]
@@ -1384,15 +1388,28 @@ impl Kraken {
                 MarginType::Cross,
             )
         };
-        let mark = if row.mark_price > 0.0 {
-            row.mark_price
-        } else {
+        let row_mark = row
+            .mark_price
+            .filter(|mark| mark.is_finite() && *mark > 0.0);
+        let mark = row_mark.or_else(|| {
             cx.store
-                .tickers()
-                .iter()
-                .find(|t| t.symbol == row.symbol)
-                .map_or(0.0, |t| t.mark)
-        };
+                .ticker(&row.symbol)
+                .map(|ticker| ticker.mark)
+                .filter(|mark| mark.is_finite() && *mark > 0.0)
+        });
+        // PF sizes already name base-coin units. Inverse sizes name contracts
+        // whose quote value is independent of the current mark.
+        let inverse = market.is_inverse == Some(true);
+        let notional = if inverse {
+            market
+                .contract_size
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .map(|value| quantity.abs() * value)
+        } else {
+            mark.map(|mark| quantity.abs() * mark)
+        }
+        .filter(|value| value.is_finite() && (*value > 0.0 || quantity == 0.0))
+        .unwrap_or(f64::NAN);
         let old = cx
             .store
             .positions()
@@ -1416,11 +1433,13 @@ impl Kraken {
             symbol: row.symbol.into_owned(),
             side,
             entry_price: row.price,
-            notional: if !live {
-                old.filter(|p| p.contracts == quantity.abs())
-                    .map_or(quantity.abs() * mark, |p| p.notional)
+            notional: if !live && !inverse && row_mark.is_none() {
+                old.filter(|p| {
+                    p.contracts == quantity.abs() && p.notional.is_finite() && p.notional > 0.0
+                })
+                .map_or(notional, |p| p.notional)
             } else {
-                quantity.abs() * mark
+                notional
             },
             leverage,
             margin_type: Some(margin),
