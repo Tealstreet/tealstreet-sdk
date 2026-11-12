@@ -3,6 +3,7 @@ import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delega
 
 import { describe, expect, it } from 'vitest';
 
+import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
 import golden from '../../../../sdk-rs/hosts/server/tests/data/delegated-actions-v1.json';
 import { delegatedActionFingerprint } from '../delegatedActions';
 import { DelegatedOutbox } from '../delegatedOutbox';
@@ -12,6 +13,7 @@ const actions: DelegatedAction[] = [
   { kind: 'cancel', order: { id: 'existing', symbol: 'BTCUSDT' } },
   { kind: 'cancelAll' },
   { kind: 'nuke' },
+  ...fullWrites.map(({ action }) => action as unknown as DelegatedAction),
 ];
 function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const writes: string[] = [];
@@ -49,6 +51,8 @@ function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
       delegatedOrderFramesV1: true,
       delegatedOrderLedgerV1: true,
       delegatedOrderActionsV1: true,
+      delegatedFullWriteActionsV1: true,
+      delegatedFullWriteLedgerV1: true,
       delegatedOrderActionLedgerV1: true,
     },
     send(frame) {
@@ -67,7 +71,7 @@ const outcome = (id: string, action: DelegatedAction, seq = 1) => ({
     seq,
     outcomeSeq: 41,
     outcome: 'applied',
-    result: action.kind === 'amend' ? { kind: 'amend', orderIds: ['changed'] } : { kind: action.kind },
+    result: ['amend', 'place', 'close'].includes(action.kind) ? { kind: action.kind, orderIds: ['changed'] } : { kind: action.kind },
     error: null,
   },
 });

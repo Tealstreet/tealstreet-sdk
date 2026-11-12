@@ -1,0 +1,120 @@
+[
+  {
+    "action": {
+      "kind": "place",
+      "orders": [
+        {
+          "symbol": "BTCUSDT",
+          "type": "limit",
+          "side": "buy",
+          "amount": 0.001,
+          "price": 50000
+        }
+      ]
+    },
+    "method": "placeOrders"
+  },
+  {
+    "action": {
+      "kind": "cancelOrders",
+      "orders": [
+        {
+          "id": "resting-order",
+          "symbol": "BTCUSDT"
+        }
+      ]
+    },
+    "method": "cancelOrders"
+  },
+  {
+    "action": {
+      "kind": "cancelSymbol",
+      "symbol": "BTCUSDT"
+    },
+    "method": "cancelSymbolOrders"
+  },
+  {
+    "action": {
+      "kind": "setLeverage",
+      "symbol": "BTCUSDT",
+      "leverage": 5,
+      "side": "long"
+    },
+    "method": "setLeverage"
+  },
+  {
+    "action": {
+      "kind": "setAllLeverage",
+      "leverage": 5
+    },
+    "method": "setAllLeverage"
+  },
+  {
+    "action": {
+      "kind": "setMarginType",
+      "isolated": true
+    },
+    "method": "changeMarginType"
+  },
+  {
+    "action": {
+      "kind": "setPositionMode",
+      "hedged": false,
+      "symbol": "BTCUSDT"
+    },
+    "method": "changePositionMode"
+  },
+  {
+    "action": {
+      "kind": "close",
+      "order": {
+        "symbol": "BTCUSDT",
+        "type": "limit",
+        "side": "buy",
+        "amount": 0.001,
+        "price": 50000,
+        "reduceOnly": true
+      }
+    },
+    "method": "placeOrder"
+  },
+  {
+    "action": {
+      "kind": "closeAll"
+    },
+    "method": "nukePositions"
+  },
+  {
+    "action": {
+      "kind": "nukeOrders"
+    },
+    "method": "nukeOrders"
+  },
+  {
+    "action": {
+      "kind": "stopAlgos"
+    },
+    "method": "stopAccountAlgos"
+  },
+  {
+    "action": {
+      "kind": "scheduleCancel",
+      "time": null
+    },
+    "method": "scheduleCancel"
+  },
+  {
+    "action": {
+      "kind": "setStpMode",
+      "mode": "EXPIRE_TAKER"
+    },
+    "method": "delegatedSetStpMode"
+  },
+  {
+    "action": {
+      "kind": "setAccountTier",
+      "tier": "premium"
+    },
+    "method": "delegatedSetAccountTier"
+  }
+]

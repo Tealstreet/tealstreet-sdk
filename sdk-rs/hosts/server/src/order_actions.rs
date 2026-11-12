@@ -299,6 +299,16 @@ impl Drop for NukeReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn full_write_contract_accepts_each_local_write_and_preserves_exact_payload() {
+        let cases: Vec<Value> = serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json")).unwrap();
+        for case in cases {
+            let action: Action = serde_json::from_value(case["action"].clone())
+                .unwrap_or_else(|e| panic!("{}: {e}", case["action"]["kind"]));
+            assert_eq!(serde_json::to_value(&action).unwrap(), case["action"]);
+            assert_eq!(action.call().unwrap().0, case["method"].as_str().unwrap());
+        }
+    }
     #[tokio::test]
     async fn registered_action_result_reserves_binding_expansion_before_size_check() {
         let (socket, mut sent, _) = Out::channel(4);
