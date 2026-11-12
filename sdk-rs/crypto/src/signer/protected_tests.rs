@@ -92,3 +92,22 @@ fn failed_protected_allocation_erases_the_completed_prefix() {
     assert!(matches!(result, Err(SignError::Unavailable)));
     assert_eq!(releases.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn panicking_protected_allocation_erases_the_completed_prefix() {
+    let (local, _) = LocalSigner::from_setup(setup()).unwrap();
+    let releases = Arc::new(AtomicUsize::new(0));
+    let mut calls = 0;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        local.with_protected_storage(|bytes| {
+            calls += 1;
+            assert_ne!(calls, 2, "synthetic protected allocation fault");
+            Ok(Box::new(Buffer {
+                bytes: bytes.to_vec(),
+                releases: releases.clone(),
+            }))
+        })
+    }));
+    assert!(result.is_err());
+    assert_eq!(releases.load(Ordering::SeqCst), 1);
+}

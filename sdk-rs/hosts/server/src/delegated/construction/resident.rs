@@ -3,7 +3,7 @@ use safe_cex_crypto::signer::{LocalSigner, ProtectedBytes};
 use safe_cex_engine::signing::{
     Algorithm, Capability, KeyRef, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::time::Instant;
 
 impl ProtectedBytes for crate::delegated_memory::SecretCopy {
@@ -23,6 +23,20 @@ struct ResidentSigner(Mutex<State>);
 struct State {
     signer: Option<LocalSigner>,
     deadline: Option<Instant>,
+}
+
+impl ResidentSigner {
+    fn state(&self) -> Option<MutexGuard<'_, State>> {
+        match self.0.lock() {
+            Ok(state) => Some(state),
+            Err(poison) => {
+                // Recover only to erase. Never clear poison or reuse a provider
+                // whose synchronous signing operation unwound.
+                poison.into_inner().signer = None;
+                None
+            }
+        }
+    }
 }
 
 impl State {
@@ -70,11 +84,15 @@ impl ResidentCopy {
     }
 
     pub(crate) fn retain_until(&self, deadline: Instant) {
-        self.signer.0.lock().unwrap().deadline = Some(deadline);
+        if let Some(mut state) = self.signer.state() {
+            state.deadline = Some(deadline);
+        }
     }
 
     pub(crate) fn admit(&self) -> bool {
-        let mut state = self.signer.0.lock().unwrap();
+        let Some(mut state) = self.signer.state() else {
+            return false;
+        };
         if state.current().is_none() {
             return false;
         }
@@ -83,7 +101,9 @@ impl ResidentCopy {
     }
 
     pub(crate) fn revoke(&self) {
-        self.signer.0.lock().unwrap().signer = None;
+        if let Some(mut state) = self.signer.state() {
+            state.signer = None;
+        }
     }
 }
 
@@ -99,23 +119,22 @@ impl Signer for ResidentSigner {
     }
 
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
-        self.0
-            .lock()
-            .unwrap()
-            .current()
-            .map_or(Capability::Unsupported, |signer| {
+        self.state().map_or(Capability::Unsupported, |mut state| {
+            state.current().map_or(Capability::Unsupported, |signer| {
                 signer.can_sign(key, algorithm)
             })
+        })
     }
 
     fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         Some(
-            self.0
-                .lock()
-                .unwrap()
-                .current()
-                .ok_or(SignError::Unavailable)
-                .and_then(|signer| signer.sign_now(request)),
+            self.state()
+                .map_or(Err(SignError::Unavailable), |mut state| {
+                    state
+                        .current()
+                        .ok_or(SignError::Unavailable)
+                        .and_then(|signer| signer.sign_now(request))
+                }),
         )
     }
 
@@ -131,10 +150,38 @@ impl Signer for ResidentSigner {
 mod tests {
     use super::*;
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
+    use zeroize::Zeroize;
+
+    struct ReadFault {
+        buffer: crate::delegated_memory::SecretCopy,
+        armed: Arc<AtomicBool>,
+    }
+
+    impl Zeroize for ReadFault {
+        fn zeroize(&mut self) {
+            self.buffer.zeroize();
+        }
+    }
+
+    impl ProtectedBytes for ReadFault {
+        fn as_bytes(&self) -> &[u8] {
+            assert!(
+                !self.armed.swap(false, Ordering::SeqCst),
+                "synthetic protected read fault"
+            );
+            self.buffer.as_bytes()
+        }
+    }
 
     fn resident() -> (ResidentCopy, Arc<AtomicUsize>) {
+        let (resident, releases, _) = resident_with_read_fault();
+        (resident, releases)
+    }
+
+    fn resident_with_read_fault() -> (ResidentCopy, Arc<AtomicUsize>, Arc<AtomicBool>) {
         let memory = crate::delegated_memory::DelegatedMemory::prepare("bybit", true).unwrap();
         let (signer, _) = LocalSigner::from_setup(LocalSetup {
             primary: Some(LocalIdentity {
@@ -146,6 +193,7 @@ mod tests {
         })
         .unwrap();
         let releases = Arc::new(AtomicUsize::new(0));
+        let armed = Arc::new(AtomicBool::new(false));
         let signer = signer
             .with_protected_storage(|bytes| {
                 let mut buffer = memory.zeroed(bytes.len()).unwrap();
@@ -156,10 +204,13 @@ mod tests {
                     assert!(allocation.iter().all(|byte| *byte == 0));
                     releases.fetch_add(1, Ordering::SeqCst);
                 });
-                Ok(Box::new(buffer))
+                Ok(Box::new(ReadFault {
+                    buffer,
+                    armed: armed.clone(),
+                }))
             })
             .unwrap();
-        (ResidentCopy::new(signer), releases)
+        (ResidentCopy::new(signer), releases, armed)
     }
 
     fn request() -> SignRequest {
@@ -191,6 +242,61 @@ mod tests {
         resident.revoke();
         drop(resident);
         drop(provider);
+        assert_eq!(releases.load(Ordering::SeqCst), 2);
+    }
+
+    fn poison_resident() -> (ResidentCopy, Provider, Arc<AtomicUsize>, bool) {
+        let (resident, releases, armed) = resident_with_read_fault();
+        let provider = resident.provider();
+        assert!(provider.sign_ready(&request()).unwrap().is_ok());
+        armed.store(true, Ordering::SeqCst);
+        let panicked = catch_unwind(AssertUnwindSafe(|| provider.sign_ready(&request()))).is_err();
+        (resident, provider, releases, panicked)
+    }
+
+    #[test]
+    fn poisoned_revoke_erases_before_provider_release_and_stays_unavailable() {
+        let (resident, provider, releases, panicked) = poison_resident();
+        let revoked = catch_unwind(AssertUnwindSafe(|| resident.revoke()));
+        let erased_before_provider_release = releases.load(Ordering::SeqCst);
+        let retained = catch_unwind(AssertUnwindSafe(|| resident.retain_until(Instant::now())));
+        let admitted = catch_unwind(AssertUnwindSafe(|| resident.admit()));
+        let dropped = catch_unwind(AssertUnwindSafe(|| drop(resident)));
+        let signed = catch_unwind(AssertUnwindSafe(|| provider.sign_ready(&request())));
+        let capability = catch_unwind(AssertUnwindSafe(|| {
+            provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256)
+        }));
+        drop(provider);
+
+        assert!(
+            panicked,
+            "the injected read must unwind through the resident lock"
+        );
+        assert!(revoked.is_ok(), "revocation must not repeat the read panic");
+        assert_eq!(erased_before_provider_release, 2);
+        assert!(retained.is_ok());
+        assert!(matches!(admitted, Ok(false)));
+        assert!(dropped.is_ok());
+        assert!(matches!(signed, Ok(Some(Err(SignError::Unavailable)))));
+        assert!(matches!(capability, Ok(Capability::Unsupported)));
+        assert_eq!(releases.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn poisoned_owner_drop_erases_before_provider_release() {
+        let (resident, provider, releases, panicked) = poison_resident();
+        let dropped = catch_unwind(AssertUnwindSafe(|| drop(resident)));
+        let erased_before_provider_release = releases.load(Ordering::SeqCst);
+        let signed = catch_unwind(AssertUnwindSafe(|| provider.sign_ready(&request())));
+        drop(provider);
+
+        assert!(
+            panicked,
+            "the injected read must unwind through the resident lock"
+        );
+        assert!(dropped.is_ok(), "owner drop must recover for erasure");
+        assert_eq!(erased_before_provider_release, 2);
+        assert!(matches!(signed, Ok(Some(Err(SignError::Unavailable)))));
         assert_eq!(releases.load(Ordering::SeqCst), 2);
     }
 

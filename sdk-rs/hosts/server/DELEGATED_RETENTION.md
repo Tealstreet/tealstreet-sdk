@@ -16,6 +16,10 @@ when engine or host references remain. Removal or disabling through the existing
 `dispose` operation takes effect immediately, including when another client is
 attached. LOCAL and COSIGNED accounts retain their existing lifecycle.
 
+A poisoned resident lock is recovered only to discard its provider and erase
+the protected material. It remains unavailable for signing or admission;
+revocation and owner drop still erase it while other provider references remain.
+
 Restart loses the resident copy. The router can deliver the authenticated
 interruption marker with reason `waiting-for-key` through the existing upgrade
 header. A DELEGATED init receives `waiting for your key` even before another
