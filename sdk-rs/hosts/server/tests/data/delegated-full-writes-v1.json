@@ -72,7 +72,17 @@
       "isolated": true
     },
     "method": "changeMarginType",
-    "fingerprint": "53f50fdbd723038cfd6c85dc53ddef618fd0940ead215fe3145654d3b3b5ce04"
+    "fingerprint": "53f50fdbd723038cfd6c85dc53ddef618fd0940ead215fe3145654d3b3b5ce04",
+    "refused": true
+  },
+  {
+    "action": {
+      "kind": "setMarginType",
+      "isolated": true,
+      "symbol": "BTCUSDT"
+    },
+    "method": "changeMarginType",
+    "fingerprint": "730e08530aafa26d96e4a318a1a00901ee1100cc228f0fedce6069bce2432f20"
   },
   {
     "action": {
@@ -89,14 +99,14 @@
       "order": {
         "symbol": "BTCUSDT",
         "type": "limit",
-        "side": "buy",
+        "side": "sell",
         "amount": 0.001,
         "price": 50000,
         "reduceOnly": true
       }
     },
     "method": "placeOrder",
-    "fingerprint": "d73df37f3481a7eee1f3ea321c731f47f1899e46dd0da5467de38138106f5eb2"
+    "fingerprint": "eebbee08a456820dbc2111eb0ea317cc60c89d79d445886c41461e4334f008c9"
   },
   {
     "action": {

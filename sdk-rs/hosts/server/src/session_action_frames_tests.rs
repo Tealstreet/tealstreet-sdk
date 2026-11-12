@@ -911,6 +911,51 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
                     }
                 } else {
                     assert_eq!(result["d"]["result"]["kind"], kind);
+                    if matches!(kind, "place" | "cancelOrders") {
+                        let suffix = if kind == "place" { "create" } else { "cancel" };
+                        let rows: Vec<Value> = tape
+                            .requests
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|r| {
+                                r["path"].as_str().is_some_and(|path| {
+                                    path.ends_with(&format!("/{suffix}"))
+                                        || path.ends_with(&format!("/{suffix}-batch"))
+                                })
+                            })
+                            .flat_map(|r| {
+                                r["body"]["request"]
+                                    .as_array()
+                                    .cloned()
+                                    .unwrap_or_else(|| vec![r["body"].clone()])
+                            })
+                            .collect();
+                        assert_eq!(
+                            rows.len(),
+                            2,
+                            "both {kind} legs must reach the signed transport"
+                        );
+                        if kind == "cancelOrders" {
+                            let ids: std::collections::BTreeSet<_> = rows
+                                .iter()
+                                .map(|r| r["orderId"].as_str().unwrap())
+                                .collect();
+                            assert_eq!(
+                                ids,
+                                std::collections::BTreeSet::from([
+                                    "resting-order",
+                                    "second-resting-order"
+                                ])
+                            );
+                        } else {
+                            let prices: Vec<_> = rows
+                                .iter()
+                                .map(|r| r["price"].as_str().unwrap().parse::<f64>().unwrap())
+                                .collect();
+                            assert_eq!(prices, vec![50000.0, 50001.0]);
+                        }
+                    }
                     let writes = tape.writes.lock().unwrap();
                     if kind != "stopAlgos" {
                         assert!(!writes.is_empty(), "{kind}");
