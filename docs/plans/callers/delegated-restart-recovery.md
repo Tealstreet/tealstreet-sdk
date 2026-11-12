@@ -15,6 +15,11 @@ router interruption returns the existing `delegated-key` offer followed by:
 {"t":"msg","d":{"op":"delegated:status","accountName":"account","data":{"status":"waiting-for-key","reason":"waiting-for-key","message":"waiting for your key"}}}
 ```
 
+When multiple DELEGATED venues are enabled, an unjoined caller must include
+`data.exchangeName` in `delegated-key-req`. An unresolved or disabled venue is
+refused before any key offer or waiting status; the interruption marker remains
+intact. An explicit enabled venue permits the normal offer/status sequence.
+
 This is connection admission status, not a job inventory or proof that all
 venue orders were canceled. It discloses no key, prior account settings or algo
 IDs. Existing `owner-released` and `lease-expired` router markers qualify; the

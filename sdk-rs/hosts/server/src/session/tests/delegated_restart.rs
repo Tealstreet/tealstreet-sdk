@@ -24,6 +24,63 @@ fn statuses(sent: &mut crate::out::Receiver) -> Vec<Value> {
 }
 
 #[tokio::test]
+async fn delegated_restart_ambiguous_unjoined_request_requires_an_explicit_venue() {
+    crate::delegated::with_test_declaration(
+        json!({"venues": {
+            "bybit": {"delegated": {"enabled": true}},
+            "binance": {"delegated": {"enabled": true}}
+        }}),
+        async {
+            let f = fixture().await;
+            record_restart(&f, "alice");
+            let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+            let epoch = f.registry.interruptions.account("alice", "acct").epoch(None);
+            assert!(epoch != crate::interruption::RestoreEpoch::default());
+            assert!(session.handover_venue("acct", &Value::Null).is_none());
+
+            session
+                .handle(
+                    r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct","data":null}}"#,
+                )
+                .await
+                .unwrap();
+            let refused: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+                .map(|frame| serde_json::from_str(&frame).unwrap())
+                .collect();
+            assert_eq!(
+                refused,
+                vec![serde_json::from_str::<Value>(&envelope::init_unverified("acct", false)).unwrap()],
+                "an ambiguous target must not receive a key offer or waiting status"
+            );
+            assert!(session.joined.is_empty());
+            assert!(session.pending_verifications.is_empty());
+            assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);
+            assert!(f.registry.interruptions.account("alice", "acct").epoch(None) == epoch);
+
+            session
+                .handle(
+                    r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct","data":{"exchangeName":"bybit"}}}"#,
+                )
+                .await
+                .unwrap();
+            let offered: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+                .map(|frame| serde_json::from_str(&frame).unwrap())
+                .collect();
+            assert_eq!(offered.len(), 2, "the explicit target restores the normal offer/status sequence");
+            assert_eq!(offered[0]["d"]["op"], "delegated-key");
+            assert_eq!(offered[1]["d"]["op"], "delegated:status");
+            assert_eq!(offered[1]["d"]["data"]["status"], "waiting-for-key");
+            assert!(session.joined.is_empty(), "an offer is not admission");
+            assert!(session.pending_verifications.is_empty());
+            assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);
+            assert!(f.registry.interruptions.account("alice", "acct").epoch(None) == epoch);
+            session.close();
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn delegated_restart_key_availability_does_not_require_a_retained_marker() {
     let f = fixture().await;
     let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
@@ -47,7 +104,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
     record_restart(&f, "alice");
     let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
     let mut done = session.take_verified();
-    session.issue_handover("acct");
+    session.issue_handover("acct", "bybit");
     let waiting = statuses(&mut sent);
     assert_eq!(
         waiting.len(),
@@ -164,13 +221,13 @@ async fn delegated_restart_refusal_does_not_clear_wait_or_consume_another_users_
         statuses(&mut sent).is_empty(),
         "refused keys never report available"
     );
-    alice.issue_handover("acct");
+    alice.issue_handover("acct", "bybit");
     assert_eq!(
         statuses(&mut sent)[0]["d"]["data"]["status"],
         "waiting-for-key"
     );
     let (mut bob, mut bob_sent) = user_session(f.registry.clone(), "bob");
-    bob.issue_handover("acct");
+    bob.issue_handover("acct", "bybit");
     assert!(
         statuses(&mut bob_sent).is_empty(),
         "another user's marker is private"
@@ -203,7 +260,7 @@ async fn delegated_restart_owner_switch_during_proof_cannot_clear_the_old_wait()
     assert_eq!(ready.len(), 1);
     assert_eq!(ready[0]["d"]["instanceId"], "bob-current");
     let (mut returned, mut returned_sent) = user_session(f.registry.clone(), "alice");
-    returned.issue_handover("acct");
+    returned.issue_handover("acct", "bybit");
     assert_eq!(
         statuses(&mut returned_sent)[0]["d"]["data"]["status"],
         "waiting-for-key"
