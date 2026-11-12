@@ -15,7 +15,9 @@ HyroTrader main-thread/process CPU and every other venue's CPU objectives retain
   retained, so recorded revalidation never re-measures.
 - Warnings: `cpu-annotations.mjs` emits `::warning` / `::error` plus a step-summary table; warnings never block.
 - Bitget steady: the paired counterbalanced certificate accepts only when its candidate Rust/TS ratio is at most
-  1.00x and its frozen creep bound `q <= 1.023110` also holds; the 0.90 readiness miss is a warning.
+  `1 + BITGET_STEADY_NOISE` (Sam, 2026-11-12: the observed baseline range from runs 43273706928 and
+  43281701341) and its frozen creep bound `q <= 1.023110` also holds; the 0.90 readiness miss is a warning.
+  Master push and nightly runs measure even identical bytes and retain the baseline and landed-master ratios.
 - Checks: correctness is "Rust / replay correctness" and "Rust / replay measurement"; CPU is
   "Rust / CPU gate (<suite>)" (plan, certify, status). "Rust / required coverage" depends on no CPU job.
 - Nightly: `.github/workflows/rust-cpu-nightly.yml` and `cpu-nightly.mjs` dispatch rust.yml on master, then file

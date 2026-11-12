@@ -63,7 +63,9 @@ function verifyBitgetProducer(text) {
   const paired = job(text, 'bitget-paired');
   assert.match(paired, /name: Rust \/ Bitget counterbalanced steady CPU/);
   verifyWorkflow(text);
-  assert.match(paired, /^    timeout-minutes: 45$/m);
+  // Two measured witnesses now include identical master builds; retain a hard
+  // deadline with ten minutes beyond the collector's eighty-minute budget.
+  assert.match(paired, /^    timeout-minutes: 90$/m);
   assert.match(paired, /CARGO_BUILD_JOBS: 4/);
   assert.match(paired, /node-version: 22/);
   assert.match(paired, /Public counterbalanced Bitget steady CPU/);
@@ -83,7 +85,7 @@ test('Bitget workflow guard rejects a bypassed deadline or canceled/missing fail
     ['bitget-paired-run.mjs --out', 'bitget-paired-ci.mjs --out'],
     ['if: success() || failure()', 'if: always()'],
     ['if: success() || failure()', 'if: success()'],
-    ['timeout-minutes: 45', 'timeout-minutes: 90'],
+    ['timeout-minutes: 90', 'timeout-minutes: 120'],
     ['run: node sdk-rs/harness/bitget-paired-run.mjs', 'continue-on-error: true\n        run: node sdk-rs/harness/bitget-paired-run.mjs'],
   ]) {
     const paired = job(source, 'bitget-paired'), changed = paired.replace(before, after);

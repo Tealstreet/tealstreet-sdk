@@ -1389,9 +1389,9 @@ jobs:
   bitget-paired:
     name: Rust / Bitget counterbalanced steady CPU
     needs: selection
-    if: needs.selection.outputs.replayRequired == 'true'
+    if: needs.selection.outputs.replayRequired == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: .
