@@ -107,6 +107,10 @@ pub struct AccountMsg {
 pub enum Inbound {
     #[serde(rename = "order.submit")]
     OrderSubmit(crate::order_contract::OrderSubmit),
+    #[serde(rename = "order.action")]
+    OrderAction(crate::order_actions::Request),
+    #[serde(rename = "order.actionCancelQueued")]
+    OrderActionCancelQueued(crate::order_actions::CancelQueued),
     #[serde(rename = "order.cancelQueued")]
     OrderCancelQueued(crate::order_contract::CancelQueued),
     Init(Box<InitPayload>),
@@ -149,6 +153,8 @@ pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
         Some("sign-req") => "sign-req",
         Some("order.ack") => "order.ack",
         Some("order.outcome") => "order.outcome",
+        Some("order.actionAck") => "order.actionAck",
+        Some("order.actionOutcome") => "order.actionOutcome",
         _ => return text,
     };
     let Some(data) = frame["d"].as_object_mut() else {

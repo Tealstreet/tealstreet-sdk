@@ -24,7 +24,7 @@ afterEach(() => vi.restoreAllMocks());
 
 it('admits MEXC canonical HMAC delegates with REST-only PayloadSigner policy', () => {
   expect(deriveRemoteSigningPolicy('mexc')).toEqual({ enabled: true, payloadSupported: true, payloadRestOnly: true,
-    protectedHeaders: ['ApiKey', 'Request-Time', 'Signature', 'Recv-Window', 'Content-Type'] });
+    protectedHeaders: ['ApiKey', 'Request-Time', 'Signature', 'Recv-Window', 'Content-Type', 'source'] });
   const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
   expect(() => assertBetaAccount('mexc', { key: 'replay-key', secret: '', remoteSigner })).not.toThrow();
   expect(() => assertBetaAccount('mexc', { key: 'replay-key', secret: '', payloadSigner: () => ({ signature: '' }) })).not.toThrow();
@@ -39,7 +39,7 @@ it.each(vectors)('MEXC $label matches local reference bytes and independent HMAC
   expect(hostedSigning.mock.calls).toEqual([[{ kind: 'credential' }], [{ kind: 'http', payload: vector.payload, stampMs: stamp, revision: '1' }]]);
   const local = await signHttpCapture(createAPI({ key: 'replay-key', secret: 'replay-secret' },
     { name: 'mexc', grafanaEndpointsEvery: [], grafanaEndpointsPeriodic: [], emitter: { emit: () => undefined } } as never), request(vector), { preserveSerializedBody: true });
-  expect(remote.config).toEqual(local.config);
+  expect(remote.config).toEqual({ ...local.config, headers: { ...local.config!.headers, source: 'TEAL' } });
   expect(remote.config?.headers.Signature).toBe(vector.signature);
   expect(input).toEqual(before);
 });
@@ -105,7 +105,7 @@ it('retains permitted signer headers while native MEXC auth and content headers 
   hostedSigning.mockImplementation(async (input) => input.kind === 'credential' ? { credential: 'replay-key' }
     : { credential: 'replay-key', signature: mac(input.payload!), headers: [
       ['X-Trace', 'first'], ['x-trace', 'retained'], ['apikey', 'shadow'], ['signature', 'shadow'],
-      ['request-time', 'shadow'], ['recv-window', 'shadow'], ['content-type', 'text/plain'],
+      ['request-time', 'shadow'], ['recv-window', 'shadow'], ['content-type', 'text/plain'], ['SoUrCe', 'shadow'],
     ] });
   const result = await signHostedHttp('mexc', { key: '', secret: '' }, true, host, request(vectors[2]));
   const headers = Object.fromEntries(Object.entries(result.config!.headers).map(([key, value]) => [key.toLowerCase(), value]));
@@ -115,4 +115,5 @@ it('retains permitted signer headers while native MEXC auth and content headers 
   expect(headers['request-time']).toBe(String(stamp));
   expect(headers['recv-window']).toBe('20000');
   expect(headers['content-type']).toBe('application/json');
+  expect(headers.source).toBe('TEAL');
 });

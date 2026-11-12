@@ -15,11 +15,19 @@ use tokio::sync::mpsc;
 #[path = "session_order_frames_tests.rs"]
 mod order_frames;
 
+#[cfg(feature = "delegated-order-frames")]
+#[path = "session_action_frames_tests.rs"]
+mod action_frames;
+
 #[derive(Clone, Default)]
 struct Tape {
     writes: Arc<Mutex<Vec<String>>>,
     client_order_ids: Arc<Mutex<Vec<String>>>,
     hold: bool,
+    close_unknown: bool,
+    closed_positions: Arc<std::sync::atomic::AtomicBool>,
+    defer_positions: Arc<std::sync::atomic::AtomicBool>,
+    held_positions: Arc<Mutex<Vec<(RequestId, Events)>>>,
     expected_key: Option<String>,
     waiting: Arc<Mutex<Vec<(RequestId, Events)>>>,
 }
@@ -35,6 +43,14 @@ fn answer(events: &Events, id: RequestId, body: String) {
 }
 
 impl Tape {
+    #[cfg(feature = "delegated-order-frames")]
+    fn release_positions(&self) {
+        self.defer_positions
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        for (id, events) in self.held_positions.lock().unwrap().drain(..) {
+            answer(&events, id, synthetic_positions().to_string());
+        }
+    }
     fn finish_unknown(&self) {
         for (id, events) in self.waiting.lock().unwrap().drain(..) {
             answer(
@@ -121,7 +137,29 @@ impl Transport for Tape {
                 self.waiting.lock().unwrap().push((request.id, events));
                 return;
             }
-            let result = if path.ends_with("-batch") {
+            if path.contains("/create") {
+                let payload: Value =
+                    serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                let closes = payload["reduceOnly"] == true
+                    || payload["request"]
+                        .as_array()
+                        .is_some_and(|rows| rows.iter().any(|row| row["reduceOnly"] == true));
+                if closes && self.close_unknown {
+                    answer(
+                        &events,
+                        request.id,
+                        json!({"retCode":0,"retMsg":"OK","result":{}}).to_string(),
+                    );
+                    return;
+                }
+                if closes {
+                    self.closed_positions
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let result = if path.ends_with("/cancel-all") {
+                json!({"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"resting-order","orderLinkId":"resting-client"}]}})
+            } else if path.ends_with("-batch") {
                 let payload: Value =
                     serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
                 let rows: Vec<Value> = payload["request"].as_array().unwrap().iter().map(|row|
@@ -132,6 +170,10 @@ impl Transport for Tape {
             } else {
                 let payload: Value =
                     serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                if path.contains("/create") && payload["reduceOnly"] == true {
+                    self.closed_positions
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
                 json!({"retCode":0,"retMsg":"OK","result":{"orderId":payload.get("orderId").and_then(Value::as_str).unwrap_or("native-one")}})
             };
             answer(&events, request.id, result.to_string());
@@ -164,15 +206,36 @@ impl Transport for Tape {
                 "reduceOnly":false,"timeInForce":"GTC","positionIdx":0,
                 "createdTime":"1000","updatedTime":"1000"}],"nextPageCursor":""}})
         } else if path.ends_with("/position/list") {
-            json!({"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0,
-                "side":"Buy","size":"0.001","leverage":"10","avgPrice":"50000",
-                "markPrice":"50000","positionValue":"50","positionIM":"5",
-                "unrealisedPnl":"0","cumRealisedPnl":"0","liqPrice":"0"}],"nextPageCursor":""}})
+            if self
+                .defer_positions
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                self.held_positions
+                    .lock()
+                    .unwrap()
+                    .push((request.id, events));
+                return;
+            }
+            if self
+                .closed_positions
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                json!({"retCode":0,"result":{"list":[],"nextPageCursor":""}})
+            } else {
+                synthetic_positions()
+            }
         } else {
             json!({"retCode":0,"retMsg":"OK","result":{"list":[]}})
         };
         answer(&events, request.id, result.to_string());
     }
+}
+
+fn synthetic_positions() -> Value {
+    json!({"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0,
+        "side":"Buy","size":"0.001","leverage":"10","avgPrice":"50000",
+        "markPrice":"50000","positionValue":"50","positionIM":"5",
+        "unrealisedPnl":"0","cumRealisedPnl":"0","liqPrice":"0"}],"nextPageCursor":""}})
 }
 
 struct PreparedTape(Tape);
@@ -213,6 +276,16 @@ fn init(venue: &str) -> InitPayload {
 }
 
 fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -> Arc<Account> {
+    delegated_account_with_algos(registry, user, venue, tape, false)
+}
+
+fn delegated_account_with_algos(
+    registry: &Registry,
+    user: &str,
+    venue: &str,
+    tape: Tape,
+    start_algos: bool,
+) -> Arc<Account> {
     let mut setup = init("bybit");
     setup.key = format!("synthetic-key-{user}");
     let mut tape = tape;
@@ -234,7 +307,7 @@ fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -
         ServerConfig::default(),
     )
     .unwrap();
-    let (mut account, _) = testing::account_on(
+    let (mut account, inbox) = testing::account_on(
         testing::HeldLoad {
             placed: Arc::default(),
             load_after_ms: None,
@@ -255,6 +328,11 @@ fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -
     if venue == "bybit" {
         testing::bind_identity(&mut account, &setup);
     }
+    let account = if start_algos {
+        testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox)
+    } else {
+        account
+    };
     testing::register(registry, &account);
     account
 }

@@ -1,12 +1,17 @@
 # Rust harness: CPU gate policy
 
-Sam, 2026-11-07: Rust must not be slower than TS. Fail only when Rust > 1.00x TS after one re-measure;
+Sam, 2026-11-07: CPU objectives default to failing only when Rust > 1.00x TS after one re-measure;
 missing the 10%-faster target is a warning; nightly certification files cpu-regression issues.
+
+Sam, 2026-11-11 ruling: HyroTrader may run up to 1.20x TS raw steady CPU.
+Only the exact `hyrotrader` venue's raw steady CPU uses this bound: 1.20x passes, above 1.20x fails.
+HyroTrader main-thread/process CPU and every other venue's CPU objectives retain the 1.00x bound.
 
 - Verdict: `performance-policy.mjs` (`performanceVerdict`, `remeasuredVerdict`). Each CPU objective (main-thread,
   steady, process) compares the paired same-runner medians. Retained memory keeps its 10% rule as a failure.
-- Re-measure: `gate.mjs` re-runs the 16 interleaved pairs once, in the same job, only when a CPU objective is over
-  1.00x. It decides only the CPU verdict: the first set's non-CPU failures are kept. Only the re-measured raw set is
+- Re-measure: `gate.mjs` re-runs the 16 interleaved pairs once, in the same job, only when a CPU objective
+  exceeds its applicable failure bound: 1.20x for HyroTrader raw steady CPU, otherwise 1.00x.
+  It decides only the CPU verdict: the first set's non-CPU failures are kept. Only the re-measured raw set is
   retained, so recorded revalidation never re-measures.
 - Warnings: `cpu-annotations.mjs` emits `::warning` / `::error` plus a step-summary table; warnings never block.
 - Bitget steady: the paired counterbalanced certificate accepts only when its candidate Rust/TS ratio is at most

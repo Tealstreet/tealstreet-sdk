@@ -75,7 +75,7 @@ export function delegatedIntentFingerprint(
   return bytesToHex(sha256(bytes));
 }
 
-function canonicalValue(value: unknown, depth: number): string {
+export function canonicalValue(value: unknown, depth: number): string {
   if (depth > 32) throw new Error('Intent parameters are too deep');
   if (value === null || typeof value === 'boolean') return JSON.stringify(value);
   if (typeof value === 'number') {
