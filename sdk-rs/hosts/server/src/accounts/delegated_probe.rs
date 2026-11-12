@@ -72,6 +72,7 @@ impl Registry {
         };
         let token_provider = ProxyToken::new();
         token_provider.set(token);
+        let venue = init.exchange_name.clone();
         let mut config = self.engine_config.clone();
         config.log_label = None;
         config.signing_mode = Some("hosted_delegated");
@@ -79,7 +80,6 @@ impl Registry {
         let lease = permit.lease.clone();
         #[cfg(test)]
         let e2e_venue = self.e2e_venue.clone();
-        let venue = init.exchange_name.clone();
         let work = async {
             self.pacer.admit().await;
             permit.check(user, init)?;
@@ -98,7 +98,7 @@ impl Registry {
                     tokio::select! {
                         biased;
                         _ = result.closed() => {},
-                        answer = crate::delegated::probe::run(&venue, prepared, transport, config, allowed) => { let _ = result.send(answer); }
+                        answer = crate::delegated::probe::run(&venue, &prepared.options, prepared.resident.provider(), transport, config, allowed) => { let _ = result.send(answer); }
                     }
                 });
             });

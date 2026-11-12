@@ -626,6 +626,24 @@ refusal, settings replacement and early-subscription handling remain on the
 existing COSIGNED init path. Fixed synthetic interoperability and RFC test data
 live in `tests/data/`.
 
+The shared startup admission runner also has staged entries for `binance`,
+`okx`, `bitget`, `blofin` and `kucoin`. It runs the selected venue's existing
+native private startup with either the remote provider or the local provider;
+it does not build a second set of REST requests. Its result classifier uses
+engine `ErrorKind` values: authentication failures are invalid, rate limits and
+transport failures are transient, and complete private startup is accepted.
+Unclassified startup failures remain transient refusals. Public-only and
+frame-fed accounts cannot satisfy this check.
+
+Entries are separate from rollout declarations. These five entries leave all
+activation flags off. The offline admission suite must cover each entry before
+it can be enabled: valid startup, a different signing key, a prior signature,
+a consumed response, a different handed-over pair, and a reused sealed handover.
+The suite verifies the actual native HTTP signatures against synthetic venue
+responses. Existing Bybit session tests additionally cover resident-account and
+registration preservation. These offline checks do not replace live venue
+validation or the existing server-origin and signing requirements for rollout.
+
 ## Frames (claude-19pt8s, web hosted client)
 
 The browser host (`ExchangeServerWorker.ts`) forwards only TEXT frames to the

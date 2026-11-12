@@ -1,8 +1,58 @@
-//! A temporary native account observes the venue's existing private startup.
+//! Shared admission checks through a temporary native private account.
 use safe_cex_engine::ErrorKind;
 use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
+
+// Explicit staging entries. Adding one requires the matching offline suite;
+// this test-only catalog does not gate runtime admission or change rollout declarations.
+#[cfg(test)]
+pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] =
+    &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProbeOutcome {
+    Accepted,
+    Invalid,
+    Transient,
+}
+
+/// Venue-independent classification of the engine's existing read result.
+/// Missing classification is uncertainty, never successful admission.
+pub(crate) fn classify(result: Result<(), Option<ErrorKind>>) -> ProbeOutcome {
+    match result {
+        Ok(()) => ProbeOutcome::Accepted,
+        Err(Some(
+            ErrorKind::AuthInvalid
+            | ErrorKind::AuthExpired
+            | ErrorKind::AuthPermission
+            | ErrorKind::InvalidInput
+            | ErrorKind::Unsupported
+            | ErrorKind::Rejected
+            | ErrorKind::InsufficientBalance,
+        )) => ProbeOutcome::Invalid,
+        Err(
+            None
+            | Some(
+                ErrorKind::RateLimited
+                | ErrorKind::Network
+                | ErrorKind::Timeout
+                | ErrorKind::VenueUnavailable
+                | ErrorKind::Internal,
+            ),
+        ) => ProbeOutcome::Transient,
+    }
+}
+
+impl ProbeOutcome {
+    fn into_result(self) -> Result<(), ProbeRefusal> {
+        match self {
+            Self::Accepted => Ok(()),
+            Self::Invalid => Err(ProbeRefusal::INVALID),
+            Self::Transient => Err(ProbeRefusal::TRANSIENT),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
@@ -14,14 +64,7 @@ impl ProbeRefusal {
 
     fn classified(kind: ErrorKind) -> Self {
         Self {
-            transient: matches!(
-                kind,
-                ErrorKind::RateLimited
-                    | ErrorKind::Network
-                    | ErrorKind::Timeout
-                    | ErrorKind::VenueUnavailable
-                    | ErrorKind::Internal
-            ),
+            transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
         }
     }
 }
@@ -39,16 +82,36 @@ impl Drop for ProbeActor {
 
 pub(crate) async fn run<T: Transport + 'static>(
     venue: &str,
-    prepared: super::PreparedDelegated,
+    options_json: &str,
+    provider: safe_cex_engine::signing::Provider,
     transport: T,
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
+    let options: safe_cex_venues::EngineOptions =
+        serde_json::from_str(options_json).map_err(|_| ProbeRefusal::INVALID)?;
+    if options.frame_fed
+        || options
+            .construction(venue)
+            .public_data_only
+            .unwrap_or(options.public_data_only)
+        || options.signing.as_ref().is_none_or(|identities| {
+            identities
+                .primary
+                .as_ref()
+                .is_none_or(|identity| identity.signing_ref().is_err())
+        })
+    {
+        return Err(ProbeRefusal::INVALID);
+    }
+    if !allowed() {
+        return Err(ProbeRefusal::TRANSIENT);
+    }
     let (handle, task) = safe_cex_native::spawn_venue_account(
         venue,
-        &prepared.options,
+        options_json,
         transport,
-        Some(prepared.resident.provider()),
+        Some(provider),
         config,
     )
     .map_err(|_| ProbeRefusal::INVALID)?;
@@ -76,7 +139,7 @@ pub(crate) async fn run<T: Transport + 'static>(
                         loaded.markets && loaded.balance && loaded.orders && loaded.positions
                     }).await;
                     match loaded {
-                        Some(true) => return Ok(()),
+                        Some(true) => return classify(Ok(())).into_result(),
                         Some(false) => {},
                         None => return Err(ProbeRefusal::TRANSIENT),
                     }
@@ -183,7 +246,8 @@ mod tests {
                             Duration::from_secs(2),
                             run(
                                 &init.exchange_name,
-                                prepared,
+                                &prepared.options,
+                                prepared.resident.provider(),
                                 requests.clone(),
                                 ServerConfig::default(),
                                 Arc::new(|| true),
@@ -201,6 +265,38 @@ mod tests {
                 .await;
             })
             .await;
+    }
+
+    #[test]
+    fn classifier_requires_success_and_refuses_unknown_results() {
+        assert_eq!(classify(Ok(())), ProbeOutcome::Accepted);
+        assert_eq!(classify(Err(None)), ProbeOutcome::Transient);
+        for kind in [
+            ErrorKind::AuthInvalid,
+            ErrorKind::AuthExpired,
+            ErrorKind::AuthPermission,
+            ErrorKind::InvalidInput,
+            ErrorKind::Unsupported,
+            ErrorKind::Rejected,
+            ErrorKind::InsufficientBalance,
+        ] {
+            assert_eq!(classify(Err(Some(kind))), ProbeOutcome::Invalid);
+        }
+        for kind in [
+            ErrorKind::RateLimited,
+            ErrorKind::Network,
+            ErrorKind::Timeout,
+            ErrorKind::VenueUnavailable,
+            ErrorKind::Internal,
+        ] {
+            assert_eq!(classify(Err(Some(kind))), ProbeOutcome::Transient);
+        }
+        for notice in [
+            r#"{"type":"startupFailed","detail":{"message":"success"}}"#,
+            r#"{"type":"startupFailed","detail":{"kind":"futureKind"}}"#,
+        ] {
+            assert!(notice_refusal(notice).unwrap().transient);
+        }
     }
 
     #[test]
@@ -237,3 +333,7 @@ mod tests {
         assert!(notice_refusal(r#"{"type":"event","message":"authInvalid"}"#).is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "probe_tests.rs"]
+mod venue_tests;
