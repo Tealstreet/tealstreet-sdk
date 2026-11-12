@@ -247,7 +247,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3372 merge keeps max(PR 2,295,808, master 2,326,528); prior run 42484598496 measured 2,285,327 B.
   // #3372 restage at merge 41d4292d6f3: build.sh --venue bybit, pinned Binaryen132, web/node 2,323,991 B.
   // Current measured size + 10 KiB, rounded up to KiB; both parent provenance blocks retained.
-  bybit: 2_334_720,
+  // #3372 head 5858609a705: CI run 43052995465, job 130635861554, artifact 13869852410.
+  // CI merge cc0145a0f0ba (base d956d25f8b48): optimized web/node/replay each 2,331,744 B.
+  // Current CI size + 10 KiB, rounded up to KiB; historical provenance and tests retained.
+  bybit: 2_342_912,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
   // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.

@@ -1895,3 +1895,16 @@ test('#3372 restage (optimized merge 41d4292d6f3) retains current Bybit headroom
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
+
+test('#3372 current CI run 43052995465 retains measured Bybit headroom', () => {
+  // Head 5858609a705, CI merge cc0145a0f0ba (base d956d25f8b48), artifact 13869852410.
+  // Optimized web/node/replay each measured 2,331,744 B; earlier provenance pins stay intact.
+  const measured = 2_331_744;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_342_912);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, 'Bybit retains the current CI size plus 10 KiB, rounded up');
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
