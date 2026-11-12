@@ -337,6 +337,56 @@ fn delegated_account_with_algos(
     account
 }
 
+#[tokio::test]
+async fn delegated_fixture_keeps_identity_when_native_algos_are_enabled_or_disabled() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for start_algos in [false, true] {
+                let registry = crate::accounts::tests::registry();
+                let account = delegated_account_with_algos(
+                    &registry,
+                    "A",
+                    "bybit",
+                    Tape::default(),
+                    start_algos,
+                );
+                let mut renamed = init("bybit");
+                renamed.key = "synthetic-key-A".into();
+                renamed.account_name = "renamed-label".into();
+                let identity = crate::accounts::identity::digest("A", &renamed)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(account.registry_name(), identity);
+                assert!(testing::holdings(&registry).contains_key(&("A".into(), identity)));
+                let holder = registry.next_id();
+                let joined = registry
+                    .obtain_delegated(
+                        "A",
+                        &renamed,
+                        holder,
+                        None,
+                        Arc::new(|_| true),
+                        DelegatedPair::new(
+                            renamed.key.clone(),
+                            Secret::new("synthetic-signing-fixture-A".into()),
+                            None,
+                        ),
+                    )
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&account, &joined));
+                assert!(Arc::ptr_eq(
+                    &account,
+                    &registry.held("A", &renamed.account_name, holder).unwrap()
+                ));
+                assert!(registry.held("B", &renamed.account_name, holder).is_none());
+                assert_eq!(registry.account_count(), 1);
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
 async fn joined(
     registry: Arc<Registry>,
     user: &str,
