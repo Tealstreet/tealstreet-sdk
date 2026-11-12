@@ -2070,6 +2070,38 @@ mod serial_plans {
     }
 
     #[test]
+    fn serial_22_override_plan_failure_message_wins_on_a_definite_rejection() {
+        // The counterpart entry point for venue paths that have already
+        // composed the correct user-facing message after a terminal leg
+        // (protective put-back, batch-unknown summary, locally re-presented
+        // reason). It must REPLACE the projected venue text on every
+        // outcome, including `Rejected`, where the gated entry point is
+        // deliberately a no-op. Regression guard for callers like
+        // `lighter::trading` re-presenting a "stop not changed: trigger
+        // crossed" message over a raw `invalid nonce` rejection.
+        let words = "Lighter stop not changed: trigger crossed";
+        let mut e = engine(Serial {
+            total: 2,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let plan = e.venue.plan.clone().expect("a live Plan");
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        cx.override_plan_failure_message(&plan, words).unwrap();
+        let refused = failed(&drive(&mut e, 0., ["reject", "reject"]).0).unwrap();
+        assert_eq!(refused.outcome, Some(crate::Outcome::Rejected));
+        assert_eq!(
+            refused.message, words,
+            "an override must replace venue text on a definite rejection",
+        );
+    }
+
+    #[test]
     fn serial_22_a_venue_recorded_unproven_write_keeps_its_evidence_text() {
         // Only an engine-sealed status reply replaces the retained refusal.
         let error = failed(&refusals(false, false, &["reject", "unknown"])).unwrap();
