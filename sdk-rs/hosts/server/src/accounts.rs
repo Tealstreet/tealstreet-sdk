@@ -409,14 +409,16 @@ impl Account {
     }
 
     fn live_outboxes(&self) -> Vec<Outbox> {
-        self.holders
-            .lock()
-            .unwrap()
-            .by_id
-            .values()
-            .flatten()
-            .map(|live| live.outbox.clone())
-            .collect()
+        let holders = self.holders.lock().unwrap();
+        let mut outboxes = Vec::new();
+        for (id, live) in &holders.by_id {
+            if let Some(labels) = holders.labels.get(id).filter(|labels| !labels.is_empty()) {
+                outboxes.extend(labels.values().flatten().map(|live| live.outbox.clone()));
+            } else if let Some(live) = live {
+                outboxes.push(live.outbox.clone());
+            }
+        }
+        outboxes
     }
 
     /// Signing and the proxy token follow this socket, which already holds the account.
