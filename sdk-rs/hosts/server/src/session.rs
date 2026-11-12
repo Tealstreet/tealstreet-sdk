@@ -1224,7 +1224,7 @@ impl Session {
                 self.drop_early(&name, "account did not join");
                 self.account_stop_error(&account, error, &out);
                 self.registry
-                    .release(&account, self.socket, Disposal::JoinFailed);
+                    .release_label(&account, self.socket, &name, Disposal::JoinFailed);
             }
         }
     }
