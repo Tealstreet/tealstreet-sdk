@@ -1295,3 +1295,86 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
         session.close(); registry.dispose(&account, Disposal::PageDisposed);
     }).await;
 }
+
+#[tokio::test]
+async fn exec_review_f2_keeps_factory_identity_across_legacy_and_overlapping_typed_calls() {
+    tokio::task::LocalSet::new().run_until(async {
+        for prior_legacy in [true, false] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape { hold: true, ..Default::default() };
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            if prior_legacy {
+                session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":"exec","data":{"command":"tasks","reqId":"legacy-before-typed","symbol":"BTCUSDT"}}}).to_string()).await.unwrap();
+            } else {
+                action(&mut session, json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}), 1, false).await;
+                action_frame(&mut sent, "order.actionOutcome").await;
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    while tape.waiting.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+                }).await.expect("first typed EXEC must remain in flight");
+            }
+            action(&mut session, json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}), 1, false).await;
+            action_frame(&mut sent, "order.actionOutcome").await;
+            let expected = if prior_legacy { 1 } else { 2 };
+            let passed = tokio::time::timeout(Duration::from_secs(2), async {
+                while tape.writes.lock().unwrap().len() < expected { tokio::task::yield_now().await; }
+            }).await.is_ok();
+            let writes = tape.writes.lock().unwrap().clone();
+            let replies: Vec<String> = std::iter::from_fn(|| sent.try_recv().ok()).collect();
+            tape.finish_unknown();
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+            assert!(passed, "legacy={prior_legacy}: expected {expected} signed writes, got {writes:?}; {replies:?}");
+            assert!(!replies.iter().any(|v| v.contains("ExecFactory must be account-scoped")), "{replies:?}");
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn exec_review_f1_fences_deferred_shared_factory_handoffs_without_stopping_accepted_jobs() {
+    tokio::task::LocalSet::new().run_until(async {
+        for command in ["chase buy $100", "twap buy $1000 into 2 over 1"] {
+            for control in ["retired", "expired", "live"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                let (keeper, _kept, _) = Out::channel(256);
+                crate::accounts::tests::hold_live(&account, 9999, keeper.outbox());
+                let payload = json!({"kind":"algo","op":"exec","data":{"command":format!("sleep 1500ms; {command}"),"symbol":"BTCUSDT"}});
+                let id = action_key();
+                let fp = crate::order_contract::action_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+                session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":if control == "expired" {9000}else{0},"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
+                let accepted = action_frame(&mut sent, "order.actionOutcome").await;
+                assert_eq!(accepted["d"]["outcome"], "unknown");
+                assert!(account.running.jobs().1 > 0, "EXEC must reach its sleep deferral before retirement/expiry");
+                assert!(tape.writes.lock().unwrap().is_empty());
+                if control == "retired" { session.close(); }
+                assert!(account.running.io_allowed(), "keep the account live so only the action fence can stop its continuation");
+                tokio::time::sleep(Duration::from_millis(1800)).await;
+                let writes = tape.writes.lock().unwrap().clone();
+                let jobs = account.running.jobs();
+                // A fresh owner's independent account continues while A's
+                // deferred handoff is fenced on its captured registration.
+                if control == "retired" {
+                    let b_tape = Tape::default();
+                    let b = delegated_account_with_algos(&registry, "B", "bybit", b_tape.clone(), true);
+                    let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+                    action(&mut bob, json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}), 1, false).await;
+                    action_frame(&mut b_sent, "order.actionOutcome").await;
+                    tokio::time::timeout(Duration::from_secs(2), async {
+                        while b_tape.writes.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+                    }).await.expect("Bob's independent EXEC still signs and sends");
+                    bob.close(); registry.dispose(&b, Disposal::PageDisposed);
+                }
+                session.close(); registry.dispose(&account, Disposal::PageDisposed);
+                if control == "live" {
+                    assert!(!writes.is_empty(), "{command}: positive handoff must sign and send");
+                    assert!(!jobs.0.is_empty(), "accepted long-lived jobs keep account scope");
+                } else {
+                    assert!(writes.is_empty(), "{control} {command}: deferred admission sent {writes:?}");
+                    assert!(jobs.0.is_empty(), "{control} {command}: deferred admission created jobs {:?}", jobs.0);
+                }
+            }
+        }
+    }).await;
+}
