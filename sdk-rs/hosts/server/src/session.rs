@@ -4776,7 +4776,7 @@ mod tests {
                 let frame = sent.try_recv().expect("the refusal frame");
                 assert_eq!(
                     frame,
-                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is open in another window or on another device with different settings (enableSpotMarkets). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
+                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is already running with different settings (enableSpotMarkets). The change was not applied. Join with the current settings and use apply-settings before reinitializing.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
                 );
                 assert!(sent.try_recv().is_err(), "retries are quiet");
                 assert_eq!(crate::accounts::tests::signing(&account), Some(7));
