@@ -1978,3 +1978,14 @@ test('#3372 CI run 43303561061 retains current KuCoin Spot reserve', () => {
   assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'kucoinspot'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'kucoinspot'), /exceeds/);
 });
+
+test('#3372 CI run 43328678379 retains current Bybit reserve', () => {
+  // Head 48cb0d34c168, CI merge cff6adaa9fc1, job 131568212209, artifact 13995125309.
+  const measured = 2_338_561;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_349_056);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, 'Bybit retains the current CI measurement plus 10 KiB');
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
