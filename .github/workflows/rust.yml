@@ -359,6 +359,10 @@ jobs:
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
             command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
+          # Run the feature-gated integration suites independently of workspace
+          # feature unification. The managed-flow suite also needs address-nonce.
+          - check: crypto-admission
+            command: RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features address-nonce,ed25519,secp256k1,stark,schnorr --test admission --test starknet_verify --test stark_public_seal --test scalar_only_managed_flow -j2
           # The default workspace does not enable the opt-in order frame protocol.
           - check: delegated-order-frames
             command: |
