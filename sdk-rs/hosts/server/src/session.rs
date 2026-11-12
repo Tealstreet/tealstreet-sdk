@@ -1675,7 +1675,11 @@ impl Session {
             );
             return;
         }
-        let plans = if account.delegated.is_some() {
+        // Dedicated action frames have their own admission and ledger contract.
+        // Legacy calls retain the narrower place/close activation scope.
+        let plans = if account.delegated.is_some()
+            && !matches!(order_frame, Some(OrderReceipt::Action { .. }))
+        {
             methods::translate_delegated(
                 &account.venue,
                 &method,

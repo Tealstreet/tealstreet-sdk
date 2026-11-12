@@ -88,7 +88,9 @@ activation. Each session captures activation at creation; changes require the
 existing box drain/restart and fresh admission. Hosts also require the router's separate
 `delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
 bind UUIDv7 identity, version, action kind and target IDs in a separate canonical
-fingerprint domain. Placement's four frames and fingerprints are unchanged.
+fingerprint domain. Dedicated action receipts use the full method translator
+after that admission; legacy aliases keep the separate place/close restriction.
+Placement's four frames and fingerprints are unchanged.
 
 Amend/cancel/cancel-all use the existing method translator, native command
 completion and audit. Internal action dispatch carries the original deadline
