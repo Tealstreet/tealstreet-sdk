@@ -191,6 +191,38 @@ async fn verified_pair_starts_then_reuses_the_resident_account() {
 }
 
 #[tokio::test]
+async fn token_expiry_after_successful_probe_keeps_the_resident_registration() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut results = session.take_verified();
+    let init = payload(&mut session, Some("first"));
+    session.init(init).await.unwrap();
+    finish(&mut session, &mut results).await;
+    let client = session.joined["acct"].client.id;
+    let original = session.joined["acct"].account.clone();
+    let init = payload(&mut session, Some("second"));
+    session.init(init).await.unwrap();
+    let completed = tokio::time::timeout(Duration::from_secs(5), results.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(completed.candidate.is_ok());
+    assert!(completed.probe.as_ref().unwrap().permit.is_ok());
+    while sent.try_recv().is_ok() {}
+    session.identity.token.as_mut().unwrap().1 = now_ms();
+    session.verification_completed(completed).await.unwrap();
+    assert_eq!(session.joined["acct"].client.id, client);
+    assert!(Arc::ptr_eq(&session.joined["acct"].account, &original));
+    assert!(session.pending_verifications.is_empty());
+    assert!(
+        sent.try_recv()
+            .unwrap()
+            .contains("Tealstreet proxy token expired")
+    );
+    session.close();
+}
+
+#[tokio::test]
 async fn classified_probe_refusals_keep_current_registration_and_legacy_bytes() {
     for (code, transient) in [(10003, false), (10005, false), (10006, true)] {
         for id in [Some("probe-registration"), None] {

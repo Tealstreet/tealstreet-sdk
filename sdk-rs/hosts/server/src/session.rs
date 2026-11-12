@@ -2602,6 +2602,7 @@ mod tests {
     use safe_cex_remote_signer::Outbox;
 
     mod delegated_probe;
+    mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
         serde_json::from_str(r#"{"key":"synthetic-key","secret":"synthetic-secret"}"#).unwrap()

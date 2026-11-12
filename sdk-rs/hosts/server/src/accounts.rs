@@ -3163,6 +3163,36 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn token_expiry_is_rechecked_after_init_pacing_before_preparation() {
+        use std::future::Future;
+        let mut registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        registry.pacer = crate::pacing::Pacer::new(1, Duration::ZERO);
+        let registry = Arc::new(registry);
+        registry.pacer.admit().await;
+        // This venue's ordinary preparation refuses locally, with no venue IO.
+        let init = InitPayload {
+            account_name: "acct".into(),
+            exchange_name: "hyrotrader".into(),
+            key: "synthetic".into(),
+            ..Default::default()
+        };
+        let token = Some(("synthetic".into(), now_ms() + 50));
+        let work = registry.obtain("alice", &init, false, 9, token, Arc::new(|_| true));
+        tokio::pin!(work);
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(work.as_mut().poll(cx).is_pending()))
+                .await
+        );
+        let error = work.await.err().expect("expired init refuses");
+        assert!(error.contains("Tealstreet proxy token expired"), "{error}");
+        assert_eq!(registry.account_count(), 0);
+    }
+
+    #[tokio::test]
     async fn summary_counts_account_and_socket_users_once_without_creating_lease_records() {
         tokio::task::LocalSet::new()
             .run_until(async {

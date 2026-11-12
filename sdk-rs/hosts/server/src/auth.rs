@@ -203,4 +203,14 @@ mod tests {
             assert_eq!(verified.chat_handle, None, "{handle:?}");
         }
     }
+
+    #[test]
+    fn token_expiry_uses_the_verified_exp_without_leeway() {
+        let (token, now) = token(None);
+        let verifier = Verifier::unsigned();
+        let expires = verifier.verify(&token, now).unwrap().expires_at_ms;
+        assert!(verifier.verify(&token, expires - 1).is_some());
+        assert!(verifier.verify(&token, expires).is_none());
+        assert!(verifier.verify(&token, expires + 1).is_none());
+    }
 }
