@@ -1947,3 +1947,24 @@ fn j6b_amend_duplicate_options_cannot_hide_a_future_field() {
         );
     }
 }
+
+#[tokio::test]
+async fn j6b_paused_restored_twap_amend_cannot_bypass_explicit_resume() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry=crate::accounts::tests::registry(); let tape=Tape::default();
+        let account=delegated_account_with_algos(&registry,"A","bybit",tape.clone(),true);
+        let (mut session,mut sent)=joined(registry.clone(),"A",account.clone()).await;
+        let cases: Vec<Value>=serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json")).unwrap();
+        let restore=cases.into_iter().find(|c| c["action"]["op"]=="twap:state").unwrap()["action"].clone();
+        action(&mut session,restore,1,false).await;
+        assert_eq!(action_frame(&mut sent,"order.actionOutcome").await["d"]["outcome"],"unknown");
+        let old=account.running.jobs().0[0].id.clone(); assert!(account.running.jobs().0[0].parked);
+        j6b_raw_action(&mut session,json!({"kind":"algo","op":"twap:amend","data":{"id":old,"options":j6b_options("twap")}}),0).await;
+        let outcome=action_frame(&mut sent,"order.actionOutcome").await;
+        assert_eq!(outcome["d"]["outcome"],"refused","{outcome}");
+        assert_eq!(outcome["d"]["error"]["outcome"],"notSent");
+        assert!(account.running.jobs().0[0].parked); assert_eq!(account.running.jobs().0[0].id,old);
+        assert!(tape.writes.lock().unwrap().is_empty());
+        session.close(); registry.dispose(&account,Disposal::PageDisposed);
+    }).await;
+}
