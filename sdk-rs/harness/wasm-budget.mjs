@@ -217,6 +217,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3281 merge: max(d9b5310e7d1, 6c158931c59) for every parent cap.
 // Current master dominates; retain both parents' measurement provenance
 // and the #3281 measured-headroom regression (run 42422693183, 5025f1670c7).
+// #3397 fresh merged-tree measurements: Rust 1.99.0, wasm-bindgen 0.2.129,
+// Binaryen 132, two -Oz passes via build.sh; all older provenance remains below.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3300 post-#3306: run 42557412385, job 128966462873, CI merge 291f65994cda.
   // Optimized web/node measured 2,078,907 B; CI plus 10 KiB rounded up to KiB.
@@ -231,7 +233,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Shared engine valuation/native-size policy; retain unknown instead of a partial value.
   // #3448 head 9a736b2a6bf1: run 43198030267/job 131114624468, artifact 13934600864.
   // Optimized web/Node 2,211,230 B + 10 KiB, rounded up to KiB.
-  asterdex: 2_222_080,
+  // #3397 run 43319466529/job 131536920564, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 2,211,866 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13990660547; SHA-256 39ec0ebda4cdf700bf11a73ef9009b5c7ff7f92ecee38d62e2da36096c5a6a89.
+  asterdex: 2_223_104,
   backpack: 2_040_832,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
@@ -255,7 +260,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125555, CI source cca7b8337ad3:
   // web/Node 1,942,038 B; current measured maximum + 10 KiB, rounded up.
   // Shared native-size policy must retain unknown/conflicting quantity refusals.
-  bitunix: 1_952_768,
+  // #3397 run 43319466529/job 131536920580, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 1,942,779 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13989557960; SHA-256 ba9bb52dc22748bca25fcb5242b9cec3dc23470a6f0f56783e6ab4047a07599e.
+  bitunix: 1_953_792,
   blofin: 2_072_576,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025076016: 2,316,667 B + 10 KiB rounded up.
@@ -278,11 +286,17 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue coinbase.
   // Current measured bytes + 10 KiB, rounded up; retain both parent floors.
   coinbase: 2_115_584,
-  cryptocom: 1_807_360,
+  // #3397 run 43319466529/job 131536920523, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 1,804,182 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13990122410; SHA-256 fb12f0bb7360254bb91749840faf977e1d5977880f179fd2933dfcf79de15443.
+  cryptocom: 1_814_528,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
-  grvt: 1_991_680,
+  // #3397 run 43319466529/job 131536920517, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 1,990,869 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13989269627; SHA-256 617f513988a40ee3f14be04338f455aee23972814425c6cadf00f87f30002f4b.
+  grvt: 2_001_920,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -318,15 +332,25 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125504, CI source cca7b8337ad3:
   // web/Node 2,260,418 B; current measured maximum + 10 KiB, rounded up.
   // Keep unavailable mark valuation and distinct PF/inverse quantity rules.
-  kraken: 2_271_232,
-  krakenspot: 2_271_232,
+  // #3397 run 43319466529/job 131536920531, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 2,261,215 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13990910307; SHA-256 5be5d66839f94eb26cb61fcb370e7eb08c7f1e1b03bcb779016c0043b2b59279.
+  kraken: 2_272_256,
+  krakenspot: 2_272_256,
   kucoin: 1_872_896,
-  kucoinspot: 2_462_720,
+  // #3397 run 43319466529/job 131536920530, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web size refusal: 2,464,041 B; separate Node capsule has the same size.
+  // Node artifact 13990151877; SHA-256 738c1759de0129c349b8800cb1c77a52c27af034f578bb6dffa12e9366048674.
+  // Current measured bytes + 10 KiB, rounded up; retain parent floors.
+  kucoinspot: 2_475_008,
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
   // web/Node 2,146,773 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no signing or admission expansion.
-  lighter: 2_157_568,
-  'lighter-robinhood': 2_157_568,
+  // #3397 run 43319466529/job 131536920467, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 2,147,689 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13990221484; SHA-256 9a67744fac8df42080c232cc974f1c9bd15c16209c660ce4354992941100f919.
+  lighter: 2_158_592,
+  'lighter-robinhood': 2_158_592,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
@@ -344,16 +368,29 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125322, CI source cca7b8337ad3:
   // web/Node 1,946,379 B; current measured maximum + 10 KiB, rounded up.
   // Shared native sizing with current master broker behavior retained.
-  mexc: 1_956_864,
+  // #3397 run 43319466529/job 131536920527, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 1,947,286 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13988974079; SHA-256 77119ba064a842b5db5ef5dba4f819ea6affef465a8913949e4767e2dbf7e401.
+  mexc: 1_957_888,
   okx: 2_053_120,
-  orderly: 1_773_568,
+  // #3397 run 43192535364/job 131096463465: prior web/Node 1,768,995 B (minimum 1,779,712 B).
+  // #3397 run 43319466529/job 131536920541, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 1,770,708 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13990735425; SHA-256 eb72c086fa0ac4d0fd52405501d4344ba4fe31f48bd04db51ea79928ecf05628.
+  orderly: 1_781_760,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
-  paradex: 2_306_048,
+  // #3397 run 43319466529/job 131536920493, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 2,297,964 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13990157207; SHA-256 9722d37456ac324db76c00f50ae051735928f51d3f10a19e7e6762596ca9aaf0.
+  paradex: 2_309_120,
   // #3429 run 42729630872 at a2be15368b4: CI web/node 2,125,299 B.
   // Shared-helper fix: local web/node 2,127,824 B; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue phemex; measured + 10 KiB, rounded up.
   phemex: 2_138_112,
-  polymarket: 1_652_736,
+  // #3397 run 43319466529/job 131536920519, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 1,652,282 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13990097423; SHA-256 fd43cf0b2b9090eb02a7a9e5220b4aeedf2d40088730a61187302221876e9a99.
+  polymarket: 1_662_976,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   txflow: 1_934_336,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
@@ -372,14 +409,20 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125397, CI source cca7b8337ad3:
   // web/Node 2,010,529 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no venue activation or codec change.
-  weex: 2_021_376,
+  // #3397 run 43319466529/job 131536920672, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 2,011,369 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13989832819; SHA-256 62047d7bb3937991ed92bf91642fd8b3b5cc722c48bd96a4350d5f4a87ee4c81.
+  weex: 2_022_400,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
   // #3442 CI run 42749390151, job 129609649777 at ded39a35466: web/node 2,654,237 B.
   // Current CI size + 10 KiB, rounded up to KiB.
-  woo: 2_665_472,
+  // #3397 run 43319466529/job 131536920584, source b9f5256efe4c (tree = merge 1663c1a885):
+  // web/Node 2,657,521 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
+  // Artifact 13989742912; SHA-256 52bfe24e34c27248e12dc2b0d8b5cdc4de2b8c4b21603b7dbcdf9260c573afe7.
+  woo: 2_668_544,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

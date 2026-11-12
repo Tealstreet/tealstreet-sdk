@@ -23,8 +23,9 @@ test('#3397 Orderly CI run 43192535364 retains measured 10 KiB headroom', () => 
 // Fresh CI run 43319466529, composition b9f5256efe4c5a0370478f9d2309a84c35d3750b:
 // tree equals merge 1663c1a885eeb476556fb6a957e351f8a9354b66.
 // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 (two -Oz passes).
-// Web/Node and replay copies match for all archived families. KuCoin Spot's
-// web-size refusal (job 131536920530) occurs before its artifact is uploaded.
+// Web/Node and replay copies match for 26 family artifacts. KuCoin Spot's
+// web-size refusal (job 131536920530) matches the verified Node capsule size
+// (artifact 13990151877); its family artifact is not uploaded after the refusal.
 for (const [venue, measured, minimumCap] of [
   ['apexomni', 2_082_984, 2_094_080],
   ['asterdex', 2_211_866, 2_223_104],
