@@ -231,7 +231,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,211,230 B + 10 KiB, rounded up to KiB.
   // #3391 run 43204096369/job 131135453773, source d62f6d989c3a (3de5a492d792 tree).
   // Optimized web/Node 2,216,296 B; current measurement + 10 KiB, rounded up.
-  asterdex: 2_227_200,
+  // #3391 run 43263509956/job 131345282843, artifact 13966760078; CI source 0fd07e1c89f8.
+  // Optimized web/Node 2,219,023 B + 10 KiB, rounded up; c7c32191002a + master 0c1b6dc17cd9.
+  // Rust 1.99.0 / wasm-bindgen 0.2.129 / Binaryen 132.
+  asterdex: 2_230_272,
   backpack: 2_053_120,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.

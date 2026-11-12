@@ -2066,3 +2066,26 @@ for (const [family, web, node, minimumCap] of [
     }
   });
 }
+
+
+test('#3391 merged artifact run 43254034225 retains AsterDEX measured reserve', () => {
+  // Family job 131308189778, artifact 13960543088; web and Node both 2,218,535 B.
+  const measured = 2_218_535;
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
+
+
+test('#3391 round 2 current CI merge retains AsterDEX measured reserve', () => {
+  // Run 43263509956/job 131345282843, artifact 13966760078; source 0fd07e1c89f8.
+  // CI merges c7c32191002a with master 0c1b6dc17cd9; optimized web and Node match.
+  const measured = Math.max(2_219_023, 2_219_023);
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_230_272);
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
