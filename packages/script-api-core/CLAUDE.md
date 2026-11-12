@@ -347,3 +347,10 @@ that version, so the load gate refuses them on a 1.3.3 runtime before dispatch.
 zero with a visible size/step error; 100% keeps the full native size. CoreAdapter
 and CLI share the rule, and MCP delegates its close tool to CoreAdapter. Explicit
 amounts and amendments keep preserve-or-refuse; unknown native sizes refuse.
+
+## Combined exposure requires complete valuation
+
+`getCombinedBalance` refuses when any included position has null or nonfinite
+notional, or exposure overflows. Its numeric summary never substitutes zero
+or publishes a partial sum. Position reads preserve unknown valuation; native
+close sizing continues through the SDK sizing helper.

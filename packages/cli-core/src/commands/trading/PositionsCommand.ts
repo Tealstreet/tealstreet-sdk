@@ -21,8 +21,8 @@ export class PositionsCommand extends BaseCommand {
     const onlyLongs = this.getArg(ctx, 1)?.toLowerCase() === 'long';
     const onlyShorts = this.getArg(ctx, 1)?.toLowerCase() === 'short';
 
-    // Filter positions with non-zero notional
-    let filteredPositions = positions.filter((p) => p.notional !== 0);
+    // Position presence is quantity, independent of whether its valuation is known.
+    let filteredPositions = positions.filter((p) => p.contracts !== 0);
 
     // Filter by current symbol unless --all flag
     if (!showAll) {
