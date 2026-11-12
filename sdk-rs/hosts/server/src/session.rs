@@ -2934,6 +2934,7 @@ mod tests {
         session.close();
     }
     mod delegated_instance_id;
+    mod delegated_venue_admission;
     mod instance_id;
 
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;

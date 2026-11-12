@@ -114,3 +114,32 @@ pub(crate) fn fingerprint(init: &InitPayload) -> String {
     fields["hostedSigningMode"] = "delegated".into();
     fields.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn venue_declaration_controls_existing_private_construction() {
+        for opted_in in [false, true] {
+            crate::delegated::with_test_declaration(
+                json!({"venues": {
+                    "bybit": {"delegated": {"enabled": false}},
+                    "binance": {"delegated": {"enabled": opted_in}}
+                }}),
+                async {
+                    let init = InitPayload {
+                        account_name: "fixture".into(),
+                        exchange_name: "binance".into(),
+                        key: "synthetic-key".into(),
+                        ..Default::default()
+                    };
+                    let pair =
+                        DelegatedPair::new(init.key.clone(), Secret::new("synthetic".into()), None);
+                    assert_eq!(prepare_delegated(&init, pair).is_ok(), opted_in);
+                },
+            )
+            .await;
+        }
+    }
+}

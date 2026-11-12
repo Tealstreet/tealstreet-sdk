@@ -304,6 +304,11 @@ mod tests {
     }
 
     #[test]
+    fn venue_declaration_controls_memory_preparation() {
+        succeeds("venue-opt-in");
+    }
+
+    #[test]
     fn disabled_and_other_venues_leave_process_unchanged() {
         succeeds("disabled");
     }
@@ -330,6 +335,13 @@ mod tests {
                 assert_eq!(libc::getrlimit(libc::RLIMIT_CORE, &mut limit), 0);
                 (limit.rlim_cur, limit.rlim_max)
             };
+            if case == "venue-opt-in" {
+                for venue in ["binance", "bybitspot"] {
+                    assert!(DelegatedMemory::prepare(venue, false).is_err());
+                    assert!(DelegatedMemory::prepare(venue, true).is_ok());
+                }
+                return;
+            }
             if case == "disabled" {
                 let before = limits();
                 #[cfg(target_os = "linux")]

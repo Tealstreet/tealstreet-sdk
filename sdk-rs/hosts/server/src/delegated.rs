@@ -290,6 +290,65 @@ pub(crate) mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn venue_declaration_controls_admission_without_a_venue_allowlist() {
+        for opted_in in [false, true] {
+            let declaration = serde_json::json!({"venues": {
+                "bybit": {"delegated": {"enabled": false}},
+                "binance": {"delegated": {"enabled": opted_in}},
+                "invalid": {"delegated": {"enabled": "true"}}
+            }});
+            with_test_declaration(declaration, async {
+                assert_eq!(enabled("binance"), opted_in);
+                assert!(!enabled("bybit"));
+                assert!(!enabled("invalid"));
+                assert!(!enabled("missing"));
+                assert_eq!(
+                    crate::order_contract::enabled(),
+                    cfg!(feature = "delegated-order-frames") && opted_in
+                );
+            })
+            .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn venue_declaration_controls_handover_opening() {
+        for opted_in in [false, true] {
+            let mut owner = Handovers::default();
+            let offer = with_test_declaration(
+                serde_json::json!({"venues": {
+                    "bybit": {"delegated": {"enabled": true}},
+                    "binance": {"delegated": {"enabled": true}}
+                }}),
+                async { owner.issue("fixture", 100).unwrap() },
+            )
+            .await;
+            let sealed = seal(
+                &offer,
+                "binance",
+                "synthetic-key",
+                br#"{"key":"synthetic-key","secret":"synthetic"}"#,
+            );
+            let opening = owner.take("fixture", &sealed, 101).unwrap();
+            with_test_declaration(
+                serde_json::json!({"venues": {
+                    "bybit": {"delegated": {"enabled": true}},
+                    "binance": {"delegated": {"enabled": opted_in}}
+                }}),
+                async {
+                    assert_eq!(
+                        opening
+                            .open("binance", "synthetic-key", &sealed, 102)
+                            .is_ok(),
+                        opted_in
+                    );
+                },
+            )
+            .await;
+        }
+    }
+
     fn hex(text: &str) -> Vec<u8> {
         text.as_bytes()
             .as_chunks::<2>()

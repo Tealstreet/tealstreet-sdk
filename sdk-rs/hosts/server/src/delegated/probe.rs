@@ -123,6 +123,79 @@ fn notice_refusal(text: &str) -> Option<ProbeRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Clone, Default)]
+    struct Requests(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl Transport for Requests {
+        fn prepare_http(
+            &self,
+            request: safe_cex_engine::HttpRequest,
+            _: safe_cex_engine::request_context::RoutingIntent,
+        ) -> safe_cex_native::HttpPrepareFuture {
+            self.0.lock().unwrap().push(request.url);
+            Box::pin(async { Err(safe_cex_native::HttpPrepareError::Unsupported) })
+        }
+        fn connect(
+            &self,
+            _: safe_cex_engine::SocketId,
+            url: String,
+            _: safe_cex_native::Events,
+        ) -> tokio::sync::mpsc::UnboundedSender<String> {
+            self.0.lock().unwrap().push(url);
+            tokio::sync::mpsc::unbounded_channel().0
+        }
+        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {
+            panic!("the recording transport must not dispatch HTTP");
+        }
+    }
+
+    #[tokio::test]
+    async fn venue_declaration_probe_uses_the_requested_engine() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                crate::delegated::with_test_declaration(
+                    serde_json::json!({"venues": {
+                        "bybit": {"delegated": {"enabled": true}},
+                        "binance": {"delegated": {"enabled": true}}
+                    }}),
+                    async {
+                        let init = crate::envelope::InitPayload {
+                            account_name: "fixture".into(),
+                            exchange_name: "binance".into(),
+                            key: "synthetic-key".into(),
+                            ..Default::default()
+                        };
+                        let pair = crate::delegated::DelegatedPair::new(
+                            init.key.clone(),
+                            safe_cex_crypto::signer::Secret::new("synthetic".into()),
+                            None,
+                        );
+                        let prepared = crate::delegated::prepare_delegated(&init, pair)
+                            .unwrap_or_else(|_| panic!("enabled fixture venue prepares"));
+                        let requests = Requests::default();
+                        let _result = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            run(
+                                prepared,
+                                requests.clone(),
+                                ServerConfig::default(),
+                                Arc::new(|| true),
+                            ),
+                        )
+                        .await;
+                        let requests = requests.0.lock().unwrap();
+                        assert!(!requests.is_empty());
+                        assert!(
+                            requests.iter().all(|url| url.contains("binance")),
+                            "{requests:?}"
+                        );
+                    },
+                )
+                .await;
+            })
+            .await;
+    }
+
     #[test]
     fn probe_uses_error_kinds_and_never_error_text() {
         for kind in [
