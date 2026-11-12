@@ -442,6 +442,85 @@ pub(crate) fn placement_capabilities(
 mod tests {
     use super::*;
     #[test]
+    fn j6_chaser_closes_nested_and_scalar_fields_without_changing_legacy_decode() {
+        let valid = json!({"symbol":"BTCUSDT","size":0.001,"side":"buy","maxAttempts":3,"delay":500,
+            "reduceOnly":false,"origin":"cli","accountName":"main","clientId":"caller",
+            "terminate":{"type":"price","value":60000,"anchorPrice":50000}});
+        assert!(algo("chaser:start", &valid).is_ok());
+        let mut future = valid.clone();
+        future["terminate"]["future"] = json!(true);
+        // Legacy serde deliberately remains permissive; only typed WS tightens.
+        assert!(serde_json::from_value::<safe_cex_chaser::ChaserOptions>(future.clone()).is_ok());
+        assert!(
+            algo("chaser:start", &future).is_err(),
+            "unknown termination field accepted"
+        );
+        for (field, value) in [
+            ("symbol", json!("")),
+            ("size", json!(-1)),
+            ("maxAttempts", json!(-1)),
+            ("delay", json!("invalid")),
+            ("delay", Value::Null),
+            ("delay", json!(-1)),
+            ("reduceOnly", Value::Null),
+            ("origin", json!("future")),
+            ("origin", Value::Null),
+            ("accountName", json!("")),
+            ("accountName", Value::Null),
+            ("clientId", json!("")),
+            ("clientId", Value::Null),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[field] = value;
+            assert!(
+                algo("chaser:start", &invalid).is_err(),
+                "{field}: {invalid}"
+            );
+        }
+        for (field, value) in [
+            ("type", json!("future")),
+            ("value", json!(-1)),
+            ("anchorPrice", json!(-1)),
+            ("anchorPrice", Value::Null),
+            ("value", json!("60000")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["terminate"][field] = value;
+            assert!(
+                algo("chaser:start", &invalid).is_err(),
+                "terminate.{field}: {invalid}"
+            );
+        }
+        let mut invalid = valid.clone();
+        invalid["terminate"] = Value::Null;
+        assert!(algo("chaser:start", &invalid).is_err());
+        // Existing v1 optional shapes and every documented termination variant remain additive.
+        for kind in ["price", "percent", "usd"] {
+            let mut control = valid.clone();
+            control["terminate"]["type"] = json!(kind);
+            assert!(algo("chaser:start", &control).is_ok());
+        }
+        let mut minimal = valid.clone();
+        for field in [
+            "delay",
+            "reduceOnly",
+            "origin",
+            "accountName",
+            "clientId",
+            "terminate",
+        ] {
+            minimal.as_object_mut().unwrap().remove(field);
+        }
+        assert!(algo("chaser:start", &minimal).is_ok());
+        let mut no_anchor = valid;
+        no_anchor["terminate"]
+            .as_object_mut()
+            .unwrap()
+            .remove("anchorPrice");
+        assert!(algo("chaser:start", &no_anchor).is_ok());
+    }
+
+    #[test]
     fn full_write_internal_methods_are_reachable_only_from_typed_actions() {
         let caps = Capabilities {
             nuke_account_cancel: true,

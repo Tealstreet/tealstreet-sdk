@@ -1381,3 +1381,71 @@ async fn exec_review_f1_fences_deferred_shared_factory_handoffs_without_stopping
         }
     }).await;
 }
+
+// Exercise the actual authenticated v1 boundary, not only native serde parsing.
+async fn j6_chaser_schema_rejection(mutation: &str) {
+    tokio::task::LocalSet::new().run_until(async {
+        for valid in [true, false] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let mut data = json!({"symbol":"BTCUSDT","size":0.001,"side":"buy","maxAttempts":3,"delay":500,
+                "terminate":{"type":"price","value":1_000_000,"anchorPrice":50000}});
+            if !valid {
+                match mutation {
+                    "terminate" => data["terminate"]["future"] = json!(true),
+                    "delay" => data["delay"] = json!("invalid"),
+                    _ => unreachable!(),
+                }
+            }
+            let payload = json!({"kind":"algo","op":"chaser:start","data":data});
+            let id = action_key();
+            // Hash the exact newer-client payload even if the local schema rejects it.
+            let fp = crate::order_contract::action_wire_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main",
+                "intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
+            let (result, replies) = tokio::time::timeout(Duration::from_secs(5), async {
+                let mut replies = Vec::new();
+                while let Some(text) = sent.recv().await {
+                    let frame: Value = serde_json::from_str(&text).unwrap();
+                    replies.push(frame.clone());
+                    if frame["t"] == "order.actionOutcome" { return (frame, replies); }
+                }
+                panic!("missing chaser outcome");
+            }).await.expect("bounded chaser schema outcome");
+            if valid || result["d"]["outcome"] != "unsupported" {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while tape.writes.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+                }).await.expect("valid control or pre-fix regression must reach native signing/transport");
+            }
+            let writes = tape.writes.lock().unwrap().clone();
+            let jobs = account.running.jobs();
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+            assert_eq!(result["d"]["version"], 1);
+            assert_eq!(result["d"]["intentId"], id);
+            if valid {
+                assert_eq!(result["d"]["outcome"], "unknown", "valid chaser: {result}");
+                assert!(writes.iter().any(|v| v == "create"), "valid control must sign and send");
+                assert!(replies.iter().any(|v| v["t"] == "order.actionAck" && v["d"]["received"] == true));
+            } else {
+                assert_eq!(result["d"]["outcome"], "unsupported", "{mutation}: {result}, writes={writes:?}");
+                assert_eq!(result["d"]["result"], Value::Null);
+                assert_eq!(result["d"]["error"]["outcome"], "unsupported");
+                assert!(replies.iter().all(|v| v["t"] != "order.actionAck" || v["d"]["received"] != true));
+                assert!(writes.is_empty(), "{mutation}: native write escaped");
+                assert!(jobs.0.is_empty(), "{mutation}: job admitted");
+            }
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn j6_chaser_rejects_unknown_termination_fields_without_ack_job_or_write() {
+    j6_chaser_schema_rejection("terminate").await;
+}
+
+#[tokio::test]
+async fn j6_chaser_rejects_invalid_delay_without_ack_job_or_write() {
+    j6_chaser_schema_rejection("delay").await;
+}
