@@ -11,6 +11,8 @@ use std::time::Duration;
 mod delegated_negatives;
 #[path = "delegated_probe_more.rs"]
 mod more;
+#[path = "delegated_restart.rs"]
+mod restart;
 
 #[path = "delegated_retention.rs"]
 mod retention;
@@ -212,6 +214,13 @@ async fn apply_settings_retires_a_join_proof_deferred_before_the_reset() {
             .iter()
             .any(|f| f["d"]["data"][1]["initRefused"] == true),
         "{replies:?}"
+    );
+    assert!(
+        !replies
+            .iter()
+            .any(|f| f["d"]["op"] == "delegated:status"
+                && f["d"]["data"]["status"] == "key-available"),
+        "a proof from before the settings reset cannot announce key availability: {replies:?}"
     );
     assert_eq!(f.registry.account_count(), 0);
     pending.close();
