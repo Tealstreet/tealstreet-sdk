@@ -1145,7 +1145,7 @@ instead of pretending its exchange name is `bybitdemo`:
   `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`, and
   `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`. The WebSocket URLs are optional
   and derive from the REST origin as `/v5/public/linear` and `/v5/private`.
-  The default production/challenge origin is `https://sim-bybit.hyro.trade`;
+  The default production/challenge origin is `https://sim-tealstreet.hyro.site`;
   env vars are now overrides, not required Vercel secrets. Do not use
   `bybitdemo` for Hyro simulator keys; it talks to Bybit's demo host, not Hyro.
 - Metadata keeps HyroTrader **preview-only** (`enabled: false`,
@@ -1163,9 +1163,9 @@ instead of pretending its exchange name is `bybitdemo`:
 - The old separate test simulator used plain HTTP on port `8012`; keep that
   shape possible for local probes by not forcing HTTPS/WSS in config
   normalization. The browser rollout path now uses Hyro's TLS hostname
-  `https://sim-bybit.hyro.trade`, which answers REST preflights for Tealstreet
+  `https://sim-tealstreet.hyro.site`, which answers REST preflights for Tealstreet
   origins. WebSockets do not need CORS and derive to
-  `wss://sim-bybit.hyro.trade/v5/{public/linear,private}` unless explicitly
+  `wss://sim-tealstreet.hyro.site/v5/{public/linear,private}` unless explicitly
   overridden.
 - Public market data should use Hyro's own public REST/WS endpoints directly as
   the baseline. Do not proxy public market-data traffic unnecessarily, and do not
@@ -1283,7 +1283,7 @@ Configure the web build before enabling the connector:
 
 | Setting                                                                                    | Purpose                                                                                               |
 | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`                                                     | Optional production/challenge REST origin override; defaults to `https://sim-bybit.hyro.trade`        |
+| `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`                                                     | Optional production/challenge REST origin override; defaults to `https://sim-tealstreet.hyro.site`        |
 | `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`                                                | Optional production public socket URL; defaults to REST-derived `/v5/public/linear`                   |
 | `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`                                               | Optional production private socket URL; defaults to REST-derived `/v5/private`                        |
 | `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`                                                | Shared demo/probe simulator REST origin, including plain `http://<host>:8012`; no fallback to Bybit   |
