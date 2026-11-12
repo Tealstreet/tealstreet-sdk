@@ -4617,6 +4617,238 @@ fn applied_cancel_reports_prior_batches_and_an_unsent_tail_after_unknown() {
     assert!(events[0].fields.contains(&("unknownCount", 1_f64.into())));
 }
 
+fn cancel_journal_started(ids: Vec<String>) -> Harness {
+    let mut h = ready(Variant::Demo);
+    let rows: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "symbol":"BTCUSDT", "orderId":id, "orderStatus":"New", "orderType":"Limit",
+                "side":"Buy", "price":"100", "qty":"1", "leavesQty":"1"
+            })
+        })
+        .collect();
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"order", "data":rows}).to_string(),
+    );
+    h.command(Command::CancelOrders { command: 124, ids });
+    h
+}
+
+fn cancel_journal_first_batch(ids: &[String]) -> Harness {
+    let mut h = cancel_journal_started(ids.to_vec());
+    let request = h.take("/v5/order/cancel-batch");
+    let targets: Vec<_> = ids[..10]
+        .iter()
+        .map(|id| serde_json::json!({"orderId":id}))
+        .collect();
+    h.reply(
+        request.id,
+        200,
+        &serde_json::json!({
+            "retCode":0, "result":{"list":targets},
+            "retExtInfo":{"list":vec![serde_json::json!({"code":0}); 10]}
+        })
+        .to_string(),
+    );
+    h
+}
+
+fn cancel_journal_second_batch(ids: &[String]) -> Harness {
+    let mut h = cancel_journal_first_batch(ids);
+    h.advance(1_000.0);
+    h
+}
+
+fn assert_cancel_journal_terminal(h: &mut Harness, ids: &[String], states: &[&str]) {
+    h.advance(1_000.0);
+    let error = spot_parity_error(h, 124);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(
+        elements
+            .as_array()
+            .expect("complete cancellation journal")
+            .len(),
+        ids.len()
+    );
+    for (index, (id, state)) in ids.iter().zip(states).enumerate() {
+        assert_eq!(elements[index]["index"], index);
+        assert_eq!(
+            elements[index]["status"], *state,
+            "caller occurrence {index}"
+        );
+        if *state == "applied" {
+            assert_eq!(elements[index]["effect"], "cancel");
+            assert_eq!(elements[index]["targetOrderId"], *id);
+        } else if *state == "unknown" {
+            assert_eq!(elements[index]["error"]["outcome"], "unknown");
+        } else {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":index,"status":"notSent"})
+            );
+        }
+    }
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get),
+        "no replay or later cancellation"
+    );
+}
+
+fn cancel_journal_terminal_case(failure: &str) {
+    let ids: Vec<_> = (0..21).map(|index| format!("terminal-{index}")).collect();
+    let mut h = cancel_journal_second_batch(&ids);
+    let request = h.take("/v5/order/cancel-batch");
+    match failure {
+        "http" => h.reply(request.id, 503, "unavailable"),
+        "transport" => h.event(Event::HttpFailed {
+            request: request.id,
+            error: "transport lost",
+        }),
+        "timeout" => h.advance(20_001.0),
+        "expiry" => h.advance(200_000.0),
+        "malformed" => h.reply(request.id, 200, r#"{"retCode":0}"#),
+        _ => panic!("unknown test failure"),
+    }
+    let mut states = vec!["applied"; 10];
+    states.extend(["unknown"; 10]);
+    states.push("notSent");
+    assert_cancel_journal_terminal(&mut h, &ids, &states);
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(h.engine.store().order(id).is_some(), index >= 10);
+    }
+}
+
+#[test]
+fn cancel_journal_http_failure_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("http");
+}
+
+#[test]
+fn cancel_journal_transport_failure_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("transport");
+}
+
+#[test]
+fn cancel_journal_timeout_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("timeout");
+}
+
+#[test]
+fn cancel_journal_plan_expiry_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("expiry");
+}
+
+#[test]
+fn cancel_journal_plan_expiry_between_batches_keeps_confirmed_prefix() {
+    let ids: Vec<_> = (0..21).map(|index| format!("paced-{index}")).collect();
+    let mut h = cancel_journal_first_batch(&ids);
+    // Deliver the pacing/expiry callbacks after a host-loop pause. Advancing
+    // through every intermediate timer would release the next batch first.
+    h.now += 200_000.0;
+    h.advance(0.0);
+    let error = spot_parity_error(&h, 124);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    assert_eq!(
+        error.outcome, None,
+        "only confirmed effects and never-sent calls"
+    );
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(
+        elements
+            .as_array()
+            .expect("paced cancellation journal")
+            .len(),
+        21
+    );
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(elements[index]["index"], index);
+        if index < 10 {
+            assert_eq!(elements[index]["status"], "applied");
+            assert_eq!(elements[index]["effect"], "cancel");
+            assert_eq!(elements[index]["targetOrderId"], *id);
+        } else {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":index,"status":"notSent"})
+            );
+        }
+    }
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
+fn cancel_journal_malformed_reply_control_keeps_all_occurrences() {
+    cancel_journal_terminal_case("malformed");
+}
+
+#[test]
+fn cancel_journal_repeated_target_keeps_both_mixed_response_orders() {
+    for unknown in [0, 1] {
+        let ids = vec!["one".to_owned(), "one".to_owned()];
+        let mut h = cancel_journal_started(ids.clone());
+        let request = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["request"].as_array().unwrap().len(), 2);
+        let rows: Vec<_> = (0..2)
+            .map(|index| {
+                serde_json::json!({
+                    "code":if index == unknown {10016} else {0}, "msg":"native cancel outcome"
+                })
+            })
+            .collect();
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":0,"retExtInfo":{"list":rows}}).to_string(),
+        );
+        let mut states = ["applied"; 2];
+        states[unknown] = "unknown";
+        assert_cancel_journal_terminal(&mut h, &ids, &states);
+        let events: Vec<_> = h
+            .notices
+            .iter()
+            .filter_map(|notice| match notice {
+                safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown" => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].fields.contains(&("attemptedCount", 2_f64.into())));
+        assert!(events[0].fields.contains(&("appliedCount", 1_f64.into())));
+        assert!(events[0].fields.contains(&("unknownCount", 1_f64.into())));
+    }
+}
+
+#[test]
+fn cancel_journal_repeated_unsent_tail_does_not_inherit_an_earlier_acceptance() {
+    let mut ids: Vec<_> = (0..21).map(|index| format!("repeated-{index}")).collect();
+    ids[20] = ids[0].clone();
+    let mut h = cancel_journal_second_batch(&ids);
+    let request = h.take("/v5/order/cancel-batch");
+    h.reply(request.id, 200, r#"{"retCode":0}"#);
+    let mut states = vec!["applied"; 10];
+    states.extend(["unknown"; 10]);
+    states.push("notSent");
+    assert_cancel_journal_terminal(&mut h, &ids, &states);
+}
+
 #[test]
 fn managed_cancel_batch_anonymous_already_gone_row_waits_for_reconciliation() {
     let mut h = managed_cancel_pair(

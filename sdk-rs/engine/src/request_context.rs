@@ -1489,6 +1489,17 @@ impl PreparedWriteSeal {
     pub(crate) fn failure(&self) -> Option<&VenueError> {
         self.failure.as_ref()
     }
+
+    pub(crate) fn retain_missing_elements(
+        &mut self,
+        elements: Option<&crate::write_plan::ElementOutcomes>,
+    ) {
+        if let Some(error) = &mut self.failure
+            && error.elements.is_none()
+        {
+            error.elements = elements.cloned().map(Box::new);
+        }
+    }
 }
 impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
@@ -2047,6 +2058,25 @@ impl CommandWrites {
             evidence::mark_id_overflow(&mut error);
         }
         Ok(error)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn retain_failed_attempt_elements(
+        &mut self,
+        id: RequestId,
+        elements: Box<crate::write_plan::ElementOutcomes>,
+    ) -> Result<(), Error> {
+        self.failed_attempt(id)?;
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|attempt| attempt.id == id)
+            .unwrap();
+        let Some(WriteResult::Failed(error)) = &mut attempt.result else {
+            return Err(Error::State);
+        };
+        error.elements = Some(elements);
+        Ok(())
     }
 
     /// Seal success only when every terminal logical leg is proven accepted.

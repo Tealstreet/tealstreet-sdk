@@ -575,6 +575,9 @@ impl BybitLinear {
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
         );
+        if let Some(report) = &cancellations {
+            report.retain(cx, &plan);
+        }
         Some(Run {
             plan,
             cancellations,
@@ -780,6 +783,9 @@ impl BybitLinear {
             );
         }
         let key = entry.hyro.as_ref().map(|call| call.key.clone());
+        if let (Some(report), Call::Cancel { ids }) = (&mut run.cancellations, &leg.planned.call) {
+            report.begin(ids);
+        }
         run.active = Some(Active {
             slot,
             context: context.clone(),
@@ -867,6 +873,23 @@ impl BybitLinear {
             .then(|| fields(&pending.rest.payload).order_link_id)
             .flatten();
         ReconciliationData::new(link.unwrap_or_default())
+    }
+
+    pub(crate) fn ordinary_cancel_evidence(
+        &self,
+        request: &Request,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Some(entry) = self.trading.ordinary.get(&request.command)
+            && let Stage::Plan(run) = &entry.stage
+            && run
+                .active
+                .as_ref()
+                .is_some_and(|active| active.context == request.context)
+            && let Some(report) = &run.cancellations
+        {
+            report.unproven(evidence);
+        }
     }
 
     pub(crate) fn on_ordinary_response(
@@ -1193,6 +1216,9 @@ impl BybitLinear {
                     let _ = cx.fail_plan(&plan, internal("Bybit trading plan lost its call"));
                     return;
                 }
+                if let Some(report) = &run.cancellations {
+                    report.retain(cx, &plan);
+                }
                 if matches!(active.leg.planned.call, Call::PlaceLot { last: true })
                     && run.stop_after_spot_order
                 {
@@ -1500,6 +1526,14 @@ impl BybitLinear {
             .active
             .as_ref()
             .is_some_and(|active| active.context == request.context);
+        if matches && let Some(report) = &mut run.cancellations {
+            // Signing failures already carry NotSent; a released transport failure does not.
+            error.outcome.get_or_insert(Outcome::Unknown);
+            let active = run.active.as_ref().expect("matched active cancellation");
+            error = report.failure(cx, request.command, &active.leg.planned.call, error);
+            let _ = cx.fail_plan(&run.plan, error);
+            return;
+        }
         if matches
             && error.outcome == Some(Outcome::NotSent)
             && run.active.as_ref().is_some_and(|active| {

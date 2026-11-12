@@ -13,6 +13,8 @@ const CANCEL_MESSAGE: &str = "Bybit cancel was not confirmed";
 pub(super) struct Cancellations {
     targets: Vec<String>,
     journal: WritePlan,
+    remaining: Vec<usize>,
+    active: Vec<usize>,
 }
 
 fn unknown_text(mut error: VenueError) -> VenueError {
@@ -42,6 +44,14 @@ fn failed(error: VenueError) -> ElementResult {
 }
 
 impl Cancellations {
+    pub(super) fn retain(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        let _ = cx.retain_idle_plan_elements(plan, &self.journal);
+    }
+
     pub(super) fn new(command: &Command, native_targets: &[&str]) -> Option<Self> {
         let ids = match command {
             Command::CancelOrders { ids, .. } => ids.clone(),
@@ -53,32 +63,43 @@ impl Cancellations {
         if native_targets.is_empty() {
             return None;
         }
+        let remaining: Vec<usize> = ids
+            .iter()
+            .enumerate()
+            .filter(|(_, id)| native_targets.contains(&id.as_str()))
+            .map(|(index, _)| index)
+            .collect();
         Some(Self {
             journal: WritePlan::new(
-                ids.iter()
-                    .enumerate()
-                    .filter(|(_, id)| native_targets.contains(&id.as_str()))
-                    .map(|(index, _)| Element {
-                        index,
+                remaining
+                    .iter()
+                    .map(|index| Element {
+                        index: *index,
                         client_order_id: None,
                     })
                     .collect(),
             ),
             targets: ids,
+            remaining,
+            active: Vec::new(),
         })
     }
 
-    fn record(&mut self, target: &str, result: ElementResult) {
-        for (index, id) in self.targets.iter().enumerate() {
-            if id == target {
-                let _ = self.journal.record(index, result.clone());
-            }
+    pub(super) fn begin(&mut self, ids: &[String]) {
+        self.active.clear();
+        for id in ids {
+            let position = self
+                .remaining
+                .iter()
+                .position(|index| self.targets[*index] == *id)
+                .expect("planned cancellation occurrence");
+            self.active.push(self.remaining.remove(position));
         }
     }
 
     pub(super) fn accepted(&mut self, target: &str) {
-        self.record(
-            target,
+        let _ = self.journal.record(
+            self.active[0],
             ElementResult::Applied {
                 effect: AppliedEffect::Cancel,
                 target_order_id: Some(target.into()),
@@ -88,9 +109,13 @@ impl Cancellations {
     }
 
     pub(super) fn rows(&mut self, ids: &[String], rows: &[Row], response: &Response<'_>) {
-        for (id, row) in ids.iter().zip(rows) {
-            match row {
-                Row::Accepted(_) => self.accepted(id),
+        for (position, (id, row)) in ids.iter().zip(rows).enumerate() {
+            let result = match row {
+                Row::Accepted(_) => ElementResult::Applied {
+                    effect: AppliedEffect::Cancel,
+                    target_order_id: Some(id.clone()),
+                    position_key: None,
+                },
                 Row::Refused { code, message } => {
                     let native = Native {
                         code: NativeCode::Int(*code),
@@ -113,10 +138,30 @@ impl Cancellations {
                     if error.outcome.is_none() {
                         error.outcome = Some(Outcome::Unknown);
                     }
-                    self.record(id, failed(error));
+                    failed(error)
                 }
-            }
+            };
+            let _ = self.journal.record(self.active[position], result);
         }
+    }
+
+    pub(super) fn unproven(
+        &self,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        let rows = self.journal.outcomes();
+        let mut snapshot = WritePlan::new(rows.iter().map(|row| row.element.clone()).collect());
+        for row in rows {
+            let result = if self.active.contains(&row.element.index)
+                && matches!(row.result, ElementResult::NotSent { error: None })
+            {
+                failed(VenueError::new(UNKNOWN_TEXT).outcome(Outcome::Unknown))
+            } else {
+                row.result
+            };
+            let _ = snapshot.record(row.element.index, result);
+        }
+        evidence.write_plan(&snapshot);
     }
 
     pub(super) fn failure(
@@ -126,12 +171,12 @@ impl Cancellations {
         call: &Call,
         error: VenueError,
     ) -> VenueError {
-        let Call::Cancel { ids } = call else {
+        let Call::Cancel { .. } = call else {
             return self.journal.attach(error);
         };
         let error = unknown_text(error);
         for row in self.journal.outcomes() {
-            if ids.contains(&self.targets[row.element.index])
+            if self.active.contains(&row.element.index)
                 && matches!(row.result, ElementResult::NotSent { error: None })
             {
                 let _ = self
