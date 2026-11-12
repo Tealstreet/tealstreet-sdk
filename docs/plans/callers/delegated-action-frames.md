@@ -5,23 +5,30 @@ TS/Rust fixtures: `sdk-rs/hosts/server/tests/data/delegated-actions-v1.json`.
 
 ## Implementation and release boundary
 
-Box-side action dispatch stays entirely within `sdk-rs/hosts/server`. Its
-adapters call the existing native amend, cancel, cancel-all and nuke paths;
-this version adds no crates and changes nothing under `sdk-rs/engine`,
-`sdk-rs/venues/*` or `sdk-rs/algos`. No exception to this boundary is required.
+Box-side action dispatch lives in `sdk-rs/hosts/server`. Its adapters call
+the existing native write paths; this version adds no crates and changes nothing
+under `sdk-rs/engine` or `sdk-rs/venues/*`.
+
+The full-write fix round also extends `sdk-rs/algos/exec/src/native.rs` with a
+native-only guarded EXEC entry point. This explicit boundary exception is needed
+because deferred EXEC commands can enter the shared chaser/TWAP factories without
+calling the command-port adapter. Factory identity and resource counters must
+remain account-scoped while each action retains its own continuation fence.
 
 The server's nuke account-port adapter carries the original registration and
 checks it before every native command, including later close legs after an
 awaited cancel. Retirement fences those new legs without undoing an earlier
 handoff or turning its uncertainty into a not-sent proof.
 
-`hosts/server` is excluded from the beta-wasm fingerprint, so the Rust changes
-require a box roll without a full SDK release, a new wasm pin or the lane
-fingerprint gate. The TypeScript API and router capability still require their
-own integration; action admission remains gated by all required capability flags.
-If a future change genuinely requires Rust code outside `hosts/server`, record
-an explicit decision here with the reason and the resulting SDK release, wasm
-pin and lane fingerprint gate requirements before implementing that exception.
+`hosts/server` is excluded from the beta-wasm fingerprint, but the shared EXEC
+file is a fingerprint input. The guarded entry point and checks compile only for
+native hosts; ordinary LOCAL/COSIGNED and WASM EXEC paths retain their existing
+semantics. Nevertheless, this PR now requires the SDK release/wasm pin and lane
+fingerprint gates, including CPU certification: Rust slower than TS fails with
+no new threshold or tolerance. No byte-equivalence claim replaces those gates.
+The hosted service requires a box roll. The TypeScript API and router capability
+still require their own integration; action admission remains gated by all
+required capability flags.
 
 ## Capability and admission
 
@@ -285,8 +292,14 @@ outcome and must never re-forward the action. EXEC receives the intent as its
 `reqId`, rather than accepting a second caller-controlled correlation ID.
 
 Queued algo admission captures the original registration and deadline and checks
-both before and after the actor's store read. EXEC continuations recheck them
-before each native command. Accepted long-lived chases/TWAPs belong to the native
+both before and after the actor's store read. A typed EXEC uses the resident
+account port for factory identity and shared parallel/nuke counters, while its
+own adapter retains the captured registration/deadline. It rechecks the fence
+before each native command, after awaits before completing the next instruction,
+and before direct shared chaser/TWAP factory handoffs. Expired or retired work is
+dropped; late replies cannot start sibling jobs. Overlapping typed EXECs and
+legacy EXECs share one account factory without sharing action guards.
+Accepted long-lived chases/TWAPs belong to the native
 account scope, as in LOCAL, and retain the account/user/router-lease authority;
 a socket handover does not restart them. TWAP options/restored state must name
 the admitted account. No payload may name another account to route a command.
@@ -296,8 +309,9 @@ rejects invalid schedules and enforces restoration/uncertainty rules.
 
 The expanded corpus `delegated-full-writes-v1.json` pins the method mapping and
 canonical hashes in both SDK and Rust tests. The original four-kind corpus and
-placement protocol remain unchanged. Server implementation remains entirely in
-`hosts/server`; no engine, venue, algo crate, wasm input or budget changes.
+placement protocol remain unchanged. Server implementation is in `hosts/server`
+with the guarded native shared-EXEC exception described above. No engine, venue,
+budget, CPU threshold or tolerance changes are included.
 
 A zero-amount amend is also an expanded action: native Bybit Partial protection
 uses zero for full-position sizing. It requires the two expanded capability

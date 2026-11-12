@@ -1059,13 +1059,6 @@ pub async fn run(
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
-                    // EXEC continuations retain their original registration/deadline.
-                    // Long-lived jobs deliberately belong to the account scope, as on LOCAL.
-                    let op_cx = if op == "exec" {
-                        action.as_ref().map(|receipt| AlgoCx::new(
-                            Rc::new(ActionNukePort { port: port.clone(), guard: receipt.guard() }), cx.scope.clone()
-                        ))
-                    } else { None };
                     let epoch = running.restore_epoch();
                     if op == "twap:state" && let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(&data) {
                         for row in &mut rows {
@@ -1086,7 +1079,15 @@ pub async fn run(
                         continue;
                     }
                     let dispatch = || {
-                        let result = registry.dispatch(&op, &data, op_cx.as_ref().unwrap_or(&cx));
+                        // Factory identity/counters belong to the resident account.
+                        // Only this EXEC's adapter carries the action command port
+                        // and rechecks its fence before deferred factory handoffs.
+                        let result = if op == "exec" && let Some(receipt) = action.as_ref() {
+                            let guard = receipt.guard();
+                            let command_port = Rc::new(ActionNukePort { port: port.clone(), guard: guard.clone() });
+                            Some(exec.handle_guarded(&data, &cx, command_port,
+                                Rc::new(move || guard.check().map_err(str::to_owned))))
+                        } else { registry.dispatch(&op, &data, &cx) };
                         running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                         result
                     };
