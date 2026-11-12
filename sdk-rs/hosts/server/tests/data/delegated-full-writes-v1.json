@@ -338,5 +338,13 @@
     "method": "updateOrder",
     "refused": true,
     "fingerprint": "5a04e805dffb10385e9c0ca9c6df1a2d06d43b39c8e26664328d3d93ba292160"
+  },
+  {
+    "action": {
+      "kind": "cancelAccountOrders"
+    },
+    "method": "delegatedCancelAccountOrders",
+    "refused": true,
+    "fingerprint": "9ba9e705ea4e685eaac3a3382e3f034f53d6717ee375f205e5ebb982328198e9"
   }
 ]
