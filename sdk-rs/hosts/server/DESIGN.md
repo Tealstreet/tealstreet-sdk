@@ -566,7 +566,8 @@ repeat its unchanged init with an ID to bind the same account without restarting
 Pending verification replies `verifying`; unadmitted, stale or fenced clients
 cannot reset an account. Live and parked holders, and a DELEGATED resident copy
 without a socket, prevent an ordinary init from changing private settings.
-The existing builder-only sharing exception keeps the running settings unchanged.
+The comparison uses normalized engine and routing settings; fields ignored by
+the venue do not create a settings change.
 
 The action replies `msg` with `op:"applySettings:done"` and
 `data:{success:true,requiresInit:true}` on the admitted registration. This means

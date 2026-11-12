@@ -1027,17 +1027,9 @@ impl Registry {
         if account.fingerprint == fingerprint && !public_only {
             return None;
         }
-        let others = account.live_holders_besides(holder);
-        // Joins the live account instead (see `obtain`).
-        if !public_only
-            && !others.is_empty()
-            && same_but_builder(&account.fingerprint, &fingerprint)
-        {
-            return None;
-        }
         let differs = differing_fields(&account.fingerprint, &fingerprint);
         Log::warn(&format!(
-            "init {} from socket {holder} refused: socket(s) {others:?} hold it with other settings ({})",
+            "init {} from socket {holder} refused: explicit settings action required ({})",
             init.account_name,
             differs.join(", ")
         ));
@@ -1186,19 +1178,6 @@ impl Registry {
                 self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
             {
                 return Err(refusal);
-            }
-            // The Hyperliquid builder is per device (browser storage): a second
-            // client differing only in it trades with the live holder's builder.
-            if !public_only
-                && !account.live_holders_besides(holder).is_empty()
-                && same_but_builder(&account.fingerprint, &fingerprint)
-            {
-                Log::info(&format!(
-                    "init {} from socket {holder} joins the live account; only its hyperliquidBuilder differs",
-                    init.account_name
-                ));
-                account.hold(holder, Live { outbox, token });
-                return Ok(account);
             }
             self.dispose(
                 &account,
@@ -2085,12 +2064,6 @@ impl Registry {
             })
             .collect()
     }
-}
-
-/// Two fingerprints that differ in nothing but the Hyperliquid builder.
-fn same_but_builder(old: &str, new: &str) -> bool {
-    let fields = differing_fields(old, new);
-    !fields.is_empty() && fields.iter().all(|field| field == "hyperliquidBuilder")
 }
 
 /// The top-level init fields (names only) on which two fingerprints differ.
@@ -3955,7 +3928,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_second_device_differing_only_in_the_builder_joins_a_live_hyperliquid_account() {
+    async fn a_second_device_with_a_changed_builder_requires_apply_settings() {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let registry = registry();
@@ -3975,7 +3948,7 @@ pub(crate) mod tests {
                 let link = SignerLink::new(7, Arc::new(|_| true));
                 let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
                 register(&registry, &account);
-                // Another device still on the default builder: joins, never refused or rebuilt.
+                // A different effective builder is a settings change too.
                 let default_builder = InitPayload {
                     hyperliquid_builder: None,
                     ..init.clone()
@@ -3984,15 +3957,17 @@ pub(crate) mod tests {
                 assert!(
                     registry
                         .rebuild_refusal("u", &default_builder, false, 8)
-                        .is_none()
+                        .is_some()
                 );
-                let joined = registry
-                    .obtain("u", &default_builder, false, 8, None, Arc::new(|_| true))
-                    .await
-                    .unwrap();
-                assert!(Arc::ptr_eq(&joined, &account), "the live account, shared");
+                assert!(
+                    registry
+                        .obtain("u", &default_builder, false, 8, None, Arc::new(|_| true))
+                        .await
+                        .is_err()
+                );
                 assert!(algos.try_recv().is_err(), "never disposed");
-                assert_eq!(signing(&account), Some(8));
+                assert_eq!(signing(&account), Some(7));
+                assert!(!registry.holds(&account, 8));
                 // Anything else that differs is still refused while a live holder exists.
                 let spot = InitPayload {
                     enable_spot_markets: Some(true),
@@ -4011,6 +3986,14 @@ pub(crate) mod tests {
                             9
                         )
                         .is_some()
+                );
+                let same = registry
+                    .obtain("u", &init, false, 8, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+                assert!(
+                    Arc::ptr_eq(&same, &account),
+                    "unchanged settings still share the live account"
                 );
             })
             .await;
@@ -4040,10 +4023,10 @@ pub(crate) mod tests {
                 // Holder 7 is the only live holder: nothing to join, so its own change is no join.
                 assert!(account.live_holders_besides(7).is_empty());
                 assert!(registry.rebuild_refusal("u", &assigned, false, 7).is_some());
-                assert!(same_but_builder(
-                    &account.fingerprint,
-                    &assigned.fingerprint()
-                ));
+                assert_eq!(
+                    differing_fields(&account.fingerprint, &assigned.fingerprint()),
+                    vec!["hyperliquidBuilder".to_owned()]
+                );
             })
             .await;
     }
