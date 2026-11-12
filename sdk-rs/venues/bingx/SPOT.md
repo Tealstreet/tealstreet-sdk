@@ -134,10 +134,14 @@ nonempty arrays or unrecognized object fields remain Unknown. This includes
 execution quantities and order status even when the native order ID is absent
 or null; a contradictory error header cannot erase that execution evidence.
 
-KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. Transport-loss
-and HTTP 503 cases sealed before Spot decoding retain their Unknown outcome,
-accepted-ID and no-resend pins; only their independent telemetry assertion is
-deferred to the shared engine work.
+Engine-sealed transport and HTTP 408/429/5xx Unknowns use the shared engine
+telemetry hook and emit the same diagnostic once, with command/request correlation,
+outcome and HTTP status only when present. The hook has no native call context,
+so it never guesses an operation or copies error text, response bodies or signing
+material. Managed HTTP failure callbacks leave this diagnostic to the engine;
+venue-decoded failures retain the operation-specific diagnostic above. Outcomes,
+accepted IDs, journals and no-resend behavior are unchanged; late callbacks cannot
+emit another diagnostic or completion.
 
 Released HTTP 408/429/5xx, transport failures, malformed or contradictory
 acknowledgements and unlisted errors remain **Unknown**. There is no write resend or fallback-domain

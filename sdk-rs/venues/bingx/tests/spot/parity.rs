@@ -63,7 +63,7 @@ fn unknown_outcome_and_journal(actions: &[Action], accepted: &[&str]) {
     );
 }
 
-fn unknown_telemetry(actions: &[Action], operation: &str) {
+fn unknown_event(actions: &[Action]) -> &safe_cex_engine::LogEvent {
     let events = actions
         .iter()
         .filter_map(|action| match action {
@@ -88,14 +88,34 @@ fn unknown_telemetry(actions: &[Action], operation: &str) {
     let event = events[0];
     assert_eq!(event.level, safe_cex_engine::Level::Error);
     assert_eq!(event.message, ENGINE_UNKNOWN_TEXT);
+    event
+}
+
+fn unknown_telemetry(actions: &[Action], operation: &str) {
     assert_eq!(
-        event.fields,
+        unknown_event(actions).fields,
         vec![
             ("command", 70u32.into()),
             ("outcome", "unknown".into()),
             ("operation", operation.into()),
         ]
     );
+}
+
+fn engine_unknown_telemetry(
+    actions: &[Action],
+    request: safe_cex_engine::RequestId,
+    status: Option<u16>,
+) {
+    let mut fields = vec![
+        ("command", 70u32.into()),
+        ("outcome", "unknown".into()),
+        ("request", request.0.to_string().into()),
+    ];
+    if let Some(status) = status {
+        fields.push(("status", u32::from(status).into()));
+    }
+    assert_eq!(unknown_event(actions).fields, fields);
 }
 
 fn late_unknown_ack_is_inert(e: &mut Engine<BingxSpot>, request: &HttpRequest) {
@@ -272,8 +292,6 @@ fn missing_market_is_a_formatter_failure_before_any_write() {
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
 #[test]
 fn unknown_middle_payload_halts_with_prefix_ids_and_a_terminal_event() {
-    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
-    // Only telemetry is deferred; outcome, native IDs and no-resend stay pinned.
     unknown_middle_payload(&[0, 1]);
 }
 
@@ -367,6 +385,8 @@ fn unknown_middle_payload(modes: &[u8]) {
             unknown_outcome_and_journal(&actions, &accepted);
             if mode >= 2 {
                 unknown_telemetry(&actions, "place");
+            } else {
+                engine_unknown_telemetry(&actions, requests[0].id, (mode == 1).then_some(503));
             }
             late_unknown_ack_is_inert(&mut e, &requests[0]);
         }
@@ -649,8 +669,74 @@ fn spot_unknown_journal_keeps_an_earlier_refusal_and_later_failed_index() {
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:940-962.
 #[test]
 fn cancellation_unknown_halts_the_action() {
-    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
     cancellation_unknown(&[0, 1]);
+}
+
+#[test]
+fn engine_sealed_cancel_all_reports_only_bounded_facts_once() {
+    for status in [None, Some(408), Some(429), Some(500), Some(503)] {
+        let (mut e, _) = seed(true);
+        e.handle(
+            NOW,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 70,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let r = request(&collect(&mut e), "/trade/cancelOpenOrders");
+        if let Some(status) = status {
+            reply(
+                &mut e,
+                &r,
+                status,
+                "fixture-private-response-not-for-telemetry",
+            );
+        } else {
+            e.handle(
+                NOW,
+                Event::HttpFailed {
+                    request: r.id,
+                    error: "fixture-private-error-not-for-telemetry",
+                },
+            );
+        }
+        let actions = collect(&mut e);
+        assert!(writes(&actions).is_empty());
+        unknown_outcome_and_journal(&actions, &[]);
+        engine_unknown_telemetry(&actions, r.id, status);
+        late_unknown_ack_is_inert(&mut e, &r);
+    }
+}
+
+#[test]
+fn read_failures_do_not_emit_order_unknown_diagnostics() {
+    for status in [None, Some(503)] {
+        let (mut e, _) = seed(true);
+        e.handle(
+            NOW,
+            Event::Command(Command::Venue {
+                command: 70,
+                action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+            }),
+        );
+        let r = request(&collect(&mut e), "/trade/openOrders");
+        if let Some(status) = status {
+            reply(&mut e, &r, status, "fixture-read-failed");
+        } else {
+            e.handle(
+                NOW,
+                Event::HttpFailed {
+                    request: r.id,
+                    error: "fixture-read-failed",
+                },
+            );
+        }
+        let actions = collect(&mut e);
+        assert!(writes(&actions).is_empty());
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+        )));
+    }
 }
 
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
@@ -690,6 +776,8 @@ fn cancellation_unknown(modes: &[u8]) {
         unknown_outcome_and_journal(&actions, &[]);
         if mode >= 2 {
             unknown_telemetry(&actions, "cancel");
+        } else {
+            engine_unknown_telemetry(&actions, first[0].id, (mode == 1).then_some(503));
         }
         late_unknown_ack_is_inert(&mut e, &first[0]);
     }
@@ -733,7 +821,6 @@ fn explicit_client_id_cannot_be_reused_across_native_lots() {
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
 #[test]
 fn gateway_after_refusal_preserves_native_prefix_and_unknown_text() {
-    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
     unknown_after_refusal(503, "upstream unavailable");
 }
 
@@ -766,6 +853,8 @@ fn unknown_after_refusal(status: u16, body: &str) {
     unknown_outcome_and_journal(&actions, &["1001"]);
     if status == 200 {
         unknown_telemetry(&actions, "place");
+    } else {
+        engine_unknown_telemetry(&actions, third[0].id, Some(status));
     }
     late_unknown_ack_is_inert(&mut e, &third[0]);
 }
