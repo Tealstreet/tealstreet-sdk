@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { smokeOrder, LIVE_SMOKE_MAX_NOTIONAL } from './live-smoke.mjs';
 import { MARKET_FLAG } from '../hosts/wasm/js/wire.mjs';
 import { venueMarketRules, LIVE_SMOKE_RULE_SOURCES, LIVE_SMOKE_UNKNOWN_RULES } from './live-smoke-rules.mjs';
+import { createPrivateRecorder } from './live-smoke-tape.mjs';
+import { bodyBytes } from './tape.mjs';
 
 const market = { id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT',
   minAmount: 0.001, precisionAmount: 0.001, maxAmount: 1000 };
@@ -19,6 +21,38 @@ const bingxSpotRow = { symbol: 'BTC-USDT', status: 1, minQty: '0.0001', maxQty: 
   minNotional: '5', maxNotional: '50', stepSize: '0.00001', tickSize: '0.01' };
 const bingxSpotDiscovery = (row = bingxSpotRow) => http('https://open-api.bingx.com/openApi/spot/v1/common/symbols',
   { code: 0, data: { symbols: [row] } });
+
+for (const streamed of [false, true]) {
+  test(`BingX Spot recorded ${streamed ? 'streamed' : 'buffered'} discovery retains buy eligibility for sizing`, async () => {
+    const cases = [];
+    for (const apiStateBuy of [true, false, undefined]) {
+      const row = { ...bingxSpotRow, apiStateBuy, unreviewedSpotExtension: 'private-extension-must-not-persist' };
+      const discovery = bingxSpotDiscovery(row);
+      const bytes = new TextEncoder().encode(discovery.body);
+      const persisted = [];
+      const recorder = createPrivateRecorder({ now: () => 1700000000000, async request() {
+        return { status: 200, body: streamed ? (async function* () {
+          yield bytes.subarray(0, 20); yield bytes.subarray(20);
+        })() : bytes };
+      } }, { venue: { rust: 'bingxspot' }, write: (record) => persisted.push(record) });
+      const response = await recorder.transport.request({ method: 'GET', url: discovery.url });
+      assert.equal(new TextDecoder().decode(await bodyBytes(response.body)), discovery.body,
+        'recording leaves the response delivered to the engine unchanged');
+      assert.equal(recorder.failure, undefined);
+      assert.equal(recorder.records.filter((record) => record.type === 'http').length, 1);
+      assert.deepEqual(recorder.records, persisted);
+      const recorded = JSON.parse(recorder.records.find((record) => record.type === 'http').body).data.symbols[0];
+      assert.equal(Object.hasOwn(recorded, 'unreviewedSpotExtension'), false);
+      assert.equal(JSON.stringify(persisted).includes('private-extension-must-not-persist'), false);
+      cases.push({ apiStateBuy, recorded, rules: venueMarketRules('bingxspot', recorder.records, bingxSpotMarket) });
+    }
+    assert.equal(cases[0].rules.notionalKnown, true, 'enabled-market working control');
+    assert.deepEqual(cases[1].rules, { notionalKnown: false, minNotional: 0 }, 'explicit buy refusal survives recording');
+    assert.equal(cases[2].rules.notionalKnown, true, 'absent optional field keeps its prior meaning');
+    for (const { apiStateBuy, recorded } of cases)
+      assert.equal(recorded.apiStateBuy, apiStateBuy);
+  });
+}
 
 test('BingX Spot sizing uses its own catalog and base-quantity limits', () => {
   const rules = venueMarketRules('bingxspot', [bingxSpotDiscovery()], bingxSpotMarket);
