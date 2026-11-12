@@ -46,6 +46,12 @@ is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
 
+The existing Bybit opt-in also selects private COSIGNED admissions. Both modes
+share the off-loop probe, refusal classification, token/lease checks and account
+attachment. A pending COSIGNED signer belongs only to its joining connection;
+probe frames are consumed internally. Matching COSIGNED inits on an admitted
+connection and COSIGNED resumes retain their existing snapshot path.
+
 ## DELEGATED order frames
 
 DELEGATED `order.submit` messages use the existing method translation,
