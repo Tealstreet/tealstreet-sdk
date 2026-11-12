@@ -620,6 +620,24 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+      - name: Prove the shipped BingX engine keeps Spot fixture exports absent
+        if: matrix.family == 'bingx'
+        run: corepack yarn -s node --test sdk-rs/harness/bingxspot-admission.integration.mjs
+      - name: Build the nondefault BingX Spot fixture engine after shipped checks
+        if: matrix.family == 'bingx'
+        run: |
+          corepack yarn rust:build-wasm --venue bingx --bingx-spot-replay
+          BINGX_SPOT_FIXTURE=1 corepack yarn -s node --test sdk-rs/harness/bingxspot-admission.integration.mjs
+          corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue bingxspot --archive sdk-rs/hosts/wasm/pkg/ci-bingxspot
+      - name: Retain the separate BingX Spot fixture engine
+        if: matrix.family == 'bingx'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-bingxspot-fixture
+          path: sdk-rs/hosts/wasm/pkg/ci-bingxspot/
+          retention-days: 3
+          if-no-files-found: error
+
       - name: Prove the shared operation channel through actual Kraken WASM engines
         if: matrix.family == 'kraken'
         env:
@@ -825,6 +843,12 @@ jobs:
           path: sdk-rs/hosts/wasm/pkg/
       - name: Verify the same-run matching family capsule
         run: node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --verify sdk-rs/hosts/wasm/pkg/ci-replay
+      - name: Download the separate BingX Spot fixture engine
+        if: matrix.venue == 'bingx'
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-bingxspot-fixture
+          path: sdk-rs/hosts/wasm/pkg/ci-bingxspot/
       - uses: actions/cache@v6
         with:
           path: |
@@ -850,6 +874,14 @@ jobs:
       - name: OKX EEA X-Perps public books (correctness)
         if: matrix.venue == 'okx'
         run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
+      - name: BingX Spot public and private correctness against its independent oracle
+        if: matrix.venue == 'bingx'
+        env:
+          RUST_REPLAY_CI_WASM: sdk-rs/hosts/wasm/pkg/ci-bingxspot
+        run: |
+          corepack yarn rust:private-tape-bingxspot
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/fixtures/bingxspot-public.jsonl.gz --books BTCUSDT
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/tapes/bingxspot-private.jsonl --books ''
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
@@ -1191,6 +1223,17 @@ jobs:
       - name: Check the wasm size budget
         if: inputs.replay_artifact != 'combined'
         run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
+      - name: Build the nondefault BingX Spot measurement engine
+        if: matrix.venue == 'bingx'
+        run: |
+          if [ '${{ inputs.replay_artifact }}' = combined ]; then
+            corepack yarn rust:build-wasm --bingx-spot-replay
+          else
+            corepack yarn rust:build-wasm --venue bingx --bingx-spot-replay
+          fi
+      - name: Generate the BingX Spot private fixture before sealing
+        if: matrix.venue == 'bingx'
+        run: corepack yarn rust:private-tape-bingxspot
       - name: Replay request normalization
         run: corepack yarn rust:test-harness
       - name: Credentialed lifecycle runner (scripted transport only)
@@ -1217,6 +1260,11 @@ jobs:
       - name: OKX EEA X-Perps public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
         run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 16
+      - name: BingX Spot public CPU and private correctness against its independent oracle
+        if: matrix.venue == 'bingx'
+        run: |
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/fixtures/bingxspot-public.jsonl.gz --books BTCUSDT --runs 16
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/tapes/bingxspot-private.jsonl --books '' --runs "$PRIVATE_REPLAY_RUNS"
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |

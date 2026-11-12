@@ -22,3 +22,7 @@ HyroTrader main-thread/process CPU and every other venue's CPU objectives retain
   or update one `cpu-regression` issue for suites whose CPU gate failed on two adjacent UTC nights (the last run each night).
   Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and
   multiple runs on one night must not hide the previous night.
+
+BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
+The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
+normal factories still refuse Spot. Shipped family size checks run before the fixture build.
