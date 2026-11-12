@@ -17,6 +17,7 @@ use tokio::task::JoinHandle;
 
 mod order_actions;
 mod order_frames;
+mod settings;
 
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
@@ -516,6 +517,12 @@ impl Session {
                                 self.join(account, out.clone()).await;
                             }
                             if self.joined.contains_key(&completed.account_name) {
+                                self.registry.interruptions.delegated_status(
+                                    self.user(),
+                                    &completed.account_name,
+                                    &out,
+                                    crate::interruption::DelegatedKeyStatus::KeyAvailable,
+                                );
                                 self.registry.interruptions.deliver(
                                     self.user(),
                                     &completed.account_name,
@@ -902,6 +909,12 @@ impl Session {
                 self.order_cancel_queued(cancel);
             }
             Inbound::Init(init) => self.init(*init).await?,
+            Inbound::ApplySettings(request) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated settings action rejected"));
+                }
+                self.apply_settings(request);
+            }
             Inbound::Msg(msg) => {
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
@@ -1075,7 +1088,7 @@ impl Session {
             self.resnapshot(&init.account_name).await;
             return Ok(());
         }
-        // Another live socket holds it with other settings: keep both as they are.
+        // Existing private settings stay until an admitted client explicitly resets them.
         if let Some(refusal) =
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
@@ -1472,8 +1485,17 @@ impl Session {
     fn issue_handover(&mut self, name: &str, venue: &str) {
         match self.handovers.issue(name, venue, crate::accounts::now_ms()) {
             Ok(offer) => {
-                self.handover_out(name)
-                    .send(envelope::delegated_key(name, &offer));
+                let out = self.handover_out(name);
+                if out.send(envelope::delegated_key(name, &offer))
+                    && !self.joined.contains_key(name)
+                {
+                    self.registry.interruptions.delegated_status(
+                        self.user(),
+                        name,
+                        &out,
+                        crate::interruption::DelegatedKeyStatus::WaitingForKey,
+                    );
+                }
             }
             Err(_) => {
                 self.drop_early(name, "delegated init refused");
@@ -2657,6 +2679,7 @@ mod tests {
     use super::*;
     use safe_cex_remote_signer::Outbox;
 
+    mod apply_settings;
     mod delegated_probe;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
@@ -4823,7 +4846,7 @@ mod tests {
                 let frame = sent.try_recv().expect("the refusal frame");
                 assert_eq!(
                     frame,
-                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is open in another window or on another device with different settings (enableSpotMarkets). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
+                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is already running with different settings (enableSpotMarkets). The change was not applied. Join with the current settings and use apply-settings before reinitializing.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
                 );
                 assert!(sent.try_recv().is_err(), "retries are quiet");
                 assert_eq!(crate::accounts::tests::signing(&account), Some(7));

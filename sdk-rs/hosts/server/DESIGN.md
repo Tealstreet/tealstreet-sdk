@@ -531,11 +531,12 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
 
 All application messages are JSON text frames of the form `{"t": <type>, "d": <data>}`.
 
-### Client to server (unchanged from today)
+### Client to server
 
 | `t` | `d` | Behaviour |
 |---|---|---|
-| `init` | `InitPayload` (same fields as `server.ts`) | Builds the account, or keeps a resumed account whose init fingerprint is identical and sends it a snapshot instead |
+| `init` | `InitPayload` (same fields as `server.ts`) | Builds a new account or re-snapshots matching settings; changing an existing private account requires `apply-settings` |
+| `apply-settings` | `{accountName, instanceId}` | An admitted private client explicitly stops its current account before reinitializing with new settings |
 | `msg` | `{op, data?, accountName, instanceId?}` | Account op, see below |
 | `sign-res` | `{id, config?, wsAuthSignature?, error?}`, with `ts` as a sidecar | Goes to the signer (4yjlw0) |
 | `echo-res` | `{id}` | Echo RTT sample |
@@ -564,6 +565,25 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `sign-req` | the signer request (4yjlw0) | Remote signing |
 | `echo` | `{id, pad}` | Echo probe every `SIGNER_ECHO_PROBE_MS`, default unchanged |
 | `pong` | `{accounts: string[], ...linkReport}` | Reply to `ping` |
+
+`apply-settings` reuses the settings-disposal path: algos stop with the recorded
+reason "its key or connection settings changed" (`settings_changed`). It accepts
+only the current live account/registration with unexpired socket authority.
+The nonempty `instanceId` must match the admitted init. A legacy client can first
+repeat its unchanged init with an ID to bind the same account without restarting it.
+Pending verification replies `verifying`; unadmitted, stale or fenced clients
+cannot reset an account. Live and parked holders, and a DELEGATED resident copy
+without a socket, prevent an ordinary init from changing private settings.
+The comparison uses normalized engine and routing settings; fields ignored by
+the venue do not create a settings change.
+
+The action replies `msg` with `op:"applySettings:done"` and
+`data:{success:true,requiresInit:true}` on the admitted registration. This means
+the reset was initiated, not that a replacement was admitted or all venue work
+settled. The caller then sends a normal init (including fresh DELEGATED handover
+and verification when applicable). The action carries no credentials or new
+settings, and older pending joins cannot restore the reset account. Existing
+init generations, account outputs and settings stop notices retain ownership.
 
 Socket keepalive: the server sends a protocol-level WebSocket ping every 10s.
 With no inbound data for 30s, either a message or a pong, the socket is
@@ -850,7 +870,8 @@ Sessions and resume (same semantics as today):
   - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
 - **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts the parked accounts. It then receives `session {resumed:true}`.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
-  - A different fingerprint disposes the account and rebuilds it.
+  - A different private fingerprint is refused until an admitted client uses
+    `apply-settings`; parked clients and resident copies keep their settings.
 - **Resume alias:** a used `resumeId` stays valid as an alias for 120s, which is `RESUME_ALIAS_MS`.
 - **Grace expiry:** parked accounts are disposed with the reason `no browser for 60s`, recorded in the order audit log. No browser is attached to tell, so when chases or TWAPs were running the registry keeps one notice per (user, account) and sends it as an `error` on that account's next init; it is dropped once delivered or after 24 hours.
 - **Stop notices name their algo.** Every "Chase on X stopped: …" or "TWAP on X stopped: …" (live, break-glass, SIGTERM, grace expiry, failed signer) is its own `error`, `data: [message, {forceToast: true, algo: {kind: "chase"|"twap", id}}]`, where `id` is the algo's `activeChasers`/`activeTWAPs` row id, so the page dedupes exactly. Errors the page missed still arrive joined in one notice without `algo`.
@@ -1073,3 +1094,13 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## DELEGATED restart key status (codex-oqblq9)
+
+The existing interruption marker also accepts `reason: "waiting-for-key"`.
+Marked DELEGATED handover requests expose `delegated:status` waiting for a key;
+only admitted handovers report key availability. This does not acknowledge a
+restored job or create persistence. Client-held TWAPs retain the existing paused
+restore/explicit-resume gate; lost chases and absent schedules cannot be rebuilt.
+See [restart recovery](../../../docs/plans/callers/delegated-restart-recovery.md)
+for the wire contract, scope and measured recovery limits.
