@@ -1135,7 +1135,29 @@ impl Registry {
             }
         };
         let key = (user.to_owned(), name);
-        let account = self.accounts.lock().unwrap().get(&key).cloned()?;
+        let account = {
+            let accounts = self.accounts.lock().unwrap();
+            accounts.get(&key).cloned().or_else(|| {
+                if !public_only {
+                    return None;
+                }
+                accounts
+                    .values()
+                    .find(|account| {
+                        account.user == user
+                            && account.identity.is_some()
+                            && (account.name == init.account_name
+                                || account
+                                    .holders
+                                    .lock()
+                                    .unwrap()
+                                    .labels
+                                    .values()
+                                    .any(|labels| labels.contains_key(&init.account_name)))
+                    })
+                    .cloned()
+            })
+        }?;
         // Shared public data carries no signer or algos; it rebuilds as before.
         if account.is_public() {
             return None;
@@ -1335,6 +1357,12 @@ impl Registry {
         }
         let delegated = setup.is_some();
         if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
+            return Err(refusal);
+        }
+        if public_only
+            && let Some(refusal) =
+                self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
+        {
             return Err(refusal);
         }
         let fingerprint = if delegated {

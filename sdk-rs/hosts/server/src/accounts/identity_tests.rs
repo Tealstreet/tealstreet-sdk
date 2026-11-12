@@ -697,6 +697,10 @@ async fn public_fallback_cannot_reset_identity_settings_through_a_label() {
                             "public fallback must not bypass explicit settings: parked={parked}, holder={holder}, alias={}",
                             label == &alias.account_name,
                         );
+                        assert!(
+                            registry.obtain("u", &public, true, holder, None, Arc::new(|_| true)).await.is_err(),
+                            "trusted construction must retain the same settings refusal"
+                        );
                     }
                     assert!(registry.rebuild_refusal("other", &public, true, 7).is_none());
                 }
