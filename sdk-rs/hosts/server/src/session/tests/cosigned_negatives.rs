@@ -636,10 +636,26 @@ async fn shared_admission_rechecks_token_on_a_matching_init() {
     session.identity.token = Some(("synthetic-expired".into(), 0));
     session.init(init(Some("elapsed"))).await.unwrap();
     assert!(session.pending_verifications.is_empty());
-    assert_eq!(
-        resident._sent.try_recv().unwrap(),
-        envelope::with_instance_id(envelope::init_unverified("acct", false), "elapsed")
-    );
+    let expected = envelope::with_instance_id(envelope::init_unverified("acct", false), "elapsed");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let text = resident
+                ._sent
+                .recv()
+                .await
+                .expect("resident output remains open");
+            if text == expected {
+                break;
+            }
+            // The resident's private startup may still publish after the earlier drain.
+            // An expired re-init must not produce any new-registration output.
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(frame["d"]["accountName"], "acct");
+            assert_eq!(frame["d"]["instanceId"], "resident");
+        }
+    })
+    .await
+    .expect("expired matching init emits its exact refusal");
     resident.untouched(&f);
 }
 
