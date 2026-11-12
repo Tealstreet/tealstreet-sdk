@@ -6,6 +6,10 @@ activation. The join owner retains its existing feature gates, pacing, connectio
 generation, lease checks and admission deadline. Both hosted signing modes use
 the same helpers.
 
+Enable the `safe-cex-crypto/admission` Cargo feature to use the shared statement
+and verifier APIs. The native server requests this feature explicitly; existing
+venue WASM builds leave it disabled. Signer-family features remain independent.
+
 `safe_cex_crypto::admission::Statement` is a closed descriptor with a fixed kind,
 an attempt, an identity digest, a 32-byte nonce and an issue time. The server
 creates it with `LocalProof::issue`; devices reconstruct the signing request with

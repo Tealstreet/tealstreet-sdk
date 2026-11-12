@@ -146,6 +146,7 @@ pub fn derive_from_ethereum(key: &str, chain: &str) -> Result<Zeroizing<[u8; 32]
 
 /// Strict fixed-width Stark ECDSA verification. Invalid field encodings, points,
 /// scalar ranges and signatures return false without reducing the wire values.
+#[cfg(feature = "admission")]
 pub fn verify(message: &[u8], public_key: &[u8], signature: &[u8]) -> bool {
     fn felt(bytes: &[u8]) -> Option<Felt> {
         let bytes: &[u8; 32] = bytes.try_into().ok()?;
