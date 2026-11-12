@@ -350,7 +350,7 @@ export const signHostedHttp = async (
     headers.set({ ApiKey: credential,
       'Request-Time': prepared.stamp, Signature: output.signature,
       'Recv-Window': String(Math.max(1, Math.min(20_000, options.extra?.recvWindow ?? 20_000))),
-      'Content-Type': 'application/json' });
+      'Content-Type': 'application/json', source: 'TEAL' });
     return { ...prepared.config, headers };
   } : okx ? async (config) => {
     // Market paths keep the existing local signing behavior. The skip flag

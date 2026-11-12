@@ -644,7 +644,7 @@ Example footer script (`~/.tealstreet/scripts/risk.ts`):
 export const meta = { name: 'risk', targets: ['core', 'cli'], capabilities: { accounts: [], writes: [] } };
 export default function (_args, api) {
   const p = api.getPositions()[0];
-  return p ? `risk ${p.notional.toFixed(0)}` : 'flat';
+  return p ? `risk ${typeof p.notional === 'number' && Number.isFinite(p.notional) ? p.notional.toFixed(0) : '—'}` : 'flat';
 }
 ```
 

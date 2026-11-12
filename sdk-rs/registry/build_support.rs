@@ -352,7 +352,16 @@ fn rule(value: &Rule) -> String {
                 "Some(&[{}])",
                 names
                     .iter()
-                    .map(|name| format!("{name:?}"))
+                    .map(|name| {
+                        // Broker metadata belongs only to the compiled MEXC family.
+                        if matches!(value.setup_mapping.as_ref(), Some(SetupMapping::Mexc))
+                            && name == "source"
+                        {
+                            format!("#[cfg(feature = \"mexc\")] {name:?}")
+                        } else {
+                            format!("{name:?}")
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(",")
             )

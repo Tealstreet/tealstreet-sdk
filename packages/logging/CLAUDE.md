@@ -14,3 +14,9 @@ chat handle, never an Auth0 name/email or an account name. Each queued log/notic
 captures it as JSON-escaped `username=` text beside the unchanged user ID; it is
 not a Loki label, Sentry tag or issue title. The owning cleanup clears identity
 context on logout, while stale cleanup cannot clear a newer user's context.
+
+Ingest tokens, pending token requests, queued entries and callbacks are bound to
+the full tenant-qualified user ID and lifecycle generation. Logout or an owner
+change discards queued work and invalidates deferred uploads, even with a cached
+token; there is no final cleanup upload. Restarting the same active owner retains
+its generation and queue, while logout followed by login creates a new generation.

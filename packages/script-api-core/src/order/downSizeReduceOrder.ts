@@ -12,6 +12,7 @@ import {
 } from '@tealstreet/safe-cex/src/types';
 import { DEFAULT_AMOUNT_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
 import { assertNativeReduceAmount, nativeAmountRules, sameNativeAmount } from './nativeAmountRules';
+import { venueUsesBaseAmountRails } from './orderPricing';
 import { ScriptValidationError } from './ScriptValidationError';
 
 // MEXC's named policy converts every contract size, including DOGE's 100 base units.
@@ -140,7 +141,7 @@ export const downSizeReduceOrder = (
   // rounds to 0. A zero amount is never an order: keep the order as placed, as when nothing is left.
   if (!(rounded > 0)) return order;
   const nativeAmount = baseToNative(rounded);
-  if (exchangeName === 'mexc' && !sameNativeAmount(nativeAmount, order.amount)) {
+  if (venueUsesBaseAmountRails(exchangeName) && !sameNativeAmount(nativeAmount, order.amount)) {
     throw new ScriptValidationError(
       `MEXC reduce requested ${order.amount} native contracts but downsizing would send ${nativeAmount}; cancel conflicting orders or request the available quantity explicitly`,
     );

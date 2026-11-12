@@ -229,6 +229,16 @@ ordinary synchronization retains its local-UTC fallback and five-minute cadence.
 
 ## Files
 
+- `diagnosticRedaction.ts` — detached copies for console, log events, telemetry
+  and retained diagnostics. Never use it to transform live command or market
+  messages; ordinary IDs and timestamps remain diagnostic context. Complete
+  prefixed JSON is parsed before escape decoding and reserialized after redaction;
+  truncated auth text uses the same operation fields/namespaces as structured
+  frames. Header tuples require two strings and a valid HTTP header name, so
+  ordinary error argument arrays retain startup classification and phase metadata.
+  Copied Error name/message/stack/cause remain non-enumerable; explicit diagnostic
+  text formatting includes their redacted values. Plain JSON/key enumeration
+  retains native Error behavior. The shared diagnostic marker is `[REDACTED]`.
 - `httpFailure.ts` — `getHttpFailure` / `appendHttpFailure` / `describeHttpFailure`.
   The HOW adapter resolves non-2xx tunnel frames without axios' `settle()`, so a
   venue interceptor's SUCCESS handler receives the failure with its status
@@ -328,3 +338,10 @@ evidence returns null, which close/reduce callers must refuse. There is no
 per-field freshness marker, so disagreement beyond roundoff cannot select a
 newer value. Missing/zero contract size still defaults to one; rounding belongs
 to the caller. Do not add a reverse dependency on script-api-core.
+
+## Unknown position valuation
+
+`leverage.ts` returns null when a required notional is null or nonfinite,
+including after JSON transport. An incomplete scope cannot publish a partial
+total. PnL percentages require a known nonzero valuation; sizing still uses
+`nativePositionSize` and its independent native-quantity evidence.

@@ -1,15 +1,17 @@
 # DELEGATED memory
 
-`delegated_memory::DelegatedMemory::prepare(venue, enabled)` accepts only Bybit
-with its resolved per-venue DELEGATED policy flag enabled. Call it before
+`delegated_memory::DelegatedMemory::prepare(venue, enabled)` requires the
+caller's resolved per-venue DELEGATED policy flag. Memory preparation is the
+same for every venue and adds no separate venue allowlist. Call it before
 receiving or opening key material. It does not enable DELEGATED admission or
 change account construction. The handover and account-build changes consume
 this helper separately.
 
 Preparation disables core dumps for the process (`RLIMIT_CORE=0`, and
 `PR_SET_DUMPABLE=0` on Linux). Failure refuses preparation. The settings remain
-for the process lifetime. Ordinary startup, disabled DELEGATED, and other venues
-do not call the process controls.
+for the process lifetime. Ordinary startup and disabled DELEGATED declarations
+do not call the process controls. Only Bybit is currently opted in by the
+production declaration.
 
 `zeroed(len)` creates a candidate buffer that an opener can fill directly.
 `copy(Vec<u8>)` consumes an existing buffer and zeroizes that input on every exit.

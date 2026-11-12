@@ -55,9 +55,18 @@ pub enum Reply {
     /// The TS method returns `undefined`, not the engine result.
     Unit,
     /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
-    Placed { client_order_id: String },
+    Placed {
+        client_order_id: String,
+    },
     /// An order frame using the same single-order command and audit path.
-    Intent { client_order_id: String, seq: u64 },
+    Intent {
+        client_order_id: String,
+        seq: u64,
+    },
+    Action {
+        kind: &'static str,
+        seq: u64,
+    },
     /// `updateOrder`: the worker bridge's `WorkerOrderIds`, which the main-thread
     /// mirror decodes (`decodeWorkerOrderIds`); a bare array would throw there.
     OrderIds,
@@ -390,7 +399,7 @@ pub fn translate_delegated(
     open_order_symbols: &[String],
     public_only: bool,
 ) -> Result<Vec<Plan>, Refused> {
-    if public_only || !safe_cex_remote_signer::delegated_enabled(venue) {
+    if public_only || !crate::delegated::enabled(venue) {
         return Err(refused(
             "UnsupportedMethod",
             "DELEGATED methods are not enabled for this account",
