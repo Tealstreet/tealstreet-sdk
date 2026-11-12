@@ -157,3 +157,7 @@ mod tests {
         assert!(notice_refusal(r#"{"type":"event","message":"authInvalid"}"#).is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "probe_tests.rs"]
+mod venue_tests;
