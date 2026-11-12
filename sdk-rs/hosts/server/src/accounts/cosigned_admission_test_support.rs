@@ -19,13 +19,10 @@ impl Registry {
             .cloned()
             .ok_or(ProbeRefusal::INVALID)?;
         let remote = prepared.remote.ok_or(ProbeRefusal::INVALID)?;
-        let prepared = PreparedDelegated {
-            plan,
-            options: prepared.options,
-            resident: ResidentCopy::test_provider(remote.provider),
-        };
+        let provider = remote.provider;
         let tokens = ProxyToken::new();
         tokens.set(token);
+        let venue = init.exchange_name.clone();
         let mut config = self.engine_config.clone();
         config.log_label = None;
         config.signing_mode = Some("hosted_cosign");
@@ -44,12 +41,12 @@ impl Registry {
                 tokio::task::spawn_local(async move {
                     let _placement = placement;
                     if result.is_closed() || !allowed() { return; }
-                    let transport = NetworkTransport::with_routing(prepared.plan.clone(), tokens.provider())
-                        .with_venue("bybit").with_io_guard(allowed.clone());
+                    let transport = NetworkTransport::with_routing(plan, tokens.provider())
+                        .with_venue(&venue).with_io_guard(allowed.clone());
                     tokio::select! {
                         biased;
                         _ = result.closed() => {},
-                        answer = crate::delegated::probe::run(prepared, transport, config, allowed) => {
+                        answer = crate::delegated::probe::run(&venue, &prepared.options, provider, transport, config, allowed) => {
                             let _ = result.send(answer);
                         }
                     }

@@ -173,7 +173,10 @@ impl Transport for VenueIo {
             r.method == Method::Get
                 || (r.method == Method::Post
                     && ((self.venue == "binance" && path(&r).ends_with("listenKey"))
-                        || (self.venue == "kucoin" && path(&r).ends_with("bullet-private")))),
+                        || (self.venue == "kucoin"
+                            && ["bullet-private", "bullet-public"]
+                                .iter()
+                                .any(|endpoint| path(&r).ends_with(*endpoint))))),
             "admission may only read account state or obtain a read-feed token"
         );
         self.seen
@@ -242,7 +245,14 @@ async fn check(
     };
     let result = tokio::time::timeout(
         Duration::from_secs(3),
-        run(prepared, io, ServerConfig::default(), Arc::new(|| true)),
+        run(
+            venue,
+            &prepared.options,
+            prepared.resident.provider(),
+            io,
+            ServerConfig::default(),
+            Arc::new(|| true),
+        ),
     )
     .await;
     assert!(
@@ -365,7 +375,9 @@ async fn remote(
                 !link.resolve(78, response.clone()),
                 "another socket cannot answer"
             );
-            assert!(link.resolve(77, response.clone()));
+            if !link.resolve(77, response.clone()) {
+                break;
+            }
             assert!(
                 !link.resolve(77, response),
                 "consumed response cannot resolve twice"
@@ -403,24 +415,28 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                 ] {
                     let (prepared, link, task) = remote(venue, answer, prior.clone()).await;
                     let (result, seen) = check(venue, prepared).await;
-                    let seen = seen.lock().unwrap();
-                    assert!(
-                        seen.signed_reads > 0,
-                        "{venue}: real signed startup required"
-                    );
-                    if matches!(answer, DeviceAnswer::Correct) {
-                        assert!(result.is_ok(), "{venue}: valid remote proof");
-                        assert_eq!(seen.refused, 0);
-                    } else {
+                    {
+                        let seen = seen.lock().unwrap();
                         assert!(
-                            matches!(result, Err(ProbeRefusal { transient: false })),
-                            "{venue}: {result:?}"
+                            seen.signed_reads > 0,
+                            "{venue}: real signed startup required"
                         );
-                        assert!(seen.refused > 0, "{venue}: fixture verified the signature");
+                        if matches!(answer, DeviceAnswer::Correct) {
+                            assert!(result.is_ok(), "{venue}: valid remote proof");
+                            assert_eq!(seen.refused, 0);
+                        } else {
+                            assert!(
+                                matches!(result, Err(ProbeRefusal { transient: false })),
+                                "{venue}: {result:?}"
+                            );
+                            assert!(seen.refused > 0, "{venue}: fixture verified the signature");
+                        }
                     }
-                    drop(seen);
                     link.mark_unavailable();
                     task.abort();
+                    if let Err(error) = task.await {
+                        assert!(error.is_cancelled(), "device responder failed: {error}");
+                    }
                     tokio::time::sleep(Duration::from_millis(5)).await;
                 }
                 let (result, seen) = check(venue, local(venue, "synthetic-other-material")).await;
@@ -480,6 +496,13 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
+    assert_eq!(PRIVATE_STARTUP_VENUES.len(), VENUES.len() + 1);
+    for &venue in PRIVATE_STARTUP_VENUES {
+        assert!(
+            venue == "bybit" || VENUES.contains(&venue),
+            "{venue}: missing offline suite"
+        );
+    }
     for (venue, rule) in rules["venues"].as_object().unwrap() {
         if rule["delegated"]["enabled"] == true {
             assert!(

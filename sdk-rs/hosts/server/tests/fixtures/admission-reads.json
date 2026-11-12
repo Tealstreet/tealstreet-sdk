@@ -342,6 +342,19 @@
         "totalNum": 0,
         "items": []
       }
+    },
+    "bullet-public": {
+      "code": "200000",
+      "data": {
+        "token": "synthetic-public-token",
+        "instanceServers": [
+          {
+            "endpoint": "wss://example.test/public",
+            "pingInterval": 18000,
+            "pingTimeout": 10000
+          }
+        ]
+      }
     }
   }
 }
