@@ -29,6 +29,12 @@ export {
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
 
+export { DelegatedActivationError, requireDelegatedActivation, requireDelegatedAction } from './delegatedActivation';
+export type {
+  DelegatedActivationFlags,
+  DelegatedActivationCapabilities,
+  DelegatedActivationScopeV1,
+} from './delegatedActivation';
 export {
   DelegatedOutbox,
   DelegatedIntentError,
