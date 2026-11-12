@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { GATE_SUITES } from './ci-gate-suites.mjs';
 
@@ -117,3 +120,44 @@ test('Binance replay measurement has 45 minutes while other matrix venues retain
   const first = job(source, 'gate');
   assert.match(first, /^    timeout-minutes: \$\{\{ matrix\.venue == 'binance' && 45 \|\| 30 \}\}$/m);
 });
+
+function measurementNodeCheck(text) {
+  const first = job(text, 'gate');
+  const marker = '      - name: Assert Node 22 before sealing CPU inputs\n';
+  const start = first.indexOf(marker);
+  assert(start >= 0, 'CPU seal needs an explicit Node version check');
+  const end = first.indexOf('      - name:', start + marker.length);
+  assert.equal(first.slice(end).split('\n')[0], '      - name: Seal approved CPU measurement inputs');
+  const step = first.slice(start, end);
+  assert.doesNotMatch(step, /\n        if:/, 'every measurement runner must check its Node version');
+  return step.split('        run: |\n')[1].split('\n').filter(Boolean).map(line => line.slice(10)).join('\n');
+}
+
+test('measurement seal and collection use the same Yarn Node as replay, after explicit diagnostics', () => {
+  const first = job(source, 'gate');
+  const script = measurementNodeCheck(source);
+  for (const diagnostic of ['node --version', 'which -a node', 'command -v node', 'corepack yarn -s node --version'])
+    assert(script.includes(diagnostic), `missing diagnostic: ${diagnostic}`);
+  for (const command of ['prepare', 'collect']) {
+    assert.match(first, new RegExp(`corepack yarn -s node sdk-rs/harness/cpu-ci\\.mjs --command ${command} --suite`));
+    assert.doesNotMatch(first, new RegExp(`^ +node sdk-rs/harness/cpu-ci\\.mjs --command ${command}`, 'm'));
+  }
+});
+
+for (const version of ['v22.23.4', 'v24.22.2', '']) {
+  test(`measurement Node assertion checks Yarn's runtime (${version || 'empty'}), not the bare Node`, t => {
+    const directory = mkdtempSync(join(tmpdir(), 'cpu-node-pin-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    writeFileSync(join(directory, 'node'), '#!/bin/sh\nprintf "v24.22.2\\n"\n');
+    writeFileSync(join(directory, 'corepack'), '#!/bin/sh\n[ "$*" = "yarn -s node --version" ] || exit 99\nprintf "%s\\n" "$CPU_TEST_NODE_VERSION"\n');
+    for (const executable of ['node', 'corepack']) chmodSync(join(directory, executable), 0o755);
+    const run = spawnSync('bash', ['-e', '-c', measurementNodeCheck(source)], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, CPU_TEST_NODE_VERSION: version },
+    });
+    assert.equal(run.status, version.startsWith('v22.') ? 0 : 1, run.stderr);
+    assert(run.stdout.includes('v24.22.2'), 'bare Node diagnostic is retained even when Yarn uses 22');
+    assert(run.stdout.includes(join(directory, 'node')), 'resolved bare Node paths are visible');
+    assert(run.stdout.includes(`CPU measurement Node: ${version}`));
+    if (!version.startsWith('v22.')) assert(run.stdout.includes(`::error::CPU measurement requires Node v22; found ${version || '<empty>'}`));
+  });
+}
