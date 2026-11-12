@@ -1197,12 +1197,23 @@ jobs:
       - name: Generate Binance Options public CPU input before sealing
         if: matrix.venue == 'binance'
         run: corepack yarn rust:private-tape-binanceoptions --public
+      - name: Assert Node 22 before sealing CPU inputs
+        run: |
+          node --version
+          which -a node
+          command -v node
+          measurement_node_version="$(corepack yarn -s node --version)"
+          printf 'CPU measurement Node: %s\n' "$measurement_node_version"
+          if [[ ! "$measurement_node_version" =~ ^v22\.[0-9]+\.[0-9]+$ ]]; then
+            printf '::error::CPU measurement requires Node v22; found %s\n' "${measurement_node_version:-<empty>}"
+            exit 1
+          fi
       - name: Seal approved CPU measurement inputs
         id: cpu_prepare
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
+          corepack yarn -s node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
           --out '${{ runner.temp }}/cpu-runtime-first' --mode '${{ inputs.replay_artifact == 'combined' && 'combined' || 'family' }}'
       - name: Public data (correctness, CPU and memory)
         run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 16
@@ -1342,7 +1353,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
+          corepack yarn -s node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
       - name: Retain CPU runtime capsule
         if: always()
         uses: actions/upload-artifact@v7
