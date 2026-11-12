@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -179,3 +179,50 @@ for (const version of ['v22.23.4', 'v24.22.2', '']) {
     if (!version.startsWith('v22.')) assert(run.stdout.includes(`::error::CPU measurement requires Node v22; found ${version || '<empty>'}`));
   });
 }
+
+test('Bun PATH export preserves setup Node for the actual sealing assertion', t => {
+  const first = job(source, 'gate');
+  const start = first.indexOf('      - name: Install pinned Bun for standalone CLI loader proof\n');
+  assert(start >= 0);
+  const end = first.indexOf('      - name:', start + 1);
+  const install = first.slice(start, end).split('        run: |\n')[1]
+    .split('\n').filter(Boolean).map(line => line.slice(10)).join('\n');
+  const directory = mkdtempSync(join(tmpdir(), 'cpu-bun-node-path-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const pinned = join(directory, 'node22'), globalBin = join(directory, 'global');
+  for (const path of [pinned, globalBin]) mkdirSync(path);
+  const executables = [
+    [join(pinned, 'node'), '#!/bin/sh\ncase "$1" in --version) printf "v22.23.4\\n";; -p) printf "%s\\n" "$CPU_TEST_PINNED_NODE";; *) exit 99;; esac\n'],
+    [join(globalBin, 'node'), '#!/bin/sh\nprintf "v24.22.2\\n"\n'],
+    [join(globalBin, 'bun'), '#!/bin/sh\nprintf "1.4.3\\n"\n'],
+    [join(pinned, 'corepack'), `#!/bin/sh
+case "$*" in
+  'yarn -s global add bun@1.4.3') exit 0;;
+  'yarn -s global bin') printf '%s\\n' "$CPU_TEST_GLOBAL_BIN";;
+  'yarn -s node --version') exec node --version;;
+  *) exit 99;;
+esac
+`],
+  ];
+  for (const [path, contents] of executables) { writeFileSync(path, contents); chmodSync(path, 0o755); }
+  const env = { ...process.env, PATH: `${pinned}:${process.env.PATH}`,
+    GITHUB_PATH: join(directory, 'github-path'), CPU_TEST_GLOBAL_BIN: globalBin, CPU_TEST_PINNED_NODE: join(pinned, 'node') };
+  const installed = spawnSync('bash', ['-e', '-c', install], { encoding: 'utf8', env });
+  assert.equal(installed.status, 0, installed.stderr);
+  const paths = readFileSync(env.GITHUB_PATH, 'utf8').trim().split('\n');
+  assert(paths.includes(globalBin), 'Bun global bin remains available to CLI loader checks');
+  // The runner prepends GITHUB_PATH entries to each following step, last entry first.
+  const nextEnv = entries => ({ ...env, PATH: `${[...entries].reverse().join(':')}:${env.PATH}` });
+  const check = entries => spawnSync('bash', ['-e', '-c', measurementNodeCheck(source)], {
+    encoding: 'utf8', env: nextEnv(entries),
+  });
+  const bun = spawnSync('bun', ['--version'], { encoding: 'utf8', env: nextEnv(paths) });
+  assert.equal(bun.status, 0, bun.stderr);
+  assert.equal(bun.stdout.trim(), '1.4.3');
+  const replay = check(paths);
+  assert.equal(replay.status, 0, replay.stdout + replay.stderr);
+  assert.match(replay.stdout, /CPU measurement Node: v22\.23\.4/);
+  const withoutPin = check(paths.filter(path => path !== pinned));
+  assert.equal(withoutPin.status, 1, withoutPin.stdout + withoutPin.stderr);
+  assert.match(withoutPin.stdout, /requires Node v22; found v24\.22\.2/);
+});
