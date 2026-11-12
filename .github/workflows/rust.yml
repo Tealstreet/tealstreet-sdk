@@ -1431,9 +1431,9 @@ jobs:
       - name: Public counterbalanced Bitget steady CPU
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/bitget-paired-ci.mjs --out '${{ runner.temp }}/bitget-paired-steady'
+        run: node sdk-rs/harness/bitget-paired-run.mjs --out '${{ runner.temp }}/bitget-paired-steady'
       - name: Retain counterbalanced Bitget steady evidence
-        if: always()
+        if: success() || failure()
         uses: actions/upload-artifact@v7
         with:
           name: bitget-paired-steady
