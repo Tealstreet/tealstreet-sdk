@@ -338,3 +338,10 @@ evidence returns null, which close/reduce callers must refuse. There is no
 per-field freshness marker, so disagreement beyond roundoff cannot select a
 newer value. Missing/zero contract size still defaults to one; rounding belongs
 to the caller. Do not add a reverse dependency on script-api-core.
+
+## Unknown position valuation
+
+`leverage.ts` returns null when a required notional is null or nonfinite,
+including after JSON transport. An incomplete scope cannot publish a partial
+total. PnL percentages require a known nonzero valuation; sizing still uses
+`nativePositionSize` and its independent native-quantity evidence.
