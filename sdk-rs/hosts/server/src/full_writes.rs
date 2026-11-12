@@ -442,6 +442,42 @@ pub(crate) fn placement_capabilities(
 mod tests {
     use super::*;
     #[test]
+    fn full_write_internal_methods_are_reachable_only_from_typed_actions() {
+        let caps = Capabilities {
+            nuke_account_cancel: true,
+            stp_controls: true,
+            account_tier: true,
+            ..Default::default()
+        };
+        for (method, args) in [
+            ("delegatedCancelAccountOrders", vec![]),
+            ("delegatedSetStpMode", vec![json!("EXPIRE_TAKER")]),
+            ("delegatedSetAccountTier", vec![json!("premium")]),
+        ] {
+            assert!(
+                crate::methods::translate_delegated_action(
+                    "bybit",
+                    method,
+                    &args,
+                    &caps,
+                    &[],
+                    false
+                )
+                .is_ok(),
+                "typed action must translate {method}"
+            );
+            assert!(
+                crate::methods::translate_delegated("bybit", method, &args, &caps, &[], false)
+                    .is_err(),
+                "legacy DELEGATED must refuse {method}"
+            );
+            assert!(
+                crate::methods::translate(method, &args, &caps, &[], false).is_err(),
+                "LOCAL/COSIGNED must refuse {method}"
+            );
+        }
+    }
+    #[test]
     fn full_write_account_cancel_uses_only_the_native_capability() {
         let base = Capabilities::default();
         assert!(

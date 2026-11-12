@@ -1668,7 +1668,12 @@ impl Session {
                     })
                 })
         } else if account.delegated.is_some() {
-            methods::translate_delegated(
+            let translate = if matches!(order_frame, Some(OrderReceipt::Action { .. })) {
+                methods::translate_delegated_action
+            } else {
+                methods::translate_delegated
+            };
+            translate(
                 &account.venue,
                 &method,
                 &args,

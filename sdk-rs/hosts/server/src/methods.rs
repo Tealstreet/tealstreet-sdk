@@ -405,10 +405,35 @@ pub fn translate_delegated(
         ));
     }
     crate::full_writes::placement_capabilities(method, args, capabilities)?;
+    translate(method, args, capabilities, open_order_symbols, public_only)
+}
+
+/// Only a validated typed action may reach the additive internal commands.
+pub fn translate_delegated_action(
+    venue: &str,
+    method: &str,
+    args: &[Value],
+    capabilities: &Capabilities,
+    open_order_symbols: &[String],
+    public_only: bool,
+) -> Result<Vec<Plan>, Refused> {
+    if public_only || !safe_cex_remote_signer::delegated_enabled(venue) {
+        return Err(refused(
+            "UnsupportedMethod",
+            "DELEGATED methods are not enabled for this account",
+        ));
+    }
     if let Some(plan) = crate::full_writes::translate(method, args, capabilities) {
         return plan;
     }
-    translate(method, args, capabilities, open_order_symbols, public_only)
+    translate_delegated(
+        venue,
+        method,
+        args,
+        capabilities,
+        open_order_symbols,
+        public_only,
+    )
 }
 
 /// Translates one hosted `callMethod`. `open_order_symbols` (engine store) answers

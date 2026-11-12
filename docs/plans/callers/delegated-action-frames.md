@@ -243,6 +243,8 @@ that context is supplied.
 and refuses before dispatch if the venue lacks `nukeAccountCancel`. It does not
 stop algos or approximate account coverage with currently observed symbols.
 Its internal method translation is DELEGATED-only; LOCAL/COSIGNED are unchanged.
+The new internal account-cancel/STP/tier methods are reachable only after typed
+action validation; legacy DELEGATED `callMethod` does not acquire these names.
 
 Algo actions preserve the existing native algo protocol, including interruption
 restore pauses and drain admission. Their ACK means admitted, not completed.

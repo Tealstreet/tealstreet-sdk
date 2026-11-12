@@ -25,6 +25,25 @@ async fn action_frame(sent: &mut crate::out::Receiver, kind: &str) -> Value {
     .expect("bounded native action receipt")
 }
 
+fn native_request_rows(tape: &Tape, suffix: &str) -> Vec<Value> {
+    tape.requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|r| {
+            r["path"].as_str().is_some_and(|path| {
+                path.ends_with(&format!("/{suffix}")) || path.ends_with(&format!("/{suffix}-batch"))
+            })
+        })
+        .flat_map(|r| {
+            r["body"]["request"]
+                .as_array()
+                .cloned()
+                .unwrap_or_else(|| vec![r["body"].clone()])
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn action_frames_use_real_native_amend_cancel_cancel_all_and_nuke_paths() {
     tokio::task::LocalSet::new().run_until(async {
@@ -850,6 +869,7 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
             let cases: Vec<Value> =
                 serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
                     .unwrap();
+            let mut failures = Vec::new();
             for case in cases {
                 let kind = case["action"]["kind"].as_str().unwrap();
                 let registry = crate::accounts::tests::registry();
@@ -871,66 +891,58 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
                 let unsupported =
                     matches!(kind, "scheduleCancel" | "setStpMode" | "setAccountTier")
                         || case["refused"] == true;
-                assert_eq!(
-                    result["d"]["outcome"],
-                    if unsupported {
-                        "refused"
-                    } else if kind == "algo" {
-                        "unknown"
-                    } else {
-                        "applied"
-                    },
-                    "{kind}: {result}"
-                );
+                let expected = if unsupported {
+                    "refused"
+                } else if kind == "algo" {
+                    "unknown"
+                } else {
+                    "applied"
+                };
+                if result["d"]["outcome"] != expected {
+                    failures.push(format!(
+                        "{kind} {}: expected {expected}, got {result}",
+                        case["action"]["op"]
+                    ));
+                    session.close();
+                    registry.dispose(&account, Disposal::PageDisposed);
+                    continue;
+                }
                 if unsupported {
                     assert_eq!(result["d"]["error"]["outcome"], "notSent");
                     assert!(tape.writes.lock().unwrap().is_empty(), "{kind}");
                 } else if kind == "algo" {
                     assert!(result["d"]["result"].is_null());
-                    if case["action"]["op"] == "twap:state" {
-                        assert!(
-                            account
-                                .running
-                                .jobs()
-                                .0
-                                .iter()
-                                .any(|job| job.id == "restored-typed-job" && job.parked)
-                        );
+                    if case["action"]["op"] == "twap:state"
+                        && !account
+                            .running
+                            .jobs()
+                            .0
+                            .iter()
+                            .any(|job| job.id == "restored-typed-job" && job.parked)
+                    {
+                        failures.push("twap:state did not restore the paused job".into());
                     }
                     if matches!(
                         case["action"]["op"].as_str(),
                         Some("exec" | "chaser:start" | "twap:start")
-                    ) {
-                        tokio::time::timeout(Duration::from_secs(2), async {
-                            while tape.writes.lock().unwrap().is_empty() {
-                                tokio::task::yield_now().await;
-                            }
-                        })
-                        .await
-                        .expect("typed algo reaches a real signed native write");
+                    ) && tokio::time::timeout(Duration::from_secs(2), async {
+                        while tape.writes.lock().unwrap().is_empty() {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .is_err()
+                    {
+                        failures.push(format!(
+                            "{} did not reach a real signed native write",
+                            case["action"]["op"]
+                        ));
                     }
                 } else {
                     assert_eq!(result["d"]["result"]["kind"], kind);
                     if matches!(kind, "place" | "cancelOrders") {
                         let suffix = if kind == "place" { "create" } else { "cancel" };
-                        let rows: Vec<Value> = tape
-                            .requests
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .filter(|r| {
-                                r["path"].as_str().is_some_and(|path| {
-                                    path.ends_with(&format!("/{suffix}"))
-                                        || path.ends_with(&format!("/{suffix}-batch"))
-                                })
-                            })
-                            .flat_map(|r| {
-                                r["body"]["request"]
-                                    .as_array()
-                                    .cloned()
-                                    .unwrap_or_else(|| vec![r["body"].clone()])
-                            })
-                            .collect();
+                        let rows = native_request_rows(&tape, suffix);
                         assert_eq!(
                             rows.len(),
                             2,
@@ -967,18 +979,25 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
                         assert!(!writes.iter().any(|op| op == "create"));
                     }
                     if kind == "close" {
-                        assert!(
-                            tape.requests
-                                .lock()
-                                .unwrap()
-                                .iter()
-                                .any(|r| r["body"]["reduceOnly"] == true)
+                        let rows = native_request_rows(&tape, "create");
+                        assert_eq!(rows.len(), 1);
+                        assert_eq!(rows[0]["reduceOnly"], true);
+                        assert_eq!(rows[0]["symbol"], "BTCUSDT");
+                        assert_eq!(rows[0]["side"], "Sell");
+                        assert_eq!(
+                            rows[0]["qty"].as_str().unwrap().parse::<f64>().unwrap(),
+                            0.001
                         );
                     }
                 }
                 session.close();
                 registry.dispose(&account, Disposal::PageDisposed);
             }
+            assert!(
+                failures.is_empty(),
+                "native full-write failures:\n{}",
+                failures.join("\n")
+            );
         })
         .await;
 }
