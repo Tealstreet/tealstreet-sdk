@@ -950,6 +950,9 @@ fn restored_owner_round_trip_matches_the_worker_fixture() {
     let mut row = expected["retained-A"].clone();
     row["id"] = json!("retained-A");
     let (mut env, view) = (Env::new(), View::default());
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut book = TwapBook::new_with_owner("test-account", "A".into());
+    #[cfg(target_arch = "wasm32")]
     let mut book = TwapBook::new("test-account");
     let effects = book.handle("twap:state", &json!([row]), &mut env, &view);
     assert_eq!(book.serialize_state(), expected);
@@ -957,6 +960,9 @@ fn restored_owner_round_trip_matches_the_worker_fixture() {
     book.handle("twap:pause", &json!("retained-A"), &mut env, &view);
     let mut row = book.serialize_state()["retained-A"].clone();
     row["id"] = json!("retained-A");
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut reloaded = TwapBook::new_with_owner("test-account", "A".into());
+    #[cfg(target_arch = "wasm32")]
     let mut reloaded = TwapBook::new("test-account");
     reloaded.handle("twap:state", &json!([row]), &mut env, &view);
     assert_eq!(reloaded.serialize_state()["retained-A"]["ownerId"], "A");

@@ -542,13 +542,13 @@ impl TwapBook {
             #[cfg(not(target_arch = "wasm32"))]
             let entry = {
                 let mut entry = entry;
-                if let Some(owner) = &self.owner_id {
-                    if entry.owner_id.as_ref() != Some(owner) {
-                        effects.push(TwapEffect::Log {
-                            message: "TWAP not restored: account identity differs".into(),
-                        });
-                        continue;
-                    }
+                if entry.owner_id != self.owner_id {
+                    effects.push(TwapEffect::Log {
+                        message: "TWAP not restored: account identity differs".into(),
+                    });
+                    continue;
+                }
+                if self.owner_id.is_some() {
                     if entry.state.account_name != entry.options.account_name {
                         effects.push(TwapEffect::Log {
                             message:
