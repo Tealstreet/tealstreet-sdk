@@ -309,7 +309,7 @@ impl Action {
 /// Decode only routing/binding metadata first. Unsupported payloads remain raw
 /// until their identity has been checked; unknown fields are never discarded
 /// on a path that can execute a native write.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireRequest {
     pub version: u8,
@@ -317,6 +317,7 @@ pub struct WireRequest {
     pub instance_id: Option<String>,
     pub intent_id: String,
     pub seq: u64,
+    #[serde(serialize_with = "crate::order_contract::serialize_age_ms")]
     pub age_ms: f64,
     pub fingerprint: String,
     pub action: Value,

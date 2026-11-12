@@ -1352,11 +1352,8 @@ async fn exec_review_f1_fences_deferred_shared_factory_handoffs_without_stopping
                 let mut remaining_session = Some(session);
                 if control == "retired" { remaining_session.take().unwrap().close(); }
                 assert!(account.running.io_allowed(), "keep the account live so only the action fence can stop its continuation");
-                tokio::time::sleep(Duration::from_millis(1800)).await;
-                let writes = tape.writes.lock().unwrap().clone();
-                let jobs = account.running.jobs();
-                // A fresh owner's independent account continues while A's
-                // deferred handoff is fenced on its captured registration.
+                // A fresh owner's independent account continues DURING A's
+                // sleep deferral; A must never acquire Bob's authority.
                 if control == "retired" {
                     let b_tape = Tape::default();
                     let b = delegated_account_with_algos(&registry, "B", "bybit", b_tape.clone(), true);
@@ -1368,6 +1365,9 @@ async fn exec_review_f1_fences_deferred_shared_factory_handoffs_without_stopping
                     }).await.expect("Bob's independent EXEC still signs and sends");
                     bob.close(); registry.dispose(&b, Disposal::PageDisposed);
                 }
+                tokio::time::sleep(Duration::from_millis(1800)).await;
+                let writes = tape.writes.lock().unwrap().clone();
+                let jobs = account.running.jobs();
                 if let Some(session) = remaining_session { session.close(); }
                 registry.dispose(&account, Disposal::PageDisposed);
                 if control == "live" {
