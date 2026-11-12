@@ -39,6 +39,33 @@ fn path(r: &HttpRequest) -> &str {
 }
 impl VenueIo {
     fn authenticated(&self, r: &HttpRequest) -> Option<bool> {
+        let route = path(r).split('?').next().unwrap();
+        // Native startup can attach credentials to public discovery. Public
+        // responses cannot verify the joined key; only private reads count.
+        let public = match self.venue {
+            "binance" => [
+                "exchangeInfo",
+                "ticker/24hr",
+                "ticker/bookTicker",
+                "premiumIndex",
+                "listenKey",
+            ]
+            .iter()
+            .any(|suffix| route.ends_with(*suffix)),
+            "okx" => route.starts_with("/api/v5/public/") || route.starts_with("/api/v5/market/"),
+            "bitget" => route.starts_with("/api/v2/mix/market/"),
+            "blofin" => route.starts_with("/api/v1/market/"),
+            "kucoin" => ["contracts/active", "allTickers", "bullet-public"]
+                .iter()
+                .any(|suffix| route.ends_with(*suffix)),
+            _ => unreachable!(),
+        };
+        if public {
+            return None;
+        }
+        Some(self.valid_private_signature(r))
+    }
+    fn valid_private_signature(&self, r: &HttpRequest) -> bool {
         let method = if r.method == Method::Get {
             "GET"
         } else {
@@ -51,9 +78,13 @@ impl VenueIo {
         let h = |name: &str| header(r, name).unwrap_or("");
         match self.venue {
             "binance" => {
-                let (_, query) = r.url.split_once('?')?;
-                let (payload, sig) = query.rsplit_once("&signature=")?;
-                Some(h("X-MBX-APIKEY") == KEY && sig == mac(payload.into(), Encoding::Hex))
+                let Some((_, query)) = r.url.split_once('?') else {
+                    return false;
+                };
+                let Some((payload, sig)) = query.rsplit_once("&signature=") else {
+                    return false;
+                };
+                h("X-MBX-APIKEY") == KEY && sig == mac(payload.into(), Encoding::Hex)
             }
             "okx" | "bitget" => {
                 let prefix = if self.venue == "okx" {
@@ -61,23 +92,21 @@ impl VenueIo {
                 } else {
                     "ACCESS-"
                 };
-                let sig = header(r, &(prefix.to_owned() + "SIGN"))?;
-                Some(
-                    h(&(prefix.to_owned() + "KEY")) == KEY
-                        && h(&(prefix.to_owned() + "PASSPHRASE")) == PASS
-                        && sig
-                            == mac(
-                                format!(
-                                    "{}{method}{}{suffix}",
-                                    h(&(prefix.to_owned() + "TIMESTAMP")),
-                                    path(r)
-                                ),
-                                Encoding::Base64,
+                let sig = h(&(prefix.to_owned() + "SIGN"));
+                h(&(prefix.to_owned() + "KEY")) == KEY
+                    && h(&(prefix.to_owned() + "PASSPHRASE")) == PASS
+                    && sig
+                        == mac(
+                            format!(
+                                "{}{method}{}{suffix}",
+                                h(&(prefix.to_owned() + "TIMESTAMP")),
+                                path(r)
                             ),
-                )
+                            Encoding::Base64,
+                        )
             }
             "blofin" => {
-                let sig = header(r, "ACCESS-SIGN")?;
+                let sig = h("ACCESS-SIGN");
                 let hex = mac(
                     format!(
                         "{}{method}{}{}{suffix}",
@@ -87,23 +116,19 @@ impl VenueIo {
                     ),
                     Encoding::Hex,
                 );
-                Some(
-                    h("ACCESS-KEY") == KEY
-                        && h("ACCESS-PASSPHRASE") == PASS
-                        && sig == safe_cex_crypto::encode(hex.as_bytes(), Encoding::Base64),
-                )
+                h("ACCESS-KEY") == KEY
+                    && h("ACCESS-PASSPHRASE") == PASS
+                    && sig == safe_cex_crypto::encode(hex.as_bytes(), Encoding::Base64)
             }
             "kucoin" => {
-                let sig = header(r, "KC-API-SIGN")?;
-                Some(
-                    h("KC-API-KEY") == KEY
-                        && sig
-                            == mac(
-                                format!("{}{method}{}{suffix}", h("KC-API-TIMESTAMP"), path(r)),
-                                Encoding::Base64,
-                            )
-                        && h("KC-API-PASSPHRASE") == mac(PASS.into(), Encoding::Base64),
-                )
+                let sig = h("KC-API-SIGN");
+                h("KC-API-KEY") == KEY
+                    && sig
+                        == mac(
+                            format!("{}{method}{}{suffix}", h("KC-API-TIMESTAMP"), path(r)),
+                            Encoding::Base64,
+                        )
+                    && h("KC-API-PASSPHRASE") == mac(PASS.into(), Encoding::Base64)
             }
             _ => unreachable!(),
         }
@@ -543,4 +568,67 @@ async fn admission_hmac_public_or_frame_fed_startup_cannot_prove_a_private_key()
             }
         })
         .await;
+}
+
+#[test]
+fn admission_fixture_checks_private_routes_even_when_signature_headers_are_missing() {
+    for (venue, public, private, signature_header) in [
+        (
+            "binance",
+            "/fapi/v1/exchangeInfo",
+            "/fapi/v3/account",
+            "X-MBX-APIKEY",
+        ),
+        (
+            "okx",
+            "/api/v5/public/instruments",
+            "/api/v5/account/config",
+            "OK-ACCESS-SIGN",
+        ),
+        (
+            "bitget",
+            "/api/v2/mix/market/contracts",
+            "/api/v2/account/settings",
+            "ACCESS-SIGN",
+        ),
+        (
+            "blofin",
+            "/api/v1/market/instruments",
+            "/api/v1/account/margin-mode",
+            "ACCESS-SIGN",
+        ),
+        (
+            "kucoin",
+            "/api/v1/contracts/active",
+            "/api/v1/account-overview",
+            "KC-API-SIGN",
+        ),
+    ] {
+        let io = VenueIo {
+            venue,
+            seen: Arc::default(),
+        };
+        let mut request = HttpRequest {
+            id: safe_cex_engine::RequestId(1),
+            method: Method::Get,
+            route: None,
+            timeout_ms: None,
+            url: format!("https://example.test{public}?timestamp=1&signature=invalid"),
+            headers: vec![(signature_header, "invalid".into())],
+            signer_headers: vec![],
+            body: None,
+        };
+        assert_eq!(
+            io.authenticated(&request),
+            None,
+            "{venue}: public discovery cannot authenticate a key"
+        );
+        request.url = format!("https://example.test{private}");
+        request.headers.clear();
+        assert_eq!(
+            io.authenticated(&request),
+            Some(false),
+            "{venue}: an unsigned private read must refuse"
+        );
+    }
 }
