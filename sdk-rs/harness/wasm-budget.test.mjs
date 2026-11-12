@@ -1932,3 +1932,37 @@ test('#3391 run 43040714236 at 86083b569b50 retains exact-head measured wasm hea
     }
   }
 });
+
+// #3425 run 43176700451; CI source cca7b8337ad3 has the dbff6fc75827 merge tree.
+// Web and Node bytes come from the same original-attempt job per family.
+for (const [family, aliases, web, node, minimumCap] of [
+  // Replay job 131043125663.
+  ['asterdex', ['asterdex'], 2_208_996, 2_208_996, 2_220_032],
+  // Replay job 131043125555.
+  ['bitunix', ['bitunix'], 1_942_038, 1_942_038, 1_952_768],
+  // Replay job 131043125392.
+  ['bybit', ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'], 2_330_713, 2_330_713, 2_341_888],
+  // Replay job 131043125504.
+  ['kraken', ['kraken', 'krakenspot'], 2_260_418, 2_260_418, 2_271_232],
+  // Replay job 131043125518.
+  ['lighter', ['lighter', 'lighter-robinhood'], 2_146_773, 2_146_773, 2_157_568],
+  // Replay job 131043125322.
+  ['mexc', ['mexc'], 1_946_379, 1_946_379, 1_956_864],
+  // Replay job 131043125397.
+  ['weex', ['weex'], 2_010_529, 2_010_529, 2_021_376],
+]) {
+  test(`#3425 ${family} current CI web/Node retains measured headroom`, () => {
+    const measured = Math.max(web, node);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${family}: ${cap} < ${minimumCap}`);
+    for (const alias of aliases) {
+      assert.equal(venueFamily(alias), family);
+      const admittedCap = WASM_VENUE_OVERRIDES[alias] ?? cap;
+      assert.equal(admittedCap, cap, alias);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+    }
+  });
+}

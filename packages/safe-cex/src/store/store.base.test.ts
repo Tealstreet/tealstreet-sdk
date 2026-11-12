@@ -876,6 +876,15 @@ describe('DefaultStore', () => {
       expect(serialized.markets.length).toBe(1);
     });
 
+    it('preserves explicit unknown margin fields rather than defaulting them to zero', () => {
+      store.update({ displayedMargin: { longExposure: null, shortExposure: 250, totalNotional: null } });
+      expect(store.serialize().displayedMargin).toEqual({
+        longExposure: null,
+        shortExposure: 250,
+        totalNotional: null,
+      });
+    });
+
     it('should return copies not references', () => {
       store.update({
         tickers: [createTicker()],
