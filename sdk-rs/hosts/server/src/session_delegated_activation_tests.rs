@@ -56,6 +56,56 @@ async fn partial_activation_cancel_all_is_visibly_refused_before_handoff() {
 }
 
 #[tokio::test]
+async fn partial_activation_cancel_all_refuses_without_waiting_for_a_busy_store() {
+    use std::future::Future as _;
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let (release, wait) = std::sync::mpsc::channel();
+            let (entered, read_started) = tokio::sync::oneshot::channel();
+            let handle = account.handle.clone();
+            let blocker = tokio::spawn(async move {
+                handle
+                    .read(move |_| {
+                        let _ = entered.send(());
+                        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+                        true
+                    })
+                    .await
+            });
+            tokio::time::timeout(Duration::from_secs(2), read_started)
+                .await
+                .unwrap()
+                .unwrap();
+            let completed = {
+                let work = call(&mut session, "busy-legacy", "cancelAllOrders", json!([]));
+                tokio::pin!(work);
+                std::future::poll_fn(|cx| std::task::Poll::Ready(work.as_mut().poll(cx).is_ready()))
+                    .await
+            };
+            release.send(()).unwrap();
+            assert_eq!(blocker.await.unwrap(), Some(true));
+            if completed {
+                let result = reply(&mut sent, "busy-legacy").await;
+                assert_eq!(result["success"], false);
+                assert_eq!(result["result"]["name"], "DelegatedActionUnavailable");
+            }
+            assert!(tape.writes.lock().unwrap().is_empty());
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+            assert!(
+                completed,
+                "legacy refusal waited on the blocked order store"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn partial_activation_nuke_is_visibly_refused_before_handoff() {
     refuses_before_native_handoff("nuke", json!([])).await;
 }
