@@ -259,6 +259,7 @@ async fn partial_activation_paused_restore_and_cleanup_preserve_dispatch() {
                     op: received,
                     data: payload,
                     origin,
+                    twap_owner,
                 }) = inbox.recv().await
                 else {
                     panic!("missing safe algo dispatch");
@@ -266,6 +267,7 @@ async fn partial_activation_paused_restore_and_cleanup_preserve_dispatch() {
                 assert_eq!(received, op);
                 assert_eq!(payload, data.to_string());
                 assert_eq!(origin, format!("socket:{}", session.socket));
+                assert_eq!(twap_owner, account.twap_owner.snapshot());
             }
             assert!(tape.writes.lock().unwrap().is_empty());
             session.close();
@@ -298,12 +300,19 @@ async fn partial_activation_cosigned_running_restore_preserves_dispatch() {
             while inbox.try_recv().is_ok() {}
             let rows = json!([restored_twap("cosigned-running", "running", true)]);
             send_algo(&mut session, "twap:state", rows.clone()).await;
-            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+            let Some(crate::algos::AlgoInput::Op {
+                op,
+                data,
+                origin,
+                twap_owner,
+            }) = inbox.recv().await
+            else {
                 panic!("missing COSIGNED restore dispatch");
             };
             assert_eq!(op, "twap:state");
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
+            assert_eq!(twap_owner, account.twap_owner.snapshot());
             assert!(account.delegated.is_none());
             assert!(account.link.is_some());
             session.close();
@@ -341,6 +350,7 @@ async fn native_restore_is_refused(chaser: bool) {
                 account.placed.clone(),
                 account.held.clone(),
                 account.running.clone(),
+                account.twap_owner.clone(),
                 inbox,
             ));
             send_algo(
@@ -453,12 +463,19 @@ async fn partial_activation_decoded_paused_restore_preserves_dispatch() {
                 safe_cex_algo_twap::TwapStatus::Paused
             )]);
             send_algo(&mut session, "twap:state", rows.clone()).await;
-            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+            let Some(crate::algos::AlgoInput::Op {
+                op,
+                data,
+                origin,
+                twap_owner,
+            }) = inbox.recv().await
+            else {
                 panic!("missing paused restore dispatch");
             };
             assert_eq!(op, "twap:state");
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
+            assert_eq!(twap_owner, account.twap_owner.snapshot());
             assert!(tape.writes.lock().unwrap().is_empty());
             session.close();
             drop(inbox);
@@ -508,12 +525,19 @@ async fn partial_activation_cosigned_decoded_running_restore_preserves_dispatch(
                 safe_cex_algo_twap::TwapStatus::Running
             )]);
             send_algo(&mut session, "twap:state", rows.clone()).await;
-            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+            let Some(crate::algos::AlgoInput::Op {
+                op,
+                data,
+                origin,
+                twap_owner,
+            }) = inbox.recv().await
+            else {
                 panic!("missing COSIGNED restore dispatch");
             };
             assert_eq!(op, "twap:state");
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
+            assert_eq!(twap_owner, account.twap_owner.snapshot());
             assert!(account.delegated.is_none());
             assert!(account.link.is_some());
             session.close();
