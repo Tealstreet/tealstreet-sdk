@@ -1449,3 +1449,153 @@ async fn j6_chaser_rejects_unknown_termination_fields_without_ack_job_or_write()
 async fn j6_chaser_rejects_invalid_delay_without_ack_job_or_write() {
     j6_chaser_schema_rejection("delay").await;
 }
+
+#[tokio::test]
+async fn j6b_settings_and_lifecycle_refuse_each_unadmitted_connection() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut cases: Vec<Value> =
+                serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
+                    .unwrap();
+            for family in ["chaser", "twap"] { cases.push(json!({"action":{"kind":"algo","op":format!("{family}:amend"),"data":{"id":"old","options":j6b_options(family)}}})); }
+            for case in cases {
+                let payload = &case["action"];
+                if !matches!(
+                    payload["kind"].as_str(),
+                    Some(
+                        "setMarginType"
+                            | "setPositionMode"
+                            | "scheduleCancel"
+                            | "setStpMode"
+                            | "setAccountTier"
+                            | "stopAlgos"
+                            | "algo"
+                    )
+                ) {
+                    continue;
+                }
+                for admission in ["unjoined", "pending", "disabled"] {
+                    let registry = crate::accounts::tests::registry();
+                    let tape = Tape::default();
+                    let account =
+                        delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+                    let (mut session, mut sent) =
+                        joined(registry.clone(), "A", account.clone()).await;
+                    match admission {
+                        "unjoined" => {
+                            session.joined.clear();
+                        }
+                        "pending" => {
+                            session.start_verification(
+                                "synthetic-main".into(),
+                                std::future::pending(),
+                            );
+                        }
+                        "disabled" => {
+                            session.order_frames_enabled = false;
+                        }
+                        _ => unreachable!(),
+                    }
+                    j6b_raw_action(&mut session, payload.clone(), 0).await;
+                    let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+                    assert_eq!(
+                        outcome["d"]["outcome"], "refused",
+                        "{admission}: {payload}: {outcome}"
+                    );
+                    assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+                    tokio::task::yield_now().await;
+                    assert!(
+                        tape.writes.lock().unwrap().is_empty(),
+                        "{admission}: {payload}"
+                    );
+                    assert_eq!(account.running.counts(), (0, 0), "{admission}: {payload}");
+                    session.close();
+                    registry.dispose(&account, Disposal::PageDisposed);
+                }
+            }
+        })
+        .await;
+}
+
+async fn j6b_raw_action(session: &mut Session, payload: Value, age: u64) {
+    let id = action_key();
+    let fp =
+        crate::order_contract::action_wire_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+    session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":age,"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
+}
+fn j6b_options(family: &str) -> Value {
+    let cases: Vec<Value> =
+        serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json")).unwrap();
+    cases
+        .into_iter()
+        .find(|c| c["action"]["op"] == format!("{family}:start"))
+        .unwrap()["action"]["data"]
+        .clone()
+}
+async fn j6b_wait_writes(tape: &Tape, count: usize) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while native_request_rows(tape, "create").len() < count {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("native signed placements");
+}
+
+#[tokio::test]
+async fn j6b_chaser_amend_retires_old_job_before_signed_replacement() {
+    j6b_amend_replaces("chaser").await;
+}
+#[tokio::test]
+async fn j6b_twap_amend_retires_old_job_before_signed_replacement() {
+    j6b_amend_replaces("twap").await;
+}
+async fn j6b_amend_replaces(family: &str) {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry=crate::accounts::tests::registry(); let tape=Tape::default();
+        let account=delegated_account_with_algos(&registry,"A","bybit",tape.clone(),true);
+        let (mut session,mut sent)=joined(registry.clone(),"A",account.clone()).await;
+        let mut options=j6b_options(family);
+        action(&mut session,json!({"kind":"algo","op":format!("{family}:start"),"data":options}),1,false).await;
+        action_frame(&mut sent,"order.actionOutcome").await;
+        j6b_wait_writes(&tape,1).await;
+        let old=account.running.jobs().0[0].id.clone();
+        options["size"]=json!(0.003);
+        j6b_raw_action(&mut session,json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":old,"options":options}}),0).await;
+        let outcome=action_frame(&mut sent,"order.actionOutcome").await;
+        assert_eq!(outcome["d"]["outcome"],"unknown","{family}: {outcome}");
+        j6b_wait_writes(&tape,2).await;
+        let jobs=account.running.jobs().0;
+        assert_eq!(jobs.len(),1,"{jobs:?}"); assert_ne!(jobs[0].id,old);
+        let rows=native_request_rows(&tape,"create");
+        let qty=rows[1]["qty"].as_str().unwrap().parse::<f64>().unwrap();
+        assert_eq!(qty,if family=="twap" {0.0015} else {0.003});
+        assert!(account.link.is_none());
+        session.close(); registry.dispose(&account,Disposal::PageDisposed);
+    }).await;
+}
+
+#[tokio::test]
+async fn j6b_amend_unknown_fields_are_unsupported_before_job_or_write() {
+    tokio::task::LocalSet::new().run_until(async {
+        for family in ["chaser","twap"] {
+            for field in ["outer","options","nested"] {
+                let registry=crate::accounts::tests::registry(); let tape=Tape::default();
+                let account=delegated_account_with_algos(&registry,"A","bybit",tape.clone(),true);
+                let (mut session,mut sent)=joined(registry.clone(),"A",account.clone()).await;
+                let mut payload=json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":"old","options":j6b_options(family)}});
+                match field {
+                    "outer" => payload["data"]["future"]=true.into(),
+                    "options" => payload["data"]["options"]["future"]=true.into(),
+                    _ if family=="chaser" => payload["data"]["options"]["terminate"]=json!({"type":"price","value":51000,"future":true}),
+                    _ => payload["data"]["options"]["activeMarket"]["future"]=true.into(),
+                }
+                j6b_raw_action(&mut session,payload,0).await;
+                let outcome=action_frame(&mut sent,"order.actionOutcome").await;
+                assert_eq!(outcome["d"]["outcome"],"unsupported");
+                assert!(tape.writes.lock().unwrap().is_empty()); assert!(account.running.jobs().0.is_empty());
+                session.close(); registry.dispose(&account,Disposal::PageDisposed);
+            }
+        }
+    }).await;
+}
