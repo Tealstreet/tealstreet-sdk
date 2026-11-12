@@ -394,12 +394,10 @@ export class ExchangeWorker {
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
       if (this._exchange instanceof RustEngineExchange && (this._twapOwner !== undefined || this._ctx.getTwapOwner)) {
-        this._exchange.setTwapOwnerProvider(() => {
-          const current = captureTwapOwner(() => this._ctx.getTwapOwner?.() ?? null);
-          return generation === this._generation && !this._stopped && current &&
-            current.ownerId === this._twapOwner?.ownerId && current.generation === this._twapOwner?.generation
-            ? this._twapOwner! : null;
-        });
+        this._exchange.setTwapOwnerProvider(
+          () => captureTwapOwner(() => this._ctx.getTwapOwner?.() ?? null) ?? null,
+          this._twapOwner ?? null,
+        );
       }
       if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
       if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation, true);
@@ -444,6 +442,11 @@ export class ExchangeWorker {
 
       const result = await Promise.race([startPromise, timeoutPromise, cancelledPromise]);
       if (result === 'cancelled' || startupToken !== this._startupToken || this._exchange?.isDisposed) {
+        return false;
+      }
+
+      if (!this._twapOwnerCurrent()) {
+        this.dispose();
         return false;
       }
 
@@ -929,6 +932,7 @@ export class ExchangeWorker {
       }
       return;
     }
+    if (!this._stopped && !this._twapOwnerCurrent()) this.dispose();
     if (this._stopped) {
       this._rejectUndispatched(payload);
       return;

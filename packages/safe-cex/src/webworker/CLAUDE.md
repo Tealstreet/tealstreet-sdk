@@ -490,6 +490,9 @@ captures its owner at construction and refuses owned algo startup if that owner
 or generation changes during startup. Buffered messages keep that creation binding;
 both the early call drain and final startup drain recheck it before dispatch.
 Retired buffered work is refused, never treated as initially unowned work.
+The adapter keeps the construction binding separately from its live provider;
+startup and later worker entry retire a changed binding before accepting work.
+An initially unowned worker remains allowed only while its binding stays unowned.
 `EngineHost.algoStart(accountName,
 twapOwner?, isOwnerCurrent?)` passes a present `{ ownerId: string, generation: number }` as JSON
 to the additive WASM `algoStartOwned(accountName, twapOwnerJson, now, wall)`.

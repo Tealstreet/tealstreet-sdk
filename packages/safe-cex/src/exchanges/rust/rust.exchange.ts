@@ -1404,9 +1404,11 @@ export class RustEngineExchange extends BaseExchange {
     owner: TwapOwner | null | undefined;
   }[] = [];
   private twapOwnerProvider?: () => TwapOwner | null;
+  private twapOwnerBinding: TwapOwner | null | undefined;
 
-  setTwapOwnerProvider(getOwner?: () => TwapOwner | null) {
+  setTwapOwnerProvider(getOwner?: () => TwapOwner | null, owner = captureTwapOwner(getOwner)) {
     this.twapOwnerProvider = getOwner;
+    this.twapOwnerBinding = owner && { ...owner };
   }
 
   private algoOwnerCurrent = (owner: TwapOwner | null | undefined): boolean => {
@@ -1427,7 +1429,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!host || this.isDisposed || this.engineFailure) return false;
     if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
     try {
-      const owner = captureTwapOwner(this.twapOwnerProvider);
+      const owner = this.twapOwnerBinding;
       host.algoStart(accountName, owner, owner === undefined ? undefined : () => this.algoOwnerCurrent(owner));
       this.algoRoute = 'rust';
     } catch (error) {

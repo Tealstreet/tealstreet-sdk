@@ -31,6 +31,8 @@ let refuseStartup = false;
 let algosBuild = false;
 class ControlledEngine implements WasmEngineLike {
   pending = true;
+  freed = false;
+  free = () => { this.freed = true; };
   started = false;
   trap = false;
   trapWrites = false;
@@ -71,7 +73,8 @@ class ControlledEngine implements WasmEngineLike {
   algoRunning = () => true;
   algoDeadline = () => undefined;
   algoEmits = () => '[]';
-  algoDispose = () => '[]';
+  algoDisposals = 0;
+  algoDispose = () => { this.algoDisposals++; return '[]'; };
   capabilities = () => engineCapabilities(this.venue);
   start = () => {
     if (trapStartup) throw new WebAssembly.RuntimeError('startup panic');
@@ -500,20 +503,6 @@ describe('Rust worker engine ownership', () => {
     expect(sources[0].algoOwner).toEqual({ ownerId: 'A', generation: 7 });
   });
 
-  it.each(['owner', 'generation'])('starts the account with algos unowned if the %s switches while the worker is starting', async (change) => {
-    algosBuild = true;
-    let owner = { ownerId: 'A', generation: 7 };
-    const { worker } = createWorker({}, 'same-name', () => owner);
-    const pending = worker.start();
-    owner = { ownerId: change === 'owner' ? 'B' : 'A', generation: 8 };
-    await vi.advanceTimersByTimeAsync(250);
-    // Owner unavailable refuses TWAP restores, never the account start.
-    expect(await pending).toBe(true);
-    expect(sources[0].algoOwner).toBeUndefined();
-    expect(sources[0].algoUnowned).toBe(true);
-    expect(sources[0].algoOps).toEqual([]);
-  });
-
   it.each(['unchanged', 'owner', 'generation', 'returning', 'logout', 'unowned', 'legacy'] as const)(
     'keeps startup-buffered work with its initiating binding: %s',
     async (change) => {
@@ -548,8 +537,8 @@ describe('Rust worker engine ownership', () => {
       }
       if (change === 'logout') owner = null;
       await vi.advanceTimersByTimeAsync(250);
-      expect(await pending).toBe(true);
       const allowed = change === 'unchanged' || change === 'unowned' || change === 'legacy';
+      expect(await pending).toBe(allowed);
       expect(sources[0].algoOps).toEqual(
         allowed
           ? [
@@ -576,6 +565,58 @@ describe('Rust worker engine ownership', () => {
       }
     },
   );
+
+  it.each(['unchanged', 'owner', 'generation', 'returning', 'logout', 'unowned', 'legacy'] as const)(
+    'retires a changed startup binding before later commands: %s',
+    async (change) => {
+      algosBuild = true;
+      let owner: { ownerId: string; generation: number } | null =
+        change === 'unowned' ? null : { ownerId: 'A', generation: 7 };
+      const { worker, messages } = createWorker({}, 'same-name', change === 'legacy' ? undefined : () => owner);
+      const pending = worker.start();
+      if (change === 'owner') owner = { ownerId: 'B', generation: 8 };
+      if (change === 'generation') owner = { ownerId: 'A', generation: 8 };
+      if (change === 'returning') {
+        owner = { ownerId: 'B', generation: 8 };
+        owner = { ownerId: 'A', generation: 9 };
+      }
+      if (change === 'logout') owner = null;
+      await vi.advanceTimersByTimeAsync(250);
+      await pending;
+      const allowed = change === 'unchanged' || change === 'unowned' || change === 'legacy';
+      worker.handlePayload({ op: 'exec', data: { reqId: 'later-exec', symbol: market.symbol, command: 'buy 1' } });
+      worker.handlePayload(placeOrder('later-order'));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sources).toHaveLength(1);
+      expect(sources[0].algoOps).toEqual(allowed
+        ? [['exec', { reqId: 'later-exec', symbol: market.symbol, command: 'buy 1' }]] : []);
+      expect(sources[0].commands.filter((command) => command.op === 'placeOrders')).toHaveLength(allowed ? 1 : 0);
+      expect(sources[0].freed).toBe(!allowed);
+      expect((worker.exchange as RustEngineExchange).isDisposed).toBe(!allowed);
+      expect(replies(messages, 'later-order')).toHaveLength(1);
+      expect(replies(messages, 'later-order')[0].data.success).toBe(allowed);
+      if (!allowed) {
+        expect(replies(messages, 'later-order')[0].data.result.outcome).toBe('notSent');
+        expect(messages).toContainEqual(expect.objectContaining({
+          op: 'exec-result', data: [expect.objectContaining({ reqId: 'later-exec', success: false })],
+        }));
+      }
+    },
+  );
+
+  it('retires an initially unowned worker when an owner appears without stale cleanup cancels', async () => {
+    algosBuild = true;
+    let owner: { ownerId: string; generation: number } | null = null;
+    const { worker } = createWorker({}, 'same-name', () => owner);
+    expect(await start(worker)).toBe(true);
+    expect(sources[0].algoUnowned).toBe(true);
+    owner = { ownerId: 'A', generation: 7 };
+    worker.handlePayload({ op: 'exec', data: { reqId: 'retired-unowned', symbol: market.symbol, command: 'buy 1' } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sources[0].algoOps).toEqual([]);
+    expect(sources[0].freed).toBe(true);
+    expect(sources[0].algoDisposals).toBe(0);
+  });
 
   it('settles a held Rust exec once, as an unknown outcome, when the engine traps', async () => {
     algosBuild = true;
