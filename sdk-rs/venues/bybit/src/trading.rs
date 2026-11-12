@@ -597,21 +597,33 @@ impl BybitLinear {
         self.position_idx(cx, symbol, side, true)
     }
 
-    fn full_position_opposite(&self, cx: &Cx<'_, Pending>, opts: &PlaceOrderOpts) -> bool {
+    fn full_position_opposite(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<bool, String> {
         let side = match opts.side {
             OrderSide::Buy => PositionSide::Short,
             OrderSide::Sell => PositionSide::Long,
         };
-        cx.store.positions().iter().any(|p| {
-            p.symbol == opts.symbol
-                && p.side == side
-                && p.contracts != 0.0
-                && if self.category_for(&opts.symbol) == Category::Inverse {
-                    p.notional
-                } else {
-                    p.contracts
-                } >= opts.amount
-        })
+        let mut full = false;
+        for p in cx
+            .store
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == opts.symbol && p.side == side && p.contracts != 0.0)
+        {
+            let size = if self.category_for(&opts.symbol) == Category::Inverse {
+                p.notional
+            } else {
+                p.contracts
+            };
+            if !size.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            full |= size >= opts.amount;
+        }
+        Ok(full)
     }
 
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
@@ -669,7 +681,7 @@ impl BybitLinear {
                 }
                 continue;
             }
-            if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts) {
+            if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts)? {
                 let body = self.position_stop(cx, opts)?;
                 job.steps.push_back(trading_stop_step(body));
             } else if opts.kind == OrderType::TrailingStopLoss {
@@ -793,7 +805,7 @@ impl BybitLinear {
             return self.trailing_stop(cx, opts).map(Some);
         }
         if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit)
-            && self.full_position_opposite(cx, opts)
+            && self.full_position_opposite(cx, opts)?
         {
             return self.position_stop(cx, opts).map(Some);
         }

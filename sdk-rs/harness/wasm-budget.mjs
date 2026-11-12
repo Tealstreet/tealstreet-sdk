@@ -219,8 +219,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3300 merge c4d663622c01: local optimized web/node 2,092,748 B; measured + 10 KiB rounded up.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue apexomni, twice -Oz.
   apexomni: 2_103_296,
+  // #3448 merged head 9b737161757f: CI run 43061512265, artifact 13873588589.
+  // Optimized web/node 2,197,821 B + 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
-  asterdex: 2_201_600,
+  // #3425 run 43176700451/job 131043125663, CI source cca7b8337ad3:
+  // web/Node 2,208,996 B; current measured maximum + 10 KiB, rounded up.
+  // Shared engine valuation/native-size policy; retain unknown instead of a partial value.
+  // #3448 head 9a736b2a6bf1: run 43198030267/job 131114624468, artifact 13934600864.
+  // Optimized web/Node 2,211,230 B + 10 KiB, rounded up to KiB.
+  asterdex: 2_222_080,
   backpack: 2_040_832,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
@@ -241,9 +248,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
   bitrue: 1_912_832,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
-  bitunix: 1_930_240,
+  // #3425 run 43176700451/job 131043125555, CI source cca7b8337ad3:
+  // web/Node 1,942,038 B; current measured maximum + 10 KiB, rounded up.
+  // Shared native-size policy must retain unknown/conflicting quantity refusals.
+  bitunix: 1_952_768,
   blofin: 2_072_576,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
+  // #3425 run 43176700451/job 131043125392, CI source cca7b8337ad3:
+  // web/Node 2,330,713 B; current measured maximum + 10 KiB, rounded up.
+  // Nullable valuation plus inverse quote-capacity refusals remain in this family.
   // #3342 merged head 2b623dc76a03: local optimized web/node 2,351,685 B; +10 KiB, rounded up.
   // build.sh --venue bybit; Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132, twice -Oz.
   bybit: 2_362_368,
@@ -292,12 +305,18 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3304 refusal ordering at 0b7e6ccf60f3ac4c202ffb595a2b6185b1f5fb1e: web/node 2,234,008 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue kraken;
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132. Measured + 10 KiB rounded up to KiB.
-  kraken: 2_256_896,
-  krakenspot: 2_256_896,
+  // #3425 run 43176700451/job 131043125504, CI source cca7b8337ad3:
+  // web/Node 2,260,418 B; current measured maximum + 10 KiB, rounded up.
+  // Keep unavailable mark valuation and distinct PF/inverse quantity rules.
+  kraken: 2_271_232,
+  krakenspot: 2_271_232,
   kucoin: 1_872_896,
   kucoinspot: 2_462_720,
-  lighter: 2_137_088,
-  'lighter-robinhood': 2_137_088,
+  // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
+  // web/Node 2,146,773 B; current measured maximum + 10 KiB, rounded up.
+  // Shared engine valuation/native-size policy; no signing or admission expansion.
+  lighter: 2_157_568,
+  'lighter-robinhood': 2_157_568,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
   // #3299 restage run 42558057739 at 5dec79811311, jobs 128968431838/128968431872:
@@ -308,7 +327,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3433 head 99eed37c13cc: fresh optimized web/node 1,927,409 B + 10 KiB, rounded up to KiB.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 (two -Oz passes).
-  mexc: 1_938_432,
+  // #3425 run 43176700451/job 131043125322, CI source cca7b8337ad3:
+  // web/Node 1,946,379 B; current measured maximum + 10 KiB, rounded up.
+  // Shared native sizing with current master broker behavior retained.
+  mexc: 1_956_864,
   okx: 2_053_120,
   orderly: 1_773_568,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
@@ -333,7 +355,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3433 merge b57d4ab06df2 + master 4d399f716231: optimized local web/node 1,993,711 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up to KiB.
-  weex: 2_003_968,
+  // #3425 run 43176700451/job 131043125397, CI source cca7b8337ad3:
+  // web/Node 2,010,529 B; current measured maximum + 10 KiB, rounded up.
+  // Shared engine valuation/native-size policy; no venue activation or codec change.
+  weex: 2_021_376,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.

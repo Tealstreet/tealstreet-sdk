@@ -1730,7 +1730,11 @@ impl BybitLinear {
         if error.outcome == Some(Outcome::NotSent)
             && matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
         {
-            let _ = cx.present_plan_failure(&run.plan, error.message.clone());
+            // A transport refusal on the cancel-partial-stop leg surfaces as
+            // `NotSent`. The venue path has already composed the right
+            // user-facing message for the partial put-back; replace the raw
+            // transport text on this definite outcome.
+            let _ = cx.override_plan_failure_message(&run.plan, error.message.clone());
         }
         if matches!(active.leg.planned.call, Call::PartialProof(_)) {
             let _ = cx.inherit_plan_uncertainty(&run.plan);

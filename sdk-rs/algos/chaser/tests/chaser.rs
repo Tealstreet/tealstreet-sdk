@@ -2374,6 +2374,29 @@ async fn a_reduce_only_chase_ends_when_its_position_is_gone() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn unknown_notional_does_not_hide_a_confirmed_flat_reduce_position() {
+    local(async {
+        let port = FakePort::new("kraken");
+        port.accept_placements();
+        port.store.borrow_mut().positions.push(Position {
+            id: "p".into(), symbol: "BTCUSDT".into(), side: PositionSide::Short,
+            entry_price: 100.0, notional: f64::NAN, leverage: 1.0,
+            margin_type: None, position_mode: None, unrealized_pnl: 0.0,
+            realized_pnl: None, contracts: 1.0, liquidation_price: f64::NAN,
+            margin_size: None, last_update: None,
+        });
+        let (factory, _cx) = start(&port, r#"{"symbol":"BTCUSDT","size":1,"side":"buy","maxAttempts":10,"delay":0,"reduceOnly":true}"#);
+        settle(1100).await;
+        assert!(!factory.book().active_chasers().is_empty());
+        port.store.borrow_mut().positions[0].contracts = 0.0;
+        port.update_order("o1", |_| {});
+        settle(100).await;
+        assert_eq!(port.completes().len(), 1);
+        assert_eq!(port.completes()[0]["stopReason"], "Completed");
+    }).await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn fill_events_complete_a_hyperliquid_chase() {
     local(async {
         let port = FakePort::new("hyperliquid");

@@ -1946,7 +1946,12 @@ impl Lighter {
             if let Some(plan) = &job.plan
                 && (job.protection.is_some() || error.outcome == Some(Outcome::Unknown))
             {
-                let _ = cx.present_plan_failure(plan, error.message.clone());
+                // Re-presents the venue path's own already-composed message
+                // (e.g. `not_sent("Lighter stop not changed: trigger crossed")`
+                // from protective_edits::protection) on top of a definite leg
+                // failure like `21104 invalid nonce`. Uses the override entry
+                // point because the outcome here is typically `Rejected`.
+                let _ = cx.override_plan_failure_message(plan, error.message.clone());
             }
             if let Some(plan) = &job.plan {
                 if let (Some(slot), Some(context)) = (&job.slot, &job.live) {
