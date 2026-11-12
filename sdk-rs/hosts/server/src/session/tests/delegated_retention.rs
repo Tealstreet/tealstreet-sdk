@@ -41,7 +41,7 @@ async fn restart_notice_precedes_handover_and_echoes_only_the_current_registrati
         );
         let expected = envelope::algo_notice(
             "acct",
-            "Your algos are waiting for your key after the server restarted. Provide your key again, then check Open Orders before explicitly resuming TWAPs or starting new chases.",
+            "The previous server (01) lost its memory-only delegated key (waiting for your key). Only client-retained TWAP schedules can be restored, paused. Check Open Orders before explicitly resuming TWAPs or starting new chases; resting orders may still fill.",
             None,
         );
         let expected = id.filter(|id| !id.is_empty()).map_or_else(
