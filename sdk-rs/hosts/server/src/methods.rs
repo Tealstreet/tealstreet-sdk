@@ -405,6 +405,9 @@ pub fn translate_delegated(
             "DELEGATED methods are not enabled for this account",
         ));
     }
+    if let Some(plan) = crate::full_writes::translate(method, args, capabilities) {
+        return plan;
+    }
     translate(method, args, capabilities, open_order_symbols, public_only)
 }
 

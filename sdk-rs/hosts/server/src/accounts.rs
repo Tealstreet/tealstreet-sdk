@@ -2204,6 +2204,7 @@ pub mod testing {
             op: op.into(),
             data: data.into(),
             origin: "test".into(),
+            action: None,
         };
         let sent = account.algos.as_ref().map(|algos| algos.send(input));
         assert!(

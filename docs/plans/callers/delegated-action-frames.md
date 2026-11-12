@@ -182,3 +182,89 @@ completed-history compaction and restore, including adoption of an existing SDK
 key. It remains subject to the existing 1,056-record total bound; exhaustion
 refuses new keys rather than forgetting reservations. Frame shapes, fingerprints
 and the storage methods/checkpoint atomicity are unchanged.
+
+## Full LOCAL write coverage (additive v1 vocabulary)
+
+The same `order.action` / `order.actionAck` / `order.actionOutcome` /
+`order.actionCancelQueued` frame family now also carries the local native write
+surface. Its version, canonical domain, UUIDv7 namespace, ten-second admission
+bounds, durable claim-before-forward rule, no-replay rule and registration fence
+are unchanged. `order.submit` remains byte-compatible.
+
+Expanded operations additionally require the box's
+`delegatedFullWriteActionsV1` and the router's `delegatedFullWriteLedgerV1`,
+both explicitly true on the captured admitted connection, together with the four
+original action/placement flags. The box advertises the new flag under the same
+compiled/runtime switch; an older router's four-action attestation is insufficient.
+Missing flags keep new writes queued without sending or accepting receipts. Never
+fall back to legacy `callMethod`, another channel, HTTP or browser signing.
+The existing private Bybit-only DELEGATED admission is not widened. Venue-specific
+operations on an incapable account return a proven pre-dispatch refusal.
+
+| Local operation | Action payload (all include `kind`) |
+| --- | --- |
+| Single/batch placements, bracket/TP/SL/trailing/opening triggers | `place {orders:[DelegatedOrderParams]}` |
+| Native amend | Existing `amend {order,update}` |
+| Single/batch venue cancel | Existing `cancel {order}`, or `cancelOrders {orders:[{id,symbol,type?}]}` |
+| Cancel symbol / account | `cancelSymbol {symbol}`; `cancelAll {symbols?:string[]}` adds explicit coverage to known and attempted symbols |
+| Symbol/hedge leverage | `setLeverage {symbol,leverage,side?:'long'|'short'}` |
+| All leverage | `setAllLeverage {leverage}`; native account setting or positions/known published rails fan-out |
+| Margin / position mode | `setMarginType {isolated,symbol?}`; `setPositionMode {hedged,symbol?}` |
+| One/partial/hedge position close | `close {order}`; explicit native size, `reduceOnly:true`, market/limit only |
+| Close all / cancel and close / cancel and stop algos | `closeAll {}` / existing `nuke {}` / `nukeOrders {}` |
+| Stop only account algos | `stopAlgos {}` |
+| Dead-man cancel / clear | `scheduleCancel {time:<safe UTCms integer> \| null}` |
+| Venue settings | `setStpMode {mode:'EXPIRE_TAKER'\|'EXPIRE_MAKER'\|'EXPIRE_BOTH'}`; `setAccountTier {tier:'standard'\|'premium'\|'plus'}` |
+| CORE runCommand / hosted CLI | `algo {op:'exec',data:{command,symbol?}}` |
+| Chaser lifecycle | `algo {op:'chaser:start',data:ChaserOrderOptions}`; terminate takes a job ID; terminateAll takes `{}` |
+| TWAP lifecycle / restore | `algo {op:'twap:start',data:TwapOptions}`; resume/pause/stop/cleanup take a job ID; state takes persisted rows |
+
+New placement/close results are `{kind,orderIds}` (1–32 bounded IDs), only after
+native completion. They do not replace caller-supplied client IDs with the action
+intent ID: protective and split shapes use the native ID policy. Explicit caller
+IDs retain the native whole-batch preflight. A close has no second browser-side
+placement. Other completed synchronous writes return `{kind}`; setting results
+must be native unit completions. Malformed results remain unknown. Any partial
+native effects prevent a whole-action `notSent` proof, even if a later leg refused.
+The generic command-group completion waits for all leverage/cancel-all legs.
+
+`DelegatedOrderParams` is a closed native placement shape: symbol, type, side,
+amount and the existing optional price/trigger/protection, time-in-force,
+reduce-only, caller-ID, slippage, STP, Bybit BBO and implied-volatility fields.
+Native guards and capabilities still decide whether the venue supports a shape.
+There are at most 32 orders/targets/symbols per action and the original 64 KiB
+UTF-8 frame limit still applies. Use explicit intents for larger work; a transport
+retry never splits or automatically replays it. Single `cancel` also retains an
+optional order type for protective routing and requires the expanded flags when
+that context is supplied.
+
+Algo actions preserve the existing native algo protocol, including interruption
+restore pauses and drain admission. Their ACK means admitted, not completed.
+The action outcome is conservatively unknown: job state/ordinary correlated
+`exec-result`, `chaser:*`, `twap:*` and store events reconcile the asynchronous
+operation. The SDK refuses an `applied` receipt for `kind:'algo'`; dispatch alone
+cannot manufacture a completed venue write. The router records the unknown
+outcome and must never re-forward the action. EXEC receives the intent as its
+`reqId`, rather than accepting a second caller-controlled correlation ID.
+
+Queued algo admission captures the original registration and deadline and checks
+both before and after the actor's store read. EXEC continuations recheck them
+before each native command. Accepted long-lived chases/TWAPs belong to the native
+account scope, as in LOCAL, and retain the account/user/router-lease authority;
+a socket handover does not restart them. TWAP options/restored state must name
+the admitted account. No payload may name another account to route a command.
+Persisted TWAP `activeMarket` is just `{symbol}` on this typed API; the hosted
+engine's catalogue supplies all market facts. The existing algo validation still
+rejects invalid schedules and enforces restoration/uncertainty rules.
+
+The expanded corpus `delegated-full-writes-v1.json` pins the method mapping and
+canonical hashes in both SDK and Rust tests. The original four-kind corpus and
+placement protocol remain unchanged. Server implementation remains entirely in
+`hosts/server`; no engine, venue, algo crate, wasm input or budget changes.
+
+A zero-amount amend is also an expanded action: native Bybit Partial protection
+uses zero for full-position sizing. It requires the two expanded capability
+flags and remains subject to the native protective-amend guard. Ordinary orders
+whose venue requires a positive amount still refuse before dispatch. Price
+updates remain strictly positive. The original positive-amount amend contract
+and its existing fingerprints are unchanged.

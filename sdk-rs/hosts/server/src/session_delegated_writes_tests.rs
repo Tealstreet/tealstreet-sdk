@@ -22,6 +22,7 @@ mod action_frames;
 #[derive(Clone, Default)]
 struct Tape {
     writes: Arc<Mutex<Vec<String>>>,
+    requests: Arc<Mutex<Vec<Value>>>,
     client_order_ids: Arc<Mutex<Vec<String>>>,
     hold: bool,
     close_unknown: bool,
@@ -96,8 +97,13 @@ impl Transport for Tape {
         let path = request.url.split('?').next().unwrap();
         let mutation = path.contains("/v5/order/create")
             || path.contains("/v5/order/amend")
-            || path.contains("/v5/order/cancel");
+            || path.contains("/v5/order/cancel")
+            || path.contains("/v5/position/set-leverage")
+            || path.contains("/v5/position/switch-mode")
+            || path.contains("/v5/account/set-margin-mode")
+            || path.contains("/v5/position/trading-stop");
         if mutation {
+            self.requests.lock().unwrap().push(json!({"path":path,"body":serde_json::from_str::<Value>(request.body.as_deref().unwrap_or("null")).unwrap()}));
             if path.contains("/create") {
                 let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
                 let rows = body
@@ -162,9 +168,10 @@ impl Transport for Tape {
             } else if path.ends_with("-batch") {
                 let payload: Value =
                     serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-                let rows: Vec<Value> = payload["request"].as_array().unwrap().iter().map(|row|
-                    json!({"orderId":row.get("orderId").and_then(Value::as_str).unwrap_or("native-one"),"orderLinkId":row["orderLinkId"],"symbol":row["symbol"]})
-                ).collect();
+                let rows: Vec<Value> = payload["request"].as_array().unwrap().iter().enumerate().map(|(index, row)| {
+                    let fallback = if index == 0 { "native-one".to_owned() } else { format!("native-{}", index + 1) };
+                    json!({"orderId":row.get("orderId").and_then(Value::as_str).unwrap_or(&fallback),"orderLinkId":row["orderLinkId"],"symbol":row["symbol"]})
+                }).collect();
                 let codes: Vec<Value> = rows.iter().map(|_| json!({"code":0,"msg":"OK"})).collect();
                 json!({"retCode":0,"retMsg":"OK","result":{"list":rows},"retExtInfo":{"list":codes}})
             } else {

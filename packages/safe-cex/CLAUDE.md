@@ -172,6 +172,19 @@ result, retaining atomic scoped checkpoints/retirement and all version-1 placeme
 records. See `docs/plans/callers/delegated-action-frames.md` and the shared
 `delegated-actions-v1.json` fixture.
 
+The additive full-write vocabulary uses the same v1 action frames. Batch and
+protective placements, reduce-only close, settings, symbol/batch cancellation,
+close-only/stop-only nukes and native algo/EXEC operations additionally require
+`delegatedFullWriteActionsV1` and `delegatedFullWriteLedgerV1`, together with the
+four existing flags on the admitted ticket. Old four-action routers confer no
+expanded admission. Native dispatch/completion stays on the hosted account;
+there is no browser-sign or legacy-method fallback. Algo action receipts remain
+unknown and reconcile from account events, never an assumed applied result.
+Accepted long-lived jobs keep their account scope; queued admission and EXEC
+continuations keep their captured registration/deadline fences. The complete
+closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
+LOCAL and COSIGNED method forwarding is unchanged.
+
 ## Mirror CI invariants (don't "clean these up")
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean

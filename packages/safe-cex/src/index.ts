@@ -35,9 +35,11 @@ export {
   createDelegatedIntentId,
   markDelegatedNotSent,
 } from './delegatedOutbox';
+export type { DelegatedAlgoAction } from './delegatedAlgoActions';
 export { delegatedActionFingerprint } from './delegatedActions';
 export type {
   DelegatedAction,
+  DelegatedOrderParams,
   DelegatedActionResult,
   DelegatedActionOutcome,
   DelegatedActionRequestFrame,

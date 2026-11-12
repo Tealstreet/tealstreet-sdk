@@ -1405,6 +1405,7 @@ impl Session {
                             op: op.to_owned(),
                             data: msg.data.to_string(),
                             origin: format!("socket:{}", self.socket),
+                            action: None,
                         })
                         .is_ok()
                 });
@@ -1624,6 +1625,11 @@ impl Session {
             if account.handle.capabilities().cancel_all != CancelAll::Native {
                 symbols.extend(account.placed.symbols());
             }
+            if matches!(order_frame, Some(OrderReceipt::Action { .. }))
+                && let Some(Value::Array(extra)) = args.first()
+            {
+                symbols.extend(extra.iter().filter_map(Value::as_str).map(str::to_owned));
+            }
             symbols
         } else {
             Vec::new()
@@ -1646,7 +1652,22 @@ impl Session {
             );
             return;
         }
-        let plans = if account.delegated.is_some() {
+        let plans = if matches!(order_frame, Some(OrderReceipt::Action { .. }))
+            && method == "setAllLeverage"
+            && !account.handle.capabilities().account_leverage
+        {
+            let leverage = args[0].as_f64().unwrap();
+            account
+                .handle
+                .read(move |store| crate::full_writes::all_leverage(store, leverage))
+                .await
+                .unwrap_or_else(|| {
+                    Err(methods::Refused {
+                        name: "Error",
+                        message: "Account closed before leverage dispatch".into(),
+                    })
+                })
+        } else if account.delegated.is_some() {
             methods::translate_delegated(
                 &account.venue,
                 &method,
@@ -1685,6 +1706,24 @@ impl Session {
                 return;
             }
         };
+        if let Some(OrderReceipt::Action {
+            seq,
+            kind,
+            deadline,
+        }) = order_frame
+            && let Err(message) =
+                crate::order_actions::ActionGuard::new(dispatch_out.clone(), deadline).check()
+        {
+            crate::order_actions::settle(
+                &dispatch_out,
+                name,
+                &request_id,
+                seq,
+                kind,
+                Err(json!({"message":message,"outcome":"unknown"})),
+            );
+            return;
+        }
         if let Some(receipt) = order_frame {
             // Reply maps completion only. Every command dispatch below carries
             // the original receipt, including its immutable deadline.
@@ -1729,8 +1768,8 @@ impl Session {
                     }
                 }
                 Plan::Nuke(mode) => {
-                    if let Some(OrderReceipt::Action { seq, deadline, .. }) = order_frame {
-                        self.send_action_nuke(name, &request_id, seq, deadline);
+                    if let Some(receipt @ OrderReceipt::Action { .. }) = order_frame {
+                        self.send_action_nuke(name, &request_id, receipt, mode);
                         continue;
                     }
                     let handle = account.handle.clone();
@@ -2957,6 +2996,7 @@ mod tests {
                 op: op.into(),
                 data: data.into(),
                 origin: "test".into(),
+                action: None,
             })
             .unwrap();
     }
@@ -3978,6 +4018,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            action: None,
                         })
                         .unwrap();
                 };
@@ -4326,6 +4367,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            action: None,
                         })
                         .unwrap();
                 };
@@ -4401,6 +4443,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            action: None,
                         })
                         .unwrap();
                 };
@@ -4483,6 +4526,7 @@ mod tests {
                         op: "chaser:start".into(),
                         data: "not a chase".into(),
                         origin: "test".into(),
+                        action: None,
                     })
                     .unwrap();
                 settle().await;

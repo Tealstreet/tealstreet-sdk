@@ -23,6 +23,7 @@ pub enum AlgoInput {
         data: String,
         /// The socket that sent it, for the order audit line.
         origin: String,
+        action: Option<Box<crate::order_actions::NukeReceipt>>,
     },
     /// A hosted `nuke`/`nukePositions`/`nukeOrders` call: exec's nuke, answered
     /// with `callMethod:done` once every leg has settled.
@@ -1035,7 +1036,11 @@ pub async fn run(
                     if let Some(signer) = &link_signer { signer.mark_unavailable(); }
                     return;
                 }
-                Some(AlgoInput::Op { op, mut data, origin }) => {
+                Some(AlgoInput::Op { op, mut data, origin, action }) => {
+                    if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
+                        continue;
+                    }
                     if !running.io_allowed() {
                         port.emit("error", crate::user_drain::refusal().to_string());
                         continue;
@@ -1050,6 +1055,17 @@ pub async fn run(
                         port.emit("error", crate::user_drain::refusal().to_string());
                         continue;
                     }
+                    if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
+                        continue;
+                    }
+                    // EXEC continuations retain their original registration/deadline.
+                    // Long-lived jobs deliberately belong to the account scope, as on LOCAL.
+                    let op_cx = if op == "exec" {
+                        action.as_ref().map(|receipt| AlgoCx::new(
+                            Rc::new(ActionNukePort { port: port.clone(), guard: receipt.guard() }), cx.scope.clone()
+                        ))
+                    } else { None };
                     let epoch = running.restore_epoch();
                     if op == "twap:state" && let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(&data) {
                         for row in &mut rows {
@@ -1070,7 +1086,7 @@ pub async fn run(
                         continue;
                     }
                     let dispatch = || {
-                        let result = registry.dispatch(&op, &data, &cx);
+                        let result = registry.dispatch(&op, &data, op_cx.as_ref().unwrap_or(&cx));
                         running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                         result
                     };
@@ -1102,6 +1118,11 @@ pub async fn run(
                         port.emit("error", Value::String(error).to_string());
                     }
                     publish(&mut published);
+                    if let Some(receipt) = action {
+                        // Dispatch admission is not proof that an asynchronous job or
+                        // its venue writes completed. Ordinary algo events reconcile it.
+                        receipt.finish(Err(serde_json::json!({"message":"Algo operation dispatched; reconcile its account events","outcome":"unknown"})));
+                    }
                 }
                 Some(AlgoInput::Nuke { mode, request_id, action }) => {
                     if action.as_ref().is_some_and(|receipt| receipt.expired()) {

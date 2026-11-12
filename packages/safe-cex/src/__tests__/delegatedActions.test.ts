@@ -3,9 +3,9 @@ import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delega
 
 import { describe, expect, it } from 'vitest';
 
-import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
 import golden from '../../../../sdk-rs/hosts/server/tests/data/delegated-actions-v1.json';
-import { delegatedActionFingerprint } from '../delegatedActions';
+import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
+import { delegatedActionFingerprint, isDelegatedAction, isDelegatedFullWriteAction } from '../delegatedActions';
 import { DelegatedOutbox } from '../delegatedOutbox';
 
 const actions: DelegatedAction[] = [
@@ -70,13 +70,58 @@ const outcome = (id: string, action: DelegatedAction, seq = 1) => ({
     intentId: id,
     seq,
     outcomeSeq: 41,
-    outcome: 'applied',
-    result: ['amend', 'place', 'close'].includes(action.kind) ? { kind: action.kind, orderIds: ['changed'] } : { kind: action.kind },
-    error: null,
+    outcome: action.kind === 'algo' ? 'unknown' : 'applied',
+    result:
+      action.kind === 'algo'
+        ? null
+        : ['amend', 'place', 'close'].includes(action.kind)
+          ? { kind: action.kind, orderIds: ['changed'] }
+          : { kind: action.kind },
+    error: action.kind === 'algo' ? { message: 'Asynchronous operation', outcome: 'unknown' } : null,
   },
 });
 
 describe('DELEGATED versioned actions', () => {
+  it.each(fullWrites)('pins full-write canonical hash for $method', ({ action, fingerprint }) => {
+    expect(isDelegatedFullWriteAction(action as unknown as DelegatedAction)).toBe(true);
+    expect(delegatedActionFingerprint('main', golden.key, action as unknown as DelegatedAction, 1)).toBe(fingerprint);
+  });
+  it.each(['delegatedFullWriteActionsV1', 'delegatedFullWriteLedgerV1'] as const)(
+    'requires the expanded %s attestation',
+    async (flag) => {
+      const f = setup();
+      delete f.connection.capabilities[flag];
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection);
+      await box.enqueueAction(fullWrites[0].action as unknown as DelegatedAction);
+      expect(f.writes).toEqual([]);
+      box.close();
+      const legacy = setup();
+      delete legacy.connection.capabilities[flag];
+      const oldBox = await DelegatedOutbox.open(legacy.options);
+      oldBox.connect(legacy.connection);
+      await oldBox.enqueueAction(actions[1]);
+      expect(legacy.writes).toHaveLength(1);
+      oldBox.close();
+    },
+  );
+  it.each([
+    { kind: 'setLeverage', symbol: 'BTCUSDT', leverage: -1 },
+    { kind: 'setPositionMode', hedged: 'false' },
+    { kind: 'setMarginType', isolated: true, accountName: 'other' },
+    {
+      kind: 'place',
+      orders: [{ symbol: 'BTCUSDT', type: 'market', side: 'buy', amount: 1, secret: 'forbidden-field' }],
+    },
+    { kind: 'close', order: { symbol: 'BTCUSDT', type: 'market', side: 'sell', amount: 1, reduceOnly: false } },
+    { kind: 'cancelOrders', orders: [] },
+    { kind: 'algo', op: 'callMethod', data: {} },
+    { kind: 'algo', op: 'exec', data: { command: 'buy 1', accountName: 'other' } },
+    { kind: 'algo', op: 'twap:state', data: [{ id: 'x', options: {}, state: {} }] },
+  ])('refuses malformed/full-authority $kind payloads', (value) => {
+    expect(isDelegatedAction(value)).toBe(false);
+  });
+
   it('keeps a physically handed-off action unknown when its admission window expires', async () => {
     const f = setup();
     const box = await DelegatedOutbox.open(f.options);
@@ -134,7 +179,10 @@ describe('DELEGATED versioned actions', () => {
     expect(request.d.fingerprint).toBe(delegatedActionFingerprint('main', id, action, 1));
     expect([...f.rows.values()][0]).toMatchObject({ version: 2, action });
     await box.receive(c, outcome(id, action));
-    expect(box.entries()[0]).toMatchObject({ state: 'applied', result: outcome(id, action).d.result });
+    expect(box.entries()[0]).toMatchObject({
+      state: action.kind === 'algo' ? 'unknown' : 'applied',
+      ...(action.kind === 'algo' ? {} : { result: outcome(id, action).d.result }),
+    });
     box.close();
   });
   it.each([

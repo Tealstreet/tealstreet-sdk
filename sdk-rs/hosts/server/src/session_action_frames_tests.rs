@@ -836,3 +836,213 @@ async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refus
         })
         .await;
 }
+
+#[tokio::test]
+async fn full_writes_sign_and_send_each_supported_operation_without_browser_signing() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let cases: Vec<Value> =
+                serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
+                    .unwrap();
+            for case in cases {
+                let kind = case["action"]["kind"].as_str().unwrap();
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account =
+                    delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+                assert!(
+                    account.link.is_none(),
+                    "DELEGATED must never ask a browser to sign"
+                );
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                action(&mut session, case["action"].clone(), 1, false).await;
+                let result = action_frame(&mut sent, "order.actionOutcome").await;
+                let unsupported =
+                    matches!(kind, "scheduleCancel" | "setStpMode" | "setAccountTier")
+                        || case["refused"] == true;
+                assert_eq!(
+                    result["d"]["outcome"],
+                    if unsupported {
+                        "refused"
+                    } else if kind == "algo" {
+                        "unknown"
+                    } else {
+                        "applied"
+                    },
+                    "{kind}: {result}"
+                );
+                if unsupported {
+                    assert_eq!(result["d"]["error"]["outcome"], "notSent");
+                    assert!(tape.writes.lock().unwrap().is_empty(), "{kind}");
+                } else if kind == "algo" {
+                    assert!(result["d"]["result"].is_null());
+                    if case["action"]["op"] == "twap:state" {
+                        assert!(
+                            account
+                                .running
+                                .jobs()
+                                .0
+                                .iter()
+                                .any(|job| job.id == "restored-typed-job" && job.parked)
+                        );
+                    }
+                    if matches!(
+                        case["action"]["op"].as_str(),
+                        Some("exec" | "chaser:start" | "twap:start")
+                    ) {
+                        tokio::time::timeout(Duration::from_secs(2), async {
+                            while tape.writes.lock().unwrap().is_empty() {
+                                tokio::task::yield_now().await;
+                            }
+                        })
+                        .await
+                        .expect("typed algo reaches a real signed native write");
+                    }
+                } else {
+                    assert_eq!(result["d"]["result"]["kind"], kind);
+                    let writes = tape.writes.lock().unwrap();
+                    if kind != "stopAlgos" {
+                        assert!(!writes.is_empty(), "{kind}");
+                    }
+                    if kind == "closeAll" {
+                        assert!(!writes.iter().any(|op| op == "cancel"));
+                    }
+                    if matches!(kind, "cancelOrders" | "cancelSymbol" | "nukeOrders") {
+                        assert!(!writes.iter().any(|op| op == "create"));
+                    }
+                    if kind == "close" {
+                        assert!(
+                            tape.requests
+                                .lock()
+                                .unwrap()
+                                .iter()
+                                .any(|r| r["body"]["reduceOnly"] == true)
+                        );
+                    }
+                }
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn full_write_ambiguous_setting_or_batch_is_never_assumed_applied() {
+    tokio::task::LocalSet::new().run_until(async {
+        for payload in [
+            json!({"kind":"setLeverage","symbol":"BTCUSDT","leverage":5}),
+            json!({"kind":"place","orders":[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":50000}]}),
+        ] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape { hold: true, ..Default::default() };
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            action(&mut session, payload, 1, false).await;
+            action_frame(&mut sent, "order.actionAck").await;
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while tape.waiting.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+            }).await.unwrap();
+            // Definitively discard the response after physical handoff. No retry.
+            for (id, events) in tape.waiting.lock().unwrap().drain(..) {
+                events.send(HostEvent::HttpFailed(id, "synthetic disconnected after handoff".into())).unwrap();
+            }
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["outcome"], "unknown", "{result}");
+            assert!(result["d"]["result"].is_null());
+            assert_eq!(tape.writes.lock().unwrap().len(), 1);
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn full_write_protection_shapes_reach_native_signing_without_a_forced_caller_id() {
+    tokio::task::LocalSet::new().run_until(async {
+        for order in [
+            json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0.001,"price":49000,"reduceOnly":true}),
+            json!({"symbol":"BTCUSDT","type":"take_profit_market","side":"sell","amount":0.001,"price":51000,"reduceOnly":true}),
+            json!({"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":0.001,"triggerPrice":51000}),
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":50000,"stopLoss":49000,"takeProfit":51000}),
+        ] {
+            let registry = crate::accounts::tests::registry(); let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            action(&mut session, json!({"kind":"place","orders":[order.clone()]}), 1, false).await;
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["outcome"], "applied", "{order}: {result}");
+            assert!(!tape.writes.lock().unwrap().is_empty(), "{order}");
+            assert!(account.link.is_none());
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() {
+    let (out, mut sent, _) = Out::channel(8);
+    let group = Arc::new(Mutex::new(Group {
+        remaining: 2,
+        failures: Vec::new(),
+    }));
+    let pending = || Pending {
+        request_id: json!("same-action"),
+        method: "setAllLeverage".into(),
+        reply: methods::Reply::Action {
+            kind: "setAllLeverage",
+            seq: 1,
+        },
+        group: Some(group.clone()),
+        incomplete: false,
+        audit: None,
+    };
+    settle(&out, "main", pending(), Ok(Value::Null));
+    assert!(sent.try_recv().is_err());
+    settle(
+        &out,
+        "main",
+        pending(),
+        Err(json!({"message":"second leg refused","outcome":"notSent"})),
+    );
+    let result: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+    assert_eq!(result["d"]["outcome"], "unknown");
+    assert_eq!(result["d"]["error"]["outcome"], "unknown");
+}
+
+#[tokio::test]
+async fn full_write_algo_queued_for_alice_is_dropped_when_bob_replaces_the_login() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = crate::accounts::tests::registry();
+        let a_tape = Tape::default(); let b_tape = Tape::default();
+        let a = delegated_account_with_algos(&registry, "A", "bybit", a_tape.clone(), true);
+        let b = delegated_account_with_algos(&registry, "B", "bybit", b_tape.clone(), true);
+        let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
+        let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+        let (keeper, _kept, _) = Out::channel(256);
+        crate::accounts::tests::hold_live(&a, 9999, keeper.outbox());
+        // Stop A's native actor between admission and execution, while retaining
+        // the account through another holder. Disposal alone cannot prove safety.
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        let handle = a.handle.clone();
+        let blocked = tokio::spawn(async move {
+            handle.read(move |_| { let _ = entered.send(()); gate.recv().unwrap(); }).await
+        });
+        waiting.await.unwrap();
+        action(&mut alice, json!({"kind":"algo","op":"exec","data":{"command":"buy 0.001","symbol":"BTCUSDT"}}), 1, false).await;
+        action_frame(&mut a_sent, "order.actionAck").await;
+        alice.close();
+        release.send(()).unwrap(); blocked.await.unwrap();
+        action(&mut bob, json!({"kind":"algo","op":"exec","data":{"command":"buy 0.001","symbol":"BTCUSDT"}}), 1, false).await;
+        assert_eq!(action_frame(&mut b_sent, "order.actionOutcome").await["d"]["outcome"], "unknown");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while b_tape.writes.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        assert!(a_tape.writes.lock().unwrap().is_empty(), "retired A admission must not execute on the still-live account");
+        while let Ok(text) = a_sent.try_recv() {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_ne!(frame["t"], "order.actionOutcome");
+        }
+        bob.close(); registry.dispose(&a, Disposal::PageDisposed); registry.dispose(&b, Disposal::PageDisposed);
+    }).await;
+}

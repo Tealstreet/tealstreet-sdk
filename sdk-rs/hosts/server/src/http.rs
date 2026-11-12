@@ -682,6 +682,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
             "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
             "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedFullWriteActionsV1": crate::order_contract::runtime_enabled(),
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,
@@ -1618,6 +1619,7 @@ mod tests {
                         op: op.into(),
                         data: data.into(),
                         origin: "test".into(),
+                        action: None,
                     };
                     account.algos.as_ref().unwrap().send(input).unwrap();
                 };

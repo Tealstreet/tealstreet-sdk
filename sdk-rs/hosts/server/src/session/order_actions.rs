@@ -64,6 +64,52 @@ impl Session {
             order_actions::refuse(&out, &name, &id, request.seq, "not sent: expired");
             return;
         };
+        if let crate::order_actions::Action::Algo { op, data } = &request.action {
+            if !crate::full_writes::algo_account_matches(op, data, &name) {
+                order_actions::refuse(
+                    &out,
+                    &name,
+                    &id,
+                    request.seq,
+                    "not sent: algo account differs",
+                );
+                return;
+            }
+            let receipt = crate::order_actions::NukeReceipt::new(
+                out.clone(),
+                name.clone(),
+                id.clone(),
+                request.seq,
+                deadline,
+            )
+            .with_kind("algo");
+            let Some(algos) = self.joined[&name].account.algos.clone() else {
+                receipt.finish(Err(
+                    json!({"message":"Algo host unavailable","outcome":"notSent"}),
+                ));
+                return;
+            };
+            order_actions::acknowledge(&out, &name, &id, request.seq, true);
+            let mut data = data.clone();
+            if op == "exec" {
+                data["reqId"] = id.clone();
+            }
+            if let Err(error) = algos.send(crate::algos::AlgoInput::Op {
+                op: op.clone(),
+                data: data.to_string(),
+                origin: format!("socket:{}", self.socket),
+                action: Some(Box::new(receipt)),
+            }) && let crate::algos::AlgoInput::Op {
+                action: Some(receipt),
+                ..
+            } = error.0
+            {
+                receipt.finish(Err(
+                    json!({"message":"Algo host unavailable","outcome":"notSent"}),
+                ));
+            }
+            return;
+        }
         order_actions::acknowledge(&out, &name, &id, request.seq, true);
         self.call_inner(
             &name,
@@ -131,9 +177,17 @@ impl Session {
         &self,
         name: &str,
         id: &Value,
-        seq: u64,
-        deadline: order_actions::ActionDeadline,
+        captured: OrderReceipt,
+        mode: &'static str,
     ) {
+        let OrderReceipt::Action {
+            seq,
+            deadline,
+            kind,
+        } = captured
+        else {
+            return;
+        };
         let account = self.joined[name].account.clone();
         let receipt = crate::order_actions::NukeReceipt::new(
             self.account_out(name),
@@ -141,7 +195,8 @@ impl Session {
             id.clone(),
             seq,
             deadline,
-        );
+        )
+        .with_kind(kind);
         let Some(algos) = account.algos.clone() else {
             receipt.finish(Err(
                 json!({"message":"Nuke is unavailable for this account","outcome":"notSent"}),
@@ -153,7 +208,7 @@ impl Session {
         let request_id = id.clone();
         tokio::spawn(async move {
             let loaded =
-                methods::until_nuke_can_see(&account.handle, "all", methods::READ_WAIT).await;
+                methods::until_nuke_can_see(&account.handle, mode, methods::READ_WAIT).await;
             if receipt.expired() {
                 receipt.finish(Err(order_actions::expired_outcome()));
                 return;
@@ -170,7 +225,7 @@ impl Session {
                 return;
             }
             if let Err(error) = algos.send(crate::algos::AlgoInput::Nuke {
-                mode: "all",
+                mode,
                 request_id,
                 action: Some(Box::new(receipt)),
             }) && let crate::algos::AlgoInput::Nuke {

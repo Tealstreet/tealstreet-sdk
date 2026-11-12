@@ -2,7 +2,12 @@ import type { DelegatedAction, DelegatedActionResult } from './delegatedActions'
 
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
-import { delegatedActionFingerprint, isDelegatedAction, isDelegatedActionResult } from './delegatedActions';
+import {
+  delegatedActionFingerprint,
+  isDelegatedAction,
+  isDelegatedActionResult,
+  isDelegatedFullWriteAction,
+} from './delegatedActions';
 import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
@@ -100,6 +105,8 @@ export interface OutboxConnection extends OutboxScope {
     /** Advertised by the router; absent on older pass-through routers. */
     delegatedOrderLedgerV1?: boolean;
     delegatedOrderActionsV1?: boolean;
+    delegatedFullWriteActionsV1?: boolean;
+    delegatedFullWriteLedgerV1?: boolean;
     delegatedOrderActionLedgerV1?: boolean;
   };
   instanceId?: string;
@@ -573,7 +580,7 @@ export class DelegatedOutbox {
       const row = this.intents.get(data.intentId);
       if (!row || data.seq !== row.seq) return;
       if (row.action) {
-        if (!this.actionCurrent(connection) || !this.actionReceipt(row, parsed.t, data)) return;
+        if (!this.actionCurrent(connection, row.action) || !this.actionReceipt(row, parsed.t, data)) return;
       } else if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
         if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return;
         if (row.retentionExpired && data.received) return;
@@ -687,11 +694,15 @@ export class DelegatedOutbox {
     return true;
   }
 
-  private actionCurrent(connection: Readonly<OutboxConnection>): boolean {
+  private actionCurrent(connection: Readonly<OutboxConnection>, action?: DelegatedAction): boolean {
     return (
       this.current(connection) &&
       connection.capabilities.delegatedOrderActionsV1 === true &&
-      connection.capabilities.delegatedOrderActionLedgerV1 === true
+      connection.capabilities.delegatedOrderActionLedgerV1 === true &&
+      (!action ||
+        !isDelegatedFullWriteAction(action) ||
+        (connection.capabilities.delegatedFullWriteActionsV1 === true &&
+          connection.capabilities.delegatedFullWriteLedgerV1 === true))
     );
   }
 
@@ -734,7 +745,7 @@ export class DelegatedOutbox {
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
-      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
       !this.replayable(row) ||
       this.sent.get(row.intentId) === connection
     )
@@ -755,7 +766,8 @@ export class DelegatedOutbox {
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !this.replayable(row)) return;
+    if (!(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) || !this.replayable(row))
+      return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -813,13 +825,14 @@ export class DelegatedOutbox {
 
   private async sendCancellation(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
-      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
       !row.cancelPending ||
       this.canceled.get(row.intentId) === connection
     )
       return;
     await this.persist(row);
-    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !row.cancelPending) return;
+    if (!(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) || !row.cancelPending)
+      return;
     if (
       connection.send(
         this.frame(connection, row.action ? 'order.actionCancelQueued' : 'order.cancelQueued', {
