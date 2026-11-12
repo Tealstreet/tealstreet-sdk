@@ -4,7 +4,7 @@ import type { HostBindings, HostWriteEvent } from './HostBindings';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
+import { OrderSide, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
 
 import { isErrorReported, markErrorReported } from '@tealstreet/safe-cex/src/commandOutcome';
 
@@ -12,6 +12,7 @@ import { ScriptBatchOrderError } from '../index';
 
 import { CORE_WRITE_API_PATHS } from '../runtime/runtimeSurface';
 import { createCoreAdapter } from './createCoreAdapter';
+import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
 
 /**
  * The body is the thing three hosts used to write for themselves. These tests
@@ -81,6 +82,23 @@ const fakeHost = (over: Partial<HostBindings> & { exchangeName?: string } = {}):
 };
 
 describe('createCoreAdapter', () => {
+  it.each([null, NaN, Infinity, -Infinity])('refuses a combined exposure with unknown notional %s', (notional) => {
+    const store = new DefaultStore();
+    const positions: Position[] = JSON.parse(JSON.stringify([
+      position({ notional }), position({ side: PositionSide.Short, notional: 250 }),
+    ]));
+    store.update({ positions });
+    const { host } = fakeHost({ getStore: () => store });
+    expect(() => createCoreAdapter(host).getCombinedBalance({})).toThrow(/notional.*unknown/i);
+  });
+
+  it('keeps complete and empty combined exposures numeric', () => {
+    const store = new DefaultStore();
+    const { host } = fakeHost({ getStore: () => store });
+    expect(createCoreAdapter(host).getCombinedBalance({})).toMatchObject({ longExposure: 0, shortExposure: 0 });
+    store.update({ positions: [position({ notional: 250 }), position({ notional: 0 })] });
+    expect(createCoreAdapter(host).getCombinedBalance({})).toMatchObject({ longExposure: 250, shortExposure: 0 });
+  });
   it('rounds an order size — the thing the CLI never did', () => {
     const { host, placeOrder } = fakeHost();
     return createCoreAdapter(host)

@@ -399,10 +399,31 @@ pub fn translate_delegated(
     open_order_symbols: &[String],
     public_only: bool,
 ) -> Result<Vec<Plan>, Refused> {
-    if public_only || !safe_cex_remote_signer::delegated_enabled(venue) {
+    if public_only || !crate::delegated::enabled(venue) {
         return Err(refused(
             "UnsupportedMethod",
             "DELEGATED methods are not enabled for this account",
+        ));
+    }
+    if matches!(
+        method,
+        "updateOrder"
+            | "amendOrder"
+            | "cancelOrders"
+            | "cancelOrder"
+            | "cancelSymbolOrders"
+            | "cancelAllOrders"
+            | "nuke"
+            | "nukePositions"
+            | "nukeOrders"
+            | "scheduleCancel"
+            | "cancelAccountOrders"
+    ) {
+        return Err(refused(
+            "DelegatedActionUnavailable",
+            format!(
+                "DELEGATED {method} is unavailable; only place and reduce-only close are enabled"
+            ),
         ));
     }
     translate(method, args, capabilities, open_order_symbols, public_only)

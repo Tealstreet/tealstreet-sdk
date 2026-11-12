@@ -37,7 +37,7 @@ async fn handover_replies_use_current_registration_and_preserve_legacy_bytes() {
             session.send(live.clone());
             assert_eq!(sent.try_recv().unwrap(), expected(live, Some("live-account")));
 
-            session.issue_handover("acct");
+            session.issue_handover("acct", "bybit");
             let actual = sent.try_recv().unwrap();
             let value: Value = serde_json::from_str(&actual).unwrap();
             let offer = crate::delegated::KeyOffer {

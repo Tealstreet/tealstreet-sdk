@@ -229,9 +229,15 @@ pub struct FetchedLeverage {
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct DisplayedMargin {
-    pub long_exposure: f64,
-    pub short_exposure: f64,
-    pub total_notional: f64,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    #[ts(type = "number | null")]
+    pub long_exposure: Option<f64>,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    #[ts(type = "number | null")]
+    pub short_exposure: Option<f64>,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    #[ts(type = "number | null")]
+    pub total_notional: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -393,9 +399,9 @@ pub fn initial_store_data() -> StoreData {
         zk_link_config: None,
         user_data: None,
         displayed_margin: Some(DisplayedMargin {
-            long_exposure: 0.0,
-            short_exposure: 0.0,
-            total_notional: 0.0,
+            long_exposure: Some(0.0),
+            short_exposure: Some(0.0),
+            total_notional: Some(0.0),
         }),
         orders_risk: IndexMap::new(),
         active_chasers: vec![],
@@ -524,9 +530,12 @@ mod strict_codecs {
     #[serde(remote = "super::DisplayedMargin")]
     #[serde(rename_all = "camelCase")]
     struct WireDisplayedMargin {
-        long_exposure: f64,
-        short_exposure: f64,
-        total_notional: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        long_exposure: Option<f64>,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        short_exposure: Option<f64>,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        total_notional: Option<f64>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::DisplayedMargin {
@@ -953,7 +962,7 @@ mod strict_codecs {
         assert_eq!(wire.position.id, "wire");
         assert_eq!(wire.account, "wire-account");
         assert_eq!(wire.position.entry_price, 1.25);
-        assert_eq!(wire.position.notional, 2.5);
+        assert_eq!(wire.position.notional, Some(2.5));
         assert_eq!(wire.position.leverage, 3.75);
         assert_eq!(wire.position.contracts, 4.125);
         assert_eq!(wire.position.liquidation_price, Some(5.5));

@@ -123,11 +123,7 @@ export class DefaultStore implements Store {
         Object.entries(this.positionSettings).map(([id, settings]) => [id, { ...settings }]),
       ),
       displayedPositions: [...this.displayedPositions],
-      displayedMargin: {
-        longExposure: this.displayedMargin?.longExposure ?? 0,
-        shortExposure: this.displayedMargin?.shortExposure ?? 0,
-        totalNotional: this.displayedMargin?.totalNotional ?? 0,
-      },
+      displayedMargin: { ...(this.displayedMargin ?? { longExposure: 0, shortExposure: 0, totalNotional: 0 }) },
       ordersRisk: { ...this.ordersRisk },
       activeChasers: [...this.activeChasers],
       activeTWAPs: [...this.activeTWAPs],
@@ -275,9 +271,10 @@ export class DefaultStore implements Store {
     if (this.pendingTickerDeltas.size === 0) {
       return [];
     }
-    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(
-      ([index, changes]): [number, Partial<Ticker>] => [index, changes],
-    );
+    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(([index, changes]): [number, Partial<Ticker>] => [
+      index,
+      changes,
+    ]);
     this.pendingTickerDeltas.clear();
     return deltas;
   }

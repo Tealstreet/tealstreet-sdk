@@ -3071,6 +3071,7 @@ dependencies = [
 name = "safe-cex-engine"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-position-math",
  "serde",
  "serde_json",
  "sha2",
@@ -3104,6 +3105,10 @@ dependencies = [
  "safe-cex-native",
  "tokio",
 ]
+
+[[package]]
+name = "safe-cex-position-math"
+version = "0.1.0"
 
 [[package]]
 name = "safe-cex-venue-binance"

@@ -127,7 +127,7 @@ fn differential_corpus_matches_serde() {
 fn sealed_handover_preserves_quoted_passphrase() {
     use crate::delegated::{Handovers, tests::seal};
     let mut owner = Handovers::default();
-    let offer = owner.issue("synthetic-account", 100).unwrap();
+    let offer = owner.issue("synthetic-account", "bybit", 100).unwrap();
     let sealed = seal(&offer, "bybit", "synthetic-key", br#"{"key":"synthetic-key","secret":"synthetic-secret","passphrase":"synthetic-\"quoted\"\\phrase"}"#);
     let fields = owner
         .take("synthetic-account", &sealed, 101)
