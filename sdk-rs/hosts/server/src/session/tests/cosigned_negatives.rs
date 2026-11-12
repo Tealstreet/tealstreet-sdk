@@ -125,6 +125,21 @@ struct Resident {
     _sent: crate::out::Receiver,
 }
 
+#[tokio::test]
+async fn cosigned_rpc_expiry_completion_preserves_request_and_registration() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let mut resident = Resident::start(&f, &mut device).await;
+    assert_rpc_expiry_completion(
+        &f,
+        resident.session.as_mut().unwrap(),
+        &mut resident._sent,
+        Some("resident"),
+    )
+    .await;
+    resident.untouched(&f);
+}
+
 impl Resident {
     async fn start(f: &Fixture, device: &mut Device) -> Self {
         let (mut session, mut sent) = candidate(f, "alice");
