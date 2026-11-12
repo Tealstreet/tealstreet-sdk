@@ -461,7 +461,9 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },
 }, null, 2) + '\n');
-if (!recorded) writeCpuAnnotations({ venue: values.venue, tape: values.tape, failures, warnings, remeasure: remeasure && { first: remeasure.first.failures } });
+if (!recorded) writeCpuAnnotations({ venue: values.venue, tape: values.tape, failures, warnings,
+  ...(!isPrivate && !values['correctness-only'] ? { samples: { ts: metricsOf('ts'), rust: metricsOf('rust') } } : {}),
+  remeasure: remeasure && { first: remeasure.first.failures } });
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);
   for (const failure of failures.slice(0, 40)) console.log(`  ${failure}`);

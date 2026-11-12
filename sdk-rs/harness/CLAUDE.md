@@ -13,6 +13,10 @@ missing the 10%-faster target is a warning; nightly certification files cpu-regr
   1.00x and its frozen creep bound `q <= 1.023110` also holds; the 0.90 readiness miss is a warning.
 - Checks: correctness is "Rust / replay correctness" and "Rust / replay measurement"; CPU is
   "Rust / CPU gate (<suite>)" (plan, certify, status). "Rust / required coverage" depends on no CPU job.
+- Certification writes its per-suite results and reasons before failing when any suite is uncertified.
+  Its error annotations name each refused suite; downstream status checks retain their existing guards.
+- Each public performance replay logs `CPU_METRICS` records with exact TS/Rust CPU medians in milliseconds
+  and Rust/TS ratios on success and failure. Private and correctness-only runs emit no measurement records.
 - Nightly: `.github/workflows/rust-cpu-nightly.yml` and `cpu-nightly.mjs` dispatch rust.yml on master, then file
   or update one `cpu-regression` issue for suites whose CPU gate failed on two adjacent UTC nights (the last run each night).
   Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and

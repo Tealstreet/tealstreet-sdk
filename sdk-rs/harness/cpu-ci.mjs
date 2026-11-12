@@ -594,7 +594,7 @@ export async function evidenceEndCheck(context) {
   }
 }
 
-/** One refused suite fails only its own CPU gate; overall certification stays false. */
+/** Keep every suite's disposition; overall certification stays false if any is refused. */
 export async function certifySuites(suites, certifyOne) {
   const certificates = {}, results = { certified: true, suites: {}, reasons: {} };
   for (const suite of suites) {
@@ -617,7 +617,9 @@ export async function certifyAll(context, destination,
   const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, ...outcome };
   write(resolve(destination, 'results.json'), results);
   if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `results=${JSON.stringify(results)}\n`, { flag: 'a' });
-  for (const reason of Object.values(outcome.reasons)) console.log(`::error::${reason.replaceAll('\n', ' | ')}`);
+  for (const [suite, reason] of Object.entries(outcome.reasons))
+    console.log(`::error title=CPU certification ${suite}::${reason.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+  insist(outcome.certified, `not certified for suites: ${Object.keys(outcome.reasons).join(', ')}`);
   return certificates;
 }
 
