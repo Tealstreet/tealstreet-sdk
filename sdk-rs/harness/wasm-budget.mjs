@@ -230,8 +230,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bingx: 2_139_136,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
-  bitget: 2_492_416,
-  bitgetusdc: 2_492_416,
+  // #3426 run 43187677592, job 131079474589, artifact 13930235036, CI source b3c4cf6212e6.
+  // Verified web/Node 2,487,523 B + 10 KiB, rounded up to KiB; both siblings share this cap.
+  bitget: 2_498_560,
+  bitgetusdc: 2_498_560,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
