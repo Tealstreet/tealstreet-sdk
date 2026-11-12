@@ -166,7 +166,17 @@ async fn apply_settings_refuses_pending_missing_other_user_and_stale_registratio
                 "parked",
                 "lease-fenced",
             ] {
-                let registry = crate::accounts::tests::registry();
+                let mut registry = crate::accounts::tests::registry();
+                if case == "lease-fenced" {
+                    Arc::get_mut(&mut registry).unwrap().router_leases = Arc::new(
+                        crate::router_lease::Users::new(crate::router_lease::Config {
+                            enforce: true,
+                            box_id: Some("01".into()),
+                            enable_grace_until: Some(now_ms() + 10_000),
+                            ..Default::default()
+                        }),
+                    );
+                }
                 let init = acct_init();
                 let account = crate::accounts::testing::trading_account(&registry, "u", &init);
                 let (mut owner, _) = user_session(registry.clone(), "u");
@@ -193,14 +203,13 @@ async fn apply_settings_refuses_pending_missing_other_user_and_stale_registratio
                     );
                 }
                 if case == "lease-fenced" {
-                    let leases = crate::router_lease::Users::new(crate::router_lease::Config {
-                        enforce: true,
-                        box_id: Some("01".into()),
-                        ..Default::default()
-                    });
-                    account
-                        .running
-                        .attach_lease(leases.get("u").unwrap().permit());
+                    assert!(account.running.io_allowed(), "valid during explicit grace");
+                    tokio::time::advance(std::time::Duration::from_secs(11)).await;
+                    assert!(
+                        !account.running.io_allowed(),
+                        "lease fixture must really fence"
+                    );
+                    assert!(registry.user_lease_fenced("u"));
                 }
                 let replacement = if case == "retired-account" {
                     Some(crate::accounts::testing::trading_account(
