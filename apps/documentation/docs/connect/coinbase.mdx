@@ -50,6 +50,10 @@ import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 
 - First, make sure you are logged into your [Coinbase](https://www.coinbase.com/) account.
 
+:::tip Supported Coinbase markets
+Tealstreet supports Coinbase perpetual futures and Coinbase Spot trading through separate Coinbase setup modes. Choose **Coinbase Spot** in Tealstreet when you want to connect spot markets.
+:::
+
 <!-- :::note
 Consider supporting Tealstreet by using the referral _[link](https://www.coinbase.com/)._
 ::: -->
@@ -61,6 +65,8 @@ Keep this window open, it will be used later after we create the API Key on the 
 ---
 
 ### Enabling Futures Trading on Coinbase
+
+This section applies to the Coinbase futures setup mode. If you are connecting Coinbase Spot, choose the Coinbase Spot setup mode in Tealstreet and continue with the API key creation steps below.
 
 Now lets bring up the coinbase account and make sure Advanced Trading is enabled.
 
@@ -140,6 +146,6 @@ Below is a list of reported issues or concerns for **Coinbase**.
 
 ### I am getting an error "No INTX Portfolio" ?
 
-Coinbase does not offer perpetual futures trading in all regions. If you are in a region that does not support perpetual futures trading, you will see this error. \* Dated Futures are separate from Perpetual Futures and are not supported by Tealstreet at this time.
+Coinbase does not offer perpetual futures trading in all regions. If you are in a region that does not support perpetual futures trading, you will see this error. \* Dated Futures are separate from Perpetual Futures and are not supported by Tealstreet at this time. If you only want to trade spot markets, use the Coinbase Spot setup mode instead.
 
 ![Coinbase-RegionRestricted](/img/connect/coinbase/coinbase-intx-error.png)
