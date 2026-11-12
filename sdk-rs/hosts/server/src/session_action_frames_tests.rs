@@ -1340,10 +1340,11 @@ async fn exec_review_f1_fences_deferred_shared_factory_handoffs_without_stopping
                 let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
                 let (keeper, _kept, _) = Out::channel(256);
                 crate::accounts::tests::hold_live(&account, 9999, keeper.outbox());
-                let payload = json!({"kind":"algo","op":"exec","data":{"command":format!("sleep 1500ms; {command}"),"symbol":"BTCUSDT"}});
+                let delay = if control == "live" {100} else {1500};
+                let payload = json!({"kind":"algo","op":"exec","data":{"command":format!("sleep {delay}ms; {command}"),"symbol":"BTCUSDT"}});
                 let id = action_key();
                 let fp = crate::order_contract::action_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
-                session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":if control == "expired" {9000}else{0},"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
+                session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":if control != "retired" {9000}else{0},"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
                 let accepted = action_frame(&mut sent, "order.actionOutcome").await;
                 assert_eq!(accepted["d"]["outcome"], "unknown");
                 assert!(account.running.jobs().1 > 0, "EXEC must reach its sleep deferral before retirement/expiry");
