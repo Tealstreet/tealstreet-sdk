@@ -1966,3 +1966,79 @@ for (const [family, aliases, web, node, minimumCap] of [
     }
   });
 }
+
+// #3391 run 43204096369: source d62f6d989c3a35cacf7b20375a4b5edc334e3323,
+// tree 23178e76bbafb6f557c77ffd0431aee4cdeea9e2 (also 3de5a492d792).
+// Rust 1.99.0 / wasm-bindgen 0.2.129 / Binaryen 132, required -Oz.
+// Polymarket web comes from the failing family job; Node from ci-wasm-polymarket.
+for (const [family, web, node, minimumCap] of [
+  // Family job 131135453880; artifact 13936582318.
+  ['apexomni', 2_089_661, 2_089_661, 2_100_224],
+  // Family job 131135453773; artifact 13936588049.
+  ['asterdex', 2_216_296, 2_216_296, 2_227_200],
+  // Family job 131135453549; artifact 13936982114.
+  ['backpack', 2_036_366, 2_036_366, 2_046_976],
+  // Family job 131135453620; artifact 13937780468.
+  ['binance', 2_267_072, 2_267_072, 2_277_376],
+  // Family job 131135453731; artifact 13936523131.
+  ['bingx', 2_126_140, 2_126_140, 2_137_088],
+  // Family job 131135453683; artifact 13935794958.
+  ['bitget', 2_477_459, 2_477_459, 2_488_320],
+  // Family job 131135453687; artifact 13937850329.
+  ['bitrue', 1_903_365, 1_903_365, 1_913_856],
+  // Family job 131135453920; artifact 13936642823.
+  ['bitunix', 1_949_515, 1_949_515, 1_959_936],
+  // Family job 131135453711; artifact 13935909796.
+  ['blofin', 2_060_408, 2_060_408, 2_071_552],
+  // Family job 131135453903; artifact 13936642978.
+  ['bybit', 2_338_200, 2_338_200, 2_349_056],
+  // Family job 131135453743; artifact 13937425727.
+  ['coinbase', 2_109_592, 2_109_592, 2_120_704],
+  // Family job 131135453931; artifact 13937106766.
+  ['cryptocom', 1_810_902, 1_810_902, 1_821_696],
+  // Family job 131135453957; artifact 13937815232.
+  ['grvt', 1_997_577, 1_997_577, 2_008_064],
+  // Family job 131135453858; artifact 13937311047.
+  ['hyperliquid', 2_231_852, 2_231_852, 2_242_560],
+  // Family job 131135453763; artifact 13936588037.
+  ['kraken', 2_267_706, 2_267_706, 2_278_400],
+  // Family job 131135453832; artifact 13936248817.
+  ['kucoin', 1_860_316, 1_860_316, 1_870_848],
+  // Family job 131135454013; artifact 13936787868.
+  ['kucoinspot', 2_471_018, 2_471_018, 2_482_176],
+  // Family job 131135454148; artifact 13936772862.
+  ['lighter', 2_154_475, 2_154_475, 2_164_736],
+  // Family job 131135454171; artifact 13937321670.
+  ['mexc', 1_953_995, 1_953_995, 1_965_056],
+  // Family job 131135454062; artifact 13936912504.
+  ['okx', 2_045_606, 2_045_606, 2_056_192],
+  // Family job 131135454025; artifact 13937476728.
+  ['orderly', 1_777_164, 1_777_164, 1_787_904],
+  // Family job 131135454051; artifact 13936218205.
+  ['paradex', 2_304_689, 2_304_689, 2_315_264],
+  // Family job 131135454267; artifact 13937386078.
+  ['phemex', 2_132_324, 2_132_324, 2_143_232],
+  // Family job 131135454125; artifact 13936288104.
+  ['polymarket', 1_658_851, 1_658_851, 1_669_120],
+  // Family job 131135454016; artifact 13937271386.
+  ['txflow', 1_922_889, 1_922_889, 1_933_312],
+  // Family job 131135454191; artifact 13937520671.
+  ['weex', 2_018_048, 2_018_048, 2_028_544],
+  // Family job 131135454115; artifact 13938010042.
+  ['woo', 2_664_064, 2_664_064, 2_674_688],
+]) {
+  test(`#3391 integrated ${family} retains current measured headroom`, () => {
+    const measured = Math.max(web, node);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${family}: ${cap} < ${minimumCap}`);
+    const aliases = Object.keys(WASM_VENUE_OVERRIDES).filter(venue => venueFamily(venue) === family);
+    for (const venue of aliases) {
+      assert.equal(WASM_VENUE_OVERRIDES[venue], cap, venue);
+      assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}

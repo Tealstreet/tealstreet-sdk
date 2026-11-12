@@ -225,7 +225,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125663, CI source cca7b8337ad3:
   // web/Node 2,208,996 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; retain unknown instead of a partial value.
-  asterdex: 2_220_032,
+  // #3391 run 43204096369/job 131135453773, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,216,296 B; current measurement + 10 KiB, rounded up.
+  asterdex: 2_227_200,
   backpack: 2_053_120,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
@@ -250,14 +252,18 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // web/Node 1,942,038 B; current measured maximum + 10 KiB, rounded up.
   // Shared native-size policy must retain unknown/conflicting quantity refusals.
   // #3391 run 42561525825 at ec49cdd8159: 1,920,841 B + 10 KiB, rounded up; retain PR-parent cap.
-  bitunix: 1_952_768,
+  // #3391 run 43204096369/job 131135453920, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 1,949,515 B; current measurement + 10 KiB, rounded up.
+  bitunix: 1_959_936,
   blofin: 2_085_888,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   // #3425 run 43176700451/job 131043125392, CI source cca7b8337ad3:
   // web/Node 2,330,713 B; current measured maximum + 10 KiB, rounded up.
   // Nullable valuation plus inverse quote-capacity refusals remain in this family.
   // #3391 run 42553793906 at 20f13e05df1: 2,320,705 B + 10 KiB, rounded up; retain PR-parent cap.
-  bybit: 2_344_960,
+  // #3391 run 43204096369/job 131135453903, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,338,200 B; current measurement + 10 KiB, rounded up.
+  bybit: 2_349_056,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
   // CI size plus 10 KiB, rounded up to the KiB; Coinbase Spot shares this family cap.
@@ -266,11 +272,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
   // measured 2,094,163 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
   coinbase: 2_120_704,
-  cryptocom: 1_819_648,
+  // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 1,810,902 B; current measurement + 10 KiB, rounded up.
+  cryptocom: 1_821_696,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
-  grvt: 2_003_968,
+  // #3391 run 43204096369/job 131135453957, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 1,997,577 B; current measurement + 10 KiB, rounded up.
+  grvt: 2_008_064,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -306,15 +316,21 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125504, CI source cca7b8337ad3:
   // web/Node 2,260,418 B; current measured maximum + 10 KiB, rounded up.
   // Keep unavailable mark valuation and distinct PF/inverse quantity rules.
-  kraken: 2_271_232,
-  krakenspot: 2_271_232,
+  // #3391 run 43204096369/job 131135453763, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,267,706 B; current measurement + 10 KiB, rounded up.
+  kraken: 2_278_400,
+  krakenspot: 2_278_400,
   kucoin: 1_872_896,
-  kucoinspot: 2_480_128,
+  // #3391 run 43204096369/job 131135454013, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,471,018 B; current measurement + 10 KiB, rounded up.
+  kucoinspot: 2_482_176,
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
   // web/Node 2,146,773 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no signing or admission expansion.
-  lighter: 2_157_568,
-  'lighter-robinhood': 2_157_568,
+  // #3391 run 43204096369/job 131135454148, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,154,475 B; current measurement + 10 KiB, rounded up.
+  lighter: 2_164_736,
+  'lighter-robinhood': 2_164_736,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
   // #3299 restage run 42558057739 at 5dec79811311, jobs 128968431838/128968431872:
@@ -328,16 +344,24 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125322, CI source cca7b8337ad3:
   // web/Node 1,946,379 B; current measured maximum + 10 KiB, rounded up.
   // Shared native sizing with current master broker behavior retained.
-  mexc: 1_956_864,
+  // #3391 run 43204096369/job 131135454171, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 1,953,995 B; current measurement + 10 KiB, rounded up.
+  mexc: 1_965_056,
   okx: 2_068_480,
-  orderly: 1_785_856,
+  // #3391 run 43204096369/job 131135454025, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 1,777,164 B; current measurement + 10 KiB, rounded up.
+  orderly: 1_787_904,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_318_336,
   // #3429 run 42729630872 at a2be15368b4: CI web/node 2,125,299 B.
   // Shared-helper fix: local web/node 2,127,824 B; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue phemex; measured + 10 KiB, rounded up.
-  phemex: 2_138_112,
-  polymarket: 1_652_736,
+  // #3391 run 43204096369/job 131135454267, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,132,324 B; current measurement + 10 KiB, rounded up.
+  phemex: 2_143_232,
+  // #3391 run 43204096369/job 131135454125, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 1,658,851 B; current measurement + 10 KiB, rounded up.
+  polymarket: 1_669_120,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   txflow: 1_934_336,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
@@ -356,14 +380,18 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125397, CI source cca7b8337ad3:
   // web/Node 2,010,529 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no venue activation or codec change.
-  weex: 2_021_376,
+  // #3391 run 43204096369/job 131135454191, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,018,048 B; current measurement + 10 KiB, rounded up.
+  weex: 2_028_544,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
   // #3221 CI run 42393607294, artifact 13582294491: web/node 2,578,659 B + 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
   // #3442 CI run 42749390151, job 129609649777 at ded39a35466: web/node 2,654,237 B.
   // Current CI size + 10 KiB, rounded up to KiB.
-  woo: 2_665_472,
+  // #3391 run 43204096369/job 131135454115, source d62f6d989c3a (3de5a492d792 tree).
+  // Optimized web/Node 2,664,064 B; current measurement + 10 KiB, rounded up.
+  woo: 2_674_688,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
