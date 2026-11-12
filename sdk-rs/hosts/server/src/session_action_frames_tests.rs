@@ -1215,3 +1215,54 @@ async fn full_write_keeps_local_unit_reply_semantics_after_native_completion() {
         "unknown"
     );
 }
+
+// Forward-compatible v1 additions must never execute a recognized subset.
+#[tokio::test]
+async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = crate::accounts::tests::registry();
+        let tape = Tape::default();
+        let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+        let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+        let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-v1"));
+        session.join(account.clone(), bound).await;
+        for case in ["kind", "actionField", "opVersion", "targetField", "updateField", "orderField", "bboField", "algoOp", "algoData", "twapMarket", "requestField", "envelopeField"] {
+            let mut payload = match case {
+                "kind" => json!({"kind":"futureWrite"}),
+                "targetField" => json!({"kind":"cancel","order":{"id":"resting-order","symbol":"BTCUSDT","future":true}}),
+                "updateField" => json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000,"future":true}}),
+                "orderField" => json!({"kind":"place","orders":[{"symbol":"BTCUSDT","type":"market","side":"buy","amount":0.001,"future":true}]}),
+                "bboField" => json!({"kind":"place","orders":[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"bybitBbo":{"sideType":"Queue","level":1,"future":true}}]}),
+                "algoOp" => json!({"kind":"algo","op":"future:start","data":{}}),
+                "algoData" => json!({"kind":"algo","op":"exec","data":{"command":"buy $100","future":true}}),
+                "twapMarket" => {
+                    let cases: Value = serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json")).unwrap();
+                    let mut action = cases.as_array().unwrap().iter().find(|v| v["action"]["op"] == "twap:start").unwrap()["action"].clone();
+                    action["data"]["activeMarket"]["future"] = json!(true);
+                    action
+                }
+                _ => json!({"kind":"cancelAll"}),
+            };
+            if case == "actionField" { payload["future"] = json!(true); }
+            if case == "opVersion" { payload["version"] = json!(2); }
+            let id = action_key();
+            let fp = crate::order_contract::action_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            let mut frame = json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-v1","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}});
+            if case == "requestField" { frame["d"]["future"] = json!(true); }
+            if case == "envelopeField" { frame["future"] = json!(true); }
+            session.handle(&frame.to_string()).await.unwrap();
+            // Rejection is synchronous; do not hide a generic error behind a timeout.
+            let replies: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok()).map(|v| serde_json::from_str(&v).unwrap()).collect();
+            let result = replies.iter().find(|v| v["t"] == "order.actionOutcome").unwrap_or_else(|| panic!("{case}: missing typed unsupported: {replies:?}"));
+            assert_eq!(result["d"]["version"], 1, "{case}");
+            assert_eq!(result["d"]["instanceId"], "reg-v1", "{case}");
+            assert_eq!(result["d"]["intentId"], id, "{case}");
+            assert_eq!(result["d"]["outcome"], "unsupported", "{case}: {result}");
+            assert_eq!(result["d"]["result"], Value::Null);
+            assert_eq!(result["d"]["error"]["outcome"], "unsupported");
+            assert!(replies.iter().all(|v| v["t"] != "order.actionAck" || v["d"]["received"] != true));
+            assert!(tape.writes.lock().unwrap().is_empty(), "{case}");
+        }
+        session.close(); registry.dispose(&account, Disposal::PageDisposed);
+    }).await;
+}

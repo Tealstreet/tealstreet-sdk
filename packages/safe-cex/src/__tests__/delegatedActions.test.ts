@@ -83,6 +83,35 @@ const outcome = (id: string, action: DelegatedAction, seq = 1) => ({
 });
 
 describe('DELEGATED versioned actions', () => {
+  it('preserves a typed unsupported v1 outcome across restore without replay or a fabricated notSent proof', async () => {
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection);
+    const action: DelegatedAction = { kind: 'setAllLeverage', leverage: 3 };
+    const id = await box.enqueueAction(action);
+    const sent = JSON.parse(f.writes[0]);
+    expect(sent.d.version).toBe(1);
+    expect(sent.d.action).not.toHaveProperty('version');
+    const frame = outcome(id, action);
+    Object.assign(frame.d, { outcome: 'unsupported', result: null, error: { message: 'Unsupported v1 field', outcome: 'unsupported' } });
+    await box.receive(c, frame);
+    expect(box.entries()[0]).toMatchObject({ state: 'unsupported', error: { outcome: 'unsupported' } });
+    expect(box.entries()[0].notSentEvidence).toBeUndefined();
+    // Later queue uncertainty / stale business results cannot revoke rejection.
+    await box.receive(c, { ...frame, d: { ...frame.d, outcomeSeq: 42, outcome: 'unknown', error: { message: 'uncertain', outcome: 'unknown' } } });
+    await box.receive(c, { ...outcome(id, action), d: { ...outcome(id, action).d, outcomeSeq: 43 } });
+    expect(box.entries()[0].state).toBe('unsupported');
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    const connection = restored.connect(f.connection);
+    expect(restored.entries()[0].state).toBe('unsupported');
+    await restored.cancel(id);
+    await restored.enqueueAction(action, { intentId: id });
+    await restored.receive(connection, frame);
+    expect(f.writes).toHaveLength(1);
+    restored.close();
+  });
+
   it('accepts an identified native protection effect without inventing order IDs, and refuses it for ordinary placements', async () => {
     for (const protection of [false, true]) {
       const f = setup();
