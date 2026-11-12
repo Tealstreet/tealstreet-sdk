@@ -1041,3 +1041,13 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## DELEGATED restart key status (codex-oqblq9)
+
+The existing interruption marker also accepts `reason: "waiting-for-key"`.
+Marked DELEGATED handover requests expose `delegated:status` waiting for a key;
+only admitted handovers report key availability. This does not acknowledge a
+restored job or create persistence. Client-held TWAPs retain the existing paused
+restore/explicit-resume gate; lost chases and absent schedules cannot be rebuilt.
+See [restart recovery](../../../docs/plans/callers/delegated-restart-recovery.md)
+for the wire contract, scope and measured recovery limits.
