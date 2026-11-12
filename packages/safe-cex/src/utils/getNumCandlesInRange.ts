@@ -1,10 +1,11 @@
 import { Timeframe, timeframeToSeconds } from '../types';
+import { diagnosticConsole } from './diagnosticRedaction';
 import { getCandleStartTime } from './getCandleStartTime';
 import { normalizeEpochToSeconds } from './normalizeEpochToSeconds';
 
 export const getNumCandlesInRange = (timeframe: Timeframe, from: number, to: number) => {
   if (from > to) {
-    console.warn(`[getNumCandlesInRange] Invalid range: from (${from}) must be less than to (${to})`);
+    diagnosticConsole.warn(`[getNumCandlesInRange] Invalid range: from (${from}) must be less than to (${to})`);
     return 0;
   }
   // easy out

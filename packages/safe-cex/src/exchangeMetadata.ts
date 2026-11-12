@@ -437,16 +437,15 @@ const HyrotraderMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/logos/HYROTRADER/full-white.svg',
   enabled: false,
   enabledInDev: true,
-  // Keep preview/prod dark until the private REST/WS path has either Hyro HTTPS
-  // origins or a Tealstreet relay. Local dev can still test the simulator
-  // directly over plain HTTP.
-  enableInPreview: false,
+  // Hyro now fronts the production simulator at a TLS hostname with Tealstreet
+  // browser CORS, so preview can run direct while production stays explicitly dark.
+  enableInPreview: true,
   forbidCors: false,
   enforceWsTunnel: false,
   supportsTunnel: false,
   privateProxyIps: [],
   privateProxyRegions: {},
-  latencyDomain: 'hyrotrader-simulator',
+  latencyDomain: 'sim-bybit.hyro.trade',
 };
 
 const BybitSpotMetadata: ExchangeMetadata = {
@@ -1086,6 +1085,36 @@ const BingxMetadata: ExchangeMetadata = {
     positions: true,
     balance: true,
   },
+};
+
+// Native/fixture-only. SDK admission follows live-key transport smoke validation.
+const BingxSpotMetadata: ExchangeMetadata = {
+  ...defaultMetaData,
+  exchangeName: 'bingxspot',
+  prettyName: 'BingX Spot',
+  logo: BingxMetadata.logo,
+  lightLogo: BingxMetadata.lightLogo,
+  darkLogo: BingxMetadata.darkLogo,
+  refLink: BingxMetadata.refLink,
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
+  hasEmptyPositions: true,
+  positionModes: [PositionMode.OneWay],
+  marginTypes: [MarginType.Isolated],
+  hideMarginTypeSelector: true,
+  hidePositionModeSelector: true,
+  leverageSliderDisabled: true,
+  supportsPartialStops: false,
+  supportsInfinityStops: false,
+  supportsMaxCrossLeverage: false,
+  doesNotSupportOpenInterest: true,
+  requiresCors: true,
+  supportsTunnel: true,
+  enforceWsTunnel: true,
+  latencyDomain: 'open-api-ws.bingx.com',
+  candleApiCountLimit: 1440,
+  features: { kline: true, orderbook: true, orders: true, balance: true, positions: false },
 };
 
 const BitrueMetadata: ExchangeMetadata = {
@@ -2257,6 +2286,7 @@ export const exchangeMetadata: {
   grvt: GrvtMetadata,
   phemex: PhemexMetadata,
   bingx: BingxMetadata,
+  bingxspot: BingxSpotMetadata,
   bitrue: BitrueMetadata,
   blofin: BlofinMetadata,
   lighter: LighterMetadata,

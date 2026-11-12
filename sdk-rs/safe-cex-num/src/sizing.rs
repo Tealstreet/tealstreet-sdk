@@ -212,23 +212,9 @@ pub fn convert_margin_risk_to_native_size(
     let exact = (quotient - nearest).abs() <= quotient.abs().max(1.0) * 1e-12;
     handle_rounding_error(if exact { nearest } else { quotient.floor() } * market.precision.amount)
 }
-pub fn calculate_position_account_leverage(notional: f64, balance: f64) -> f64 {
-    if balance <= 0.0 {
-        0.0
-    } else {
-        notional.abs() / balance
-    }
-}
-pub fn calculate_total_account_leverage(notionals: &[f64], balance: f64) -> f64 {
-    if balance <= 0.0 {
-        0.0
-    } else {
-        calculate_total_notional(notionals) / balance
-    }
-}
-pub fn calculate_total_notional(notionals: &[f64]) -> f64 {
-    notionals.iter().fold(0.0, |sum, v| sum + v.abs())
-}
+pub use safe_cex_position_math::{
+    calculate_position_account_leverage, calculate_total_account_leverage, calculate_total_notional,
+};
 /// A borrowed source row, preserving the account or currency object shape.
 #[derive(Clone, Copy, serde::Serialize)]
 #[serde(untagged)]

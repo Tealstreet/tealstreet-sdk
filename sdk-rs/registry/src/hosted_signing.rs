@@ -6,9 +6,15 @@ use safe_cex_engine::signing::{
 use safe_cex_engine::signing_policy::{RemoteSigningPolicy, SignatureEncoding};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "apexomni")]
+mod apexomni;
 #[cfg(feature = "backpack")]
 mod backpack;
+#[cfg(feature = "coinbase")]
+mod coinbase;
 
+#[cfg(feature = "kraken")]
+mod kraken;
 #[cfg(feature = "orderly")]
 mod orderly;
 
@@ -17,6 +23,18 @@ mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "apexomni")]
+    #[serde(rename = "apexomni-batch")]
+    ApexOmniBatch,
+    #[cfg(feature = "coinbase")]
+    #[serde(rename = "coinbase-jws")]
+    CoinbaseJws,
+    #[cfg(feature = "kraken")]
+    #[serde(rename = "kraken-sha512")]
+    KrakenSha512,
+    #[cfg(feature = "kraken")]
+    #[serde(rename = "kraken-challenge")]
+    KrakenChallenge,
     #[cfg(feature = "orderly")]
     #[serde(rename = "orderly-ed25519")]
     OrderlyEd25519,
@@ -158,6 +176,17 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "apexomni")]
+    ApexOmni {
+        contracts: usize,
+        ws: bool,
+    },
+    #[cfg(feature = "coinbase")]
+    Coinbase,
+    #[cfg(feature = "kraken")]
+    Kraken {
+        batch: bool,
+    },
     #[cfg(feature = "orderly")]
     Orderly {
         ws: bool,
@@ -313,14 +342,19 @@ fn family(venue: &str) -> bool {
         || bybit
         || okx
         || bitget
-        || (cfg!(feature = "bingx") && venue == "bingx")
+        || (cfg!(feature = "bingx") && matches!(venue, "bingx" | "bingxspot"))
         || (cfg!(feature = "blofin") && venue == "blofin")
+        || (cfg!(feature = "coinbase") && matches!(venue, "coinbase" | "coinbasespot"))
         || (cfg!(feature = "backpack") && venue == "backpack")
+        || (cfg!(feature = "apexomni") && venue == "apexomni")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
+        || (cfg!(feature = "kraken") && venue == "kraken")
         || (cfg!(feature = "kucoinspot") && venue == "kucoinspot")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "woo") && venue == "woo")
+        || (cfg!(feature = "mexc") && venue == "mexc")
+        || (cfg!(feature = "bitrue") && venue == "bitrue")
         || (cfg!(feature = "cryptocom") && venue == "cryptocom")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
@@ -330,6 +364,107 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "apexomni")]
+    if venue == "apexomni" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return apexomni::prepare(
+                    identities,
+                    payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::ApexOmniBatch,
+            } => return apexomni::prepare(identities, to_sign, SignReceipt::default(), true),
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    #[cfg(feature = "apexomni")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::ApexOmniBatch,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
+    #[cfg(feature = "coinbase")]
+    {
+        if matches!(venue, "coinbase" | "coinbasespot") {
+            return match input {
+                Input::WsAuth {
+                    to_sign,
+                    output_format: OutputFormat::CoinbaseJws,
+                } => coinbase::prepare(identities, to_sign),
+                _ => Err(SignError::Unsupported),
+            };
+        }
+        if matches!(
+            &input,
+            Input::WsAuth {
+                output_format: OutputFormat::CoinbaseJws,
+                ..
+            }
+        ) {
+            return Err(SignError::Unsupported);
+        }
+    }
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return kraken::prepare(
+                    identities,
+                    &payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::KrakenSha512,
+            } => return kraken::prepare(identities, &to_sign, SignReceipt::default(), true),
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::KrakenChallenge,
+            } => {
+                #[derive(Serialize)]
+                struct Challenge<'a> {
+                    payload: &'a str,
+                }
+                let descriptor = serde_json::to_string(&Challenge { payload: &to_sign })
+                    .map_err(|_| SignError::InvalidRequest)?;
+                return kraken::prepare(identities, &descriptor, SignReceipt::default(), false);
+            }
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    #[cfg(feature = "kraken")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::KrakenSha512 | OutputFormat::KrakenChallenge,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
     #[cfg(feature = "orderly")]
     if orderly::family(venue) {
         return match input {
@@ -513,6 +648,18 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "apexomni")]
+    if let OutputKind::ApexOmni { contracts, ws } = kind {
+        return apexomni::finish(contracts, ws, result);
+    }
+    #[cfg(feature = "coinbase")]
+    if let OutputKind::Coinbase = kind {
+        return coinbase::finish(result);
+    }
+    #[cfg(feature = "kraken")]
+    if let OutputKind::Kraken { batch } = kind {
+        return kraken::finish(batch, result);
+    }
     #[cfg(feature = "orderly")]
     if let OutputKind::Orderly { ws } = kind {
         return orderly::finish(ws, result);
@@ -565,6 +712,20 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "apexomni")]
+        OutputKind::ApexOmni { .. } => unreachable!(),
+        #[cfg(feature = "apexomni")]
+        OutputKind::WsAuth(OutputFormat::ApexOmniBatch) => return Err(SignError::Unsupported),
+        #[cfg(feature = "coinbase")]
+        OutputKind::Coinbase | OutputKind::WsAuth(OutputFormat::CoinbaseJws) => {
+            return Err(SignError::Unsupported);
+        }
+        #[cfg(feature = "kraken")]
+        OutputKind::Kraken { .. } => unreachable!(),
+        #[cfg(feature = "kraken")]
+        OutputKind::WsAuth(OutputFormat::KrakenSha512 | OutputFormat::KrakenChallenge) => {
+            return Err(SignError::Unsupported);
+        }
         #[cfg(feature = "orderly")]
         OutputKind::Orderly { .. } | OutputKind::WsAuth(OutputFormat::OrderlyEd25519) => {
             return Err(SignError::Unsupported);
@@ -921,6 +1082,14 @@ mod presentation_tests {
 mod input_parse_tests {
     use super::*;
 
+    #[cfg(not(feature = "apexomni"))]
+    #[test]
+    fn apexomni_codec_is_absent_without_venue_feature() {
+        assert!(
+            parse(r#"{"kind":"wsAuth","toSign":"x","outputFormat":"apexomni-batch"}"#).is_err()
+        );
+    }
+
     #[cfg(not(feature = "backpack"))]
     #[test]
     fn backpack_codec_is_absent_without_venue_feature() {
@@ -961,6 +1130,20 @@ mod input_parse_tests {
             ));
         }
         for (format, input) in [
+            #[cfg(feature = "kraken")]
+            (
+                "kraken-sha512",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kraken-sha512"}"#,
+            ),
+            #[cfg(feature = "kraken")]
+            ("kraken-sha512", r#"["wsAuth","x","kraken-sha512"]"#),
+            #[cfg(feature = "kraken")]
+            (
+                "kraken-challenge",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kraken-challenge"}"#,
+            ),
+            #[cfg(feature = "kraken")]
+            ("kraken-challenge", r#"["wsAuth","x","kraken-challenge"]"#),
             #[cfg(feature = "orderly")]
             (
                 "orderly-ed25519",
@@ -1004,6 +1187,14 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "apexomni")]
+                    OutputFormat::ApexOmniBatch => "apexomni-batch",
+                    #[cfg(feature = "coinbase")]
+                    OutputFormat::CoinbaseJws => "coinbase-jws",
+                    #[cfg(feature = "kraken")]
+                    OutputFormat::KrakenSha512 => "kraken-sha512",
+                    #[cfg(feature = "kraken")]
+                    OutputFormat::KrakenChallenge => "kraken-challenge",
                     #[cfg(feature = "orderly")]
                     OutputFormat::OrderlyEd25519 => "orderly-ed25519",
                     #[cfg(feature = "backpack")]

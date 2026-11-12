@@ -2,6 +2,7 @@ import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { nativeCloseSize, prepareCliOrder } from '../../order/prepareCliOrder';
 import { OrderSide, OrderType, PlaceOrderOpts, PositionSide } from '@tealstreet/safe-cex/src/types';
+import { assertCloseLikeOrderAmount } from '@tealstreet/script-api-core/src/order/orderPricing';
 
 /**
  * Close command - closes positions, optionally partial.
@@ -140,8 +141,7 @@ export class CloseCommand extends TradingBaseCommand {
           // Cap at the position size — `close 200%` should not flip the
           // position. Both sides must be NATIVE for the comparison to mean
           // anything; `position.contracts` is base.
-          const capped = Math.min(Math.abs(amount), nativeCloseSize(exchange, position));
-          amount = capped;
+          amount = this.capCloseAmount(exchange, symbol, amount, nativeCloseSize(exchange, position));
         } else {
           amount = nativeCloseSize(exchange, position);
         }
@@ -171,6 +171,19 @@ export class CloseCommand extends TradingBaseCommand {
       if (/^\d+(\.\d+)?(%|%bal|%pos)$/.test(a)) return a;
     }
     return null;
+  }
+
+  private capCloseAmount(
+    exchange: NonNullable<CommandContext['exchange']>,
+    symbol: string,
+    requested: number,
+    full: number,
+  ): number {
+    const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
+    if (!market) throw new Error(`Market data not found for symbol ${symbol}`);
+    // A position cap must not hide an invalid explicit native quantity.
+    assertCloseLikeOrderAmount(requested, { type: OrderType.Market, reduceOnly: true }, market, exchange.name);
+    return Math.min(Math.abs(requested), full);
   }
 
   private async executeGlobalClose(
@@ -238,10 +251,10 @@ export class CloseCommand extends TradingBaseCommand {
       try {
         const full = nativeCloseSize(exchange, position);
         const amount = sizeArg
-          ? Math.min(
-              Math.abs(
-                this.parseSizeAndConvertIfUsd(exchange, position.symbol, sizeArg, true, position.side, 'position'),
-              ),
+          ? this.capCloseAmount(
+              exchange,
+              position.symbol,
+              this.parseSizeAndConvertIfUsd(exchange, position.symbol, sizeArg, true, position.side, 'position'),
               full,
             )
           : full;

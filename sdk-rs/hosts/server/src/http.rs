@@ -679,7 +679,9 @@ pub fn capabilities_json() -> serde_json::Value {
             "edgePath": "/account",
             "rawPath": "/",
             "auth": "Tealstreet proxy JWT in the proxyToken query parameter",
-            "privateSigning": "browser-delegated remote signer; private keys never enter exchange-server",
+            "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
+            "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
+            "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,
@@ -886,7 +888,7 @@ async fn send(
 /// What the page was already sent goes first (a break-glass stop notice), then the move.
 async fn move_away(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    outgoing: &mut tokio::sync::mpsc::Receiver<String>,
+    outgoing: &mut crate::out::Receiver,
     moved: Close,
 ) {
     while let Ok(text) = outgoing.try_recv() {
@@ -927,6 +929,7 @@ async fn serve(
     drop(pending_socket);
     let mut loaded = session.take_loaded();
     let mut dropped = session.take_dropped();
+    let mut verified = session.take_verified();
     session.open().await;
     let taken_over = session.taken_over();
     let mut closing = app.closing.subscribe();
@@ -989,6 +992,16 @@ async fn serve(
             }
             Some((name, client)) = loaded.recv() => session.account_loaded(&name, client).await,
             Some((name, client)) = dropped.recv() => session.client_dropped(&name, client).await,
+            Some(completed) = verified.recv() => {
+                if let Err(refusal) = session.verification_completed(completed).await {
+                    if refusal == Close::Moved {
+                        move_away(&mut sink, &mut outgoing, refusal).await;
+                    } else {
+                        send(&mut sink, close(refusal.code(), refusal.reason())).await;
+                    }
+                    break;
+                }
+            },
             text = outgoing.recv() => match text {
                 Some(text) => if !send(&mut sink, Message::Text(text.into())).await { break },
                 None => break,
@@ -1013,6 +1026,7 @@ async fn serve(
                 }
             }
             _ = keepalive.tick() => {
+                session.expire_handovers();
                 if last_seen.elapsed() > idle {
                     Log::warn(&idle_dropped(session.socket, user.as_deref()));
                     break;

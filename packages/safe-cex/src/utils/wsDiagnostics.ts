@@ -232,8 +232,6 @@ const redactStructuredJson = (message: string): string | undefined => {
   }
 };
 
-const shortenHexSecret = (value: string): string => `${value.slice(0, 4)}...${value.slice(-4)}`;
-
 export const redactWsDiagnosticPayload = (message: string): string => {
   const structured = redactStructuredJson(message);
   const source = structured ?? message;
@@ -242,7 +240,7 @@ export const redactWsDiagnosticPayload = (message: string): string => {
     .replace(JSON_KEY_VALUE_RE, (match, prefix, key) => (isSecretKey(key) ? `${prefix}"${REDACTED}"` : match))
     .replace(QUERY_KEY_VALUE_RE, (match, prefix, key) => (isSecretKey(key) ? `${prefix}${REDACTED}` : match))
     .replace(JWT_RE, REDACTED)
-    .replace(HEX_SECRET_RE, shortenHexSecret);
+    .replace(HEX_SECRET_RE, REDACTED);
 };
 
 /** Opaque or incomplete frames cannot be safely redacted; never fall back to their wire text. */

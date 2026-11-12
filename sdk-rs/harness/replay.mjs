@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createReplayEntropy } from './replay-entropy.mjs';
 import { prepareRecordedHttp } from './recorded-http.mjs';
+import { replayPositions } from './bitget-anchor-positions.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -18,7 +19,7 @@ import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { captureReplayState, finalizeReplay } from './replay-finalize.mjs';
 import { credentialValues, findNoticeLeaks } from './notice-leaks.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
-import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
+import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, captureTsSettings, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -313,7 +314,7 @@ async function runRust() {
       tickers.apply(frame);
       for (const book of frame.books()) books.set(book.market, book);
       orders = frame.orders() ?? orders;
-      const positionUpdate = frame.positions();
+      const positionUpdate = replayPositions(frame, values.venue, isPrivate);
       if (positionUpdate) {
         positions = positionUpdate;
         positionGreeks = frame.positionGreeks();
@@ -544,11 +545,14 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
-    for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    for (const column of POSITION_COLUMNS) {
+      if (column !== 'contractsNative' && column !== 'unrealizedPnlNative') row[column] = positions[column][i];
+    }
     const greekIndex = positionGreeks && Array.from({ length: positionGreeks.count }, (_, index) => index).find((index) => positionGreeks.positionId(index) === positions.id(i));
     if (greekIndex !== undefined) row.option = { greeks: { delta: positionGreeks.delta[greekIndex], gamma: positionGreeks.gamma[greekIndex], vega: positionGreeks.vega[greekIndex], theta: positionGreeks.theta[greekIndex], units: positionGreeks.units(greekIndex) } };
-    if (venue.coinNativeAmounts) row.extra = { contractsNative: row.notional / markets.contractSize[positions.market[i]], unrealizedPnlNative: row.unrealizedPnl };
-    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
+    if (positions.contractsNative[i] !== undefined || positions.unrealizedPnlNative[i] !== undefined) {
+      row.extra = { contractsNative: positions.contractsNative[i], unrealizedPnlNative: positions.unrealizedPnlNative[i] };
+    }
     positionRows.push(row);
   }
   const settingRows = [];
@@ -786,16 +790,9 @@ async function runTs() {
             } : {}),
           },
           orders: receiver.orders.map((o) => ({ ...o })),
-          // Zero-size placeholders carry each market's leverage and margin type.
           positions: receiver.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
           flatPositionPnl: flatPositionPnl(receiver.positions),
-          settings: venue.tsSettings?.(exchange, store) ?? [
-            ...new Map(
-              receiver.positions
-                .filter((p) => p.leverage > 0)
-                .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
-            ).values(),
-          ],
+          settings: venue.tsSettings?.(exchange, store) ?? captureTsSettings(receiver),
           fills: executions.map(captureTsFill),
         }
       : undefined;

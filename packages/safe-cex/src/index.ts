@@ -28,6 +28,44 @@ export {
 
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
+
+export {
+  DelegatedOutbox,
+  DelegatedIntentError,
+  createDelegatedIntentId,
+  markDelegatedNotSent,
+} from './delegatedOutbox';
+export { delegatedActionFingerprint } from './delegatedActions';
+export type {
+  DelegatedAction,
+  DelegatedActionResult,
+  DelegatedActionOutcome,
+  DelegatedActionRequestFrame,
+  DelegatedActionAckFrame,
+  DelegatedActionOutcomeFrame,
+  DelegatedActionCancelQueuedFrame,
+} from './delegatedActions';
+export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
+export type {
+  DelegatedOrderBinding,
+  DelegatedOrderSubmitFrame,
+  DelegatedOrderAckFrame,
+  DelegatedOrderOutcomeFrame,
+  DelegatedOrderCancelQueuedFrame,
+} from './delegatedOrderFrames';
+export type {
+  DelegatedIntent,
+  EnqueueOptions,
+  DelegatedNotSentEvidence,
+  StoredDelegatedNotSentEvidence,
+  IntentState,
+  OutboxConnection,
+  OutboxOptions,
+  OutboxScope,
+  OutboxStorage,
+  OutboxSnapshot,
+  OutboxCompaction,
+} from './delegatedOutbox';
 export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
 export { describeStoppedAlgos, nukeWarning } from './nukeResult';
 export type { HistoryCompleteness, HistoricalRows } from './historyCompleteness';
@@ -42,6 +80,9 @@ export { createEngineTransport, resolveEngineRoutingPlan } from './transport/eng
 export type { EngineRoutingPlan } from './transport/engine';
 export { setWsDiagnosticsEnabled, isWsDiagnosticsEnabled } from './utils/wsDiagnostics';
 export type { WsDiagnosticEvent } from './transport/requestsLog';
+
+export { sealDelegatedHandover } from './delegatedHandover';
+export type { DelegatedHandoverInput, SealedDelegatedHandover } from './delegatedHandover';
 
 // Cache for loaded exchange classes
 const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
@@ -257,6 +298,7 @@ export {
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
+export type { BuilderFeeApprovalGuard } from './exchanges/hyperliquid/hyperliquid.builderFee';
 
 export type {
   BuilderFeeApprovalResult,
@@ -383,3 +425,5 @@ export type {
   CandleCacheRangeLookup,
   CandleCacheSparseChunk,
 } from './candleCache';
+
+export type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';

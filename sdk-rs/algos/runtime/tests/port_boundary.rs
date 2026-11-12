@@ -14,6 +14,7 @@ const ALLOWED: &[&str] = &[
     "engine::Fill",
     "engine::Query",
     "error",
+    "write_plan",
     "command::decode_command",
     "Capabilities",
     "capabilities",

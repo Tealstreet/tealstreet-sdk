@@ -1411,6 +1411,7 @@ struct WriteAttempt {
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
+    record_sequence: u64,
     reports: RejectionReports,
     id_overflow: bool,
 }
@@ -1424,12 +1425,14 @@ struct WriteLeg {
 
 /// A Plan the engine sealed Unknown on an unproven reply after an earlier
 /// refusal: that refusal's words would misreport what stands.
-pub(crate) const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+pub const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
 
 /// Bounded evidence retained for the whole command, including prior retries.
 /// Registration order is logical planning order, never callback arrival order.
 pub struct CommandWrites {
     attempts: Vec<WriteAttempt>,
+    // Callback completion order is independent of logical registration order.
+    record_sequence: u64,
     legs: Vec<WriteLeg>,
     capacity: usize,
     sealed: bool,
@@ -1439,7 +1442,18 @@ pub struct CommandWrites {
     // An earlier attempt of this intent may have reached the venue.
     inherited_uncertain: bool,
     /// The venue's words for a failure whose terminal presents none of its own.
+    /// Applied only when the projected outcome is `Unknown`; a definite
+    /// acceptance or rejection keeps the venue's own words. Used by venue
+    /// paths that stage a generic "unknown outcome; check Open Orders"
+    /// sentence BEFORE a leg is dispatched.
     presentation: Option<String>,
+    /// The venue has already computed the correct user-facing message for
+    /// this failure and wants it to replace the projected venue text on any
+    /// outcome, including `Rejected`/`NotSent`. Used by venue paths that
+    /// RE-present their own composed message AFTER a terminal leg (protective
+    /// edit put-backs, batch-unknown summaries), where the venue's raw native
+    /// text would be strictly less informative.
+    presentation_force: Option<String>,
     /// The engine recorded an unproven status reply the venue never saw.
     unproven_status: bool,
     #[cfg(feature = "serial-plans")]
@@ -1506,6 +1520,7 @@ impl CommandWrites {
         }
         Ok(Self {
             attempts: Vec::new(),
+            record_sequence: 0,
             legs: Vec::new(),
             capacity,
             sealed: false,
@@ -1514,6 +1529,7 @@ impl CommandWrites {
             evidence: evidence::EvidenceBudget::default(),
             inherited_uncertain: false,
             presentation: None,
+            presentation_force: None,
             unproven_status: false,
             #[cfg(feature = "serial-plans")]
             stream: None,
@@ -1546,6 +1562,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
@@ -1569,6 +1586,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
@@ -1896,7 +1914,9 @@ impl CommandWrites {
         let mut evidence = writer(self.evidence)?;
         capture(&mut evidence);
         let (budget, error, overflow) = evidence.finish();
+        self.record_sequence += 1;
         self.attempts[index].result = Some(WriteResult::Failed(error));
+        self.attempts[index].record_sequence = self.record_sequence;
         self.attempts[index].id_overflow = overflow;
         self.evidence = budget;
         Ok(())
@@ -1938,7 +1958,9 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let (budget, result, id_overflow) = self.evidence.result(result);
+        self.record_sequence += 1;
         attempt.result = Some(result);
+        attempt.record_sequence = self.record_sequence;
         attempt.id_overflow = id_overflow;
         attempt.reports = reports;
         self.evidence = budget;
@@ -2070,13 +2092,28 @@ impl CommandWrites {
     }
 
     /// Words for this journal's failure when its terminal presents none; the
-    /// latest replaces any earlier. Outcome and protection stay projected.
+    /// latest replaces any earlier. Applied only to `Unknown` seals. Outcome
+    /// and protection stay projected.
     #[cfg(feature = "http-plans")]
     pub(crate) fn present_failure(&mut self, message: String) -> Result<(), Error> {
         if self.sealed {
             return Err(Error::State);
         }
         self.presentation = Some(message);
+        Ok(())
+    }
+
+    /// Words for this journal's failure that should REPLACE the venue text on
+    /// any outcome. Used where the venue path has already composed the right
+    /// user-facing message (protective put-back, batch-unknown summary) and
+    /// the raw native text would be strictly less informative. Outcome and
+    /// protection stay projected.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn force_present_failure(&mut self, message: String) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        self.presentation_force = Some(message);
         Ok(())
     }
 
@@ -2102,12 +2139,20 @@ impl CommandWrites {
 
     fn failure_projection(
         &self,
-        fallback: VenueError,
+        mut fallback: VenueError,
         note: Option<&str>,
     ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
         }
+        let elements = fallback.elements.take();
+        // Identity-only fallbacks declare no logical counts. They must neither
+        // invent an empty partial result nor erase selected native counts.
+        let plan_counts = elements
+            .as_ref()
+            .and(fallback.partial.as_ref())
+            .filter(|partial| partial.total.is_some() || partial.failed_index.is_some())
+            .map(|partial| (partial.total, partial.failed_index));
         let presented = (fallback.protection.is_some() || fallback.presents)
             .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
@@ -2152,7 +2197,7 @@ impl CommandWrites {
             .all(|a| matches!(&a.result, Some(WriteResult::Rejected(e)) if e.outcome == Some(Outcome::NotSent)));
         #[cfg(feature = "serial-plans")]
         let all_not_sent = all_not_sent && !self.streamed().is_some_and(|s| s.sent_refusal);
-        let error = |a: &WriteAttempt| match &a.result {
+        let error_from_attempt = |a: &WriteAttempt| match &a.result {
             Some(
                 WriteResult::Rejected(error)
                 | WriteResult::KnownPartial(error)
@@ -2161,13 +2206,33 @@ impl CommandWrites {
             ) => Some(error.clone()),
             _ => None,
         };
+        // Later failed attempts can carry a complete journal even when an
+        // earlier refusal still supplies the native error text.
+        let elements = elements.or_else(|| {
+            self.attempts
+                .iter()
+                .filter_map(|attempt| match &attempt.result {
+                    Some(
+                        WriteResult::Rejected(error)
+                        | WriteResult::KnownPartial(error)
+                        | WriteResult::PartialUnknown(error)
+                        | WriteResult::Failed(error),
+                    ) => error
+                        .elements
+                        .as_ref()
+                        .map(|elements| (attempt.record_sequence, elements)),
+                    _ => None,
+                })
+                .max_by_key(|(sequence, _)| *sequence)
+                .map(|(_, elements)| elements.clone())
+        });
         // Choose the terminal physical attempt of the earliest logical leg,
         // preferring legs that reached the venue. Callback order is irrelevant.
         let select = |sent_only: bool| {
             self.attempts
                 .iter()
                 .filter(|a| self.terminal(a) && (!sent_only || self.reached(a.leg)))
-                .filter_map(|a| error(a).map(|error| (self.order(a.leg), error)))
+                .filter_map(|a| error_from_attempt(a).map(|error| (self.order(a.leg), error)))
                 .min_by(|(a, _), (b, _)| a.cmp(b))
                 .map(|(_, error)| error)
         };
@@ -2206,6 +2271,11 @@ impl CommandWrites {
                 error
             }
         };
+        // Native-error selection must retain the complete logical plan journal.
+        // Aggregate transport classification below remains engine-owned.
+        if elements.is_some() {
+            error.elements = elements;
+        }
         error.outcome = if self.inherited_uncertain {
             Some(Outcome::Unknown)
         } else if !any_released {
@@ -2221,6 +2291,28 @@ impl CommandWrites {
             // existing partial contract; do not invent execution uncertainty.
             None
         };
+        // Earlier refusal text/evidence must not erase a later cooldown. Any
+        // unresolved rate limit still constrains reconciliation; keep the
+        // longest terminal pause, including the default for a missing header.
+        if error.outcome == Some(Outcome::Unknown)
+            && let Some(rate) = self
+                .attempts
+                .iter()
+                .filter(|attempt| attempt.released && self.terminal(attempt))
+                .filter_map(error_from_attempt)
+                .filter(|error| error.kind == Some(crate::ErrorKind::RateLimited))
+                .max_by(|a, b| {
+                    let delay = |error: &VenueError| {
+                        error
+                            .retry_after_ms
+                            .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS)
+                    };
+                    delay(a).total_cmp(&delay(b))
+                })
+        {
+            error.kind = rate.kind;
+            error.retry_after_ms = rate.retry_after_ms;
+        }
         // Preserve the selected native/fallback evidence prefix exactly. Append
         // additional facts in logical replacement order, without charging known
         // IDs again or reordering a bounded retained prefix.
@@ -2268,6 +2360,19 @@ impl CommandWrites {
                 error = error.partial_ids(&ids);
             }
         }
+        // Logical counts travel with the complete venue journal, independently
+        // of native-error selection and the engine's accepted identity prefix.
+        if let Some((total, failed_index)) = plan_counts {
+            let partial = error.partial.get_or_insert_with(|| {
+                Box::new(crate::Partial {
+                    order_ids: Vec::new(),
+                    total: None,
+                    failed_index: None,
+                })
+            });
+            partial.total = total;
+            partial.failed_index = failed_index;
+        }
         if overflow {
             evidence::mark_id_overflow(&mut error);
         }
@@ -2282,7 +2387,20 @@ impl CommandWrites {
         if let Some((message, protection)) = presented {
             error.message = message;
             error.protection = protection;
-        } else if let Some(message) = &self.presentation {
+        } else if let Some(message) = &self.presentation_force {
+            // The venue path has already composed the exact user-facing
+            // message it wants for this failure (protective put-back summary,
+            // batch-unknown aggregate, re-presented local reason). Replace the
+            // projected venue text on every outcome, including definite
+            // rejections, where raw native text would be strictly less
+            // informative.
+            error.message = message.clone();
+        } else if let Some(message) = &self.presentation
+            && error.outcome == Some(Outcome::Unknown)
+        {
+            // A caller-staged presentation names an uncertain outcome. A
+            // definite acceptance or rejection carries the venue's own words;
+            // overwriting it would hide a real refusal behind generic text.
             error.message = message.clone();
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();
@@ -2517,7 +2635,7 @@ impl CommandWrites {
                             stream.refused += 1;
                             let bytes = error.message.len()
                                 + error.venue_code.as_ref().map_or(0, String::len)
-                                + error.venue_message.as_ref().map_or(0, String::len);
+                                + error.venue_message.as_deref().map_or(0, str::len);
                             if stream.retained_bytes + bytes <= evidence::RETAINED_TEXT_BYTES {
                                 stream.retained_bytes += bytes;
                                 stream.retained.push((
@@ -2573,3 +2691,7 @@ mod evidence_tests;
 #[cfg(test)]
 #[path = "request_context_replacement_tests.rs"]
 mod replacement_tests;
+
+#[cfg(test)]
+#[path = "request_context_write_plan_tests.rs"]
+mod write_plan_tests;

@@ -42,6 +42,10 @@ expose the same kind to web clients.
 | `warn`    | yellow  | `warn`         | terminal only     |
 | `error`   | red     | `error`        | terminal only     |
 
+Exchange output belongs to the login that connected the exchange. After switching
+users, delayed output and disposal notices from the previous login are discarded.
+Disabling an account within the same login still reports interrupted chases.
+
 Where each stream goes:
 
 - `logger.info / warn / error / debug` → `~/.tealstreet/cli.log` only — never
@@ -114,6 +118,10 @@ code, goes to stderr instead, and the background update notice is skipped. See
 
 ## Status bar + footer {#status-bar--footer}
 
+Changing login clears the old status and watch messages, stops its redraws and
+loads the new user's footer settings. Late exchange events, command output and
+webhook replies from the previous session are discarded.
+
 Two pinned single-line surfaces frame the scrolling output, both reserved via
 one shared ANSI scroll region (so they never fight each other or corrupt the
 prompt):
@@ -143,6 +151,11 @@ monitor's current-order row show the remaining base amount after partial fills.
 Inverse contracts have a price-dependent base size, so fractional amounts use
 up to eight significant digits rather than a fixed decimal count. Small nonzero
 positions and remaining order sizes stay visible.
+
+Unknown position valuation displays as `—` in position cards and position/margin
+tables, including derived leverage, PnL percentages and incomplete account totals.
+Known quantities and currency PnL remain visible. The footer also shows `—` for
+the PnL percentage until a known nonzero valuation is available.
 
 ---
 

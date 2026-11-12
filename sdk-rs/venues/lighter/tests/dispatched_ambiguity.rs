@@ -202,6 +202,14 @@ fn documented_definitive_refusal_stays_rejected() {
 }
 
 fn nonce_retry_stale_refusal(status: u16, code: u64, unknown: bool) {
+    nonce_retry_stale_refusal_body(
+        status,
+        &format!(r#"{{"code":{code},"message":"retry response"}}"#),
+        unknown,
+    );
+}
+
+fn nonce_retry_stale_refusal_body(status: u16, body: &str, unknown: bool) {
     let mut opts = options();
     opts.testnet = true;
     let (mut e, _, _) = ready_feeds(opts, true);
@@ -243,13 +251,7 @@ fn nonce_retry_stale_refusal(status: u16, code: u64, unknown: bool) {
     reply_at(&mut e, now, &nonce, 200, r#"{"code":200,"nonce":20}"#);
     let resent = take_http(&mut e, now, "sendTx");
     assert_eq!(resent.method, Method::Post);
-    reply_at(
-        &mut e,
-        now,
-        &resent,
-        status,
-        &format!(r#"{{"code":{code},"message":"retry response"}}"#),
-    );
+    reply_at(&mut e, now, &resent, status, body);
     let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
     let failures: Vec<_> = actions
         .iter()
@@ -332,10 +334,25 @@ fn stale_refusal_after_nonce_retry_23100_is_replaced_by_unknown_guidance() {
     nonce_retry_stale_refusal(200, 23100, true);
 }
 #[test]
+fn stale_refusal_after_nonce_retry_internal_error_is_replaced_by_unknown_guidance() {
+    nonce_retry_stale_refusal(200, 29500, true);
+}
+#[test]
+fn stale_refusal_after_nonce_retry_duplicate_index_is_replaced_by_unknown_guidance() {
+    nonce_retry_stale_refusal(200, 21728, true);
+}
+#[test]
 fn stale_refusal_after_nonce_retry_http_429_already_has_unknown_guidance() {
     nonce_retry_stale_refusal(429, 23000, true);
 }
 #[test]
 fn stale_refusal_nonce_retry_definitive_response_stays_rejected() {
     nonce_retry_stale_refusal(200, 21702, false);
+}
+
+#[test]
+fn stale_refusal_after_nonce_retry_malformed_reply_is_replaced_by_uncertainty() {
+    for body in ["<html>", r#"{"code":200,"tx_hash":true}"#] {
+        nonce_retry_stale_refusal_body(200, body, true);
+    }
 }

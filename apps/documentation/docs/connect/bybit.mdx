@@ -49,6 +49,10 @@ import BybitSpecific from '/img/connect/bybit/bybit-specific-settings.png';
 
 - First, make sure you are logged into your [Bybit](https://teal.link/bybit1) account.
 
+:::tip Supported Bybit markets
+Tealstreet supports Bybit derivatives, Inverse, Demo, and Spot trading through separate Bybit setup modes. Choose **Bybit Spot** in Tealstreet when you want to connect spot markets.
+:::
+
 <IntroTealstreet exchangeName="Bybit" />
 
 ---
@@ -99,7 +103,7 @@ This guide assumes you will use the **SG** region for Tealstreet. If you instead
 2. In the Application Name select **'Tealstreet'**
     <!-- * Again this option is only for **"SG"** Region in Tealstreet. -->
 3. Choose the **‘Read-Write’** permission.
-4. Select **‘Orders’ 'Positions' 'USDC Derivatives Trading'** and **‘Trade’** in the permission section.
+4. Select the trading permissions required for the Bybit setup mode you are connecting. Derivatives modes need orders, positions, and derivatives trading permissions. Bybit Spot needs spot trading permission. Do not enable withdrawal permissions.
 5. Double check all the selections are correct and then click ‘Submit’.
     - A popup will appear next and prompt you to submit your 2FA code if its linked to your Bybit account.
     - Once you submit the 2FA code, you will see a new popup from Bybit with your API Key details. You need to paste those details into the API Key page of Tealstreet.
@@ -142,7 +146,7 @@ Read more about Tealstreet's password encryption system **[here](/docs/connect/a
 <!-- * Consider supporting Tealstreet by using the referral [link](https://teal.link/bybit1). -->
 
 - Enable **Use Tealstreet Network** unless you intend to route your orders from some other location.
-  - For a manually created key with an IP restriction, add the nine current fleet IPs first, then the selected legacy SG/JA AWS addresses below. The union keeps the key usable for rollback and whitelabel on the legacy app.
+  - For a manually created key with an IP restriction, add the nine current fleet IPs below.
 
 <ProxyFleetIps exchange="bybit" />
 
@@ -238,7 +242,7 @@ You can find more [info here](https://announcements.bybit.com/article/introducin
 
 ### Does Tealstreet support HyroTrader?
 
-- Yes, Tealstreet supports HyroTrader. You can connect your HyroTrader account to Tealstreet by following the [HyroTrader Instructions](https://www.hyrotrader.com/faq/getting-started/) and connecting a `Bybit Demo` account.
+- Yes. Connect it as `HyroTrader` in Tealstreet, then paste the challenge API key and secret from HyroTrader. Do not connect HyroTrader challenge keys as `Bybit Demo`.
 
 ### I have available balance but my available margin is zero and I can't place orders?
 

@@ -1,6 +1,6 @@
 ---
 title: V2 Shutdown and IP Whitelist Migration
-description: Guide for moving V2 users to V3 and keeping exchange IP whitelists valid for Rust and legacy app egress.
+description: Guide for moving V2 users to V3 and keeping exchange IP whitelists valid for current Tealstreet egress.
 sidebar_position: 2
 hide_title: false
 draft: false
@@ -9,10 +9,9 @@ hide_table_of_contents: false
 
 import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
 
-:::caution Keep both app lanes allowed
-The Rust app uses the Vultr Tokyo fleet. The legacy app still uses the AWS
-addresses for whitelabel users and rollback. Allow the union shown below so the
-same API key can work on either lane.
+:::caution Use the current fleet only
+Tealstreet uses the Vultr Tokyo fleet below. The old AWS egress addresses are
+retired and should not be added to new API key allowlists.
 :::
 
 <!-- :::note Temporary migration page
@@ -21,8 +20,7 @@ Retire it 30-60 days after the migration is complete, once support confirms the
 old Tealstreet IPs are no longer needed.
 ::: -->
 
-The Rust app uses the Vultr Tokyo fleet; the legacy app retains AWS egress.
-Most users only need to know which path applies to them:
+Tealstreet uses the Vultr Tokyo fleet. Most users only need to know which path applies to them:
 
 - If you still use the old V2 terminal, move to V3 and add your exchange
   accounts there.
@@ -61,10 +59,9 @@ should not require an exchange-side whitelist edit.
 | New Tealstreet IP list available | Available now |
 | Migration window | Ended November 2, 2026 at 00:00 UTC |
 | Final V2 shutdown | November 2, 2026 at 00:00 UTC |
-| Legacy AWS egress | Still used for rollback and whitelabel |
+| Legacy AWS egress | Retired |
 
-Add the current fleet IPs and the selected venue/region's legacy AWS addresses.
-Keep any additional venue-specific addresses shown in the API key form.
+Add the current fleet IPs shown below, plus any venue-specific additional addresses shown by the form.
 
 ## V2 user - move to V3
 
@@ -130,9 +127,8 @@ Tealstreet routing.
 
 ### What changes
 
-The Rust app egresses through the Vultr Tokyo fleet, while the legacy app uses
-the AWS private proxy pool. A key may need to work on both when a user is moved
-back to the legacy app. Keep both groups allowed until the legacy app is retired.
+Tealstreet egresses through the Vultr Tokyo fleet. The former AWS private proxy
+pool is retired and should not be kept in exchange allowlists.
 
 Cloud sync can help make your Tealstreet API key list available on every device
 while you work through this migration. It does not edit the exchange API key or
@@ -144,16 +140,15 @@ exchange account.
 Add the full new Tealstreet IP list anywhere your exchange asks for the
 Tealstreet Network, TS Network, or Tealstreet IP whitelist.
 
-Going forward, Tealstreet Network routing uses one region instead of split
-Japan and Singapore routing for Rust. The legacy app still has separate AWS
-regions. Choose your venue and legacy region below, and allow both groups.
-Retain any additional passthrough IPs shown in your venue-specific API key form.
+Tealstreet Network routing uses one current fleet instead of split Japan and
+Singapore legacy regions. Allow the list below, plus any additional venue
+addresses shown by the form.
 
 #### New Tealstreet IPs, Vultr Tokyo fleet
 
 <ProxyFleetIps />
 
-Use the web API key form's copy button to copy the union. Where a verified venue limit is too small for the union, the form copies the fleet only and labels the legacy addresses optional; that key will not work on the legacy app unless its AWS addresses can also be allowed.
+Use the web API key form's copy button to copy the same list.
 
 ### Update each exchange key
 
@@ -165,9 +160,8 @@ Repeat these steps for each Tealstreet-connected exchange account:
 4. Find the API key used by Tealstreet.
 5. Edit the IP whitelist or allowed IP addresses.
 6. Add the new Tealstreet IPs.
-7. Retain any additional passthrough addresses shown in your venue-specific API key form.
-8. Save the exchange-side API key changes and complete any 2FA or email checks.
-9. Return to Tealstreet and reconnect or validate the account.
+7. Save the exchange-side API key changes and complete any 2FA or email checks.
+8. Return to Tealstreet and reconnect or validate the account.
 
 :::warning Give exchanges time to apply the change
 API key edits can take several minutes to propagate. Some exchanges also apply

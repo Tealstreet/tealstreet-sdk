@@ -1,0 +1,71 @@
+# Shared TWAP outcomes and legacy parity
+
+TWAP releases one scheduled child at a time. Quantity, price and notional rules
+remain delegated to native writes. A definite refusal leaves later distinct
+children scheduled, as in legacy TS. This includes a fully known native partial:
+a placed prefix plus definitive refusal with no Unknown element. Its native
+journal, IDs and refusal text are retained, even without an aggregate outcome.
+Only actual uncertainty in the aggregate or native journal halts the action.
+There is no new whole-plan admission gate.
+
+Genuine Unknown halts the action under Sean/daxx's recorded parity exception
+(2026-11-08, decision #3355; Sam to verify). It clears future child and fallback
+timers and stops owned chasers while retaining their resting orders. It never
+replays an uncertain child or issues a cancellation/replacement because of Unknown.
+Previously dispatched responses still settle and update the reported native IDs.
+The Unknown-only chaser halt also relinquishes orders whose placement response
+arrives later. Ordinary timeout removal still cancels before market fallback
+(legacy `TwapInstance.ts:213-220`); generic keep-order removal retains its legacy
+late-response cancellation (`ChaserOrderManager.ts:307-322,1017-1035`).
+Real child chasers expose an Unknown placement while read-only identity lookups
+are still pending, so even a shorter slice interval cannot release another child.
+An unresolved placement retains that signal in the ended chaser's progress.
+Native journal uncertainty overrides an outer refusal even with accepted IDs.
+A TWAP chaser's Unknown cancel immediately retains that progress signal and
+relinquishes remaining automatic cancels; it never enters the cancel retry loop.
+Standalone chaser cancellation keeps its existing retry policy.
+
+The exact local wording is `The outcome is unknown. Check Open Orders`, matching
+`engine/src/http_evidence.rs:38` per the lead's literal rule. Shared engine code
+and the engine duplicate-write fence are unchanged by this follow-up.
+
+The shared reporting-only WritePlan records indexed placed, applied, unknown and
+not-sent rows. `twap:outcome` carries the structured error, native partial IDs and
+all element outcomes; a `telemetry` event carries the same error with the kind
+`twap.unknown_outcome`. The normal `error` op carries the canonical user message.
+These are AccountPort emissions; the tests do not claim backend Sentry delivery.
+Accepted chaser handoffs use `applied/deferredChild`, not fabricated native IDs.
+Optional market remainder writes occupy separate journal rows. Completed parents
+retain outstanding remainder responses and observe child chasers until settled.
+
+Legacy source is pinned to `c78bed93d6eb4e45a3ec072b7d09fc1529d10a9b`.
+All five paths are TS-partial and TS-continues after failure, including Unknown;
+Rust retains TS continuation for definite refusals and records the explicit
+stop-after-UNKNOWN exception for each path:
+
+| Path | Legacy TS evidence | Unknown recording test in `tests/after_failure.rs` |
+| --- | --- | --- |
+| scheduled-TWAP-children (fresh schedules, every venue) | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:249-280` | `unknown_exception_fresh_schedule_halts_with_outcomes_and_telemetry` |
+| quantity/min/max/grid/notional/price delegation (including BingX unbounded maximum) | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:117-139,167,255-280` | `unknown_exception_native_rule_delegation_halts_with_outcomes_and_telemetry` |
+| restore/resume child preflight | `packages/safe-cex/src/webworker/handlers/TwapHandler.ts:95-99; packages/safe-cex/src/webworker/twap/TwapInstance.ts:291-310,330-345,255-280` | `unknown_exception_{restored,resumed}_schedule_halts_with_outcomes_and_telemetry; unknown_exception_restored_in_flight_halts_without_replay_or_suffix` |
+| runtime rejected/unknown child continuation | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280` | `unknown_exception_runtime_reply_halts_with_outcomes_and_telemetry` |
+| chaser handoff and compensating market remainder | `packages/safe-cex/src/webworker/twap/TwapInstance.ts:181-194,213-220,255-280` | `unknown_exception_market_remainder_halts_without_next_chaser; unknown_exception_chaser_halts_siblings_without_cancel_or_replacement` |
+
+Each Unknown pin cites `PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx,
+2026-11-08)` and its legacy TS file/line. The tests assert no subsequent action
+writes, the indexed outcome and exact message, and the journal/telemetry emissions.
+The recording AccountPort and chaser fixtures observe algorithm commands, not
+physical venue HTTP. Their clock advances epoch time with Tokio's paused clock.
+
+Definite-refusal controls retain the legacy sequence: fresh/restored/resumed
+schedules release the third child after the second refuses; BingX's unbounded cap
+remains usable; refused chaser handoffs allow later children; and a definite
+market-remainder refusal retains chase -> cancellation -> market remainder ->
+next chase. Compensation before an Unknown remains intact. Last-child Unknown
+remainders, uncertain restored in-flight work, and late successful responses are
+covered separately. Skipped zero slices retain their original journal indices.
+
+KNOWN-ISSUE (legacy TS also partial-places): a valid prefix can land before a
+later native-rule refusal. The earlier full-plan validator, notional sidecars and
+dispatch-controlling helper adoption were reverted. The reporting helper cannot
+veto dispatch; TWAP's explicit Unknown policy decides the action's stop.

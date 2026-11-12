@@ -55,7 +55,18 @@ pub enum Reply {
     /// The TS method returns `undefined`, not the engine result.
     Unit,
     /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
-    Placed { client_order_id: String },
+    Placed {
+        client_order_id: String,
+    },
+    /// An order frame using the same single-order command and audit path.
+    Intent {
+        client_order_id: String,
+        seq: u64,
+    },
+    Action {
+        kind: &'static str,
+        seq: u64,
+    },
     /// `updateOrder`: the worker bridge's `WorkerOrderIds`, which the main-thread
     /// mirror decodes (`decodeWorkerOrderIds`); a bare array would throw there.
     OrderIds,
@@ -377,6 +388,24 @@ fn fill_bound(value: Option<Value>, time: FillHistoryTime) -> Option<Value> {
     };
     let value = if milliseconds { value } else { value * 1000.0 };
     Some(value.floor().into())
+}
+
+/// DELEGATED uses the existing translation only for an enabled private venue.
+pub fn translate_delegated(
+    venue: &str,
+    method: &str,
+    args: &[Value],
+    capabilities: &Capabilities,
+    open_order_symbols: &[String],
+    public_only: bool,
+) -> Result<Vec<Plan>, Refused> {
+    if public_only || !crate::delegated::enabled(venue) {
+        return Err(refused(
+            "UnsupportedMethod",
+            "DELEGATED methods are not enabled for this account",
+        ));
+    }
+    translate(method, args, capabilities, open_order_symbols, public_only)
 }
 
 /// Translates one hosted `callMethod`. `open_order_symbols` (engine store) answers
@@ -833,6 +862,33 @@ pub fn translate(
                 out.insert("incomeType".into(), text(kind, "incomeType")?.into());
             }
             one(command("fetchIncome", out, false))
+        }
+        "fetchClosedPnl" if capabilities.closed_positions => {
+            let options = arg(args, 0);
+            let mut out = Map::new();
+            if let Some(symbol) = optional(options, "symbol") {
+                let symbol = text(&symbol, "symbol")?;
+                if !symbol.is_empty()
+                    || !matches!(
+                        capabilities.closed_position_format,
+                        safe_cex_engine::ClosedPositionFormat::Okx
+                            | safe_cex_engine::ClosedPositionFormat::Blofin
+                    )
+                {
+                    out.insert("symbol".into(), symbol.into());
+                }
+            }
+            for field in ["from", "to"] {
+                if let Some(bound) = optional(options, field) {
+                    out.insert(field.into(), finite(&bound, field)?.into());
+                }
+            }
+            let account = optional(options, "accountName")
+                .map(|value| text(&value, "accountName"))
+                .transpose()?
+                .unwrap_or_default();
+            out.insert("account".into(), account.into());
+            one(command("fetchClosedPnl", out, false))
         }
         // The raw rows a mirror's journal maps; it folds the journal itself.
         "fetchClosedPositions" if capabilities.closed_positions => {
@@ -1648,6 +1704,29 @@ mod tests {
             false,
         );
         assert_eq!(filtered.unwrap_err().name, "Error");
+    }
+
+    #[test]
+    fn reported_closed_pnl_forwards_account_and_normalizes_account_wide_symbols() {
+        let closed = Capabilities {
+            closed_positions: true,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Okx,
+            ..caps()
+        };
+        assert_eq!(
+            single(
+                "fetchClosedPnl",
+                json!([{"symbol":"", "from":1,"to":2,"accountName":"fixture-account"}]),
+                &closed
+            ),
+            json!({"op":"fetchClosedPnl","from":1.0,"to":2.0,"account":"fixture-account"})
+        );
+        assert_eq!(
+            translate("fetchClosedPnl", &[json!({})], &caps(), &[], false)
+                .unwrap_err()
+                .name,
+            "UnsupportedMethod"
+        );
     }
 
     #[test]

@@ -56,7 +56,16 @@ describe.each([
       units: profile.units,
       contractSize: profile.contractSize,
       native: true,
-      orders: [{ id: 'partial', amount: 7, filled: 2, remaining: profile.remaining, native: profile.native }],
+      orders: [
+        {
+          id: 'partial',
+          amount: 7,
+          filled: 2,
+          remaining: profile.remaining,
+          native: profile.native,
+          remainingNotional: 500,
+        },
+      ],
     });
     const orders = frame.orders();
     if (orders === undefined) throw new Error('Inverse display fixture requires an orders frame');
@@ -103,9 +112,19 @@ describe.each([
   it('converts the decoded remainder in rendered charts', async () => {
     const exchange = fixture();
     const ticker: Ticker = {
-      id: 'BTCUSD', symbol: 'BTCUSD', bid: 50_000, ask: 50_000, last: 50_000,
-      mark: 50_000, index: 50_000, percentage: 0, openInterest: 0,
-      fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+      id: 'BTCUSD',
+      symbol: 'BTCUSD',
+      bid: 50_000,
+      ask: 50_000,
+      last: 50_000,
+      mark: 50_000,
+      index: 50_000,
+      percentage: 0,
+      openInterest: 0,
+      fundingRate: 0,
+      fundingTime: 0,
+      volume: 0,
+      quoteVolume: 0,
     };
     exchange.store.update({ tickers: [ticker] });
     exchange.fetchOHLCV = vi
