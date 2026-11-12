@@ -6,7 +6,11 @@ use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
 };
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::*;
+use safe_cex_engine::model::{
+    MarginType, Market, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide,
+    OrderStatus, OrderType, PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType,
+    TimeInForce,
+};
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     ConditionOwner, ConditionWait, Context, Credential, HttpOwnerRetirement, Operation, Plan,
