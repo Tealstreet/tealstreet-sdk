@@ -610,10 +610,9 @@ export async function certifySuites(suites, certifyOne) {
   return { results, certificates };
 }
 
-async function certifyAll(context, destination) {
-  const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, async (suite) => {
-    return certifySuite(context, suite, resolve(destination, suite));
-  });
+export async function certifyAll(context, destination,
+  certifyOne = suite => certifySuite(context, suite, resolve(destination, suite))) {
+  const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, certifyOne);
   await evidenceEndCheck(context);
   const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, ...outcome };
   write(resolve(destination, 'results.json'), results);
