@@ -3,7 +3,7 @@ use super::*;
 use crate::order_contract::{self, CancelQueued, OrderSubmit};
 
 impl Session {
-    fn order_admitted(&mut self, name: &str, instance: Option<&str>) -> bool {
+    pub(super) fn order_admitted(&mut self, name: &str, instance: Option<&str>) -> bool {
         self.forget_disposed();
         self.order_frames_enabled
             && order_contract::enabled()
@@ -84,7 +84,7 @@ impl Session {
             &name,
             json!({"requestId":submit.intent_id,
             "method":"placeOrderWithClientOrderId","args":[submit.params],"intentSeq":submit.seq}),
-            Some(submit.seq),
+            Some(OrderReceipt::Placement(submit.seq)),
         )
         .await;
     }
@@ -146,9 +146,11 @@ impl Session {
         kind: &str,
         message: &str,
         outcome: Option<&str>,
-        order_frame: Option<u64>,
+        order_frame: Option<OrderReceipt>,
     ) {
-        if let Some(seq) = order_frame {
+        if let Some(OrderReceipt::Action { seq, .. }) = order_frame {
+            crate::order_actions::refuse(&self.account_out(name), name, request_id, seq, message);
+        } else if let Some(OrderReceipt::Placement(seq)) = order_frame {
             let message: String = message.chars().take(512).collect();
             self.account_out(name).order_outcome(name, json!({"intentId":request_id,"seq":seq,"outcome":"refused",
                 "venueOrderId":null,"clientOrderId":request_id,"error":{"message":message,"outcome":"notSent"}}));
