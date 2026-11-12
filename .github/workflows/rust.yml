@@ -1217,9 +1217,6 @@ jobs:
       - name: Build the venue wasm engine
         if: inputs.replay_artifact != 'combined'
         run: corepack yarn rust:build-wasm --venue ${{ matrix.venue }}
-      - name: Archive the matching CI replay engine
-        if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
         if: inputs.replay_artifact != 'combined'
         run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
@@ -1231,6 +1228,10 @@ jobs:
           else
             corepack yarn rust:build-wasm --venue bingx --bingx-spot-replay
           fi
+      # Family identity must seal the measured variant, after any fixture rebuild.
+      - name: Archive the matching CI replay engine
+        if: inputs.replay_artifact != 'combined'
+        run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Generate the BingX Spot private fixture before sealing
         if: matrix.venue == 'bingx'
         run: corepack yarn rust:private-tape-bingxspot
