@@ -315,7 +315,7 @@ async fn construction_case(switch_user: bool, revoke_a: bool, apply_settings: bo
     tokio::pin!(a);
     queued(a.as_mut(), &registry, 2 + usize::from(apply_settings)).await;
     if let Some(account) = &resident {
-        assert!(account.handle.disposal_cause().is_some());
+        assert!(account.handle.disposal_cause().is_none());
         received.lock().unwrap().clear();
         assert_construction_replies(&mut a_out, None, true);
     } else {
@@ -349,7 +349,12 @@ async fn construction_case(switch_user: bool, revoke_a: bool, apply_settings: bo
         .unwrap();
     let a = if revoke_a {
         assert!(matches!(a, Err(ref e) if e.contains("Router lease expired")));
-        assert!(registry.held(A, "synthetic-main", a_socket).is_none());
+        if let Some(resident) = &resident {
+            assert!(registry.held(A, "synthetic-main", a_socket).is_some());
+            assert!(!resident.running.io_allowed());
+        } else {
+            assert!(registry.held(A, "synthetic-main", a_socket).is_none());
+        }
         None
     } else {
         let account = a.unwrap_or_else(|_| panic!("same-owner construction completes"));
@@ -438,8 +443,11 @@ async fn construction_case(switch_user: bool, revoke_a: bool, apply_settings: bo
     }
     assert_eq!(
         registry.account_count(),
-        usize::from(!revoke_a) + usize::from(switch_user)
+        usize::from(!revoke_a || apply_settings) + usize::from(switch_user)
     );
+    if let Some(resident) = resident.filter(|_| revoke_a) {
+        registry.dispose(&resident, Disposal::PageDisposed);
+    }
     for account in [a, b].into_iter().flatten() {
         assert!(!account.is_public() && account.link.is_none() && account.delegated.is_some());
         registry.dispose(&account, Disposal::PageDisposed);

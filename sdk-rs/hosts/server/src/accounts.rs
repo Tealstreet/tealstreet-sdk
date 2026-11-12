@@ -1386,9 +1386,7 @@ impl Registry {
                 account.hold_label(holder, Live { outbox, token }, &init.account_name);
                 return Ok(account);
             }
-            if apply.is_some() {
-                self.stop_for_new_settings(&account, outbox.clone(), Disposal::SettingsChanged);
-            } else {
+            if apply.is_none() {
                 self.dispose(
                     &account,
                     Disposal::rebuild(account.is_public(), public_only),
@@ -1459,12 +1457,16 @@ impl Registry {
         if let Some(replaced) = replaced {
             // Only current settings can publish; identical inits may still race.
             // Its holders go too, so the losing socket stops calling a stopped account.
-            self.dispose_for(
-                &replaced,
-                Disposal::Replaced,
-                "account replaced by a newer init",
-                Some(tell_through(&replaced, replaced.live_outboxes())),
-            );
+            if apply.is_some() {
+                self.stop_for_new_settings(&replaced, outbox, Disposal::SettingsChanged);
+            } else {
+                self.dispose_for(
+                    &replaced,
+                    Disposal::Replaced,
+                    "account replaced by a newer init",
+                    Some(tell_through(&replaced, replaced.live_outboxes())),
+                );
+            }
         }
         Ok(account)
     }

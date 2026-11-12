@@ -813,8 +813,9 @@ excluded. Enabled Bybit settings fingerprints exclude primary credentials.
 
 Settings changes on a held Bybit identity use the admitted connection's
 `msg` operation `applySettings`, with `data: {requestId, settings: InitPayload}`.
-The settings must name the same label and identity. Success stops the account's
-algos through the existing settings-disposal path and builds its new settings;
+The settings must name the same label and identity. Replacement construction and
+its captured authority checks succeed before retiring the resident account through
+the existing settings-disposal path. A failed replacement keeps that resident;
 DELEGATED retains the same provider. The reply is `applySettings:done` with
 `{requestId, success, result}` and the current registration's `instanceId`.
 Parked holders and the DELEGATED resident copy participate in settings refusal.
