@@ -230,12 +230,20 @@ async fn typed_start_reports_owner_change_during_first_effects() {
                     let message =
                         result.expect_err("discarded work must never report Starting TWAP");
                     assert!(
-                        message.contains(if after_dispatch {
+                        message.message.contains(if after_dispatch {
                             "outcome is unknown"
                         } else {
                             "cancelled-for-owner-change"
                         }),
-                        "{message}"
+                        "{message:?}"
+                    );
+                    assert_eq!(
+                        message.outcome,
+                        Some(if after_dispatch {
+                            safe_cex_engine::error::Outcome::Unknown
+                        } else {
+                            safe_cex_engine::error::Outcome::NotSent
+                        })
                     );
                     assert!(factory.active_twaps("a").is_empty());
                 } else {
@@ -1057,7 +1065,10 @@ async fn typed_start_and_stop_for_the_exec_twap_command() {
             let emitted = port.emits.borrow().len();
             assert_eq!(
                 factory.start(unbounded),
-                Err("TWAP BTCUSDT rejected: ordersCount must be between 1 and 1000".to_owned())
+                Err(VenueError::new(
+                    "TWAP BTCUSDT rejected: ordersCount must be between 1 and 1000"
+                )
+                .outcome(safe_cex_engine::error::Outcome::NotSent))
             );
             assert_eq!(
                 port.emits.borrow().len(),

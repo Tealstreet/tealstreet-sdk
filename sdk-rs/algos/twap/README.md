@@ -9,6 +9,8 @@ to drop retired schedules and ignore their deferred placement completions.
 Typed starts keep their captured binding through the book's owner refresh.
 A replacement binding refuses a start discarded before dispatch; if a direct slice
 or chaser was already dispatched, the typed result remains explicitly unknown.
+`TwapFactory::start` returns the existing `VenueError` with `notSent` or `unknown`;
+EXEC preserves that outcome in the correlated result instead of relabelling it.
 
 New TWAPs persist `ownerId` and `ownerGeneration` from that trusted snapshot.
 A restore must match both tags and the account name. Foreign rows, stale

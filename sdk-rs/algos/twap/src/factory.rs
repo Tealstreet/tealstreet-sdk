@@ -67,6 +67,18 @@ struct Inner {
     owner_provider: RefCell<Option<OwnerProvider>>,
 }
 
+fn start_owner_change_error(dispatched: bool) -> VenueError {
+    if dispatched {
+        VenueError::new("TWAP start outcome is unknown: authenticated connection binding changed after slice dispatch")
+            .outcome(Outcome::Unknown)
+    } else {
+        VenueError::new(
+            "TWAP start cancelled-for-owner-change: authenticated connection binding changed",
+        )
+        .outcome(Outcome::NotSent)
+    }
+}
+
 impl TwapFactory {
     /// New TWAPs only; persisted restores require [`Self::with_owner`].
     pub fn new(account_name: &str, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
@@ -173,12 +185,9 @@ impl TwapFactory {
 
     /// Start a TWAP for a typed caller such as the exec `twap` command, with
     /// the same validation and effects as `twap:start`. Returns the new id.
-    pub fn start(&self, options: TwapOptions) -> Result<String, String> {
+    pub fn start(&self, options: TwapOptions) -> Result<String, VenueError> {
         if !self.owner_is_current() {
-            return Err(
-                "TWAP start cancelled-for-owner-change: authenticated connection binding changed"
-                    .into(),
-            );
+            return Err(start_owner_change_error(false));
         }
         let cx = &self.inner.cx;
         Inner::refresh_owner(&self.inner, cx);
@@ -187,10 +196,7 @@ impl TwapFactory {
             .as_ref()
             .is_some_and(|owner| self.inner.book.borrow().owner.as_ref() != Some(owner))
         {
-            return Err(
-                "TWAP start cancelled-for-owner-change: authenticated connection binding changed"
-                    .into(),
-            );
+            return Err(start_owner_change_error(false));
         }
         let owner = self.inner.book.borrow().owner.clone();
         let (started, effects, chaser_dispatched) = {
@@ -212,15 +218,10 @@ impl TwapFactory {
         let dispatched = Inner::run(&self.inner, cx, effects) || chaser_dispatched;
         Inner::refresh_owner(&self.inner, cx);
         if started.is_ok() && self.inner.book.borrow().owner != owner {
-            return Err(if dispatched {
-                "TWAP start outcome is unknown: authenticated connection binding changed after slice dispatch".into()
-            } else {
-                "TWAP start cancelled-for-owner-change: authenticated connection binding changed"
-                    .into()
-            });
+            return Err(start_owner_change_error(dispatched));
         }
         Inner::ensure_driver(&self.inner, cx);
-        started
+        started.map_err(|message| VenueError::new(message).outcome(Outcome::NotSent))
     }
 
     /// `twap:stop` for a typed caller; false when no running TWAP has `id`.
