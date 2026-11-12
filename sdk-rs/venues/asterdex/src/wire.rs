@@ -53,9 +53,14 @@ pub struct Envelope<'a> {
     pub id: Option<i64>,
 }
 
+// Stream-first frames decode typed bodies without a separate raw-body scan.
 pub enum FastAggregate<'a> {
     Tickers(Vec<TickerEvent<'a>>),
     Marks(Vec<MarkEvent<'a>>),
+    Depth {
+        stream: Str<'a>,
+        event: PartialDepth<'a>,
+    },
 }
 
 impl<'a> FastAggregate<'a> {
@@ -115,6 +120,12 @@ impl<'de> Deserialize<'de> for FastAggregate<'de> {
                                 Some("!markPrice@arr@1s" | "!markPrice@arr") => {
                                     FastAggregate::Marks(map.next_value()?)
                                 }
+                                Some(value) if super::is_partial_stream(value) => {
+                                    FastAggregate::Depth {
+                                        stream: stream.as_ref().unwrap().clone(),
+                                        event: map.next_value()?,
+                                    }
+                                }
                                 _ => {
                                     return Err(serde::de::Error::custom(
                                         "not a stream-first aggregate",
@@ -144,7 +155,39 @@ impl<'de> Deserialize<'de> for FastAggregate<'de> {
 
 #[cfg(test)]
 mod aggregate_tests {
-    use super::{FastAggregate, MarkEvent, TickerEvent};
+    use super::{FastAggregate, MarkEvent, PartialDepth, TickerEvent};
+
+    #[test]
+    fn partial_depth_numbers_borrow_unescaped_frame_storage() {
+        let (depth, allocations) = allocation_count::measure(|| {
+            serde_json::from_str::<PartialDepth<'_>>(
+                r#"{"b":[["100.1","2"],["99.9","3"]],"a":[["101","4"],["102.5","5"]]}"#,
+            )
+            .unwrap()
+        });
+        assert_eq!(allocations, 2, "only the two level vectors allocate");
+        for value in depth.b.iter().chain(&depth.a).flatten() {
+            assert!(matches!(value, std::borrow::Cow::Borrowed(_)));
+        }
+    }
+
+    #[test]
+    fn partial_depth_level_borrowing_keeps_escape_and_error_semantics() {
+        let depth: PartialDepth<'_> =
+            serde_json::from_str(r#"{"b":[["1\u0030.5","2"]],"a":[["11","3"]]}"#).unwrap();
+        assert_eq!(depth.b[0][0], "10.5");
+        assert!(matches!(depth.b[0][0], std::borrow::Cow::Owned(_)));
+        for text in [
+            r#"{"b":[["10"]],"a":[]}"#,
+            r#"{"b":[["10","1","2"]],"a":[]}"#,
+            r#"{"b":[[10,"1"]],"a":[]}"#,
+            r#"{"b":[[null,"1"]],"a":[]}"#,
+            r#"{"b":[["10",true]],"a":[]}"#,
+            r#"{"b":[],"b":[],"a":[]}"#,
+        ] {
+            assert!(serde_json::from_str::<PartialDepth<'_>>(text).is_err());
+        }
+    }
 
     #[test]
     fn optional_market_numbers_borrow_unescaped_frame_storage() {
@@ -269,6 +312,20 @@ mod aggregate_tests {
     }
 
     #[test]
+    fn stream_first_partial_depth_uses_typed_single_pass_decoding() {
+        for stream in [
+            "btcusdt@depth5",
+            "ethusdt@depth10@250ms",
+            "btcusdt@depth20@100ms",
+        ] {
+            let text = format!(
+                r#"{{"stream":"{stream}","data":{{"s":"BTCUSDT","u":2,"b":[["100","1"]],"a":[["101","2"]]}}}}"#
+            );
+            assert!(FastAggregate::decode(&text).is_some(), "{stream}");
+        }
+    }
+
+    #[test]
     fn reordered_and_typed_error_frames_select_the_general_decoder() {
         for text in [
             r#"{"data":[{"s":"BTCUSDT","c":"101"}],"stream":"!ticker@arr"}"#,
@@ -315,15 +372,38 @@ fn optional_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Str<'d
     Option::<Text<'de>>::deserialize(d).map(|value| value.map(|text| text.0))
 }
 
+fn depth_levels<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<[Str<'de>; 2]>, D::Error> {
+    #[derive(Deserialize)]
+    struct Level<'a>(#[serde(borrow)] Cow<'a, str>, #[serde(borrow)] Cow<'a, str>);
+    struct Levels;
+    impl<'de> serde::de::Visitor<'de> for Levels {
+        type Value = Vec<[Str<'de>; 2]>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("an array of price and size string pairs")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut rows = Vec::new();
+            while let Some(Level(price, size)) = seq.next_element()? {
+                rows.push([price, size]);
+            }
+            Ok(rows)
+        }
+    }
+    d.deserialize_seq(Levels)
+}
+
 #[derive(Deserialize)]
 pub struct PartialDepth<'a> {
     #[serde(borrow, default)]
     pub s: Option<Str<'a>>,
     #[serde(default)]
     pub u: Option<u64>,
-    #[serde(borrow)]
+    #[serde(borrow, deserialize_with = "depth_levels")]
     pub b: Vec<[Str<'a>; 2]>,
-    #[serde(borrow)]
+    #[serde(borrow, deserialize_with = "depth_levels")]
     pub a: Vec<[Str<'a>; 2]>,
 }
 

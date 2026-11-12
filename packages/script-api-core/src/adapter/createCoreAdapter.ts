@@ -183,9 +183,16 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         totalUpnl += balance.upnl ?? 0;
       }
       for (const position of store.positions ?? []) {
-        if (position.side === 'long') longExposure += position.notional;
-        else if (position.side === 'short') shortExposure += position.notional;
+        const notional = position.notional;
+        if (typeof notional !== 'number' || !Number.isFinite(notional)) {
+          throw new Error('Position notional is unknown; combined exposure is unavailable');
+        }
+        if (position.side === 'long') longExposure += notional;
+        else if (position.side === 'short') shortExposure += notional;
       }
+    }
+    if (!Number.isFinite(longExposure) || !Number.isFinite(shortExposure)) {
+      throw new Error('Position notional is unknown; combined exposure is unavailable');
     }
     return { totalEquity, totalAvailable, totalUsed, totalUpnl, longExposure, shortExposure, currency: 'USD' };
   };

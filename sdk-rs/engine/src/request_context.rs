@@ -1442,7 +1442,18 @@ pub struct CommandWrites {
     // An earlier attempt of this intent may have reached the venue.
     inherited_uncertain: bool,
     /// The venue's words for a failure whose terminal presents none of its own.
+    /// Applied only when the projected outcome is `Unknown`; a definite
+    /// acceptance or rejection keeps the venue's own words. Used by venue
+    /// paths that stage a generic "unknown outcome; check Open Orders"
+    /// sentence BEFORE a leg is dispatched.
     presentation: Option<String>,
+    /// The venue has already computed the correct user-facing message for
+    /// this failure and wants it to replace the projected venue text on any
+    /// outcome, including `Rejected`/`NotSent`. Used by venue paths that
+    /// RE-present their own composed message AFTER a terminal leg (protective
+    /// edit put-backs, batch-unknown summaries), where the venue's raw native
+    /// text would be strictly less informative.
+    presentation_force: Option<String>,
     /// The engine recorded an unproven status reply the venue never saw.
     unproven_status: bool,
     #[cfg(feature = "serial-plans")]
@@ -1518,6 +1529,7 @@ impl CommandWrites {
             evidence: evidence::EvidenceBudget::default(),
             inherited_uncertain: false,
             presentation: None,
+            presentation_force: None,
             unproven_status: false,
             #[cfg(feature = "serial-plans")]
             stream: None,
@@ -2080,13 +2092,28 @@ impl CommandWrites {
     }
 
     /// Words for this journal's failure when its terminal presents none; the
-    /// latest replaces any earlier. Outcome and protection stay projected.
+    /// latest replaces any earlier. Applied only to `Unknown` seals. Outcome
+    /// and protection stay projected.
     #[cfg(feature = "http-plans")]
     pub(crate) fn present_failure(&mut self, message: String) -> Result<(), Error> {
         if self.sealed {
             return Err(Error::State);
         }
         self.presentation = Some(message);
+        Ok(())
+    }
+
+    /// Words for this journal's failure that should REPLACE the venue text on
+    /// any outcome. Used where the venue path has already composed the right
+    /// user-facing message (protective put-back, batch-unknown summary) and
+    /// the raw native text would be strictly less informative. Outcome and
+    /// protection stay projected.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn force_present_failure(&mut self, message: String) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        self.presentation_force = Some(message);
         Ok(())
     }
 
@@ -2360,7 +2387,20 @@ impl CommandWrites {
         if let Some((message, protection)) = presented {
             error.message = message;
             error.protection = protection;
-        } else if let Some(message) = &self.presentation {
+        } else if let Some(message) = &self.presentation_force {
+            // The venue path has already composed the exact user-facing
+            // message it wants for this failure (protective put-back summary,
+            // batch-unknown aggregate, re-presented local reason). Replace the
+            // projected venue text on every outcome, including definite
+            // rejections, where raw native text would be strictly less
+            // informative.
+            error.message = message.clone();
+        } else if let Some(message) = &self.presentation
+            && error.outcome == Some(Outcome::Unknown)
+        {
+            // A caller-staged presentation names an uncertain outcome. A
+            // definite acceptance or rejection carries the venue's own words;
+            // overwriting it would hide a real refusal behind generic text.
             error.message = message.clone();
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();

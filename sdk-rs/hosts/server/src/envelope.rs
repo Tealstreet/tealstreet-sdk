@@ -103,6 +103,14 @@ pub struct AccountMsg {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplySettings {
+    pub account_name: String,
+    /// Missing bindings deserialize so the handler can visibly refuse them.
+    pub instance_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(tag = "t", content = "d", rename_all = "kebab-case")]
 pub enum Inbound {
     #[serde(rename = "order.submit")]
@@ -114,6 +122,7 @@ pub enum Inbound {
     #[serde(rename = "order.cancelQueued")]
     OrderCancelQueued(crate::order_contract::CancelQueued),
     Init(Box<InitPayload>),
+    ApplySettings(ApplySettings),
     Msg(AccountMsg),
     SignRes(Value),
     Dispose {

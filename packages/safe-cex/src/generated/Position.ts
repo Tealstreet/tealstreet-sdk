@@ -4,7 +4,7 @@ import type { OptionGreeks } from "./OptionGreeks";
 import type { PositionMode } from "./PositionMode";
 import type { PositionSide } from "./PositionSide";
 /**
- * Canonical SDK position. liquidationPrice is required and null when the threshold is unavailable.
+ * Canonical SDK position. Notional and liquidationPrice are required and nullable when unknown.
  * contracts is the whole base-unit quantity; extra.contractsNative retains native placement units.
  * marginSize is absolute quote-currency margin when published by the venue; cross margin may be zero.
  */
@@ -13,7 +13,7 @@ export type Position = {
     readonly symbol: string;
     readonly side: PositionSide;
     readonly entryPrice: number;
-    readonly notional: number;
+    readonly notional: number | null;
     readonly leverage: number;
     readonly marginType?: MarginType;
     readonly positionMode?: PositionMode;

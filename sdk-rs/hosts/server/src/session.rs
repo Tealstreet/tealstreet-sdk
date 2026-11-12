@@ -16,6 +16,7 @@ use tokio::task::JoinHandle;
 
 mod order_actions;
 mod order_frames;
+mod settings;
 
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
@@ -515,6 +516,12 @@ impl Session {
                                 self.join(account, out.clone()).await;
                             }
                             if self.joined.contains_key(&completed.account_name) {
+                                self.registry.interruptions.delegated_status(
+                                    self.user(),
+                                    &completed.account_name,
+                                    &out,
+                                    crate::interruption::DelegatedKeyStatus::KeyAvailable,
+                                );
                                 self.registry.interruptions.deliver(
                                     self.user(),
                                     &completed.account_name,
@@ -901,6 +908,12 @@ impl Session {
                 self.order_cancel_queued(cancel);
             }
             Inbound::Init(init) => self.init(*init).await?,
+            Inbound::ApplySettings(request) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated settings action rejected"));
+                }
+                self.apply_settings(request);
+            }
             Inbound::Msg(msg) => {
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
@@ -1074,7 +1087,7 @@ impl Session {
             self.resnapshot(&init.account_name).await;
             return Ok(());
         }
-        // Another live socket holds it with other settings: keep both as they are.
+        // Existing private settings stay until an admitted client explicitly resets them.
         if let Some(refusal) =
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
@@ -1309,8 +1322,11 @@ impl Session {
         };
         if msg.op == "delegated-key-req" {
             self.cancel_verification(&name);
-            if crate::delegated::enabled("bybit") {
-                self.issue_handover(&name);
+            if let Some(venue) = self
+                .handover_venue(&name, &msg.data)
+                .filter(|venue| crate::delegated::enabled(venue))
+            {
+                self.issue_handover(&name, &venue);
             } else {
                 self.handovers.forget(&name);
                 self.drop_early(&name, "delegated init refused");
@@ -1421,11 +1437,37 @@ impl Session {
         }
     }
 
-    fn issue_handover(&mut self, name: &str) {
-        match self.handovers.issue(name, crate::accounts::now_ms()) {
+    /// Old unjoined callers can omit the venue while just one declaration is enabled.
+    /// Multiple declarations require an explicit target instead of guessing one.
+    fn handover_venue(&self, name: &str, data: &Value) -> Option<String> {
+        if let Some(venue) = data.get("exchangeName") {
+            return venue.as_str().map(str::to_owned);
+        }
+        if let Some(joined) = self.joined.get(name) {
+            return Some(joined.account.venue.clone());
+        }
+        let venues = crate::delegated::enabled_venues();
+        if venues.len() == 1 {
+            venues.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    fn issue_handover(&mut self, name: &str, venue: &str) {
+        match self.handovers.issue(name, venue, crate::accounts::now_ms()) {
             Ok(offer) => {
-                self.handover_out(name)
-                    .send(envelope::delegated_key(name, &offer));
+                let out = self.handover_out(name);
+                if out.send(envelope::delegated_key(name, &offer))
+                    && !self.joined.contains_key(name)
+                {
+                    self.registry.interruptions.delegated_status(
+                        self.user(),
+                        name,
+                        &out,
+                        crate::interruption::DelegatedKeyStatus::WaitingForKey,
+                    );
+                }
             }
             Err(_) => {
                 self.drop_early(name, "delegated init refused");
@@ -2676,6 +2718,7 @@ mod tests {
     use super::*;
     use safe_cex_remote_signer::Outbox;
 
+    mod apply_settings;
     mod delegated_probe;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
@@ -2689,7 +2732,7 @@ mod tests {
         let mut completed = session.take_verified();
         let offer = session
             .handovers
-            .issue("acct", crate::accounts::now_ms())
+            .issue("acct", "bybit", crate::accounts::now_ms())
             .unwrap();
         let sealed = crate::delegated::tests::seal(
             &offer,
@@ -2983,15 +3026,13 @@ mod tests {
             .await
             .unwrap();
         let frame = sent.try_recv().expect("a handover key response");
-        let mut frame: Value = serde_json::from_str(&frame).unwrap();
-        if !crate::delegated::enabled("bybit") {
+        let frame: Value = serde_json::from_str(&frame).unwrap();
+        if crate::delegated::enabled_venues().is_empty() {
             assert_eq!(frame["d"]["op"], "error");
             assert_eq!(frame["d"]["data"][1]["initRefused"], true);
             assert_eq!(frame["d"]["data"][1]["kind"], "unverified");
-            // The account-build change owns the opt-in declaration. Also pin
-            // the exact offer envelope while that flag remains off here.
-            session.issue_handover("acct");
-            frame = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            session.close();
+            return;
         }
         assert_eq!(frame["t"], "msg");
         assert_eq!(frame["d"]["op"], "delegated-key");
@@ -3009,6 +3050,7 @@ mod tests {
         session.close();
     }
     mod delegated_instance_id;
+    mod delegated_venue_admission;
     mod instance_id;
 
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
@@ -4848,7 +4890,7 @@ mod tests {
                 let frame = sent.try_recv().expect("the refusal frame");
                 assert_eq!(
                     frame,
-                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is open in another window or on another device with different settings (enableSpotMarkets). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
+                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is already running with different settings (enableSpotMarkets). The change was not applied. Join with the current settings and use apply-settings before reinitializing.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
                 );
                 assert!(sent.try_recv().is_err(), "retries are quiet");
                 assert_eq!(crate::accounts::tests::signing(&account), Some(7));

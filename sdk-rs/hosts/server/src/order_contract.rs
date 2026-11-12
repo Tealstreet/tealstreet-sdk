@@ -8,7 +8,12 @@ pub const OUTCOME_MAX: usize = 8 * 1024;
 pub const KEY_MAX: usize = 128;
 
 pub fn enabled() -> bool {
-    cfg!(feature = "delegated-order-frames") && crate::delegated::enabled("bybit")
+    cfg!(feature = "delegated-order-frames") && !crate::delegated::enabled_venues().is_empty()
+}
+
+/// Per-account admission checks the joined account's actual venue.
+pub fn enabled_for(venue: &str) -> bool {
+    cfg!(feature = "delegated-order-frames") && crate::delegated::enabled(venue)
 }
 
 /// The compiled protocol and venue opt-in are separate from rollout activation.
