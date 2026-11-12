@@ -1,6 +1,7 @@
 import type { HttpPacket, HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import {
+  getWsDiagnosticsGeneration,
   isHeartbeatFrame,
   isWsDiagnosticsEnabled,
   redactWsDiagnosticPayload,
@@ -145,6 +146,8 @@ export const withRequestsLog = (
       // A text frame is an immutable string; a binary one is logged by its length.
       const frame = (direction: WsDiagnosticEvent['direction'], data: string | number) => {
         if (!enabled()) return;
+        const generation = getWsDiagnosticsGeneration();
+        const isCurrent = () => enabled() && generation === getWsDiagnosticsGeneration();
         try {
           sampler ??= new WsDiagnosticSampler();
           if (sampler.drop()) return;
@@ -153,13 +156,15 @@ export const withRequestsLog = (
         }
         const frameSampler = sampler;
         offPath(() => {
-          if (!enabled() || (typeof data === 'string' && data.length <= OBSERVED_CHARS && isHeartbeatFrame(data)))
+          if (!isCurrent() || (typeof data === 'string' && data.length <= OBSERVED_CHARS && isHeartbeatFrame(data)))
             return;
           const message = typeof data === 'string' ? sanitizeWsDiagnosticFrame(data) : `binary ${data} bytes`;
           frameSampler.emit(
             (entry) => {
+              if (!isCurrent()) return;
               onWsDiagnostic?.({ venue: label, channel, direction, message: entry });
-              if (channel !== 'public') emit(direction === 'send' ? 'grafana-pws-sub' : 'grafana-pws', entry);
+              if (channel !== 'public' && isCurrent())
+                emit(direction === 'send' ? 'grafana-pws-sub' : 'grafana-pws', entry);
             },
             label,
             message,

@@ -2014,8 +2014,10 @@ Arrays retain at most 32 sanitized entries. Challenge/signature material,
 connection URLs/headers and binary contents are never included. Opaque,
 malformed, oversized and excessive-depth content is withheld. Heartbeats are
 omitted, output is capped and frames are sampled per socket. Disabling the
-switch drops queued entries too. Existing private grafana events remain available
-with the same sanitized frame text; do not display both as duplicate rows.
+switch drops queued entries too, even if it is re-enabled before their callbacks
+run. Queued socket diagnostics capture the cancellation generation and recheck
+it before each structured/legacy callback. Existing private grafana events remain
+available with the same sanitized frame text; do not display both as duplicate rows.
 
 ## Worker Position Refresh Bridge
 

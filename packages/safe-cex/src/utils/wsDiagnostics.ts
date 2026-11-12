@@ -1,4 +1,5 @@
 let wsDiagnosticsEnabled = false;
+let wsDiagnosticsGeneration = 0;
 
 const REDACTED = '[redacted]';
 const HEX_SECRET_RE = /\b[0-9a-f]{40,}\b/gi;
@@ -70,10 +71,15 @@ const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 const AUTH_OPERATION_RE = /auth|login|logon|signature|jwt|challenge/i;
 
 export const setWsDiagnosticsEnabled = (enabled: boolean): void => {
-  wsDiagnosticsEnabled = enabled === true;
+  const next = enabled === true;
+  if (wsDiagnosticsEnabled && !next) wsDiagnosticsGeneration += 1;
+  wsDiagnosticsEnabled = next;
 };
 
 export const isWsDiagnosticsEnabled = (): boolean => wsDiagnosticsEnabled;
+
+/** Internal cancellation generation; re-enabling cannot revive queued diagnostics. */
+export const getWsDiagnosticsGeneration = (): number => wsDiagnosticsGeneration;
 
 /** Literal or JSON ping/pong frames, which the Requests Log leaves out. */
 export function isHeartbeatFrame(message: string): boolean {
