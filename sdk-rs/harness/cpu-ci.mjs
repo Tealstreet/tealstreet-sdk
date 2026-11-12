@@ -54,7 +54,7 @@ export function classifyInitialCase(evidence, declarations, paired, family, refu
     insist(!identityAssessment.errors.length, identityAssessment.errors.join('\n'));
     return { decision: 'first', assessment: identityAssessment, unchanged: true };
   }
-  // A CPU-only miss (Rust > 1.00x TS after the in-job re-measure) refuses only this suite's CPU gate.
+  // A CPU-only miss above its venue bound after the in-job re-measure refuses only this suite's CPU gate.
   const split = splitCpuErrors(evidence, assessment.errors, paired);
   insist(split.deferred.length && !split.kept.length, assessment.errors.join('\n'));
   return { decision: 'cpu-refused', assessment };
