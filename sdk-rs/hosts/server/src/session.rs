@@ -14,7 +14,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 
+mod order_actions;
 mod order_frames;
+
+#[derive(Clone, Copy)]
+pub(super) enum OrderReceipt {
+    Placement(u64),
+    Action {
+        seq: u64,
+        kind: &'static str,
+        deadline: crate::order_actions::ActionDeadline,
+    },
+}
 
 /// Who connected, as verified before the upgrade.
 #[derive(Clone)]
@@ -841,6 +852,34 @@ impl Session {
         };
         let authenticated = self.identity.user.is_some();
         match message {
+            Inbound::OrderAction(request) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                if text.len() > crate::order_contract::SUBMIT_MAX {
+                    self.handover_out(&request.account_name)
+                        .send(envelope::error(
+                            Some(&request.account_name),
+                            "not sent: action exceeds size limit",
+                        ));
+                    return Ok(());
+                }
+                self.order_action(request).await;
+            }
+            Inbound::OrderActionCancelQueued(cancel) => {
+                if !authenticated {
+                    return Err(Close::Policy("Unauthenticated order rejected"));
+                }
+                if text.len() > crate::order_contract::ACK_MAX {
+                    self.handover_out(&cancel.account_name)
+                        .send(envelope::error(
+                            Some(&cancel.account_name),
+                            "not sent: action queue cancellation exceeds size limit",
+                        ));
+                    return Ok(());
+                }
+                self.action_cancel_queued(cancel);
+            }
             Inbound::OrderSubmit(submit) => {
                 if !authenticated {
                     return Err(Close::Policy("Unauthenticated order rejected"));
@@ -1270,8 +1309,11 @@ impl Session {
         };
         if msg.op == "delegated-key-req" {
             self.cancel_verification(&name);
-            if crate::delegated::enabled("bybit") {
-                self.issue_handover(&name);
+            if let Some(venue) = self
+                .handover_venue(&name, &msg.data)
+                .filter(|venue| crate::delegated::enabled(venue))
+            {
+                self.issue_handover(&name, &venue);
             } else {
                 self.handovers.forget(&name);
                 self.drop_early(&name, "delegated init refused");
@@ -1381,8 +1423,25 @@ impl Session {
         }
     }
 
-    fn issue_handover(&mut self, name: &str) {
-        match self.handovers.issue(name, crate::accounts::now_ms()) {
+    /// Old unjoined callers can omit the venue while just one declaration is enabled.
+    /// Multiple declarations require an explicit target instead of guessing one.
+    fn handover_venue(&self, name: &str, data: &Value) -> Option<String> {
+        if let Some(venue) = data.get("exchangeName") {
+            return venue.as_str().map(str::to_owned);
+        }
+        if let Some(joined) = self.joined.get(name) {
+            return Some(joined.account.venue.clone());
+        }
+        let venues = crate::delegated::enabled_venues();
+        if venues.len() == 1 {
+            venues.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    fn issue_handover(&mut self, name: &str, venue: &str) {
+        match self.handovers.issue(name, venue, crate::accounts::now_ms()) {
             Ok(offer) => {
                 self.handover_out(name)
                     .send(envelope::delegated_key(name, &offer));
@@ -1545,7 +1604,7 @@ impl Session {
         self.call_inner(name, data, None).await;
     }
 
-    async fn call_inner(&mut self, name: &str, data: Value, order_frame: Option<u64>) {
+    async fn call_inner(&mut self, name: &str, data: Value, order_frame: Option<OrderReceipt>) {
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
         let method = data
             .get("method")
@@ -1568,6 +1627,7 @@ impl Session {
             }
         };
         let account = self.joined[name].account.clone();
+        let dispatch_out = self.account_out(name);
         let symbols = if method == "cancelAllOrders" {
             let mut symbols: Vec<String> = account
                 .handle
@@ -1588,6 +1648,24 @@ impl Session {
         } else {
             Vec::new()
         };
+        if let Some(OrderReceipt::Action {
+            seq,
+            kind,
+            deadline,
+        }) = order_frame
+            && let Err(message) =
+                crate::order_actions::ActionGuard::new(dispatch_out.clone(), deadline).check()
+        {
+            crate::order_actions::settle(
+                &dispatch_out,
+                name,
+                &request_id,
+                seq,
+                kind,
+                Err(json!({"message":message,"outcome":"unknown"})),
+            );
+            return;
+        }
         let plans = if account.delegated.is_some() {
             methods::translate_delegated(
                 &account.venue,
@@ -1627,12 +1705,19 @@ impl Session {
                 return;
             }
         };
-        if let Some(seq) = order_frame {
+        if let Some(receipt) = order_frame {
+            // Reply maps completion only. Every command dispatch below carries
+            // the original receipt, including its immutable deadline.
             for plan in &mut plans {
-                if let Plan::Command { reply, .. } = plan {
-                    *reply = methods::Reply::Intent {
-                        client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
-                        seq,
+                if let Plan::Command { reply, .. } | Plan::AfterLoad { reply, .. } = plan {
+                    *reply = match receipt {
+                        OrderReceipt::Placement(seq) => methods::Reply::Intent {
+                            client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
+                            seq,
+                        },
+                        OrderReceipt::Action { seq, kind, .. } => {
+                            methods::Reply::Action { seq, kind }
+                        }
                     };
                 }
             }
@@ -1645,12 +1730,29 @@ impl Session {
         });
         for plan in plans {
             match plan {
-                Plan::Reply(result) => self.send(envelope::msg(
-                    name,
-                    "callMethod:done",
-                    json!({"requestId": request_id, "success": true, "result": result}),
-                )),
+                Plan::Reply(result) => {
+                    if let Some(OrderReceipt::Action { seq, kind, .. }) = order_frame {
+                        crate::order_actions::settle(
+                            &self.account_out(name),
+                            name,
+                            &request_id,
+                            seq,
+                            kind,
+                            Ok(result),
+                        );
+                    } else {
+                        self.send(envelope::msg(
+                            name,
+                            "callMethod:done",
+                            json!({"requestId":request_id,"success":true,"result":result}),
+                        ));
+                    }
+                }
                 Plan::Nuke(mode) => {
+                    if let Some(OrderReceipt::Action { seq, deadline, .. }) = order_frame {
+                        self.send_action_nuke(name, &request_id, seq, deadline);
+                        continue;
+                    }
                     let handle = account.handle.clone();
                     // Asked of the whole account, so a page running its own legs after
                     // `algos` is told too: its positions read then waits the same 30s.
@@ -1677,6 +1779,7 @@ impl Session {
                     let input = crate::algos::AlgoInput::Nuke {
                         mode,
                         request_id: request_id.clone(),
+                        action: None,
                     };
                     if !waiting || mode == "algos" {
                         if algos.send(input).is_err() {
@@ -1782,12 +1885,26 @@ impl Session {
                         out.send(envelope::msg(&name, "callMethod:done", data));
                     });
                 }
-                Plan::AfterLoad { command, reply } => {
-                    self.send_command(name, &request_id, &method, &group, command, reply, true)
-                }
-                Plan::Command { command, reply } => {
-                    self.send_command(name, &request_id, &method, &group, command, reply, false)
-                }
+                Plan::AfterLoad { command, reply } => self.send_command(
+                    name,
+                    &request_id,
+                    &method,
+                    &group,
+                    command,
+                    reply,
+                    true,
+                    order_frame,
+                ),
+                Plan::Command { command, reply } => self.send_command(
+                    name,
+                    &request_id,
+                    &method,
+                    &group,
+                    command,
+                    reply,
+                    false,
+                    order_frame,
+                ),
             }
         }
     }
@@ -1804,15 +1921,20 @@ impl Session {
         mut command: Value,
         reply: methods::Reply,
         after_load: bool,
+        order_frame: Option<OrderReceipt>,
     ) {
-        let order_frame = match &reply {
-            methods::Reply::Intent { seq, .. } => Some(*seq),
-            _ => None,
+        let mut completion = Pending {
+            request_id: request_id.clone(),
+            method: method.to_owned(),
+            reply,
+            group: group.clone(),
+            incomplete: false,
+            audit: None,
         };
         if !self.joined[name].account.running.io_allowed() {
-            self.call_failure(
+            self.command_failure(
                 name,
-                request_id,
+                completion,
                 "ServerDraining",
                 "Router lease expired; no new work was sent",
                 Some("notSent"),
@@ -1827,9 +1949,9 @@ impl Session {
             match pool.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
                 Err(_) => {
-                    self.call_failure(
+                    self.command_failure(
                         name,
-                        request_id,
+                        completion,
                         "Error",
                         "too many account reads in flight; retry shortly",
                         None,
@@ -1842,12 +1964,18 @@ impl Session {
             None
         };
         let out = self.account_out(name);
+        let action_guard = match order_frame {
+            Some(OrderReceipt::Action { deadline, .. }) => Some(
+                crate::order_actions::ActionGuard::new(out.clone(), deadline),
+            ),
+            _ => None,
+        };
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
-            self.call_failure(
+            self.command_failure(
                 name,
-                request_id,
+                completion,
                 "Error",
                 "command IDs exhausted",
                 None,
@@ -1862,22 +1990,28 @@ impl Session {
             origin: format!("socket:{}/client:{}", self.socket, joined.client.id),
             fields,
         });
-        joined.client.pending.lock().unwrap().insert(
-            id,
-            Pending {
-                request_id: request_id.clone(),
-                method: method.to_owned(),
-                reply,
-                group: group.clone(),
-                incomplete: false,
-                audit,
-            },
-        );
+        completion.audit = audit;
+        joined.client.pending.lock().unwrap().insert(id, completion);
         let (client, handle) = (joined.client.id, joined.account.handle.clone());
         let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
         let send = move || {
+            // Each leg keeps the original age/registration through any startup
+            // wait. Expiry cannot dispatch a write or prove the action not sent.
+            if let Some(guard) = &action_guard
+                && let Err(message) = guard.check()
+            {
+                if let Some(entry) = pending.lock().unwrap().remove(&id) {
+                    settle(
+                        &out,
+                        &name,
+                        entry,
+                        Err(json!({"message":message,"outcome":"unknown"})),
+                    );
+                }
+                return;
+            }
             let failure = match handle.input(client, &command.to_string()) {
                 Ok(true) => None,
                 // Not queued, so not submitted: a definite failure, never retried.
@@ -1887,12 +2021,11 @@ impl Session {
             if let Some(message) = failure
                 && let Some(pending) = pending.lock().unwrap().remove(&id)
             {
-                settle(
-                    &out,
-                    &name,
-                    pending,
-                    Err(failure_detail("Error", &message, false)),
-                );
+                let mut detail = failure_detail("Error", &message, false);
+                if matches!(pending.reply, methods::Reply::Action { .. }) {
+                    detail["outcome"] = "notSent".into();
+                }
+                settle(&out, &name, pending, Err(detail));
             }
         };
         let Some((handle, pending, out, name)) = waiter else {
@@ -1914,6 +2047,36 @@ impl Session {
                 }
             }
         });
+    }
+
+    fn command_failure(
+        &self,
+        name: &str,
+        pending: Pending,
+        kind: &str,
+        message: &str,
+        outcome: Option<&str>,
+        order_frame: Option<OrderReceipt>,
+    ) {
+        if pending.group.is_some() && matches!(pending.reply, methods::Reply::Action { .. }) {
+            // This proves only one leg was not dispatched. Another leg may be
+            // in flight: count every leg and let the group settle as unknown.
+            settle(
+                &self.account_out(name),
+                name,
+                pending,
+                Err(failure_detail(kind, message, false)),
+            );
+        } else {
+            self.call_failure(
+                name,
+                &pending.request_id,
+                kind,
+                message,
+                outcome,
+                order_frame,
+            );
+        }
     }
 
     fn reply_failure(
@@ -2066,6 +2229,10 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             }
         }
     };
+    if let methods::Reply::Action { kind, seq } = &pending.reply {
+        crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
+        return;
+    }
     if let methods::Reply::Intent {
         client_order_id,
         seq,
@@ -2084,7 +2251,9 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
     let data = match outcome {
         Ok(result) => {
             let result = match pending.reply {
-                methods::Reply::Result | methods::Reply::Intent { .. } => result,
+                methods::Reply::Result
+                | methods::Reply::Intent { .. }
+                | methods::Reply::Action { .. } => result,
                 methods::Reply::Unit => Value::Null,
                 methods::Reply::OrderIds => methods::worker_order_ids(result),
                 methods::Reply::Placed { client_order_id } => {
@@ -2465,7 +2634,7 @@ mod tests {
         let mut completed = session.take_verified();
         let offer = session
             .handovers
-            .issue("acct", crate::accounts::now_ms())
+            .issue("acct", "bybit", crate::accounts::now_ms())
             .unwrap();
         let sealed = crate::delegated::tests::seal(
             &offer,
@@ -2759,15 +2928,13 @@ mod tests {
             .await
             .unwrap();
         let frame = sent.try_recv().expect("a handover key response");
-        let mut frame: Value = serde_json::from_str(&frame).unwrap();
-        if !crate::delegated::enabled("bybit") {
+        let frame: Value = serde_json::from_str(&frame).unwrap();
+        if crate::delegated::enabled_venues().is_empty() {
             assert_eq!(frame["d"]["op"], "error");
             assert_eq!(frame["d"]["data"][1]["initRefused"], true);
             assert_eq!(frame["d"]["data"][1]["kind"], "unverified");
-            // The account-build change owns the opt-in declaration. Also pin
-            // the exact offer envelope while that flag remains off here.
-            session.issue_handover("acct");
-            frame = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            session.close();
+            return;
         }
         assert_eq!(frame["t"], "msg");
         assert_eq!(frame["d"]["op"], "delegated-key");
@@ -2785,6 +2952,7 @@ mod tests {
         session.close();
     }
     mod delegated_instance_id;
+    mod delegated_venue_admission;
     mod instance_id;
 
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;

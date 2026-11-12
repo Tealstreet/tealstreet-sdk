@@ -147,16 +147,23 @@ pub(crate) fn adjust(value: f64, step: f64) -> f64 {
     let factor = 10f64.powi(decimals);
     js_round(rounded * factor) / factor
 }
-pub(crate) fn native_position(position: &Value, market: &Value) -> f64 {
-    let contract = positive(n(market, "contractSize"), 1.);
-    let source = if market["isInverse"] == true {
-        n(position, "notional")
-    } else {
-        n(position, "contracts")
-    };
-    n(&position["extra"], "contractsNative")
-        .abs()
-        .max(source.abs() / contract)
+pub(crate) fn native_position(position: &Value, market: &Value) -> Result<f64, String> {
+    safe_cex_position_math::native_position_size(
+        &safe_cex_position_math::NativeSizeInputs {
+            contracts: position["contracts"].as_f64(),
+            notional: position["notional"].as_f64(),
+            contracts_native: position["extra"]
+                .get("contractsNative")
+                .map(|value| value.as_f64().unwrap_or(f64::NAN)),
+        },
+        &safe_cex_position_math::NativeSizeMarket {
+            contract_size: market
+                .get("contractSize")
+                .map(|value| value.as_f64().unwrap_or(f64::NAN)),
+            is_inverse: market["isInverse"].as_bool(),
+        },
+    )
+    .ok_or_else(|| "Position size is unknown".into())
 }
 pub(crate) fn price(text: &str, last: f64) -> Result<f64, String> {
     let text = text.strip_prefix('$').unwrap_or(text);
@@ -301,7 +308,7 @@ impl Placement {
                         self.symbol
                     )
                 })?;
-            Ok(adjust(native_position(p, market) * pct / 100., lot))
+            Ok(adjust(native_position(p, market)? * pct / 100., lot))
         } else {
             let balance = store
                 .get("balance")

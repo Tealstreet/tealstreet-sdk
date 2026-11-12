@@ -8,7 +8,7 @@ import { BitgetOracleChanged, collectBitgetOracle } from './bitget-paired-oracle
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, BITGET_MEASUREMENT_FILES, BITGET_CUMULATIVE_ANCHOR,
-  readBitgetSteadyCertificate, bitgetPairedAuthority } from './bitget-paired-steady.mjs';
+  readBitgetSteadyCertificate, bitgetPairedAuthority, BitgetTipRejected } from './bitget-paired-steady.mjs';
 
 const insist = (ok, message) => { if (!ok) throw new Error(`Bitget paired CI: ${message}`); };
 const git = (root, ...args) => {
@@ -139,11 +139,11 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
       return readBitgetPairedEvidence(resolve(directory, 'records'));
     } });
   } catch (error) {
-    if (!(error instanceof BitgetOracleChanged)) throw error;
+    if (!(error instanceof BitgetOracleChanged) && !(error instanceof BitgetTipRejected)) throw error;
     const current = await selectBitgetPair({ reader, runId, root });
     insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during oracle collection');
     const result = { valid: false, disposition: error.disposition, certified: false, certificate: null,
-      errors: [error.message], oracle: error.receipt };
+      errors: [error.message], ...(error instanceof BitgetOracleChanged ? { oracle: error.receipt } : { tip: error.tip }) };
     write(resolve(destination, 'steady-assessment.json'), result);
     console.error(error.message);
     return result;
@@ -170,5 +170,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   mkdirSync(dirname(destination), { recursive: true });
   const reader = createGithubReader({ repository: process.env.GITHUB_REPOSITORY, token: process.env.GITHUB_TOKEN });
   const result = await collectBitgetPair({ reader, runId: Number(process.env.GITHUB_RUN_ID), root, destination });
-  if (result.disposition === 'NOT-CERTIFIED') process.exitCode = 1;
+  if (result.disposition === 'NOT-CERTIFIED' || result.disposition === 'REJECTED') process.exitCode = 1;
 }

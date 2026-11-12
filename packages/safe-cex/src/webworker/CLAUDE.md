@@ -10,8 +10,15 @@ snapshots to the main thread on every `store.notify()`.
 ## Worker lifecycle logs
 
 `ExchangeWorker.log` sends the emitter argument array `[JSON text, severity]`,
-serializing its level, message and context. A standalone object is coerced to
-`[object Object]` by existing main-thread log consumers; `warn` maps to `warning`.
+serializing its level, message and context. Global exception and promise rejection
+handlers redact a detached copy of the entire diagnostic packet before delivery
+through DedicatedWorker or SharedWorker ports, preserving the error event shape.
+A standalone object is coerced to `[object Object]` by existing main-thread log
+consumers; `warn` maps to `warning`.
+
+Startup retry explanations are diagnostic copies when cached, so a native read
+failure cannot bypass masking in the later retry warning. Deactivation refusal
+text uses the same text policy while its status flag remains unchanged.
 
 ## History result completeness
 

@@ -10,6 +10,10 @@ The router integration pins NX #9404 at `9f52873b76`
 (`9f52873b76a64b4258ac38f51e70cd29a1e85941`): frame shapes, socket
 renumbering, capability names and the reply semantics below.
 
+Account amendments, venue cancellations, cancel-all and nuke use the additive
+[versioned action protocol](delegated-action-frames.md); `order.submit` remains
+placement-only and `order.cancelQueued` remains a router queue operation.
+
 ## DESIGN
 
 ### Activation and binding

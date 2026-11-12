@@ -2,6 +2,19 @@
 mod build_support;
 
 #[test]
+fn mexc_broker_header_does_not_gate_other_protected_headers() {
+    let output = build_support::generate(
+        r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+        "mexc":{"setupMapping":"mexc","remoteSigning":{"protectedHeaders":["ApiKey","source"]}},
+        "other":{"remoteSigning":{"protectedHeaders":["source"]}}}}"#,
+    )
+    .unwrap();
+    assert!(output.contains(r#"Some(&["ApiKey",#[cfg(feature = "mexc")] "source"])"#));
+    assert!(output.contains(r#"protected_headers: Some(&["source"])"#));
+    assert_eq!(output.matches(r#"#[cfg(feature = "mexc")]"#).count(), 1);
+}
+
+#[test]
 fn kucoin_broker_setup_declaration_does_not_enable_dispatch_or_hosted_signing() {
     let output = build_support::generate(
         r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{

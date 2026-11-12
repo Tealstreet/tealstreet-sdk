@@ -15,6 +15,7 @@ import {
   Writable,
 } from '../types';
 import { clone } from '../utils/clone';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
 
 // Longer than any REST snapshot is in flight; short enough that a wrong "final" heals.
@@ -122,11 +123,7 @@ export class DefaultStore implements Store {
         Object.entries(this.positionSettings).map(([id, settings]) => [id, { ...settings }]),
       ),
       displayedPositions: [...this.displayedPositions],
-      displayedMargin: {
-        longExposure: this.displayedMargin?.longExposure ?? 0,
-        shortExposure: this.displayedMargin?.shortExposure ?? 0,
-        totalNotional: this.displayedMargin?.totalNotional ?? 0,
-      },
+      displayedMargin: { ...(this.displayedMargin ?? { longExposure: 0, shortExposure: 0, totalNotional: 0 }) },
       ordersRisk: { ...this.ordersRisk },
       activeChasers: [...this.activeChasers],
       activeTWAPs: [...this.activeTWAPs],
@@ -274,9 +271,10 @@ export class DefaultStore implements Store {
     if (this.pendingTickerDeltas.size === 0) {
       return [];
     }
-    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(
-      ([index, changes]): [number, Partial<Ticker>] => [index, changes],
-    );
+    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(([index, changes]): [number, Partial<Ticker>] => [
+      index,
+      changes,
+    ]);
     this.pendingTickerDeltas.clear();
     return deltas;
   }
@@ -463,9 +461,9 @@ export class DefaultStore implements Store {
     // check for dupes
     const positions = uniqBy(this.state.positions, 'id');
     if (positions.length !== this.state.positions.length) {
-      console.warn('Duplicate positions detected...');
+      diagnosticConsole.warn('Duplicate positions detected...');
       if (removeDupes) {
-        console.error('Removing duplicate positions');
+        diagnosticConsole.error('Removing duplicate positions');
         Object.assign(this.state, { positions });
       }
     }
@@ -473,7 +471,7 @@ export class DefaultStore implements Store {
     // check for negative contracts
     const negativePositions = positions.filter((p) => p.contracts < 0);
     if (negativePositions.length > 0) {
-      console.warn(
+      diagnosticConsole.warn(
         'Negative contracts detected:',
         negativePositions.map((p) => ({ id: p.id, symbol: p.symbol, side: p.side, contracts: p.contracts })),
       );

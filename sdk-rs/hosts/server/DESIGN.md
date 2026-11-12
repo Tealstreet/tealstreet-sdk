@@ -78,7 +78,7 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
-| `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for Bybit `order.*` frames: `0` disables, `1` enables only with compiled protocol support and the venue declaration; other nonempty values refuse startup |
+| `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for declared venues' `order.*` frames: `0` disables, `1` enables only with compiled protocol support and the venue declaration; other nonempty values refuse startup |
 | `EXCHANGE_ALERT_SLACK_WEBHOOK_URL`, `EXCHANGE_ALERT_CRITICAL_SLACK_WEBHOOK_URL` | unset | Deferred past cutover. Accepted and ignored |
 
 The production image compiles the `delegated-order-frames` feature but keeps its
@@ -563,9 +563,14 @@ dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 ### DELEGATED handover
 
-When the shared Bybit opt-in declaration is enabled, authenticated connections
+When a venue's shared opt-in declaration is enabled, authenticated connections
 may request a handover with `msg` data
-`{op:"delegated-key-req", accountName}`. The `msg` response has
+`{op:"delegated-key-req", accountName, data:{exchangeName}}`.
+The optional `data.exchangeName` selects the target venue. Without it, a joined
+account supplies its venue; an unjoined legacy caller can omit it only when
+exactly one venue declaration is enabled. An ambiguous or disabled target is
+refused. Only Bybit is currently opted in, so legacy requests retain their wire
+behavior. The `msg` response has
 `{op:"delegated-key", accountName, attemptId, publicKey, bootId, expiresAtMs}`.
 The public key uses padded standard base64. An offer lasts 30 seconds, belongs
 to that connection and saved account name, and is replaced by another request
@@ -573,7 +578,7 @@ for the same name. Each connection retains at most 64 unexpired offers.
 
 The matching init adds `signingMode:"delegated"` and
 `sealed:{attemptId, enc, ciphertext}`. This path checks the shared venue opt-in
-declaration and is limited to Bybit. Existing LOCAL/COSIGNED settings and engine
+declaration for the requested venue. Existing LOCAL/COSIGNED settings and engine
 options retain their original behavior. Plaintext credentials are never init
 settings or account fingerprints.
 
@@ -586,8 +591,9 @@ standard base64. Decrypted JSON contains `key`, `secret` and optional
 fields erase their owned buffers on drop. Handover parsing retains the JSON
 string contract, including escaped strings and optional or null `passphrase`.
 JSON input is limited to 12,272 bytes, consistent with the envelope limit.
-Opening fills the shared `delegated_memory::CandidateCopy` directly after its
-Bybit preparation succeeds. Handover replies use the current init registration,
+Opening fills the shared `delegated_memory::CandidateCopy` directly after the
+requested venue's preparation succeeds. The offer retains its target venue,
+which must still be enabled and match the init when opened. Handover replies use the current init registration,
 including its optional `instanceId`; clients without an ID retain the same bytes.
 
 Opening and subsequent join verification run in a spawned task. The existing
@@ -598,7 +604,7 @@ the captured user, socket and init generation; dispose, another init, another
 key request or socket close retires pending work. Verification failure leaves
 any running account unchanged.
 
-After opening, a temporary native Bybit account checks the supplied pair through
+After opening, a temporary native account for the requested venue checks the supplied pair through
 the venue's normal private startup reads and is disposed before admission.
 An accepted pair starts a DELEGATED account when none exists, or joins the
 matching running DELEGATED account while retaining its existing signer. This
@@ -619,6 +625,24 @@ clients without one retain the original envelope bytes. Existing rebuild
 refusal, settings replacement and early-subscription handling remain on the
 existing COSIGNED init path. Fixed synthetic interoperability and RFC test data
 live in `tests/data/`.
+
+The shared startup admission runner also has staged entries for `binance`,
+`okx`, `bitget`, `blofin` and `kucoin`. It runs the selected venue's existing
+native private startup with either the remote provider or the local provider;
+it does not build a second set of REST requests. Its result classifier uses
+engine `ErrorKind` values: authentication failures are invalid, rate limits and
+transport failures are transient, and complete private startup is accepted.
+Unclassified startup failures remain transient refusals. Public-only and
+frame-fed accounts cannot satisfy this check.
+
+Entries are separate from rollout declarations. These five entries leave all
+activation flags off. The offline admission suite must cover each entry before
+it can be enabled: valid startup, a different signing key, a prior signature,
+a consumed response, a different handed-over pair, and a reused sealed handover.
+The suite verifies the actual native HTTP signatures against synthetic venue
+responses. Existing Bybit session tests additionally cover resident-account and
+registration preservation. These offline checks do not replace live venue
+validation or the existing server-origin and signing requirements for rollout.
 
 ## Frames (claude-19pt8s, web hosted client)
 
@@ -998,3 +1022,46 @@ server by its `callMethod` name, using the same list as LOCAL
 ## Candle server
 
 Placeholder for its owner, covering binary, port, health and env.
+
+
+## DELEGATED action frames v1
+
+The additive `order.action` family dispatches amend, venue cancel, cancel-all and
+nuke on the admitted Bybit DELEGATED account. `delegatedOrderActionsV1` follows
+the existing feature/Bybit gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
+activation. Each session captures activation at creation; changes require the
+existing box drain/restart and fresh admission. Hosts also require the router's separate
+`delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
+bind UUIDv7 identity, version, action kind and target IDs in a separate canonical
+fingerprint domain. Placement's four frames and fingerprints are unchanged.
+
+Amend/cancel/cancel-all use the existing method translator, native command
+completion and audit. Internal action dispatch carries the original deadline
+through cancel-all symbol reads and command translation. Each native command
+rechecks both expiry bounds and its captured registration after any startup wait and
+immediately before dispatch. Expiry stays unknown without a notSent proof.
+Nuke uses the account's existing native algo-host nuke,
+awaiting cancellation and closing legs; a partial/interrupted action stays
+unknown. Actor-queued nuke work carries the original registration and rechecks
+its liveness, account holder and IO authority after load waits and after the
+actor's store read. A server-owned account-port adapter also rechecks that
+registration and both captured expiry bounds before every native command,
+including close legs after an awaited cancel. Nuke receipts carry the original
+monotonic age deadline and UUID expiry through startup and actor store waits;
+neither wait resets the budget. Expiry blocks every remaining native leg and
+returns unknown with an expired message, without inventing a notSent proof.
+Retirement fences new legs and drops stale outcomes; already handed-off work
+remains uncertain. An aborted/abandoned nuke settles unknown on
+its captured output, never another owner's registration.
+
+Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
+`unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+Every cancel-all leg settles through its shared completion group, including
+pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
+cannot refuse the whole action after another leg may have crossed physical IO.
+Receipt counters share the existing registration lifecycle and size bounds.
+`order.actionCancelQueued` belongs to the router and never issues a venue cancel.
+Rejecting that frame uses the ordinary error envelope: it supplies no proof
+about an earlier action and cannot fabricate an action refusal or negative ACK.
+See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
+`tests/data/delegated-actions-v1.json` contract.

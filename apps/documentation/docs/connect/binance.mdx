@@ -47,6 +47,10 @@ import AccountTypeError from '/img/connect/binance/account-type-error.png';
 Binance users are required to complete KYC before creating new trading API Keys.
 :::
 
+:::tip Supported Binance markets
+Tealstreet supports Binance USD-M Futures, COIN-M Inverse, Portfolio Margin, and Spot trading. Choose the matching Binance setup mode in Tealstreet before you create or paste the API key.
+:::
+
 <!-- :::caution
 To Trade using your Binance account on Tealstreet, users must setup a Dual API key. Please review the [Dual API](/docs/connect/dual-api) section for more informaiton.
 ::: -->
@@ -110,7 +114,7 @@ You can get to this page directly by navigating to [Binance API Management](http
 
 1. ‘**API Key**’ - This is the key that will be pasted it into the Key field on Tealstreet.
 2. ‘**Secret Key**’ - This is the secret that will be pasted it into the Secret field on Tealstreet.
-3. Select the ‘**Enable Futures**’ option. Do not enable any other permissions.
+3. Select the trading permission for the Binance setup mode you will use in Tealstreet. Futures modes need futures trading permission, while Binance Spot needs spot trading permission. Do not enable withdrawal permissions.
 4. Copy the list of IP Addresses from Tealstreet and then paste them into the ‘Restrict access to trusted IPs only’ field on the edit permissions window of Binance.
     - You need to hit the confirm button after you paste in the IPs in order for them to save properly.
 5. Click ‘Save’
@@ -254,5 +258,5 @@ In this section we will go over some of the Binance specific issues that may ari
     <img src={AccountTypeError} alt="wrong account / permission type" style={{ width: 400 }} />
 </div>
 
-- Please ensure you are using a futures trading account. Tealstreet does not currently support spot trading.
+- Please ensure you selected the Binance setup mode that matches the market you are trading, such as USD-M Perps, COIN-M Inverse, Portfolio Margin, or Spot.
   - Also please ensure you selected the correct permissions for the API key.

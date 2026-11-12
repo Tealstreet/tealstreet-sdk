@@ -1363,6 +1363,7 @@ mod tests {
                     .send(crate::algos::AlgoInput::Nuke {
                         mode: "positions",
                         request_id: json!("nuke"),
+                        action: None,
                     })
                     .unwrap();
                 let started = registry.start_user_drain("u", DEFAULT_CAP_MS);
