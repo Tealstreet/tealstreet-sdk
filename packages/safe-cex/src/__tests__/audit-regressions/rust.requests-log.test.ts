@@ -620,6 +620,115 @@ it('withholds malformed, oversized, binary and deeply nested frame contents and 
   expect(diagnostics).toHaveLength(7);
 });
 
+const toggleChannels: WsDiagnosticEvent['channel'][] = ['public', 'private', 'business'];
+const toggleDirections: WsDiagnosticEvent['direction'][] = ['send', 'receive'];
+const toggleTransitions = [
+  { transition: 'stays enabled', change: () => setWsDiagnosticsEnabled(true), expected: 1 },
+  { transition: 'stays disabled', change: () => setWsDiagnosticsEnabled(false), expected: 0 },
+  {
+    transition: 'disabled then re-enabled',
+    change: () => { setWsDiagnosticsEnabled(false); setWsDiagnosticsEnabled(true); },
+    expected: 0,
+  },
+];
+
+it.each(toggleChannels.flatMap((channel) => toggleDirections.flatMap((direction) =>
+  toggleTransitions.map((transition) => ({ channel, direction, ...transition })),
+)))('queued $channel $direction diagnostics: $transition', ({ channel, direction, change, expected }) => {
+  setWsDiagnosticsEnabled(true);
+  const { inner, transport, sockets, diagnostics, events } = harness(undefined, 'hyrotrader');
+  const queued: Array<() => void> = [];
+  inner.setTimeout = (callback) => { queued.push(callback); return 0; };
+  const received = vi.fn();
+  const socket = transport.connect('wss://fixture.invalid/', {
+    channel, onOpen() {}, onMessage: received, onClose() {},
+  });
+  const wire = '{"op":"subscribe"}';
+  const deliver = () => direction === 'send' ? socket.send(wire) : sockets[0].handlers.onMessage(wire);
+  deliver();
+  expect(queued).toHaveLength(1);
+  expect(diagnostics).toEqual([]);
+  change();
+  for (const callback of queued.splice(0)) callback();
+  expect(diagnostics).toHaveLength(expected);
+  expect(events).toHaveLength(channel === 'public' ? 0 : expected);
+  expect(sockets[0].sent).toEqual(direction === 'send' ? [wire] : []);
+  expect(received).toHaveBeenCalledTimes(direction === 'receive' ? 1 : 0);
+
+  // A retired entry stays gone, while fresh work on the same socket can resume.
+  setWsDiagnosticsEnabled(true);
+  deliver();
+  for (const callback of queued.splice(0)) callback();
+  expect(diagnostics).toHaveLength(expected + 1);
+  expect(diagnostics.at(-1)).toEqual({ venue: 'hyrotrader', channel, direction, message: wire });
+  expect(events).toHaveLength(channel === 'public' ? 0 : expected + 1);
+  expect(sockets[0].sent).toEqual(direction === 'send' ? [wire, wire] : []);
+  expect(received).toHaveBeenCalledTimes(direction === 'receive' ? 2 : 0);
+});
+
+it.each(toggleChannels)('queued $channel binary diagnostics stay retired after re-enabling', (channel) => {
+  setWsDiagnosticsEnabled(true);
+  const { inner, transport, sockets, diagnostics, events } = harness();
+  const queued: Array<() => void> = [];
+  inner.setTimeout = (callback) => { queued.push(callback); return 0; };
+  const received = vi.fn();
+  transport.connect('wss://fixture.invalid/', {
+    channel, onOpen() {}, onMessage() {}, onBinary: received, onClose() {},
+  });
+  const bytes = new Uint8Array([1, 2, 3]);
+  const onBinary = sockets[0].handlers.onBinary;
+  if (!onBinary) throw new Error('transport did not install a binary handler');
+  onBinary(bytes);
+  setWsDiagnosticsEnabled(false);
+  setWsDiagnosticsEnabled(true);
+  for (const callback of queued.splice(0)) callback();
+  expect(received).toHaveBeenCalledExactlyOnceWith(bytes);
+  expect(diagnostics).toEqual([]);
+  expect(events).toEqual([]);
+});
+
+it('a toggle retires the old transport queue without re-attributing it to the replacement', () => {
+  setWsDiagnosticsEnabled(true);
+  const old = harness(undefined, 'hyrotrader');
+  const replacement = harness(undefined, 'bybit');
+  const queued: Array<() => void> = [];
+  for (const { inner } of [old, replacement]) {
+    inner.setTimeout = (callback) => { queued.push(callback); return 0; };
+  }
+  const handlers: Parameters<Transport['connect']>[1] = { channel: 'public', onOpen() {}, onMessage() {}, onClose() {} };
+  const oldSocket = old.transport.connect('wss://old-fixture.invalid/', handlers);
+  oldSocket.send('{"op":"subscribe"}');
+  setWsDiagnosticsEnabled(false);
+  setWsDiagnosticsEnabled(true);
+  const newSocket = replacement.transport.connect('wss://new-fixture.invalid/', handlers);
+  newSocket.send('{"op":"unsubscribe"}');
+  for (const callback of queued.splice(0)) callback();
+  expect(old.diagnostics).toEqual([]);
+  expect(replacement.diagnostics).toEqual([
+    { venue: 'bybit', channel: 'public', direction: 'send', message: '{"op":"unsubscribe"}' },
+  ]);
+  expect(old.sockets[0].sent).toEqual(['{"op":"subscribe"}']);
+  expect(replacement.sockets[0].sent).toEqual(['{"op":"unsubscribe"}']);
+});
+
+it('disabling inside a structured callback retires its pending legacy sibling', () => {
+  setWsDiagnosticsEnabled(true);
+  const { inner, sockets } = harness();
+  const queued: Array<() => void> = [];
+  inner.setTimeout = (callback) => { queued.push(callback); return 0; };
+  const legacy = vi.fn();
+  const structured = vi.fn(() => { setWsDiagnosticsEnabled(false); setWsDiagnosticsEnabled(true); });
+  const transport = withRequestsLog(inner, 'hyrotrader', legacy, structured);
+  const socket = transport.connect('wss://fixture.invalid/', {
+    channel: 'private', onOpen() {}, onMessage() {}, onClose() {},
+  });
+  socket.send('{"op":"subscribe"}');
+  for (const callback of queued.splice(0)) callback();
+  expect(structured).toHaveBeenCalledOnce();
+  expect(legacy).not.toHaveBeenCalled();
+  expect(sockets[0].sent).toEqual(['{"op":"subscribe"}']);
+});
+
 it('redacts token-shaped keys, query auth, any JWT, and secrets nested in a body longer than the log cap', async () => {
   setWsDiagnosticsEnabled(true);
   const jwt = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJwYXJhZGV4In0.c2lnbmF0dXJlLXZhbHVl';
