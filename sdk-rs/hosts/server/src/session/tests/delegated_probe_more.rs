@@ -51,7 +51,7 @@ async fn a_valid_pair_joins_without_comparing_or_replacing_resident_material() {
     let mut init = payload(&mut candidate, Some("second"));
     let offer = candidate
         .handovers
-        .issue("acct", crate::accounts::now_ms())
+        .issue("acct", "bybit", crate::accounts::now_ms())
         .unwrap();
     init.sealed = Some(crate::delegated::tests::seal(
         &offer,
@@ -88,7 +88,7 @@ async fn another_public_key_cannot_replace_a_running_delegated_account() {
     let mut init = payload(&mut candidate, None);
     let offer = candidate
         .handovers
-        .issue("acct", crate::accounts::now_ms())
+        .issue("acct", "bybit", crate::accounts::now_ms())
         .unwrap();
     init.key = "synthetic-other-key".into();
     init.sealed = Some(crate::delegated::tests::seal(

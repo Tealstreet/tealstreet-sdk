@@ -6,12 +6,11 @@ impl Session {
     pub(super) fn order_admitted(&mut self, name: &str, instance: Option<&str>) -> bool {
         self.forget_disposed();
         self.order_frames_enabled
-            && order_contract::enabled()
             && !self.pending_verifications.contains_key(name)
             && self.joined.get(name).is_some_and(|joined| {
                 joined.account.delegated.is_some()
                     && !joined.account.is_public()
-                    && crate::delegated::enabled(&joined.account.venue)
+                    && order_contract::enabled_for(&joined.account.venue)
                     && joined.account.running.io_allowed()
                     && self.registry.holds(&joined.account, self.socket)
                     && joined.out.order_binding(instance)

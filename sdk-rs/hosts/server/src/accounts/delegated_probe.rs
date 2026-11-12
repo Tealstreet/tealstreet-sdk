@@ -109,6 +109,7 @@ impl Registry {
         };
         let token_provider = ProxyToken::new();
         token_provider.set(token);
+        let venue = init.exchange_name.clone();
         let mut config = self.engine_config.clone();
         config.log_label = None;
         config.signing_mode = Some("hosted_delegated");
@@ -128,13 +129,13 @@ impl Registry {
                     }
                     let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || lease.as_ref().is_none_or(|permit| permit.allowed()));
                     let transport = NetworkTransport::with_routing(prepared.plan.clone(), token_provider.provider())
-                        .with_venue("bybit").with_io_guard(allowed.clone());
+                        .with_venue(&venue).with_io_guard(allowed.clone());
                     #[cfg(test)]
                     let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
                     tokio::select! {
                         biased;
                         _ = result.closed() => {},
-                        answer = crate::delegated::probe::run(prepared, transport, config, allowed) => { let _ = result.send(answer); }
+                        answer = crate::delegated::probe::run(&venue, &prepared.options, prepared.resident.provider(), transport, config, allowed) => { let _ = result.send(answer); }
                     }
                 });
             });
