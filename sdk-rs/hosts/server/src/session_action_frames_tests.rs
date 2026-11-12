@@ -853,7 +853,12 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
             for case in cases {
                 let kind = case["action"]["kind"].as_str().unwrap();
                 let registry = crate::accounts::tests::registry();
-                let tape = Tape::default();
+                // Bybit's LOCAL-compatible cancellation uses store identities.
+                // Publish both orders before asserting that the batch signs/sends.
+                let tape = Tape {
+                    two_orders: kind == "cancelOrders",
+                    ..Default::default()
+                };
                 let account =
                     delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
                 assert!(
@@ -1024,34 +1029,61 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
 
 #[tokio::test]
 async fn full_write_algo_queued_for_alice_is_dropped_when_bob_replaces_the_login() {
-    tokio::task::LocalSet::new().run_until(async {
-        let registry = crate::accounts::tests::registry();
-        let a_tape = Tape::default(); let b_tape = Tape::default();
-        let a = delegated_account_with_algos(&registry, "A", "bybit", a_tape.clone(), true);
-        let b = delegated_account_with_algos(&registry, "B", "bybit", b_tape.clone(), true);
-        let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
-        let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
-        let (keeper, _kept, _) = Out::channel(256);
-        crate::accounts::tests::hold_live(&a, 9999, keeper.outbox());
-        // This fixture's actors share the current LocalSet. The typed algo
-        // admission path contains no pending await: it enqueues the Op and
-        // returns before that actor can execute. Retire A before yielding.
-        action(&mut alice, json!({"kind":"algo","op":"exec","data":{"command":"buy 0.001","symbol":"BTCUSDT"}}), 1, false).await;
-        assert!(a_tape.writes.lock().unwrap().is_empty());
-        alice.close();
-        tokio::task::yield_now().await;
-        action(&mut bob, json!({"kind":"algo","op":"exec","data":{"command":"buy 0.001","symbol":"BTCUSDT"}}), 1, false).await;
-        assert_eq!(action_frame(&mut b_sent, "order.actionOutcome").await["d"]["outcome"], "unknown");
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while b_tape.writes.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
-        }).await.unwrap();
-        assert!(a_tape.writes.lock().unwrap().is_empty(), "retired A admission must not execute on the still-live account");
-        while let Ok(text) = a_sent.try_recv() {
-            let frame: Value = serde_json::from_str(&text).unwrap();
-            assert_ne!(frame["t"], "order.actionOutcome");
-        }
-        bob.close(); registry.dispose(&a, Disposal::PageDisposed); registry.dispose(&b, Disposal::PageDisposed);
-    }).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let a_tape = Tape::default();
+            let b_tape = Tape::default();
+            let a = delegated_account_with_algos(&registry, "A", "bybit", a_tape.clone(), true);
+            let b = delegated_account_with_algos(&registry, "B", "bybit", b_tape.clone(), true);
+            let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
+            let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+            let (keeper, _kept, _) = Out::channel(256);
+            crate::accounts::tests::hold_live(&a, 9999, keeper.outbox());
+            // This fixture's actors share the current LocalSet. The typed algo
+            // admission path contains no pending await: it enqueues the Op and
+            // returns before that actor can execute. Retire A before yielding.
+            action(
+                &mut alice,
+                json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}),
+                1,
+                false,
+            )
+            .await;
+            assert!(a_tape.writes.lock().unwrap().is_empty());
+            alice.close();
+            tokio::task::yield_now().await;
+            action(
+                &mut bob,
+                json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}),
+                1,
+                false,
+            )
+            .await;
+            assert_eq!(
+                action_frame(&mut b_sent, "order.actionOutcome").await["d"]["outcome"],
+                "unknown"
+            );
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while b_tape.writes.lock().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                a_tape.writes.lock().unwrap().is_empty(),
+                "retired A admission must not execute on the still-live account"
+            );
+            while let Ok(text) = a_sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert_ne!(frame["t"], "order.actionOutcome");
+            }
+            bob.close();
+            registry.dispose(&a, Disposal::PageDisposed);
+            registry.dispose(&b, Disposal::PageDisposed);
+        })
+        .await;
 }
 
 #[tokio::test]

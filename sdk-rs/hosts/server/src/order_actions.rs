@@ -136,7 +136,7 @@ impl Action {
     }
     pub fn full_write(&self) -> bool {
         match self {
-            Self::Amend { order, update } => order.kind.is_some() || update.amount == Some(0.0),
+            Self::Amend { update, .. } => update.amount == Some(0.0),
             Self::Cancel { order } => order.kind.is_some(),
             Self::CancelAll { symbols } => symbols.is_some(),
             Self::Nuke {} => false,
@@ -168,6 +168,7 @@ impl Action {
             }
             Self::Amend { order, update } => {
                 if !valid_target(order)
+                    || order.kind.is_some()
                     || (update.price.is_none() && update.amount.is_none())
                     || update.price.is_some_and(|v| !v.is_finite() || v <= 0.0)
                     || update.amount.is_some_and(|v| !v.is_finite() || v < 0.0)
@@ -533,6 +534,15 @@ impl Drop for NukeReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn amendment_rejects_unused_target_routing_type() {
+        let action: Action = serde_json::from_value(json!({
+            "kind":"amend", "order":{"id":"resting","symbol":"BTCUSDT","type":"stop_market"},
+            "update":{"price":49000}
+        }))
+        .unwrap();
+        assert!(action.call().is_err());
+    }
     #[test]
     fn full_write_contract_accepts_each_local_write_and_preserves_exact_payload() {
         let cases: Vec<Value> =

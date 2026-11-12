@@ -136,6 +136,11 @@ describe('DELEGATED versioned actions', () => {
     },
   );
   it.each([
+    {
+      kind: 'amend',
+      order: { id: 'resting', symbol: 'BTCUSDT', type: 'stop_market' },
+      update: { price: 49000 },
+    },
     { kind: 'setLeverage', symbol: 'BTCUSDT', leverage: -1 },
     { kind: 'setPositionMode', hedged: 'false' },
     { kind: 'setMarginType', isolated: true, accountName: 'other' },

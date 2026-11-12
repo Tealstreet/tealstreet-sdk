@@ -25,6 +25,7 @@ struct Tape {
     requests: Arc<Mutex<Vec<Value>>>,
     client_order_ids: Arc<Mutex<Vec<String>>>,
     hold: bool,
+    two_orders: bool,
     close_unknown: bool,
     closed_positions: Arc<std::sync::atomic::AtomicBool>,
     defer_positions: Arc<std::sync::atomic::AtomicBool>,
@@ -207,11 +208,21 @@ impl Transport for Tape {
                 "coin":[{"coin":"USDT","walletBalance":"10000","equity":"10000","usdValue":"10000",
                     "availableToWithdraw":"10000","unrealisedPnl":"0","locked":"0"}]}]}})
         } else if path.ends_with("/order/realtime") {
-            json!({"retCode":0,"result":{"list":[{"orderId":"resting-order","orderLinkId":"resting-client",
+            let mut result = json!({"retCode":0,"result":{"list":[{"orderId":"resting-order","orderLinkId":"resting-client",
                 "symbol":"BTCUSDT","orderType":"Limit","side":"Buy","orderStatus":"New",
                 "price":"50000","qty":"0.001","cumExecQty":"0","leavesQty":"0.001",
                 "reduceOnly":false,"timeInForce":"GTC","positionIdx":0,
-                "createdTime":"1000","updatedTime":"1000"}],"nextPageCursor":""}})
+                "createdTime":"1000","updatedTime":"1000"}],"nextPageCursor":""}});
+            if self.two_orders {
+                let mut second = result["result"]["list"][0].clone();
+                second["orderId"] = "second-resting-order".into();
+                second["orderLinkId"] = "second-resting-client".into();
+                result["result"]["list"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(second);
+            }
+            result
         } else if path.ends_with("/position/list") {
             if self
                 .defer_positions

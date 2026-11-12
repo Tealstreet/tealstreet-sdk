@@ -31,14 +31,14 @@
           "symbol": "BTCUSDT"
         },
         {
-          "id": "unseen-native-order",
+          "id": "second-resting-order",
           "symbol": "BTCUSDT",
           "type": "limit"
         }
       ]
     },
     "method": "cancelOrders",
-    "fingerprint": "0b63b14d7e4273058d5468fb99287dc32b4a3941150c625c7a0ccf6eadbabc2f"
+    "fingerprint": "0dd178351558f0b32931a880d4f3b4c2d812b4e685e8f7071cb5d24e9e6f99fd"
   },
   {
     "action": {
@@ -148,12 +148,12 @@
       "kind": "algo",
       "op": "exec",
       "data": {
-        "command": "buy 0.001",
+        "command": "buy $100",
         "symbol": "BTCUSDT"
       }
     },
     "method": "delegatedAlgo",
-    "fingerprint": "aa4d64712cd025b9f15196b22c21a5e3c45a4b6c769db8fb7e60110e1418c244"
+    "fingerprint": "54fd08b5ae8075c6ff6df205b3a08eef3fc9f0404d8785bc2eeec2a3518076c3"
   },
   {
     "action": {
