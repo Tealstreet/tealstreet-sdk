@@ -49,6 +49,10 @@ import BybitSpecific from '/img/connect/bybit/bybit-specific-settings.png';
 
 - First, make sure you are logged into your [Bybit](https://teal.link/bybit1) account.
 
+:::tip Supported Bybit markets
+Tealstreet supports Bybit derivatives, Inverse, Demo, and Spot trading through separate Bybit setup modes. Choose **Bybit Spot** in Tealstreet when you want to connect spot markets.
+:::
+
 <IntroTealstreet exchangeName="Bybit" />
 
 ---
@@ -99,7 +103,7 @@ This guide assumes you will use the **SG** region for Tealstreet. If you instead
 2. In the Application Name select **'Tealstreet'**
     <!-- * Again this option is only for **"SG"** Region in Tealstreet. -->
 3. Choose the **‘Read-Write’** permission.
-4. Select **‘Orders’ 'Positions' 'USDC Derivatives Trading'** and **‘Trade’** in the permission section.
+4. Select the trading permissions required for the Bybit setup mode you are connecting. Derivatives modes need orders, positions, and derivatives trading permissions. Bybit Spot needs spot trading permission. Do not enable withdrawal permissions.
 5. Double check all the selections are correct and then click ‘Submit’.
     - A popup will appear next and prompt you to submit your 2FA code if its linked to your Bybit account.
     - Once you submit the 2FA code, you will see a new popup from Bybit with your API Key details. You need to paste those details into the API Key page of Tealstreet.
