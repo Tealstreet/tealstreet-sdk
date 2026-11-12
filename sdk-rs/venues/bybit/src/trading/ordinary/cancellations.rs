@@ -97,6 +97,14 @@ impl Cancellations {
         }
     }
 
+    /// Absence satisfies cancellation intent but does not prove this cancel applied.
+    pub(super) fn already_gone(&mut self, mut error: VenueError) {
+        error.outcome = Some(Outcome::Unknown);
+        for index in &self.active {
+            let _ = self.journal.record(*index, failed(error.clone()));
+        }
+    }
+
     pub(super) fn accepted(&mut self, target: &str) {
         let _ = self.journal.record(
             self.active[0],
@@ -174,7 +182,7 @@ impl Cancellations {
         let Call::Cancel { .. } = call else {
             return self.journal.attach(error);
         };
-        let error = unknown_text(error);
+        let mut error = unknown_text(error);
         for row in self.journal.outcomes() {
             if self.active.contains(&row.element.index)
                 && matches!(row.result, ElementResult::NotSent { error: None })
@@ -211,6 +219,25 @@ impl Cancellations {
                 ],
             );
         }
+        let outcomes = self.journal.outcomes();
+        let failed_index = outcomes
+            .iter()
+            .find(|row| matches!(row.result, ElementResult::Unknown { .. }))
+            .or_else(|| {
+                outcomes
+                    .iter()
+                    .find(|row| matches!(row.result, ElementResult::NotSent { error: Some(_) }))
+            })
+            .map(|row| row.element.index);
+        let partial = error.partial.get_or_insert_with(|| {
+            Box::new(safe_cex_engine::Partial {
+                order_ids: Vec::new(),
+                total: None,
+                failed_index: None,
+            })
+        });
+        partial.total = Some(self.targets.len());
+        partial.failed_index = failed_index;
         self.journal.attach(error)
     }
 }

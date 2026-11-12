@@ -723,6 +723,11 @@ impl BybitLinear {
             self.park(id, entry);
             return;
         }
+        // A later Hyro leg waits for reconciled private state (legacy text).
+        if !self.private_ready() {
+            let _ = cx.fail_plan(&run.plan, not_sent(HYRO_RECOVERING));
+            return;
+        }
         let (Ok([slot]), Some(leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front()) else {
             let _ = cx.fail_plan(&run.plan, internal("Bybit trading plan is not serial"));
             return;
@@ -741,11 +746,6 @@ impl BybitLinear {
             );
             return;
         };
-        // A later Hyro leg waits for reconciled private state (legacy text).
-        if !self.private_ready() {
-            let _ = cx.fail_plan(&run.plan, not_sent(HYRO_RECOVERING));
-            return;
-        }
         let method = if matches!(leg.planned.call, Call::PartialProof(_)) {
             Method::Get
         } else {
@@ -1720,7 +1720,17 @@ impl BybitLinear {
                 ext,
             }) => {
                 let http_ok = (200..300).contains(&response.status);
-                self.refused_leg(cx, id, active, code, message, result, ext, http_ok)
+                self.refused_leg(
+                    cx,
+                    id,
+                    active,
+                    code,
+                    message,
+                    result,
+                    ext,
+                    http_ok,
+                    cancellations,
+                )
             }
             Ok(Answer::Success { result, ext }) => {
                 self.accepted_leg(cx, active, response, result, ext, cancellations)
@@ -1763,6 +1773,7 @@ impl BybitLinear {
         result: Option<&serde_json::value::RawValue>,
         ext: Option<&serde_json::value::RawValue>,
         http_ok: bool,
+        cancellations: Option<&mut Cancellations>,
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
@@ -1886,6 +1897,11 @@ impl BybitLinear {
         }
         match (verdict, &planned.call) {
             (Verdict::Satisfied(_), call) => {
+                if matches!(call, Call::Cancel { .. })
+                    && let Some(report) = cancellations
+                {
+                    report.already_gone(error);
+                }
                 self.satisfied_effects(cx, call);
                 Decision::Next(Vec::new())
             }

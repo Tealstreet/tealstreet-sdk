@@ -4569,6 +4569,8 @@ fn applied_cancel_reports_prior_batches_and_an_unsent_tail_after_unknown() {
     }
     let error = spot_parity_error(&h, 123);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().total, Some(21));
+    assert_eq!(error.partial.as_ref().unwrap().failed_index, Some(11));
     let elements = serde_json::to_value(error).unwrap()["elements"].clone();
     assert_eq!(elements.as_array().unwrap().len(), 21);
     for (index, id) in ids.iter().enumerate() {
@@ -4618,7 +4620,11 @@ fn applied_cancel_reports_prior_batches_and_an_unsent_tail_after_unknown() {
 }
 
 fn cancel_journal_started(ids: Vec<String>) -> Harness {
-    let mut h = ready(Variant::Demo);
+    cancel_journal_started_with(Variant::Demo, ids)
+}
+
+fn cancel_journal_started_with(variant: Variant, ids: Vec<String>) -> Harness {
+    let mut h = ready(variant);
     let rows: Vec<_> = ids
         .iter()
         .map(|id| {
@@ -4847,6 +4853,89 @@ fn cancel_journal_repeated_unsent_tail_does_not_inherit_an_earlier_acceptance() 
     states.extend(["unknown"; 10]);
     states.push("notSent");
     assert_cancel_journal_terminal(&mut h, &ids, &states);
+}
+
+#[test]
+fn cancel_journal_private_readiness_refusal_keeps_confirmed_prefix() {
+    let ids = vec!["confirmed".to_owned(), "unsent".to_owned()];
+    let mut h = cancel_journal_started_with(Variant::Hyrotrader, ids.clone());
+    let request = h.take("/v5/order/cancel");
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"confirmed"}}"#,
+    );
+    h.advance(1_000.0);
+    let error = spot_parity_error(&h, 124);
+    assert_eq!(error.message, "HyroTrader private state is recovering");
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(
+        elements,
+        serde_json::json!([
+            {"index":0,"status":"applied","effect":"cancel","targetOrderId":"confirmed"},
+            {"index":1,"status":"notSent"}
+        ])
+    );
+    assert!(
+        h.requests
+            .iter()
+            .all(|r| r.method == safe_cex_engine::Method::Get),
+        "private readiness cannot release another cancellation"
+    );
+}
+
+#[test]
+fn cancel_journal_top_level_already_gone_keeps_sent_occurrences_unknown() {
+    top_level_already_gone_case(true);
+}
+
+#[test]
+fn cancel_journal_top_level_already_gone_survives_unproven_http_normalization() {
+    top_level_already_gone_case(false);
+}
+
+fn top_level_already_gone_case(native_failure: bool) {
+    for code in [110001, 170213] {
+        let ids: Vec<_> = (0..21).map(|index| format!("gone-{index}")).collect();
+        let mut h = cancel_journal_started(ids.clone());
+        let request = h.take("/v5/order/cancel-batch");
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":code,"retMsg":"order not exists"}).to_string(),
+        );
+        h.advance(1_000.0);
+        let next = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&next)).unwrap();
+        assert_eq!(wire["request"][0]["orderId"], ids[10]);
+        if native_failure {
+            h.reply(
+                next.id,
+                200,
+                &serde_json::json!({
+                    "retCode":0, "retExtInfo":{"list":vec![
+                        serde_json::json!({"code":10016,"msg":"unknown cancel outcome"});10
+                    ]}
+                })
+                .to_string(),
+            );
+        } else {
+            h.reply(next.id, 503, "unavailable");
+        }
+        let mut states = vec!["unknown"; 20];
+        states.push("notSent");
+        assert_cancel_journal_terminal(&mut h, &ids, &states);
+        let error = spot_parity_error(&h, 124);
+        let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+        if native_failure {
+            assert_eq!(elements[0]["error"]["venueCode"], code.to_string());
+        } else {
+            // The existing unproven-HTTP boundary normalizes Unknown diagnostics.
+            assert_eq!(elements[0]["error"]["kind"], "venueUnavailable");
+        }
+    }
 }
 
 #[test]
