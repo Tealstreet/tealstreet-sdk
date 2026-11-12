@@ -34,6 +34,7 @@ impl Registry {
             link.is_available() && lease.as_ref().is_none_or(|permit| permit.allowed())
         });
         let (mut result, receive) = tokio::sync::oneshot::channel();
+        let venue = init.exchange_name.clone();
         let work = async {
             self.pacer.admit().await;
             permit.check(user, init)?;
@@ -45,11 +46,11 @@ impl Registry {
                     let _placement = placement;
                     if result.is_closed() || !allowed() { return; }
                     let transport = NetworkTransport::with_routing(prepared.plan.clone(), tokens.provider())
-                        .with_venue("bybit").with_io_guard(allowed.clone());
+                        .with_venue(&venue).with_io_guard(allowed.clone());
                     tokio::select! {
                         biased;
                         _ = result.closed() => {},
-                        answer = crate::delegated::probe::run(prepared, transport, config, allowed) => {
+                        answer = crate::delegated::probe::run(&venue, prepared, transport, config, allowed) => {
                             let _ = result.send(answer);
                         }
                     }
