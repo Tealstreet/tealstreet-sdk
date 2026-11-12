@@ -286,7 +286,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
-  grvt: 1_991_680,
+  // #3317 run 43321890002/job 131545235862, artifact 13990169480; CI source e969a3bf1c92.
+  // Web/Node 1,991,790 B; current measured maximum + 10 KiB, rounded up to KiB.
+  grvt: 2_002_944,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -327,7 +329,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kraken: 2_271_232,
   krakenspot: 2_271_232,
   kucoin: 1_872_896,
-  kucoinspot: 2_462_720,
+  // #3317 run 43321890002/job 131545235949, artifact 13991900630; CI source e969a3bf1c92.
+  // Web/Node 2,463,737 B; current measured maximum + 10 KiB, rounded up to KiB.
+  kucoinspot: 2_473_984,
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
   // web/Node 2,146,773 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no signing or admission expansion.
@@ -355,7 +359,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Shared-helper fix: local web/node 2,127,824 B; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue phemex; measured + 10 KiB, rounded up.
   phemex: 2_138_112,
-  polymarket: 1_652_736,
+  // #3317 run 43321890002/job 131545235900, artifact 13992140380; CI source e969a3bf1c92.
+  // Web/Node 1,653,005 B; current measured maximum + 10 KiB, rounded up to KiB.
+  polymarket: 1_664_000,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   txflow: 1_934_336,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.

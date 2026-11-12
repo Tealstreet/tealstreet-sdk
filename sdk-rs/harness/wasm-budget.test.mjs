@@ -7,6 +7,25 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
+// #3317 run 43321890002, attempt 1; CI source e969a3bf1c92 has the head's sdk-rs tree.
+// Node artifacts 13990169480, 13991900630 and 13992140380; family logs match the web sizes.
+for (const [family, measured, minimumCap] of [
+  ['grvt', 1_991_790, 2_002_944],
+  ['kucoinspot', 2_463_737, 2_473_984],
+  ['polymarket', 1_653_005, 1_664_000],
+]) {
+  test(`#3317 current composed ${family} build retains measured plus 10 KiB headroom`, () => {
+    assert.equal(venueFamily(family), family);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${family}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
+
 test('#3317 Bybit throughput profile retains measured headroom for every alias', () => {
   // Run 43060399359/job 130665084604, sealed artifact 13874660310.
   const web = 2_481_896, node = 2_481_896;
