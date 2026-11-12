@@ -36,7 +36,6 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-pub mod admission;
 pub mod ed25519;
 pub mod eip712;
 pub mod es256;
@@ -49,6 +48,9 @@ pub mod starknet;
 pub mod uuid;
 #[cfg(feature = "zklink")]
 pub mod zklink;
+
+// Keep existing production declarations in place when adding admission helpers.
+pub mod admission;
 
 #[cfg(test)]
 mod tests {

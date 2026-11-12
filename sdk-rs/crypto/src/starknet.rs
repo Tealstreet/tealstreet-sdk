@@ -13,28 +13,6 @@ pub fn public_key_bytes(private_key: &[u8; 32]) -> [u8; 32] {
     public_key(&Felt::from_bytes_be(private_key)).to_bytes_be()
 }
 
-/// Strict fixed-width Stark ECDSA verification. Invalid field encodings, points,
-/// scalar ranges and signatures return false without reducing the wire values.
-pub fn verify(message: &[u8], public_key: &[u8], signature: &[u8]) -> bool {
-    fn felt(bytes: &[u8]) -> Option<Felt> {
-        let bytes: &[u8; 32] = bytes.try_into().ok()?;
-        let value = Felt::from_bytes_be(bytes);
-        (value.to_bytes_be() == *bytes).then_some(value)
-    }
-    if !is_public_key(public_key) || signature.len() != 64 {
-        return false;
-    }
-    let (Some(message), Some(public), Some(r), Some(s)) = (
-        felt(message),
-        felt(public_key),
-        felt(&signature[..32]),
-        felt(&signature[32..]),
-    ) else {
-        return false;
-    };
-    starknet_crypto::verify(&public, &message, &r, &s).unwrap_or(false)
-}
-
 /// Stark curve `y^2 = x^3 + x + BETA` (alpha = 1), as starknet-curve.
 const BETA: Felt =
     Felt::from_hex_unchecked("0x6f21413efbe40de150e596d72f7a8c5609ad26c15c915c1f4cdfcb99cee9e89");
@@ -164,6 +142,28 @@ pub fn derive_from_ethereum(key: &str, chain: &str) -> Result<Zeroizing<[u8; 32]
         return Err("Invalid Paradex private key".into());
     }
     Ok(Zeroizing::new(private.to_be_bytes::<32>()))
+}
+
+/// Strict fixed-width Stark ECDSA verification. Invalid field encodings, points,
+/// scalar ranges and signatures return false without reducing the wire values.
+pub fn verify(message: &[u8], public_key: &[u8], signature: &[u8]) -> bool {
+    fn felt(bytes: &[u8]) -> Option<Felt> {
+        let bytes: &[u8; 32] = bytes.try_into().ok()?;
+        let value = Felt::from_bytes_be(bytes);
+        (value.to_bytes_be() == *bytes).then_some(value)
+    }
+    if !is_public_key(public_key) || signature.len() != 64 {
+        return false;
+    }
+    let (Some(message), Some(public), Some(r), Some(s)) = (
+        felt(message),
+        felt(public_key),
+        felt(&signature[..32]),
+        felt(&signature[32..]),
+    ) else {
+        return false;
+    };
+    starknet_crypto::verify(&public, &message, &r, &s).unwrap_or(false)
 }
 
 #[cfg(test)]
