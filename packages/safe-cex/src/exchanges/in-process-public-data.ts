@@ -126,7 +126,17 @@ export class InProcessPublicDataProvider {
   ): (() => void) => {
     if (this.isDisposed) return () => {};
     if (!onRejection) return this.source.listenOrderBook(symbol, callback);
-    return this.trackSubscription(this.source.listenOrderBook(symbol, callback, onRejection));
+    return this.trackSubscription((isActive) =>
+      this.source.listenOrderBook(
+        symbol,
+        (book) => {
+          if (isActive()) callback(book);
+        },
+        (signal) => {
+          if (isActive()) onRejection(signal);
+        },
+      ),
+    );
   };
 
   /**
@@ -140,15 +150,36 @@ export class InProcessPublicDataProvider {
   ): (() => void) => {
     if (this.isDisposed) return () => {};
     if (!onRejection) return this.source.listenOHLCV(opts, callback);
-    return this.trackSubscription(this.source.listenOHLCV(opts, callback, onRejection));
+    return this.trackSubscription((isActive) =>
+      this.source.listenOHLCV(
+        opts,
+        (candle) => {
+          if (isActive()) callback(candle);
+        },
+        (signal) => {
+          if (isActive()) onRejection(signal);
+        },
+      ),
+    );
   };
 
-  private trackSubscription(unsubscribe: () => void): () => void {
+  private trackSubscription(subscribe: (isActive: () => boolean) => () => void): () => void {
+    let unsubscribe: (() => void) | undefined;
+    let stopped = false;
     const stop = () => {
-      if (this.subscriptions.delete(stop)) unsubscribe();
+      if (stopped) return;
+      stopped = true;
+      this.subscriptions.delete(stop);
+      unsubscribe?.();
     };
     this.subscriptions.add(stop);
-    if (this.isDisposed) stop();
+    try {
+      unsubscribe = subscribe(() => !stopped && !this.isDisposed);
+    } catch (error) {
+      stop();
+      throw error;
+    }
+    if (stopped) unsubscribe();
     return stop;
   }
 

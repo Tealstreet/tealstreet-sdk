@@ -1043,6 +1043,236 @@ describe('direct public-data rejection observers', () => {
   );
 
   it.each([
+    ['book', true],
+    ['candle', true],
+    ['book', false],
+    ['candle', false],
+  ] as const)('retires a %s unsubscribe during registration: %s', (kind, duringRegistration) => {
+    const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    installHost(source, vi.fn());
+    receive(source, fixture({ fills: 0 }));
+    let handler: OrderBookSubscriptionsHandler | OHLCVSubscriptionsHandler;
+    const messages: Array<{ op: string }> = [];
+    const context = {
+      postMessage(message: { op: string }) {
+        messages.push(message);
+        if (message.op.endsWith(':rejected')) {
+          handler.handle({
+            op: kind === 'book' ? 'unsubscribeOrderBook' : 'unsubscribeOHLCV',
+            data: { subId: 'cancel-during-registration' },
+          });
+        }
+      },
+    } as unknown as Worker;
+    const release = vi.fn();
+    const register = (stop: () => void) => {
+      if (duringRegistration) receive(source, new ArrayBuffer(0));
+      return () => {
+        release();
+        // Cleanup itself may synchronously report a final rejection.
+        receive(source, new ArrayBuffer(0));
+        stop();
+      };
+    };
+    if (kind === 'book') {
+      const original = source.listenOrderBook;
+      vi.spyOn(source, 'listenOrderBook').mockImplementation((...args) => register(original(...args)));
+      handler = new OrderBookSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never);
+    } else {
+      const original = source.listenOHLCV;
+      vi.spyOn(source, 'listenOHLCV').mockImplementation((...args) => register(original(...args)));
+      handler = new OHLCVSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never);
+    }
+    try {
+      handler.handle({
+        op: kind === 'book' ? 'subscribeOrderBook' : 'subscribeOHLCV',
+        data: { symbol: 'BTCUSDT', interval: '1m', subId: 'cancel-during-registration' },
+      });
+      if (!duringRegistration) receive(source, new ArrayBuffer(0));
+      const afterCancellation = messages.length;
+      const releasedAtCancellation = release.mock.calls.length;
+      receive(source, new ArrayBuffer(0));
+      receive(source, fixture({ fills: 0 }));
+      expect({ released: releasedAtCancellation, extraMessages: messages.length - afterCancellation }).toEqual({
+        released: 1,
+        extraMessages: 0,
+      });
+      expect(messages).toHaveLength(1);
+      handler.dispose();
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      handler.dispose();
+      source.dispose();
+    }
+  });
+
+  it.each(['book', 'candle'] as const)(
+    'keeps a replacement %s subscription created inside rejection delivery',
+    (kind) => {
+      const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+      installHost(source, vi.fn());
+      receive(source, fixture({ fills: 0 }));
+      let handler: OrderBookSubscriptionsHandler | OHLCVSubscriptionsHandler;
+      let replaced = false;
+      const subscribe = () =>
+        handler.handle({
+          op: kind === 'book' ? 'subscribeOrderBook' : 'subscribeOHLCV',
+          data: { symbol: 'BTCUSDT', interval: '1m', subId: 'replacement-sub' },
+        });
+      const unsubscribe = () =>
+        handler.handle({
+          op: kind === 'book' ? 'unsubscribeOrderBook' : 'unsubscribeOHLCV',
+          data: { subId: 'replacement-sub' },
+        });
+      const messages: Array<{ op: string }> = [];
+      const context = {
+        postMessage(message: { op: string }) {
+          messages.push(message);
+          if (!replaced && message.op.endsWith(':rejected')) {
+            replaced = true;
+            unsubscribe();
+            subscribe();
+          }
+        },
+      } as unknown as Worker;
+      let registrations = 0;
+      const releases = [vi.fn(), vi.fn()];
+      const register = (stop: () => void) => {
+        const index = registrations++;
+        if (index === 0) receive(source, new ArrayBuffer(0));
+        return () => {
+          releases[index]();
+          stop();
+        };
+      };
+      if (kind === 'book') {
+        const original = source.listenOrderBook;
+        vi.spyOn(source, 'listenOrderBook').mockImplementation((...args) => register(original(...args)));
+        handler = new OrderBookSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never);
+      } else {
+        const original = source.listenOHLCV;
+        vi.spyOn(source, 'listenOHLCV').mockImplementation((...args) => register(original(...args)));
+        handler = new OHLCVSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never);
+      }
+      try {
+        subscribe();
+        expect(registrations).toBe(2);
+        expect(releases.map((release) => release.mock.calls.length)).toEqual([1, 0]);
+        const beforeRejection = messages.length;
+        receive(source, new ArrayBuffer(0));
+        expect(messages.length - beforeRejection).toBe(1);
+        unsubscribe();
+        expect(releases.map((release) => release.mock.calls.length)).toEqual([1, 1]);
+        const afterCancellation = messages.length;
+        receive(source, new ArrayBuffer(0));
+        receive(source, fixture({ fills: 0 }));
+        expect(messages).toHaveLength(afterCancellation);
+        handler.dispose();
+        expect(releases.map((release) => release.mock.calls.length)).toEqual([1, 1]);
+      } finally {
+        handler.dispose();
+        source.dispose();
+      }
+    },
+  );
+
+  it.each(['book', 'candle'] as const)('allows a %s retry after source registration throws', (kind) => {
+    const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    installHost(source, vi.fn());
+    receive(source, fixture({ fills: 0 }));
+    const postMessage = vi.fn();
+    const context = { postMessage } as unknown as Worker;
+    const failure = new Error('source registration refused');
+    const listen = kind === 'book' ? vi.spyOn(source, 'listenOrderBook') : vi.spyOn(source, 'listenOHLCV');
+    listen.mockImplementationOnce(() => {
+      throw failure;
+    });
+    const handler =
+      kind === 'book'
+        ? new OrderBookSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never)
+        : new OHLCVSubscriptionsHandler('synthetic', 'bybit', source, context, {} as never, {} as never);
+    const subscribe = () =>
+      handler.handle({
+        op: kind === 'book' ? 'subscribeOrderBook' : 'subscribeOHLCV',
+        data: { symbol: 'BTCUSDT', interval: '1m', subId: 'retry-sub' },
+      });
+    try {
+      expect(subscribe).toThrow(failure);
+      expect(subscribe).not.toThrow();
+      expect(listen).toHaveBeenCalledTimes(2);
+      receive(source, new ArrayBuffer(0));
+      expect(postMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      handler.dispose();
+      source.dispose();
+    }
+  });
+
+  it.each([
+    ['book', true],
+    ['candle', true],
+    ['book', false],
+    ['candle', false],
+  ] as const)('fences %s callbacks before registration returns after provider disposal: %s', (kind, dispose) => {
+    const source = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    const parent = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    const peerData = vi.fn();
+    const peerRejections = vi.fn();
+    const stopPeer =
+      kind === 'book'
+        ? source.listenOrderBook('BTCUSDT', peerData, peerRejections)
+        : source.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, peerData, peerRejections);
+    const release = vi.fn();
+    const register = (unsubscribe: () => void) => {
+      receive(source, new ArrayBuffer(0));
+      receive(source, fixture({ fills: 0 }));
+      receive(source, new ArrayBuffer(0));
+      return () => {
+        release();
+        unsubscribe();
+      };
+    };
+    const provider = new InProcessPublicDataProvider(parent, {
+      store: source.store,
+      listenOrderBook: (...args: Parameters<typeof source.listenOrderBook>) =>
+        register(source.listenOrderBook(...args)),
+      listenOHLCV: (...args: Parameters<typeof source.listenOHLCV>) => register(source.listenOHLCV(...args)),
+    });
+    parent.externalPublicDataProvider = provider;
+    const states: boolean[] = [];
+    const observed = () => {
+      states.push(parent.isDisposed);
+      if (dispose) parent.dispose();
+    };
+    const data = vi.fn();
+    let stop = () => {};
+    try {
+      stop =
+        kind === 'book'
+          ? parent.listenOrderBook('BTCUSDT', data, observed)
+          : parent.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, data, observed);
+      expect(states).toEqual(dispose ? [false] : [false, false]);
+      expect(data).toHaveBeenCalledTimes(dispose ? 0 : 1);
+      expect(peerRejections).toHaveBeenCalledTimes(2);
+      expect(peerData).toHaveBeenCalledTimes(1);
+      expect(release).toHaveBeenCalledTimes(dispose ? 1 : 0);
+      stop();
+      stop();
+      provider.dispose();
+      receive(source, new ArrayBuffer(0));
+      receive(source, fixture({ fills: 0 }));
+      expect(states).toEqual(dispose ? [false] : [false, false]);
+      expect(data).toHaveBeenCalledTimes(dispose ? 0 : 1);
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+      stopPeer();
+      parent.dispose();
+      source.dispose();
+    }
+  });
+
+  it.each([
     ['book', 'after registration'],
     ['candle', 'after registration'],
     ['book', 'during registration'],

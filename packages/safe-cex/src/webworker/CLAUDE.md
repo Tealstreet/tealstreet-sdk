@@ -28,8 +28,11 @@ Book and candle subscription handlers forward typed rejection observers as
 JSON-safe serialized error; receivers restore the error for the optional third
 observer. Rejections fan out to every current subscriber, cancel pending data
 throttles, and send no substitute data. Unsubscribe and handler disposal remove
-these observers. A subscription handle returned after synchronous handler disposal
-is released immediately, and disposed handlers ignore later rejections.
+these observers. Registration is visible before calling the source, so a
+synchronous unsubscribe or disposal fences data and rejections immediately and
+releases the late handle exactly once. Cancelled registrations cannot overwrite
+a replacement subscription or trigger a candle repair; a thrown source
+registration releases its reservation so callers can retry.
 Worker owner/generation fences apply to these messages too.
 
 ## History result completeness

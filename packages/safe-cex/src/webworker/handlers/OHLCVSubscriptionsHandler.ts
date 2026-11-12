@@ -73,8 +73,15 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         }
 
         // Create new subscription
+        let unsubscribe: (() => void) | undefined;
+        let stopped = false;
         const sub: SymbolIntervalSub = {
-          unsub: () => {},
+          unsub: () => {
+            if (stopped) return;
+            stopped = true;
+            sub.throttleFn?.cancel();
+            unsubscribe?.();
+          },
           throttleFn: undefined,
           subIds: new Set([subId]),
           lastCandleTimestamp: 0,
@@ -86,49 +93,52 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
           { trailing: true },
         );
         sub.throttleFn = f;
-
-        const ohlcvSub = this._exchange.listenOHLCV(
-          data,
-          (c) => {
-            if (c.timestamp !== sub.lastCandleTimestamp) {
-              try {
-                f?.flush?.();
-                sub.lastCandleTimestamp = c.timestamp;
-              } catch (_e) {
-                // Ignored
+        // Cancellation must see the subscription before a source can call back.
+        this._subsByKey.set(key, sub);
+        try {
+          unsubscribe = this._exchange.listenOHLCV(
+            data,
+            (c) => {
+              if (this._disposed || stopped) return;
+              if (c.timestamp !== sub.lastCandleTimestamp) {
+                try {
+                  f?.flush?.();
+                  sub.lastCandleTimestamp = c.timestamp;
+                } catch (_e) {
+                  // Ignored
+                }
               }
-            }
-            f(c);
-          },
-          (signal) => {
-            if (this._disposed) return;
-            f.cancel();
-            for (const subId of sub.subIds) {
-              const data: StoreWorkerOHLCVFrameRejection = {
-                ...signal,
-                subId,
-                error: serializeCommandError(signal.error),
-              };
-              this._ctx.postMessage({ op: 'listenOHLCV:rejected', data });
-            }
-          },
-        );
-        sub.unsub = ohlcvSub || (() => {});
-
-        if (this._disposed) {
+              if (!this._disposed && !stopped) f(c);
+            },
+            (signal) => {
+              if (this._disposed || stopped) return;
+              f.cancel();
+              for (const subId of sub.subIds) {
+                const data: StoreWorkerOHLCVFrameRejection = {
+                  ...signal,
+                  subId,
+                  error: serializeCommandError(signal.error),
+                };
+                this._ctx.postMessage({ op: 'listenOHLCV:rejected', data });
+              }
+            },
+          );
+        } catch (error) {
+          if (this._subsByKey.get(key) === sub) this._subsByKey.delete(key);
           sub.subIds.clear();
           sub.payloadDataBySubId.clear();
-          f.cancel();
-          try {
-            sub.unsub();
-          } catch {
-            /* Continue disposal even if source cleanup throws. */
-          }
-          return;
+          sub.unsub();
+          throw error;
         }
-
-        this._subsByKey.set(key, sub);
-        repairIfReset();
+        if (stopped) {
+          try {
+            unsubscribe?.();
+          } catch {
+            /* A cancelled registration still releases its late handle once. */
+          }
+        } else {
+          repairIfReset();
+        }
         break;
       }
       case 'unsubscribeOHLCV': {
@@ -143,13 +153,13 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
 
             if (sub.subIds.size === 0) {
               // Last subscriber — actually unsubscribe from exchange
+              this._subsByKey.delete(key);
               try {
                 sub.unsub();
                 sub.throttleFn?.cancel?.();
               } catch (_e) {
                 // Ignored
               }
-              this._subsByKey.delete(key);
             }
             break;
           }

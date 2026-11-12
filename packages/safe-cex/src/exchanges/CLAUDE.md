@@ -249,6 +249,9 @@ Direct `listenOrderBook` / `listenOHLCV`, `PublicDataSource`, and the matching
 rejections reuse the existing frame readers and recovery-scope identity helper;
 in-process public-data providers carry the observer and release it on disposal,
 including when a synchronous source callback disposes the provider during registration.
+Observer-enabled provider subscriptions establish liveness before calling the
+source. Disposal immediately fences both data and rejection callbacks, including
+callbacks before the source returns; the late handle is released exactly once.
 The signal names the requested stream/symbol (and candle interval) and carries the original error. A rejected book batch invalidates all
 book baselines; known failure identities notify only matching subscribers.
 Unknown identities notify the affected stream kind broadly, and unreadable
