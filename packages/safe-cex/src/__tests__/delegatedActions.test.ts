@@ -4,7 +4,6 @@ import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delega
 import { describe, expect, it } from 'vitest';
 
 import golden from '../../../../sdk-rs/hosts/server/tests/data/delegated-actions-v1.json';
-import amendments from '../../../../sdk-rs/hosts/server/tests/data/delegated-algo-amend-v1.json';
 import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
 import { delegatedActionFingerprint, isDelegatedAction, isDelegatedFullWriteAction } from '../delegatedActions';
 import { DelegatedOutbox } from '../delegatedOutbox';
@@ -16,7 +15,6 @@ const actions: DelegatedAction[] = [
   { kind: 'cancelAll' },
   { kind: 'nuke' },
   ...fullWrites.map(({ action }) => action as unknown as DelegatedAction),
-  ...amendments.map(({ action }) => action as unknown as DelegatedAction),
 ];
 function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const writes: string[] = [];
@@ -386,28 +384,17 @@ describe('DELEGATED versioned actions', () => {
   });
 });
 
-describe('DELEGATED v1 algo replacement amendments', () => {
-  it.each(amendments)('accepts and fingerprints $action.op inside v1', ({ action, fingerprint }) => {
-    expect(isDelegatedAction(action)).toBe(true);
-    expect(delegatedActionFingerprint('main', golden.key, action as unknown as DelegatedAction, 1)).toBe(fingerprint);
-  });
-  it.each(amendments)('sends $action.op through the admitted v1 outbox only', async ({ action }) => {
-    for (const admitted of [false, true]) {
-      const f = setup();
-      f.connection.ready = admitted;
-      const box = await DelegatedOutbox.open(f.options);
-      box.connect(f.connection);
-      await box.enqueueAction(action as unknown as DelegatedAction);
-      expect(f.writes).toHaveLength(admitted ? 1 : 0);
-      if (admitted) expect(JSON.parse(f.writes[0])).toMatchObject({ t: 'order.action', d: { version: 1, action } });
-      box.close();
-    }
-  });
-  it.each(amendments)('closes $action.op replacement options and outer fields', ({ action }) => {
-    expect(isDelegatedAction({ ...action, data: { ...action.data, future: true } })).toBe(false);
-    expect(
-      isDelegatedAction({ ...action, data: { ...action.data, options: { ...action.data.options, future: true } } }),
-    ).toBe(false);
-    expect(isDelegatedAction({ ...action, data: { ...action.data, id: '' } })).toBe(false);
+describe('DELEGATED existing v1 lifecycle scope', () => {
+  it.each(['chaser', 'twap'])('rejects deferred %s parameter amendment before durable enqueue', async (family) => {
+    const start = fullWrites.find(({ action }) => 'op' in action && action.op === `${family}:start`)!.action as { data: unknown };
+    const payload = { kind: 'algo', op: `${family}:amend`, data: { id: 'resident-job', options: start.data } };
+    expect(isDelegatedAction(payload)).toBe(false);
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection);
+    await expect(box.enqueueAction(payload as unknown as DelegatedAction)).rejects.toThrow('Invalid delegated action');
+    expect(box.entries()).toHaveLength(0);
+    expect(f.writes).toHaveLength(0);
+    box.close();
   });
 });
