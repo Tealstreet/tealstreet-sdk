@@ -192,20 +192,33 @@ impl TwapFactory {
                     .into(),
             );
         }
-        let (started, effects) = {
+        let owner = self.inner.book.borrow().owner.clone();
+        let (started, effects, chaser_dispatched) = {
             let mut env = self.inner.env.borrow_mut();
             env.now = cx.now_ms();
             let view = CxView {
                 cx,
                 chasers: &*self.inner.chasers,
                 client_ids: &self.inner.client_ids,
+                chaser_dispatched: Cell::new(false),
             };
-            self.inner
+            let (started, effects) = self
+                .inner
                 .book
                 .borrow_mut()
-                .start(options, &mut *env, &view)
+                .start(options, &mut *env, &view);
+            (started, effects, view.chaser_dispatched.get())
         };
-        Inner::run(&self.inner, cx, effects);
+        let dispatched = Inner::run(&self.inner, cx, effects) || chaser_dispatched;
+        Inner::refresh_owner(&self.inner, cx);
+        if started.is_ok() && self.inner.book.borrow().owner != owner {
+            return Err(if dispatched {
+                "TWAP start outcome is unknown: authenticated connection binding changed after slice dispatch".into()
+            } else {
+                "TWAP start cancelled-for-owner-change: authenticated connection binding changed"
+                    .into()
+            });
+        }
         Inner::ensure_driver(&self.inner, cx);
         started
     }
@@ -258,6 +271,7 @@ impl AlgoFactory for TwapFactory {
                 cx,
                 chasers: &*self.inner.chasers,
                 client_ids: &self.inner.client_ids,
+                chaser_dispatched: Cell::new(false),
             };
             self.inner
                 .book
@@ -348,16 +362,18 @@ impl Inner {
                 cx,
                 chasers: &*inner.chasers,
                 client_ids: &inner.client_ids,
+                chaser_dispatched: Cell::new(false),
             };
             inner.book.borrow_mut().wake(&mut *env, &view)
         };
         Self::run(inner, cx, effects);
     }
 
-    fn run(inner: &Rc<Self>, cx: &AlgoCx, effects: Vec<TwapEffect>) {
+    fn run(inner: &Rc<Self>, cx: &AlgoCx, effects: Vec<TwapEffect>) -> bool {
+        let mut dispatched = false;
         for effect in effects {
             if Self::refresh_owner(inner, cx) {
-                return;
+                return dispatched;
             }
             match effect {
                 TwapEffect::Outcome { twap_id, error } => {
@@ -388,7 +404,8 @@ impl Inner {
                     element_index,
                     request,
                 } => {
-                    Self::place(inner, cx, twap_id, settle_token, element_index, &request);
+                    dispatched |=
+                        Self::place(inner, cx, twap_id, settle_token, element_index, &request);
                 }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
                 TwapEffect::Log { message } => report(cx, &message),
@@ -398,6 +415,7 @@ impl Inner {
                 TwapEffect::Diagnostic { message } => eprintln!("[TWAP] {message}"),
             }
         }
+        dispatched
     }
 
     fn place(
@@ -407,7 +425,7 @@ impl Inner {
         settle_token: Option<u64>,
         element_index: usize,
         request: &TwapOrderRequest,
-    ) {
+    ) -> bool {
         let command = match place_command(cx, request) {
             Ok(command) => command,
             Err(message) => {
@@ -418,7 +436,7 @@ impl Inner {
                         Self::remainder_settled(inner, cx, &twap_id, element_index, Err(failure))
                     }
                 }
-                return;
+                return false;
             }
         };
         let owner = inner.owner_snapshot();
@@ -440,6 +458,7 @@ impl Inner {
                 }
             }
         });
+        true
     }
 
     fn settled(
@@ -500,6 +519,7 @@ struct CxView<'a> {
     cx: &'a AlgoCx,
     chasers: &'a dyn TwapChasers,
     client_ids: &'a ClientIdMinter,
+    chaser_dispatched: Cell<bool>,
 }
 
 impl TwapMarketView for CxView<'_> {
@@ -521,6 +541,7 @@ impl TwapMarketView for CxView<'_> {
     }
 
     fn start_chaser(&self, request: &ChaserRequest) -> Result<(), String> {
+        self.chaser_dispatched.set(true);
         self.chasers.start_with_id(self.cx, request)
     }
 

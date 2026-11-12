@@ -178,6 +178,85 @@ async fn captured_start_cannot_adopt_the_binding_refreshed_after_its_check() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn typed_start_reports_owner_change_during_first_effects() {
+    LocalSet::new()
+        .run_until(async {
+            for (change, after_dispatch, chaser) in [
+                (true, false, false),
+                (true, true, false),
+                (false, false, false),
+                (true, true, true),
+                (false, true, true),
+            ] {
+                let initial = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "A".into(),
+                    generation: 7,
+                };
+                let replacement = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "B".into(),
+                    generation: 8,
+                };
+                let reads = Rc::new(Cell::new(0));
+                let port = Rc::new(Port::default());
+                let chasers = Rc::new(Chasers::default());
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory =
+                    TwapFactory::with_owner("a", initial.clone(), cx.clone(), chasers.clone())
+                        .guard_owner(Rc::new({
+                            let reads = reads.clone();
+                            let port = port.clone();
+                            let chasers = chasers.clone();
+                            move || {
+                                reads.set(reads.get() + 1);
+                                let dispatched = !port.commands.borrow().is_empty()
+                                    || !chasers.started.borrow().is_empty();
+                                if change
+                                    && if after_dispatch {
+                                        dispatched
+                                    } else {
+                                        reads.get() >= 4
+                                    }
+                                {
+                                    replacement.clone()
+                                } else {
+                                    initial.clone()
+                                }
+                            }
+                        }));
+                let result = factory.capture_owner().start(
+                    serde_json::from_str(&twap_options(json!({"useChaserOrders":chaser}))).unwrap(),
+                );
+                if change {
+                    let message =
+                        result.expect_err("discarded work must never report Starting TWAP");
+                    assert!(
+                        message.contains(if after_dispatch {
+                            "outcome is unknown"
+                        } else {
+                            "cancelled-for-owner-change"
+                        }),
+                        "{message}"
+                    );
+                    assert!(factory.active_twaps("a").is_empty());
+                } else {
+                    assert_eq!(factory.active_twaps("a")[0]["id"], result.unwrap());
+                }
+                assert_eq!(
+                    placed_amounts(&port),
+                    if chaser || (change && !after_dispatch) {
+                        vec![]
+                    } else {
+                        vec![0.5]
+                    }
+                );
+                assert_eq!(chasers.started.borrow().len(), usize::from(chaser));
+                cx.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn binding_changes_during_slice_deferral_drop_the_retired_schedule() {
     LocalSet::new()
         .run_until(async {
