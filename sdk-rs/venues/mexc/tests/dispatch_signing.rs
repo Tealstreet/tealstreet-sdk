@@ -325,7 +325,8 @@ fn native_primary_wire_is_integer_stamped_and_header_ordered() {
             "Request-Time",
             "Signature",
             "Recv-Window",
-            "Content-Type"
+            "Content-Type",
+            "source"
         ]
     );
     assert_eq!(request.headers[0].1, "replay-key");
@@ -340,6 +341,7 @@ fn native_primary_wire_is_integer_stamped_and_header_ordered() {
     );
     assert_eq!(request.headers[3].1, "20000");
     assert_eq!(request.headers[4].1, "application/json");
+    assert_eq!(request.headers[5].1, "TEAL");
     assert!(request.body.is_none());
 }
 
@@ -875,6 +877,7 @@ fn http_dispatch_retains_permitted_callback_headers_without_shadowing_native_aut
             ("request-time", "shadow"),
             ("recv-window", "shadow"),
             ("content-type", "text/plain"),
+            ("SoUrCe", "shadow"),
         ]
         .into_iter()
         .map(|(key, value)| (key.into(), value.into()))
@@ -930,6 +933,7 @@ fn callback_header_engine(headers: Vec<(String, String)>, declared: bool) -> Tes
                     "Signature",
                     "Recv-Window",
                     "Content-Type",
+                    "source",
                 ]),
                 ..Default::default()
             },
