@@ -190,9 +190,9 @@ if (!isPrivate && !values['correctness-only']) {
       for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
   };
   measure();
-  // One re-measure on this runner before Rust > 1.00x TS fails (Sam, 2026-11-07). Only the
+  // One re-measure on this runner before exceeding the venue CPU bound fails. Only the
   // final set is reported and retained, so recorded revalidation never re-measures.
-  const first = recorded ? undefined : performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  const first = recorded ? undefined : performanceVerdict(metricsOf('ts'), metricsOf('rust'), values.venue);
   if (first && cpuSlower(first.failures)) {
     const audited = { ts: structuredClone(results.ts[0]), rust: structuredClone(results.rust[0]) };
     remeasure = { first, firstDifferences: performanceRunDifferences(performanceResults, results, audited) };
@@ -441,7 +441,7 @@ const failures = [...differences];
 const warnings = [];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate && !values['correctness-only']) {
-  const measured = performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  const measured = performanceVerdict(metricsOf('ts'), metricsOf('rust'), values.venue);
   const verdict = remeasure ? remeasuredVerdict(remeasure.first, measured) : measured;
   failures.push(...verdict.failures);
   warnings.push(...verdict.warnings);

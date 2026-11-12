@@ -681,6 +681,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "auth": "Tealstreet proxy JWT in the proxyToken query parameter",
             "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
             "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
+            "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,

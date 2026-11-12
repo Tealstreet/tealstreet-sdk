@@ -30,6 +30,7 @@ pub enum AlgoInput {
     Nuke {
         mode: &'static str,
         request_id: Value,
+        action: Option<Box<crate::order_actions::NukeReceipt>>,
     },
     /// A socket joined (a resume or another tab): resend the algo store rows.
     Joined,
@@ -328,6 +329,40 @@ struct Port {
     /// Errors raised so far, to tell whether a shutdown raised any.
     errors: Cell<u64>,
     running: Arc<Running>,
+}
+
+/// A nuke belongs to the registration that requested it, even while another
+/// holder keeps the account resident. Fence every native leg after an await;
+/// suppressing the final receipt alone would still permit new retired writes.
+struct ActionNukePort {
+    port: Rc<Port>,
+    guard: crate::order_actions::ActionGuard,
+}
+
+impl AccountPort for ActionNukePort {
+    fn store(&self) -> Ref<'_, AlgoStore> {
+        self.port.store()
+    }
+    fn subscribe(&self) -> mpsc::UnboundedReceiver<Change> {
+        self.port.subscribe()
+    }
+    fn next_command_id(&self) -> CommandId {
+        self.port.next_command_id()
+    }
+    fn command(&self, command: Command) -> CommandFuture {
+        if let Err(message) = self.guard.check() {
+            return Box::pin(
+                async move { Err(VenueError::new(message).outcome(Outcome::Unknown)) },
+            );
+        }
+        self.port.command(command)
+    }
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        self.port.capabilities()
+    }
+    fn emit(&self, op: &str, data: String) {
+        self.port.emit(op, data);
+    }
 }
 
 impl AccountPort for Port {
@@ -1088,11 +1123,16 @@ pub async fn run(
                     }
                     publish(&mut published);
                 }
-                Some(AlgoInput::Nuke { mode, request_id }) => {
-                    if !running.io_allowed() {
-                        (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
+                Some(AlgoInput::Nuke { mode, request_id, action }) => {
+                    if action.as_ref().is_some_and(|receipt| receipt.expired()) {
+                        if let Some(receipt) = action { receipt.finish(Err(crate::order_actions::expired_outcome())); }
+                        continue;
+                    }
+                    if !running.io_allowed() || action.as_ref().is_some_and(|receipt| !receipt.active()) {
+                        if let Some(receipt) = action { receipt.finish(Err(crate::user_drain::refusal())); }
+                        else { (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
                             "requestId":request_id,"success":false,"result":crate::user_drain::refusal(),
-                        })));
+                        }))); }
                         continue;
                     }
                     // The engine may have loaded ahead of this store's frames: read it
@@ -1104,13 +1144,22 @@ pub async fn run(
                         loaded
                     });
                     let admission = running.user.get().map(|user| user.admit_cleanup());
+                    let nuke_cx = match action.as_ref().map(|receipt| receipt.guard()) {
+                        Some(guard) => AlgoCx::new(
+                            Rc::new(ActionNukePort { port: port.clone(), guard }),
+                            cx.scope.clone(),
+                        ),
+                        None => cx.clone(),
+                    };
                     let started = match admission.as_ref() {
+                        _ if action.as_ref().is_some_and(|receipt| receipt.expired()) => Err(crate::order_actions::expired_outcome()),
+                        _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"})),
                         Some(Err(error)) => Err(error.clone()),
                         _ => match seen {
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
-                            exec.nuke(mode, &cx)
+                            exec.nuke(mode, &nuke_cx)
                         }
                         _ => Err(serde_json::json!({
                             "message": crate::methods::NUKE_NOT_LOADED,
@@ -1121,12 +1170,14 @@ pub async fn run(
                     running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                     drop(admission);
                     let (port, name, who) = (port.clone(), name.clone(), who.clone());
+                    let action_started = action.is_some();
                     let settle = move |outcome: Result<Value, Value>| {
                         let audit = match &outcome {
                             Ok(_) => Value::from("ok"),
                             Err(error) => error["message"].clone(),
                         };
                         crate::audit::log(&who, "callMethod", &crate::audit::algo_op("nuke", &Value::from(mode).to_string()), audit);
+                        if let Some(receipt) = action { receipt.finish(outcome); return; }
                         let data = match outcome {
                             // Every leg was accepted; the result names the algos stopped first.
                             Ok(done) => {
@@ -1149,7 +1200,15 @@ pub async fn run(
                     };
                     let reply = NukeReply(Some(Box::new(settle)));
                     match started {
-                        Ok(nuke) => cx.spawn(async move { reply.settle(nuke.await) }),
+                        Ok(nuke) => cx.spawn(async move {
+                            let result = nuke.await.map_err(|mut error| {
+                                // Once native nuke started, a failed later leg cannot
+                                // prove the whole action was never sent.
+                                if action_started { error["outcome"] = "unknown".into(); }
+                                error
+                            });
+                            reply.settle(result)
+                        }),
                         Err(error) => reply.settle(Err(error)),
                     }
                 }

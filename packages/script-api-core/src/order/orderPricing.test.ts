@@ -1,6 +1,7 @@
 import type { ExchangeName, Market } from '@tealstreet/safe-cex/src/types';
 
 import { describe, expect, it } from 'vitest';
+import { venueUsesBaseAmountRails as publicVenueUsesBaseAmountRails } from '../index';
 
 import {
   assertMinimumPrice,
@@ -9,6 +10,7 @@ import {
   roundOrderSize,
   roundOrderSizeToNearest,
   venueAutoDownsizesReduceOrders,
+  venueUsesBaseAmountRails,
   venueSupportsInfinityStops,
 } from './orderPricing';
 
@@ -88,9 +90,7 @@ describe('roundMarketCloseSize', () => {
   // Mirrors createMarketOrder: a residual position smaller than one lot step
   // must still be closable rather than collapsing to a zero-size order.
   it('falls back to the raw size when rounding collapses to zero', () => {
-    expect(roundMarketCloseSize(0.04, market({ precision: { price: 0.01, amount: 0.1 } }))).toBe(
-      0.04,
-    );
+    expect(roundMarketCloseSize(0.04, market({ precision: { price: 0.01, amount: 0.1 } }))).toBe(0.04);
   });
 });
 
@@ -123,5 +123,33 @@ describe('assertMinimumPrice', () => {
 
   it('passes any price on a market with no minimum', () => {
     expect(() => assertMinimumPrice(0.0001, market({ limits: {} } as Partial<Market>))).not.toThrow();
+  });
+});
+
+describe('venueUsesBaseAmountRails', () => {
+  it.each([
+    ['mexc', true],
+    ['binance', false],
+    ['binancespot', false],
+    ['bybit', false],
+    ['bitgetinverse', false],
+    ['okx', false],
+    ['bitgetusdc', false],
+    ['blofin', false],
+    ['kucoin', false],
+    ['hyperliquid', false],
+    ['hyperliquidspot', false],
+    ['woo', false],
+    ['coinbase', false],
+    ['phemex', false],
+    ['not-a-venue', false],
+    [undefined, false],
+  ] as const)('reports base amount rails for %s as %s', (venue, expected) => {
+    expect(venueUsesBaseAmountRails(venue)).toBe(expected);
+    expect(publicVenueUsesBaseAmountRails(venue)).toBe(expected);
+  });
+
+  it('exports the same policy from the public entry and order-pricing module', () => {
+    expect(publicVenueUsesBaseAmountRails).toBe(venueUsesBaseAmountRails);
   });
 });

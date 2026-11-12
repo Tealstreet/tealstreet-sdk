@@ -13,6 +13,7 @@ pub mod envelope;
 pub mod http;
 pub mod interruption;
 pub mod methods;
+pub mod order_actions;
 pub mod order_contract;
 pub mod out;
 pub mod pacing;

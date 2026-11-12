@@ -222,6 +222,7 @@ async fn run_nuke(
         .send(AlgoInput::Nuke {
             mode,
             request_id: "r-nuke".into(),
+            action: None,
         })
         .unwrap();
     if stall {

@@ -134,6 +134,44 @@ keeps records until a later flush retries. Unrelated retirement failure never
 rejects enqueue or hides its durable intent ID after handoff. Close the old
 outbox before replacing it with a new writer for the same scope.
 
+## DELEGATED account actions
+
+`DelegatedOutbox.enqueueAction` adds the versioned `order.action` family for
+amend, venue cancel, cancel-all and nuke. Existing `enqueue` placement frames and
+`cancelQueued` semantics stay unchanged. Action writes/receipts require both
+`delegatedOrderActionsV1` (box) and `delegatedOrderActionLedgerV1` (router), as well
+as the existing two placement/ledger flags and completed DELEGATED admission.
+The action-specific fingerprint includes its version, kind, target IDs/symbols
+and update values in a distinct canonical domain. UUIDv7 intent IDs use the same
+router dedupe namespace across both families; never reuse one for another action.
+Both entry points accept optional `{intentId}` with a canonical caller UUIDv7.
+Identical retries are durable identity lookups: preserve sequence, canonical
+payload/fingerprint, deadline and handoff evidence, and never submit again.
+Different action/targets or placement family rejects `intentConflict`; a failed
+original put rejects an identity retry as `intentNotDurable`. A later state-put
+failure never erases the original identity's durability or authorizes replay.
+The additive
+`callerSuppliedIntentId: true` reservation survives completed-history retirement
+and restore under the same 1,056-record bound. `enqueueAction` shares placement's
+not-sent and replay evidence constructors; no direct not-sent assignment is
+permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
+action unknown; queue cancellation is explicit, never a venue cancel.
+
+Action outcomes are typed `applied`, proven `refused/notSent`, or `unknown`.
+Applied results survive later uncertain queue-cancel replies. A proven refusal
+also survives later uncertainty, while its subsequent authoritative refused
+outcome may supply the refusal message after a negative ACK.
+A replayed positive receipt ACK cannot revoke that refusal or clear its bound
+evidence, including after disconnect, close and restore.
+Partial, interrupted and unproven results stay unknown and never become
+resendable. Nuke uses the existing box account operation: stop algos, cancel
+orders and close positions, awaiting all legs. Its queued work carries the
+original registration and rechecks it after load/store waits; retirement drops
+stale replies. Action persistence uses version-2 rows with the exact action and
+result, retaining atomic scoped checkpoints/retirement and all version-1 placement
+records. See `docs/plans/callers/delegated-action-frames.md` and the shared
+`delegated-actions-v1.json` fixture.
+
 ## Mirror CI invariants (don't "clean these up")
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean
