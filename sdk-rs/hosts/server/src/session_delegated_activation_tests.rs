@@ -491,9 +491,11 @@ async fn partial_activation_decoded_row_restore_is_visibly_refused() {
         json!("running"),
         safe_cex_algo_twap::TwapStatus::Running,
     );
-    let row = json!([row["id"], null, row["options"], row["state"]]);
+    let row = json!([row["id"], null, null, row["options"], row["state"]]);
     let parsed: safe_cex_algo_twap::PersistedTwap =
         serde_json::from_value(row.clone()).expect("valid complete runtime restore row");
+    assert_eq!(parsed.owner_id, None);
+    assert_eq!(parsed.owner_generation, None);
     assert_eq!(parsed.state.status, safe_cex_algo_twap::TwapStatus::Running);
     restore_is_refused(json!([row])).await;
 }
