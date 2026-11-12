@@ -322,7 +322,7 @@ export class ExchangeWorker {
 
     bufferedMessages.forEach((payload, index) => {
       try {
-        this.handlePayload(payload);
+        this._dispatchBufferedMessage(payload);
       } catch (error) {
         this.logError(`Failed to process buffered message ${index + 1}/${bufferCount} ` + String(error), error, {
           payloadOp: payload.op,
@@ -336,7 +336,15 @@ export class ExchangeWorker {
   private _flushBufferedCalls() {
     const calls = this._messageBuffer.filter((payload) => payload.op === 'callMethod');
     this._messageBuffer = this._messageBuffer.filter((payload) => payload.op !== 'callMethod');
-    calls.forEach((payload) => this.handlePayload(payload));
+    calls.forEach((payload) => this._dispatchBufferedMessage(payload));
+  }
+
+  private _dispatchBufferedMessage(payload: StoreWorkerPayload) {
+    if (!this._twapOwnerCurrent()) {
+      this._rejectUndispatched(payload, 'Account owner changed before this operation was sent; nothing was sent.');
+      return;
+    }
+    this.handlePayload(payload);
   }
 
   /**

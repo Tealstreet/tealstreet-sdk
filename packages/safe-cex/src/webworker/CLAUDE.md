@@ -487,7 +487,10 @@ forwarded to the engine.
 
 The local Rust engine receives the same provider before startup. The worker
 captures its owner at construction and refuses owned algo startup if that owner
-or generation changes during startup. `EngineHost.algoStart(accountName,
+or generation changes during startup. Buffered messages keep that creation binding;
+both the early call drain and final startup drain recheck it before dispatch.
+Retired buffered work is refused, never treated as initially unowned work.
+`EngineHost.algoStart(accountName,
 twapOwner?, isOwnerCurrent?)` passes a present `{ ownerId: string, generation: number }` as JSON
 to the additive WASM `algoStartOwned(accountName, twapOwnerJson, now, wall)`.
 Absent providers use the existing `algoStart` ABI and its interim account-name

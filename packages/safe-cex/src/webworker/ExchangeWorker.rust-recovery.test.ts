@@ -514,6 +514,69 @@ describe('Rust worker engine ownership', () => {
     expect(sources[0].algoOps).toEqual([]);
   });
 
+  it.each(['unchanged', 'owner', 'generation', 'returning', 'logout', 'unowned', 'legacy'] as const)(
+    'keeps startup-buffered work with its initiating binding: %s',
+    async (change) => {
+      algosBuild = true;
+      let owner: { ownerId: string; generation: number } | null =
+        change === 'unowned' ? null : { ownerId: 'A', generation: 7 };
+      const { worker, messages } = createWorker({}, 'same-name', change === 'legacy' ? undefined : () => owner);
+      const options = {
+        accountName: 'same-name',
+        activeMarket: market,
+        size: 1,
+        duration: 1,
+        ordersCount: 2,
+        side: OrderSide.Buy,
+        chaserDelay: 1000,
+        reduceOnly: false,
+        randomnessPercentage: 0,
+        useLimitOrders: false,
+        useChaserOrders: false,
+      };
+      worker.handlePayload({ op: 'twap:start', data: options });
+      worker.handlePayload({ op: 'exec', data: { reqId: 'buffered-exec', symbol: market.symbol, command: 'buy 1' } });
+      worker.handlePayload(placeOrder('buffered-order', 'original-client'));
+      expect(worker.exchange).toBeNull();
+      expect(sources).toHaveLength(0);
+      const pending = worker.start();
+      if (change === 'owner') owner = { ownerId: 'B', generation: 8 };
+      if (change === 'generation') owner = { ownerId: 'A', generation: 8 };
+      if (change === 'returning') {
+        owner = { ownerId: 'B', generation: 8 };
+        owner = { ownerId: 'A', generation: 9 };
+      }
+      if (change === 'logout') owner = null;
+      await vi.advanceTimersByTimeAsync(250);
+      expect(await pending).toBe(true);
+      const allowed = change === 'unchanged' || change === 'unowned' || change === 'legacy';
+      expect(sources[0].algoOps).toEqual(
+        allowed
+          ? [
+              ['twap:start', options],
+              ['exec', { reqId: 'buffered-exec', symbol: market.symbol, command: 'buy 1' }],
+            ]
+          : [],
+      );
+      expect(sources[0].commands.filter((command) => command.op === 'placeOrders')).toHaveLength(allowed ? 1 : 0);
+      expect(replies(messages, 'buffered-order')).toHaveLength(1);
+      expect(replies(messages, 'buffered-order')[0].data.success).toBe(allowed);
+      if (!allowed) {
+        expect(replies(messages, 'buffered-order')[0].data.result.outcome).toBe('notSent');
+        expect(messages).toContainEqual(
+          expect.objectContaining({
+            op: 'exec-result',
+            data: [expect.objectContaining({ reqId: 'buffered-exec', success: false })],
+          }),
+        );
+        expect(
+          messages.some((message) => message.op === 'error' &&
+            message.data[1]?.sentryData?.extra?.payloadOp === 'twap:start'),
+        ).toBe(true);
+      }
+    },
+  );
+
   it('settles a held Rust exec once, as an unknown outcome, when the engine traps', async () => {
     algosBuild = true;
     const { worker, messages } = createWorker();
