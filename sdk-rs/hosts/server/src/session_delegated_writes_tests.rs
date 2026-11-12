@@ -287,6 +287,7 @@ fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -
     delegated_account_with_algo_inbox(registry, user, venue, tape).0
 }
 
+#[cfg(feature = "delegated-order-frames")]
 fn delegated_account_with_algos(
     registry: &Registry,
     user: &str,
