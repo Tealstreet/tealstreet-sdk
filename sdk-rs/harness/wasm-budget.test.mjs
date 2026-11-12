@@ -1907,6 +1907,19 @@ test('#3342 merge 2b623dc76a03 retains current optimized Bybit headroom', () => 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
 
+test('#3342 proof-diagnostic fix retains fresh merged-head Bybit headroom', () => {
+  // Local 091d0b980aef build.sh --venue bybit; Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
+  // Web/Node SHA256 170c1e44400fd4b682818cdd37b01d7a322d11d6c3b9677f53b638b3165a1167.
+  const measured = Math.max(2_354_730, 2_354_730);
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_365_440);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
 test('#3448 changed AsterDEX artifact retains measured plus 10 KiB reserve', () => {
   // Merged-head CI run 43061512265, artifact 13873588589: optimized web/node 2,197,821 bytes.
   const measured = 2_197_821;
