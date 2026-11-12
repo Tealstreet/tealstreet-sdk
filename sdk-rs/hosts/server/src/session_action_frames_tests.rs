@@ -1246,7 +1246,10 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
             if case == "actionField" { payload["future"] = json!(true); }
             if case == "opVersion" { payload["version"] = json!(2); }
             let id = action_key();
-            let fp = crate::order_contract::action_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            // A newer client can hash its unknown schema. These ASCII test values
+            // have the same sorted JSON/number spelling as the v1 canonicalizer.
+            let canonical = format!("tealstreet/delegated-action/v1\0{}", json!({"accountName":"synthetic-main","action":payload,"intentId":id,"seq":1,"version":1}));
+            let fp: String = safe_cex_crypto::sha256(canonical.as_bytes()).iter().map(|v| format!("{v:02x}")).collect();
             let mut frame = json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-v1","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}});
             if case == "requestField" { frame["d"]["future"] = json!(true); }
             if case == "envelopeField" { frame["future"] = json!(true); }
