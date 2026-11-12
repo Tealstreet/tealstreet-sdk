@@ -417,6 +417,8 @@ merely because its name is registered in Rust.
 log events, telemetry or retained diagnostic buffers receive them. It shares the
 HTTP diagnostic string policy; live command and market messages stay untouched.
 Its parity fixtures are pinned to the host diagnostic contract at `6fde9450cf`.
+Structured `ws-diagnostic` events use this same detached redaction boundary before
+emitter listeners and worker forwarding; live-result events retain their identity.
 
 `BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
 One throwing listener cannot starve later listeners for the same event; errors
