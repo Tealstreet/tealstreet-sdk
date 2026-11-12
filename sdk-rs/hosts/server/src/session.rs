@@ -1309,8 +1309,11 @@ impl Session {
         };
         if msg.op == "delegated-key-req" {
             self.cancel_verification(&name);
-            if crate::delegated::enabled("bybit") {
-                self.issue_handover(&name);
+            if let Some(venue) = self
+                .handover_venue(&name, &msg.data)
+                .filter(|venue| crate::delegated::enabled(venue))
+            {
+                self.issue_handover(&name, &venue);
             } else {
                 self.handovers.forget(&name);
                 self.drop_early(&name, "delegated init refused");
@@ -1420,8 +1423,25 @@ impl Session {
         }
     }
 
-    fn issue_handover(&mut self, name: &str) {
-        match self.handovers.issue(name, crate::accounts::now_ms()) {
+    /// Old unjoined callers can omit the venue while just one declaration is enabled.
+    /// Multiple declarations require an explicit target instead of guessing one.
+    fn handover_venue(&self, name: &str, data: &Value) -> Option<String> {
+        if let Some(venue) = data.get("exchangeName") {
+            return venue.as_str().map(str::to_owned);
+        }
+        if let Some(joined) = self.joined.get(name) {
+            return Some(joined.account.venue.clone());
+        }
+        let venues = crate::delegated::enabled_venues();
+        if venues.len() == 1 {
+            venues.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    fn issue_handover(&mut self, name: &str, venue: &str) {
+        match self.handovers.issue(name, venue, crate::accounts::now_ms()) {
             Ok(offer) => {
                 self.handover_out(name)
                     .send(envelope::delegated_key(name, &offer));
@@ -2614,7 +2634,7 @@ mod tests {
         let mut completed = session.take_verified();
         let offer = session
             .handovers
-            .issue("acct", crate::accounts::now_ms())
+            .issue("acct", "bybit", crate::accounts::now_ms())
             .unwrap();
         let sealed = crate::delegated::tests::seal(
             &offer,
@@ -2908,15 +2928,13 @@ mod tests {
             .await
             .unwrap();
         let frame = sent.try_recv().expect("a handover key response");
-        let mut frame: Value = serde_json::from_str(&frame).unwrap();
-        if !crate::delegated::enabled("bybit") {
+        let frame: Value = serde_json::from_str(&frame).unwrap();
+        if crate::delegated::enabled_venues().is_empty() {
             assert_eq!(frame["d"]["op"], "error");
             assert_eq!(frame["d"]["data"][1]["initRefused"], true);
             assert_eq!(frame["d"]["data"][1]["kind"], "unverified");
-            // The account-build change owns the opt-in declaration. Also pin
-            // the exact offer envelope while that flag remains off here.
-            session.issue_handover("acct");
-            frame = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            session.close();
+            return;
         }
         assert_eq!(frame["t"], "msg");
         assert_eq!(frame["d"]["op"], "delegated-key");

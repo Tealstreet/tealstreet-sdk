@@ -38,13 +38,14 @@ impl Drop for ProbeActor {
 }
 
 pub(crate) async fn run<T: Transport + 'static>(
+    venue: &str,
     prepared: super::PreparedDelegated,
     transport: T,
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
     let (handle, task) = safe_cex_native::spawn_venue_account(
-        "bybit",
+        venue,
         &prepared.options,
         transport,
         Some(prepared.resident.provider()),
@@ -144,8 +145,13 @@ mod tests {
             self.0.lock().unwrap().push(url);
             tokio::sync::mpsc::unbounded_channel().0
         }
-        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {
-            panic!("the recording transport must not dispatch HTTP");
+        fn request(&self, request: safe_cex_engine::HttpRequest, events: safe_cex_native::Events) {
+            // Record and refuse legacy requests as well as managed preparations; no network IO.
+            self.0.lock().unwrap().push(request.url);
+            let _ = events.send(safe_cex_native::HostEvent::HttpFailed(
+                request.id,
+                "synthetic transport refusal".into(),
+            ));
         }
     }
 
@@ -176,6 +182,7 @@ mod tests {
                         let _result = tokio::time::timeout(
                             Duration::from_secs(2),
                             run(
+                                &init.exchange_name,
                                 prepared,
                                 requests.clone(),
                                 ServerConfig::default(),

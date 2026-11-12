@@ -1,4 +1,4 @@
-//! Memory owned by an admitted DELEGATED Bybit setup. No socket or account policy lives here.
+//! Memory owned by an admitted DELEGATED setup. No socket or account policy lives here.
 use std::io;
 use std::ptr::NonNull;
 use std::sync::OnceLock;
@@ -10,8 +10,8 @@ use zeroize::{Zeroize, Zeroizing};
 pub struct DelegatedMemory(());
 
 impl DelegatedMemory {
-    pub fn prepare(venue: &str, delegated_enabled: bool) -> io::Result<Self> {
-        if venue != "bybit" || !delegated_enabled {
+    pub fn prepare(_venue: &str, delegated_enabled: bool) -> io::Result<Self> {
+        if !delegated_enabled {
             return Err(io::ErrorKind::Unsupported.into());
         }
         static READY: OnceLock<Result<(), io::ErrorKind>> = OnceLock::new();
@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_and_other_venues_leave_process_unchanged() {
+    fn disabled_venues_leave_process_unchanged() {
         succeeds("disabled");
     }
 
@@ -346,7 +346,8 @@ mod tests {
                 let before = limits();
                 #[cfg(target_os = "linux")]
                 let before_dumpable = dumpable();
-                for (venue, enabled) in [("bybit", false), ("binance", true), ("bybitspot", true)] {
+                for (venue, enabled) in [("bybit", false), ("binance", false), ("bybitspot", false)]
+                {
                     assert!(DelegatedMemory::prepare(venue, enabled).is_err());
                 }
                 assert_eq!(limits(), before);

@@ -19,21 +19,38 @@ pub const HANDOVER_TTL_MS: u64 = 30_000;
 const MAX_ATTEMPTS: usize = 64;
 const MAX_CIPHERTEXT: usize = 16 * 1024;
 
-/// This slice reads the shared opt-in declaration. No venue is enabled by
-/// default; the account-build slice supplies Bybit's declaration.
+/// Admission follows the exact venue's shared opt-in declaration.
+/// Do not add a second venue allowlist beside the declaration.
 pub fn enabled(venue: &str) -> bool {
+    with_rules(|rules| rules["venues"][venue]["delegated"]["enabled"].as_bool() == Some(true))
+}
+
+/// Used for global capabilities and legacy requests with only one possible venue.
+pub(crate) fn enabled_venues() -> Vec<String> {
+    with_rules(|rules| {
+        let Some(venues) = rules["venues"].as_object() else {
+            return Vec::new();
+        };
+        venues
+            .iter()
+            .filter(|(_, rule)| rule["delegated"]["enabled"].as_bool() == Some(true))
+            .map(|(venue, _)| venue.clone())
+            .collect()
+    })
+}
+
+fn with_rules<T>(read: impl FnOnce(&serde_json::Value) -> T) -> T {
+    #[cfg(test)]
+    if let Ok(declaration) = TEST_DECLARATION.try_with(Clone::clone) {
+        return read(&declaration);
+    }
     static RULES: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
-    let rules = RULES.get_or_init(|| {
+    read(RULES.get_or_init(|| {
         serde_json::from_str(include_str!(
             "../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
         ))
         .expect("construction rules parse")
-    });
-    #[cfg(test)]
-    let declaration = TEST_DECLARATION.try_with(Clone::clone).ok();
-    #[cfg(test)]
-    let rules = declaration.as_ref().unwrap_or(rules);
-    venue == "bybit" && rules["venues"][venue]["delegated"]["enabled"] == true
+    }))
 }
 
 #[cfg(test)]
@@ -109,6 +126,7 @@ pub struct KeyOffer {
 
 struct Attempt {
     id: String,
+    venue: String,
     private: Zeroizing<[u8; 32]>,
     expires: u64,
 }
@@ -124,15 +142,15 @@ impl Handovers {
         self.attempts.retain(|_, attempt| attempt.expires > now);
     }
 
-    pub fn issue(&mut self, account: &str, now: u64) -> Result<KeyOffer, Refused> {
+    pub fn issue(&mut self, account: &str, venue: &str, now: u64) -> Result<KeyOffer, Refused> {
         self.expire(now);
         if account.is_empty()
             || (!self.attempts.contains_key(account) && self.attempts.len() >= MAX_ATTEMPTS)
         {
             return Err(Refused);
         }
-        // Callers resolve the Bybit opt-in before issuing an offer.
-        DelegatedMemory::prepare("bybit", true).map_err(|_| Refused)?;
+        // Resolve the requested venue before generating any handover material.
+        DelegatedMemory::prepare(venue, enabled(venue)).map_err(|_| Refused)?;
         let mut private = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(private.as_mut()).map_err(|_| Refused)?;
         let mut id = [0u8; 16];
@@ -153,6 +171,7 @@ impl Handovers {
             account.to_owned(),
             Attempt {
                 id,
+                venue: venue.to_owned(),
                 private,
                 expires,
             },
@@ -197,11 +216,21 @@ impl Opening {
         sealed: &Sealed,
         now: u64,
     ) -> Result<Credentials, Refused> {
-        if self.attempt.expires <= now || sealed.attempt_id != self.attempt.id {
+        if self.attempt.expires <= now
+            || sealed.attempt_id != self.attempt.id
+            || self.attempt.venue != exchange
+            || !enabled(exchange)
+        {
             return Err(Refused);
         }
         let aad = format!("{}|{}|{exchange}|{key}", self.attempt.id, self.boot_id);
-        let mut plaintext = open(&self.attempt.private[..], INFO, aad.as_bytes(), sealed)?;
+        let mut plaintext = open(
+            exchange,
+            &self.attempt.private[..],
+            INFO,
+            aad.as_bytes(),
+            sealed,
+        )?;
         let fields = plaintext::parse(plaintext.as_bytes_mut())?;
         if fields.key.as_str() != key || key.is_empty() || fields.secret.is_empty() {
             return Err(Refused);
@@ -211,6 +240,7 @@ impl Opening {
 }
 
 fn open(
+    exchange: &str,
     private: &[u8],
     info: &[u8],
     aad: &[u8],
@@ -221,7 +251,7 @@ fn open(
     if sealed.enc.len() > 44 || sealed.ciphertext.len() > MAX_CIPHERTEXT {
         return Err(Refused);
     }
-    let memory = DelegatedMemory::prepare("bybit", true).map_err(|_| Refused)?;
+    let memory = DelegatedMemory::prepare(exchange, enabled(exchange)).map_err(|_| Refused)?;
     let enc = STANDARD.decode(&sealed.enc).map_err(|_| Refused)?;
     let enc = <Kem as hpke::Kem>::EncappedKey::from_bytes(&enc).map_err(|_| Refused)?;
     let private = <Kem as hpke::Kem>::PrivateKey::from_bytes(private).map_err(|_| Refused)?;
@@ -321,7 +351,7 @@ pub(crate) mod tests {
                     "bybit": {"delegated": {"enabled": true}},
                     "binance": {"delegated": {"enabled": true}}
                 }}),
-                async { owner.issue("fixture", 100).unwrap() },
+                async { owner.issue("fixture", "binance", 100).unwrap() },
             )
             .await;
             let sealed = seal(
@@ -385,6 +415,7 @@ pub(crate) mod tests {
         let opening = Opening {
             attempt: Attempt {
                 id: offer.attempt_id,
+                venue: "bybit".into(),
                 private: Zeroizing::new(private),
                 expires: offer.expires_at_ms,
             },
@@ -399,7 +430,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn handover_is_disabled_for_every_other_venue() {
+    fn production_declaration_keeps_other_venues_disabled() {
         for venue in [
             "bybitspot",
             "bybitinverse",
@@ -453,6 +484,7 @@ pub(crate) mod tests {
         };
         assert!(
             open(
+                "bybit",
                 &private.to_bytes(),
                 &bytes("info"),
                 &hex(first["aad"].as_str().unwrap()),
@@ -467,7 +499,7 @@ pub(crate) mod tests {
     #[test]
     fn attempts_are_single_use_account_connection_and_deadline_bound() {
         let mut owner = Handovers::default();
-        let offer = owner.issue("account", 100).unwrap();
+        let offer = owner.issue("account", "bybit", 100).unwrap();
         let sealed = seal(
             &offer,
             "bybit",
@@ -483,7 +515,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(candidate.secret.as_str() == "synthetic-secret");
         assert!(candidate.passphrase.as_deref().map(String::as_str) == Some("test"));
-        let offer = owner.issue("account", 200).unwrap();
+        let offer = owner.issue("account", "bybit", 200).unwrap();
         let sealed = seal(&offer, "bybit", "synthetic-key", b"{}");
         assert!(
             owner
@@ -495,9 +527,9 @@ pub(crate) mod tests {
     #[test]
     fn replacement_and_every_authenticated_context_field_are_checked() {
         let mut owner = Handovers::default();
-        let first = owner.issue("account", 100).unwrap();
+        let first = owner.issue("account", "bybit", 100).unwrap();
         let old = seal(&first, "bybit", "synthetic-key", b"{}");
-        owner.issue("account", 101).unwrap();
+        owner.issue("account", "bybit", 101).unwrap();
         assert!(owner.take("account", &old, 102).is_err());
         for change in [
             "boot",
@@ -510,7 +542,7 @@ pub(crate) mod tests {
             "attempt",
             "expired",
         ] {
-            let offer = owner.issue("account", 100).unwrap();
+            let offer = owner.issue("account", "bybit", 100).unwrap();
             let plaintext: &[u8] = if change == "payload-key" {
                 br#"{"key":"different","secret":"synthetic"}"#
             } else {
@@ -535,6 +567,7 @@ pub(crate) mod tests {
                     let aad = format!("{}|{}|bybit|synthetic-key", offer.attempt_id, offer.boot_id);
                     assert!(
                         open(
+                            "bybit",
                             &opening.attempt.private[..],
                             b"different-info",
                             aad.as_bytes(),
@@ -559,7 +592,7 @@ pub(crate) mod tests {
             ("field name", br#"{"key":"synthetic-key","secr\u0065t":"synthetic-secret"}"#.as_slice()),
         ] {
             let mut owner = Handovers::default();
-            let offer = owner.issue("account", 100).unwrap();
+            let offer = owner.issue("account", "bybit", 100).unwrap();
             let sealed = seal(&offer, "bybit", "synthetic-key", plaintext);
             let candidate = owner.take("account", &sealed, 101).unwrap().open("bybit", "synthetic-key", &sealed, 102);
             assert!(candidate.is_ok(), "escaped {field} must be accepted");
@@ -582,7 +615,7 @@ pub(crate) mod tests {
             br#"{"key":"synthetic-key","secret":"synthetic","extra":true}"#,
         ] {
             let mut owner = Handovers::default();
-            let offer = owner.issue("account", 100).unwrap();
+            let offer = owner.issue("account", "bybit", 100).unwrap();
             let sealed = seal(&offer, "bybit", "synthetic-key", plaintext);
             assert!(
                 owner
@@ -594,7 +627,7 @@ pub(crate) mod tests {
         }
         for bad in ["invalid-base64", "", "AA=="] {
             let mut owner = Handovers::default();
-            let offer = owner.issue("account", 100).unwrap();
+            let offer = owner.issue("account", "bybit", 100).unwrap();
             let mut sealed = seal(&offer, "bybit", "synthetic-key", b"{}");
             sealed.ciphertext = bad.into();
             assert!(
@@ -612,14 +645,14 @@ pub(crate) mod tests {
     fn offers_are_bounded_replaced_and_removed_on_dispose() {
         let mut owner = Handovers::default();
         for i in 0..MAX_ATTEMPTS {
-            owner.issue(&i.to_string(), 100).unwrap();
+            owner.issue(&i.to_string(), "bybit", 100).unwrap();
         }
-        assert!(owner.issue("overflow", 100).is_err());
-        owner.issue("0", 100).unwrap();
+        assert!(owner.issue("overflow", "bybit", 100).is_err());
+        owner.issue("0", "bybit", 100).unwrap();
         owner.forget("0");
-        owner.issue("new", 100).unwrap();
+        owner.issue("new", "bybit", 100).unwrap();
         owner
-            .issue("expired-reclaimed", 100 + HANDOVER_TTL_MS)
+            .issue("expired-reclaimed", "bybit", 100 + HANDOVER_TTL_MS)
             .unwrap();
         assert_eq!(owner.attempts.len(), 1);
     }

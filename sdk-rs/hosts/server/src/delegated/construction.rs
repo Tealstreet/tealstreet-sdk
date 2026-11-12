@@ -21,7 +21,7 @@ impl DelegatedPair {
         }
     }
     pub(crate) fn validate(&self, init: &InitPayload) -> Result<(), String> {
-        if !safe_cex_remote_signer::delegated_enabled(&init.exchange_name) {
+        if !crate::delegated::enabled(&init.exchange_name) {
             return Err("DELEGATED is not enabled for this venue".into());
         }
         if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
