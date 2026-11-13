@@ -49,6 +49,7 @@ import type {
   UpdateOrderOpts,
   ValidateAccountResult,
 } from '../../types';
+import type { TwapOwner } from '../../webworker/twap/TwapOwner';
 import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type {
@@ -91,6 +92,7 @@ import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverri
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { stopAccountAlgos as stopLocalAccountAlgos } from '../../webworker/stopAccountAlgos';
+import { captureTwapOwner } from '../../webworker/twap/TwapOwner';
 import {
   claimWriteTiming,
   emitWriteTiming,
@@ -1402,7 +1404,25 @@ export class RustEngineExchange extends BaseExchange {
   /** Whether this account's engine runs algos, once its engine host exists to say. */
   private algoRoute: 'rust' | 'unsupported' | undefined;
   /** Algo ops that arrived before the engine host, replayed in order once it decides. */
-  private queuedAlgoOps: { op: string; rust: () => void; refuse: (message: string) => void }[] = [];
+  private queuedAlgoOps: {
+    op: string;
+    rust: () => void;
+    refuse: (message: string) => void;
+    owner: TwapOwner | null | undefined;
+  }[] = [];
+  private twapOwnerProvider?: () => TwapOwner | null;
+  private twapOwnerBinding: TwapOwner | null | undefined;
+
+  setTwapOwnerProvider(getOwner?: () => TwapOwner | null, owner = captureTwapOwner(getOwner)) {
+    this.twapOwnerProvider = getOwner;
+    this.twapOwnerBinding = owner && { ...owner };
+  }
+
+  private algoOwnerCurrent = (owner: TwapOwner | null | undefined): boolean => {
+    const current = captureTwapOwner(this.twapOwnerProvider);
+    if (owner === undefined || owner === null) return current === owner;
+    return !!current && current.ownerId === owner.ownerId && current.generation === owner.generation;
+  };
 
   /** Chaser, TWAP and exec ops run in this account's engine (an `algos` build). */
   get runsRustAlgos(): boolean {
@@ -1416,7 +1436,8 @@ export class RustEngineExchange extends BaseExchange {
     if (!host || this.isDisposed || this.engineFailure) return false;
     if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
     try {
-      host.algoStart(accountName);
+      const owner = this.twapOwnerBinding;
+      host.algoStart(accountName, owner, owner === undefined ? undefined : () => this.algoOwnerCurrent(owner));
       this.algoRoute = 'rust';
     } catch (error) {
       if (!(error instanceof ExchangeError && error.kind === 'unsupported')) throw error;
@@ -1432,9 +1453,17 @@ export class RustEngineExchange extends BaseExchange {
    * order). An op that cannot run there reaches `refuse` with the reason.
    */
   routeAlgoOp = (accountName: string, op: string, rust: () => void, refuse: (message: string) => void): void => {
-    if (!this.algoRoute) this.startAlgos(accountName);
+    if (!this.algoRoute) {
+      try {
+        this.startAlgos(accountName);
+      } catch (error) {
+        refuse(`${op} was not run: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+    }
     if (this.algoRoute === 'rust') {
-      rust();
+      if (this.runsRustAlgos) rust();
+      else refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
       return;
     }
     if (this.algoRoute === 'unsupported') {
@@ -1449,16 +1478,17 @@ export class RustEngineExchange extends BaseExchange {
       refuse(`${op} was not run: too many algo requests are waiting for the ${this.name} engine to start`);
       return;
     }
-    this.queuedAlgoOps.push({ op, rust, refuse });
+    this.queuedAlgoOps.push({ op, rust, refuse, owner: captureTwapOwner(this.twapOwnerProvider) });
   };
 
   private noAlgosMessage = (op: string) => `${op} was not run: this ${this.name} engine build has no algos`;
 
   private replayQueuedAlgoOps() {
     const queued = this.queuedAlgoOps.splice(0);
-    for (const { op, rust, refuse } of queued) {
+    for (const { op, rust, refuse, owner } of queued) {
       try {
-        if (this.algoRoute === 'rust') rust();
+        if (!this.algoOwnerCurrent(owner)) refuse(`${op} cancelled-for-owner-change`);
+        else if (this.algoRoute === 'rust' && this.runsRustAlgos) rust();
         else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
         else refuse(`${op} was not run: the ${this.name} engine never started`);
       } catch (error) {
@@ -1471,6 +1501,7 @@ export class RustEngineExchange extends BaseExchange {
   algoOp = (op: string, data: unknown): void => {
     try {
       if (!this.host) throw new Error(`${this.name} engine is not started`);
+      if (!this.runsRustAlgos) throw new Error(`${this.name} algos are not running`);
       this.host.algoOp(op, data);
     } catch (error) {
       this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -2736,6 +2767,15 @@ export class RustEngineExchange extends BaseExchange {
         ...(timing ? { onStage: timing.mark } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       };
+      // A call admitted before readiness must still belong to this engine at handoff.
+      if (!this.algoOwnerCurrent(this.twapOwnerBinding)) {
+        const message = `${this.name} ${command.op} was not sent: owner changed; recreate the account worker`;
+        const error = new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+        // Retire without algo cleanup cancels, including before startAlgos installs its check.
+        this.host.dispose();
+        this.receiveEngineFailure(error);
+        throw error;
+      }
       return (await (Object.keys(options).length
         ? this.host.command(command, options)
         : this.host.command(command))) as T;

@@ -102,6 +102,18 @@ cancellation. Reservation counts retire under the same map lock as admission,
 so concurrent final cancellation removes idle entries even while destructor
 fields still retain queue references. No successful proof is cached.
 
+## TWAP restore binding
+
+Native TWAP restore authority carries both the verified owner and generation.
+Identity-keyed accounts seed that binding from the registry identity digest;
+other native accounts retain their verified user binding. Label changes do not
+change identity or generation. Native identity restoration can remap matching
+persisted labels only after preserving both owner tags; missing/stale generations
+never inherit the current generation. Algo inputs capture this binding alongside
+any typed action receipt, and both guards survive deferred dispatch. Typed v1
+TWAP-state rows carry optional safe-integer `ownerGeneration` through validation
+and fingerprinting without backfill; the native restore gate remains mandatory.
+
 ## DELEGATED order frames
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before

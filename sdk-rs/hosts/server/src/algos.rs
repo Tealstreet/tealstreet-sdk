@@ -23,6 +23,7 @@ pub enum AlgoInput {
         data: String,
         /// The socket that sent it, for the order audit line.
         origin: String,
+        twap_owner: safe_cex_algo_twap::TwapOwner,
         action: Option<Box<crate::order_actions::NukeReceipt>>,
     },
     /// A hosted `nuke`/`nukePositions`/`nukeOrders` call: exec's nuke, answered
@@ -883,6 +884,7 @@ pub async fn run(
     placed: crate::accounts::PlacedSymbols,
     held: Arc<AtomicBool>,
     running: Arc<Running>,
+    twap_owner: Arc<crate::twap_owner::Binding>,
     inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     run_with_identity(
@@ -895,6 +897,7 @@ pub async fn run(
         placed,
         held,
         running,
+        twap_owner,
         None,
         inbox,
     )
@@ -912,6 +915,7 @@ pub(crate) async fn run_with_identity(
     placed: crate::accounts::PlacedSymbols,
     held: Arc<AtomicBool>,
     running: Arc<Running>,
+    twap_owner: Arc<crate::twap_owner::Binding>,
     identity: Option<String>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
@@ -949,17 +953,23 @@ pub(crate) async fn run_with_identity(
     let cx = AlgoCx::new(port.clone(), scope.clone());
     let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
     let book = chasers.book();
-    let twap = Rc::new(match identity {
-        Some(identity) => safe_cex_algo_twap::factory::TwapFactory::new_with_owner(
+    let binding = twap_owner.clone();
+    let factory = if identity.is_some() {
+        safe_cex_algo_twap::factory::TwapFactory::new_with_owner(
             &name,
             cx.clone(),
             Rc::new(book.clone()),
-            identity,
-        ),
-        None => {
-            safe_cex_algo_twap::factory::TwapFactory::new(&name, cx.clone(), Rc::new(book.clone()))
-        }
-    });
+            twap_owner.snapshot(),
+        )
+    } else {
+        safe_cex_algo_twap::factory::TwapFactory::with_owner(
+            &name,
+            twap_owner.snapshot(),
+            cx.clone(),
+            Rc::new(book.clone()),
+        )
+    };
+    let twap = Rc::new(factory.guard_owner(Rc::new(move || binding.snapshot())));
     // Exec's chase/TWAP handoff shares this account's book and TWAP schedule,
     // under the server's trusted account name, never one from the payload.
     // A nuke ends with the venue's cancel-all, scoped as hosted `cancelAllOrders`.
@@ -1072,7 +1082,13 @@ pub(crate) async fn run_with_identity(
                     if let Some(signer) = &link_signer { signer.mark_unavailable(); }
                     return;
                 }
-                Some(AlgoInput::Op { op, mut data, origin, action }) => {
+                Some(AlgoInput::Op { op, mut data, origin, twap_owner: captured_owner, action }) => {
+                    if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
+                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        port.emit("error", serde_json::json!(message).to_string());
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
+                        continue;
+                    }
                     if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
@@ -1089,6 +1105,12 @@ pub(crate) async fn run_with_identity(
                     }
                     if !running.io_allowed() {
                         port.emit("error", crate::user_drain::refusal().to_string());
+                        continue;
+                    }
+                    if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
+                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        port.emit("error", serde_json::json!(message).to_string());
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
                     if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
@@ -1130,6 +1152,13 @@ pub(crate) async fn run_with_identity(
                     let dispatched = if crate::user_drain::starts_job(&op) {
                         if let Some(user) = running.user.get() {
                             match user.admit() {
+                                // Admission can wait: re-check the owner after it, right before dispatch.
+                                Ok(_admission) if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() => {
+                                    let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                                    port.emit("error", serde_json::json!(message).to_string());
+                                    if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
+                                    continue;
+                                }
                                 Ok(_admission) => dispatch(),
                                 Err(error) => {
                                     port.emit("error", error.to_string());

@@ -252,6 +252,9 @@ four existing flags on the admitted ticket. Old four-action routers confer no
 expanded admission. Native dispatch/completion stays on the hosted account;
 there is no browser-sign or legacy-method fallback. Algo action receipts remain
 unknown and reconcile from account events, never an assumed applied result.
+Typed TWAP-state rows preserve optional `ownerGeneration` as a nonnegative safe
+integer alongside `ownerId`; it is included in the fingerprint, never synthesized.
+Native restoration still requires both tags to match its trusted binding.
 Accepted long-lived jobs keep their account scope; queued admission and EXEC
 continuations keep their captured registration/deadline fences. The complete
 closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.

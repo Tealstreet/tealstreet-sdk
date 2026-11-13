@@ -145,7 +145,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         "restart cannot fabricate lost chases or TWAP schedules"
     );
 
-    let owner = session.joined["acct"].account.registry_name().to_owned();
+    let identity = session.joined["acct"].account.registry_name().to_owned();
     let options: Value = serde_json::from_str(WEB_TWAP).unwrap();
     let now = crate::accounts::now_ms();
     let mut state = json!({
@@ -155,11 +155,20 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         "nextOrderAt":now+60_000, "origin":"web", "createdAt":now-180_000,
         "startedAt":now-180_000
     });
+    // Synthetic saved evidence comes from the admitted account, never the received row.
+    let owner = session.joined["acct"].account.twap_owner.snapshot();
+    assert_eq!(
+        owner.owner_id, identity,
+        "restore authority follows the verified identity"
+    );
     session
         .msg(AccountMsg {
             op: "twap:state".into(),
             account_name: Some("acct".into()),
-            data: json!([{"id":"client-held-twap", "ownerId":owner, "options":options, "state":state}]),
+            data: json!([{
+                "id":"client-held-twap", "options":options, "state":state,
+                "ownerId":owner.owner_id, "ownerGeneration":owner.generation
+            }]),
         })
         .await;
     assert_partial_action_refusal(&mut sent, "twap:state");
@@ -170,7 +179,10 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         .msg(AccountMsg {
             op: "twap:state".into(),
             account_name: Some("acct".into()),
-            data: json!([{"id":"client-held-twap", "ownerId":owner, "options":options, "state":state}]),
+            data: json!([{
+                "id":"client-held-twap", "options":options, "state":state,
+                "ownerId":owner.owner_id, "ownerGeneration":owner.generation
+            }]),
         })
         .await;
     let restored = twap_row(&mut sent, "paused").await;
@@ -213,6 +225,57 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
     assert_eq!(
         still_paused, restored,
         "refused resume must retain the paused schedule and its progress"
+    );
+    session.close();
+}
+
+#[tokio::test]
+async fn delegated_restart_refuses_untagged_client_held_twap() {
+    let f = fixture().await;
+    record_restart(&f, "alice");
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut done = session.take_verified();
+    let init = payload(&mut session, Some("returned-key"));
+    session.init(init).await.unwrap();
+    finish(&mut session, &mut done).await;
+    let options: Value = serde_json::from_str(WEB_TWAP).unwrap();
+    let now = crate::accounts::now_ms();
+    let state = json!({
+        "accountName":"acct", "activeMarket":options["activeMarket"],
+        "size":0.1, "ordersSizes":[0.01,0.01,0.01], "side":"buy",
+        "status":"paused", "ordersCount":10, "ordersExecuted":7,
+        "nextOrderAt":now+60_000, "origin":"web", "createdAt":now-180_000,
+        "startedAt":now-180_000
+    });
+    session
+        .msg(AccountMsg {
+            op: "twap:state".into(),
+            account_name: Some("acct".into()),
+            data: json!([{"id":"untagged-client-held-twap", "options":options, "state":state}]),
+        })
+        .await;
+    let expected_refusal =
+        "TWAP BTCUSDT not restored: persisted TWAP owner or generation does not match";
+    let refusal = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(frame) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&frame).unwrap();
+            if frame["d"]["op"] == "error" && frame["d"]["data"][0] == expected_refusal {
+                return frame["d"]["data"][0].clone();
+            }
+        }
+        panic!("account output ended before the restore refusal");
+    })
+    .await
+    .expect("untagged restore must visibly refuse");
+    assert_eq!(refusal, expected_refusal);
+    assert_eq!(session.joined["acct"].account.running.counts(), (0, 0));
+    assert!(
+        f.registry
+            .interruptions
+            .account("alice", "acct")
+            .epoch(None)
+            != crate::interruption::RestoreEpoch::default(),
+        "an untagged row cannot clear the interruption fence"
     );
     session.close();
 }
