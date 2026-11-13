@@ -4722,9 +4722,29 @@ fn cancel_journal_terminal_case(failure: &str) {
             error: "transport lost",
         }),
         "timeout" => h.advance(20_001.0),
-        "expiry" => h.advance(200_000.0),
+        "expiry" => {
+            // Deliver overdue callbacks after a host-loop pause beyond
+            // the whole Plan deadline. The engine must expire the Plan first;
+            // walking intermediate due times would only test call timeout.
+            h.now += 200_000.0;
+            h.advance(0.0);
+        }
         "malformed" => h.reply(request.id, 200, r#"{"retCode":0}"#),
         _ => panic!("unknown test failure"),
+    }
+    if matches!(failure, "expiry" | "timeout") {
+        // Whole-Plan expiry owns the final seal: native cleanup contributes
+        // passive elements, while the engine retains the physical timeout
+        // fact. Call timeout instead uses the venue's presented terminal text.
+        let error = spot_parity_error(&h, 124);
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+        assert_eq!(
+            error
+                .message
+                .starts_with("The outcome is unknown. Check Open Orders"),
+            failure == "timeout",
+            "whole-Plan expiry must own the seal; call timeout remains venue-presented"
+        );
     }
     let mut states = vec!["applied"; 10];
     states.extend(["unknown"; 10]);
