@@ -125,9 +125,8 @@ pub(super) fn key_id(init: &InitPayload) -> Result<String, String> {
     }
 }
 
-pub(super) fn scope(init: &InitPayload) -> String {
-    let venue = init.exchange_name.as_str();
-    let family = match venue {
+fn family(venue: &str) -> &str {
+    match venue {
         "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => "bybit",
         "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions" => "binance",
         "okxeu" | "okxdemo" | "okxeudemo" => "okx",
@@ -137,7 +136,12 @@ pub(super) fn scope(init: &InitPayload) -> String {
         "bingxspot" => "bingx",
         "coinbasespot" => "coinbase",
         _ => venue,
-    };
+    }
+}
+
+pub(super) fn scope(init: &InitPayload) -> String {
+    let venue = init.exchange_name.as_str();
+    let family = family(venue);
     let testnet = init.testnet == Some(true);
     let network = match venue {
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" if testnet || venue.ends_with("demo") => "demo",
@@ -177,8 +181,25 @@ pub(crate) fn digest(user: &str, init: &InitPayload) -> Result<Option<String>, S
     Ok(Some(safe_cex_crypto::hex(&safe_cex_crypto::sha256(&input))))
 }
 
+/// Sibling products share a credential namespace, but need separate actors and
+/// algo owners. Preserve the published identity for each family's base product.
+pub(super) fn actor_digest(user: &str, init: &InitPayload) -> Result<Option<String>, String> {
+    let Some(credential) = digest(user, init)? else {
+        return Ok(None);
+    };
+    if init.exchange_name == family(&init.exchange_name) {
+        return Ok(Some(credential));
+    }
+    let mut input = b"tealstreet/actor/v1".to_vec();
+    for component in [credential.as_str(), init.exchange_name.as_str()] {
+        input.extend_from_slice(&(component.len() as u64).to_be_bytes());
+        input.extend_from_slice(component.as_bytes());
+    }
+    Ok(Some(safe_cex_crypto::hex(&safe_cex_crypto::sha256(&input))))
+}
+
 pub(super) fn registry_name(user: &str, init: &InitPayload) -> Result<String, String> {
-    Ok(digest(user, init)?.unwrap_or_else(|| init.account_name.clone()))
+    Ok(actor_digest(user, init)?.unwrap_or_else(|| init.account_name.clone()))
 }
 
 #[derive(Clone)]

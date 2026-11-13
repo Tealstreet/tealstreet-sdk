@@ -72,6 +72,7 @@ impl ProxyToken {
 pub struct Account {
     pub user: String,
     pub name: String,
+    /// Product-scoped actor/algo owner; credential identity remains family-scoped.
     identity: Option<String>,
     pub venue: String,
     pub handle: AccountHandle,
@@ -880,7 +881,7 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
     };
     fields.insert("routing".into(), routing);
     for field in ["key", "passphrase"] {
-        if identity::enabled(init) {
+        if identity::enabled(init) && !(init.exchange_name == "grvt" && field == "key") {
             fields.remove(field);
             continue;
         }
@@ -1625,7 +1626,7 @@ impl Registry {
         let identity = if public_only {
             None
         } else {
-            identity::digest(user, init)?
+            identity::actor_digest(user, init)?
         };
         let registry_name = identity.as_deref().unwrap_or(&init.account_name);
         self.user_drains
@@ -2515,7 +2516,7 @@ pub mod testing {
     }
 
     pub fn bind_identity(account: &mut Arc<Account>, init: &InitPayload) {
-        let identity = identity::digest(&account.user, init).unwrap();
+        let identity = identity::actor_digest(&account.user, init).unwrap();
         Arc::get_mut(account)
             .expect("identity is bound before sharing the test account")
             .identity = identity;
@@ -2646,7 +2647,7 @@ pub mod testing {
             init.fingerprint(),
             running,
         );
-        Arc::get_mut(&mut account).unwrap().identity = identity::digest(user, init).unwrap();
+        Arc::get_mut(&mut account).unwrap().identity = identity::actor_digest(user, init).unwrap();
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account

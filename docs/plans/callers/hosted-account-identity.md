@@ -58,14 +58,23 @@ the simulated-trading namespace. OKX EU, Bybit regional sites and the Lighter
 Robinhood deployment remain separate namespaces. Binance Spot Test Network has
 its [own API-key registration](https://testnet.binance.vision/) and is separate
 from the derivatives demo namespace; their mainnet products retain their shared
-family namespace.
+family namespace. Registry actors and native TWAP owners additionally distinguish
+the native product, so one credential can hold separate spot and derivatives
+actors at the same time. Renamed labels for the same product still share an actor.
 
 The identity is an unsalted, domain-separated SHA-256 digest of length-delimited
 user, scope and canonical public key ID. Existing Bybit identities keep their
-published vector. Raw public credentials are not used as registry names or logged
-by the identity resolver. Settings and mode checks remain separate: sharing a
+published vector. Sibling-product actor IDs qualify that credential digest with
+the native exchange name in a separate `tealstreet/actor/v1` domain. Base-product
+actor IDs retain the credential digest. Raw public credentials are not used as
+registry names or logged by the identity resolver. Settings and mode checks remain separate: sharing a
 public identity does not permit an implicit settings change or attach another
 signing mode. Existing explicit settings actions retain their lifecycle.
+
+GRVT's login API key is a settings input separate from its trading-account/signer
+identity. Changing it requires the existing explicit settings action, which
+rebuilds the login provider; ordinary re-init refuses the change. Its fingerprint
+uses the existing process-salted digest rather than retaining the login key.
 
 ## Signing selection hint
 

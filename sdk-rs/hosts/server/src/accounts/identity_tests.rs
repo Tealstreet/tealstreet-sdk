@@ -544,9 +544,10 @@ async fn mixed_rollout_name_collisions_refuse_without_rebuilding_either_mode() {
                 let identified = init();
                 let legacy = InitPayload {
                     account_name: identity::digest("u", &identified).unwrap().unwrap(),
-                    exchange_name: "bybitinverse".into(),
+                    exchange_name: "txflow".into(),
                     ..identified.clone()
                 };
+                assert!(!identity::enabled(&legacy));
                 let (existing, proposed) = if identified_first {
                     (&identified, &legacy)
                 } else {
