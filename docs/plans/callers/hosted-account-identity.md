@@ -55,7 +55,10 @@ KuCoin, Hyperliquid, BingX and Coinbase variants each use their family. Mainnet,
 testnet and demo namespaces follow the native venue routing. Bybit demo with
 `testnet: true` uses ordinary Bybit testnet. OKX testnet and demo aliases share
 the simulated-trading namespace. OKX EU, Bybit regional sites and the Lighter
-Robinhood deployment remain separate namespaces.
+Robinhood deployment remain separate namespaces. Binance Spot Test Network has
+its [own API-key registration](https://testnet.binance.vision/) and is separate
+from the derivatives demo namespace; their mainnet products retain their shared
+family namespace.
 
 The identity is an unsalted, domain-separated SHA-256 digest of length-delimited
 user, scope and canonical public key ID. Existing Bybit identities keep their

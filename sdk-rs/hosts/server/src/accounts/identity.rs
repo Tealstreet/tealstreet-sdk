@@ -142,6 +142,7 @@ pub(super) fn scope(init: &InitPayload) -> String {
     let network = match venue {
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" if testnet || venue.ends_with("demo") => "demo",
         "bybitdemo" if !testnet => "demo",
+        "binancespot" if testnet => "spot-testnet",
         _ if testnet => "testnet",
         _ => "mainnet",
     };
