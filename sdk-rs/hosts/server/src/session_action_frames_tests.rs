@@ -922,7 +922,13 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
                     "DELEGATED must never ask a browser to sign"
                 );
                 let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
-                action(&mut session, case["action"].clone(), 1, false).await;
+                let mut payload = case["action"].clone();
+                if payload["op"] == "twap:state" {
+                    for row in payload["data"].as_array_mut().unwrap() {
+                        row["ownerId"] = account.registry_name().into();
+                    }
+                }
+                action(&mut session, payload, 1, false).await;
                 let result = action_frame(&mut sent, "order.actionOutcome").await;
                 let unsupported =
                     matches!(kind, "scheduleCancel" | "setStpMode" | "setAccountTier")
@@ -1517,4 +1523,75 @@ async fn j6_chaser_rejects_unknown_termination_fields_without_ack_job_or_write()
 #[tokio::test]
 async fn j6_chaser_rejects_invalid_delay_without_ack_job_or_write() {
     j6_chaser_schema_rejection("delay").await;
+}
+
+#[tokio::test]
+async fn typed_twap_start_keeps_connection_labels_on_a_shared_identity() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let cases: Vec<Value> =
+                serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
+                    .unwrap();
+            let start = cases
+                .iter()
+                .find(|case| case["action"]["op"] == "twap:start")
+                .unwrap()["action"]
+                .clone();
+            for label in ["synthetic-main", "phone-label"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account =
+                    delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                let instance = (label != account.name).then_some("phone-registration");
+                if instance.is_some() {
+                    let out = session
+                        .out
+                        .account(label)
+                        .with_account_label(label)
+                        .with_instance_id(instance);
+                    account.hold_registration(session.socket, out.outbox(), None, label);
+                    session.join(account.clone(), out).await;
+                    assert!(Arc::ptr_eq(
+                        &account,
+                        &registry.held("A", label, session.socket).unwrap()
+                    ));
+                }
+                let mut payload = start.clone();
+                payload["data"]["accountName"] = label.into();
+                let id = action_key();
+                let fingerprint =
+                    crate::order_contract::action_fingerprint(label, &id, &payload, 1).unwrap();
+                session
+                    .handle(
+                        &json!({"t":"order.action","d":{"version":1,
+                        "accountName":label,"instanceId":instance,"intentId":id,
+                        "seq":1,"ageMs":0,"fingerprint":fingerprint,"action":payload}})
+                        .to_string(),
+                    )
+                    .await
+                    .unwrap();
+                let ack = action_frame(&mut sent, "order.actionAck").await;
+                assert_eq!(ack["d"]["received"], true);
+                assert_eq!(ack["d"]["accountName"], label);
+                assert_eq!(ack["d"]["instanceId"].as_str(), instance);
+                let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+                assert_eq!(outcome["d"]["outcome"], "unknown");
+                assert_eq!(outcome["d"]["accountName"], label);
+                assert_eq!(outcome["d"]["instanceId"].as_str(), instance);
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while !tape.writes.lock().unwrap().iter().any(|op| op == "create") {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("typed TWAP through {label} must place on its identity")
+                });
+                assert!(registry.held("B", label, session.socket).is_none());
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
 }

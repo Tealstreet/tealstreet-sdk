@@ -126,6 +126,9 @@ its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+Typed TWAP starts validate the connection-local label before translating it to
+the shared identity actor's original label. Restoration retains the persisted
+identity owner tag and the native book's ownership checks.
 Every cancel-all leg settles through its shared completion group, including
 pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
 cannot refuse the whole action after another leg may have crossed physical IO.

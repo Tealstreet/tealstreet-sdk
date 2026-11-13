@@ -98,6 +98,11 @@ impl Session {
             if op == "exec" {
                 data["reqId"] = id.clone();
             }
+            // The wire label is validated above; the shared TWAP book retains
+            // the resident actor's original label.
+            if op == "twap:start" {
+                data["accountName"] = self.joined[&name].account.name.clone().into();
+            }
             if let Err(error) = algos.send(crate::algos::AlgoInput::Op {
                 op: op.clone(),
                 data: data.to_string(),
