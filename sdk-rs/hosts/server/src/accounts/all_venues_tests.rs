@@ -272,3 +272,15 @@ fn hosted_identity_uses_effective_demo_network_not_redundant_flags() {
         assert_ne!(network(main, false), network(demo, false));
     }
 }
+
+#[test]
+fn hosted_identity_separates_binance_spot_test_keys_from_derivatives_demo() {
+    let mut spot = init("binancespot", "synthetic-key");
+    let mut futures = init("binance", "synthetic-key");
+    assert_eq!(digest(&spot), digest(&futures));
+    spot.testnet = Some(true);
+    futures.testnet = Some(true);
+    assert_ne!(digest(&spot), digest(&futures));
+    futures.exchange_name = "binancepm".into();
+    assert_ne!(digest(&spot), digest(&futures));
+}
