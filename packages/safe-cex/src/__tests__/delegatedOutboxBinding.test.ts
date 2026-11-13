@@ -9,6 +9,7 @@ const params = { symbol: 'BTCUSDT', side: 'buy', type: 'limit', amount: 0.001, p
 
 function fixture(venue: ExchangeName = 'bybit', accountId = 'account-A', rows: DelegatedIntent[] = []) {
   const writes: string[] = [];
+  let entropy = 0;
   const options = {
     owner: 'alice',
     accountName: 'main',
@@ -16,7 +17,7 @@ function fixture(venue: ExchangeName = 'bybit', accountId = 'account-A', rows: D
     accountId,
     clock: { epoch: 'fixture-boot', now: () => 0, unix: () => 1_700_000_000_000 },
     random: (bytes: Uint8Array) => {
-      bytes.fill(1);
+      bytes.fill(++entropy);
     },
     schedule: () => () => undefined,
     storage: {
@@ -54,6 +55,24 @@ function fixture(venue: ExchangeName = 'bybit', accountId = 'account-A', rows: D
 }
 
 describe('DELEGATED immutable account binding', () => {
+  it('rechecks each restored record after a storage deferral', async () => {
+    const original = fixture();
+    const box = await DelegatedOutbox.open(original.options);
+    await box.enqueue(params);
+    await box.enqueue(params);
+    box.close();
+    const loaded = structuredClone(original.rows);
+    const persisted: DelegatedIntent[] = [];
+    original.options.storage.load = async () => loaded;
+    original.options.storage.put = async (_scope, row) => {
+      persisted.push(structuredClone(row));
+      loaded[1].venue = 'binance';
+      loaded[1].accountId = 'account-B';
+    };
+    await expect(DelegatedOutbox.open(original.options)).rejects.toThrow();
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({ venue: 'bybit', accountId: 'account-A' });
+  });
   for (const useActivation of [false, true]) {
     for (const replacement of [
       { venue: 'binance', accountId: 'account-B' },

@@ -324,8 +324,7 @@ export class DelegatedOutbox {
       const row = clone(saved);
       if (
         ![1, 2].includes(row.version) ||
-        row.owner !== box.scope.owner ||
-        row.accountName !== box.scope.accountName ||
+        !sameScope(row, box.scope) ||
         delegatedIntentTime(row.intentId) < 0 ||
         !Number.isSafeInteger(row.seq) ||
         row.seq < 1 ||
