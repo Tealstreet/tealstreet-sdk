@@ -138,12 +138,12 @@ pub(super) fn scope(init: &InitPayload) -> String {
         "coinbasespot" => "coinbase",
         _ => venue,
     };
-    let demo = matches!(venue, "bybitdemo" | "okxdemo" | "okxeudemo");
-    let network = match (init.testnet == Some(true), demo) {
-        (false, false) => "mainnet",
-        (true, false) => "testnet",
-        (false, true) => "demo",
-        (true, true) => "demo-testnet",
+    let testnet = init.testnet == Some(true);
+    let network = match venue {
+        "okx" | "okxeu" | "okxdemo" | "okxeudemo" if testnet || venue.ends_with("demo") => "demo",
+        "bybitdemo" if !testnet => "demo",
+        _ if testnet => "testnet",
+        _ => "mainnet",
     };
     let site = match venue {
         "bybit" | "bybitinverse" | "bybitspot" => init.bybit_site_id.as_deref().unwrap_or_default(),
