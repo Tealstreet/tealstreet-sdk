@@ -445,7 +445,7 @@ const HyrotraderMetadata: ExchangeMetadata = {
   supportsTunnel: false,
   privateProxyIps: [],
   privateProxyRegions: {},
-  latencyDomain: 'sim-bybit.hyro.trade',
+  latencyDomain: 'sim-tealstreet.hyro.site',
 };
 
 const BybitSpotMetadata: ExchangeMetadata = {

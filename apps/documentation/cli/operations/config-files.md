@@ -132,7 +132,7 @@ tealstreet`) or for keeping multiple identity configs on one machine.
 ## Exchange endpoint overrides
 
 Most exchange URLs are built into the CLI through safe-cex. HyroTrader defaults
-to Hyro's hosted simulator at `https://sim-bybit.hyro.trade`, and the standalone
+to Hyro's hosted simulator at `https://sim-tealstreet.hyro.site`, and the standalone
 CLI reads optional overrides from environment variables at process start:
 
 - `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL` — HyroTrader production REST

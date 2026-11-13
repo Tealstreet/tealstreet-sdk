@@ -621,7 +621,7 @@
       "exchangeName": "hyrotrader",
       "supportsOptionsToggle": false,
       "supportsInverseToggle": false,
-      "latencyDomain": "sim-bybit.hyro.trade",
+      "latencyDomain": "sim-tealstreet.hyro.site",
       "features": {
         "kline": true,
         "orderbook": true,

@@ -682,6 +682,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
             "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
             "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedFullWriteActionsV1": crate::order_contract::runtime_enabled(),
             "delegatedActivationScopeV1": crate::order_contract::action_capabilities(),
         }},
         "publicData": {"unauthenticated": {
@@ -937,8 +938,12 @@ async fn serve(
     let mut drain = app.registry.watch_drain();
     let mut algos_ended = app.registry.watch_algos_ended();
     let close_at = expires.map(|expires_at_ms| {
-        let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()));
-        tokio::time::Instant::now() + remaining + TOKEN_GRACE
+        let remaining = Duration::from_millis(
+            expires_at_ms
+                .saturating_add(TOKEN_GRACE.as_millis() as u64)
+                .saturating_sub(now_ms()),
+        );
+        tokio::time::Instant::now() + remaining
     });
     let expiry = async {
         match close_at {
@@ -975,7 +980,7 @@ async fn serve(
                 break;
             }
             _ = &mut expiry => {
-                send(&mut sink, close(1008, "Tealstreet proxy token expired")).await;
+                send(&mut sink, close(1008, crate::auth::TOKEN_EXPIRED)).await;
                 break;
             }
             Ok(()) = drain.changed() => if let Some(moved) = session.drain_close() {
@@ -1619,6 +1624,7 @@ mod tests {
                         op: op.into(),
                         data: data.into(),
                         origin: "test".into(),
+                        action: None,
                     };
                     account.algos.as_ref().unwrap().send(input).unwrap();
                 };

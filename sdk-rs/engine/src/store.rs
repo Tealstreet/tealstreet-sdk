@@ -586,6 +586,17 @@ impl Store {
 
     /// Mutate a row of the current ticker table; rebuild cached indexes on replacement.
     pub fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
+        self.update_ticker_at_observed(index, 0, update);
+    }
+
+    /// Update a current ticker row and record the fields a venue actually observed,
+    /// including unchanged values. Cached indexes must be rebuilt on replacement.
+    pub fn update_ticker_at_observed(
+        &mut self,
+        index: u32,
+        observed: u16,
+        update: impl FnOnce(&mut Ticker),
+    ) {
         let Some(ticker) = self.tickers.get_mut(index as usize) else {
             return;
         };
@@ -605,11 +616,15 @@ impl Store {
                 mask |= 1 << bit;
             }
         }
+        let reported = mask | observed;
+        if reported == 0 {
+            return;
+        }
+        self.mark_references_seen(index, reported);
+        self.mark_observations_seen(index, reported);
         if mask == 0 {
             return;
         }
-        self.mark_references_seen(index, mask);
-        self.mark_observations_seen(index, mask);
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {
@@ -2632,6 +2647,59 @@ mod tests {
             by_index.take_pending().ticker_deltas
         );
         assert_eq!(by_index.tickers()[1].last, 7.);
+    }
+
+    #[test]
+    fn indexed_observed_updates_preserve_reference_times_and_exact_delta_frames() {
+        for export_observations in [false, true] {
+            let mut separate = Store::default();
+            let mut combined = Store::default();
+            for store in [&mut separate, &mut combined] {
+                store.export_ticker_observations = export_observations;
+                store.set_tickers(vec![ticker("B"), ticker("A"), ticker("A")]);
+                store.take_pending();
+            }
+            // Includes an unchanged observation, a changed value, signed zero,
+            // omitted references, and a message with no reference observation.
+            for (now, observed, last, mark) in [
+                (1., 1 << 2, 0., 0.),
+                (2., 1 << 3, 0., 5.),
+                (3., (1 << 2) | (1 << 4), -0., 5.),
+                (4., 0, -0., 5.),
+                (5., 1, -0., 5.),
+            ] {
+                separate.set_clock(now);
+                combined.set_clock(now);
+                let update = |row: &mut Ticker| {
+                    row.last = last;
+                    row.mark = mark;
+                };
+                separate.update_ticker("A", update);
+                separate.observe_ticker_fields("A", observed);
+                combined.update_ticker_at_observed(2, observed, update);
+                assert_eq!(combined.ticker_seen_at, separate.ticker_seen_at);
+                assert_eq!(combined.ticker_observed_at, separate.ticker_observed_at);
+                assert_eq!(combined.ticker_revision, separate.ticker_revision);
+                assert_eq!(combined.tickers()[1].last.to_bits(), 0f64.to_bits());
+                let separate_pending = separate.take_pending();
+                let combined_pending = combined.take_pending();
+                assert_eq!(
+                    combined_pending.ticker_deltas,
+                    separate_pending.ticker_deltas
+                );
+                let mut separate_frame = FrameWriter::new(vec![], now);
+                let mut combined_frame = FrameWriter::new(vec![], now);
+                separate.write(&separate_pending, &mut separate_frame);
+                combined.write(&combined_pending, &mut combined_frame);
+                assert_eq!(combined_frame.finish(), separate_frame.finish());
+            }
+            let times = combined.ticker_observed_at.clone();
+            combined.update_ticker_at_observed(u32::MAX, u16::MAX, |_| {
+                panic!("invalid ticker index reached closure")
+            });
+            assert_eq!(combined.ticker_observed_at, times);
+            assert!(combined.take_pending().ticker_deltas.is_empty());
+        }
     }
 
     #[test]

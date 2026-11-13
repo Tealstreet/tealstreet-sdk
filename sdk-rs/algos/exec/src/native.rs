@@ -83,6 +83,8 @@ impl ExecFactory {
         let guard = nuke::NukeGuard(self.nuking.clone());
         let adapter = Adapter {
             cx: cx.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            action_fence: None,
             exec: Weak::new(),
             parallel: self.parallel.clone(),
             nuking: self.nuking.clone(),
@@ -96,6 +98,52 @@ impl ExecFactory {
             let _guard = guard;
             adapter.run_nuke(&mode).await
         })
+    }
+}
+
+/// A native host's per-intent fence, independent of shared account identity.
+#[cfg(not(target_arch = "wasm32"))]
+pub type ActionFence = Rc<dyn Fn() -> Result<(), String>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ExecFactory {
+    /// Keep the resident account identity/resource counters, but carry this
+    /// action's command port and fence through its own EXEC continuations.
+    pub fn handle_guarded(
+        &self,
+        data: &str,
+        account_cx: &AlgoCx,
+        command_port: Rc<dyn AccountPort>,
+        action_fence: ActionFence,
+    ) -> Result<(), String> {
+        action_fence()?;
+        if account_cx.scope.is_disposed() {
+            return Err("EXEC scope is disposed".into());
+        }
+        let mut account = self.account.borrow_mut();
+        if let Some(previous) = account.as_ref().and_then(Weak::upgrade) {
+            if !Rc::ptr_eq(&previous, &account_cx.port) {
+                return Err("ExecFactory must be account-scoped".into());
+            }
+        } else {
+            *account = Some(Rc::downgrade(&account_cx.port));
+        }
+        drop(account);
+        let payload: Value = serde_json::from_str(data).map_err(|_| "Invalid command payload.")?;
+        let exec = Rc::new(RefCell::new(Exec::default()));
+        let mut host = Adapter {
+            cx: AlgoCx::new(command_port, account_cx.scope.clone()),
+            action_fence: Some(action_fence),
+            exec: Rc::downgrade(&exec),
+            parallel: self.parallel.clone(),
+            nuking: self.nuking.clone(),
+            account_name: self.account_name.clone(),
+            chasers: self.chasers.clone(),
+            twap: self.twap.clone(),
+            cancel_all: self.cancel_all.clone(),
+        };
+        exec.borrow_mut().handle(&payload, &mut host);
+        Ok(())
     }
 }
 
@@ -124,6 +172,8 @@ impl AlgoFactory for ExecFactory {
         let exec = Rc::new(RefCell::new(Exec::default()));
         let mut host = Adapter {
             cx: cx.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            action_fence: None,
             exec: Rc::downgrade(&exec),
             parallel: self.parallel.clone(),
             nuking: self.nuking.clone(),
@@ -140,6 +190,8 @@ impl AlgoFactory for ExecFactory {
 #[derive(Clone)]
 struct Adapter {
     cx: AlgoCx,
+    #[cfg(not(target_arch = "wasm32"))]
+    action_fence: Option<ActionFence>,
     exec: Weak<RefCell<Exec>>,
     parallel: Rc<Cell<usize>>,
     nuking: Rc<Cell<bool>>,
@@ -154,8 +206,20 @@ impl Drop for ParallelReservation {
         self.0.set(self.0.get() - 1);
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
+impl Adapter {
+    fn check_action(&self) -> Result<(), Value> {
+        if let Some(fence) = &self.action_fence {
+            fence().map_err(|message| json!({"message":message,"outcome":"unknown"}))?;
+        }
+        Ok(())
+    }
+}
+
 impl Host for Adapter {
     fn algo(&mut self, request: AlgoRequest) -> Result<AlgoReply, Value> {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.check_action()?;
         if self.cx.scope.is_disposed() {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         }
@@ -201,6 +265,8 @@ impl Host for Adapter {
         args: Value,
         _parallel: bool,
     ) -> Result<(), Value> {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.check_action()?;
         if self.cx.scope.is_disposed() {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         }
@@ -269,6 +335,10 @@ impl Host for Adapter {
             if adapter.cx.scope.is_disposed() {
                 return;
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            if adapter.check_action().is_err() {
+                return;
+            }
             let result = if let Some(mode) = nuke_mode {
                 adapter.run_nuke(&mode).await
             } else if let Some(wait) = wait {
@@ -298,6 +368,12 @@ impl Host for Adapter {
             };
             drop(reservation);
             drop(nuke_guard);
+            // Completion can synchronously enter a sibling algo factory, so
+            // the action is checked again after the awaited native/wait result.
+            #[cfg(not(target_arch = "wasm32"))]
+            if adapter.check_action().is_err() {
+                return;
+            }
             if !adapter.cx.scope.is_disposed() {
                 exec.borrow_mut().complete(token, result, &mut adapter);
             }
@@ -305,6 +381,10 @@ impl Host for Adapter {
         Ok(())
     }
     fn emit(&mut self, op: &str, data: Value) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.check_action().is_err() {
+            return;
+        }
         if !self.cx.scope.is_disposed() {
             self.cx.port.emit(op, data.to_string());
         }
