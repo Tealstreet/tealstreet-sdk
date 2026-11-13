@@ -264,7 +264,9 @@ fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> 
         Arc::new(crate::algos::Running::new(registry.algos_ended.clone())),
     );
     let inner = Arc::get_mut(&mut account).unwrap();
-    inner.identity = identity::digest(user, init).unwrap();
+    inner.identity = identity::digest(user, init)
+        .unwrap()
+        .map(|_| identity::registry_name(user, init).unwrap());
     if init.signing_mode.as_deref() == Some("delegated") {
         let prepared = prepare_delegated(
             init,
@@ -281,6 +283,135 @@ fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> 
     }
     testing::register(registry, &account);
     account
+}
+
+#[tokio::test]
+async fn fixround_sibling_products_keep_two_live_actors_for_one_credential() {
+    tokio::task::LocalSet::new().run_until(async {
+        for (first_venue, second_venue) in [
+            ("binance", "binanceinverse"),
+            ("binance", "binancespot"),
+            ("bitget", "bitgetusdc"),
+            ("bybitinverse", "bybitspot"),
+            ("kucoin", "kucoinspot"),
+            ("bingx", "bingxspot"),
+            ("coinbase", "coinbasespot"),
+        ] {
+            let registry = tests::registry();
+            let first = InitPayload { exchange_name: first_venue.into(), ..init() };
+            let second = InitPayload {
+                exchange_name: second_venue.into(),
+                account_name: "sibling product".into(),
+                ..first.clone()
+            };
+            assert_eq!(identity::digest("u", &first).unwrap(), identity::digest("u", &second).unwrap());
+            let retained = account(&registry, "u", &first);
+            let first_join = registry.obtain("u", &first, false, 7, None, Arc::new(|_| true)).await.unwrap();
+            assert!(Arc::ptr_eq(&retained, &first_join));
+            let alias = InitPayload { account_name: "same product alias".into(), ..first.clone() };
+            let alias_join = registry.obtain("u", &alias, false, 7, None, Arc::new(|_| true)).await.unwrap();
+            assert!(Arc::ptr_eq(&alias_join, &retained));
+            let another_key = InitPayload { key: "another-public-key".into(), ..second.clone() };
+            assert!(registry.rebuild_refusal("u", &another_key, false, 7).is_none());
+            assert!(registry.rebuild_refusal("u", &second, false, 7).is_none(),
+                "{first_venue}/{second_venue}: sibling product must not become an implicit settings replacement");
+            let sibling = account(&registry, "u", &second);
+            let second_join = registry.obtain("u", &second, false, 7, None, Arc::new(|_| true)).await.unwrap();
+            assert!(Arc::ptr_eq(&second_join, &sibling));
+            assert!(!Arc::ptr_eq(&first_join, &second_join));
+            assert_ne!(retained.registry_name(), sibling.registry_name());
+            assert_eq!(registry.account_count(), 2);
+            assert!(Arc::ptr_eq(&registry.held("u", &first.account_name, 7).unwrap(), &retained));
+            assert!(Arc::ptr_eq(&registry.held("u", &second.account_name, 7).unwrap(), &sibling));
+            registry.release_label(&retained, 7, &first.account_name, Disposal::PageDisposed);
+            registry.release_label(&retained, 7, &alias.account_name, Disposal::PageDisposed);
+            assert!(registry.held("u", &second.account_name, 7).is_some());
+            assert!(sibling.handle.disposal_cause().is_none());
+            registry.dispose(&retained, Disposal::PageDisposed);
+            registry.dispose(&sibling, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn fixround_grvt_login_key_requires_explicit_settings_and_enters_replacement_build() {
+    use std::future::Future;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let original = InitPayload {
+                exchange_name: "grvt".into(),
+                grvt_trading_account_id: Some("42".into()),
+                grvt_signer_address: Some("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into()),
+                ..init()
+            };
+            let changed = InitPayload {
+                key: "replacement-public-login-key".into(),
+                ..original.clone()
+            };
+            assert_eq!(
+                identity::digest("u", &original).unwrap(),
+                identity::digest("u", &changed).unwrap()
+            );
+            let retained = account(&registry, "u", &original);
+            let joined = registry
+                .obtain("u", &original, false, 7, None, Arc::new(|_| true))
+                .await
+                .unwrap();
+            assert!(Arc::ptr_eq(&joined, &retained));
+            for holder in [7, 8] {
+                let refused = registry
+                    .obtain("u", &changed, false, holder, None, Arc::new(|_| true))
+                    .await;
+                assert!(
+                    matches!(refused, Err(error) if error.contains("apply-settings")),
+                    "changed login key was silently accepted without replacing its provider"
+                );
+            }
+            assert!(retained.handle.disposal_cause().is_none());
+            registry.pacer.admit().await;
+            let apply = registry.apply_settings(
+                "u",
+                &changed,
+                retained.clone(),
+                7,
+                Some(("synthetic-token".into(), now_ms() + 60_000)),
+                Arc::new(|_| true),
+            );
+            tokio::pin!(apply);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    apply.as_mut().poll(cx).is_pending()
+                ))
+                .await,
+                "explicit settings must enter construction, never return the old login provider"
+            );
+            // Keep another owner usable while Alice's replacement is deferred.
+            let bob = account(&registry, "v", &original);
+            let bob_join = registry
+                .obtain("v", &original, false, 9, None, Arc::new(|_| true))
+                .await
+                .unwrap();
+            assert!(Arc::ptr_eq(&bob, &bob_join));
+            let superseding = registry
+                .begin_init(
+                    "u",
+                    retained.registry_name(),
+                    false,
+                    &retained.fingerprint,
+                    None,
+                )
+                .unwrap();
+            tokio::time::advance(Duration::from_secs(1)).await;
+            assert!(matches!(apply.await, Err(error) if error.contains("superseded")));
+            assert!(retained.handle.disposal_cause().is_none());
+            assert!(registry.held("u", &original.account_name, 7).is_some());
+            assert!(registry.held("v", &original.account_name, 9).is_some());
+            drop(superseding);
+            registry.dispose(&retained, Disposal::PageDisposed);
+            registry.dispose(&bob, Disposal::PageDisposed);
+        })
+        .await;
 }
 
 #[tokio::test]
