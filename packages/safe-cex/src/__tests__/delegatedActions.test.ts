@@ -93,7 +93,11 @@ describe('DELEGATED versioned actions', () => {
     expect(sent.d.version).toBe(1);
     expect(sent.d.action).not.toHaveProperty('version');
     const frame = outcome(id, action);
-    Object.assign(frame.d, { outcome: 'unsupported', result: null, error: { message: 'Unsupported v1 field', outcome: 'unsupported' } });
+    Object.assign(frame.d, {
+      outcome: 'unsupported',
+      result: null,
+      error: { message: 'Unsupported v1 field', outcome: 'unsupported' },
+    });
     for (const invalid of [
       { ...frame.d, version: 2 },
       { ...frame.d, seq: 2 },
@@ -107,7 +111,10 @@ describe('DELEGATED versioned actions', () => {
     expect(box.entries()[0]).toMatchObject({ state: 'unsupported', error: { outcome: 'unsupported' } });
     expect(box.entries()[0].notSentEvidence).toBeUndefined();
     // Later queue uncertainty / stale business results cannot revoke rejection.
-    await box.receive(c, { ...frame, d: { ...frame.d, outcomeSeq: 42, outcome: 'unknown', error: { message: 'uncertain', outcome: 'unknown' } } });
+    await box.receive(c, {
+      ...frame,
+      d: { ...frame.d, outcomeSeq: 42, outcome: 'unknown', error: { message: 'uncertain', outcome: 'unknown' } },
+    });
     await box.receive(c, { ...outcome(id, action), d: { ...outcome(id, action).d, outcomeSeq: 43 } });
     expect(box.entries()[0].state).toBe('unsupported');
     box.close();
@@ -374,5 +381,22 @@ describe('DELEGATED versioned actions', () => {
     expect(g.writes).toHaveLength(1);
     expect([...f.rows.values()].filter((r) => r.owner === 'alice')).toHaveLength(1);
     bob.close();
+  });
+});
+
+describe('DELEGATED existing v1 lifecycle scope', () => {
+  it.each(['chaser', 'twap'])('rejects deferred %s parameter amendment before durable enqueue', async (family) => {
+    const start = fullWrites.find(({ action }) => 'op' in action && action.op === `${family}:start`)!.action as {
+      data: unknown;
+    };
+    const payload = { kind: 'algo', op: `${family}:amend`, data: { id: 'resident-job', options: start.data } };
+    expect(isDelegatedAction(payload)).toBe(false);
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection);
+    await expect(box.enqueueAction(payload as unknown as DelegatedAction)).rejects.toThrow('Invalid delegated action');
+    expect(box.entries()).toHaveLength(0);
+    expect(f.writes).toHaveLength(0);
+    box.close();
   });
 });

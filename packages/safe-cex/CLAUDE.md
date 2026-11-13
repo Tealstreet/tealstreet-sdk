@@ -232,6 +232,13 @@ Accepted long-lived jobs keep their account scope; queued admission and EXEC
 continuations keep their captured registration/deadline fences. The complete
 closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
 LOCAL and COSIGNED method forwarding is unchanged.
+
+Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
+unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
+keeps the same job and schedule; never emulate amendment with automatic
+stop-and-replace. The hosted v1 decoder rejects duplicate algo object keys
+recursively before they can hide unknown or malformed fields.
+
 Native account-wide cancellation requires the venue's `nukeAccountCancel`
 capability; it never falls back to an incomplete symbol census.
 

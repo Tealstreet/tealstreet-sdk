@@ -4,6 +4,8 @@ use crate::methods::{Plan, Refused, Reply};
 use safe_cex_engine::{Capabilities, Store};
 use serde_json::{Value, json};
 
+pub(crate) mod unique_json;
+
 pub(crate) fn text(v: &str) -> bool {
     !v.is_empty() && v.len() <= 256
 }

@@ -343,3 +343,23 @@ from the captured protective command shape plus native completion, never from an
 ACK or a missing reply. The SDK accepts it only for a protection-only request;
 ordinary empty placement results and interrupted protection writes stay unknown.
 No venue order ID is invented.
+
+## Existing algo lifecycle and deferred parameter changes
+
+The typed v1 vocabulary already carries chaser start/terminate/terminateAll and
+TWAP start/pause/resume/stop/cleanup/state through the resident hosted factories.
+Pause/resume keeps the TWAP job ID and its remaining schedule; it does not replace
+parameters, create a new job, or imply that any venue write completed. Algo
+action outcomes remain `unknown`, reconciled through the existing account events.
+
+Parameter amendment is deferred. `chaser:amend` and `twap:amend` are unknown
+operations and return the existing typed `unsupported` outcome before dispatch.
+Do not emulate amendment with automatic stop-and-replace or change the wire
+version. Client controls can expose the existing lifecycle only.
+
+The server checks the original algo JSON recursively for duplicate object keys,
+including objects inside restore arrays. A duplicate cannot discard an earlier
+unknown or malformed field before the closed schema is checked. The admitted,
+fingerprint-bound request receives typed `unsupported` before positive ACK, job
+admission or native IO. Other admission, age and fingerprint refusals still take
+precedence. LOCAL/COSIGNED method forwarding is unchanged.
