@@ -419,8 +419,8 @@ async fn token_expiry_after_successful_probe_keeps_the_resident_registration() {
         .await
         .unwrap()
         .unwrap();
-    assert!(completed.candidate.is_ok());
-    assert!(completed.probe.as_ref().unwrap().permit.is_ok());
+    assert!(completed.proof_candidate().is_ok());
+    assert!(completed.proof_permit().is_ok());
     while sent.try_recv().is_ok() {}
     session.identity.token.as_mut().unwrap().1 = now_ms();
     session.verification_completed(completed).await.unwrap();
@@ -450,7 +450,7 @@ async fn classified_probe_refusals_keep_current_registration_and_legacy_bytes() 
                 .unwrap()
                 .unwrap();
             assert!(
-                completion.candidate.is_err(),
+                completion.proof_candidate().is_err(),
                 "refused material is dropped before queueing the reply"
             );
             session.verification_completed(completion).await.unwrap();

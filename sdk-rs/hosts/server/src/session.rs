@@ -156,8 +156,35 @@ pub struct JoinCompletion {
     socket: u64,
     generation: u64,
     account_name: String,
-    candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
-    probe: Option<ProbedInit>,
+    result: JoinVerification,
+}
+
+enum JoinVerification {
+    Identity(Result<InitPayload, String>),
+    Proof {
+        candidate: Result<crate::delegated::Credentials, crate::delegated::Refused>,
+        probe: Option<ProbedInit>,
+    },
+}
+
+#[cfg(test)]
+impl JoinCompletion {
+    fn proof_candidate(&self) -> &Result<crate::delegated::Credentials, crate::delegated::Refused> {
+        match &self.result {
+            JoinVerification::Proof { candidate, .. } => candidate,
+            JoinVerification::Identity(_) => panic!("expected a private proof completion"),
+        }
+    }
+    fn proof_permit(
+        &self,
+    ) -> &Result<crate::accounts::ProbePermit, crate::delegated::probe::ProbeRefusal> {
+        match &self.result {
+            JoinVerification::Proof {
+                probe: Some(probe), ..
+            } => &probe.permit,
+            _ => panic!("expected a private proof permit"),
+        }
+    }
 }
 
 struct ProbedInit {
@@ -420,6 +447,23 @@ impl Session {
             > + Send
             + 'static,
     {
+        self.start_join_verification(name, signer, async move {
+            let (candidate, probe) = verify.await;
+            JoinVerification::Proof { candidate, probe }
+        });
+    }
+
+    fn start_join_verification<F>(
+        &mut self,
+        name: String,
+        signer: Option<(
+            Arc<safe_cex_remote_signer::SignerLink>,
+            crate::out::OutputLifetime,
+        )>,
+        verify: F,
+    ) where
+        F: std::future::Future<Output = JoinVerification> + Send + 'static,
+    {
         self.cancel_verification(&name);
         let (cosigned_link, signer_output) = signer.unzip();
         self.next_verification += 1;
@@ -430,15 +474,14 @@ impl Session {
         let completed = self.verified.clone();
         let out = self.handover_out(&name);
         let task = tokio::spawn(async move {
-            let (candidate, probe) = verify.await;
+            let result = verify.await;
             // A closed receiver drops the candidate and erases its fields.
             let _ = completed.send(JoinCompletion {
                 user,
                 socket,
                 generation,
                 account_name,
-                candidate,
-                probe,
+                result,
             });
         });
         self.pending_verifications.insert(
@@ -488,8 +531,17 @@ impl Session {
             out.send(envelope::init_unverified(&completed.account_name, false));
             return Ok(());
         }
-        if let Some(probe) = completed.probe {
-            let candidate = completed.candidate.ok();
+        let (candidate, probe) = match completed.result {
+            JoinVerification::Identity(Ok(init)) => return self.init(init).await,
+            JoinVerification::Identity(Err(_)) => {
+                self.drop_early(&completed.account_name, "identity resolution refused");
+                out.send(envelope::init_unverified(&completed.account_name, true));
+                return Ok(());
+            }
+            JoinVerification::Proof { candidate, probe } => (candidate, probe),
+        };
+        if let Some(probe) = probe {
+            let candidate = candidate.ok();
             out = out.account(&completed.account_name);
             let account = match probe.permit {
                 Ok(permit) => {
@@ -587,13 +639,29 @@ impl Session {
             return Ok(());
         }
         // Opening-only test completions do not carry venue verification.
-        let transient = completed.candidate.is_ok();
+        let transient = candidate.is_ok();
         self.drop_early(&completed.account_name, "verification refused");
         out.send(envelope::init_unverified(
             &completed.account_name,
             transient,
         ));
         Ok(())
+    }
+
+    fn start_identity_resolution(&mut self, init: InitPayload) {
+        let out = self.handover_out(&init.account_name);
+        let (signing_out, lifetime) = out.isolated();
+        let link = safe_cex_remote_signer::SignerLink::new(self.socket, signing_out.outbox());
+        let captured = link.clone();
+        let work = self.registry.resolve_identity(
+            self.user(),
+            init.clone(),
+            self.identity.token.clone(),
+            Arc::new(move || captured.is_available() && out.action_active()),
+        );
+        self.start_join_verification(init.account_name, Some((link, lifetime)), async move {
+            JoinVerification::Identity(work.await)
+        });
     }
 
     fn admission_token_valid(&self) -> bool {
@@ -1183,7 +1251,21 @@ impl Session {
                 ));
             return Ok(());
         }
-        if init.signing_mode.as_deref() == Some("delegated") {
+        let delegated = init.signing_mode.as_deref() == Some("delegated");
+        if !public_only
+            && crate::accounts::identity::enabled(&init)
+            && matches!(init.exchange_name.as_str(), "lighter" | "lighter-robinhood")
+            && init.lighter_registered_key.is_none()
+            && (!delegated || crate::delegated::enabled(&init.exchange_name))
+        {
+            if !self.admission_token_valid() || self.pending_verifications.len() >= 64 {
+                self.refuse_handover(&init.account_name, true);
+            } else {
+                self.start_identity_resolution(init);
+            }
+            return Ok(());
+        }
+        if delegated {
             self.admission_init(init);
             return Ok(());
         }
@@ -1681,9 +1763,24 @@ impl Session {
         let registry = self.registry.clone();
         let identity = self.identity.clone();
         let socket = self.socket;
-        let outbox = self.account_out(&init.account_name).outbox();
+        let out = self.account_out(&init.account_name);
+        let outbox = out.outbox();
+        let resolution = (matches!(init.exchange_name.as_str(), "lighter" | "lighter-robinhood")
+            && init.lighter_registered_key.is_none())
+        .then(|| {
+            registry.resolve_identity(
+                identity.user.as_deref().unwrap_or_default(),
+                init.clone(),
+                identity.token.clone(),
+                Arc::new(move || out.action_active()),
+            )
+        });
         async move {
             let user = identity.user.ok_or("Authenticated user required")?;
+            let init = match resolution {
+                Some(work) => work.await?,
+                None => init,
+            };
             registry
                 .apply_settings(&user, &init, account, socket, identity.token, outbox)
                 .await
@@ -3020,7 +3117,7 @@ mod tests {
         assert!(session.joined.is_empty());
         assert!(sent.try_recv().is_err());
         let completion = completed.recv().await.unwrap();
-        assert!(completion.candidate.is_ok());
+        assert!(completion.proof_candidate().is_ok());
         session.verification_completed(completion).await.unwrap();
         let refusal: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
         assert_eq!(refusal["d"]["data"][1]["transient"], true);

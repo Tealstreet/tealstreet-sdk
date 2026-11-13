@@ -1,4 +1,4 @@
-//! Hosted account registry with identity keys for enabled private Bybit accounts.
+//! Hosted account registry keyed by canonical private identity.
 //! Connections keep their labels; live and parked holders share the account actor.
 use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 use crate::envelope::InitPayload;
@@ -9,7 +9,7 @@ use safe_cex_native::resolve::{self, AccountTransport, Provider};
 use safe_cex_native::{
     AccountHandle, NetworkTransport, ProxyTokenProvider, RoutingPlan, ServerConfig,
 };
-use safe_cex_remote_signer::{Outbox, SignerLink, remote_account};
+use safe_cex_remote_signer::{Outbox, SignerLink};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 mod admission;
 pub(crate) use admission::ProbePermit;
 pub(crate) mod identity;
+mod identity_resolution;
 
 #[cfg(test)]
 mod all_venues_tests;
@@ -479,6 +480,7 @@ struct InitAuthority {
     lease: Option<crate::router_lease::Permit>,
     probe_lease: Option<crate::router_lease::Permit>,
     admission_expires_at: Option<u64>,
+    resolved_identity: Option<identity::RegisteredLighterKey>,
     probe_current: Option<Arc<AtomicBool>>,
 }
 
@@ -509,6 +511,9 @@ impl InitAuthority {
 
     fn check_admission(&self) -> Result<(), String> {
         self.check()?;
+        if let Some(identity) = &self.resolved_identity {
+            identity.check()?;
+        }
         if self
             .admission_expires_at
             .is_some_and(|expiry| expiry <= now_ms())
@@ -883,6 +888,18 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
             *text = fingerprint_digest(text);
         }
     }
+    if identity::enabled(init) {
+        let identity_fields: &[&str] = match init.exchange_name.as_str() {
+            "hyperliquid" | "hyperliquidspot" => &["vault"],
+            "grvt" => &["grvtTradingAccountId", "grvtSignerAddress"],
+            "paradex" => &["paradexAddress"],
+            "lighter" | "lighter-robinhood" => &["applicationId", "apiKeyIndex"],
+            _ => &[],
+        };
+        for field in identity_fields {
+            fields.remove(*field);
+        }
+    }
     Value::Object(fields).to_string()
 }
 
@@ -914,8 +931,17 @@ pub fn prepare(
             remote: None,
         });
     };
-    let remote = remote_account(link, venue, Some(init.account_name.clone()), &options)
-        .map_err(|error| error.to_string())?;
+    let key_id = identity::enabled(init)
+        .then(|| identity::key_id(init))
+        .transpose()?;
+    let remote = safe_cex_remote_signer::remote_account_with_key_id(
+        link,
+        venue,
+        Some(init.account_name.clone()),
+        &options,
+        key_id,
+    )
+    .map_err(|error| error.to_string())?;
     Ok(Prepared {
         plan,
         options: remote.options_json.clone(),
@@ -1211,6 +1237,7 @@ impl Registry {
             lease,
             probe_lease: None,
             admission_expires_at: None,
+            resolved_identity: None,
             probe_current: None,
         };
         authority.check_admission()?;
@@ -1392,6 +1419,8 @@ impl Registry {
             &fingerprint,
             expires_at_ms,
         )?;
+        attempt.authority.resolved_identity = init.lighter_registered_key.clone();
+        attempt.authority.check_admission()?;
         if apply.is_some() {
             attempt.authority.admission_expires_at = token.as_ref().map(|(_, expiry)| *expiry);
         }

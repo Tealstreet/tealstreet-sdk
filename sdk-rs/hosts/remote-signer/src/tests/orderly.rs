@@ -52,6 +52,7 @@ fn provider(venue: &str, link: Arc<SignerLink>) -> TestResult<RemoteProvider> {
                 passphrase_value: None,
                 broker: None,
             },
+            None,
         )),
     })
 }

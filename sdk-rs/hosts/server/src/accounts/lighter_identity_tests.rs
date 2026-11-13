@@ -26,7 +26,7 @@ async fn fixture() -> Fixture {
     let app = axum::Router::new().fallback(move |uri: axum::http::Uri| {
         let (count, current, wait) = (count.clone(), current.clone(), wait.clone());
         async move {
-            if uri.path() == "/api/v1/apikeys" {
+            if uri.path().ends_with("/api/v1/apikeys") {
                 count.fetch_add(1, Ordering::SeqCst);
                 wait.acquire().await.unwrap().forget();
                 let n = current.load(Ordering::SeqCst) as u8 + 3;

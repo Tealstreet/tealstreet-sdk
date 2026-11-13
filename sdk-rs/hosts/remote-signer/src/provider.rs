@@ -90,6 +90,7 @@ pub(crate) struct Inner {
     pub account_name: Option<String>,
     pub link: Arc<SignerLink>,
     pub primary: Owned,
+    key_id: Option<String>,
     bound: Mutex<Option<Vec<u8>>>,
     streak: Mutex<Streak>,
     on_fatal: Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -277,6 +278,7 @@ impl Inner {
         account_name: Option<String>,
         link: Arc<SignerLink>,
         primary: Owned,
+        key_id: Option<String>,
     ) -> Self {
         Self {
             family: Family::of(&venue),
@@ -285,6 +287,7 @@ impl Inner {
             account_name,
             link,
             primary,
+            key_id,
             bound: Mutex::new(None),
             streak: Mutex::new(Streak::default()),
             on_fatal: Mutex::new(None),
@@ -368,7 +371,9 @@ impl Inner {
         request.insert("id".into(), id.clone().into());
         request.insert("type".into(), "ws-auth".into());
         request.insert("exchangeName".into(), exchange_name.into());
-        if self.venue == "bybit" && crate::delegated_enabled(&self.venue) {
+        if let Some(key_id) = &self.key_id {
+            request.insert("keyId".into(), key_id.clone().into());
+        } else if self.venue == "bybit" && crate::delegated_enabled(&self.venue) {
             let key_id =
                 std::str::from_utf8(&self.primary.public).map_err(|_| SignError::Refused)?;
             request.insert("keyId".into(), key_id.into());

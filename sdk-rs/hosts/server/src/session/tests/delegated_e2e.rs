@@ -200,8 +200,8 @@ async fn delegated_e2e_sealed_init_probe_admission_and_resident_signed_manual_wr
         wire(&mut session, init).await;
         assert!(session.joined.is_empty(), "probe precedes admission");
         let result = completed(&mut results).await;
-        assert!(result.candidate.is_ok());
-        assert!(result.probe.as_ref().unwrap().permit.is_ok());
+        assert!(result.proof_candidate().is_ok());
+        assert!(result.proof_permit().is_ok());
         assert!(
             venue.observed.lock().unwrap().reads > 0,
             "native private probe ran before admission"

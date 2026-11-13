@@ -135,3 +135,13 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## Hosted private identity
+
+Private hosted registry keys use the verified user and canonical public credential
+within its venue/network/site namespace; account names remain per-connection labels.
+Wallet public fields and fresh Lighter registration metadata bind that credential.
+Deferred metadata retains the original user, socket, generation, token deadline and
+lease authority through publication. This does not enable a venue or replace its
+possession proof. See `docs/plans/callers/hosted-account-identity.md` for the host
+fields and NEEDS-NX requirements. Existing public-only identities remain unchanged.

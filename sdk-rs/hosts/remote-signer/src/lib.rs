@@ -76,6 +76,22 @@ pub fn remote_account(
     account_name: Option<String>,
     engine_options: &str,
 ) -> Result<RemoteAccount, SetupError> {
+    remote_account_with_key_id(link, venue, account_name, engine_options, None)
+}
+
+/// Adds a canonical public credential hint while retaining the existing wire.
+pub fn remote_account_with_key_id(
+    link: Arc<SignerLink>,
+    venue: &str,
+    account_name: Option<String>,
+    engine_options: &str,
+    key_id: Option<String>,
+) -> Result<RemoteAccount, SetupError> {
+    if key_id.as_ref().is_some_and(|key| {
+        key.is_empty() || key.len() > 1_048_576 || key.contains(['\r', '\n', '\0'])
+    }) {
+        return Err(SetupError("Invalid public key identity"));
+    }
     let policy = policy::policy(venue)
         .filter(|policy| policy.enabled)
         .ok_or(SetupError("Remote signing is not supported for this venue"))?;
@@ -235,6 +251,7 @@ pub fn remote_account(
         account_name,
         link,
         primary,
+        key_id,
     ));
     Ok(RemoteAccount {
         provider: Arc::new(RemoteProvider {
