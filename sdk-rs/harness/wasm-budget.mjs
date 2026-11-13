@@ -481,7 +481,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // CI merge fc362e3e5ebd (base 80a802868f09): web/Node/replay each 2,462,504 B.
   // Current measured size + 10 KiB, rounded up: 10,456 B reserve, matching master.
   // Master integration retains its larger 2,475,008 B parent floor; reduction history above remains historical.
-  kucoinspot: 2_482_176,
+  // #3391 head a545cbe2fca0, CI run 43439489621, artifact 14044993539.
+  // Source 4f137fb49815 has the reviewed head tree; optimized web/Node/replay 2,472,600 B.
+  // Module SHA256 9e08084887ba174d928963d343c88859471fadb398544530632cfb95994810a6.
+  // Current measured size + 10 KiB, rounded up; historical floors and overflow controls retained.
+  // #3391 merged source df6f095bd740, incorporating master 353a3ab925b0: local web/Node 2,473,416 B.
+  // build.sh --venue kucoinspot; Rust1.99, bindgen0.2.129, Binaryen132, required two -Oz passes.
+  // Both module SHA256 ce57c8df54582f153ec305930df9fa87fcf763ee80bc9552a27059926cebd28f.
+  // Fresh measured size + 10 KiB, rounded up: 10,808 B reserve; all historical floors retained.
+  kucoinspot: 2_484_224,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
@@ -652,7 +660,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,664,064 B; current measurement + 10 KiB, rounded up.
   // #3391 head 133b901dc12b (master b99d9867a1d8): local optimized web/Node 2,665,054 B.
   // build.sh --venue woo; Rust 1.99.0, bindgen 0.2.129, Binaryen 132; +10 KiB rounded up.
-  woo: 2_675_712,
+  // #3391 head a545cbe2fca0, CI run 43439489621, artifact 14045298425.
+  // Source 4f137fb49815 has the reviewed head tree; optimized web/Node/replay 2,666,111 B.
+  // Module SHA256 09297ace386e55b238f24ef0c1d3fdf2a266d10cc1e2822a76834a444c401de9.
+  // Current measured size + 10 KiB, rounded up; historical floors and overflow controls retained.
+  // #3391 merged source df6f095bd740, incorporating master 353a3ab925b0: local web/Node 2,667,111 B.
+  // build.sh --venue woo; Rust1.99, bindgen0.2.129, Binaryen132, required two -Oz passes.
+  // Both module SHA256 fa221b247c4c9d795922cf2a195d327c5bfc5b10ff5eac17f604268fb54ab1d8.
+  // Fresh measured size + 10 KiB, rounded up: 10,649 B reserve; all historical floors retained.
+  woo: 2_677_760,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
