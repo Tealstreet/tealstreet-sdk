@@ -362,7 +362,8 @@ fn disabled_private_payload_checks_callback_configuration_before_admission() {
                         let error = result.expect_err("unadopted private custody");
                         // Full Hosted roster admission precedes callback validation.
                         // Client TxFlow retains the existing codec/provider errors.
-                        let hosted_out = context == ConstructionContext::Hosted && venue == "txflow";
+                        let hosted_out =
+                            context == ConstructionContext::Hosted && venue == "txflow";
                         assert_eq!(
                             error.kind,
                             Some(if injected || hosted_out {
