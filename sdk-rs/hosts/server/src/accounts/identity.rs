@@ -182,16 +182,22 @@ pub(crate) fn digest(user: &str, init: &InitPayload) -> Result<Option<String>, S
 }
 
 /// Sibling products share a credential namespace, but need separate actors and
-/// algo owners. Preserve the published identity for each family's base product.
+/// algo owners. Environment aliases select the same product, with network/site
+/// already bound by the credential scope. Preserve each base product's identity.
 pub(super) fn actor_digest(user: &str, init: &InitPayload) -> Result<Option<String>, String> {
     let Some(credential) = digest(user, init)? else {
         return Ok(None);
     };
-    if init.exchange_name == family(&init.exchange_name) {
+    let product = match init.exchange_name.as_str() {
+        "okxdemo" => "okx",
+        "okxeudemo" => "okxeu",
+        venue => venue,
+    };
+    if product == family(product) {
         return Ok(Some(credential));
     }
     let mut input = b"tealstreet/actor/v1".to_vec();
-    for component in [credential.as_str(), init.exchange_name.as_str()] {
+    for component in [credential.as_str(), product] {
         input.extend_from_slice(&(component.len() as u64).to_be_bytes());
         input.extend_from_slice(component.as_bytes());
     }

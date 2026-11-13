@@ -65,11 +65,16 @@ actors at the same time. Renamed labels for the same product still share an acto
 The identity is an unsalted, domain-separated SHA-256 digest of length-delimited
 user, scope and canonical public key ID. Existing Bybit identities keep their
 published vector. Sibling-product actor IDs qualify that credential digest with
-the native exchange name in a separate `tealstreet/actor/v1` domain. Base-product
-actor IDs retain the credential digest. Raw public credentials are not used as
-registry names or logged by the identity resolver. Settings and mode checks remain separate: sharing a
-public identity does not permit an implicit settings change or attach another
-signing mode. Existing explicit settings actions retain their lifecycle.
+the native product name in a separate `tealstreet/actor/v1` domain. OKX demo
+aliases use the corresponding non-demo spelling (`okxdemo` to `okx`,
+`okxeudemo` to `okxeu`); their effective network and site remain in credential
+scope. Alias routing/settings differences still require the existing explicit
+settings action rather than creating another actor. Each family's base product
+retains the credential digest as its actor ID. Raw public credentials are not
+used as registry names or logged by the identity resolver. Settings and mode
+checks remain separate: sharing a public identity does not permit an implicit
+settings change or attach another signing mode. Existing explicit settings
+actions retain their lifecycle.
 
 GRVT's login API key is a settings input separate from its trading-account/signer
 identity. Changing it requires the existing explicit settings action, which
