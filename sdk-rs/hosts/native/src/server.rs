@@ -3844,7 +3844,16 @@ mod tests {
                     .unwrap();
                 // Unavailable hosted venues keep their typed refusal before
                 // raw or injected signing setup, including public accounts.
-                for venue in ["nope", "bitmex", "bitmextestnet", "bitrue", "polymarket"] {
+                for venue in [
+                    "nope",
+                    "bitmex",
+                    "bitmextestnet",
+                    "bitrue",
+                    "orderly",
+                    "polymarket",
+                    "txflow",
+                    "weex",
+                ] {
                     for options in [
                         "{}",
                         r#"{"publicDataOnly":true}"#,
@@ -3898,8 +3907,8 @@ mod tests {
                         NoTransport,
                     )
                     .unwrap_err();
-                assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-                assert_eq!(error.to_string(), "Invalid local signer setup");
+                // Full Hosted roster admission precedes WEEX credential setup.
+                assert_unsupported_venue(&error, "weex");
                 assert!(
                     server
                         .add_venue("b", "token-b", "binance", "not json", NoTransport)

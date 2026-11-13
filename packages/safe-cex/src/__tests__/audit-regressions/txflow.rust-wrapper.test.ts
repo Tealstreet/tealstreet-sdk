@@ -4,6 +4,8 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 });
 
 import { describe, expect, it, vi } from 'vitest';
+import * as betaPolicy from '../../exchanges/rust/betaVenues';
+import { createRustRegistry } from '../../exchanges/rustRegistry';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
@@ -24,7 +26,20 @@ describe('TxFlow account identity at the worker seam', () => {
     } finally { exchange.dispose(); }
   });
   it('refuses TxFlow in the production beta registry', async () => {
-    await expect(exchangeRegistry.txflow()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+    // This admission case restores both real guards below the historical fixture boundary.
+    const actual = await vi.importActual<typeof import('../../exchanges/rust/betaVenues')>('../../exchanges/rust/betaVenues');
+    const venueGuard = vi.spyOn(betaPolicy, 'assertBetaVenue').mockImplementation(actual.assertBetaVenue);
+    const accountGuard = vi.spyOn(betaPolicy, 'assertBetaAccount').mockImplementation(actual.assertBetaAccount);
+    const load = vi.fn(async () => RustEngineExchange);
+    try {
+      await expect(exchangeRegistry.txflow()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+      await expect(createRustRegistry(load).txflow()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+      expect(load).not.toHaveBeenCalled();
+      expect(venueGuard).toHaveBeenCalledWith('txflow');
+    } finally {
+      venueGuard.mockRestore();
+      accountGuard.mockRestore();
+    }
   });
   it.each([TxFlowExchange, RustEngineExchange])('keeps agent-only credentials private without an API key', (Ctor) => {
     const exchange = new Ctor('txflow', options, new DefaultStore());
