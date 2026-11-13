@@ -70,7 +70,7 @@ async fn fixture() -> Fixture {
     }
 }
 fn session(f: &Fixture, user: &str) -> (Session, crate::out::Receiver) {
-    let (out, sent) = crate::out::Out::channel(128);
+    let (out, sent, _) = crate::out::Out::channel(128);
     (
         Session::new(
             f.registry.clone(),
