@@ -999,7 +999,7 @@ impl Session {
                         ));
                     return Ok(());
                 }
-                self.order_action(request).await;
+                self.order_action(request, text).await;
             }
             Inbound::OrderActionCancelQueued(cancel) => {
                 if !authenticated {
@@ -1657,6 +1657,7 @@ impl Session {
                             op: op.to_owned(),
                             data: data.to_string(),
                             origin: format!("socket:{}", self.socket),
+                            action: None,
                         })
                         .is_ok()
                 });
@@ -1951,6 +1952,7 @@ impl Session {
         };
         let account = self.joined[name].account.clone();
         let dispatch_out = self.account_out(name);
+        let action_expires_at_ms = self.token_expires_at_ms();
         let symbols = if method == "cancelAllOrders"
             && (account.delegated.is_none()
                 || matches!(order_frame, Some(OrderReceipt::Action { .. })))
@@ -1970,6 +1972,11 @@ impl Session {
             if account.handle.capabilities().cancel_all != CancelAll::Native {
                 symbols.extend(account.placed.symbols());
             }
+            if matches!(order_frame, Some(OrderReceipt::Action { .. }))
+                && let Some(Value::Array(extra)) = args.first()
+            {
+                symbols.extend(extra.iter().filter_map(Value::as_str).map(str::to_owned));
+            }
             symbols
         } else {
             Vec::new()
@@ -1979,8 +1986,12 @@ impl Session {
             kind,
             deadline,
         }) = order_frame
-            && let Err(message) =
-                crate::order_actions::ActionGuard::new(dispatch_out.clone(), deadline).check()
+            && let Err(message) = crate::order_actions::ActionGuard::new(
+                dispatch_out.clone(),
+                deadline,
+                action_expires_at_ms,
+            )
+            .check()
         {
             crate::order_actions::settle(
                 &dispatch_out,
@@ -1992,12 +2003,30 @@ impl Session {
             );
             return;
         }
-        // Dedicated action frames have their own admission and ledger contract.
+        // Dedicated action frames retain their full-write admission/ledger contract.
         // Legacy calls retain the narrower place/close activation scope.
-        let plans = if account.delegated.is_some()
-            && !matches!(order_frame, Some(OrderReceipt::Action { .. }))
+        let plans = if matches!(order_frame, Some(OrderReceipt::Action { .. }))
+            && method == "setAllLeverage"
+            && !account.handle.capabilities().account_leverage
         {
-            methods::translate_delegated(
+            let leverage = args[0].as_f64().unwrap();
+            account
+                .handle
+                .read(move |store| crate::full_writes::all_leverage(store, leverage))
+                .await
+                .unwrap_or_else(|| {
+                    Err(methods::Refused {
+                        name: "Error",
+                        message: "Account closed before leverage dispatch".into(),
+                    })
+                })
+        } else if account.delegated.is_some() {
+            let translate = if matches!(order_frame, Some(OrderReceipt::Action { .. })) {
+                methods::translate_delegated_action
+            } else {
+                methods::translate_delegated
+            };
+            translate(
                 &account.venue,
                 &method,
                 &args,
@@ -2035,19 +2064,46 @@ impl Session {
                 return;
             }
         };
+        if let Some(OrderReceipt::Action {
+            seq,
+            kind,
+            deadline,
+        }) = order_frame
+            && let Err(message) = crate::order_actions::ActionGuard::new(
+                dispatch_out.clone(),
+                deadline,
+                action_expires_at_ms,
+            )
+            .check()
+        {
+            crate::order_actions::settle(
+                &dispatch_out,
+                name,
+                &request_id,
+                seq,
+                kind,
+                Err(json!({"message":message,"outcome":"unknown"})),
+            );
+            return;
+        }
         if let Some(receipt) = order_frame {
             // Reply maps completion only. Every command dispatch below carries
             // the original receipt, including its immutable deadline.
             for plan in &mut plans {
-                if let Plan::Command { reply, .. } | Plan::AfterLoad { reply, .. } = plan {
+                if let Plan::Command { reply, command } | Plan::AfterLoad { reply, command } = plan
+                {
                     *reply = match receipt {
                         OrderReceipt::Placement(seq) => methods::Reply::Intent {
                             client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
                             seq,
                         },
-                        OrderReceipt::Action { seq, kind, .. } => {
-                            methods::Reply::Action { seq, kind }
-                        }
+                        OrderReceipt::Action { seq, kind, .. } => methods::Reply::Action {
+                            seq,
+                            kind,
+                            unit: matches!(reply, methods::Reply::Unit),
+                            idless_protection: kind == "place"
+                                && crate::full_writes::protection_only(command),
+                        },
                     };
                 }
             }
@@ -2079,8 +2135,8 @@ impl Session {
                     }
                 }
                 Plan::Nuke(mode) => {
-                    if let Some(OrderReceipt::Action { seq, deadline, .. }) = order_frame {
-                        self.send_action_nuke(name, &request_id, seq, deadline);
+                    if let Some(receipt @ OrderReceipt::Action { .. }) = order_frame {
+                        self.send_action_nuke(name, &request_id, receipt, mode);
                         continue;
                     }
                     let handle = account.handle.clone();
@@ -2314,9 +2370,10 @@ impl Session {
             None
         };
         let out = self.account_out(name);
+        let expires_at_ms = self.token_expires_at_ms();
         let action_guard = match order_frame {
             Some(OrderReceipt::Action { deadline, .. }) => Some(
-                crate::order_actions::ActionGuard::new(out.clone(), deadline),
+                crate::order_actions::ActionGuard::new(out.clone(), deadline, expires_at_ms),
             ),
             _ => None,
         };
@@ -2346,7 +2403,6 @@ impl Session {
         let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
-        let expires_at_ms = self.token_expires_at_ms();
         let send = move || {
             if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
                 if let Some(entry) = pending.lock().unwrap().remove(&id) {
@@ -2585,13 +2641,39 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             } else {
                 Err(failure_detail(
                     "Error",
-                    &format!("{name} cancel-all failed: {}", group.failures.join("; ")),
+                    &format!(
+                        "{name} {} failed: {}",
+                        if pending.method == "setAllLeverage" {
+                            "leverage update"
+                        } else {
+                            "cancel-all"
+                        },
+                        group.failures.join("; ")
+                    ),
                     false,
                 ))
             }
         }
     };
-    if let methods::Reply::Action { kind, seq } = &pending.reply {
+    if let methods::Reply::Action {
+        kind,
+        seq,
+        unit,
+        idless_protection,
+    } = &pending.reply
+    {
+        // Unit-returning methods already discard native result bodies on LOCAL /
+        // COSIGNED. Keep that mapping after an authoritative native completion;
+        // never turn an error or absent completion into a unit success.
+        let outcome = outcome.map(|value| {
+            if *unit {
+                Value::Null
+            } else if *idless_protection && value.as_array().is_some_and(Vec::is_empty) {
+                json!({"orderIds":[],"protectionApplied":true})
+            } else {
+                value
+            }
+        });
         crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
         return;
     }
@@ -3341,6 +3423,7 @@ mod tests {
                 op: op.into(),
                 data: data.into(),
                 origin: "test".into(),
+                action: None,
             })
             .unwrap();
     }
@@ -4362,6 +4445,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            action: None,
                         })
                         .unwrap();
                 };
@@ -4710,6 +4794,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            action: None,
                         })
                         .unwrap();
                 };
@@ -4785,6 +4870,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            action: None,
                         })
                         .unwrap();
                 };
@@ -4867,6 +4953,7 @@ mod tests {
                         op: "chaser:start".into(),
                         data: "not a chase".into(),
                         origin: "test".into(),
+                        action: None,
                     })
                     .unwrap();
                 settle().await;
