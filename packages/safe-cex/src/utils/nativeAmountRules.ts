@@ -12,6 +12,9 @@ export type NativeAmountMarket = Pick<Market, 'symbol' | 'contractSize' | 'isInv
 /** Whether amount precision and limits need base-to-native conversion for this venue.
  * MEXC publishes base units while placement takes contracts; market validity is checked separately.
  * Missing or unrecognised names retain the existing native-rails default. */
+// Adding another base-amount-rail venue requires widening this type predicate and
+// auditing hard-coded MEXC messages in callers, e.g. tealstreet-next's
+// chartBracketAmount.ts: 'Cannot place MEXC bracket'.
 export const venueUsesBaseAmountRails = (exchangeName?: string): exchangeName is 'mexc' => exchangeName === 'mexc';
 
 /** MEXC publishes base-sized amount rails while placement takes native contracts. */

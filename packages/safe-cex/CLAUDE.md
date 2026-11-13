@@ -63,6 +63,22 @@ the server handover implementation landing.
 
 ## DELEGATED order outbox
 
+Sam's 2026-11-11 policy allows activation with place and reduce-only close before
+the other venue actions exist. `activate(connection, { DELEGATED_BYBIT })` checks
+the host-owned feature flag, the captured box/router transport proofs, and only
+the advertised `delegatedActivationScopeV1` place/close capabilities. Amend, venue
+cancel, cancel-all and nuke are not activation prerequisites. A failed activation
+retires the old ticket, including deferred work, and throws a named reason.
+The existing low-level `connect` API still requires prior host admission.
+`enqueueAction(actionName, params)` permits place or a close with literal
+`reduceOnly: true` and visibly refuses every other string action before storage
+or a frame; it never chooses another signing mode. Supported string actions
+capture JSON parameters once before validation; fingerprints, persistence and
+handoff use those captured values. A close requires literal `reduceOnly: true`
+in the captured payload. Router queued-intent cancellation keeps its separate
+existing semantics. These admission helpers do not alter handoff, deadline,
+restore, evidence or replay rules below.
+
 `DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
 submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
@@ -136,7 +152,9 @@ outbox before replacing it with a new writer for the same scope.
 
 ## DELEGATED account actions
 
-`DelegatedOutbox.enqueueAction` adds the versioned `order.action` family for
+`DelegatedOutbox.enqueueAction(action, options)` retains the separate typed
+action API, gated by the boolean `delegatedOrderActionsV1`, independently of
+`delegatedActivationScopeV1`. It adds the versioned `order.action` family for
 amend, venue cancel, cancel-all and nuke. Existing `enqueue` placement frames and
 `cancelQueued` semantics stay unchanged. Action writes/receipts require both
 `delegatedOrderActionsV1` (box) and `delegatedOrderActionLedgerV1` (router), as well
@@ -835,7 +853,13 @@ approval fields; the old class export stays available without prototype repair.
 ## Native reported closed-PnL output
 
 `fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
-`history_output`. Bybit inverse sizes, OKX contract conversion, fee signs,
+`history_output`. All seven financial fields and both timestamps are required
+nullable values: unknown inputs and unknown/overflowed derived results stay null;
+measured zero stays zero. Missing close time never borrows opening time, and
+unknown close times sort last without dropping the row. Numeric strings remain
+accepted by the public contract for derived/reference producers. Consumers must
+propagate unknown through totals rather than coerce null to zero.
+Bybit inverse sizes, OKX contract conversion, fee signs,
 account labels and newest-close ordering are native output policy. The four TS
 closed-PnL mappers live only under test references. `fetchClosedPositions`
 remains the raw journal contract; it is never a fallback for reported PnL.

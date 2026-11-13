@@ -683,6 +683,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
             "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
             "delegatedFullWriteActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedActivationScopeV1": crate::order_contract::action_capabilities(),
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,

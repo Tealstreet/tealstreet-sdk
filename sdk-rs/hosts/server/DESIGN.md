@@ -95,6 +95,14 @@ that capability. Hosts must discover both per connection before passing a ticket
 to the outbox. See [order-frame activation](../../../docs/plans/callers/delegated-order-frames.md#rolling-activation)
 for deployment ordering and rollback.
 
+`delegatedActivationScopeV1` advertises the partial action set allowed by Sam on
+2026-11-11: place and reduce-only close; amend, venue cancel, cancel-all and nuke
+are false and not activation prerequisites. The per-user `DELEGATED_BYBIT` flag
+belongs to the admitting host; there is no same-named server environment flag.
+The existing runtime frame switch and router-ledger proof remain necessary.
+Legacy unsupported DELEGATED method calls return `DelegatedActionUnavailable`
+before native handoff. LOCAL/COSIGNED retain their existing action translation.
+
 `TEALSTREET_WORKERS`, `TEALSTREET_GATEWAY_PORT` and `TEALSTREET_HEALTH_PORT`
 belong to the Bun gateway and have no meaning here. One process serves all
 connections.
@@ -598,9 +606,13 @@ for the same name. Each connection retains at most 64 unexpired offers.
 
 The matching init adds `signingMode:"delegated"` and
 `sealed:{attemptId, enc, ciphertext}`. This path checks the shared venue opt-in
-declaration for the requested venue. Existing LOCAL/COSIGNED settings and engine
-options retain their original behavior. Plaintext credentials are never init
-settings or account fingerprints.
+declaration for the requested venue; only exact Bybit is currently enabled.
+The same declaration opts private COSIGNED
+inits into the shared admission lifecycle, including clients omitting the mode
+field. Matching COSIGNED inits on an already-admitted connection, including a
+resumed account, retain their snapshot-only behavior. Account settings and
+engine options remain unchanged. Plaintext credentials are never init settings
+or account fingerprints.
 
 The handover uses RFC 9180 base mode with X25519/HKDF-SHA256,
 HKDF-SHA256 and ChaCha20-Poly1305. The application info is
@@ -624,8 +636,12 @@ the captured user, socket and init generation; dispose, another init, another
 key request or socket close retires pending work. Verification failure leaves
 any running account unchanged.
 
-After opening, a temporary native account for the requested venue checks the supplied pair through
-the venue's normal private startup reads and is disposed before admission.
+Both modes use a temporary native account for the requested venue's normal private
+startup reads, disposed before admission. COSIGNED uses a pending signing link
+owned only by the joining connection; DELEGATED uses the supplied pair through
+the existing local signer. The shared completion rechecks the token and captured
+router lease before attaching the account. Pending signing links are retired on
+completion or cancellation.
 An accepted pair starts a DELEGATED account when none exists, or joins the
 matching running DELEGATED account while retaining its existing signer. This
 does not compare secret material or replace an existing account's settings.
@@ -641,9 +657,10 @@ registration lifecycle.
 Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
 message. Auth kinds are permanent refusals; rate, network, timeout and venue
 availability failures are transient. Replies retain the init's registration ID;
-clients without one retain the original envelope bytes. Existing rebuild
-refusal, settings replacement and early-subscription handling remain on the
-existing COSIGNED init path. Fixed synthetic interoperability and RFC test data
+clients without one retain the original envelope bytes. Verified admission does
+not replace a running account with different settings. Public-only accounts,
+venues outside the opt-in, and existing early-subscription handling retain their
+previous paths. Fixed synthetic interoperability and RFC test data
 live in `tests/data/`.
 
 The shared startup admission runner also has staged entries for `binance`,
@@ -860,7 +877,7 @@ Sessions and resume (same semantics as today):
   - private accounts are parked under `resumeId` for 60s, bound to `userId`;
   - other accounts are disposed;
   - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
-- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts the parked accounts. It then receives `session {resumed:true}`.
+- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts use a fresh handover and shared admission; their previous parked holders retain the original expiry while verification is pending.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
   - A different private fingerprint is refused until an admitted client uses
     `apply-settings`; parked clients and resident copies keep their settings.

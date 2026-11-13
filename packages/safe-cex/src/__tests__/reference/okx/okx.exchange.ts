@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../../store/store.interface';
@@ -1387,7 +1388,7 @@ export class OKXExchange extends BaseExchange {
         );
       }
 
-      return entries.sort((a, b) => b.closedTime - a.closedTime);
+      return entries.sort(compareClosedPnlTimes);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return [];

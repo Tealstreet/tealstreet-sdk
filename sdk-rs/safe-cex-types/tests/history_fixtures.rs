@@ -130,10 +130,10 @@ fn consumer_fixture_is_the_native_serializers_output() {
     let closed = output_fixture::fixture().closed;
     assert!(matches!(
         closed[0].fees,
-        history::ClosedPnlEntryFees::Variant1(0.)
+        Some(history::ClosedPnlEntryFees::Variant1(0.))
     ));
     assert!(
-        matches!(&closed[1].fees, history::ClosedPnlEntryFees::Variant0(value) if value == "0.00")
+        matches!(&closed[1].fees, Some(history::ClosedPnlEntryFees::Variant0(value)) if value == "0.00")
     );
     assert!(serde_json::from_str::<history::ClosedPnlEntry>("[]").is_err());
     let mut invalid = serde_json::to_value(&closed[0]).unwrap();
@@ -148,7 +148,11 @@ fn actual_native_closed_pnl_replies_satisfy_the_canonical_contract() {
             "../../engine/tests/fixtures/history-closed-output.json"
         ))
         .unwrap();
-    for rows in fixture.values() {
+    let unknown: Vec<Box<serde_json::value::RawValue>> = serde_json::from_str(include_str!(
+        "../../engine/tests/fixtures/history-unknown-output.json"
+    ))
+    .unwrap();
+    for rows in fixture.values().chain(std::iter::once(&unknown)) {
         for row in rows {
             let decoded: history::ClosedPnlEntry = serde_json::from_str(row.get()).unwrap();
             let serialized = serde_json::to_string(&decoded).unwrap();
@@ -188,7 +192,6 @@ fn closed_numeric_unions_reject_non_scalar_inputs_and_preserve_decimal_values() 
         "leverage",
     ] {
         for invalid in [
-            serde_json::json!(null),
             serde_json::json!([]),
             serde_json::json!({"$serde_json::private::Number":"1.5"}),
             serde_json::json!(true),
@@ -200,11 +203,41 @@ fn closed_numeric_unions_reject_non_scalar_inputs_and_preserve_decimal_values() 
                 "{field}"
             );
         }
+        let mut nullable = base.clone();
+        nullable[field] = serde_json::Value::Null;
+        let decoded: history::ClosedPnlEntry = serde_json::from_str(&nullable.to_string()).unwrap();
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap()[field],
+            serde_json::Value::Null
+        );
+        nullable.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<history::ClosedPnlEntry>(nullable).is_err(),
+            "required {field}"
+        );
         let mut input = base.clone();
         input[field] = serde_json::json!(0.125);
         let text = input.to_string();
         let parsed: history::ClosedPnlEntry = serde_json::from_str(&text).unwrap();
         let value = serde_json::to_value(parsed).unwrap();
         assert_eq!(value[field].as_f64(), Some(0.125));
+    }
+}
+
+#[test]
+fn closed_timestamps_are_required_nullable_numbers() {
+    let base = serde_json::to_value(&output_fixture::fixture().closed[0]).unwrap();
+    for field in ["time", "closedTime"] {
+        let mut row = base.clone();
+        row[field] = serde_json::Value::Null;
+        let decoded: history::ClosedPnlEntry = serde_json::from_value(row.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap()[field],
+            serde_json::Value::Null
+        );
+        row.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<history::ClosedPnlEntry>(row.clone()).is_err());
+        row[field] = serde_json::json!("0");
+        assert!(serde_json::from_value::<history::ClosedPnlEntry>(row).is_err());
     }
 }

@@ -11,6 +11,9 @@ use safe_cex_remote_signer::SignerLink;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+#[path = "session_delegated_activation_tests.rs"]
+mod activation;
+
 #[cfg(feature = "delegated-order-frames")]
 #[path = "session_order_frames_tests.rs"]
 mod order_frames;
@@ -24,6 +27,7 @@ struct Tape {
     writes: Arc<Mutex<Vec<String>>>,
     requests: Arc<Mutex<Vec<Value>>>,
     client_order_ids: Arc<Mutex<Vec<String>>>,
+    reduce_only: Arc<Mutex<Vec<bool>>>,
     hold: bool,
     two_orders: bool,
     close_unknown: bool,
@@ -115,6 +119,10 @@ impl Transport for Tape {
                 self.client_order_ids.lock().unwrap().extend(
                     rows.iter()
                         .map(|row| row["orderLinkId"].as_str().unwrap_or_default().to_owned()),
+                );
+                self.reduce_only.lock().unwrap().extend(
+                    rows.iter()
+                        .map(|row| row["reduceOnly"].as_bool().unwrap_or(false)),
                 );
             }
             assert!(
@@ -294,9 +302,10 @@ fn init(venue: &str) -> InitPayload {
 }
 
 fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -> Arc<Account> {
-    delegated_account_with_algos(registry, user, venue, tape, false)
+    delegated_account_with_algo_inbox(registry, user, venue, tape).0
 }
 
+#[cfg(feature = "delegated-order-frames")]
 fn delegated_account_with_algos(
     registry: &Registry,
     user: &str,
@@ -304,6 +313,23 @@ fn delegated_account_with_algos(
     tape: Tape,
     start_algos: bool,
 ) -> Arc<Account> {
+    let (account, inbox) = delegated_account_with_algo_inbox(registry, user, venue, tape);
+    if start_algos {
+        testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox)
+    } else {
+        account
+    }
+}
+
+fn delegated_account_with_algo_inbox(
+    registry: &Registry,
+    user: &str,
+    venue: &str,
+    tape: Tape,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
     let mut setup = init("bybit");
     setup.key = format!("synthetic-key-{user}");
     let mut tape = tape;
@@ -343,13 +369,8 @@ fn delegated_account_with_algos(
     inner.handle = handle;
     inner.link = None;
     inner.delegated = Some(prepared.resident);
-    let account = if start_algos {
-        testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox)
-    } else {
-        account
-    };
     testing::register(registry, &account);
-    account
+    (account, inbox)
 }
 
 async fn joined(
@@ -485,6 +506,10 @@ async fn delegated_calls_use_the_resident_provider_and_existing_order_audit() {
                 reply(&mut sent, "place").await,
                 json!({"requestId":"place","success":true,"result":["native-one"]})
             );
+            let mut close = placement();
+            close["reduceOnly"] = true.into();
+            call(&mut session, "close", "placeOrder", json!([close])).await;
+            assert_eq!(reply(&mut sent, "close").await["success"], true);
             call(
                 &mut session,
                 "amend",
@@ -492,7 +517,9 @@ async fn delegated_calls_use_the_resident_provider_and_existing_order_audit() {
                 json!([{"order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}}]),
             )
             .await;
-            assert_eq!(reply(&mut sent, "amend").await["success"], true);
+            let refused = reply(&mut sent, "amend").await;
+            assert_eq!(refused["success"], false);
+            assert_eq!(refused["result"]["name"], "DelegatedActionUnavailable");
             call(
                 &mut session,
                 "cancel",
@@ -500,8 +527,11 @@ async fn delegated_calls_use_the_resident_provider_and_existing_order_audit() {
                 json!([[{"id":"resting-order","symbol":"BTCUSDT"}]]),
             )
             .await;
-            assert_eq!(reply(&mut sent, "cancel").await["success"], true);
-            assert_eq!(*tape.writes.lock().unwrap(), ["create", "amend", "cancel"]);
+            let refused = reply(&mut sent, "cancel").await;
+            assert_eq!(refused["success"], false);
+            assert_eq!(refused["result"]["name"], "DelegatedActionUnavailable");
+            assert_eq!(*tape.writes.lock().unwrap(), ["create", "create"]);
+            assert_eq!(*tape.reduce_only.lock().unwrap(), [false, true]);
             assert!(account.link.is_none());
             registry.dispose(&account, Disposal::PageDisposed);
         })

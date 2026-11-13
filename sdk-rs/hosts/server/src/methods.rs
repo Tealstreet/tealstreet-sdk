@@ -404,6 +404,27 @@ pub fn translate_delegated(
             "DELEGATED methods are not enabled for this account",
         ));
     }
+    if matches!(
+        method,
+        "updateOrder"
+            | "amendOrder"
+            | "cancelOrders"
+            | "cancelOrder"
+            | "cancelSymbolOrders"
+            | "cancelAllOrders"
+            | "nuke"
+            | "nukePositions"
+            | "nukeOrders"
+            | "scheduleCancel"
+            | "cancelAccountOrders"
+    ) {
+        return Err(refused(
+            "DelegatedActionUnavailable",
+            format!(
+                "DELEGATED {method} is unavailable; only place and reduce-only close are enabled"
+            ),
+        ));
+    }
     crate::full_writes::placement_capabilities(method, args, capabilities)?;
     translate(method, args, capabilities, open_order_symbols, public_only)
 }
@@ -423,17 +444,11 @@ pub fn translate_delegated_action(
             "DELEGATED methods are not enabled for this account",
         ));
     }
+    crate::full_writes::placement_capabilities(method, args, capabilities)?;
     if let Some(plan) = crate::full_writes::translate(method, args, capabilities) {
         return plan;
     }
-    translate_delegated(
-        venue,
-        method,
-        args,
-        capabilities,
-        open_order_symbols,
-        public_only,
-    )
+    translate(method, args, capabilities, open_order_symbols, public_only)
 }
 
 /// Translates one hosted `callMethod`. `open_order_symbols` (engine store) answers
