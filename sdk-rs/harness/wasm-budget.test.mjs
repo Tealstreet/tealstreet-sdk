@@ -2843,3 +2843,30 @@ for (const [family, artifact, measured, minimumCap] of [
     });
   }
 }
+
+// #3317 merge 6a8318ff61c9 + master 7600a9a56787, CI run 43493007722.
+// Source b07da9e11b0f has the same tree; all six artifact ZIP digests verified.
+// All five optimized web/Node/replay copies agree for each family.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required two -Oz passes.
+for (const [family, artifact, measured, minimumCap, moduleSha256] of [
+  ['bybit', 14071675570, 2_547_120, 2_557_952, '9d1980d78eeb9ee0fd6441997f1fcf864fa3d71e6ae5fd5041549094b9de48a4'],
+  ['kucoinspot', 14071220644, 2_477_083, 2_488_320, '498d7beb845e5568abfd9c028c93a0b657b3d3bff21e161c45e7f8c6ac649d8c'],
+  ['grvt', 14071196267, 2_002_550, 2_013_184, '678fde6acd0301529c273e8e582affa5432b34dae8dd9ce40fce992bcc99ce90'],
+  ['polymarket', 14070537614, 1_664_022, 1_675_264, 'c7c5a3503743c1d3efc30738948fe3cc7993217c44a8b58af597e2a5e2018f42'],
+  ['weex', 14070393067, 2_023_034, 2_033_664, 'f3aa4b5ef0d6c67ac1a332e8438d7dc03c2370333b4747a3ab4834d4e260cf6d'],
+  ['woo', 14070187529, 2_671_977, 2_682_880, '4a7b69619d603116b5786c53eb71642564416ffcee2e55a918fc5ff88d13e205'],
+]) {
+  test(`#3317 CI 43493007722: ${family} artifact ${artifact} retains fresh 10 KiB reserve`, () => {
+    assert.match(moduleSha256, /^[0-9a-f]{64}$/);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const venues = family === 'bybit' ? ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'] : [family];
+    for (const venue of venues) {
+      assert.equal(venueFamily(venue), family);
+      const cap = WASM_VENUE_OVERRIDES[family];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+    }
+  });
+}
