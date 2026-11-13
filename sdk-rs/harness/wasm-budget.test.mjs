@@ -2540,3 +2540,20 @@ test('#3438 master merge retains newly measured conflict-family headroom', () =>
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+// #3391 head a545cbe2fca0; run 43439489621, CI source 4f137fb49815.
+// CI source and reviewed head share tree 1bf68bddecd71587299f2eccaeb255030753fac1.
+// Original optimized web/Node/replay measurements; Rust1.99, bindgen0.2.129, Binaryen132.
+for (const [family, artifact, measured, minimumCap] of [
+  ['woo', 14045298425, 2_666_111, 2_676_736],
+  ['kucoinspot', 14044993539, 2_472_600, 2_483_200],
+]) {
+  test(`#3391 reviewed ${family} artifact ${artifact} keeps current 10 KiB reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${family}: ${cap} < current measured floor ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
