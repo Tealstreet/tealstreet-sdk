@@ -398,6 +398,140 @@ async fn captured_passphrase_explicit_settings_enters_fenced_replacement() {
     }).await;
 }
 
+async fn check_okx_environment_alias_settings_gate(base: &str, demo: &str) {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for demo_testnet in [false, true] {
+                for demo_first in [false, true] {
+                    let registry = tests::registry();
+                    let base = InitPayload {
+                        exchange_name: base.into(),
+                        testnet: Some(true),
+                        ..init()
+                    };
+                    let demo = InitPayload {
+                        exchange_name: demo.into(),
+                        testnet: Some(demo_testnet),
+                        account_name: "demo alias".into(),
+                        ..base.clone()
+                    };
+                    let (first, alias) = if demo_first {
+                        (demo, base)
+                    } else {
+                        (base, demo)
+                    };
+                    let retained = testing::trading_account(&registry, "u", &first);
+                    let joined = registry
+                        .obtain("u", &first, false, 7, None, Arc::new(|_| true))
+                        .await
+                        .unwrap();
+                    assert!(Arc::ptr_eq(&joined, &retained));
+                    // Raw venue/routing settings may differ even when the native
+                    // product is the same. They must reach the existing settings
+                    // gate instead of admitting another actor and TWAP owner.
+                    assert_ne!(first.fingerprint(), alias.fingerprint());
+                    for holder in [7, 8] {
+                        assert!(
+                            registry
+                                .rebuild_refusal("u", &alias, false, holder)
+                                .is_some_and(|error| error.contains("apply-settings")),
+                            "{}/{}: equivalent products must reach the resident settings gate",
+                            first.exchange_name,
+                            alias.exchange_name
+                        );
+                        let result = registry
+                            .obtain("u", &alias, false, holder, None, Arc::new(|_| true))
+                            .await;
+                        assert!(matches!(result, Err(error) if error.contains("apply-settings")));
+                    }
+                    assert!(retained.matches_init("u", &alias));
+                    assert_eq!(testing::holdings(&registry).len(), 1);
+                    assert_eq!(registry.account_count(), 1);
+                    assert!(registry.holds(&retained, 7));
+                    assert!(!registry.holds(&retained, 8));
+                    assert!(retained.handle.disposal_cause().is_none());
+                    let renamed = InitPayload {
+                        account_name: "same spelling renamed".into(),
+                        ..first.clone()
+                    };
+                    let renamed = registry
+                        .obtain("u", &renamed, false, 7, None, Arc::new(|_| true))
+                        .await
+                        .unwrap();
+                    assert!(Arc::ptr_eq(&renamed, &retained));
+                    registry.dispose(&retained, Disposal::PageDisposed);
+                }
+            }
+        })
+        .await;
+}
+
+fn check_okx_environment_alias_identity(base: &str, demo: &str) {
+    let original = InitPayload {
+        exchange_name: base.into(),
+        testnet: Some(true),
+        ..init()
+    };
+    let actor = identity::actor_digest("u", &original).unwrap();
+    for testnet in [false, true] {
+        let alias = InitPayload {
+            exchange_name: demo.into(),
+            testnet: Some(testnet),
+            ..original.clone()
+        };
+        assert_eq!(
+            identity::digest("u", &original).unwrap(),
+            identity::digest("u", &alias).unwrap()
+        );
+        assert_eq!(
+            actor,
+            identity::actor_digest("u", &alias).unwrap(),
+            "{base}/{demo}"
+        );
+    }
+    for changed in [
+        InitPayload {
+            testnet: Some(false),
+            ..original.clone()
+        },
+        InitPayload {
+            key: "another-public-key".into(),
+            ..original.clone()
+        },
+        InitPayload {
+            exchange_name: if base == "okx" { "okxeu" } else { "okx" }.into(),
+            ..original.clone()
+        },
+    ] {
+        assert_ne!(actor, identity::actor_digest("u", &changed).unwrap());
+    }
+    assert_ne!(actor, identity::actor_digest("v", &original).unwrap());
+    assert_eq!(
+        identity::actor_digest("u", &init()).unwrap().as_deref(),
+        Some("16b4dec30a65d36e34c43a9f5c927abb5b0fb639e71006fa942f6cde06b2b01f")
+    );
+}
+
+#[tokio::test]
+async fn okx_environment_aliases_reach_the_resident_settings_gate() {
+    check_okx_environment_alias_settings_gate("okx", "okxdemo").await;
+}
+
+#[tokio::test]
+async fn okx_environment_aliases_eu_reach_the_resident_settings_gate() {
+    check_okx_environment_alias_settings_gate("okxeu", "okxeudemo").await;
+}
+
+#[test]
+fn okx_environment_aliases_keep_one_actor_identity() {
+    check_okx_environment_alias_identity("okx", "okxdemo");
+}
+
+#[test]
+fn okx_environment_aliases_eu_keep_one_actor_identity() {
+    check_okx_environment_alias_identity("okxeu", "okxeudemo");
+}
+
 #[tokio::test]
 async fn fixround_sibling_products_keep_two_live_actors_for_one_credential() {
     tokio::task::LocalSet::new().run_until(async {
