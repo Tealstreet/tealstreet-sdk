@@ -777,6 +777,8 @@ pub struct Permit {
     attempt: Attempt,
     preparation: u64,
     sequence: u64,
+    // Native WS envelope provenance; never part of an HTTP wire token.
+    websocket_issuer: u64,
 }
 
 /// Returned to asynchronous route/sign work and checked again on completion.
@@ -814,6 +816,15 @@ impl Preparation {
 }
 
 impl Permit {
+    pub(crate) fn with_websocket_issuer(mut self, issuer: u64) -> Self {
+        self.websocket_issuer = issuer;
+        self
+    }
+
+    pub(crate) fn take_websocket_issuer(&mut self) -> u64 {
+        std::mem::take(&mut self.websocket_issuer)
+    }
+
     pub fn attempt(self) -> Attempt {
         self.attempt
     }
@@ -843,6 +854,7 @@ impl Permit {
             attempt: token_attempt(parts[1], parts[2])?,
             preparation: parts[3],
             sequence: parts[4],
+            websocket_issuer: 0,
         })
     }
 }
@@ -915,6 +927,10 @@ pub enum Claim {
     Released(HttpRelease),
     WaitUntil(f64),
 }
+
+/// Commit a reserved write only if its synchronous physical handoff accepts it.
+pub type WebSocketCommit<'a> = dyn FnMut(&mut dyn FnMut() -> bool) -> bool + 'a;
+pub(crate) type ClaimHandoff<'a> = dyn FnMut(&mut WebSocketCommit<'_>) -> bool + 'a;
 
 #[path = "request_context_group_protocol.rs"]
 mod group_protocol;
@@ -1098,6 +1114,7 @@ impl Lifecycle {
             attempt: self.attempt,
             preparation: route.id,
             sequence: self.permits,
+            websocket_issuer: 0,
         };
         self.state = State::Permitted(route, permit);
         Ok(permit)
@@ -1111,6 +1128,19 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
+        self.claim_with_handoff(permit, time, pacing, admit, &mut |commit| {
+            commit(&mut || true)
+        })
+    }
+
+    pub(crate) fn claim_with_handoff(
+        &mut self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &mut SendPacing,
+        admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
+        handoff: &mut ClaimHandoff<'_>,
+    ) -> Result<Claim, Error> {
         let draft = match self.prepare_claim(permit, time, pacing)? {
             group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
             group_lifecycle::ClaimPreparation::Ready(draft) => draft,
@@ -1122,7 +1152,25 @@ impl Lifecycle {
                 return Err(error);
             }
         };
-        Ok(Claim::Released(self.commit_claim(ready, pacing)))
+        let mut ready = Some(ready);
+        let mut released = None;
+        handoff(&mut |send| {
+            let Some(ready) = ready.take() else {
+                return false;
+            };
+            if !send() {
+                return false;
+            }
+            released = Some(self.commit_claim(ready, pacing));
+            true
+        });
+        match released {
+            Some(release) => Ok(Claim::Released(release)),
+            None => {
+                self.state = State::Settled(None);
+                Err(Error::Revoked)
+            }
+        }
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes

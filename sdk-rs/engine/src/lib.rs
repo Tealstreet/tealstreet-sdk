@@ -90,6 +90,7 @@ pub use engine::{
     PollTimerBounds, Query, ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response,
     SigningTarget, SocketChannel, SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId,
     UNKNOWN_HTTP_OUTCOME_TEXT, UNKNOWN_OUTCOME_TEXT, UnknownOutcomeTelemetry, Venue, VenueAction,
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
     unsupported_venue_action,
 };
 pub use error::{
