@@ -4069,7 +4069,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn credentials_are_compared_by_identity_and_excluded_from_settings_fingerprints() {
+    fn public_key_identity_and_captured_passphrase_settings_remain_separate() {
         let init = InitPayload {
             account_name: "a".into(),
             exchange_name: "okx".into(),
@@ -4087,7 +4087,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             differing_fields(&fingerprint, &rotated.fingerprint()),
-            Vec::<String>::new()
+            ["passphrase"]
         );
         assert_eq!(
             identity::digest("u", &init).unwrap(),

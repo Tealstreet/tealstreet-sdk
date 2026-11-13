@@ -285,6 +285,107 @@ fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> 
     account
 }
 
+const CAPTURED_PASSPHRASE_VENUES: [&str; 9] = [
+    "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
+    "bitget",
+    "bitgetinverse",
+    "bitgetusdc",
+    "blofin",
+    "apexomni",
+];
+
+fn passphrase_init(venue: &str) -> InitPayload {
+    InitPayload {
+        exchange_name: venue.into(),
+        passphrase: Some("synthetic-passphrase-A".into()),
+        ..init()
+    }
+}
+
+#[tokio::test]
+async fn captured_passphrase_reinit_requires_explicit_settings() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in CAPTURED_PASSPHRASE_VENUES {
+                let registry = tests::registry();
+                let original = passphrase_init(venue);
+                let retained = account(&registry, "u", &original);
+                let unchanged = registry
+                    .obtain("u", &original, false, 7, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&unchanged, &retained), "unchanged: {venue}");
+                let changed = InitPayload {
+                    passphrase: Some("synthetic-passphrase-B".into()),
+                    ..original.clone()
+                };
+                assert_eq!(
+                    identity::digest("u", &original).unwrap(),
+                    identity::digest("u", &changed).unwrap()
+                );
+                for holder in [7, 8] {
+                    let result = registry
+                        .obtain("u", &changed, false, holder, None, Arc::new(|_| true))
+                        .await;
+                    assert!(
+                        matches!(result, Err(error) if error.contains("apply-settings")),
+                        "{venue}: passphrase-only re-init must not silently reuse the old provider"
+                    );
+                }
+                let rekeyed = InitPayload {
+                    key: "another-public-key".into(),
+                    ..changed
+                };
+                assert!(registry.rebuild_refusal("u", &rekeyed, false, 7).is_none());
+                assert!(retained.handle.disposal_cause().is_none());
+                assert!(registry.holds(&retained, 7));
+                assert_eq!(registry.account_count(), 1);
+                registry.dispose(&retained, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn captured_passphrase_explicit_settings_enters_fenced_replacement() {
+    use std::future::Future;
+    tokio::task::LocalSet::new().run_until(async {
+        for venue in CAPTURED_PASSPHRASE_VENUES {
+            let registry = tests::registry();
+            let original = passphrase_init(venue);
+            let retained = account(&registry, "u", &original);
+            registry.obtain("u", &original, false, 7, None, Arc::new(|_| true)).await.unwrap();
+            let token = Some(("synthetic-token".into(), now_ms() + 60_000));
+            let unchanged = registry.apply_settings("u", &original, retained.clone(), 7, token.clone(), Arc::new(|_| true)).await.unwrap();
+            assert!(Arc::ptr_eq(&unchanged, &retained), "unchanged settings: {venue}");
+            registry.pacer.admit().await;
+            let changed = InitPayload {
+                passphrase: Some("synthetic-passphrase-B".into()),
+                ..original.clone()
+            };
+            let apply = registry.apply_settings("u", &changed, retained.clone(), 7, token, Arc::new(|_| true));
+            tokio::pin!(apply);
+            assert!(std::future::poll_fn(|cx| std::task::Poll::Ready(apply.as_mut().poll(cx).is_pending())).await,
+                "{venue}: explicit settings must build a replacement, not return the old provider");
+            let bob = account(&registry, "v", &original);
+            registry.obtain("v", &original, false, 9, None, Arc::new(|_| true)).await.unwrap();
+            let superseding = registry.begin_init("u", retained.registry_name(), false, &retained.fingerprint, None).unwrap();
+            tokio::time::advance(Duration::from_secs(1)).await;
+            assert!(matches!(apply.await, Err(error) if error.contains("superseded")), "{venue}");
+            assert!(retained.handle.disposal_cause().is_none());
+            assert!(registry.holds(&retained, 7));
+            assert!(registry.holds(&bob, 9));
+            assert_eq!(registry.account_count(), 2);
+            drop(superseding);
+            registry.dispose(&retained, Disposal::PageDisposed);
+            registry.dispose(&bob, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
 #[tokio::test]
 async fn fixround_sibling_products_keep_two_live_actors_for_one_credential() {
     tokio::task::LocalSet::new().run_until(async {

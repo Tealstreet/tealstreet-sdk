@@ -152,9 +152,55 @@ fn hosted_identity_settings_exclude_primary_credentials_for_every_hmac_venue() {
         let first = init(venue, "synthetic-key-A");
         let mut second = first.clone();
         second.key = "synthetic-key-B".into();
-        second.passphrase = Some("synthetic-passphrase".into());
         assert_eq!(first.fingerprint(), second.fingerprint(), "{venue}");
     }
+}
+
+#[test]
+fn captured_passphrases_change_settings_but_not_public_identity() {
+    let rules: Value = serde_json::from_str(include_str!(
+        "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
+    ))
+    .unwrap();
+    let mut checked = 0;
+    for (venue, rule) in rules["venues"].as_object().unwrap() {
+        if rule["remoteSigning"]["enabled"] != true
+            || !rule["remoteSigning"]["passphraseHeader"].is_string()
+        {
+            continue;
+        }
+        let mut first = init(venue, "synthetic-key-A");
+        first.passphrase = Some("synthetic-passphrase-A".into());
+        let mut changed = first.clone();
+        changed.passphrase = Some("synthetic-passphrase-B".into());
+        assert_eq!(digest(&first), digest(&changed), "identity: {venue}");
+        assert_ne!(
+            first.fingerprint(),
+            changed.fingerprint(),
+            "settings: {venue}"
+        );
+        assert_eq!(first.fingerprint(), first.clone().fingerprint());
+        let fields: Value = serde_json::from_str(&first.fingerprint()).unwrap();
+        assert!(fields.get("key").is_none(), "public key: {venue}");
+        let opaque = fields["passphrase"].as_str().unwrap();
+        assert_eq!(opaque.len(), 64, "digest length: {venue}");
+        assert!(opaque.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert!(!first.fingerprint().contains("synthetic-passphrase-A"));
+        checked += 1;
+    }
+    assert_eq!(checked, 9);
+
+    let mut kucoin = init("kucoin", "synthetic-key-A");
+    kucoin.passphrase = Some("device-derived-control-A".into());
+    let mut changed = kucoin.clone();
+    changed.passphrase = Some("device-derived-control-B".into());
+    assert_eq!(kucoin.fingerprint(), changed.fingerprint());
+
+    let optional = init("apexomni", "synthetic-key-A");
+    let mut supplied = optional.clone();
+    supplied.passphrase = Some("synthetic-optional-passphrase".into());
+    assert_eq!(digest(&optional), digest(&supplied));
+    assert_ne!(optional.fingerprint(), supplied.fingerprint());
 }
 
 #[test]
