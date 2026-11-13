@@ -360,9 +360,12 @@ fn disabled_private_payload_checks_callback_configuration_before_admission() {
                             build_in_context(context, venue, options(value.clone()), None, Mode)
                         };
                         let error = result.expect_err("unadopted private custody");
+                        // Full Hosted roster admission precedes callback validation.
+                        // Client TxFlow retains the existing codec/provider errors.
+                        let hosted_out = context == ConstructionContext::Hosted && venue == "txflow";
                         assert_eq!(
                             error.kind,
-                            Some(if injected {
+                            Some(if injected || hosted_out {
                                 ErrorKind::Unsupported
                             } else {
                                 ErrorKind::InvalidInput
@@ -372,7 +375,9 @@ fn disabled_private_payload_checks_callback_configuration_before_admission() {
                         assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}/{context:?}");
                         assert_eq!(
                             error.message,
-                            if injected {
+                            if hosted_out {
+                                format!("unsupported venue: {venue}")
+                            } else if injected {
                                 match venue {
                                     "coinbase" | "coinbasespot" => format!(
                                         "Rust {venue} payloadSigner requires a configured injected signing provider"
