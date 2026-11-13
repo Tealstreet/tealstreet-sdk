@@ -191,7 +191,11 @@ impl Registry {
             }
             receive.await.map_err(|_| ProbeRefusal::TRANSIENT)?
         };
-        tokio::time::timeout(Duration::from_secs(30), work)
+        let timeout = safe_cex_remote_signer::SIGN_TIMEOUT
+            + Duration::from_millis(u64::from(
+                safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+            ));
+        tokio::time::timeout(timeout, work)
             .await
             .map_err(|_| ProbeRefusal::TRANSIENT)??;
         permit.check(user, init)?;
