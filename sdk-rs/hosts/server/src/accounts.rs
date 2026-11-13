@@ -880,8 +880,13 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         ]),
     };
     fields.insert("routing".into(), routing);
+    let captured_passphrase = safe_cex_venues::remote_signing_policy(&init.exchange_name)
+        .passphrase_header
+        .is_some();
     for field in ["key", "passphrase"] {
-        if identity::enabled(init) && !(init.exchange_name == "grvt" && field == "key") {
+        let provider_bound = (field == "key" && init.exchange_name == "grvt")
+            || (field == "passphrase" && captured_passphrase);
+        if identity::enabled(init) && !provider_bound {
             fields.remove(field);
             continue;
         }

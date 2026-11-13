@@ -359,6 +359,18 @@ async fn captured_passphrase_explicit_settings_enters_fenced_replacement() {
             let retained = account(&registry, "u", &original);
             registry.obtain("u", &original, false, 7, None, Arc::new(|_| true)).await.unwrap();
             let token = Some(("synthetic-token".into(), now_ms() + 60_000));
+            if venue == "apexomni" {
+                for passphrase in ["synthetic-passphrase-A", "synthetic-passphrase-B"] {
+                    let settings = InitPayload { passphrase: Some(passphrase.into()), ..original.clone() };
+                    let result = registry.apply_settings("u", &settings, retained.clone(), 7, token.clone(), Arc::new(|_| true)).await;
+                    assert!(matches!(result, Err(error) if error.contains("cannot run on the Hosted server")),
+                        "Apex Omni must keep its existing missing-host-route refusal");
+                }
+                assert!(retained.handle.disposal_cause().is_none());
+                assert!(registry.holds(&retained, 7));
+                registry.dispose(&retained, Disposal::PageDisposed);
+                continue;
+            }
             let unchanged = registry.apply_settings("u", &original, retained.clone(), 7, token.clone(), Arc::new(|_| true)).await.unwrap();
             assert!(Arc::ptr_eq(&unchanged, &retained), "unchanged settings: {venue}");
             registry.pacer.admit().await;

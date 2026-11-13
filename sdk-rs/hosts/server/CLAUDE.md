@@ -141,7 +141,8 @@ See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 Private hosted registry keys use the verified user and canonical public credential
 within its venue/network/site namespace and native product; account names remain
 per-connection labels. Sibling products share credential scope, but have separate
-actors and TWAP owners. GRVT login-key changes use explicit settings replacement.
+actors and TWAP owners. GRVT login-key and provider-captured API passphrase changes
+use explicit settings replacement, compared through process-salted digests.
 Wallet public fields and fresh Lighter registration metadata bind that credential.
 Deferred metadata retains the original user, socket, generation, token deadline and
 lease authority through publication. This does not enable a venue or replace its

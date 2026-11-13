@@ -131,7 +131,7 @@ fn hosted_wallet_identity_requires_its_public_signing_binding() {
 }
 
 #[test]
-fn hosted_identity_settings_exclude_primary_credentials_for_every_hmac_venue() {
+fn hosted_identity_settings_exclude_public_keys_for_every_hmac_venue() {
     for venue in [
         "bybitinverse",
         "binance",

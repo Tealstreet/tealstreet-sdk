@@ -75,6 +75,10 @@ GRVT's login API key is a settings input separate from its trading-account/signe
 identity. Changing it requires the existing explicit settings action, which
 rebuilds the login provider; ordinary re-init refuses the change. Its fingerprint
 uses the existing process-salted digest rather than retaining the login key.
+The same rule applies to an API passphrase captured by the remote provider:
+correcting it requires explicit settings replacement, without changing public
+identity. Only its process-salted digest enters settings comparison. KuCoin's
+device-derived passphrase path remains unchanged.
 
 ## Signing selection hint
 

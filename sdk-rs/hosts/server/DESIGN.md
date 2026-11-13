@@ -864,7 +864,9 @@ as an unsigned 64-bit big-endian integer. Scope is the compact JSON array
 `[family, network, site]`; testnet and demo networks and regional namespaces
 remain separate. An absent site is the empty string. Credential trimming follows the venue's signer setup
 policy. The digest uses no process salt. Account labels and signing secrets are
-excluded. Private hosted settings fingerprints exclude primary credentials. Wallet IDs
+excluded. Private hosted settings fingerprints exclude public identity keys;
+GRVT's login key and provider-captured API passphrases participate through
+process-salted digests. Wallet IDs
 use canonical public signing values. Lighter IDs include the freshly resolved
 registered public key; its metadata owner, namespace, token deadline and lease
 generation remain bound through actor publication. See
