@@ -2265,3 +2265,17 @@ test('#3438 master merge retains newly measured conflict-family headroom', () =>
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+
+test('#3372 merged CI run 43381322258 retains current Bybit reserve', () => {
+  // Head 41026bb9ab40 and CI source 15801feeeb97 have the same compiled-source tree.
+  // Artifact 14016926715: all web/Node/replay copies measure 2,338,820 B.
+  const measured = 2_338_820;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_350_080);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, 'Bybit retains the current merged CI size plus 10 KiB, rounded up');
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
