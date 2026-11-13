@@ -612,11 +612,16 @@ impl Session {
                     init.signing_mode.as_deref() == Some("delegated"),
                 )
                 .is_some()
-            || self.pending_verifications.len() >= 64
         {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated init refused");
             self.refuse_handover(&init.account_name, false);
+            return;
+        }
+        if self.pending_verifications.len() >= 64 {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "verification capacity reached");
+            self.refuse_handover(&init.account_name, true);
             return;
         }
         if init.signing_mode.as_deref() == Some("delegated") {

@@ -59,6 +59,14 @@ attachment. A pending COSIGNED signer belongs only to its joining connection;
 probe frames are consumed internally. Matching COSIGNED inits on an admitted
 connection and COSIGNED resumes retain their existing snapshot path.
 
+Shared admission serializes temporary proofs by verified user, credential and
+venue/network/site scope. One proof runs with at most four waiting reservations;
+overflow uses the existing transient refusal. Labels, settings, routing and
+signing mode do not split the queue. Waiting uses the existing proof deadline
+and rechecks captured token, init and lease authority before native work. The
+active reservation remains on the engine thread through probe cleanup, including
+cancellation. Idle queue entries are removed; no successful proof is cached.
+
 ## DELEGATED order frames
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before

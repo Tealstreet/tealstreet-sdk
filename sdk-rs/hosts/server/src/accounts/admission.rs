@@ -10,6 +10,7 @@ pub(crate) struct ProbePermit {
     pub(super) current: Arc<AtomicBool>,
     pending: PendingInits,
     account_name: String,
+    reservation: Option<proof_queue::Reservation>,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
@@ -77,6 +78,7 @@ impl Registry {
         if self.router_leases.enforced() && lease.is_none() {
             return Err(ProbeRefusal::TRANSIENT);
         }
+        let reservation = self.proof_queues.reserve(user, init)?;
         let fingerprint = admission_fingerprint(init);
         let current = Arc::new(AtomicBool::new(true));
         let mut pending = self.pending_inits.lock().unwrap();
@@ -99,6 +101,7 @@ impl Registry {
             current,
             pending: self.pending_inits.clone(),
             account_name: init.account_name.clone(),
+            reservation: Some(reservation),
         };
         permit.check(user, init)?;
         Ok(permit)
@@ -115,55 +118,68 @@ impl Registry {
     ) -> Result<ProbePermit, ProbeRefusal> {
         permit.token_expires_at = Some(token.as_ref().ok_or(ProbeRefusal::INVALID)?.1);
         permit.check(user, init)?;
-        let (plan, options, provider, mode) = match (candidate, link.as_ref()) {
-            (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
-                let prepared =
-                    prepare_delegated(init, candidate.pair()).map_err(|_| ProbeRefusal::INVALID)?;
-                (
-                    prepared.plan,
-                    prepared.options,
-                    prepared.resident.provider(),
-                    "hosted_delegated",
-                )
-            }
-            (None, Some(link)) if init.signing_mode.as_deref() != Some("delegated") => {
-                let prepared =
-                    prepare(init, false, Some(link.clone())).map_err(|_| ProbeRefusal::INVALID)?;
-                let remote = prepared.remote.ok_or(ProbeRefusal::INVALID)?;
-                (
-                    prepared.plan,
-                    prepared.options,
-                    remote.provider,
-                    "hosted_cosign",
-                )
-            }
-            _ => return Err(ProbeRefusal::INVALID),
-        };
-        #[cfg(test)]
-        let plan = self
-            .construction_test_plans
-            .get(user)
-            .cloned()
-            .unwrap_or(plan);
-        let token_provider = ProxyToken::new();
-        token_provider.set(token);
-        let mut config = self.engine_config.clone();
-        config.log_label = None;
-        config.signing_mode = Some(mode);
-        let (mut result, receive) = tokio::sync::oneshot::channel();
-        let lease = permit.lease.clone();
-        let expiry = permit.token_expires_at;
-        let venue = init.exchange_name.clone();
-        #[cfg(test)]
-        let e2e_venue = self.e2e_venue.clone();
         let work = async {
+            let active = permit
+                .reservation
+                .take()
+                .ok_or(ProbeRefusal::INVALID)?
+                .start()
+                .await?;
+            permit.check(user, init)?;
+            let (plan, options, provider, mode) = match (candidate, link.as_ref()) {
+                (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
+                    let prepared = prepare_delegated(init, candidate.pair())
+                        .map_err(|_| ProbeRefusal::INVALID)?;
+                    (
+                        prepared.plan,
+                        prepared.options,
+                        prepared.resident.provider(),
+                        "hosted_delegated",
+                    )
+                }
+                (None, Some(link)) if init.signing_mode.as_deref() != Some("delegated") => {
+                    let prepared = prepare(init, false, Some(link.clone()))
+                        .map_err(|_| ProbeRefusal::INVALID)?;
+                    let remote = prepared.remote.ok_or(ProbeRefusal::INVALID)?;
+                    (
+                        prepared.plan,
+                        prepared.options,
+                        remote.provider,
+                        "hosted_cosign",
+                    )
+                }
+                _ => return Err(ProbeRefusal::INVALID),
+            };
+            #[cfg(test)]
+            let plan = self
+                .construction_test_plans
+                .get(user)
+                .cloned()
+                .unwrap_or(plan);
+            let token_provider = ProxyToken::new();
+            token_provider.set(token);
+            let mut config = self.engine_config.clone();
+            config.log_label = None;
+            config.signing_mode = Some(mode);
+            let (mut result, receive) = tokio::sync::oneshot::channel();
+            let lease = permit.lease.clone();
+            let current = permit.current.clone();
+            let expiry = permit.token_expires_at;
+            let venue = init.exchange_name.clone();
+            #[cfg(test)]
+            let e2e_venue = self.e2e_venue.clone();
             self.pacer.admit().await;
             permit.check(user, init)?;
             let placed = self.threads.place(move |placement| {
                 tokio::task::spawn_local(async move {
+                    let _active = active;
                     let _placement = placement;
+                    let live = Arc::new(AtomicBool::new(true));
+                    let captured_live = live.clone();
                     let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
-                        lease.as_ref().is_none_or(|permit| permit.allowed())
+                        captured_live.load(Ordering::Acquire)
+                            && current.load(Ordering::Acquire)
+                            && lease.as_ref().is_none_or(|permit| permit.allowed())
                             && expiry.is_none_or(|expiry| expiry > now_ms())
                             && link.as_ref().is_none_or(|link| link.is_available())
                     });
@@ -172,13 +188,21 @@ impl Registry {
                         return;
                     }
                     let transport = NetworkTransport::with_routing(plan, token_provider.provider())
-                        .with_venue(&venue).with_io_guard(allowed.clone());
+                        .with_venue(&venue)
+                        .with_io_guard(allowed.clone());
                     #[cfg(test)]
                     let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
+                    let probe = crate::delegated::probe::run(
+                        &venue, &options, provider, transport, config, allowed,
+                    );
+                    tokio::pin!(probe);
                     tokio::select! {
                         biased;
-                        _ = result.closed() => {},
-                        answer = crate::delegated::probe::run(&venue, &options, provider, transport, config, allowed) => { let _ = result.send(answer); }
+                        _ = result.closed() => {
+                            live.store(false, Ordering::Release);
+                            let _ = probe.await;
+                        },
+                        answer = &mut probe => { let _ = result.send(answer); }
                     }
                 });
             });
