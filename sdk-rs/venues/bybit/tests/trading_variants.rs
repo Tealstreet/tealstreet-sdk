@@ -7025,7 +7025,7 @@ fn hyro_v1_unsupported_modes_are_typed_and_send_nothing() {
 }
 
 #[test]
-fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
+fn inverse_create_keeps_legacy_integer_clamp_before_allocation() {
     let mut h = ready(Variant::Inverse);
     place(&mut h, 1, vec![order("BTCUSD", 25.6)]);
     let mode = h.take("/v5/position/list");
@@ -7037,8 +7037,21 @@ fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
     );
     let request = h.take("/v5/order/create-batch");
     assert!(body(&request).contains("\"category\":\"inverse\""));
-    assert_eq!(body(&request).matches("\"qty\":\"10\"").count(), 2);
-    assert_eq!(body(&request).matches("\"qty\":\"6\"").count(), 1);
+    // reference/bybit/bybitinverse.exchange.ts rounds and clamps before allocation.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 25.6); kept for exact TS parity per Sam's decision
+    let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+    let quantities: Vec<_> = wire["request"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|order| order["qty"].as_str().unwrap())
+        .collect();
+    assert_eq!(quantities, ["10"]);
+    let total: f64 = quantities
+        .iter()
+        .map(|qty| qty.parse::<f64>().unwrap())
+        .sum();
+    assert_eq!(total, 10.0);
 }
 
 #[test]
