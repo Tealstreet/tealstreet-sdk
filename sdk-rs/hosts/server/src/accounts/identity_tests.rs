@@ -399,6 +399,49 @@ async fn captured_passphrase_explicit_settings_enters_fenced_replacement() {
 }
 
 #[tokio::test]
+async fn effective_demo_aliases_keep_one_actor_and_the_settings_gate() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (base, demo) in [("okx", "okxdemo"), ("okxeu", "okxeudemo")] {
+                for (resident, proposed) in [(base, demo), (demo, base)] {
+                    let registry = tests::registry();
+                    let first = InitPayload {
+                        exchange_name: resident.into(),
+                        testnet: Some(true),
+                        ..init()
+                    };
+                    let alias = InitPayload {
+                        exchange_name: proposed.into(),
+                        account_name: "equivalent demo alias".into(),
+                        ..first.clone()
+                    };
+                    assert_eq!(identity::digest("u", &first).unwrap(), identity::digest("u", &alias).unwrap());
+                    assert_eq!(engine_options(&first, false), engine_options(&alias, false));
+                    let retained = account(&registry, "u", &first);
+                    registry.obtain("u", &first, false, 7, None, Arc::new(|_| true)).await.unwrap();
+                    assert!(registry.rebuild_refusal("u", &alias, false, 8).is_some(),
+                        "{resident}/{proposed}: different alias routing must use the resident settings gate");
+                    assert!(registry.obtain("u", &alias, false, 8, None, Arc::new(|_| true)).await.is_err());
+                    assert_eq!(identity::registry_name("u", &alias).unwrap(), retained.registry_name());
+                    assert_eq!(registry.account_count(), 1);
+                    assert!(Arc::ptr_eq(&registry.held("u", &first.account_name, 7).unwrap(), &retained));
+                    assert!(registry.held("u", &alias.account_name, 8).is_none());
+                    assert!(retained.handle.disposal_cause().is_none());
+                    let other_key = InitPayload { key: "another-public-key".into(), ..alias.clone() };
+                    assert_ne!(identity::registry_name("u", &other_key).unwrap(), retained.registry_name());
+                    assert_ne!(identity::registry_name("v", &alias).unwrap(), retained.registry_name());
+                    let mainnet = InitPayload { exchange_name: base.into(), testnet: Some(false), ..first.clone() };
+                    assert_ne!(identity::registry_name("u", &mainnet).unwrap(), retained.registry_name());
+                    let other_site = InitPayload { exchange_name: if base == "okx" { "okxeu" } else { "okx" }.into(), ..first.clone() };
+                    assert_ne!(identity::registry_name("u", &other_site).unwrap(), retained.registry_name());
+                    registry.dispose(&retained, Disposal::PageDisposed);
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn fixround_sibling_products_keep_two_live_actors_for_one_credential() {
     tokio::task::LocalSet::new().run_until(async {
         for (first_venue, second_venue) in [
