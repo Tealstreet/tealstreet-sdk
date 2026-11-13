@@ -61,6 +61,7 @@ pub enum Action {
     },
     Nuke {},
     Place {
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize_array")]
         orders: Vec<Value>,
     },
     CancelOrders {
@@ -91,6 +92,7 @@ pub enum Action {
         symbol: Option<String>,
     },
     Close {
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize")]
         order: Value,
     },
     CloseAll {},
@@ -98,6 +100,7 @@ pub enum Action {
     StopAlgos {},
     CancelAccountOrders {},
     ScheduleCancel {
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize")]
         time: Value,
     },
     SetStpMode {

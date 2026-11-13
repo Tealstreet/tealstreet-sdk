@@ -236,8 +236,12 @@ LOCAL and COSIGNED method forwarding is unchanged.
 Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
 unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
 keeps the same job and schedule; never emulate amendment with automatic
-stop-and-replace. The hosted v1 decoder rejects duplicate algo object keys
-recursively before they can hide unknown or malformed fields.
+stop-and-replace.
+
+The hosted typed v1 action decoder rejects duplicate object keys recursively in
+placement orders, close orders, scheduling values and algo payloads before they
+can hide unknown or malformed fields. Binding/hash checks retain precedence;
+schema rejection returns typed `unsupported` before ACK or native work.
 
 Native account-wide cancellation requires the venue's `nukeAccountCancel`
 capability; it never falls back to an incomplete symbol census.

@@ -2069,3 +2069,89 @@ async fn typed_exec_continuations_keep_socket_expiry_without_expiring_accepted_j
         }
     }).await;
 }
+
+async fn duplicate_order_payload_is_unsupported(mutation: &str) {
+    tokio::task::LocalSet::new().run_until(async {
+        for unique in [true, false] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let mut order = json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":50000});
+            let payload = if mutation == "reduceOnly" {
+                order["side"] = "sell".into();
+                order["reduceOnly"] = true.into();
+                json!({"kind":"close","order":order})
+            } else {
+                if matches!(mutation, "bybitBbo" | "level") {
+                    order.as_object_mut().unwrap().remove("price");
+                    order["bybitBbo"] = json!({"sideType":"Queue","level":1});
+                }
+                json!({"kind":"place","orders":[order]})
+            };
+            let id = action_key();
+            let fingerprint = crate::order_contract::action_wire_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            let wire = json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main",
+                "intentId":id,"seq":1,"ageMs":0,"fingerprint":fingerprint,"action":payload}}).to_string();
+            let wire = if unique { wire } else {
+                let (field, duplicate) = match mutation {
+                    "price" => ("\"price\":", "\"price\":0,\"price\":"),
+                    "reduceOnly" => ("\"reduceOnly\":", "\"reduceOnly\":false,\"reduceOnly\":"),
+                    "bybitBbo" => ("\"bybitBbo\":", "\"bybitBbo\":{\"future\":true},\"bybitBbo\":"),
+                    "level" => ("\"level\":", "\"level\":0,\"level\":"),
+                    _ => unreachable!(),
+                };
+                assert!(wire.contains(field));
+                wire.replacen(field, duplicate, 1)
+            };
+            session.handle(&wire).await.unwrap();
+            let mut replies = Vec::new();
+            let outcome = tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(text) = sent.recv().await {
+                    let frame: Value = serde_json::from_str(&text).unwrap();
+                    replies.push(frame.clone());
+                    if frame["t"] == "order.actionOutcome" { return frame; }
+                }
+                panic!("missing placement/close outcome");
+            }).await.expect("bounded placement/close outcome");
+            let writes = tape.writes.lock().unwrap().clone();
+            let jobs = account.running.jobs();
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+            assert_eq!(outcome["d"]["intentId"], id);
+            assert_eq!(outcome["d"]["version"], 1);
+            if unique {
+                assert_eq!(outcome["d"]["outcome"], "applied", "{mutation}: {outcome}");
+                assert_eq!(writes, vec!["create"], "{mutation}: unique-key control must sign and send");
+                assert!(replies.iter().any(|frame| frame["t"] == "order.actionAck" && frame["d"]["received"] == true));
+            } else {
+                assert_eq!(outcome["d"]["outcome"], "unsupported", "{mutation}: {outcome}, writes={writes:?}, replies={replies:?}");
+                assert_eq!(outcome["d"]["error"]["outcome"], "unsupported");
+                assert!(outcome["d"]["result"].is_null());
+                assert!(replies.iter().all(|frame| frame["t"] != "order.actionAck"));
+                assert!(writes.is_empty(), "{mutation}: duplicate payload wrote {writes:?}");
+                assert!(jobs.0.is_empty() && jobs.1 == 0, "{mutation}: duplicate payload admitted native work");
+            }
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn typed_place_rejects_duplicate_price_without_ack_job_or_write() {
+    duplicate_order_payload_is_unsupported("price").await;
+}
+
+#[tokio::test]
+async fn typed_close_rejects_duplicate_reduce_only_without_ack_job_or_write() {
+    duplicate_order_payload_is_unsupported("reduceOnly").await;
+}
+
+#[tokio::test]
+async fn typed_place_rejects_shadowed_bbo_without_ack_job_or_write() {
+    duplicate_order_payload_is_unsupported("bybitBbo").await;
+}
+
+#[tokio::test]
+async fn typed_place_rejects_duplicate_bbo_level_without_ack_job_or_write() {
+    duplicate_order_payload_is_unsupported("level").await;
+}

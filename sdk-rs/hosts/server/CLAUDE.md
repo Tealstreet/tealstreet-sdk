@@ -130,6 +130,9 @@ its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+Every raw typed-action payload checks recursive key uniqueness before `Value`
+conversion: placement arrays, close orders, scheduling values and algo data.
+Schema rejection follows binding/hash checks and precedes ACK or native work.
 Typed TWAP starts validate the connection-local label before translating it to
 the shared identity actor's original label. Restoration retains the persisted
 identity owner tag and the native book's ownership checks.

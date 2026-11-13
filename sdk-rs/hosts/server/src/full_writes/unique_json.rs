@@ -1,4 +1,4 @@
-//! Do not normalize duplicate algo fields before checking the closed v1 schema.
+//! Do not normalize duplicate payload keys before checking the closed v1 schema.
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
@@ -6,6 +6,9 @@ use std::fmt;
 
 pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Value, D::Error> {
     Unique::deserialize(d).map(|value| value.0)
+}
+pub(crate) fn deserialize_array<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Value>, D::Error> {
+    Vec::<Unique>::deserialize(d).map(|values| values.into_iter().map(|value| value.0).collect())
 }
 struct Unique(Value);
 impl<'de> Deserialize<'de> for Unique {
@@ -50,7 +53,7 @@ impl<'de> Deserialize<'de> for Unique {
                 let mut values = Map::new();
                 while let Some(key) = map.next_key::<String>()? {
                     if values.contains_key(&key) {
-                        return Err(de::Error::custom("duplicate algo field"));
+                        return Err(de::Error::custom("duplicate object key"));
                     }
                     values.insert(key, map.next_value::<Unique>()?.0);
                 }

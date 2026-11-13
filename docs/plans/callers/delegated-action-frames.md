@@ -357,9 +357,12 @@ operations and return the existing typed `unsupported` outcome before dispatch.
 Do not emulate amendment with automatic stop-and-replace or change the wire
 version. Client controls can expose the existing lifecycle only.
 
-The server checks the original algo JSON recursively for duplicate object keys,
-including objects inside restore arrays. A duplicate cannot discard an earlier
-unknown or malformed field before the closed schema is checked. The admitted,
+## Recursive JSON validation
+
+The server checks original typed-action payloads recursively for duplicate object
+keys, including placement order arrays, close orders, scheduling values and algo
+data/restore arrays. A duplicate cannot discard an earlier unknown or malformed
+field before the closed schema is checked. The admitted,
 fingerprint-bound request receives typed `unsupported` before positive ACK, job
 admission or native IO. Other admission, age and fingerprint refusals still take
 precedence. LOCAL/COSIGNED method forwarding is unchanged.
