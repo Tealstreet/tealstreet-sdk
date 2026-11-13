@@ -124,8 +124,8 @@ mod tests {
         for opted_in in [false, true] {
             crate::delegated::with_test_declaration(
                 json!({"venues": {
-                    "bybit": {"delegated": {"enabled": false}},
-                    "binance": {"delegated": {"enabled": opted_in}}
+                    "bybit": {"remoteSigning": {"enabled": false}},
+                    "binance": {"remoteSigning": {"enabled": opted_in}}
                 }}),
                 async {
                     let init = InitPayload {

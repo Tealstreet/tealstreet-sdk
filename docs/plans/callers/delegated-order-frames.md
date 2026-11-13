@@ -20,9 +20,9 @@ placement-only and `order.cancelQueued` remains a router queue operation.
 
 Sam's 2026-11-11 activation policy permits DELEGATED with **place and reduce-only
 close** while amend, venue cancel, cancel-all and nuke remain unavailable. The
-host owns the per-user `DELEGATED_BYBIT` feature flag; the SDK introduces no
+host owns the per-user `DELEGATED` feature flag; the SDK introduces no
 server environment variable with that name. Use
-`outbox.activate(connection, { DELEGATED_BYBIT })` for explicit SDK admission.
+`outbox.activate(connection, { DELEGATED })` for explicit SDK admission.
 It requires the flag, the two transport/ledger proofs below, and only
 `delegatedActivationScopeV1.place === true` and `.close === 'reduceOnly'`. Later
 actions are not prerequisites. Missing place/close support refuses with a named
@@ -43,14 +43,20 @@ stop and cleanup controls remain available.
 
 The server advertises `transports.accountWorkerWebSocket.delegatedOrderFramesV1`
 in `capabilities_json`. It is false by default and true only in a build with the
-`delegated-order-frames` Cargo feature, the existing Bybit DELEGATED flag, and
+`delegated-order-frames` Cargo feature, a hosted-supported venue with a configured server origin, and
 `TEALSTREET_DELEGATED_ORDER_FRAMES=1` in the process environment. The production
 image compiles support and defaults the runtime switch to `0`; unset/empty also
 means off, and other values refuse startup. Change the container environment and
 use the existing drain/restart procedure with the same image to toggle it. It is
 not hot-reloaded. Both advertisement and order admission use that runtime control.
+Query `/account/capabilities?exchangeName=<joined venue>` (or `/capabilities`
+with the same query) on each admitted connection. The response adds
+`delegatedVenueV1`, which the host preserves in the outbox capabilities.
+Unscoped discovery advertises no actions; a missing or mismatched venue refuses
+SDK activation. The neutral host flag is `DELEGATED`, and the disabled refusal
+code is `delegatedDisabled`; the former Bybit-named API is removed.
 The additive `delegatedActivationScopeV1` record advertises place and reduce-only
-close, with amend, cancel, cancelAll and nuke false. This action record describes
+close for that hosted venue, with amend, cancel, cancelAll and nuke false. This action record describes
 implemented support; the frame switch still controls live admission. The separate
 boolean `delegatedOrderActionsV1` retains dedicated-action protocol support.
 The typed `enqueueAction(action, options)` API and its action-ledger gate remain

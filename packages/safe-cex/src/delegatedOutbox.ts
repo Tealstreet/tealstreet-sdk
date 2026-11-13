@@ -1,5 +1,6 @@
 import type { DelegatedAction, DelegatedActionResult } from './delegatedActions';
 import type { DelegatedActivationCapabilities, DelegatedActivationFlags } from './delegatedActivation';
+import type { ExchangeName } from './types';
 
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
@@ -13,6 +14,7 @@ import {
   delegatedIntentFingerprint,
   delegatedIntentTime,
 } from './delegatedOrderFrames';
+import { deriveRemoteSigningPolicy } from './exchanges/rust/construction';
 
 export type { DelegatedAction, DelegatedActionResult, DelegatedActionOutcome } from './delegatedActions';
 export { createDelegatedIntentId } from './delegatedOrderFrames';
@@ -94,7 +96,7 @@ export interface OutboxOptions extends OutboxScope {
   changed?(intent: DelegatedIntent): void;
 }
 export interface OutboxConnection extends OutboxScope {
-  venue: 'bybit';
+  venue: ExchangeName;
   signingMode: 'delegated';
   ready: boolean;
   capabilities: DelegatedActivationCapabilities;
@@ -364,7 +366,7 @@ export class DelegatedOutbox {
   activate(connection: OutboxConnection, flags: DelegatedActivationFlags): Readonly<OutboxConnection> {
     // Even a refused replacement retires the previous ticket and deferred work.
     if (this.connection) this.disconnect(this.connection);
-    requireDelegatedActivation(connection.capabilities, flags);
+    requireDelegatedActivation(connection.capabilities, flags, connection.venue);
     if (!connection.ready)
       throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'DELEGATED connection is not ready');
     const captured = this.connect(connection);
@@ -378,7 +380,7 @@ export class DelegatedOutbox {
       !this.active ||
       connection.owner !== this.scope.owner ||
       connection.accountName !== this.scope.accountName ||
-      connection.venue !== 'bybit' ||
+      deriveRemoteSigningPolicy(connection.venue)?.enabled !== true ||
       connection.signingMode !== 'delegated'
     )
       throw new Error('Outbox connection scope differs');

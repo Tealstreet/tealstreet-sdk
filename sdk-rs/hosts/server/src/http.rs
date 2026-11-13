@@ -671,6 +671,11 @@ async fn user_admin_action(app: Arc<App>, request: UserDrainRequest, action: &st
 }
 
 pub fn capabilities_json() -> serde_json::Value {
+    capabilities_json_for(None)
+}
+
+/// Hosts select the joined account's venue; this grants no account admission.
+pub fn capabilities_json_for(venue: Option<&str>) -> serde_json::Value {
     json!({
         "service": "exchange-server",
         "version": 1,
@@ -682,7 +687,8 @@ pub fn capabilities_json() -> serde_json::Value {
             "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
             "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
             "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
-            "delegatedActivationScopeV1": crate::order_contract::action_capabilities(),
+            "delegatedActivationScopeV1": crate::order_contract::action_capabilities(venue),
+            "delegatedVenueV1": venue,
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,
@@ -693,8 +699,14 @@ pub fn capabilities_json() -> serde_json::Value {
     })
 }
 
-async fn capabilities() -> Response {
-    cors(axum::Json(capabilities_json()).into_response())
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilitiesQuery {
+    exchange_name: Option<String>,
+}
+
+async fn capabilities(Query(query): Query<CapabilitiesQuery>) -> Response {
+    cors(axum::Json(capabilities_json_for(query.exchange_name.as_deref())).into_response())
 }
 
 #[derive(Deserialize)]

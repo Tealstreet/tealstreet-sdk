@@ -160,19 +160,13 @@ async fn mode_is_captured_before_the_init_pacing_deferral() {
 }
 
 #[tokio::test]
-async fn every_unflagged_venue_refuses_before_mutating_a_running_cosigned_account() {
+async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = tests::registry();
             let mut init = init();
             let account = testing::trading_account(&registry, "A", &init);
-            for venue in [
-                "bybitspot",
-                "bybitinverse",
-                "bybitdemo",
-                "hyperliquid",
-                "binance",
-            ] {
+            for venue in ["hyrotrader", "binanceoptions", "kucoin", "unknown"] {
                 init.exchange_name = venue.into();
                 let result = registry
                     .obtain_delegated("A", &init, 8, None, Arc::new(|_| true), pair())

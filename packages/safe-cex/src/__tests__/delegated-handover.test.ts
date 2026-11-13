@@ -95,6 +95,12 @@ afterEach(() => {
 });
 
 describe('DELEGATED handover seal', () => {
+  it('seals the requested non-Bybit venue with the unchanged venue-bound proof', () => {
+    const context = { ...input, exchangeName: 'binance' };
+    const sealed = sealDelegatedHandover(context);
+    expect(open(sealed, context)).toEqual({ key: input.key, secret: input.secret });
+    expect(() => open(sealed, input)).toThrow();
+  });
   it('matches RFC 9180 appendix A.2.1 sequence zero', () => {
     vi.mocked(x25519.utils.randomSecretKey).mockReturnValueOnce(hexToBytes(rfc.skEm));
     const sealed = sealHandoverHpke(
@@ -172,9 +178,9 @@ describe('DELEGATED handover seal', () => {
     expect(open(sealDelegatedHandover(input))).toEqual({ key: input.key, secret: input.secret });
   });
 
-  it.each(['binance', 'bybitspot', 'bybitdemo', 'hyrotrader', 'BYBIT', ''])('does not enable %s', (exchangeName) => {
+  // Eligibility belongs to the host; malformed proof contexts always refuse.
+  it.each(['', 'binance|other', String.fromCharCode(0xd800)])('refuses invalid venue context %s', (exchangeName) => {
     expect(() => sealDelegatedHandover({ ...input, exchangeName })).toThrow('DELEGATED');
-    expect(x25519.utils.randomSecretKey).not.toHaveBeenCalled();
   });
 
   it.each(['attemptId', 'bootId', 'key'] as const)('requires an unambiguous %s', (field) => {

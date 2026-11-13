@@ -224,8 +224,8 @@ mod tests {
             .run_until(async {
                 crate::delegated::with_test_declaration(
                     serde_json::json!({"venues": {
-                        "bybit": {"delegated": {"enabled": true}},
-                        "binance": {"delegated": {"enabled": true}}
+                        "bybit": {"remoteSigning": {"enabled": true}},
+                        "binance": {"remoteSigning": {"enabled": true}}
                     }}),
                     async {
                         let init = crate::envelope::InitPayload {

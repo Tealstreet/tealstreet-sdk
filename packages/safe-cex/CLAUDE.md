@@ -47,9 +47,9 @@ read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
-Bybit DELEGATED handover. Its standalone module needs no WASM, Node Buffer or
+DELEGATED handover for a hosted-supported venue. Its standalone module needs no WASM, Node Buffer or
 browser base64 globals; the host supplies the usual secure random source for
-Noble. Call it only after the host's per-venue DELEGATED enablement check. It does
+Noble. Call it only after the host's hosted-signing and server-origin eligibility check. It does
 not select signing modes, open sockets or change LOCAL/COSIGNED setup.
 Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
 context; the result contains only the attempt ID and padded-base64 encapsulation
@@ -86,9 +86,15 @@ activate DELEGATED writes or replace admission. Unknown modes (including null)
 are refused as `invalidInput` / `notSent` during conversion and factory creation.
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
-the other venue actions exist. `activate(connection, { DELEGATED_BYBIT })` checks
+the other venue actions exist. `activate(connection, { DELEGATED })` checks
 the host-owned feature flag, the captured box/router transport proofs, and only
-the advertised `delegatedActivationScopeV1` place/close capabilities. Amend, venue
+the advertised `delegatedActivationScopeV1` place/close capabilities. Discover
+box capabilities using `?exchangeName=<joined venue>` and retain its
+`delegatedVenueV1`; activation refuses a missing or mismatched venue. The neutral
+`DELEGATED` flag replaces `DELEGATED_BYBIT`, and `delegatedDisabled` replaces
+`delegatedBybitDisabled`. `requireDelegatedActivation` takes the connection venue
+as its third argument. `OutboxConnection.venue` is an `ExchangeName`; its trusted
+low-level connection still requires a remote-signing-supported venue. Amend, venue
 cancel, cancel-all and nuke are not activation prerequisites. A failed activation
 retires the old ticket, including deferred work, and throws a named reason.
 The existing low-level `connect` API still requires prior host admission.

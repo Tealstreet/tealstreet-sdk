@@ -61,7 +61,7 @@ function validContext(value: unknown): value is string {
   return true;
 }
 
-/** Seal one Bybit DELEGATED attempt using the host-provided ephemeral public key.
+/** Seal one DELEGATED attempt using the host-provided ephemeral public key.
  * Input and output key/ciphertext encodings are canonical padded base64.
  * The caller owns venue enablement and the attempt's connection/lifecycle.
  */
@@ -69,8 +69,8 @@ export function sealDelegatedHandover(input: DelegatedHandoverInput): SealedDele
   let plaintext: Uint8Array | undefined;
   try {
     const { publicKey, attemptId, bootId, exchangeName, key, secret, passphrase } = input;
-    if (exchangeName !== 'bybit') throw new Error('Unsupported DELEGATED exchange');
     if (
+      !validContext(exchangeName) ||
       !validContext(attemptId) ||
       !validContext(bootId) ||
       !validContext(key) ||

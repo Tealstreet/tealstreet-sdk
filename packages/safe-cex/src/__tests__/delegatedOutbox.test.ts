@@ -577,10 +577,10 @@ describe('DELEGATED host-neutral outbox', () => {
     const f = fixture();
     // Exercise the historical writer rather than manufacturing an ambiguous label.
     const old = await LegacyOutbox.open(f.options as unknown as LegacyOutboxOptions);
-    old.connect(f.connection());
+    old.connect({ ...f.connection(), venue: 'bybit' });
     const id = await old.enqueue(params);
     expect(f.writes).toHaveLength(1);
-    const declined = old.connect({ ...f.connection(), send: () => false });
+    const declined = old.connect({ ...f.connection(), venue: 'bybit', send: () => false });
     await old.flush(declined);
     const saved = [...f.rows.values()][0];
     expect(saved).toMatchObject({ intentId: id, state: 'queued', clockEpoch: 'boot-A', createdAt: 0 });

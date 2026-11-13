@@ -442,12 +442,12 @@ async fn reply(sent: &mut crate::out::Receiver, request: &str) -> Value {
 }
 
 #[tokio::test]
-async fn delegated_manual_writes_require_the_exact_venue_flag() {
+async fn delegated_manual_writes_require_hosted_venue_support() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = crate::accounts::tests::registry();
             let tape = Tape::default();
-            let account = delegated_account(&registry, "A", "bybitspot", tape.clone());
+            let account = delegated_account(&registry, "A", "hyrotrader", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             call(&mut session, "flag", "placeOrder", json!([placement()])).await;
             let result = reply(&mut sent, "flag").await;
@@ -691,8 +691,8 @@ async fn venue_declaration_controls_existing_order_admission() {
             for opted_in in [false, true] {
                 crate::delegated::with_test_declaration(
                     json!({"venues": {
-                        "bybit": {"delegated": {"enabled": true}},
-                        "binance": {"delegated": {"enabled": opted_in}}
+                        "bybit": {"remoteSigning": {"enabled": true}},
+                        "binance": {"remoteSigning": {"enabled": opted_in}}
                     }}),
                     async {
                         let registry = crate::accounts::tests::registry();

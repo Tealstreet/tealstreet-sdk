@@ -46,14 +46,16 @@ the grace permits reconnection, not new admissions or commands. Expiry belongs
 to the requesting socket and never fences another holder's account transport.
 
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
-handover pair. Admission follows the exact venue's `delegated.enabled` in construction-rules.json;
-only `bybit` is currently opted in. The account retains the existing LocalSigner provider,
+handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
+`remoteSigning` policy and a configured server origin, with the existing
+unhosted refusal preserved. There is no mode-specific venue list or
+`delegated.enabled` declaration. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
 
-The existing Bybit opt-in also selects private COSIGNED admissions. Both modes
+The same hosted eligibility selects private COSIGNED admissions. Both modes
 share the off-loop probe, refusal classification, token/lease checks and account
 attachment. A pending COSIGNED signer belongs only to its joining connection;
 probe frames are consumed internally. Matching COSIGNED inits on an admitted
@@ -64,10 +66,15 @@ connection and COSIGNED resumes retain their existing snapshot path.
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
 amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
 advertisement exposes exactly that partial set. The existing compiled feature,
-Bybit declaration, runtime frame switch, router ledger and per-connection
-ownership/registration checks remain required. `DELEGATED_BYBIT` is the host's
+hosted venue support, runtime frame switch, router ledger and per-connection
+ownership/registration checks remain required. `DELEGATED` is the host's
 per-user feature flag, not a new box environment variable. SDK `activate` checks
-it before using the advertised partial set. Unsupported legacy method aliases
+it before using the advertised partial set. Hosts query `/account/capabilities`
+with `?exchangeName=<joined venue>` (or `/capabilities` with the same query).
+`delegatedVenueV1` must match the joined venue; the unscoped response advertises
+no actions. Unjoined handover requests must include `data.exchangeName`;
+a joined account may supply its stored venue. The init remains
+`signingMode:"delegated"` plus `sealed`, with no venue-specific mode field. Unsupported legacy method aliases
 also return `DelegatedActionUnavailable` before a native plan is produced. A
 close remains a placement with `reduceOnly: true`, using the existing outbox and
 venue enforcement. Queued-intent cancellation remains a separate router operation.
@@ -95,8 +102,8 @@ signals reconnect without wrapping the counter.
 ## DELEGATED action frames v1
 
 The additive `order.action` family dispatches amend, venue cancel, cancel-all and
-nuke on the admitted Bybit DELEGATED account. `delegatedOrderActionsV1` follows
-the existing feature/Bybit gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
+nuke on the admitted DELEGATED account, using its own venue. `delegatedOrderActionsV1` follows
+the existing feature/hosted-venue gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
 activation. Each session captures activation at creation; changes require the
 existing box drain/restart and fresh admission. Hosts also require the router's separate
 `delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
