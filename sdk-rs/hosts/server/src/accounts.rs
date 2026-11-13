@@ -1137,10 +1137,7 @@ impl Registry {
         let key = (user.to_owned(), name);
         let account = {
             let accounts = self.accounts.lock().unwrap();
-            accounts.get(&key).cloned().or_else(|| {
-                if !public_only {
-                    return None;
-                }
+            let identity_account = if public_only {
                 accounts
                     .values()
                     .find(|account| {
@@ -1156,7 +1153,10 @@ impl Registry {
                                     .any(|labels| labels.contains_key(&init.account_name)))
                     })
                     .cloned()
-            })
+            } else {
+                None
+            };
+            identity_account.or_else(|| accounts.get(&key).cloned())
         }?;
         // Shared public data carries no signer or algos; it rebuilds as before.
         if account.is_public() {
