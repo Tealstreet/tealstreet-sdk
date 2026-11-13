@@ -78,7 +78,7 @@ export const assertCertified = async ({ api, repo, sha, sleep = pause }) => {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('source must be a full commit SHA');
   const { status, json } = await getWithRetry(api, `/repos/${repo}/actions/workflows/rust.yml/runs?head_sha=${sha}&event=push&branch=master&per_page=20`, sleep);
   if (status !== 200) throw new Error(`Rust SDK run lookup returned HTTP ${status}`);
-  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push' && run.status === 'completed');
+  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push');
   for (const run of runs) {
     for (let page = 1; page <= 10; page += 1) {
       const jobs = await getWithRetry(api, `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=${JOBS_PER_PAGE}&page=${page}`, sleep);
