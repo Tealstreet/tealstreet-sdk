@@ -935,7 +935,7 @@ export class RustEngineExchange extends BaseExchange {
         setupError = error;
       }
     }
-    if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
+    if (bridgeConstruction.dispatchSigning && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
       try {
         aster = mapAsterDEXSignerSetup(options);
       } catch (error) {

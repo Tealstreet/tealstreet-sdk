@@ -1248,6 +1248,16 @@ fn payload_signing_rules_in_mode(
     if !options.payload_signer || public || !supported(venue) {
         return Ok(());
     }
+    #[cfg(feature = "asterdex")]
+    if venue == "asterdex"
+        && matches!(
+            options.asterdex.api_version,
+            Some(safe_cex_venue_asterdex::sign::Version::V3)
+        )
+    {
+        return Err(VenueError::new("AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only")
+            .kind(ErrorKind::Unsupported).outcome(safe_cex_engine::Outcome::NotSent));
+    }
     // Hosted (device-key) Paradex has no Rust route in this release; its legacy
     // digest-only delegate is never constructed.
     if venue == "paradex" {

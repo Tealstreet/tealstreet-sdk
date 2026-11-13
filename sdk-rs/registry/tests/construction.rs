@@ -483,7 +483,7 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
             "asterdex",
             r#"{"key":"k","publicMode":{"payloadSigner":true}}"#
         ),
-        (false, true)
+        (true, false)
     );
     // Lighter's remote signer signs its statements, so it is a signing credential.
     assert_eq!(
@@ -517,6 +517,17 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
 
 #[test]
 fn native_payload_refusal_preserves_classification_with_or_without_local_credentials() {
+    let v3 = construct(
+        "asterdex",
+        r#"{"key":"public-wallet","payloadSigner":true,"asterdex":{"apiVersion":"v3"}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(v3.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(v3.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        v3.message,
+        "AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only"
+    );
     for venue in [
         "binance",
         "binancepm",
@@ -569,10 +580,19 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
         assert_eq!(error.kind, Some(ErrorKind::Unsupported));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
-    // Aster and Lighter payload-only SDK accounts retain their public fallback.
-    for venue in ["asterdex", "lighter"] {
-        construct(venue, r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap();
-    }
+    // Aster V1 PayloadSigner is private and needs an injected provider.
+    let aster = construct(
+        "asterdex",
+        r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(aster.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(aster.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        aster.message,
+        "Rust asterdex payloadSigner requires a configured injected signing provider"
+    );
+    construct("lighter", r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap();
 }
 
 #[cfg(feature = "bybit")]

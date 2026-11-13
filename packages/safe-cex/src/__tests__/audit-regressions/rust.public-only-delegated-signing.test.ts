@@ -13,11 +13,42 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const venues = BETA_VENUES.filter((name) => deriveRemoteSigningPolicy(name)?.enabled);
+const publicCases: Array<{ name: ExchangeName; version?: 'v1' | 'v3' }> = venues.map((name) => ({ name }));
+publicCases.push({ name: 'asterdex', version: 'v1' }, { name: 'asterdex', version: 'v3' });
 const unusedSigners = () => ({
   remoteSigner: {
     sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn(),
   },
   payloadSigner: vi.fn(),
+});
+
+it.each<{ key?: string; publicDataOnly?: boolean }>([
+  {}, { key: '' }, { publicDataOnly: false }, { key: '', publicDataOnly: false },
+])('keyless AsterDEX V3 PayloadSigner resolves public mode for %j', (input) => {
+  const payloadSigner = vi.fn();
+  const options: ExchangeOptions = { key: '', secret: '', payloadSigner, extra: { asterdexApiVersion: 'v3' }, ...input };
+  if (input.key === undefined) Reflect.deleteProperty(options, 'key');
+  const setup = new DelegatedSignerSetup('asterdex', options);
+  try {
+    expect(setup.primaryComplete).toBe(false);
+    expect(setup.credentialPresence).toEqual({ key: false, secret: false });
+    const exchange = new RustEngineExchange('asterdex', options, new DefaultStore());
+    try {
+      expect(exchange.isPublicDataOnly).toBe(true);
+      expect(exchange.privateWebsocket).toBeUndefined();
+      expect(payloadSigner).not.toHaveBeenCalled();
+    } finally { exchange.dispose(); }
+  } finally { setup.dispose(); }
+});
+
+it('private AsterDEX V3 PayloadSigner with a wallet key retains its typed custody refusal', () => {
+  const payloadSigner = vi.fn();
+  expect(() => new RustEngineExchange('asterdex', { key: `0x${'11'.repeat(20)}`, secret: '', payloadSigner,
+    extra: { asterdexApiVersion: 'v3' } }, new DefaultStore())).toThrowError(expect.objectContaining({
+    kind: 'unsupported', outcome: 'notSent',
+    message: 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only',
+  }));
+  expect(payloadSigner).not.toHaveBeenCalled();
 });
 
 class CapturedEngine implements WasmEngineLike {
@@ -281,13 +312,15 @@ it.each(['kucoin', 'kucoinspot', 'kraken'] as const)('%s constructs explicitly p
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it.each(venues)('%s public-only shared setup ignores signing configuration and confers no authority', async (name) => {
+it.each(publicCases)('$name $version public-only shared setup ignores signing configuration and confers no authority', async ({ name, version }) => {
   const { remoteSigner, payloadSigner } = unusedSigners();
   for (const callbacks of [{ payloadSigner }, { remoteSigner }, { remoteSigner, payloadSigner },
+    { remoteSigner: { sign: remoteSigner.sign } }, { payloadSigner: 'unused-invalid-callback' },
     { remoteSigner: null, payloadSigner: 'unused-invalid-callback' }]) {
     const input = {
       key: 'unused-key', secret: 'unused-material', publicDataOnly: true,
       secondary_secret: 'unused-read-material', secondary_passphrase: '', localSigner: null,
+      extra: { asterdexApiVersion: version },
       ...callbacks,
     } as unknown as ExchangeOptions;
     const setup = new DelegatedSignerSetup(name, input);
@@ -393,9 +426,10 @@ const falsyCallbacks = callbackFields.flatMap((field) => [null, false, ''].map((
 
 it('covers every disabled-delegation beta venue', () => {
   expect(venues).toContain('cryptocom');
+  expect(venues).toContain('asterdex');
   expect(venues).toContain('mexc');
   expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
-    'asterdex-v1', 'asterdex-v3', 'kodiakfi', 'krakenspot',
+    'kodiakfi', 'krakenspot',
     'mode', 'what', 'woofi',
   ].sort());
 });
