@@ -6,12 +6,21 @@
 set -euo pipefail
 venues="asterdex, binance, bitunix, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
 mutation_barriers=false
+bingx_spot_replay=false
+if [[ ${!#:-} == --bingx-spot-replay ]]; then
+  bingx_spot_replay=true
+  set -- "${@:1:$(($# - 1))}"
+  if [[ $# -gt 0 && ! ( $# -eq 2 && $1 == --venue && $2 == bingx ) ]]; then
+    echo "Spot replay fixture supports only the BingX family or combined build" >&2
+    exit 2
+  fi
+fi
 if [[ $# -eq 3 && $1 == --venue && $3 == --mutation-barriers ]]; then
   mutation_barriers=true
   set -- "$1" "$2"
 fi
 if [[ $# -gt 0 && ! ( $# -eq 2 && $1 == --venue ) && ! ( $# -eq 1 && $1 == --families ) ]]; then
-  echo "Usage: $0 [--venue VENUE [--mutation-barriers] | --families]" >&2
+  echo "Usage: $0 [--venue VENUE [--mutation-barriers] | --families] [--bingx-spot-replay]" >&2
   exit 2
 fi
 # WASM-only size profiles. Native release profiles in Cargo.toml stay unchanged.
@@ -122,5 +131,6 @@ build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
   --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
   "${wasm_throughput_args[@]}")
 if [[ ${1:-} == --venue ]]; then family_args "$2"; fi
+if [[ $bingx_spot_replay == true ]]; then build_args+=(--features bingx-spot-replay); fi
 cargo build "${build_args[@]}"
 bind hosts/wasm/pkg/web hosts/wasm/pkg/node

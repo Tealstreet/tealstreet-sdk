@@ -30,6 +30,8 @@ getrandom_04.workspace = true
 
 
 [features]
+# Shared admission helpers are separate from existing venue signer closures.
+admission = []
 address-nonce = ["safe-cex-engine/address-nonce", "secp256k1"]
 # zkLink pulls franklin-crypto; only ApeX Omni builds enable it.
 zklink = ["dep:franklin-crypto"]
@@ -45,6 +47,14 @@ hmac-sha512 = []
 # Declared signing-key trimming at setup; only Bitunix links it.
 trim-signing = []
 schnorr = []
+
+[[test]]
+name = "admission"
+required-features = ["admission", "ed25519", "secp256k1", "stark", "schnorr"]
+
+[[test]]
+name = "starknet_verify"
+required-features = ["admission"]
 
 [dev-dependencies]
 alloy-signer = { workspace = true, features = ["eip712"] }

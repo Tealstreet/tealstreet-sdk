@@ -140,7 +140,7 @@ async fn mode_is_captured_before_the_init_pacing_deferral() {
     let registry = tests::registry();
     let init = init();
     let original = registry
-        .begin_init("A", &init.account_name, false, &init.fingerprint())
+        .begin_init("A", &init.account_name, false, &init.fingerprint(), None)
         .unwrap();
     let delegated = registry
         .begin_init(
@@ -148,12 +148,13 @@ async fn mode_is_captured_before_the_init_pacing_deferral() {
             &init.account_name,
             false,
             &crate::delegated::fingerprint(&init),
+            None,
         )
         .unwrap();
     assert!(original.authority.check().is_err());
     assert!(delegated.authority.check().is_ok());
     let other_user = registry
-        .begin_init("B", &init.account_name, false, &init.fingerprint())
+        .begin_init("B", &init.account_name, false, &init.fingerprint(), None)
         .unwrap();
     assert!(delegated.authority.check().is_ok());
     assert!(other_user.authority.check().is_ok());
@@ -244,6 +245,7 @@ async fn a_deferred_delegated_build_keeps_its_original_user_and_init_generation(
             &identity::registry_name("B", &init).unwrap(),
             false,
             &crate::delegated::fingerprint(&init),
+            None,
         )
         .unwrap();
     let replacement = registry
@@ -252,6 +254,7 @@ async fn a_deferred_delegated_build_keeps_its_original_user_and_init_generation(
             &identity::registry_name("A", &init).unwrap(),
             false,
             &init.fingerprint(),
+            None,
         )
         .unwrap();
     tokio::time::advance(Duration::from_secs(1)).await;

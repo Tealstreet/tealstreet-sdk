@@ -21,42 +21,39 @@ pub struct ClosedPnlOutput {
 struct ClosedPnlEntry<'a> {
     provenance: &'static str,
     symbol: String,
-    notional: f64,
-    contracts: f64,
-    entry_price: f64,
-    exit_price: f64,
-    unrealized_pnl: f64,
+    notional: Option<f64>,
+    contracts: Option<f64>,
+    entry_price: Option<f64>,
+    exit_price: Option<f64>,
+    unrealized_pnl: Option<f64>,
     side: PositionSide,
-    fees: f64,
-    time: f64,
-    closed_time: f64,
+    fees: Option<f64>,
+    time: Option<f64>,
+    closed_time: Option<f64>,
     account: &'a str,
-    leverage: f64,
+    leverage: Option<f64>,
 }
 
-fn float(value: &Field) -> f64 {
+fn float(value: &Field) -> Option<f64> {
     let value = value
         .text
         .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     for end in std::iter::once(value.len()).chain(value.char_indices().rev().map(|(end, _)| end)) {
         if let Ok(number) = value[..end].parse::<f64>() {
-            return if number.is_finite() { number } else { 0. };
+            return number.is_finite().then_some(number);
         }
     }
-    0.
+    None
 }
 
-fn timestamp(value: &Field) -> f64 {
+fn timestamp(value: &Field) -> Option<f64> {
+    float(value)?;
     let value = value
         .text
         .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     let sign = usize::from(matches!(value.as_bytes().first(), Some(b'+' | b'-')));
     let end = sign + value[sign..].bytes().take_while(u8::is_ascii_digit).count();
-    value[..end]
-        .parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite())
-        .unwrap_or(0.)
+    value[..end].parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 fn inverse_symbol(symbol: &str) -> bool {
@@ -104,7 +101,12 @@ impl ClosedPnlOutput {
                 entries.push(entry);
             }
         }
-        entries.sort_by(|a, b| b.closed_time.total_cmp(&a.closed_time));
+        entries.sort_by(|a, b| match (a.closed_time, b.closed_time) {
+            (Some(a), Some(b)) => b.total_cmp(&a),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
         serde_json::to_string(&entries).map_err(|_| VenueError::new("invalid closed-PnL output"))
     }
 
@@ -167,10 +169,7 @@ impl ClosedPnlOutput {
             symbol_key.text.clone()
         };
         let time = timestamp(time_key);
-        if symbol.is_empty()
-            || time == 0.
-            || (self.format == ClosedPositionFormat::Bybit && time <= 0.)
-        {
+        if symbol.is_empty() {
             return None;
         }
         let market = if self.format == ClosedPositionFormat::Okx {
@@ -183,35 +182,43 @@ impl ClosedPnlOutput {
         };
         let price = float(exit_key);
         let native = float(size_key);
-        let mut contracts = native;
-        if self.format == ClosedPositionFormat::Bybit
-            && (self.inverse || inverse_symbol(&symbol))
-            && price > 0.
-        {
-            let value = (native / price) * 1e8;
-            contracts = if value.fract() == 0. {
-                value
-            } else {
-                (value + 0.5).floor()
-            } / 1e8;
-        } else if self.format == ClosedPositionFormat::Okx
-            && price > 0.
-            && let Some(market) = market
-        {
-            let size = market.contract_size.filter(|s| *s != 0.).unwrap_or(1.);
-            contracts = if market.is_inverse == Some(true) {
-                (native * size) / price
-            } else {
-                let digits = crate::num::decimals(native) + crate::num::decimals(size);
-                let factor = 10f64.powi(digits as i32);
-                let value = native * size * factor;
-                (if value.fract() == 0. {
-                    value
+        let contracts = native
+            .and_then(|native| {
+                if self.format == ClosedPositionFormat::Bybit
+                    && (self.inverse || inverse_symbol(&symbol))
+                {
+                    let price = price.filter(|price| *price > 0.)?;
+                    let value = (native / price) * 1e8;
+                    Some(
+                        (if value.fract() == 0. {
+                            value
+                        } else {
+                            (value + 0.5).floor()
+                        }) / 1e8,
+                    )
+                } else if self.format == ClosedPositionFormat::Okx
+                    && let Some(market) = market
+                {
+                    let size = market.contract_size.filter(|s| *s != 0.).unwrap_or(1.);
+                    if market.is_inverse == Some(true) {
+                        Some((native * size) / price.filter(|price| *price > 0.)?)
+                    } else {
+                        let digits = crate::num::decimals(native) + crate::num::decimals(size);
+                        let factor = 10f64.powi(digits as i32);
+                        let value = native * size * factor;
+                        Some(
+                            (if value.fract() == 0. {
+                                value
+                            } else {
+                                (value + 0.5).floor()
+                            }) / factor,
+                        )
+                    }
                 } else {
-                    (value + 0.5).floor()
-                }) / factor
-            };
-        }
+                    Some(native)
+                }
+            })
+            .filter(|value| value.is_finite());
         let notional = if self.format == ClosedPositionFormat::Bybit {
             if self.inverse || inverse_symbol(&symbol) {
                 native
@@ -219,7 +226,10 @@ impl ClosedPnlOutput {
                 float(&row.cum_exit_value)
             }
         } else {
-            contracts * price
+            contracts
+                .zip(price)
+                .map(|(contracts, price)| contracts * price)
+                .filter(|value| value.is_finite())
         };
         let side = match self.format {
             ClosedPositionFormat::Bybit if !row.side.sell_literal => PositionSide::Short,
@@ -235,8 +245,13 @@ impl ClosedPnlOutput {
             _ => PositionSide::Long,
         };
         let fees = match self.format {
-            ClosedPositionFormat::Bybit => float(&row.open_fee) + float(&row.close_fee),
-            ClosedPositionFormat::Okx | ClosedPositionFormat::Blofin => float(&row.fee).abs(),
+            ClosedPositionFormat::Bybit => float(&row.open_fee)
+                .zip(float(&row.close_fee))
+                .map(|(open, close)| open + close)
+                .filter(|value| value.is_finite()),
+            ClosedPositionFormat::Okx | ClosedPositionFormat::Blofin => {
+                float(&row.fee).map(f64::abs)
+            }
             _ => float(&row.fee),
         };
         let closed = timestamp(close_time_key);
@@ -258,13 +273,7 @@ impl ClosedPnlOutput {
             side,
             fees,
             time,
-            closed_time: if closed == 0.
-                || (self.format == ClosedPositionFormat::Bybit && closed <= 0.)
-            {
-                time
-            } else {
-                closed
-            },
+            closed_time: closed,
             account: &self.account,
             leverage: float(leverage_key),
         })

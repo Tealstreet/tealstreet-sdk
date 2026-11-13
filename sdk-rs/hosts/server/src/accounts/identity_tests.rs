@@ -651,7 +651,13 @@ async fn fixround_superseded_settings_keep_the_resident_account() {
                 .await
             );
             let superseding = registry
-                .begin_init("u", account.registry_name(), false, &account.fingerprint)
+                .begin_init(
+                    "u",
+                    account.registry_name(),
+                    false,
+                    &account.fingerprint,
+                    None,
+                )
                 .unwrap();
             tokio::time::advance(Duration::from_secs(1)).await;
             assert!(matches!(apply.await, Err(error) if error.contains("superseded")));

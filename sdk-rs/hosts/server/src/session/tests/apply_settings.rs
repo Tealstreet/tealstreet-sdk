@@ -232,6 +232,8 @@ async fn apply_settings_refuses_pending_missing_other_user_and_stale_registratio
                 let replies = frames(&mut sent);
                 let expected = if case == "pending" {
                     "verifying"
+                } else if case == "expired" {
+                    crate::auth::TOKEN_EXPIRED
                 } else {
                     "apply settings refused: account not admitted"
                 };
@@ -242,6 +244,10 @@ async fn apply_settings_refuses_pending_missing_other_user_and_stale_registratio
                     "{case}: {replies:?}"
                 );
                 assert!(account.handle.disposal_cause().is_none(), "{case}");
+                if case == "expired" {
+                    assert!(attempt.joined["acct"].out.order_binding(Some("current")));
+                    assert!(registry.holds(&account, attempt.socket));
+                }
                 if let Some(replacement) = replacement {
                     assert!(replacement.handle.disposal_cause().is_none());
                 }
