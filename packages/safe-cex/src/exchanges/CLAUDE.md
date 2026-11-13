@@ -244,13 +244,21 @@ including a healthy stream in the snapshot RPC response, cannot reset it.
 Unidentifiable stream failures retain cooldown until the mirror is reset.
 A recovered stream also fences any older in-flight snapshot from applying.
 
-`listenOrderBookWebworker` and `listenOHLCVWebworker` accept an optional third
-rejection callback. Its signal names the requested stream/symbol (and candle
-interval) and carries the original error. A rejected book batch invalidates all
+Direct `listenOrderBook` / `listenOHLCV`, `PublicDataSource`, and the matching
+`*Webworker` listeners accept an optional third rejection callback. Native frame
+rejections reuse the existing frame readers and recovery-scope identity helper;
+in-process public-data providers carry the observer and release it on disposal,
+including when a synchronous source callback disposes the provider during registration.
+Observer-enabled provider subscriptions establish liveness before calling the
+source. Disposal immediately fences both data and rejection callbacks, including
+callbacks before the source returns; the late handle is released exactly once.
+The signal names the requested stream/symbol (and candle interval) and carries the original error. A rejected book batch invalidates all
 book baselines; known failure identities notify only matching subscribers.
 Unknown identities notify the affected stream kind broadly, and unreadable
 envelopes notify both kinds. Rejection-observer
 exceptions are isolated, and unsubscribe/dispose removes the rejection listener.
+If a native rejection observer disposes the exchange, frame processing stops
+before sibling data or frame forwarding is delivered.
 
 ### Common Startup Sequence
 

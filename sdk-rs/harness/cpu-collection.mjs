@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import { parseArgs, isDeepStrictEqual } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { venueOf } from './venues.mjs';
+import { replayVenueOf } from './venues.mjs';
 import { captureCache } from './cpu-cache.mjs';
 import { PUBLIC_REPLAY_PAIRS, performanceOrder } from './performance-policy.mjs';
 import { cohortKey, parseCohortJson, selectRuntimeInputs, sourceInputFingerprint } from './cpu-cohort.mjs';
@@ -97,7 +97,7 @@ function tapeInfo(root, item) {
   const raw = read(root, item.tape);
   const records = (item.tape.endsWith('.gz') ? gunzipSync(raw) : raw).toString('utf8').trim().split('\n').map(line => parseCohortJson(line));
   check(records.length > 0 && records.every(row => row && typeof row === 'object' && !Array.isArray(row)), 'invalid fixture records');
-  const venue = venueOf(item.venue);
+  const venue = replayVenueOf(item.venue);
   const privateValue = records.find(row => row.type === 'config')?.private ?? records.find(row => row.type === 'meta')?.private ?? records.some(row => venue.isPrivateRecord ? venue.isPrivateRecord(row) : Boolean(venue.privateSocket && row.url?.includes(venue.privateSocket)));
   check(typeof privateValue === 'boolean', 'ambiguous fixture privacy');
   return { private: privateValue, tapeSha256: sha(raw) };

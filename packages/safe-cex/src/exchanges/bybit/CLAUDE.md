@@ -1145,7 +1145,7 @@ instead of pretending its exchange name is `bybitdemo`:
   `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`, and
   `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`. The WebSocket URLs are optional
   and derive from the REST origin as `/v5/public/linear` and `/v5/private`.
-  The default production/challenge origin is `https://sim-bybit.hyro.trade`;
+  The default production/challenge origin is `https://sim-tealstreet.hyro.site`;
   env vars are now overrides, not required Vercel secrets. Do not use
   `bybitdemo` for Hyro simulator keys; it talks to Bybit's demo host, not Hyro.
 - Metadata keeps HyroTrader **preview-only** (`enabled: false`,
@@ -1163,9 +1163,9 @@ instead of pretending its exchange name is `bybitdemo`:
 - The old separate test simulator used plain HTTP on port `8012`; keep that
   shape possible for local probes by not forcing HTTPS/WSS in config
   normalization. The browser rollout path now uses Hyro's TLS hostname
-  `https://sim-bybit.hyro.trade`, which answers REST preflights for Tealstreet
+  `https://sim-tealstreet.hyro.site`, which answers REST preflights for Tealstreet
   origins. WebSockets do not need CORS and derive to
-  `wss://sim-bybit.hyro.trade/v5/{public/linear,private}` unless explicitly
+  `wss://sim-tealstreet.hyro.site/v5/{public/linear,private}` unless explicitly
   overridden.
 - Public market data should use Hyro's own public REST/WS endpoints directly as
   the baseline. Do not proxy public market-data traffic unnecessarily, and do not
@@ -1283,7 +1283,7 @@ Configure the web build before enabling the connector:
 
 | Setting                                                                                    | Purpose                                                                                               |
 | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`                                                     | Optional production/challenge REST origin override; defaults to `https://sim-bybit.hyro.trade`        |
+| `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`                                                     | Optional production/challenge REST origin override; defaults to `https://sim-tealstreet.hyro.site`        |
 | `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`                                                | Optional production public socket URL; defaults to REST-derived `/v5/public/linear`                   |
 | `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`                                               | Optional production private socket URL; defaults to REST-derived `/v5/private`                        |
 | `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`                                                | Shared demo/probe simulator REST origin, including plain `http://<host>:8012`; no fallback to Bybit   |
@@ -1292,9 +1292,13 @@ Configure the web build before enabling the connector:
 | `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_KEY` / `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_SECRET` | Existing branded-demo defaults, bundled publicly; only a disposable shared demo account belongs here  |
 | `HYROTRADER_ENABLED`                                                                       | App feature flag controlling connector/demo access; runtime overrides may differ from source defaults |
 
-Ordinary `hyrotrader` accounts use the production/challenge origin, defaulting
-to Hyro's hosted simulator. This is still not a Bybit fallback, and only the
-`/hyrotrader-demo` account reads the simulator API key/secret envs.
+Rust defaults omitted `extra.hyrotraderMode` to production. Ordinary accounts
+use the production/challenge origin, defaulting to Hyro's hosted simulator.
+Native construction selects only the requested production network and refuses
+missing endpoints with `invalidInput` / `notSent` before I/O; it never falls
+back to Bybit or to the separately configured demo URLs. Only explicit `demo`
+selects those demo URLs, and only the `/hyrotrader-demo` account reads the
+simulator API key/secret envs.
 
 Normal connected accounts supply their own credentials through exchange options,
 not environment variables. During v1 they may use the simulator origin with

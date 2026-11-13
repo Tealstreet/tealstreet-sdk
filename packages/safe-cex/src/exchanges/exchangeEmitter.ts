@@ -16,6 +16,7 @@ export class ExchangeEmitter extends TinyEmitter {
       event === 'error' ||
       event === 'warning' ||
       event === 'engine-event' ||
+      event === 'ws-diagnostic' ||
       event.startsWith('grafana-');
     const delivered = diagnostic ? args.map((arg) => redactDiagnosticData(arg)) : args;
     for (const listener of this.listeners(event)) {

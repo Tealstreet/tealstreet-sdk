@@ -10,7 +10,7 @@ name = "exchange-server"
 path = "src/main.rs"
 
 [dependencies]
-safe-cex-crypto.workspace = true
+safe-cex-crypto = { workspace = true, features = ["admission"] }
 safe-cex-engine.workspace = true
 safe-cex-venues.workspace = true
 safe-cex-native = { workspace = true, features = ["address-nonce"] }
@@ -49,6 +49,7 @@ delegated-order-frames = []
 test-support = ["safe-cex-engine/test-support"]
 
 [dev-dependencies]
+safe-cex-venue-backpack = { path = "../../venues/backpack" }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 safe-cex-exchange-server = { path = ".", features = ["test-support"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }
