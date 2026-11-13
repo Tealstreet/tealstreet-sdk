@@ -25,7 +25,10 @@ test('the workflow runs only after a Rust SDK push run on master, or by hand', (
   }
   assert.match(workflow, /\npermissions:\n {2}contents: read\n/);
   const roster = job('roster');
-  assert.doesNotMatch(roster, /workflow_run\.conclusion/, 'CPU-only reds must not suppress a release; certified decides');
+  assert.doesNotMatch(roster, /workflow_run\.conclusion == 'success'/, 'CPU-only reds must not suppress a release; certified decides');
+  for (const superseded of ["github.event.workflow_run.conclusion != 'cancelled'", "github.event.workflow_run.conclusion != 'skipped'"]) {
+    assert.ok(roster.includes(superseded), `${superseded}: a superseded master run skips instead of failing`);
+  }
   for (const condition of ["github.event.workflow_run.event == 'push'",
     "github.event.workflow_run.head_branch == 'master'"]) assert.ok(roster.includes(condition), condition);
 });
