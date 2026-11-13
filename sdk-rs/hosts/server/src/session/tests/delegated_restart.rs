@@ -27,8 +27,8 @@ fn statuses(sent: &mut crate::out::Receiver) -> Vec<Value> {
 async fn delegated_restart_ambiguous_unjoined_request_requires_an_explicit_venue() {
     crate::delegated::with_test_declaration(
         json!({"venues": {
-            "bybit": {"delegated": {"enabled": true}},
-            "binance": {"delegated": {"enabled": true}}
+            "bybit": {"remoteSigning": {"enabled": true}},
+            "binance": {"remoteSigning": {"enabled": true}}
         }}),
         async {
             let f = fixture().await;

@@ -1,8 +1,7 @@
-use safe_cex_crypto::signer::Secret;
 use safe_cex_exchange_server::accounts::{engine_options, prepare};
 use safe_cex_exchange_server::delegated::{DelegatedPair, prepare_delegated};
 use safe_cex_exchange_server::envelope::InitPayload;
-use safe_cex_remote_signer::{SignerLink, delegated_enabled};
+use safe_cex_remote_signer::{SignerLink, supports_remote_signing};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -17,22 +16,46 @@ fn init(venue: &str) -> InitPayload {
 fn pair() -> DelegatedPair {
     DelegatedPair::new(
         "synthetic-key".into(),
-        Secret::new("synthetic-signing-fixture".into()),
+        "synthetic-signing-fixture".into(),
         None,
     )
 }
 
 #[test]
-fn only_exact_bybit_venue_enables_delegated_construction() {
+fn delegated_uses_hosted_support_and_requires_a_server_origin() {
+    assert!(prepare_delegated(&init("binance"), pair()).is_ok());
+    // HyroTrader declares remote signing, but has no server origin configured.
     let rules: Value = serde_json::from_str(include_str!(
         "../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    for venue in rules["venues"].as_object().unwrap().keys() {
-        assert_eq!(delegated_enabled(venue), venue == "bybit", "{venue}");
+    assert_eq!(
+        rules["venues"]["hyrotrader"]["remoteSigning"]["enabled"],
+        true
+    );
+    assert!(!safe_cex_exchange_server::delegated::enabled("hyrotrader"));
+    assert!(prepare_delegated(&init("hyrotrader"), pair()).is_err());
+    assert!(!safe_cex_exchange_server::delegated::enabled("unknown"));
+}
+
+#[test]
+fn delegated_support_matches_hosted_signing_and_server_origins() {
+    // Sam's 2026-11-13 ruling removes the former per-venue DELEGATED list.
+    let rules: Value = serde_json::from_str(include_str!(
+        "../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
+    ))
+    .unwrap();
+    for (venue, rule) in rules["venues"].as_object().unwrap() {
+        assert!(rule.get("delegated").is_none(), "{venue}");
+        let hosted = supports_remote_signing(venue)
+            && safe_cex_exchange_server::accounts::refuse_unhosted(venue).is_ok()
+            && safe_cex_native::resolve::rest_base_url(venue, false).is_ok();
+        assert_eq!(
+            safe_cex_exchange_server::delegated::enabled(venue),
+            hosted,
+            "{venue}"
+        );
     }
-    assert!(!delegated_enabled("unknown"));
-    assert!(!delegated_enabled("BYBIT"));
 }
 
 #[test]
@@ -49,15 +72,8 @@ fn bybit_delegated_prepares_injected_private_provider_options() {
 }
 
 #[test]
-fn delegated_is_refused_for_other_venues_and_public_accounts() {
-    for venue in [
-        "bybitspot",
-        "bybitinverse",
-        "bybitdemo",
-        "binance",
-        "hyperliquid",
-        "unknown",
-    ] {
+fn delegated_is_refused_for_unhosted_venues_and_public_accounts() {
+    for venue in ["hyrotrader", "binanceoptions", "kucoin", "unknown"] {
         assert!(prepare_delegated(&init(venue), pair()).is_err());
     }
     let mut public = init("bybit");
@@ -153,7 +169,7 @@ fn delegated_pair_binding_and_empty_material_refuse_with_fixed_errors() {
     ] {
         let result = prepare_delegated(
             &init("bybit"),
-            DelegatedPair::new(key.into(), Secret::new(material.into()), None),
+            DelegatedPair::new(key.into(), material.into(), None),
         );
         assert!(matches!(result, Err(ref e) if e == "Invalid DELEGATED account setup"));
     }

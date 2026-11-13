@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 pub use link::{
     ECHO_PAD_CAP, EchoSize, MAX_RESPONSE_FIELD, Outbox, SIGN_TIMEOUT, SignerLink, SocketId,
 };
-pub use policy::delegated_enabled;
+pub use policy::supports_remote_signing;
 pub use provider::{FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, RemoteProvider};
 
 use policy::PassphraseRule;

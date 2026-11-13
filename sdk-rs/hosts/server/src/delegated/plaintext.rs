@@ -122,6 +122,7 @@ impl Input<'_> {
             "key" => Ok(0),
             "secret" => Ok(1),
             "passphrase" => Ok(2),
+            "signingKey" => Ok(3),
             _ => Err(Refused),
         }
     }
@@ -139,8 +140,8 @@ pub(super) fn parse(bytes: &mut [u8]) -> Result<Credentials, Refused> {
     let sequence = input.bytes.get(input.position) == Some(&b'[');
     let closing = if sequence { b']' } else { b'}' };
     input.take(if sequence { b'[' } else { b'{' })?;
-    let mut fields: [Option<Zeroizing<String>>; 3] = [None, None, None];
-    let mut seen = [false; 3];
+    let mut fields: [Option<Zeroizing<String>>; 4] = [None, None, None, None];
+    let mut seen = [false; 4];
     let mut next_field: usize = 0;
     loop {
         input.whitespace()?;
@@ -159,7 +160,7 @@ pub(super) fn parse(bytes: &mut [u8]) -> Result<Credentials, Refused> {
             input.take(b':')?;
         }
         input.whitespace()?;
-        if field == 2
+        if field >= 2
             && input
                 .bytes
                 .get(input.position..)
@@ -183,11 +184,12 @@ pub(super) fn parse(bytes: &mut [u8]) -> Result<Credentials, Refused> {
     if input.position != input.bytes.len() {
         return Err(Refused);
     }
-    let [key, secret, passphrase] = fields;
+    let [key, secret, passphrase, signing_key] = fields;
     Ok(Credentials {
         key: key.ok_or(Refused)?,
         secret: secret.ok_or(Refused)?,
         passphrase,
+        signing_key,
     })
 }
 
@@ -203,6 +205,8 @@ mod tests {
         secret: String,
         #[serde(default)]
         passphrase: Option<String>,
+        #[serde(default, rename = "signingKey")]
+        signing_key: Option<String>,
     }
 
     #[test]
@@ -248,6 +252,10 @@ mod tests {
             let actual = parse(&mut input);
             assert_eq!(actual.is_ok(), expected.is_ok(), "case {index}");
             if let (Ok(actual), Ok(expected)) = (actual, expected) {
+                assert!(
+                    actual.signing_key.as_deref().map(String::as_str)
+                        == expected.signing_key.as_deref()
+                );
                 assert!(actual.key.as_str() == expected.key);
                 assert!(actual.secret.as_str() == expected.secret);
                 assert!(

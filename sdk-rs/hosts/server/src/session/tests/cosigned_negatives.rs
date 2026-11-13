@@ -135,6 +135,61 @@ struct Resident {
 }
 
 #[tokio::test]
+async fn cosigned_probe_deadline_refuses_and_releases_its_engine() {
+    let f = fixture_with_auth(true).await;
+    f.gate.forget_permits(1000);
+    let (mut session, mut sent) = candidate(&f, "alice");
+    let mut done = session.take_verified();
+    session.init(init(Some("timed-proof"))).await.unwrap();
+    let link = session.pending_verifications["acct"]
+        .cosigned_link
+        .clone()
+        .unwrap();
+    let mut device = Device::default();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while f.private_reads.load(Ordering::SeqCst) == 0 {
+            tokio::select! {
+                Some(text) = sent.recv() => {
+                    device.answer(&mut session, serde_json::from_str(&text).unwrap(), Answer::Correct).await;
+                }
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+            }
+        }
+    })
+    .await
+    .expect("the signed private read is held by the fixture");
+
+    tokio::time::pause();
+    let budget = safe_cex_remote_signer::SIGN_TIMEOUT
+        + Duration::from_millis(u64::from(
+            safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+        ));
+    tokio::time::advance(budget + Duration::from_millis(1)).await;
+    let completion = done.recv().await.unwrap();
+    tokio::time::resume();
+    // Discard other challenges already queued by the temporary startup.
+    while sent.try_recv().is_ok() {}
+    session.verification_completed(completion).await.unwrap();
+    assert_eq!(
+        sent.try_recv().unwrap(),
+        envelope::with_instance_id(envelope::init_unverified("acct", true), "timed-proof")
+    );
+    assert!(!link.is_available());
+    assert!(session.pending_verifications.is_empty());
+    assert!(session.joined.is_empty());
+    assert!(f.registry.held("alice", "acct", session.socket).is_none());
+    assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while crate::accounts::testing::engine_count(&f.registry) != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("probe actor disposed");
+    session.close();
+}
+
+#[tokio::test]
 async fn cosigned_rpc_expiry_completion_preserves_request_and_registration() {
     let f = fixture_with_auth(true).await;
     let mut device = Device::default();
@@ -422,7 +477,7 @@ async fn cosigned_two_users_switch_during_deferred_private_reads() {
 }
 
 #[tokio::test]
-async fn cosigned_test_admission_does_not_start_other_venue_proofs() {
+async fn cosigned_test_admission_does_not_start_unhosted_venue_proofs() {
     let mut f = fixture_with_auth(true).await;
     crate::accounts::testing::set_join_admission(Arc::get_mut(&mut f.registry).unwrap(), true);
     let mut device = Device::default();
@@ -430,7 +485,7 @@ async fn cosigned_test_admission_does_not_start_other_venue_proofs() {
     let before = f.private_reads.load(Ordering::SeqCst);
     let (mut session, mut sent) = candidate(&f, "alice");
     let mut request = init(Some("other-venue"));
-    request.exchange_name = "bybitspot".into();
+    request.exchange_name = "hyrotrader".into();
     session.init(request).await.unwrap();
     refused(&f, &session, &mut sent, Some("other-venue"));
     assert_eq!(f.private_reads.load(Ordering::SeqCst), before);

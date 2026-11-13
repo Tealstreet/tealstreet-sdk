@@ -1579,6 +1579,10 @@ impl Registry {
         proxy_token.set(token);
         let tokens = proxy_token.provider();
         let mut config = self.engine_config.clone();
+        config.trusted_signer_state = None;
+        if let Some(resident) = &delegated {
+            resident.configure(&mut config);
+        }
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
         // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {

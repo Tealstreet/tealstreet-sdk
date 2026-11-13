@@ -196,7 +196,11 @@ async fn native_probe_deadline_refuses_and_releases_its_engine() {
     session.init(init).await.unwrap();
     wait_reads(&f).await;
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(31)).await;
+    let budget = safe_cex_remote_signer::SIGN_TIMEOUT
+        + Duration::from_millis(u64::from(
+            safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+        ));
+    tokio::time::advance(budget + Duration::from_millis(1)).await;
     let completion = done.recv().await.unwrap();
     tokio::time::resume();
     session.verification_completed(completion).await.unwrap();

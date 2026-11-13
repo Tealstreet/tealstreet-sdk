@@ -1,5 +1,6 @@
 import type { DelegatedAction } from '../delegatedActions';
 import type { OutboxConnection, OutboxOptions } from '../delegatedOutbox';
+import type { ExchangeName } from '../types';
 
 import { describe, expect, it } from 'vitest';
 
@@ -8,12 +9,14 @@ import { DelegatedOutbox } from '../delegatedOutbox';
 
 const params = { symbol: 'BTCUSDT', side: 'buy', type: 'market', amount: 0.001 };
 
-async function fixture(owner = 'alice') {
+async function fixture(owner = 'alice', venue: ExchangeName = 'bybit') {
   const writes: string[] = [];
   let entropy = 0;
   const options: OutboxOptions = {
     owner,
     accountName: 'main',
+    venue,
+    accountId: 'account-A',
     clock: { epoch: 'synthetic-boot', now: () => 0, unix: () => 1_700_000_000_000 },
     random: (bytes) => bytes.fill(++entropy),
     schedule: () => () => undefined,
@@ -31,11 +34,13 @@ async function fixture(owner = 'alice') {
     delegatedOrderFramesV1: true,
     delegatedOrderLedgerV1: true,
     delegatedActivationScopeV1: actions,
+    delegatedVenueV1: 'bybit',
   };
   const connection = {
     owner,
     accountName: 'main',
-    venue: 'bybit' as const,
+    accountId: 'account-A',
+    venue,
     signingMode: 'delegated' as const,
     ready: true,
     capabilities,
@@ -48,9 +53,49 @@ async function fixture(owner = 'alice') {
 }
 
 describe('DELEGATED place and reduce-only close activation', () => {
-  it('activates with DELEGATED_BYBIT and the two supported actions while later actions are absent', async () => {
+  it('activates an admitted non-Bybit hosted venue without changing order bytes', async () => {
+    const f = await fixture('alice', 'binance');
+    const control = await fixture();
+    f.box.activate(
+      {
+        ...f.connection,
+        venue: 'binance',
+        capabilities: {
+          ...f.connection.capabilities,
+          delegatedVenueV1: 'binance',
+        },
+      },
+      { DELEGATED: true },
+    );
+    control.box.activate(control.connection, { DELEGATED: true });
+    await f.box.enqueueAction('place', params);
+    await control.box.enqueueAction('place', params);
+    expect(f.writes).toEqual(control.writes);
+    expect(f.writes).toHaveLength(1);
+    f.box.close();
+    control.box.close();
+  });
+
+  it.each([undefined, null, 'binance'])('refuses missing or different-venue capabilities (%s)', async (venue) => {
     const f = await fixture();
-    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    expect(() =>
+      f.box.activate(
+        {
+          ...f.connection,
+          capabilities: {
+            ...f.connection.capabilities,
+            delegatedVenueV1: venue,
+          },
+        },
+        { DELEGATED: true },
+      ),
+    ).toThrow(expect.objectContaining({ code: 'delegatedVenueUnavailable' }));
+    expect(f.writes).toEqual([]);
+    f.box.close();
+  });
+  it('activates with DELEGATED and the two supported actions while later actions are absent', async () => {
+    const f = await fixture();
+    f.box.activate(f.connection, { DELEGATED: true });
     await f.box.enqueueAction('place', params);
     await f.box.enqueueAction('close', { ...params, reduceOnly: true });
     expect(f.writes.map((text) => JSON.parse(text).t)).toEqual(['order.submit', 'order.submit']);
@@ -69,7 +114,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
         delegatedOrderActionLedgerV1: true,
       },
     };
-    expect(() => f.box.activate(connection, { DELEGATED_BYBIT: true })).toThrow(
+    expect(() => f.box.activate(connection, { DELEGATED: true })).toThrow(
       expect.objectContaining({ code: 'delegatedPlaceUnavailable' }),
     );
     expect(f.box.entries()).toEqual([]);
@@ -87,7 +132,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
         delegatedOrderActionLedgerV1: true,
       },
     };
-    const ticket = f.box.activate(connection, { DELEGATED_BYBIT: true });
+    const ticket = f.box.activate(connection, { DELEGATED: true });
     expect(ticket.capabilities.delegatedOrderActionsV1).toBe(true);
     expect(ticket.capabilities.delegatedActivationScopeV1?.close).toBe('reduceOnly');
     await f.box.enqueueAction('place', params);
@@ -126,7 +171,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
           [capability]: false,
         },
       };
-      f.box.activate(connection, { DELEGATED_BYBIT: true });
+      f.box.activate(connection, { DELEGATED: true });
       await f.box.enqueueAction({ kind: 'cancelAll' });
       expect(f.writes).toEqual([]);
       await f.box.enqueueAction('close', { ...params, reduceOnly: true });
@@ -136,7 +181,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
   );
 
   it.each([
-    { flag: false, place: true, reason: 'delegatedBybitDisabled' },
+    { flag: false, place: true, reason: 'delegatedDisabled' },
     { flag: true, place: false, reason: 'delegatedPlaceUnavailable' },
     { flag: true, place: undefined, reason: 'delegatedPlaceUnavailable' },
   ])('visibly refuses activation before sending ($reason, place=$place)', async ({ flag, place, reason }) => {
@@ -148,9 +193,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
         delegatedActivationScopeV1: { ...f.connection.capabilities.delegatedActivationScopeV1, place },
       },
     };
-    expect(() => f.box.activate(connection, { DELEGATED_BYBIT: flag })).toThrow(
-      expect.objectContaining({ code: reason }),
-    );
+    expect(() => f.box.activate(connection, { DELEGATED: flag })).toThrow(expect.objectContaining({ code: reason }));
     expect(f.writes).toEqual([]);
     f.box.close();
   });
@@ -159,7 +202,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
     '%s is named and refused before any frame',
     async (action) => {
       const f = await fixture();
-      f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+      f.box.activate(f.connection, { DELEGATED: true });
       await expect(f.box.enqueueAction(action, params)).rejects.toMatchObject({
         name: 'DelegatedActionUnavailable',
         code: 'delegatedActionUnavailable',
@@ -182,7 +225,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
         delegatedActivationScopeV1: { ...f.connection.capabilities.delegatedActivationScopeV1, close },
       },
     };
-    expect(() => f.box.activate(connection, { DELEGATED_BYBIT: true })).toThrow(
+    expect(() => f.box.activate(connection, { DELEGATED: true })).toThrow(
       expect.objectContaining({
         code: 'delegatedCloseUnavailable',
       }),
@@ -195,7 +238,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
     'refuses a close without literal reduceOnly=true (%s)',
     async (reduceOnly) => {
       const f = await fixture();
-      f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+      f.box.activate(f.connection, { DELEGATED: true });
       await expect(f.box.enqueueAction('close', { ...params, reduceOnly })).rejects.toMatchObject({
         name: 'DelegatedReduceOnlyRequired',
         code: 'delegatedReduceOnlyRequired',
@@ -218,7 +261,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
         kind === 'inherited'
           ? Object.assign(Object.create({ reduceOnly: true }), params)
           : Object.defineProperty({ ...params }, 'reduceOnly', { value: true, enumerable: false });
-      f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+      f.box.activate(f.connection, { DELEGATED: true });
       await expect(f.box.enqueueAction('close', close)).rejects.toMatchObject({
         code: 'delegatedReduceOnlyRequired',
       });
@@ -242,7 +285,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
         return ++reads === 1;
       },
     };
-    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    f.box.activate(f.connection, { DELEGATED: true });
     await f.box.enqueueAction('close', close);
     expect(f.writes).toHaveLength(1);
     const { d } = JSON.parse(f.writes[0]);
@@ -264,7 +307,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
         return { ...params, reduceOnly };
       },
     };
-    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    f.box.activate(f.connection, { DELEGATED: true });
     await expect(f.box.enqueueAction('close', close)).rejects.toMatchObject({
       code: 'delegatedReduceOnlyRequired',
     });
@@ -290,7 +333,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
       entered();
       await gate;
     };
-    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    f.box.activate(f.connection, { DELEGATED: true });
     const close = { ...params, reduceOnly: true };
     const pending = f.box.enqueueAction('close', close);
     await started;
@@ -311,7 +354,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
     async (capability) => {
       const f = await fixture();
       f.connection.capabilities[capability] = false;
-      expect(() => f.box.activate(f.connection, { DELEGATED_BYBIT: true })).toThrow(
+      expect(() => f.box.activate(f.connection, { DELEGATED: true })).toThrow(
         expect.objectContaining({
           code:
             capability === 'delegatedOrderFramesV1'
@@ -324,7 +367,7 @@ describe('DELEGATED place and reduce-only close activation', () => {
     },
   );
 
-  it('retires an admitted connection when the host disables DELEGATED_BYBIT during persistence', async () => {
+  it('retires an admitted connection when the host disables DELEGATED during persistence', async () => {
     const f = await fixture();
     let release!: () => void;
     let entered!: () => void;
@@ -338,12 +381,12 @@ describe('DELEGATED place and reduce-only close activation', () => {
       entered();
       await gate;
     };
-    f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    f.box.activate(f.connection, { DELEGATED: true });
     const pending = f.box.enqueueAction('place', params);
     await started;
-    expect(() => f.box.activate(f.connection, { DELEGATED_BYBIT: false })).toThrow(
+    expect(() => f.box.activate(f.connection, { DELEGATED: false })).toThrow(
       expect.objectContaining({
-        code: 'delegatedBybitDisabled',
+        code: 'delegatedDisabled',
       }),
     );
     release();
@@ -366,12 +409,12 @@ describe('DELEGATED place and reduce-only close activation', () => {
       entered();
       await gate;
     };
-    alice.box.activate(alice.connection, { DELEGATED_BYBIT: true });
+    alice.box.activate(alice.connection, { DELEGATED: true });
     const stale = alice.box.enqueueAction('place', params);
     await started;
     alice.box.close();
     const bob = await fixture('bob');
-    bob.box.activate(bob.connection, { DELEGATED_BYBIT: true });
+    bob.box.activate(bob.connection, { DELEGATED: true });
     await bob.box.enqueueAction('close', { ...params, reduceOnly: true });
     release();
     await stale;
@@ -384,13 +427,13 @@ describe('DELEGATED place and reduce-only close activation', () => {
 
   it('captures action capabilities and requires new admission after discovery changes', async () => {
     const f = await fixture();
-    const ticket = f.box.activate(f.connection, { DELEGATED_BYBIT: true });
+    const ticket = f.box.activate(f.connection, { DELEGATED: true });
     f.connection.capabilities.delegatedActivationScopeV1.place = false;
     expect(ticket.capabilities.delegatedActivationScopeV1?.place).toBe(true);
     expect(Object.isFrozen(ticket.capabilities.delegatedActivationScopeV1)).toBe(true);
     await f.box.enqueueAction('close', { ...params, reduceOnly: true });
     expect(f.writes).toHaveLength(1);
-    expect(() => f.box.activate(f.connection, { DELEGATED_BYBIT: true })).toThrow(
+    expect(() => f.box.activate(f.connection, { DELEGATED: true })).toThrow(
       expect.objectContaining({
         code: 'delegatedPlaceUnavailable',
       }),

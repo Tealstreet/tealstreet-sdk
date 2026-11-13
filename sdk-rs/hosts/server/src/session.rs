@@ -1737,8 +1737,7 @@ impl Session {
         out.send(envelope::msg(name, "applySettings:done", reply));
     }
 
-    /// Old unjoined callers can omit the venue while just one declaration is enabled.
-    /// Multiple declarations require an explicit target instead of guessing one.
+    /// An unjoined account must name its venue; an existing join supplies its own.
     fn handover_venue(&self, name: &str, data: &Value) -> Option<String> {
         if let Some(venue) = data.get("exchangeName") {
             return venue.as_str().map(str::to_owned);
@@ -1746,12 +1745,7 @@ impl Session {
         if let Some(joined) = self.joined.get(name) {
             return Some(joined.account.venue.clone());
         }
-        let venues = crate::delegated::enabled_venues();
-        if venues.len() == 1 {
-            venues.into_iter().next()
-        } else {
-            None
-        }
+        None
     }
 
     fn issue_handover(&mut self, name: &str, venue: &str) {
@@ -3151,7 +3145,7 @@ mod tests {
             out,
         );
         let refused = session
-            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct"}}"#)
+            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct","data":{"exchangeName":"bybit"}}}"#)
             .await
             .unwrap_err();
         assert_eq!(refused.code(), 1008);
@@ -3375,7 +3369,7 @@ mod tests {
         let registry = crate::accounts::tests::registry();
         let (mut session, mut sent) = user_session(registry, "handover-user");
         session
-            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct"}}"#)
+            .handle(r#"{"t":"msg","d":{"op":"delegated-key-req","accountName":"acct","data":{"exchangeName":"bybit"}}}"#)
             .await
             .unwrap();
         let frame = sent.try_recv().expect("a handover key response");
