@@ -19,12 +19,12 @@ fn native_closed_output_keeps_missing_zero_fee_and_timestamp_semantics() {
         r#"{"symbol":"BTCUSDT","side":"Buy","closedSize":0,"createdTime":"1700000000001","updatedTime":"1700000001000","closedPnl":null}"#.to_owned(),
     ];
     let result: serde_json::Value = serde_json::from_str(&output.encode(&rows).unwrap()).unwrap();
-    assert_eq!(result.as_array().unwrap().len(), 2);
+    assert_eq!(result.as_array().unwrap().len(), 3);
     assert_eq!(result[0]["side"], "short");
-    assert_eq!(result[0]["unrealizedPnl"], 0.);
+    assert_eq!(result[0]["unrealizedPnl"], serde_json::Value::Null);
     assert_eq!(result[1]["contracts"], 0.01);
     assert_eq!(result[1]["notional"], 1000.);
-    assert_eq!(result[1]["closedTime"], 1700000000000.);
+    assert_eq!(result[1]["closedTime"], 0.);
     assert_eq!(result[1]["leverage"], 10.);
 }
 
@@ -65,17 +65,17 @@ fn reported_field_decoding_keeps_native_coercion_and_literal_side_rules() {
     assert_eq!(result[0]["side"], "short");
     assert_eq!(result[0]["contracts"], 2.);
     assert_eq!(result[0]["exitPrice"], 3.);
-    assert_eq!(result[0]["closedTime"], 12.);
-    assert_eq!(result[0]["fees"], -0.25);
+    assert_eq!(result[0]["closedTime"], serde_json::Value::Null);
+    assert_eq!(result[0]["fees"], serde_json::Value::Null);
     assert_eq!(result[0]["leverage"], 1e-7);
     assert_eq!(result[1]["symbol"], "0");
     assert_eq!(result[1]["side"], "long");
-    assert_eq!(result[1]["unrealizedPnl"], 0.);
+    assert_eq!(result[1]["unrealizedPnl"], serde_json::Value::Null);
 }
 
 #[test]
 fn native_field_names_remain_distinct_across_projection_formats() {
-    let row = r#"{"symbol":"BTCUSDT","instId":"BTC-USDT-SWAP","createdTime":"1","cTime":"2","createTime":"3","ctime":"4","closedSize":"5","closeTotalPos":"6","closePositions":"7","qty":"8","realizedPnl":"9","realizedPNL":"10","leverage":"11","lever":"12"}"#;
+    let row = r#"{"symbol":"BTCUSDT","instId":"BTC-USDT-SWAP","createdTime":"1","cTime":"2","createTime":"3","ctime":"4","closedSize":"5","closeTotalPos":"6","closePositions":"7","qty":"8","realizedPnl":"9","realizedPNL":"10","closedPnl":"0","leverage":"11","lever":"12"}"#;
     for (format, symbol, time, size, pnl, leverage) in [
         (ClosedPositionFormat::Bybit, "BTCUSDT", 1., 5., 0., 11.),
         (ClosedPositionFormat::Okx, "BTC-USDT-SWAP", 2., 6., 9., 12.),
@@ -142,4 +142,174 @@ fn ignored_native_values_preserve_numeric_and_depth_refusals() {
             }
         }
     }
+}
+
+fn projected(format: ClosedPositionFormat, row: &serde_json::Value) -> serde_json::Value {
+    let output = output::ClosedPnlOutput::new(format, "fixture".into(), false, None, &[]);
+    serde_json::from_str::<serde_json::Value>(&output.encode(&[row.to_string()]).unwrap()).unwrap()
+        [0]
+    .clone()
+}
+
+#[test]
+fn every_history_number_preserves_unknown_zero_and_valid_values() {
+    use serde_json::{Value, json};
+    for (format, symbol, opened, closed, mappings) in [
+        (
+            ClosedPositionFormat::Bybit,
+            "symbol",
+            "createdTime",
+            "updatedTime",
+            vec![
+                ("closedSize", "contracts"),
+                ("cumExitValue", "notional"),
+                ("avgEntryPrice", "entryPrice"),
+                ("avgExitPrice", "exitPrice"),
+                ("closedPnl", "unrealizedPnl"),
+                ("openFee", "fees"),
+                ("closeFee", "fees"),
+                ("leverage", "leverage"),
+            ],
+        ),
+        (
+            ClosedPositionFormat::Okx,
+            "instId",
+            "cTime",
+            "uTime",
+            vec![
+                ("closeTotalPos", "contracts"),
+                ("openAvgPx", "entryPrice"),
+                ("closeAvgPx", "exitPrice"),
+                ("realizedPnl", "unrealizedPnl"),
+                ("fee", "fees"),
+                ("lever", "leverage"),
+            ],
+        ),
+        (
+            ClosedPositionFormat::Blofin,
+            "instId",
+            "createTime",
+            "updateTime",
+            vec![
+                ("closePositions", "contracts"),
+                ("openAveragePrice", "entryPrice"),
+                ("closeAveragePrice", "exitPrice"),
+                ("realizedPnl", "unrealizedPnl"),
+                ("fee", "fees"),
+                ("leverage", "leverage"),
+            ],
+        ),
+        (
+            ClosedPositionFormat::Bitunix,
+            "symbol",
+            "ctime",
+            "mtime",
+            vec![
+                ("qty", "contracts"),
+                ("entryPrice", "entryPrice"),
+                ("closePrice", "exitPrice"),
+                ("realizedPNL", "unrealizedPnl"),
+                ("fee", "fees"),
+                ("leverage", "leverage"),
+            ],
+        ),
+    ] {
+        let mut base = json!({symbol: "BTCUSDT", opened: "100", closed: "200", "openFee": "0", "closeFee": "0"});
+        for (input, _) in &mappings {
+            base[*input] = json!("0");
+        }
+        for (input, output) in mappings
+            .into_iter()
+            .chain([(opened, "time"), (closed, "closedTime")])
+        {
+            for value in [
+                None,
+                Some(Value::Null),
+                Some(json!("not-a-number")),
+                Some(json!("NaN")),
+                Some(json!("Infinity")),
+                Some(json!("-Infinity")),
+                Some(json!("1e309")),
+            ] {
+                let mut row = base.clone();
+                if let Some(value) = value {
+                    row[input] = value;
+                } else {
+                    row.as_object_mut().unwrap().remove(input);
+                }
+                assert_eq!(
+                    projected(format, &row)[output],
+                    Value::Null,
+                    "{format:?} {input} {row}"
+                );
+            }
+            for value in [json!("0"), json!(0), json!("12.5"), json!(12.5)] {
+                let mut row = base.clone();
+                row[input] = value.clone();
+                let expected = if value == json!("0") || value == json!(0) {
+                    0.
+                } else if output == "time" || output == "closedTime" {
+                    12.
+                } else {
+                    12.5
+                };
+                assert_eq!(
+                    projected(format, &row)[output].as_f64(),
+                    Some(expected),
+                    "{format:?} {input} {value}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn derived_history_values_require_all_inputs_and_finite_results() {
+    use serde_json::{Value, json};
+    for format in [
+        ClosedPositionFormat::Okx,
+        ClosedPositionFormat::Blofin,
+        ClosedPositionFormat::Bitunix,
+    ] {
+        let row = json!({"symbol":"BTCUSDT","instId":"BTCUSDT","createdTime":"1","cTime":"1","createTime":"1","ctime":"1","closeTotalPos":"2","closePositions":"2","qty":"2"});
+        assert_eq!(projected(format, &row)["notional"], Value::Null);
+    }
+    let inverse = json!({"symbol":"BTCUSD","createdTime":"1","closedSize":"10"});
+    assert_eq!(
+        projected(ClosedPositionFormat::Bybit, &inverse)["contracts"],
+        Value::Null
+    );
+    assert_eq!(
+        projected(ClosedPositionFormat::Bybit, &inverse)["notional"],
+        10.
+    );
+    let overflow = json!({"symbol":"BTCUSDT","ctime":"1","qty":"1e308","closePrice":"1e308"});
+    assert_eq!(
+        projected(ClosedPositionFormat::Bitunix, &overflow)["notional"],
+        Value::Null
+    );
+    let fee = json!({"symbol":"BTCUSDT","createdTime":"1","openFee":"1e308","closeFee":"1e308"});
+    assert_eq!(
+        projected(ClosedPositionFormat::Bybit, &fee)["fees"],
+        Value::Null
+    );
+}
+
+#[test]
+fn native_unknown_fixture_is_the_projections_actual_serialized_output() {
+    let output = output::ClosedPnlOutput::new(
+        ClosedPositionFormat::Bybit,
+        "fixture".into(),
+        false,
+        None,
+        &[],
+    );
+    let rows = [
+        r#"{"symbol":"BTCUSDT","side":"Sell"}"#.to_owned(),
+        r#"{"symbol":"BTCUSDT","side":"Sell","createdTime":0,"updatedTime":0,"closedSize":"0","cumExitValue":"0","avgEntryPrice":"0","avgExitPrice":"0","closedPnl":"0","openFee":"0","closeFee":"0","leverage":"0"}"#.to_owned(),
+    ];
+    let actual: serde_json::Value = serde_json::from_str(&output.encode(&rows).unwrap()).unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/history-unknown-output.json")).unwrap();
+    assert_eq!(actual, expected);
 }

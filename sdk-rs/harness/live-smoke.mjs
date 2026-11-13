@@ -94,7 +94,9 @@ export function smokeOrder(market, book, rules = {}, postOnly = true) {
   const amount = units(BigNumber.maximum(new BigNumber(minAmount).times(perUnit), minimumNotional), step, true, perUnit);
   if (!positive(amount) || amount > maxAmount) fail('minimum-exceeds-market-limit');
   const notional = amount * scale * (quoteQuantity ? 1 : Math.max(price, amendPrice));
-  if (!positive(notional) || notional > LIVE_SMOKE_MAX_NOTIONAL) fail('notional-cap-exceeded');
+  if (!positive(notional) || notional > LIVE_SMOKE_MAX_NOTIONAL ||
+      (rules.maximumNotional !== undefined && (!positive(rules.maximumNotional) || notional > rules.maximumNotional)))
+    fail('notional-cap-exceeded');
   return { symbol: market.symbol, type: 'limit', side: 'buy', amount, price, amendPrice,
     ...(postOnly ? { timeInForce: 'PostOnly' } : {}) };
 }
