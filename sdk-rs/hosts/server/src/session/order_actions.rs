@@ -209,10 +209,15 @@ impl Session {
         };
         let registry = self.registry.clone();
         let socket = self.socket;
+        let expires_at_ms = self.token_expires_at_ms();
         let request_id = id.clone();
         tokio::spawn(async move {
             let loaded =
                 methods::until_nuke_can_see(&account.handle, mode, methods::READ_WAIT).await;
+            if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
+                receipt.finish(Err(json!({"message":message,"outcome":"unknown"})));
+                return;
+            }
             if receipt.expired() {
                 receipt.finish(Err(order_actions::expired_outcome()));
                 return;

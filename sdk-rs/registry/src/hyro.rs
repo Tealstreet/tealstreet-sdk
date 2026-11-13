@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::{EndpointOptions, invalid};
-use safe_cex_engine::VenueError;
+use safe_cex_engine::{Outcome, VenueError};
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,13 +45,11 @@ impl HyroConfig {
     }
 
     pub fn resolve(self, testnet: bool) -> Result<EndpointOptions, VenueError> {
-        // The missing-production fallback checks livenet even for testnet accounts.
-        let selected =
-            if self.mode.as_deref() == Some("demo") || self.production.rest.livenet.is_empty() {
-                self.simulator
-            } else {
-                self.production
-            };
+        let selected = if self.mode.as_deref() == Some("demo") {
+            self.simulator
+        } else {
+            self.production
+        };
         let endpoints = EndpointOptions {
             rest: selected.rest.select(testnet),
             public_ws: selected.public_ws.select(testnet),
@@ -61,9 +59,10 @@ impl HyroConfig {
             || endpoints.public_ws.is_empty()
             || endpoints.private_ws.is_empty()
         {
-            return Err(invalid(
-                "HyroTrader REST/public/private URLs are not configured",
-            ));
+            return Err(
+                invalid("HyroTrader REST/public/private URLs are not configured")
+                    .outcome(Outcome::NotSent),
+            );
         }
         Ok(endpoints)
     }

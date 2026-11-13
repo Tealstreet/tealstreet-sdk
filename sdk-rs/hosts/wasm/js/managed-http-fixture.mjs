@@ -12,6 +12,8 @@ export function releasedHttpActions(engine, wire, now) {
     assert.ok(action.op !== 'sign', 'Fixture requires its trusted local signer');
     if (action.op !== 'managedHttp') { actions.push(action); continue; }
     if (action.phase === 'prepare') {
+      const preparation = fields(action.preparation, 'p2', 4);
+      assert.equal(preparation[1], String(action.packet.request));
       assert.ok(engine.httpPreparationPending(action.preparation));
       assert.ok(!resources.has(action.preparation), 'Cannot replace a prepared fixture resource');
       const resource = String(++resourceId);
@@ -21,11 +23,11 @@ export function releasedHttpActions(engine, wire, now) {
       const prepared = resources.get(action.preparation);
       assert.ok(prepared, 'Bind needs the exact preparation');
       assert.equal(prepared.request, action.packet.request);
-      const preparation = fields(action.preparation, 'p1', 3);
-      const permit = fields(action.permit, 'r1', 4);
-      assert.deepEqual(permit.slice(0, 2), preparation.slice(0, 2));
-      assert.equal(permit[0], String(action.packet.request));
-      assert.equal(permit[2], prepared.resource);
+      const preparation = fields(action.preparation, 'p2', 4);
+      const permit = fields(action.permit, 'r2', 5);
+      assert.deepEqual(permit.slice(0, 3), preparation.slice(0, 3));
+      assert.equal(permit[1], String(action.packet.request));
+      assert.equal(permit[3], prepared.resource);
       resources.delete(action.preparation);
       const claim = JSON.parse(engine.httpClaim(action.permit, now));
       assert.ok(claim.status === 'released' || claim.status === 'denied', 'Fixture cannot hide pacing waits');
@@ -44,6 +46,8 @@ function fields(token, prefix, count) {
   const parts = token.split(':');
   assert.equal(parts.shift(), prefix);
   assert.equal(parts.length, count);
+  assert.notEqual(parts[0], '0', 'Issuer must be nonzero');
+  if (prefix === 'r2') assert.notEqual(parts[4], '0', 'Permit sequence must be nonzero');
   for (const part of parts) {
     assert.match(part, /^(?:0|[1-9][0-9]*)$/);
     assert.ok(part.length < 20 || (part.length === 20 && part <= '18446744073709551615'));

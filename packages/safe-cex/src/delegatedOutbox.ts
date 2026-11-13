@@ -61,6 +61,7 @@ export interface DelegatedIntent extends OutboxScope {
   result?: DelegatedActionResult;
   fingerprint: string;
   intentId: string;
+  /** Caller keys remain reserved after their completed history ages. */
   callerSuppliedIntentId?: true;
   seq: number;
   params: Record<string, unknown>;
@@ -274,9 +275,9 @@ export class DelegatedOutbox {
   private readonly sent = new Map<string, Readonly<OutboxConnection>>();
   private readonly canceled = new Map<string, Readonly<OutboxConnection>>();
   private readonly durable = new Set<string>();
-  // Identity durability survives a failed later state update. This is never
-  // no-handoff evidence and cannot make an intent replayable.
-  private readonly persistedIntentKeys = new Set<string>();
+  // A metadata-only retry must preserve the committed state, even when a newer
+  // in-memory transition failed to persist or handoff stopped after write-ahead.
+  private readonly persistedIntents = new Map<string, DelegatedIntent>();
   // Only current, durably completed rows can release capacity or retire.
   private readonly completedIntents = new Map<string, DelegatedIntent>();
   private connection?: Readonly<OutboxConnection>;
@@ -513,13 +514,34 @@ export class DelegatedOutbox {
           : delegatedIntentFingerprint(this.scope.accountName, existing.intentId, params, existing.seq);
         if (!!existing.action !== !!action || existing.fingerprint !== fingerprint)
           return Promise.reject(new DelegatedIntentError('intentConflict'));
-        // Retry is an identity lookup, never evidence for changing handoff or
-        // replay state. Serialize behind the original put and keep its brands.
+        // Serialize behind the original put: a retry must not report durability
+        // before that write commits, or turn its failure into another submission.
         return this.serial(async () => {
           if (!this.active) throw new Error('Outbox is closed or full');
-          if (!this.persistedIntentKeys.has(existing.intentId)) throw new DelegatedIntentError('intentNotDurable');
+          const committed = this.persistedIntents.get(existing.intentId);
+          if (!committed) throw new DelegatedIntentError('intentNotDurable');
+          if (!committed.callerSuppliedIntentId) {
+            const reservation = clone(committed);
+            // JSON snapshots carry evidence, not runtime brands. Reissue only
+            // from the same constructors used by restore; never infer no send
+            // from the current in-memory label or a failed storage operation.
+            if (reservation.state === 'notSent') {
+              const proof = storedNotSentEvidence(reservation);
+              if (proof) markDelegatedNotSent(reservation, proof);
+              else unprovenNotSent(reservation);
+            } else if (reservation.state === 'queued') {
+              const proof = storedNoHandoffEvidence(reservation);
+              if (proof) markDelegatedReplayable(reservation, proof);
+              else unprovenNotSent(reservation);
+            }
+            reservation.callerSuppliedIntentId = true;
+            await this.options.storage.put(this.scope, reservation);
+            this.persistedIntents.set(existing.intentId, reservation);
+          }
+          // A failed reservation put leaves this false so the next retry must
+          // commit it again. Do not mark a newer business outcome durable.
           existing.callerSuppliedIntentId = true;
-          await this.persist(existing);
+          this.refreshCompleted(existing);
           return existing.intentId;
         });
       }
@@ -539,7 +561,7 @@ export class DelegatedOutbox {
         : delegatedIntentFingerprint(this.scope.accountName, intentId, params, this.sequence + 1),
       intentId,
       ...(options ? { callerSuppliedIntentId: true as const } : {}),
-      seq: ++this.sequence,
+      seq: this.sequence + 1,
       params: clone(params),
       clockEpoch: this.options.clock.epoch,
       createdAt,
@@ -550,6 +572,7 @@ export class DelegatedOutbox {
       return Promise.reject(new Error('Invalid monotonic clock'));
     if (JSON.stringify(row.params).length > 60 * 1024)
       return Promise.reject(new Error('Order parameters are too large'));
+    this.sequence = row.seq;
     this.intents.set(intentId, row);
     markDelegatedReplayable(row, { kind: 'noHandoff', source: 'local', attempted: false });
     this.arm(row);
@@ -806,10 +829,14 @@ export class DelegatedOutbox {
     // Write ahead of the physical handoff. On reload an ambiguous handoff is
     // unknown, even if saving a later acknowledgement or outcome failed.
     try {
-      await this.options.storage.put(
-        this.scope,
-        clone({ ...row, state: 'sending' as const, notSentEvidence: undefined, noHandoffEvidence: undefined }),
-      );
+      const sending = clone({
+        ...row,
+        state: 'sending' as const,
+        notSentEvidence: undefined,
+        noHandoffEvidence: undefined,
+      });
+      await this.options.storage.put(this.scope, sending);
+      this.persistedIntents.set(row.intentId, sending);
     } catch {
       // The queued intent is already durable. Preserve successful enqueue and
       // its identity while waiting for storage to prepare the handoff.
@@ -1016,7 +1043,7 @@ export class DelegatedOutbox {
     this.normalizeNotSent(row);
     const saved = clone(row);
     await this.options.storage.put(this.scope, saved);
-    this.persistedIntentKeys.add(row.intentId);
+    this.persistedIntents.set(row.intentId, saved);
     // A synchronous deadline/cancellation can change memory during this await.
     if (JSON.stringify(saved) === JSON.stringify(row)) this.durable.add(row.intentId);
     else this.durable.delete(row.intentId);
@@ -1051,7 +1078,7 @@ export class DelegatedOutbox {
     this.completedIntents.delete(row.intentId);
     this.intents.delete(row.intentId);
     this.durable.delete(row.intentId);
-    this.persistedIntentKeys.delete(row.intentId);
+    this.persistedIntents.delete(row.intentId);
     this.outcomeSequences.delete(row.intentId);
   }
   private async compact(): Promise<void> {
