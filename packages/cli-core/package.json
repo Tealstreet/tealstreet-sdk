@@ -12,6 +12,7 @@
     "test-ci": "vitest run"
   },
   "dependencies": {
+    "@tealstreet/math": "*",
     "@tealstreet/safe-cex": "*",
     "@tealstreet/script-api-core": "*",
     "@tealstreet/utils": "*"
