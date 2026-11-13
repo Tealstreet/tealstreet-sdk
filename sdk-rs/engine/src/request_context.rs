@@ -7,6 +7,11 @@
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
+#[path = "http_token_issuer.rs"]
+mod token_issuer;
+
+const MAX_HOST_TOKEN_BYTES: usize = 103;
+
 #[cfg(feature = "http-plans")]
 #[path = "request_context_plan.rs"]
 pub mod plan;
@@ -768,6 +773,7 @@ impl HttpRelease {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Permit {
+    issuer: u64,
     attempt: Attempt,
     preparation: u64,
     sequence: u64,
@@ -776,6 +782,7 @@ pub struct Permit {
 /// Returned to asynchronous route/sign work and checked again on completion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Preparation {
+    issuer: u64,
     attempt: Attempt,
     sequence: u64,
 }
@@ -788,16 +795,20 @@ impl Preparation {
     /// Lossless opaque host token: wide counters must never cross JS as numbers.
     pub fn to_wire(self) -> String {
         format!(
-            "p1:{}:{}:{}",
-            self.attempt.request.0, self.attempt.generation, self.sequence
+            "p2:{}:{}:{}:{}",
+            self.issuer, self.attempt.request.0, self.attempt.generation, self.sequence
         )
     }
 
     pub fn from_wire(token: &str) -> Result<Self, Error> {
-        let parts = token_parts(token.strip_prefix("p1:").ok_or(Error::Invalid)?, 3)?;
+        let parts = token_parts(token.strip_prefix("p2:").ok_or(Error::Invalid)?, 4)?;
+        if parts[0] == 0 {
+            return Err(Error::Invalid);
+        }
         Ok(Self {
-            attempt: token_attempt(parts[0], parts[1])?,
-            sequence: parts[2],
+            issuer: parts[0],
+            attempt: token_attempt(parts[1], parts[2])?,
+            sequence: parts[3],
         })
     }
 }
@@ -813,20 +824,25 @@ impl Permit {
 
     pub fn to_wire(self) -> String {
         format!(
-            "r1:{}:{}:{}:{}",
-            self.attempt.request.0, self.attempt.generation, self.preparation, self.sequence
+            "r2:{}:{}:{}:{}:{}",
+            self.issuer,
+            self.attempt.request.0,
+            self.attempt.generation,
+            self.preparation,
+            self.sequence
         )
     }
 
     pub fn from_wire(token: &str) -> Result<Self, Error> {
-        let parts = token_parts(token.strip_prefix("r1:").ok_or(Error::Invalid)?, 4)?;
-        if parts[3] == 0 {
+        let parts = token_parts(token.strip_prefix("r2:").ok_or(Error::Invalid)?, 5)?;
+        if parts[0] == 0 || parts[4] == 0 {
             return Err(Error::Invalid);
         }
         Ok(Self {
-            attempt: token_attempt(parts[0], parts[1])?,
-            preparation: parts[2],
-            sequence: parts[3],
+            issuer: parts[0],
+            attempt: token_attempt(parts[1], parts[2])?,
+            preparation: parts[3],
+            sequence: parts[4],
         })
     }
 }
@@ -841,11 +857,11 @@ fn token_attempt(request: u64, generation: u64) -> Result<Attempt, Error> {
     })
 }
 
-fn token_parts(token: &str, count: usize) -> Result<[u64; 4], Error> {
-    if token.len() > 80 {
+fn token_parts(token: &str, count: usize) -> Result<[u64; 5], Error> {
+    if token.len() > MAX_HOST_TOKEN_BYTES - 3 {
         return Err(Error::Invalid);
     }
-    let mut values = [0; 4];
+    let mut values = [0; 5];
     let mut words = token.split(':');
     for value in &mut values[..count] {
         let word = words.next().ok_or(Error::Invalid)?;
@@ -879,6 +895,7 @@ enum State {
 /// One physical attempt. A retry constructs another lifecycle with the same
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
+    issuer: u64,
     #[cfg(not(target_arch = "wasm32"))]
     created_at: f64,
     context: Context,
@@ -909,6 +926,7 @@ pub(crate) mod group_lifecycle;
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            issuer: token_issuer::next(),
             #[cfg(not(target_arch = "wasm32"))]
             created_at: context.created_at,
             deadline: context.deadline(),
@@ -981,6 +999,17 @@ impl Lifecycle {
     pub fn deadline(&self) -> f64 {
         self.deadline
     }
+    #[cfg(test)]
+    pub(crate) fn narrow_test_window(&mut self, created_at: f64, deadline: f64) {
+        assert!(created_at.is_finite() && deadline.is_finite());
+        assert!(created_at < deadline && deadline < self.deadline);
+        assert_eq!(self.state, State::Preparing);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.created_at = created_at;
+        }
+        self.deadline = deadline;
+    }
     pub fn context(&self) -> &Context {
         &self.context
     }
@@ -990,6 +1019,7 @@ impl Lifecycle {
 
     pub fn preparation(&self) -> Preparation {
         Preparation {
+            issuer: self.issuer,
             attempt: self.attempt,
             sequence: self.preparation,
         }
@@ -1064,6 +1094,7 @@ impl Lifecycle {
         };
         self.permits = self.permits.checked_add(1).ok_or(Error::Capacity)?;
         let permit = Permit {
+            issuer: self.issuer,
             attempt: self.attempt,
             preparation: route.id,
             sequence: self.permits,

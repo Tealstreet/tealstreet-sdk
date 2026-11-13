@@ -81,6 +81,19 @@ impl TwapFactory {
         }
     }
 
+    /// Hosted identity binding does not change the browser's account-label book.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_with_owner(
+        account_name: &str,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+        owner: String,
+    ) -> Self {
+        let factory = Self::new(account_name, account_cx, chasers);
+        factory.inner.book.borrow_mut().owner_id = Some(owner);
+        factory
+    }
+
     /// Stop every TWAP (`twap:stop` each) and send the final state; nothing is
     /// spawned. Chase slices are the chaser book's: await `ChaserBook::shutdown`
     /// before disposing the account scope.

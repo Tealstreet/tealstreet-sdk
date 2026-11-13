@@ -259,6 +259,7 @@ async fn partial_activation_paused_restore_and_cleanup_preserve_dispatch() {
                     op: received,
                     data: payload,
                     origin,
+                    action: None,
                 }) = inbox.recv().await
                 else {
                     panic!("missing safe algo dispatch");
@@ -298,7 +299,13 @@ async fn partial_activation_cosigned_running_restore_preserves_dispatch() {
             while inbox.try_recv().is_ok() {}
             let rows = json!([restored_twap("cosigned-running", "running", true)]);
             send_algo(&mut session, "twap:state", rows.clone()).await;
-            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+            let Some(crate::algos::AlgoInput::Op {
+                op,
+                data,
+                origin,
+                action: None,
+            }) = inbox.recv().await
+            else {
                 panic!("missing COSIGNED restore dispatch");
             };
             assert_eq!(op, "twap:state");
@@ -453,7 +460,13 @@ async fn partial_activation_decoded_paused_restore_preserves_dispatch() {
                 safe_cex_algo_twap::TwapStatus::Paused
             )]);
             send_algo(&mut session, "twap:state", rows.clone()).await;
-            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+            let Some(crate::algos::AlgoInput::Op {
+                op,
+                data,
+                origin,
+                action: None,
+            }) = inbox.recv().await
+            else {
                 panic!("missing paused restore dispatch");
             };
             assert_eq!(op, "twap:state");
@@ -508,7 +521,13 @@ async fn partial_activation_cosigned_decoded_running_restore_preserves_dispatch(
                 safe_cex_algo_twap::TwapStatus::Running
             )]);
             send_algo(&mut session, "twap:state", rows.clone()).await;
-            let Some(crate::algos::AlgoInput::Op { op, data, origin }) = inbox.recv().await else {
+            let Some(crate::algos::AlgoInput::Op {
+                op,
+                data,
+                origin,
+                action: None,
+            }) = inbox.recv().await
+            else {
                 panic!("missing COSIGNED restore dispatch");
             };
             assert_eq!(op, "twap:state");
