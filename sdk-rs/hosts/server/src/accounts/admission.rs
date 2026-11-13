@@ -115,15 +115,17 @@ impl Registry {
     ) -> Result<ProbePermit, ProbeRefusal> {
         permit.token_expires_at = Some(token.as_ref().ok_or(ProbeRefusal::INVALID)?.1);
         permit.check(user, init)?;
-        let (plan, options, provider, mode) = match (candidate, link.as_ref()) {
+        let (plan, options, provider, mode, resident) = match (candidate, link.as_ref()) {
             (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
                 let prepared =
                     prepare_delegated(init, candidate.pair()).map_err(|_| ProbeRefusal::INVALID)?;
+                let provider = prepared.resident.provider();
                 (
                     prepared.plan,
                     prepared.options,
-                    prepared.resident.provider(),
+                    provider,
                     "hosted_delegated",
+                    Some(prepared.resident),
                 )
             }
             (None, Some(link)) if init.signing_mode.as_deref() != Some("delegated") => {
@@ -135,6 +137,7 @@ impl Registry {
                     prepared.options,
                     remote.provider,
                     "hosted_cosign",
+                    None,
                 )
             }
             _ => return Err(ProbeRefusal::INVALID),
@@ -162,6 +165,8 @@ impl Registry {
             let placed = self.threads.place(move |placement| {
                 tokio::task::spawn_local(async move {
                     let _placement = placement;
+                    // Provider handles remain usable only while their owner lives.
+                    let _resident = resident;
                     let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
                         lease.as_ref().is_none_or(|permit| permit.allowed())
                             && expiry.is_none_or(|expiry| expiry > now_ms())

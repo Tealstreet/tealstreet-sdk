@@ -178,7 +178,29 @@ async fn admitted_reconnect_resets_retention_and_another_user_does_not() {
                 ("synthetic-token".into(), u64::MAX),
                 &|_| outbox.clone(),
             );
-            assert_eq!(resumed.len(), 1);
+            assert!(resumed.is_empty(), "DELEGATED requires fresh admission");
+            let init = InitPayload {
+                account_name: a.name.clone(),
+                exchange_name: "bybit".into(),
+                key: "synthetic-key".into(),
+                ..Default::default()
+            };
+            let admitted = registry
+                .obtain_delegated(
+                    "A",
+                    &init,
+                    9,
+                    Some(("synthetic-token".into(), u64::MAX)),
+                    outbox,
+                    DelegatedPair::new(
+                        "synthetic-key".into(),
+                        Secret::new("synthetic-secret".into()),
+                        None,
+                    ),
+                )
+                .await
+                .unwrap();
+            assert!(Arc::ptr_eq(&a, &admitted));
             advance(RETAIN).await;
             assert!(
                 a_inbox.try_recv().is_err(),
