@@ -23,6 +23,7 @@ const diagnosticEvents = [
   'grafana-pws-sub',
   'grafana-http-request',
   'grafana-http-response',
+  'ws-diagnostic',
 ];
 const liveEvents = ['exec-result', 'chaser:complete'];
 const material = 'synthetic-exec-diagnostic-material';

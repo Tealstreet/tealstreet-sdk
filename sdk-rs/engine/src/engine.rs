@@ -1454,7 +1454,7 @@ mod resource_identity_regressions {
     fn unsafe_managed_cancel_signing_id_uses_the_same_terminal_boundary() {
         assert_unsafe_batch_retires(Action::ManagedHttp(Box::new(
             crate::request_context::HttpAction::Cancel {
-                preparation: crate::request_context::Preparation::from_wire("p1:1:1:0").unwrap(),
+                preparation: crate::request_context::Preparation::from_wire("p2:1:1:1:0").unwrap(),
                 signing: Some(RequestId(crate::resource_ids::MAX_RESOURCE_ID + 1)),
             },
         )));

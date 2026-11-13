@@ -703,6 +703,62 @@ fn failed_once(
     assert_eq!(errors[0].outcome, Some(outcome));
     errors[0]
 }
+
+#[test]
+fn retired_engine_group_permits_cannot_release_a_replacement_group() {
+    use safe_cex_engine::request_context::{Error, GroupClaim, GroupPermit};
+    let consumer = || Consumer {
+        pair: true,
+        ..Default::default()
+    };
+    for released in [false, true] {
+        let (mut a, old, _) = announced(consumer(), 3.);
+        let old_wire = old.to_wire();
+        if released {
+            assert!(
+                matches!(a.claim_http_group(3., old), Ok(GroupClaim::Released(ref rows)) if rows.len() == 2)
+            );
+        }
+        drop(a);
+
+        let old = GroupPermit::from_wire(&old_wire).unwrap();
+        let (mut b, current, _) = announced(consumer(), 3.);
+        for (old, current) in old.members().iter().zip(current.members()) {
+            assert_eq!(
+                old.attempt(),
+                current.attempt(),
+                "local counters deliberately collide"
+            );
+            assert_eq!(old.prepared_id(), current.prepared_id());
+        }
+        assert!(!b.http_group_pending(&old));
+        assert!(matches!(
+            b.claim_http_group(3., old.clone()),
+            Err(Error::Revoked)
+        ));
+        assert!(b.drain_actions().next().is_none());
+
+        let wire = current.to_wire();
+        let prefix = wire.split(';').next().unwrap();
+        let mixed = GroupPermit::from_wire(&format!(
+            "{prefix};{};{}",
+            current.members()[0].to_wire(),
+            old.members()[1].to_wire()
+        ))
+        .unwrap();
+        assert!(!b.http_group_pending(&mixed));
+        assert!(matches!(b.claim_http_group(3., mixed), Err(Error::Revoked)));
+        assert!(
+            b.drain_actions().next().is_none(),
+            "foreign member must not cancel B's siblings"
+        );
+        assert!(b.http_group_pending(&current));
+        assert!(
+            matches!(b.claim_http_group(3., current), Ok(GroupClaim::Released(ref rows)) if rows.len() == 2)
+        );
+    }
+}
+
 #[test]
 fn stale_announced_group_refuses_partial_completion_and_seals_once() {
     use safe_cex_engine::request_context::{Error, HttpAction};

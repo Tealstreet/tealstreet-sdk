@@ -1443,6 +1443,7 @@ export class ExchangeWorker {
       'grafana-pws-sub',
       'grafana-http-request',
       'grafana-http-response',
+      'ws-diagnostic',
     ];
     logEvents.forEach((event) => {
       this._exchange!.on(event, (...args: any[]) => {

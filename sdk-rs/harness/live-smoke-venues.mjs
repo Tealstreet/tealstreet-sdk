@@ -144,7 +144,9 @@ register('polymarket', 'POLYMARKET', {
   },
 });
 
-export const LIVE_SMOKE_VENUES = Object.freeze(Object.keys(VENUES));
+// Fixture qualification and an opt-in smoke profile confer no ordinary admission.
+export const LIVE_SMOKE_VENUES = Object.freeze(Object.keys(VENUES)
+  .filter(name => !VENUES[name].rustFixture && !profiles[name]?.optIn));
 
 const setOption = (options, path, value) => {
   const parts = path.split('.');
@@ -191,7 +193,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env,
   { credentials, allowMissing = false, enableBingxSpot = false, authorized = false } = {}) => {
   if (!Object.hasOwn(VENUES, name) && name !== 'bingxspot') throw new Error('Unknown live-smoke venue');
   if (name === 'bingxspot' && (enableBingxSpot !== true || authorized !== true))
-    throw new Error('BingX Spot smoke requires explicit opt-in and authorization');
+    throw new Error('Venue has no reviewed live-smoke endpoint profile; BingX Spot smoke requires explicit opt-in and authorization');
   const profile = profiles[name];
   if (!profile) throw new Error('Venue has no reviewed live-smoke endpoint profile');
   const availableModes = Object.keys(profile.environments);
