@@ -13,7 +13,11 @@ or chaser was already dispatched, the typed result remains explicitly unknown.
 EXEC preserves that outcome in the correlated result instead of relabelling it.
 
 New TWAPs persist `ownerId` and `ownerGeneration` from that trusted snapshot.
-A restore must match both tags and the account name. Foreign rows, stale
+A restore must match both tags and the account name. Native identity-bound
+`new_with_owner` constructors take the same full `TwapOwner`, including its
+trusted generation, and permit a renamed label only for that verified identity.
+The original persisted option/state labels must agree before remapping; the
+owner/generation are never synthesized from the receiving book. Foreign rows, stale
 generations, and rows missing either tag are dropped without retaining timers
 or placing slices. Matching rows preserve their existing schedule and sizing.
 
@@ -31,13 +35,14 @@ including untagged rows; it never invents missing tags. The separate
 tags to match its trusted owner. Invalid or unavailable explicit ownership
 never falls back to compatibility mode.
 
-The native server initially binds the verified authenticated user and a generation
-derived from that user. Same-socket reinit, reconnects and same-owner signing
-handovers keep the current generation: the approved 60-second COSIGNED resume
-window keeps the account's TWAPs. Fresh bindings for the same identity use the
-same initial generation across account rebuilds, restarts and box moves. Only an
-in-place authenticated owner change advances the generation, and returning to an
-earlier owner never reinstates its retired generation. Queued TWAP ops
+The native server binds the verified registry identity digest when present,
+otherwise the authenticated user, with a generation derived from that binding.
+Same-socket reinit, reconnects and same-owner signing handovers keep the current
+generation: the approved 60-second COSIGNED resume window keeps the account's
+TWAPs. Fresh bindings for the same identity use the same initial generation across
+account rebuilds, restarts and box moves. Only an in-place authenticated owner
+change advances the generation, and returning to an earlier owner never
+reinstates its retired generation. Queued TWAP ops
 captured before that change are refused, and remaining slices from the old
 owner are dropped. EXEC captures the binding before a sleep
 or wait and cannot start a TWAP after it changes. Already-issued venue writes are not undone;

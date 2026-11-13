@@ -190,6 +190,8 @@ pub enum TwapEffect {
 /// One account's TWAPs, in insertion order like the TS `Map`.
 #[derive(Debug)]
 pub struct TwapBook {
+    #[cfg(not(target_arch = "wasm32"))]
+    owner_id: Option<String>,
     /// The `accountName` every TWAP here must carry; `activeTWAPs` lists by it.
     account_name: String,
     owner: Option<TwapOwner>,
@@ -214,6 +216,8 @@ impl TwapBook {
     /// Unbound books can start new TWAPs but cannot adopt persisted rows.
     pub fn new(account_name: impl Into<String>) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            owner_id: None,
             account_name: account_name.into(),
             owner: None,
             legacy_restore: false,
@@ -231,6 +235,16 @@ impl TwapBook {
         }
     }
 
+    /// Native identity books permit a label change only after matching both owner tags.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_with_owner(account_name: impl Into<String>, owner: TwapOwner) -> Self {
+        Self {
+            owner_id: Some(owner.owner_id.clone()),
+            owner: Some(owner),
+            ..Self::new(account_name)
+        }
+    }
+
     /// Interim WASM compatibility only: callers without an owner retain account-name checks.
     pub fn with_legacy_restore(account_name: impl Into<String>) -> Self {
         Self {
@@ -243,6 +257,10 @@ impl TwapBook {
     pub fn rebind_owner(&mut self, owner: Option<TwapOwner>) -> bool {
         if self.owner == owner {
             return false;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.owner_id.is_some() {
+            self.owner_id = owner.as_ref().map(|owner| owner.owner_id.clone());
         }
         self.owner = owner;
         self.legacy_restore = false;
@@ -588,6 +606,32 @@ impl TwapBook {
                     });
                     return;
                 }
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            let entry = {
+                let mut entry = entry;
+                if self.owner_id.is_some() && entry.owner_id != self.owner_id {
+                    effects.push(TwapEffect::Log {
+                        message: format!(
+                            "TWAP {} not restored: persisted TWAP owner or generation does not match",
+                            entry.options.symbol()
+                        ),
+                    });
+                    continue;
+                }
+                if self.owner_id.is_some() {
+                    if entry.state.account_name != entry.options.account_name {
+                        effects.push(TwapEffect::Log {
+                            message:
+                                "TWAP not restored: state names another account than its options"
+                                    .into(),
+                        });
+                        continue;
+                    }
+                    entry.options.account_name = self.account_name.clone();
+                    entry.state.account_name = self.account_name.clone();
+                }
+                entry
             };
             // Another holder already restored or started it: one TWAP per id.
             if self

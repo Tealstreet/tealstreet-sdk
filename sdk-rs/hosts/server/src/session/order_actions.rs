@@ -1,8 +1,8 @@
 use super::*;
-use crate::order_actions::{self, CancelQueued, Request};
+use crate::order_actions::{self, CancelQueued, WireRequest};
 
 impl Session {
-    pub(super) async fn order_action(&mut self, request: Request) {
+    pub(super) async fn order_action(&mut self, request: WireRequest, text: &str) {
         let arrived = std::time::Instant::now();
         let name = request.account_name.clone();
         let id = Value::String(request.intent_id.clone());
@@ -36,11 +36,10 @@ impl Session {
         {
             Some("not sent: expired")
         } else {
-            let action = serde_json::to_value(&request.action).unwrap_or(Value::Null);
-            match crate::order_contract::action_fingerprint(
+            match crate::order_contract::action_wire_fingerprint(
                 &name,
                 &request.intent_id,
-                &action,
+                &request.action,
                 request.seq,
             ) {
                 Ok(fp) if fp == request.fingerprint => None,
@@ -51,10 +50,15 @@ impl Session {
             order_actions::refuse(&out, &name, &id, request.seq, message);
             return;
         }
-        let (method, args) = match request.action.call() {
+        let Ok(decoded) = order_actions::decode_request(text) else {
+            order_actions::unsupported(&out, &name, &id, request.seq);
+            return;
+        };
+        let action = decoded.action;
+        let (method, args) = match action.call() {
             Ok(call) => call,
-            Err(message) => {
-                order_actions::refuse(&out, &name, &id, request.seq, message);
+            Err(_) => {
+                order_actions::unsupported(&out, &name, &id, request.seq);
                 return;
             }
         };
@@ -64,13 +68,66 @@ impl Session {
             order_actions::refuse(&out, &name, &id, request.seq, "not sent: expired");
             return;
         };
+        if let crate::order_actions::Action::Algo { op, data } = &action {
+            if !crate::full_writes::algo_account_matches(op, data, &name) {
+                order_actions::refuse(
+                    &out,
+                    &name,
+                    &id,
+                    request.seq,
+                    "not sent: algo account differs",
+                );
+                return;
+            }
+            let receipt = crate::order_actions::NukeReceipt::new(
+                out.clone(),
+                name.clone(),
+                id.clone(),
+                request.seq,
+                deadline,
+                self.token_expires_at_ms(),
+            )
+            .with_kind("algo");
+            let Some(algos) = self.joined[&name].account.algos.clone() else {
+                receipt.finish(Err(
+                    json!({"message":"Algo host unavailable","outcome":"notSent"}),
+                ));
+                return;
+            };
+            order_actions::acknowledge(&out, &name, &id, request.seq, true);
+            let mut data = data.clone();
+            if op == "exec" {
+                data["reqId"] = id.clone();
+            }
+            // The wire label is validated above; the shared TWAP book retains
+            // the resident actor's original label.
+            if op == "twap:start" {
+                data["accountName"] = self.joined[&name].account.name.clone().into();
+            }
+            if let Err(error) = algos.send(crate::algos::AlgoInput::Op {
+                op: op.clone(),
+                data: data.to_string(),
+                origin: format!("socket:{}", self.socket),
+                twap_owner: self.joined[&name].account.twap_owner.snapshot(),
+                action: Some(Box::new(receipt)),
+            }) && let crate::algos::AlgoInput::Op {
+                action: Some(receipt),
+                ..
+            } = error.0
+            {
+                receipt.finish(Err(
+                    json!({"message":"Algo host unavailable","outcome":"notSent"}),
+                ));
+            }
+            return;
+        }
         order_actions::acknowledge(&out, &name, &id, request.seq, true);
         self.call_inner(
             &name,
             json!({"requestId":request.intent_id,"method":method,"args":args}),
             Some(OrderReceipt::Action {
                 seq: request.seq,
-                kind: request.action.kind(),
+                kind: action.kind(),
                 deadline,
             }),
         )
@@ -131,9 +188,17 @@ impl Session {
         &self,
         name: &str,
         id: &Value,
-        seq: u64,
-        deadline: order_actions::ActionDeadline,
+        captured: OrderReceipt,
+        mode: &'static str,
     ) {
+        let OrderReceipt::Action {
+            seq,
+            deadline,
+            kind,
+        } = captured
+        else {
+            return;
+        };
         let account = self.joined[name].account.clone();
         let receipt = crate::order_actions::NukeReceipt::new(
             self.account_out(name),
@@ -141,7 +206,9 @@ impl Session {
             id.clone(),
             seq,
             deadline,
-        );
+            self.token_expires_at_ms(),
+        )
+        .with_kind(kind);
         let Some(algos) = account.algos.clone() else {
             receipt.finish(Err(
                 json!({"message":"Nuke is unavailable for this account","outcome":"notSent"}),
@@ -154,7 +221,7 @@ impl Session {
         let request_id = id.clone();
         tokio::spawn(async move {
             let loaded =
-                methods::until_nuke_can_see(&account.handle, "all", methods::READ_WAIT).await;
+                methods::until_nuke_can_see(&account.handle, mode, methods::READ_WAIT).await;
             if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
                 receipt.finish(Err(json!({"message":message,"outcome":"unknown"})));
                 return;
@@ -175,7 +242,7 @@ impl Session {
                 return;
             }
             if let Err(error) = algos.send(crate::algos::AlgoInput::Nuke {
-                mode: "all",
+                mode,
                 request_id,
                 action: Some(Box::new(receipt)),
             }) && let crate::algos::AlgoInput::Nuke {

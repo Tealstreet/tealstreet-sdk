@@ -11,6 +11,7 @@ pub mod delegated;
 mod delegated_e2e_io;
 pub mod delegated_memory;
 pub mod envelope;
+mod full_writes;
 pub mod http;
 pub mod interruption;
 pub mod methods;

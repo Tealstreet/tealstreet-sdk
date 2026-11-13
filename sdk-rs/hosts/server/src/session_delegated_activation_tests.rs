@@ -260,6 +260,7 @@ async fn partial_activation_paused_restore_and_cleanup_preserve_dispatch() {
                     data: payload,
                     origin,
                     twap_owner,
+                    action: None,
                 }) = inbox.recv().await
                 else {
                     panic!("missing safe algo dispatch");
@@ -305,6 +306,7 @@ async fn partial_activation_cosigned_running_restore_preserves_dispatch() {
                 data,
                 origin,
                 twap_owner,
+                action: None,
             }) = inbox.recv().await
             else {
                 panic!("missing COSIGNED restore dispatch");
@@ -468,6 +470,7 @@ async fn partial_activation_decoded_paused_restore_preserves_dispatch() {
                 data,
                 origin,
                 twap_owner,
+                action: None,
             }) = inbox.recv().await
             else {
                 panic!("missing paused restore dispatch");
@@ -532,6 +535,7 @@ async fn partial_activation_cosigned_decoded_running_restore_preserves_dispatch(
                 data,
                 origin,
                 twap_owner,
+                action: None,
             }) = inbox.recv().await
             else {
                 panic!("missing COSIGNED restore dispatch");

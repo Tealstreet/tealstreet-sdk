@@ -145,6 +145,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         "restart cannot fabricate lost chases or TWAP schedules"
     );
 
+    let identity = session.joined["acct"].account.registry_name().to_owned();
     let options: Value = serde_json::from_str(WEB_TWAP).unwrap();
     let now = crate::accounts::now_ms();
     let mut state = json!({
@@ -156,7 +157,10 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
     });
     // Synthetic saved evidence comes from the admitted account, never the received row.
     let owner = session.joined["acct"].account.twap_owner.snapshot();
-    assert_eq!(owner.owner_id, "alice");
+    assert_eq!(
+        owner.owner_id, identity,
+        "restore authority follows the verified identity"
+    );
     session
         .msg(AccountMsg {
             op: "twap:state".into(),

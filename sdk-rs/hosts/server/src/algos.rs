@@ -24,6 +24,7 @@ pub enum AlgoInput {
         /// The socket that sent it, for the order audit line.
         origin: String,
         twap_owner: safe_cex_algo_twap::TwapOwner,
+        action: Option<Box<crate::order_actions::NukeReceipt>>,
     },
     /// A hosted `nuke`/`nukePositions`/`nukeOrders` call: exec's nuke, answered
     /// with `callMethod:done` once every leg has settled.
@@ -884,6 +885,38 @@ pub async fn run(
     held: Arc<AtomicBool>,
     running: Arc<Running>,
     twap_owner: Arc<crate::twap_owner::Binding>,
+    inbox: mpsc::UnboundedReceiver<AlgoInput>,
+) {
+    run_with_identity(
+        handle,
+        client,
+        who,
+        emit,
+        broadcast,
+        link_signer,
+        placed,
+        held,
+        running,
+        twap_owner,
+        None,
+        inbox,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_with_identity(
+    handle: AccountHandle,
+    client: u64,
+    who: crate::audit::Who,
+    emit: Emit,
+    broadcast: Broadcast,
+    link_signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
+    placed: crate::accounts::PlacedSymbols,
+    held: Arc<AtomicBool>,
+    running: Arc<Running>,
+    twap_owner: Arc<crate::twap_owner::Binding>,
+    identity: Option<String>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     // An algo host that cannot run never takes the account with it: the account's
@@ -921,15 +954,22 @@ pub async fn run(
     let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
     let book = chasers.book();
     let binding = twap_owner.clone();
-    let twap = Rc::new(
+    let factory = if identity.is_some() {
+        safe_cex_algo_twap::factory::TwapFactory::new_with_owner(
+            &name,
+            cx.clone(),
+            Rc::new(book.clone()),
+            twap_owner.snapshot(),
+        )
+    } else {
         safe_cex_algo_twap::factory::TwapFactory::with_owner(
             &name,
             twap_owner.snapshot(),
             cx.clone(),
             Rc::new(book.clone()),
         )
-        .guard_owner(Rc::new(move || binding.snapshot())),
-    );
+    };
+    let twap = Rc::new(factory.guard_owner(Rc::new(move || binding.snapshot())));
     // Exec's chase/TWAP handoff shares this account's book and TWAP schedule,
     // under the server's trusted account name, never one from the payload.
     // A nuke ends with the venue's cancel-all, scoped as hosted `cancelAllOrders`.
@@ -1042,9 +1082,15 @@ pub async fn run(
                     if let Some(signer) = &link_signer { signer.mark_unavailable(); }
                     return;
                 }
-                Some(AlgoInput::Op { op, mut data, origin, twap_owner: captured_owner }) => {
+                Some(AlgoInput::Op { op, mut data, origin, twap_owner: captured_owner, action }) => {
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
-                        port.emit("error", serde_json::json!("Algo operation cancelled-for-owner-change: authenticated connection binding changed").to_string());
+                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        port.emit("error", serde_json::json!(message).to_string());
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
+                        continue;
+                    }
+                    if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
                     if !running.io_allowed() {
@@ -1062,7 +1108,13 @@ pub async fn run(
                         continue;
                     }
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
-                        port.emit("error", serde_json::json!("Algo operation cancelled-for-owner-change: authenticated connection binding changed").to_string());
+                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        port.emit("error", serde_json::json!(message).to_string());
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
+                        continue;
+                    }
+                    if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
                     let epoch = running.restore_epoch();
@@ -1085,7 +1137,15 @@ pub async fn run(
                         continue;
                     }
                     let dispatch = || {
-                        let result = registry.dispatch(&op, &data, &cx);
+                        // Factory identity/counters belong to the resident account.
+                        // Only this EXEC's adapter carries the action command port
+                        // and rechecks its fence before deferred factory handoffs.
+                        let result = if op == "exec" && let Some(receipt) = action.as_ref() {
+                            let guard = receipt.guard();
+                            let command_port = Rc::new(ActionNukePort { port: port.clone(), guard: guard.clone() });
+                            Some(exec.handle_guarded(&data, &cx, command_port,
+                                Rc::new(move || guard.check().map_err(str::to_owned))))
+                        } else { registry.dispatch(&op, &data, &cx) };
                         running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                         result
                     };
@@ -1094,7 +1154,9 @@ pub async fn run(
                             match user.admit() {
                                 // Admission can wait: re-check the owner after it, right before dispatch.
                                 Ok(_admission) if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() => {
-                                    port.emit("error", serde_json::json!("Algo operation cancelled-for-owner-change: authenticated connection binding changed").to_string());
+                                    let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                                    port.emit("error", serde_json::json!(message).to_string());
+                                    if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                                     continue;
                                 }
                                 Ok(_admission) => dispatch(),
@@ -1122,10 +1184,15 @@ pub async fn run(
                         port.emit("error", Value::String(error).to_string());
                     }
                     publish(&mut published);
+                    if let Some(receipt) = action {
+                        // Dispatch admission is not proof that an asynchronous job or
+                        // its venue writes completed. Ordinary algo events reconcile it.
+                        receipt.finish(Err(serde_json::json!({"message":"Algo operation dispatched; reconcile its account events","outcome":"unknown"})));
+                    }
                 }
                 Some(AlgoInput::Nuke { mode, request_id, action }) => {
-                    if action.as_ref().is_some_and(|receipt| receipt.expired()) {
-                        if let Some(receipt) = action { receipt.finish(Err(crate::order_actions::expired_outcome())); }
+                    if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"unknown"}))); }
                         continue;
                     }
                     if !running.io_allowed() || action.as_ref().is_some_and(|receipt| !receipt.active()) {
@@ -1151,10 +1218,11 @@ pub async fn run(
                         ),
                         None => cx.clone(),
                     };
-                    let started = match admission.as_ref() {
-                        _ if action.as_ref().is_some_and(|receipt| receipt.expired()) => Err(crate::order_actions::expired_outcome()),
+                    let action_refusal = action.as_ref().and_then(|receipt| receipt.guard().check().err());
+                    let started = match (action_refusal, admission.as_ref()) {
+                        (Some(message), _) => Err(serde_json::json!({"message":message,"outcome":"unknown"})),
                         _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"})),
-                        Some(Err(error)) => Err(error.clone()),
+                        (_, Some(Err(error))) => Err(error.clone()),
                         _ => match seen {
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>

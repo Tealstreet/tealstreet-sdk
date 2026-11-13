@@ -45,6 +45,10 @@ The existing socket close remains at expiry plus `TOKEN_GRACE` (30 seconds);
 the grace permits reconnection, not new admissions or commands. Expiry belongs
 to the requesting socket and never fences another holder's account transport.
 
+Typed action guards retain that socket expiry through actor queues/store awaits,
+EXEC continuations and native command dispatch, alongside registration and age.
+Already accepted chaser/TWAP jobs retain their existing account lifetime.
+
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
 handover pair. Admission follows the exact venue's `delegated.enabled` in construction-rules.json;
 only `bybit` is currently opted in. The account retains the existing LocalSigner provider,
@@ -58,6 +62,18 @@ share the off-loop probe, refusal classification, token/lease checks and account
 attachment. A pending COSIGNED signer belongs only to its joining connection;
 probe frames are consumed internally. Matching COSIGNED inits on an admitted
 connection and COSIGNED resumes retain their existing snapshot path.
+
+## TWAP restore binding
+
+Native TWAP restore authority carries both the verified owner and generation.
+Identity-keyed accounts seed that binding from the registry identity digest;
+other native accounts retain their verified user binding. Label changes do not
+change identity or generation. Native identity restoration can remap matching
+persisted labels only after preserving both owner tags; missing/stale generations
+never inherit the current generation. Algo inputs capture this binding alongside
+any typed action receipt, and both guards survive deferred dispatch. Typed v1
+TWAP-state rows carry optional safe-integer `ownerGeneration` through validation
+and fingerprinting without backfill; the native restore gate remains mandatory.
 
 ## DELEGATED order frames
 
@@ -126,6 +142,12 @@ its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+Every raw typed-action payload checks recursive key uniqueness before `Value`
+conversion: placement arrays, close orders, scheduling values and algo data.
+Schema rejection follows binding/hash checks and precedes ACK or native work.
+Typed TWAP starts validate the connection-local label before translating it to
+the shared identity actor's original label. Restoration retains the persisted
+identity owner tag and the native book's ownership checks.
 Every cancel-all leg settles through its shared completion group, including
 pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
 cannot refuse the whole action after another leg may have crossed physical IO.

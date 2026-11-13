@@ -216,6 +216,7 @@ async fn different_owner_stops_running_twap_and_fences_queued_work() {
                     data: "\"retired\"".into(),
                     origin: "old-u".into(),
                     twap_owner: owner.clone(),
+                    action: None,
                 })
                 .unwrap();
             assert!(f.account.twap_owner.rebind_owner("other-user"));
@@ -259,6 +260,7 @@ async fn returning_owner_cannot_reuse_retired_generation_or_queued_work() {
                     data: "\"retired\"".into(),
                     origin: "old-u".into(),
                     twap_owner: owner.clone(),
+                    action: None,
                 })
                 .unwrap();
             // Both identity changes happen during the deferral, before the algo task runs.

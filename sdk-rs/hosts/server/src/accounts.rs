@@ -1,5 +1,5 @@
-//! Accounts keyed by `(userId, accountName)`: built once, shared by that user's
-//! sockets, disposed when the last holder (live socket or parked resume) lets go.
+//! Hosted account registry with identity keys for enabled private Bybit accounts.
+//! Connections keep their labels; live and parked holders share the account actor.
 use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 use crate::envelope::InitPayload;
 use crate::state::Log;
@@ -19,10 +19,19 @@ use tokio::sync::mpsc;
 
 mod admission;
 pub(crate) use admission::ProbePermit;
+pub(crate) mod identity;
+
+#[cfg(test)]
+mod identity_tests;
 
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
 pub const PUBLIC_ACCOUNT: &str = "__pub_bybit";
 pub const PUBLIC_EXCHANGE: &str = "bybit";
+
+enum DelegatedSetup {
+    Pair(DelegatedPair),
+    Resident(Box<ResidentCopy>),
+}
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
@@ -60,6 +69,7 @@ impl ProxyToken {
 pub struct Account {
     pub user: String,
     pub name: String,
+    identity: Option<String>,
     pub venue: String,
     pub handle: AccountHandle,
     /// Explicit construction mode, independent of a remote signer link.
@@ -234,6 +244,7 @@ struct Holders {
     by_id: HashMap<u64, Option<Live>>,
     /// Live holders in init/resume order; socket IDs do not order later reinits.
     init_order: Vec<u64>,
+    labels: HashMap<u64, std::collections::BTreeMap<String, Option<Live>>>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
 }
@@ -269,6 +280,15 @@ impl Holders {
 }
 
 impl Account {
+    pub(crate) fn registry_name(&self) -> &str {
+        self.identity.as_deref().unwrap_or(&self.name)
+    }
+
+    pub(crate) fn matches_init(&self, user: &str, init: &InitPayload) -> bool {
+        self.user == user
+            && identity::registry_name(user, init).as_deref() == Ok(self.registry_name())
+    }
+
     pub(crate) fn moving(&self) -> bool {
         self.handle.disposal_cause() == Some(DisposalCause::Moving)
     }
@@ -291,7 +311,8 @@ impl Account {
 
     /// Signing and the proxy token follow `id` (the newest init or resume).
     fn sign_through(&self, holders: &mut Holders, id: u64, live: &Live) {
-        self.twap_owner.rebind_owner(&self.user);
+        self.twap_owner
+            .rebind_owner(self.identity.as_deref().unwrap_or(&self.user));
         holders.signing = Some(id);
         self.held.store(true, Ordering::Relaxed);
         self.token.set(live.token.clone());
@@ -317,9 +338,38 @@ impl Account {
     }
 
     fn hold(&self, id: u64, live: Live) {
+        self.hold_label(id, live, &self.name);
+    }
+
+    fn hold_label(&self, id: u64, live: Live, label: &str) {
         let mut holders = self.holders.lock().unwrap();
+        holders
+            .labels
+            .entry(id)
+            .or_default()
+            .insert(label.to_owned(), Some(live.clone()));
         holders.insert(id, Some(live.clone()));
         self.sign_through(&mut holders, id, &live);
+    }
+
+    pub(crate) fn labels(&self, id: u64) -> Vec<String> {
+        self.holders
+            .lock()
+            .unwrap()
+            .labels
+            .get(&id)
+            .map(|labels| labels.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn hold_registration(
+        &self,
+        id: u64,
+        outbox: Outbox,
+        token: Option<(String, u64)>,
+        label: &str,
+    ) {
+        self.hold_label(id, Live { outbox, token }, label);
     }
 
     pub(crate) fn has_parked_holders(&self) -> bool {
@@ -340,7 +390,15 @@ impl Account {
                 Some(live) => {
                     holding.live.push(*id);
                     if let Some(text) = &text {
-                        (live.outbox)(text.clone());
+                        if self.identity.is_some()
+                            && let Some(labels) = holders.labels.get(id)
+                        {
+                            for live in labels.values().flatten() {
+                                (live.outbox)(text.clone());
+                            }
+                        } else {
+                            (live.outbox)(text.clone());
+                        }
                     }
                 }
                 None => holding.parked = true,
@@ -358,14 +416,16 @@ impl Account {
     }
 
     fn live_outboxes(&self) -> Vec<Outbox> {
-        self.holders
-            .lock()
-            .unwrap()
-            .by_id
-            .values()
-            .flatten()
-            .map(|live| live.outbox.clone())
-            .collect()
+        let holders = self.holders.lock().unwrap();
+        let mut outboxes = Vec::new();
+        for (id, live) in &holders.by_id {
+            if let Some(labels) = holders.labels.get(id).filter(|labels| !labels.is_empty()) {
+                outboxes.extend(labels.values().flatten().map(|live| live.outbox.clone()));
+            } else if let Some(live) = live {
+                outboxes.push(live.outbox.clone());
+            }
+        }
+        outboxes
     }
 
     /// Signing and the proxy token follow this socket, which already holds the account.
@@ -373,8 +433,16 @@ impl Account {
         self.hold(id, Live { outbox, token });
     }
 
-    pub(crate) fn update_reply_outbox(&self, id: u64, outbox: Outbox) {
-        if let Some(Some(live)) = self.holders.lock().unwrap().by_id.get_mut(&id) {
+    pub(crate) fn update_reply_outbox(&self, id: u64, outbox: Outbox, label: &str) {
+        let mut holders = self.holders.lock().unwrap();
+        if let Some(Some(live)) = holders.by_id.get_mut(&id) {
+            live.outbox = outbox.clone();
+        }
+        if let Some(Some(live)) = holders
+            .labels
+            .get_mut(&id)
+            .and_then(|labels| labels.get_mut(label))
+        {
             live.outbox = outbox;
         }
     }
@@ -426,7 +494,7 @@ struct InitAuthority {
     current: Arc<AtomicBool>,
     lease: Option<crate::router_lease::Permit>,
     probe_lease: Option<crate::router_lease::Permit>,
-    probe_expires_at: Option<u64>,
+    admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
 }
 
@@ -458,7 +526,7 @@ impl InitAuthority {
     fn check_admission(&self) -> Result<(), String> {
         self.check()?;
         if self
-            .probe_expires_at
+            .admission_expires_at
             .is_some_and(|expiry| expiry <= now_ms())
         {
             return Err("Account verification expired; initialization stopped".into());
@@ -823,6 +891,10 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
     };
     fields.insert("routing".into(), routing);
     for field in ["key", "passphrase"] {
+        if identity::enabled(init) {
+            fields.remove(field);
+            continue;
+        }
         if let Some(Value::String(text)) = fields.get_mut(field) {
             *text = fingerprint_digest(text);
         }
@@ -955,7 +1027,7 @@ impl Registry {
                 }
             }
             let mut cached = self.accounts.lock().unwrap();
-            let key = (account.user.clone(), account.name.clone());
+            let key = (account.user.clone(), account.registry_name().to_owned());
             if cached
                 .get(&key)
                 .is_some_and(|current| Arc::ptr_eq(current, &account))
@@ -1031,7 +1103,32 @@ impl Registry {
         delegated: bool,
     ) -> Option<String> {
         let accounts = self.accounts.lock().unwrap();
-        let account = accounts.get(&(user.to_owned(), init.account_name.clone()))?;
+        let name = match if public_only {
+            Ok(init.account_name.clone())
+        } else {
+            identity::registry_name(user, init)
+        } {
+            Ok(name) => name,
+            Err(error) => return Some(error),
+        };
+        let keyed = accounts.get(&(user.to_owned(), name));
+        if keyed.is_some_and(|account| {
+            account.identity.is_some() != (!public_only && identity::enabled(init))
+        }) {
+            return Some(
+                "An existing account has a conflicting label. Rename it and try again.".into(),
+            );
+        }
+        let account = keyed.or_else(|| {
+            if !public_only {
+                return None;
+            }
+            accounts.values().find(|account| {
+                account.user == user
+                    && account.delegated.is_some()
+                    && account.name == init.account_name
+            })
+        })?;
         if public_only && account.delegated.is_none() {
             return None;
         }
@@ -1050,8 +1147,38 @@ impl Registry {
         if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
             return Some(refusal);
         }
-        let key = (user.to_owned(), init.account_name.clone());
-        let account = self.accounts.lock().unwrap().get(&key).cloned()?;
+        let name = if public_only {
+            init.account_name.clone()
+        } else {
+            match identity::registry_name(user, init) {
+                Ok(name) => name,
+                Err(error) => return Some(error),
+            }
+        };
+        let key = (user.to_owned(), name);
+        let account = {
+            let accounts = self.accounts.lock().unwrap();
+            let identity_account = if public_only {
+                accounts
+                    .values()
+                    .find(|account| {
+                        account.user == user
+                            && account.identity.is_some()
+                            && (account.name == init.account_name
+                                || account
+                                    .holders
+                                    .lock()
+                                    .unwrap()
+                                    .labels
+                                    .values()
+                                    .any(|labels| labels.contains_key(&init.account_name)))
+                    })
+                    .cloned()
+            } else {
+                None
+            };
+            identity_account.or_else(|| accounts.get(&key).cloned())
+        }?;
         // Shared public data carries no signer or algos; it rebuilds as before.
         if account.is_public() {
             return None;
@@ -1099,7 +1226,7 @@ impl Registry {
             current: Arc::new(AtomicBool::new(true)),
             lease,
             probe_lease: None,
-            probe_expires_at: None,
+            admission_expires_at: None,
             probe_current: None,
         };
         authority.check_admission()?;
@@ -1166,6 +1293,51 @@ impl Registry {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn apply_settings(
+        self: &Arc<Self>,
+        user: &str,
+        init: &InitPayload,
+        account: Arc<Account>,
+        holder: u64,
+        token: Option<(String, u64)>,
+        outbox: Outbox,
+    ) -> Result<Arc<Account>, String> {
+        if account.identity.is_none()
+            || !account.matches_init(user, init)
+            || !self.holds(&account, holder)
+            || init.sealed.is_some()
+            || account.delegated.is_some() != (init.signing_mode.as_deref() == Some("delegated"))
+        {
+            return Err("Settings can only be applied to the joined account identity".into());
+        }
+        if token
+            .as_ref()
+            .is_none_or(|(_, expires)| *expires <= now_ms())
+        {
+            return Err("Tealstreet proxy token expired; settings were not applied".into());
+        }
+        let setup = if let Some(resident) = &account.delegated {
+            resident.reconfigure(init)?;
+            Some(DelegatedSetup::Resident(Box::new(resident.clone())))
+        } else {
+            prepare(init, false, Some(SignerLink::new(holder, outbox.clone())))?;
+            None
+        };
+        self.obtain_with_setup(
+            user,
+            init,
+            false,
+            holder,
+            token,
+            outbox,
+            setup,
+            None,
+            Some(account),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn obtain_with_pair(
         self: &Arc<Self>,
         user: &str,
@@ -1177,13 +1349,46 @@ impl Registry {
         pair: Option<DelegatedPair>,
         proof: Option<ProbePermit>,
     ) -> Result<Arc<Account>, String> {
+        self.obtain_with_setup(
+            user,
+            init,
+            public_only,
+            holder,
+            token,
+            outbox,
+            pair.map(DelegatedSetup::Pair),
+            proof,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn obtain_with_setup(
+        self: &Arc<Self>,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        holder: u64,
+        token: Option<(String, u64)>,
+        outbox: Outbox,
+        setup: Option<DelegatedSetup>,
+        proof: Option<ProbePermit>,
+        apply: Option<Arc<Account>>,
+    ) -> Result<Arc<Account>, String> {
         let expires_at_ms = token.as_ref().map(|(_, expires)| *expires);
         crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
         if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
         }
-        let delegated = pair.is_some();
+        let delegated = setup.is_some();
         if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
+            return Err(refusal);
+        }
+        if public_only
+            && let Some(refusal) =
+                self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
+        {
             return Err(refusal);
         }
         let fingerprint = if delegated {
@@ -1191,25 +1396,42 @@ impl Registry {
         } else {
             init.fingerprint()
         };
+        let registry_name = if public_only {
+            init.account_name.clone()
+        } else {
+            identity::registry_name(user, init)?
+        };
         let mut attempt = self.begin_init(
             user,
-            &init.account_name,
+            &registry_name,
             public_only,
             &fingerprint,
             expires_at_ms,
         )?;
+        if apply.is_some() {
+            attempt.authority.admission_expires_at = token.as_ref().map(|(_, expiry)| *expiry);
+        }
         let probed = proof.is_some();
         if let Some(proof) = proof {
             proof
                 .check(user, init)
                 .map_err(|_| "Account verification expired".to_owned())?;
             attempt.authority.probe_lease = proof.lease.clone();
-            attempt.authority.probe_expires_at = proof.token_expires_at;
+            attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
             attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
+        if let Some(expected) = &apply
+            && (expected.identity.is_none()
+                || !self.holds(expected, holder)
+                || existing
+                    .as_ref()
+                    .is_none_or(|current| !Arc::ptr_eq(current, expected)))
+        {
+            return Err("The account registration changed; settings were not applied".into());
+        }
         if let Some(account) = existing {
             if probed && (account.fingerprint != fingerprint || account.is_public()) {
                 return Err("Account settings differ; account not attached".into());
@@ -1222,18 +1444,21 @@ impl Registry {
             }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
-                account.hold(holder, Live { outbox, token });
+                account.hold_label(holder, Live { outbox, token }, &init.account_name);
                 return Ok(account);
             }
-            if let Some(refusal) =
-                self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
+            if apply.is_none()
+                && let Some(refusal) =
+                    self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
             {
                 return Err(refusal);
             }
-            self.dispose(
-                &account,
-                Disposal::rebuild(account.is_public(), public_only),
-            );
+            if apply.is_none() {
+                self.dispose(
+                    &account,
+                    Disposal::rebuild(account.is_public(), public_only),
+                );
+            }
         }
         let live = Live {
             outbox: outbox.clone(),
@@ -1249,7 +1474,7 @@ impl Registry {
                 holder,
                 outbox.clone(),
                 &attempt.authority,
-                pair,
+                setup,
             )
             .await?;
         let account = Arc::new(account);
@@ -1264,7 +1489,7 @@ impl Registry {
         }
         self.user_drains.track(
             user,
-            &account.name,
+            account.registry_name(),
             &account.running,
             Arc::downgrade(&account),
         );
@@ -1278,7 +1503,7 @@ impl Registry {
             return Err("The user is draining; reconnecting".into());
         }
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
-        account.hold(holder, live);
+        account.hold_label(holder, live, &init.account_name);
         if let Some(remote) = remote {
             let registry = Arc::downgrade(self);
             let weak = Arc::downgrade(&account);
@@ -1301,12 +1526,16 @@ impl Registry {
         if let Some(replaced) = replaced {
             // Only current settings can publish; identical inits may still race.
             // Its holders go too, so the losing socket stops calling a stopped account.
-            self.dispose_for(
-                &replaced,
-                Disposal::Replaced,
-                "account replaced by a newer init",
-                Some(tell_through(&replaced, replaced.live_outboxes())),
-            );
+            if apply.is_some() {
+                self.stop_for_new_settings(&replaced, outbox, Disposal::SettingsChanged);
+            } else {
+                self.dispose_for(
+                    &replaced,
+                    Disposal::Replaced,
+                    "account replaced by a newer init",
+                    Some(tell_through(&replaced, replaced.live_outboxes())),
+                );
+            }
         }
         Ok(account)
     }
@@ -1322,19 +1551,22 @@ impl Registry {
         socket: u64,
         outbox: Outbox,
         authority: &InitAuthority,
-        pair: Option<DelegatedPair>,
+        setup: Option<DelegatedSetup>,
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         self.pacer.admit().await;
         authority.check_admission()?;
         crate::auth::Verifier::check_expiry(token.as_ref().map(|(_, expires)| *expires), now_ms())?;
         let venue = init.exchange_name.clone();
-        let delegated_build = pair.is_some();
-        let (link, plan, options, remote, signer, delegated) = if let Some(pair) = pair {
+        let delegated_build = setup.is_some();
+        let (link, plan, options, remote, signer, delegated) = if let Some(setup) = setup {
             let PreparedDelegated {
                 plan,
                 options,
                 resident,
-            } = prepare_delegated(init, pair)?;
+            } = match setup {
+                DelegatedSetup::Pair(pair) => prepare_delegated(init, pair)?,
+                DelegatedSetup::Resident(resident) => resident.reconfigure(init)?,
+            };
             let signer = Some(resident.provider());
             (None, plan, options, None, signer, Some(resident))
         } else {
@@ -1377,13 +1609,20 @@ impl Registry {
         let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let algo_held = held.clone();
         let running = Arc::new(crate::algos::Running::new(self.algos_ended.clone()));
+        let identity = if public_only {
+            None
+        } else {
+            identity::digest(user, init)?
+        };
+        let registry_name = identity.as_deref().unwrap_or(&init.account_name);
         self.user_drains
-            .track(user, &init.account_name, &running, std::sync::Weak::new());
+            .track(user, registry_name, &running, std::sync::Weak::new());
         if let Some(lease) = &authority.lease {
             running.attach_lease(lease.clone());
         }
-        running.attach_restores(self.interruptions.account(user, &init.account_name));
+        running.attach_restores(self.interruptions.account(user, registry_name));
         let algo_running = running.clone();
+        let algo_identity = identity.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -1391,7 +1630,9 @@ impl Registry {
             (Some(tx), Some(rx))
         };
         let algo_client = self.next_id();
-        let twap_owner = Arc::new(crate::twap_owner::Binding::new(user));
+        let twap_owner = Arc::new(crate::twap_owner::Binding::new(
+            identity.as_deref().unwrap_or(user),
+        ));
         let algo_twap_owner = twap_owner.clone();
         let algo_signer = link.clone();
         let owner = algo_owner.clone();
@@ -1431,7 +1672,7 @@ impl Registry {
                             drop(placement);
                         });
                         if let Some(inbox) = algo_inbox {
-                            tokio::task::spawn_local(crate::algos::run(
+                            tokio::task::spawn_local(crate::algos::run_with_identity(
                                 handle.clone(),
                                 algo_client,
                                 algo_who,
@@ -1442,6 +1683,7 @@ impl Registry {
                                 algo_held,
                                 algo_running,
                                 algo_twap_owner,
+                                algo_identity,
                                 inbox,
                             ));
                         }
@@ -1458,6 +1700,7 @@ impl Registry {
         let account = Account {
             user: user.to_owned(),
             name: init.account_name.clone(),
+            identity,
             venue: init.exchange_name.clone(),
             handle,
             link,
@@ -1481,12 +1724,20 @@ impl Registry {
 
     /// The account `user` holds under `name` through `holder`, never another user's.
     pub fn held(&self, user: &str, name: &str, holder: u64) -> Option<Arc<Account>> {
-        let account = self
-            .accounts
-            .lock()
-            .unwrap()
+        let accounts = self.accounts.lock().unwrap();
+        let account = accounts
             .get(&(user.to_owned(), name.to_owned()))
-            .cloned()?;
+            .filter(|account| account.identity.is_none() && self.holds(account, holder))
+            .cloned()
+            .or_else(|| {
+                accounts
+                    .values()
+                    .find(|account| {
+                        account.user == user
+                            && account.labels(holder).iter().any(|label| label == name)
+                    })
+                    .cloned()
+            })?;
         let holds = account.holders.lock().unwrap().by_id.contains_key(&holder);
         holds.then_some(account)
     }
@@ -1496,11 +1747,42 @@ impl Registry {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
             holders.remove(holder);
+            holders.labels.remove(&holder);
             account.hand_over(&mut holders, holder);
             holders.by_id.is_empty()
         };
         if empty {
             self.dispose_for(account, disposal, "account disposed", None);
+        }
+    }
+
+    pub(crate) fn release_label(
+        &self,
+        account: &Arc<Account>,
+        holder: u64,
+        label: &str,
+        disposal: Disposal,
+    ) {
+        let still_held = {
+            let mut holders = account.holders.lock().unwrap();
+            let remaining = if let Some(labels) = holders.labels.get_mut(&holder) {
+                labels.remove(label);
+                labels.values().find_map(Clone::clone)
+            } else {
+                None
+            };
+            if let Some(live) = remaining {
+                holders.by_id.insert(holder, Some(live.clone()));
+                if holders.signing == Some(holder) {
+                    account.sign_through(&mut holders, holder, &live);
+                }
+                true
+            } else {
+                false
+            }
+        };
+        if !still_held {
+            self.release(account, holder, disposal);
         }
     }
 
@@ -1593,7 +1875,7 @@ impl Registry {
     pub(crate) fn keep_notice(&self, account: &Account, owner: &str) -> crate::algos::StopNotice {
         let notices = self.notices.clone();
         let accounts = Arc::downgrade(&self.accounts);
-        let key = (account.user.clone(), account.name.clone());
+        let key = (account.user.clone(), account.registry_name().to_owned());
         let fingerprint = account.fingerprint.clone();
         let notice_key = (key.0.clone(), key.1.clone(), fingerprint.clone());
         let owner = owner.to_owned();
@@ -1729,13 +2011,13 @@ impl Registry {
     }
 
     /// Reset only the live admitted holder's current account; retire older joins.
-    pub(crate) fn apply_settings(
+    pub(crate) fn reset_settings(
         &self,
         account: &Arc<Account>,
         holder: u64,
         outbox: Outbox,
     ) -> bool {
-        let key = (account.user.clone(), account.name.clone());
+        let key = (account.user.clone(), account.registry_name().to_owned());
         let mut pending = self.pending_inits.lock().unwrap();
         let mut accounts = self.accounts.lock().unwrap();
         if account.is_public()
@@ -1786,7 +2068,7 @@ impl Registry {
             disposal.as_str()
         ));
         let mut accounts = self.accounts.lock().unwrap();
-        let key = (account.user.clone(), account.name.clone());
+        let key = (account.user.clone(), account.registry_name().to_owned());
         if accounts
             .get(&key)
             .is_some_and(|current| Arc::ptr_eq(current, account))
@@ -1983,10 +2265,22 @@ impl Registry {
     ) {
         let mut parked = Vec::with_capacity(accounts.len());
         for (account, holder) in accounts {
+            if parked
+                .iter()
+                .any(|(previous, _)| Arc::ptr_eq(previous, &account))
+            {
+                continue;
+            }
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
                 holders.remove(holder);
+                if let Some(mut labels) = holders.labels.remove(&holder) {
+                    for live in labels.values_mut() {
+                        *live = None;
+                    }
+                    holders.labels.insert(park_holder, labels);
+                }
                 holders.insert(park_holder, None);
                 account.hand_over(&mut holders, holder);
             }
@@ -2026,6 +2320,7 @@ impl Registry {
                     let last = {
                         let mut holders = account.holders.lock().unwrap();
                         holders.remove(park_holder);
+                        holders.labels.remove(&park_holder);
                         account.hand_over(&mut holders, park_holder);
                         holders.by_id.is_empty()
                     };
@@ -2117,14 +2412,35 @@ impl Registry {
         accounts
             .into_iter()
             .map(|(account, park_holder)| {
-                account.holders.lock().unwrap().remove(park_holder);
-                account.hold(
-                    holder,
-                    Live {
-                        outbox: outbox(&account.name),
-                        token: Some(token.clone()),
-                    },
-                );
+                let labels = {
+                    let mut holders = account.holders.lock().unwrap();
+                    holders.remove(park_holder);
+                    holders.labels.remove(&park_holder).unwrap_or_default()
+                };
+                let labels = if labels.is_empty() {
+                    vec![account.name.clone()]
+                } else {
+                    labels.into_keys().collect()
+                };
+                for label in labels {
+                    let outbox = outbox(&label);
+                    let routed = if account.identity.is_some() {
+                        let (outbox, label) = (outbox.clone(), label.clone());
+                        Arc::new(move |text| {
+                            outbox(crate::envelope::with_account_label(text, &label))
+                        }) as Outbox
+                    } else {
+                        outbox.clone()
+                    };
+                    account.hold_label(
+                        holder,
+                        Live {
+                            outbox: routed,
+                            token: Some(token.clone()),
+                        },
+                        &label,
+                    );
+                }
                 account
             })
             .collect()
@@ -2166,6 +2482,16 @@ pub mod testing {
     }
 
     use super::*;
+
+    pub fn bind_identity(account: &mut Arc<Account>, init: &InitPayload) {
+        let identity = identity::digest(&account.user, init).unwrap();
+        let account =
+            Arc::get_mut(account).expect("identity is bound before sharing the test account");
+        account.twap_owner = Arc::new(crate::twap_owner::Binding::new(
+            identity.as_deref().unwrap_or(&account.user),
+        ));
+        account.identity = identity;
+    }
 
     #[cfg(test)]
     pub(crate) fn e2e_registry(
@@ -2248,6 +2574,7 @@ pub mod testing {
         let account = Arc::new(Account {
             user: user.into(),
             name: name.into(),
+            identity: None,
             venue: venue_name.into(),
             handle,
             public_only: link.is_none(),
@@ -2285,13 +2612,14 @@ pub mod testing {
             init.account_name.as_str(),
             init.exchange_name.as_str(),
         );
-        let (account, inbox) = account_on(
+        let (mut account, inbox) = account_on(
             venue,
             names,
             Some(link.clone()),
             init.fingerprint(),
             running,
         );
+        bind_identity(&mut account, init);
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account
@@ -2304,6 +2632,7 @@ pub mod testing {
             data: data.into(),
             origin: "test".into(),
             twap_owner: account.twap_owner.snapshot(),
+            action: None,
         };
         let sent = account.algos.as_ref().map(|algos| algos.send(input));
         assert!(
@@ -2535,7 +2864,7 @@ pub mod testing {
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         let owner = account.algo_owner.clone();
         let (emit, broadcast) = algo_reach(owner);
-        tokio::task::spawn_local(crate::algos::run(
+        tokio::task::spawn_local(crate::algos::run_with_identity(
             account.handle.clone(),
             1_000_000,
             crate::audit::Who {
@@ -2550,6 +2879,7 @@ pub mod testing {
             account.held.clone(),
             account.running.clone(),
             account.twap_owner.clone(),
+            account.identity.clone(),
             inbox,
         ));
         account
@@ -2557,20 +2887,22 @@ pub mod testing {
 
     /// `account` as the registry's account for its (user, name).
     pub fn register(registry: &Registry, account: &Arc<Account>) {
-        account
-            .running
-            .attach_restores(registry.interruptions.account(&account.user, &account.name));
+        account.running.attach_restores(
+            registry
+                .interruptions
+                .account(&account.user, account.registry_name()),
+        );
         if let Some(user) = registry.router_leases.get(&account.user) {
             account.running.attach_lease(user.permit());
         }
         registry.user_drains.track(
             &account.user,
-            &account.name,
+            account.registry_name(),
             &account.running,
             Arc::downgrade(account),
         );
         registry.accounts.lock().unwrap().insert(
-            (account.user.clone(), account.name.clone()),
+            (account.user.clone(), account.registry_name().to_owned()),
             account.clone(),
         );
     }
@@ -3968,7 +4300,7 @@ pub(crate) mod tests {
     fn only_what_builds_the_engine_makes_two_inits_differ() {
         let bybit = InitPayload {
             account_name: "bear5".into(),
-            exchange_name: "bybit".into(),
+            exchange_name: "bybitinverse".into(),
             key: "k".into(),
             ..InitPayload::default()
         };
@@ -4149,12 +4481,9 @@ pub(crate) mod tests {
                     ..InitPayload::default()
                 };
                 let link = SignerLink::new(1, Arc::new(|_| true));
-                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
-                registry
-                    .accounts
-                    .lock()
-                    .unwrap()
-                    .insert(("u".into(), "acct".into()), account.clone());
+                let (mut account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                testing::bind_identity(&mut account, &init);
+                register(&registry, &account);
                 let other_device = InitPayload {
                     hyperliquid_builder: Some(crate::envelope::HyperliquidBuilder {
                         address: format!("0x{}", "4".repeat(40)),
@@ -4464,20 +4793,29 @@ mod apply_settings_tests {
                 let init = InitPayload {
                     account_name: "acct".into(),
                     exchange_name: "bybit".into(),
+                    key: "synthetic-settings-key".into(),
                     ..Default::default()
                 };
                 let proof = registry.probe_permit("u", &init).unwrap();
                 let other_user = registry.probe_permit("other", &init).unwrap();
                 let attempt = registry
-                    .begin_init("u", "acct", false, &init.fingerprint(), None)
+                    .begin_init(
+                        "u",
+                        &identity::registry_name("u", &init).unwrap(),
+                        false,
+                        &init.fingerprint(),
+                        None,
+                    )
                     .unwrap();
-                let (account, _algos) = tests::held_account_with(
+                let (mut account, _algos) = tests::held_account_with(
                     Some(SignerLink::new(7, Arc::new(|_| true))),
                     init.fingerprint(),
                 );
+                Arc::get_mut(&mut account).unwrap().venue = "bybit".into();
+                testing::bind_identity(&mut account, &init);
                 testing::register(&registry, &account);
                 assert!(proof.check("u", &init).is_ok());
-                assert!(registry.apply_settings(&account, 7, Arc::new(|_| true)));
+                assert!(registry.reset_settings(&account, 7, Arc::new(|_| true)));
                 assert!(proof.check("u", &init).is_err());
                 assert!(attempt.authority.check().is_err());
                 assert!(other_user.check("other", &init).is_ok());

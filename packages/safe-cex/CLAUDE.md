@@ -197,7 +197,8 @@ not-sent and replay evidence constructors; no direct not-sent assignment is
 permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
 action unknown; queue cancellation is explicit, never a venue cancel.
 
-Action outcomes are typed `applied`, proven `refused/notSent`, or `unknown`.
+Action outcomes are typed `applied`, proven `refused/notSent`, `unsupported`
+for a pre-dispatch schema rejection, or `unknown`.
 Applied results survive later uncertain queue-cancel replies. A proven refusal
 also survives later uncertainty, while its subsequent authoritative refused
 outcome may supply the refusal message after a negative ACK.
@@ -211,6 +212,42 @@ stale replies. Action persistence uses version-2 rows with the exact action and
 result, retaining atomic scoped checkpoints/retirement and all version-1 placement
 records. See `docs/plans/callers/delegated-action-frames.md` and the shared
 `delegated-actions-v1.json` fixture.
+
+The entire typed DELEGATED WS API is one version, v1. New operations extend v1
+additively, without per-operation versions; v2 is reserved for a major redesign.
+Unknown operations or fields must fail closed with a typed `unsupported` outcome,
+never silent omission or execution of the known subset. Unsupported outcomes
+remain terminal across restore without creating replay evidence. Storage row
+versions are independent of the wire version.
+
+The additive full-write vocabulary uses the same v1 action frames. Batch and
+protective placements, reduce-only close, settings, symbol/batch/account cancellation,
+close-only/stop-only nukes and native algo/EXEC operations additionally require
+`delegatedFullWriteActionsV1` and `delegatedFullWriteLedgerV1`, together with the
+four existing flags on the admitted ticket. Old four-action routers confer no
+expanded admission. Native dispatch/completion stays on the hosted account;
+there is no browser-sign or legacy-method fallback. Algo action receipts remain
+unknown and reconcile from account events, never an assumed applied result.
+Typed TWAP-state rows preserve optional `ownerGeneration` as a nonnegative safe
+integer alongside `ownerId`; it is included in the fingerprint, never synthesized.
+Native restoration still requires both tags to match its trusted binding.
+Accepted long-lived jobs keep their account scope; queued admission and EXEC
+continuations keep their captured registration/deadline fences. The complete
+closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
+LOCAL and COSIGNED method forwarding is unchanged.
+
+Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
+unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
+keeps the same job and schedule; never emulate amendment with automatic
+stop-and-replace.
+
+The hosted typed v1 action decoder rejects duplicate object keys recursively in
+placement orders, close orders, scheduling values and algo payloads before they
+can hide unknown or malformed fields. Binding/hash checks retain precedence;
+schema rejection returns typed `unsupported` before ACK or native work.
+
+Native account-wide cancellation requires the venue's `nukeAccountCancel`
+capability; it never falls back to an incomplete symbol census.
 
 ## Mirror CI invariants (don't "clean these up")
 

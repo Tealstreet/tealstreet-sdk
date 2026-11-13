@@ -218,6 +218,7 @@ impl Algos {
                 data: data.to_string(),
                 origin: "socket:1".into(),
                 twap_owner: self.owner.snapshot(),
+                action: None,
             })
             .unwrap();
     }

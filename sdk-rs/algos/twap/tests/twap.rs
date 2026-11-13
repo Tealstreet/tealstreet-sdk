@@ -20,6 +20,10 @@ fn owned_book() -> TwapBook {
     )
 }
 
+#[path = "twap/identity.rs"]
+#[cfg(not(target_arch = "wasm32"))]
+mod identity;
+
 struct Env {
     now: f64,
     units: Vec<f64>,

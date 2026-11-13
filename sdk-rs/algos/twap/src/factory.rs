@@ -153,6 +153,21 @@ impl TwapFactory {
             .is_none_or(|owner| self.inner.owner_snapshot().as_ref() == Some(owner))
     }
 
+    /// Preserve identity-based label remapping with the host's trusted generation.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_with_owner(
+        account_name: &str,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+        owner: TwapOwner,
+    ) -> Self {
+        Self::from_book(
+            TwapBook::new_with_owner(account_name, owner),
+            account_cx,
+            chasers,
+        )
+    }
+
     /// Stop every TWAP (`twap:stop` each) and send the final state; nothing is
     /// spawned. Chase slices are the chaser book's: await `ChaserBook::shutdown`
     /// before disposing the account scope.

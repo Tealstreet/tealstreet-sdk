@@ -20,6 +20,20 @@ fn bound_row(
     json!({"id":id,"ownerId":owner.owner_id,"ownerGeneration":owner.generation,"options":options,"state":state})
 }
 
+fn account_identity(registry: &safe_cex_exchange_server::accounts::Registry) -> String {
+    let holdings = testing::holdings(registry);
+    assert_eq!(holdings.len(), 1);
+    let (user, identity) = holdings.keys().next().unwrap();
+    assert_eq!(user, "target");
+    assert_eq!(identity.len(), 64);
+    assert!(
+        identity
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+    identity.clone()
+}
+
 async fn restored_state(reason: Option<interruption::Reason>) {
     tokio::task::LocalSet::new().run_until(async {
     let mut config=support::config(Duration::from_secs(60));
@@ -36,6 +50,8 @@ async fn restored_state(reason: Option<interruption::Reason>) {
     }
     let init:InitPayload=serde_json::from_value(json!({"accountName":"acct","exchangeName":"bybit","key":"k"})).unwrap();
     let _account=testing::trading_account(&app.registry,"target",&init);
+    let owner_id=account_identity(&app.registry);
+    assert_eq!(_account.twap_owner.snapshot().owner_id,owner_id,"TWAP restore tags follow registry identity");
     let address=support::serve(app).await;
     let mut page=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
     page.init(&init).await;
@@ -104,6 +120,8 @@ async fn resume_survives_rebuild(same_box: bool) {
     }
     let init:InitPayload=serde_json::from_value(json!({"accountName":"acct","exchangeName":"bybit","key":"k"})).unwrap();
     let _account=testing::trading_account(&app.registry,"target",&init);
+    let owner_id=account_identity(&app.registry);
+    assert_eq!(_account.twap_owner.snapshot().owner_id,owner_id,"TWAP restore tags follow registry identity");
     let address=support::serve(app.clone()).await;
     let mut page=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
     page.init(&init).await;
