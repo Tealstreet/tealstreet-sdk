@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "delegated_identity_admission.rs"]
+mod admission;
+
 #[cfg(feature = "delegated-order-frames")]
 #[path = "delegated_identity_orders.rs"]
 mod orders;
