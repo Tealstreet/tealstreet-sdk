@@ -3,6 +3,20 @@ use super::*;
 use crate::order_contract::{self, CancelQueued, OrderSubmit};
 
 impl Session {
+    // Admission and receipts must select the same joined registration. A refused
+    // init may refresh fallback provenance without replacing that registration.
+    // Pending attempts still receive refusals on their own output.
+    pub(super) fn order_out(&mut self, name: &str, instance: Option<&str>) -> Out {
+        self.forget_disposed();
+        if !self.pending_verifications.contains_key(name)
+            && let Some(joined) = self.joined.get(name)
+            && joined.out.order_binding(instance)
+        {
+            return joined.out.clone();
+        }
+        self.handover_out(name)
+    }
+
     pub(super) fn order_admitted(&mut self, name: &str, instance: Option<&str>) -> bool {
         self.forget_disposed();
         self.order_frames_enabled
@@ -21,7 +35,7 @@ impl Session {
     pub(super) async fn order_submit(&mut self, mut submit: OrderSubmit) {
         let name = submit.account_name.clone();
         let id = Value::String(submit.intent_id.clone());
-        let out = self.handover_out(&name);
+        let out = self.order_out(&name, submit.instance_id.as_deref());
         if !out.order_receipt_binding_bounded()
             || name.len() > 256
             || submit.intent_id.len() > order_contract::KEY_MAX
@@ -89,7 +103,7 @@ impl Session {
     }
 
     pub(super) fn order_cancel_queued(&mut self, cancel: CancelQueued) {
-        let out = self.handover_out(&cancel.account_name);
+        let out = self.order_out(&cancel.account_name, cancel.instance_id.as_deref());
         if !out.order_receipt_binding_bounded()
             || cancel.account_name.len() > 256
             || cancel.intent_id.len() > order_contract::KEY_MAX

@@ -429,3 +429,147 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
         })
         .await;
 }
+
+#[tokio::test]
+async fn unsupported_init_preserves_live_delegated_receipts_and_pending_completion() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape {
+                hold: true,
+                ..Default::default()
+            };
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let live = session.out.with_instance_id(Some("live"));
+            session.joined.get_mut("synthetic-main").unwrap().out = live.clone();
+            session
+                .registration_outputs
+                .insert("synthetic-main".into(), live);
+            assert!(session.resnapshot("synthetic-main").await);
+            let first_id = submit(&mut session, 0, Some("live")).await;
+            assert_eq!(
+                order_frame(&mut sent, "order.ack").await["d"]["instanceId"],
+                "live"
+            );
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while tape.waiting.lock().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+
+            let mut refused = init("bitrue");
+            refused.instance_id = Some("refused".into());
+            session.init(refused).await.unwrap();
+            let reply = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let text = sent.recv().await.unwrap();
+                    let frame: Value = serde_json::from_str(&text).unwrap();
+                    if frame["d"]["op"] == "error" {
+                        break frame;
+                    }
+                }
+            })
+            .await
+            .expect("bounded unsupported-init reply");
+            assert_eq!(reply["d"]["instanceId"], "refused");
+            assert_eq!(reply["d"]["data"][1]["kind"], "unsupported");
+            assert!(Arc::ptr_eq(
+                &session.joined["synthetic-main"].account,
+                &account
+            ));
+
+            // The rejected registration cannot dispatch, and keeps its own refusal output.
+            submit(&mut session, 0, Some("refused")).await;
+            let ack = order_frame(&mut sent, "order.ack").await;
+            assert_eq!(ack["d"]["instanceId"], "refused");
+            assert_eq!(ack["d"]["received"], false);
+            let denied = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(denied["d"]["instanceId"], "refused");
+            assert_eq!(denied["d"]["outcomeSeq"], 1);
+            assert_eq!(denied["d"]["outcome"], "refused");
+            assert_eq!(*tape.writes.lock().unwrap(), vec!["create"]);
+
+            // Another authenticated user's session becomes active while A's native work waits.
+            let b_tape = Tape::default();
+            let b = delegated_account(&registry, "B", "bybit", b_tape.clone());
+            let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
+            bob.joined.get_mut("synthetic-main").unwrap().out = bob.out.with_instance_id(Some("B"));
+            assert!(bob.resnapshot("synthetic-main").await);
+            for (id, events) in tape.waiting.lock().unwrap().drain(..) {
+                answer(
+                    &events,
+                    id,
+                    json!({
+                        "retCode":0,"retMsg":"OK",
+                        "result":{"list":[{"orderId":"native-before-refusal",
+                            "orderLinkId":first_id,"symbol":"BTCUSDT"}]},
+                        "retExtInfo":{"list":[{"code":0,"msg":"OK"}]}
+                    })
+                    .to_string(),
+                );
+            }
+            let completion = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(completion["d"]["instanceId"], "live");
+            assert_eq!(completion["d"]["outcomeSeq"], 1);
+            assert_eq!(completion["d"]["outcome"], "placed");
+            // A new accepted placement must select the same output as admission.
+            submit(&mut session, 0, Some("live")).await;
+            let ack = order_frame(&mut sent, "order.ack").await;
+            assert_eq!(ack["d"]["instanceId"], "live");
+            assert_eq!(ack["d"]["received"], true);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while tape.waiting.lock().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            tape.finish_unknown();
+            let completion = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(completion["d"]["instanceId"], "live");
+            assert_eq!(completion["d"]["outcomeSeq"], 2);
+            assert_eq!(completion["d"]["outcome"], "unknown");
+            session
+                .handle(
+                    &json!({"t":"order.cancelQueued","d":{
+                        "accountName":"synthetic-main","instanceId":"live","intentId":intent(0),
+                        "seq":2,"fingerprint":"a".repeat(64)
+                    }})
+                    .to_string(),
+                )
+                .await
+                .unwrap();
+            let receipt = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(receipt["d"]["instanceId"], "live");
+            assert_eq!(receipt["d"]["outcomeSeq"], 3);
+            assert_eq!(receipt["d"]["outcome"], "unknown");
+            assert_eq!(*tape.writes.lock().unwrap(), vec!["create", "create"]);
+            assert!(b_tape.writes.lock().unwrap().is_empty());
+            while let Ok(text) = b_sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert!(
+                    !frame["t"]
+                        .as_str()
+                        .is_some_and(|kind| kind.starts_with("order.")),
+                    "A's receipts must never reach B: {frame}"
+                );
+            }
+            submit(&mut bob, 0, Some("B")).await;
+            assert_eq!(
+                order_frame(&mut b_sent, "order.ack").await["d"]["instanceId"],
+                "B"
+            );
+            let placed = order_frame(&mut b_sent, "order.outcome").await;
+            assert_eq!(placed["d"]["instanceId"], "B");
+            assert_eq!(placed["d"]["outcomeSeq"], 1);
+            assert_eq!(placed["d"]["outcome"], "placed");
+            session.close();
+            bob.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+            registry.dispose(&b, Disposal::PageDisposed);
+        })
+        .await;
+}
