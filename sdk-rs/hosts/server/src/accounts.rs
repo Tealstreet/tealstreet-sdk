@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 mod admission;
+mod proof_queue;
 pub(crate) use admission::ProbePermit;
 pub(crate) mod identity;
 
@@ -594,6 +595,7 @@ pub struct Registry {
     pub interruptions: Arc<crate::interruption::Notices>,
     accounts: Arc<Mutex<AccountEntries>>,
     pending_inits: PendingInits,
+    proof_queues: proof_queue::ProofQueues,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
     /// the server has not seen yet (no close frame) takes it over.
@@ -958,6 +960,7 @@ impl Registry {
             interruptions: Default::default(),
             accounts: Arc::default(),
             pending_inits: Arc::default(),
+            proof_queues: Default::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
             threads,
