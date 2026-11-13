@@ -99,6 +99,7 @@ export type StoreWorkerOutgoingOp =
   | 'grafana-pws-sub'
   | 'grafana-http-request'
   | 'grafana-http-response'
+  | 'ws-diagnostic'
   // Infrastructure (ExchangeServerWorker only)
   | 'connection-state'
   | 'session-lost'

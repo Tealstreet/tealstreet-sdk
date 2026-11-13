@@ -1947,6 +1947,24 @@ test('#3300 pinned master merge c4d663622c01 retains measured ApeX Omni headroom
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
 
+for (const venue of ['bitget', 'bitgetusdc']) {
+  test(`#3426 ${venue} current CI artifact retains measured family reserve`, () => {
+    // Rust SDK run 43187677592, job 131079474589, artifact 13930235036.
+    // CI source b3c4cf6212e6: verified equal web/Node modules of 2,487,523 bytes.
+    const measured = 2_487_523;
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(minimumCap, 2_498_560);
+    assert.equal(venueFamily(venue), 'bitget');
+    assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+  });
+}
+
 
 test('nullable history output retains current measured family headroom', () => {
   // Pinned local build.sh --venue FAMILY: Rust 1.99.0, bindgen 0.2.129, Binaryen 132.

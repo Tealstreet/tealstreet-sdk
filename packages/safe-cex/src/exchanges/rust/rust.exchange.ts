@@ -1555,7 +1555,7 @@ export class RustEngineExchange extends BaseExchange {
     const options = this.engineOptions;
     if (this.setupError) throw this.setupError;
     if (deriveEndpointSetupPolicy(this.name) === 'hyrotrader') {
-      const simulator = options.extra?.hyrotraderMode === 'demo' || !HYROTRADER_PROD_URL.livenet;
+      const simulator = options.extra?.hyrotraderMode === 'demo';
       const network = options.testnet ? 'testnet' : 'livenet';
       const rest = simulator ? HYROTRADER_SIMULATOR_URL : HYROTRADER_PROD_URL;
       const sockets = simulator ? HYROTRADER_SIMULATOR_WS_URL : HYROTRADER_PROD_WS_URL;
@@ -1655,8 +1655,11 @@ export class RustEngineExchange extends BaseExchange {
     this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
     this.invalidateInfoCatalogue = routedTransport.invalidateCatalogue;
     this.readReconnectDiagnostics = routedTransport.reconnectDiagnostics;
-    const transport = withRequestsLog(routedTransport, this.name, (event, message) =>
-      this.emitter.emit(event, message),
+    const transport = withRequestsLog(
+      routedTransport,
+      this.name,
+      (event, message) => this.emitter.emit(event, message),
+      (event) => this.emitter.emit('ws-diagnostic', event),
     );
     const engine = constructEngine(
       WasmEngine,

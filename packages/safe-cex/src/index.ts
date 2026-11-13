@@ -14,6 +14,7 @@ import { getExchangeMetadata } from './exchangeMetadata';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
 import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { snapshotDelegatedSigningOptions } from './exchanges/rust/delegatedSigningSnapshot';
+import { validateSigningMode } from './signingMode';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
 import { unsupportedVenueError } from './unsupportedVenue';
@@ -84,6 +85,8 @@ export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 
 export { createEngineTransport, resolveEngineRoutingPlan } from './transport/engine';
 export type { EngineRoutingPlan } from './transport/engine';
+export { setWsDiagnosticsEnabled, isWsDiagnosticsEnabled } from './utils/wsDiagnostics';
+export type { WsDiagnosticEvent } from './transport/requestsLog';
 
 export { sealDelegatedHandover } from './delegatedHandover';
 export type { DelegatedHandoverInput, SealedDelegatedHandover } from './delegatedHandover';
@@ -138,6 +141,7 @@ export const createExchange = async (
 ): Promise<BaseExchange> => {
   assertBetaVenue(exchangeName);
   options = snapshotDelegatedSigningOptions(exchangeName, options);
+  validateSigningMode(options.signingMode);
   assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
   // Rejected venues never start the clock, load WASM or construct transports.

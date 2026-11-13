@@ -253,12 +253,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3317 engine/host throughput profile: local optimized web/node 2,754,487 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitget.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
+  // #3438 merged-head local build.sh --venue bitget: web/node 2,486,531 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3426 run 43187677592, job 131079474589, artifact 13930235036, CI source b3c4cf6212e6.
+  // Verified web/Node 2,487,523 B + 10 KiB, rounded up to KiB; both siblings share this cap.
   bitget: 2_764_800,
   bitgetusdc: 2_764_800,
-  // #3438 merged-head local build.sh --venue bitget: web/node 2,486,531 B.
-  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  // #3438 merged-head local build.sh --venue bitget: web/node 2,486,531 B.
-  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262

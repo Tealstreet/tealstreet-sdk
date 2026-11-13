@@ -16,6 +16,52 @@ mod contract;
 use ts_rs::TS;
 
 #[test]
+fn signing_mode_is_optional_closed_and_preserved_in_both_models() {
+    for mode in [None, Some("local"), Some("cosigned"), Some("delegated")] {
+        for (account, mut wire) in [
+            (false, serde_json::json!({"key":"", "secret":""})),
+            (
+                true,
+                serde_json::json!({"exchange":"bybit", "name":"main", "apiKey":"", "apiSecret":""}),
+            ),
+        ] {
+            if let Some(mode) = mode {
+                wire["signingMode"] = mode.into();
+            }
+            let output = if account {
+                serde_json::to_value(
+                    serde_json::from_value::<contract::ExchangeAccountConfig>(wire.clone())
+                        .unwrap(),
+                )
+                .unwrap()
+            } else {
+                serde_json::to_value(
+                    serde_json::from_value::<contract::ExchangeOptions>(wire.clone()).unwrap(),
+                )
+                .unwrap()
+            };
+            assert_eq!(output.get("signingMode"), wire.get("signingMode"));
+        }
+    }
+    for invalid in [
+        serde_json::Value::Null,
+        serde_json::json!("DELEGATED"),
+        serde_json::json!(7),
+        serde_json::json!({"local":null}),
+    ] {
+        assert!(serde_json::from_value::<contract::ExchangeAccountConfig>(serde_json::json!({
+            "exchange":"bybit", "name":"main", "apiKey":"", "apiSecret":"", "signingMode":invalid
+        })).is_err());
+        assert!(
+            serde_json::from_value::<contract::ExchangeOptions>(serde_json::json!({
+                "key":"", "secret":"", "signingMode":invalid
+            }))
+            .is_err()
+        );
+    }
+}
+
+#[test]
 fn account_identity_retains_absent_null_and_empty_strings() {
     for value in [
         None,

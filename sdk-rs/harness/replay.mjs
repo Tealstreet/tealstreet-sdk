@@ -11,7 +11,7 @@ import { replayPositions } from './bitget-anchor-positions.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
-import { axiosClients, venueOf } from './venues.mjs';
+import { axiosClients, replayVenueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { idleLoadedBaseline, measureBeforeCapture, retainedMemory, settledMemory } from './memory.mjs';
@@ -35,7 +35,7 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const venue = venueOf(values.venue);
+const venue = replayVenueOf(values.venue);
 const tapeBytes = readFileSync(values.tape);
 const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
   .toString('utf8')
