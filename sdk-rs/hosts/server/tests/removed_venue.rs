@@ -33,7 +33,15 @@ async fn unavailable_hosted_accounts_refuse_typed_without_disturbing_live_accoun
             page.until("frame", |d| d["accountName"] == live.account_name)
                 .await;
 
-            for venue in ["bitmex", "bitmextestnet", "bitrue", "polymarket"] {
+            for venue in [
+                "bitmex",
+                "bitmextestnet",
+                "bitrue",
+                "orderly",
+                "polymarket",
+                "txflow",
+                "weex",
+            ] {
                 for (public_only, same_name) in
                     [(true, false), (false, false), (true, true), (false, true)]
                 {

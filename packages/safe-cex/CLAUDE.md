@@ -1,7 +1,9 @@
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
-Bitrue and Polymarket remain OUT for public and private SDK accounts.
+Hosted construction follows that full roster for public and private accounts.
+Bitrue, Polymarket, Weex, TxFlow and the canonical `orderly` name remain OUT;
+KodiakFi, Mode, What and WOOFi retain their admitted Orderly-family aliases.
 Polymarket's native signing layer also refuses delegated
 custody: its private user WebSocket needs the L2 API secret, not a signature. See
 `sdk-rs/venues/polymarket/README.md`; callback payloads must never export it.
