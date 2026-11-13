@@ -2459,7 +2459,7 @@ pub fn resume_id() -> String {
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
     /// Synthetic venue fixtures have no real private-startup transport. The
-    /// production declaration remains the default for admission fixtures.
+    /// production proof requirement remains the default; legacy fixtures opt out explicitly.
     pub fn set_join_admission(registry: &mut super::Registry, enabled: bool) {
         registry.join_admission_override = Some(enabled);
     }

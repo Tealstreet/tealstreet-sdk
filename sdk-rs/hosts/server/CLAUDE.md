@@ -52,7 +52,7 @@ Already accepted chaser/TWAP jobs retain their existing account lifetime.
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
 handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
 `remoteSigning` policy and a configured server origin, with the existing
-unhosted refusal preserved. There is no mode-specific venue list or
+unhosted refusal preserved. There is no separate DELEGATED venue allowlist or
 `delegated.enabled` declaration. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
@@ -80,11 +80,17 @@ The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
 unchanged in both modes. Other hosted venues retain their current account-label
 identity; that distinction does not gate DELEGATED or COSIGNED admission.
 
-The same hosted eligibility selects private COSIGNED admissions. Both modes
-share the off-loop probe, refusal classification, token/lease checks and account
-attachment. A pending COSIGNED signer belongs only to its joining connection;
-probe frames are consumed internally. Matching COSIGNED inits on an admitted
-connection and COSIGNED resumes retain their existing snapshot path.
+Private COSIGNED admissions require possession proof independently of
+DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
+DELEGATED's shared probe. Both modes share refusal classification, token/lease
+checks and account attachment. A private account is never attached
+as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
+OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
+other private COSIGNED joins return the typed `proof-unavailable` init refusal.
+A pending COSIGNED signer belongs only to its joining connection; probe frames
+are consumed internally. Matching COSIGNED inits on an admitted connection and
+COSIGNED resumes retain their existing snapshot path. The exact wire names and
+rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;

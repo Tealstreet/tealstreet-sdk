@@ -166,7 +166,11 @@ async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account
             let registry = tests::registry();
             let mut init = init();
             let account = testing::trading_account(&registry, "A", &init);
-            for venue in ["hyrotrader", "binanceoptions", "kucoin", "unknown"] {
+            for venue in ["hyrotrader", "binanceoptions", "kucoinspot", "unknown"] {
+                assert!(
+                    safe_cex_native::resolve::rest_base_url(venue, false).is_err(),
+                    "{venue}: refusal control must lack a hosted origin"
+                );
                 init.exchange_name = venue.into();
                 let result = registry
                     .obtain_delegated("A", &init, 8, None, Arc::new(|_| true), pair())

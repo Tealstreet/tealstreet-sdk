@@ -467,13 +467,14 @@ pub(crate) mod tests {
             "bybitdemo",
             "binance",
             "okx",
+            "kucoin",
         ] {
             assert!(enabled(venue), "{venue}");
         }
         for venue in [
             "hyrotrader",
             "binanceoptions",
-            "kucoin",
+            "kucoinspot",
             "",
             "BYBIT",
             "unknown",

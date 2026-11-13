@@ -4,11 +4,14 @@ use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 
-// Explicit staging entries. Adding one requires the matching offline suite;
-// this test-only catalog does not gate runtime admission or change rollout declarations.
-#[cfg(test)]
+// Exact COSIGNED venues with a private-startup proof and matching negative suite.
+// Other COSIGNED joins refuse explicitly; DELEGATED uses shared hosted eligibility.
 pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] =
     &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
+
+pub(crate) fn cosigned_ready(venue: &str) -> bool {
+    PRIVATE_STARTUP_VENUES.contains(&venue)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProbeOutcome {
@@ -336,7 +339,7 @@ mod tests {
 
 #[cfg(test)]
 #[path = "probe_tests.rs"]
-mod venue_tests;
+pub(crate) mod venue_tests;
 
 #[cfg(test)]
 #[path = "wallet_probe_tests.rs"]
