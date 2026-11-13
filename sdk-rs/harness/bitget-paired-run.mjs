@@ -4,8 +4,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-// Leave ten minutes of the job budget for setup, process teardown and evidence upload.
-export function runBitgetPaired({ out, timeoutMs = 35 * 60_000, killGraceMs = 5000,
+// Tip alone took 20–22 minutes in runs 43273706928 / 43281701341.
+// Allow both tip and anchor, plus their independent builds, while leaving ten
+// minutes of the job budget for setup, process teardown and evidence upload.
+export function runBitgetPaired({ out, timeoutMs = 80 * 60_000, killGraceMs = 5000,
   command = process.execPath, args = [fileURLToPath(new URL('./bitget-paired-ci.mjs', import.meta.url)), '--out', out] }) {
   return new Promise((finish, reject) => {
     const child = spawn(command, args, { stdio: 'inherit', detached: true });

@@ -1,6 +1,9 @@
+import type { StoreWorkerOrderBookFrameRejection } from '../StoreWorkerPayload';
+
 import throttle from 'lodash/throttle';
 
 import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
+import { serializeCommandError } from '../../commandOutcome';
 import { OrderBook } from '../../types';
 import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
@@ -25,6 +28,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
   // throttled callbacks fire at different phases of the same data stream.
   // In dedicated worker mode this is a no-op (one session = one subId per symbol).
   private _subsBySymbol = new Map<string, SymbolSub>();
+  private _disposed = false;
 
   private _sendOrderBookUpdate = (data: { symbol: string; subId: string }, o: OrderBook) => {
     this._ctx.postMessage({ op: 'listenOrderBook', data: { ...data, orderbook: o } });
@@ -44,6 +48,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
   };
 
   handle(payload: StoreWorkerPayload): void {
+    if (this._disposed) return;
     switch (payload.op) {
       case 'subscribeOrderBook': {
         // Markets not loaded yet — buffer for later
@@ -70,19 +75,59 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
 
         // Create new subscription
         const data = { ...payload.data };
+        let unsubscribe: (() => void) | undefined;
+        let stopped = false;
         const f = throttle(
           this._sendOrderBookUpdate.bind(this, data),
           exchangeMetadata[this._exchange.name].orderbookTickDelay *
             (this._exchange.options?.tuning?.dataUpdateThrottleMultiplier || 1),
           { trailing: true },
         );
-        const unsub = this._exchange.listenOrderBook(symbol, f) || (() => {});
-
-        this._subsBySymbol.set(symbol, {
-          unsub,
+        const subIds = new Set([subId]);
+        const sub: SymbolSub = {
+          unsub: () => {
+            if (stopped) return;
+            stopped = true;
+            f.cancel();
+            unsubscribe?.();
+          },
           throttleFn: f,
-          subIds: new Set([subId]),
-        });
+          subIds,
+        };
+        // Cancellation must see the subscription before a source can call back.
+        this._subsBySymbol.set(symbol, sub);
+        try {
+          unsubscribe = this._exchange.listenOrderBook(
+            symbol,
+            (book) => {
+              if (!this._disposed && !stopped) f(book);
+            },
+            (signal) => {
+              if (this._disposed || stopped) return;
+              f.cancel();
+              for (const subId of subIds) {
+                const data: StoreWorkerOrderBookFrameRejection = {
+                  ...signal,
+                  subId,
+                  error: serializeCommandError(signal.error),
+                };
+                this._ctx.postMessage({ op: 'listenOrderBook:rejected', data });
+              }
+            },
+          );
+        } catch (error) {
+          if (this._subsBySymbol.get(symbol) === sub) this._subsBySymbol.delete(symbol);
+          subIds.clear();
+          sub.unsub();
+          throw error;
+        }
+        if (stopped) {
+          try {
+            unsubscribe?.();
+          } catch {
+            /* A cancelled registration still releases its late handle once. */
+          }
+        }
         break;
       }
       case 'unsubscribeOrderBook': {
@@ -96,13 +141,13 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
 
             if (sub.subIds.size === 0) {
               // Last subscriber — actually unsubscribe from exchange
+              this._subsBySymbol.delete(symbol);
               try {
                 sub.unsub();
                 sub.throttleFn?.cancel?.();
               } catch (_e) {
                 // Ignored
               }
-              this._subsBySymbol.delete(symbol);
             }
             break;
           }
@@ -110,5 +155,19 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
         break;
       }
     }
+  }
+  dispose() {
+    this._disposed = true;
+    super.dispose();
+    for (const sub of this._subsBySymbol.values()) {
+      sub.subIds.clear();
+      sub.throttleFn.cancel();
+      try {
+        sub.unsub();
+      } catch {
+        /* Continue releasing other subscriptions. */
+      }
+    }
+    this._subsBySymbol.clear();
   }
 }

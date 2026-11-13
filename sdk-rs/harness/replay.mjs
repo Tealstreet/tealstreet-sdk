@@ -209,17 +209,22 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
-  const { memory: heapBefore, loadMetrics, loaded: { EngineHost, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder } } = await idleLoadedBaseline({
+  const { memory: heapBefore, loadMetrics, loaded: { EngineHost, socketMessages, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder } } = await idleLoadedBaseline({
     baseline,
     load: async () => {
       await initializeReplay();
-      const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
+      const { EngineHost, socketMessages } = await import('../hosts/wasm/js/host.mjs');
       const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
       const { loadEngine } = await import('./engine.mjs');
-      const { WasmEngine, wasmMemoryBytes } = await loadEngine(values.wasm);
+      const module = await loadEngine(values.wasm);
+      const { WasmEngine, wasmMemoryBytes } = module;
+      const fixture = venue.rustFixture && module[venue.rustFixture];
+      if (venue.rustFixture && typeof fixture !== 'function') throw new Error('Missing fixture-only replay constructor; no production fallback');
       const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options, { performance: values.performance });
       const encoder = new TextEncoder();
-      return { EngineHost, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder };
+      return { EngineHost, socketMessages, Frame, TickerState, MARKET_COLUMNS,
+        WasmEngine: fixture ? class { constructor() { return fixture(!isPrivate); } } : WasmEngine,
+        wasmMemoryBytes, tape, encoder };
     },
   });
   const wasmBeforeBytes = wasmMemoryBytes();
@@ -248,10 +253,13 @@ async function runRust() {
     prepareHttp: prepareRecordedHttp,
     connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       if (!values.performance) venue.validateSocket?.(url, headers);
+      const receive = venue.compressedTextSockets
+        ? socketMessages(onMessage, error => { throw error; })
+        : data => (typeof data === 'string' ? onMessage(data) : onBinary?.(data));
       const socket = tape.connect(
         url,
         onOpen,
-        (data) => (typeof data === 'string' ? onMessage(data) : onBinary?.(data)),
+        receive,
         onClose,
       );
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
