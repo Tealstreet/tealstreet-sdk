@@ -2103,38 +2103,50 @@ test('#3429 master restage retains current measured Hyperliquid and Weex headroo
   assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
 });
 
-test('#3372 (run 42484598496 at 44f62e31028) retains measured wasm headroom', () => {
+
+test('#3342 (run 42480192430 at 188604decf7) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
-    ['bybit', 2_285_327, 2_295_808],
+    ['bybit', 2_299_152, 2_310_144],
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     const cap = WASM_VENUE_OVERRIDES[venue];
-    assert.ok(cap >= minimumCap);
-    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    // A later integration can retain a larger measured parent floor.
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < historical floor ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
 
-test('#3372 restage (optimized merge 41d4292d6f3) retains current Bybit headroom', () => {
-  const measured = 2_323_991;
-  const minimumCap = 2_334_720;
+test('#3342 master merge e817ea1fa46 retains measured Bybit headroom', () => {
+  const measured = 2_336_508;
+  const minimumCap = 2_347_008;
   assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   const cap = WASM_VENUE_OVERRIDES.bybit;
-  assert.ok(cap >= minimumCap, 'Bybit retains the current measured size plus 10 KiB, rounded up');
+  assert.ok(cap >= minimumCap);
   assert.equal(wasmBudgetError(measured, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
 
-test('#3372 current CI run 43052995465 retains measured Bybit headroom', () => {
-  // Head 5858609a705, CI merge cc0145a0f0ba (base d956d25f8b48), artifact 13869852410.
-  // Optimized web/node/replay each measured 2,331,744 B; earlier provenance pins stay intact.
-  const measured = 2_331_744;
+test('#3342 merge 2b623dc76a03 retains current optimized Bybit headroom', () => {
+  const measured = 2_351_685;
   const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(minimumCap, 2_342_912);
   const cap = WASM_VENUE_OVERRIDES.bybit;
-  assert.ok(cap >= minimumCap, 'Bybit retains the current CI size plus 10 KiB, rounded up');
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
+test('#3342 proof-diagnostic fix retains fresh merged-head Bybit headroom', () => {
+  // Local 091d0b980aef build.sh --venue bybit; Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
+  // Web/Node SHA256 170c1e44400fd4b682818cdd37b01d7a322d11d6c3b9677f53b638b3165a1167.
+  const measured = Math.max(2_354_730, 2_354_730);
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_365_440);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
   assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
@@ -2261,7 +2273,6 @@ for (const [family, artifact, measured] of [
   });
 }
 
-
 test('#3438 master merge retains newly measured conflict-family headroom', () => {
   // Merge cf112c51b87c + 3f94ec11a27f; pinned build.sh web/node sizes.
   for (const [venue, measured, minimumCap, resolvedCap = minimumCap] of [
@@ -2280,6 +2291,59 @@ test('#3438 master merge retains newly measured conflict-family headroom', () =>
   }
 });
 
+test('#3342 Hyro Unknown presentation retains fresh merged-head Bybit reserve', () => {
+  // Source e1e8114b948c55955c6499f8b26feda7df9fbee1; build.sh --venue bybit, pinned tools, twice -Oz.
+  // Web/Node SHA256 b63cd566f882b1310ac05dcccd3d09dd48e075e5862aa6bb46028b294905eec2.
+  const measured = 2_355_973;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_366_464);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
+
+test('#3372 (run 42484598496 at 44f62e31028) retains measured wasm headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['bybit', 2_285_327, 2_295_808],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+
+test('#3372 restage (optimized merge 41d4292d6f3) retains current Bybit headroom', () => {
+  const measured = 2_323_991;
+  const minimumCap = 2_334_720;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, 'Bybit retains the current measured size plus 10 KiB, rounded up');
+  assert.equal(wasmBudgetError(measured, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
+
+test('#3372 current CI run 43052995465 retains measured Bybit headroom', () => {
+  // Head 5858609a705, CI merge cc0145a0f0ba (base d956d25f8b48), artifact 13869852410.
+  // Optimized web/node/replay each measured 2,331,744 B; earlier provenance pins stay intact.
+  const measured = 2_331_744;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_342_912);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, 'Bybit retains the current CI size plus 10 KiB, rounded up');
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
 
 test('#3372 merged CI run 43381322258 retains current Bybit reserve', () => {
   // Head 41026bb9ab40 and CI source 15801feeeb97 have the same compiled-source tree.
@@ -2289,6 +2353,21 @@ test('#3372 merged CI run 43381322258 retains current Bybit reserve', () => {
   assert.equal(minimumCap, 2_350_080);
   const cap = WASM_VENUE_OVERRIDES.bybit;
   assert.ok(cap >= minimumCap, 'Bybit retains the current merged CI size plus 10 KiB, rounded up');
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
+
+test('#3342 latest master composition retains fresh CI Bybit reserve', () => {
+  // Run 43452683819/job 131979457461; wasm-family-bybit, CI source 0d075971b309.
+  // Source tree equals e0b3a4b9f1f9af2ff541d4a564b28adf2da4bf06; all five WASM copies agree.
+  // SHA256 99f3fea9eac4f64b632943b980f506558dacd2a9b769a3717d27ca29b50848cd.
+  const measured = 2_360_107;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_370_560);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
   assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
