@@ -2118,3 +2118,16 @@ test('#3438 master merge retains newly measured conflict-family headroom', () =>
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3342 Hyro Unknown presentation retains fresh merged-head Bybit reserve', () => {
+  // Source e1e8114b948c55955c6499f8b26feda7df9fbee1; build.sh --venue bybit, pinned tools, twice -Oz.
+  // Web/Node SHA256 b63cd566f882b1310ac05dcccd3d09dd48e075e5862aa6bb46028b294905eec2.
+  const measured = 2_355_973;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_366_464);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
