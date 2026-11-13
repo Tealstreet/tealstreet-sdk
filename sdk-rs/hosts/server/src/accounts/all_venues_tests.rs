@@ -47,7 +47,11 @@ fn hosted_identity_covers_each_declared_remote_venue() {
         );
         alias = first.clone();
         alias.testnet = Some(true);
-        assert_ne!(digest(&alias), id, "networks: {venue}");
+        if matches!(venue.as_str(), "okxdemo" | "okxeudemo") {
+            assert_eq!(digest(&alias), id, "effective demo: {venue}");
+        } else {
+            assert_ne!(digest(&alias), id, "networks: {venue}");
+        }
         alias = first.clone();
         alias.public_only = Some(true);
         assert!(
@@ -252,3 +256,19 @@ fn hosted_backpack_identity_uses_validated_public_key_bytes() {
 
 #[path = "lighter_identity_tests.rs"]
 mod lighter;
+
+#[test]
+fn hosted_identity_uses_effective_demo_network_not_redundant_flags() {
+    let network = |venue: &str, testnet| {
+        let mut account = init(venue, "synthetic-key");
+        account.testnet = Some(testnet);
+        digest(&account)
+    };
+    assert_eq!(network("bybit", true), network("bybitdemo", true));
+    assert_ne!(network("bybitdemo", false), network("bybitdemo", true));
+    for (main, demo) in [("okx", "okxdemo"), ("okxeu", "okxeudemo")] {
+        assert_eq!(network(main, true), network(demo, false));
+        assert_eq!(network(main, true), network(demo, true));
+        assert_ne!(network(main, false), network(demo, false));
+    }
+}
