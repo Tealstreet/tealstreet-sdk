@@ -65,7 +65,9 @@ overflow uses the existing transient refusal. Labels, settings, routing and
 signing mode do not split the queue. Waiting uses the existing proof deadline
 and rechecks captured token, init and lease authority before native work. The
 active reservation remains on the engine thread through probe cleanup, including
-cancellation. Idle queue entries are removed; no successful proof is cached.
+cancellation. Reservation counts retire under the same map lock as admission,
+so concurrent final cancellation removes idle entries even while destructor
+fields still retain queue references. No successful proof is cached.
 
 ## DELEGATED order frames
 
