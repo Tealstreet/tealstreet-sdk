@@ -325,6 +325,25 @@ describe('ScaleCommand — order distribution', () => {
     ]);
   });
 
+  it.each(['$215', '50%bal'])('floors MEXC rung shares using the converted native step: %s', async (size) => {
+    const ex = makeExchange();
+    ex.name = 'mexc';
+    Object.assign(ex.store!.markets![0], { contractSize: 0.01, precision: { amount: 0.03, price: 0.01 } });
+    ex.store!.tickers![0].last = 100;
+    ex.store!.balance = { free: 430, total: 430, used: 0, upnl: 0 };
+    const store = new MemoryPreprocessStore();
+    store.setBudget(215);
+
+    const result = await cmd.execute(
+      ctx(['scale', 'buy', size, 'into', '2', 'from', '100', 'to', '100'], ex, 'BTCUSDT', store),
+    );
+
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toMatchObject([{ amount: 105, price: 100 }, { amount: 105, price: 100 }]);
+    expect(store.getBudgetSpent()).toBe(210);
+    expect(store.getBudgetSpent()).toBeLessThanOrEqual(215);
+  });
+
   it('spaces prices evenly between from and to', async () => {
     const ex = makeExchange();
     // Round numbers: from 49000 to 50000 across 5 orders → step 250.

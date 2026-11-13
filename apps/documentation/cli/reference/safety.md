@@ -221,6 +221,11 @@ cancel                   # OK
 nuke                     # OK
 ```
 
+Multi-symbol `buy` / `sell` recheck health before each exposure-increasing
+send. If health degrades during an earlier write, later sends stop. Accepted
+order IDs and budget charges remain recorded, and automatic whole-command
+retry is refused even when an accepted write returned no order IDs.
+
 Risk-**reducing** actions (`close`, `cancel`, `nuke`, and any
 `reduce`-only order) stay allowed so a degraded connection can never trap
 you in a position you can't exit. The lock **fails open** — if the
