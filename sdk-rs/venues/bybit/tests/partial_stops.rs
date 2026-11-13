@@ -1247,6 +1247,7 @@ fn a_refused_partial_replacement_puts_the_exact_old_stop_back() {
     let error = h.result(91).unwrap().as_ref().unwrap_err();
     assert!(error.contains("put back"), "{error}");
     assert!(!h.has_request("/v5/position/trading-stop"), "never loops");
+    assert_applied_restored_partial_failure(&h);
 }
 
 /// codex-mxb4mq's P1: the cancel finds the old stop already gone (110001); the
@@ -1378,7 +1379,9 @@ fn review_3018_gone_cancel_does_not_replay_a_refused_replacement() {
     assert!(matches!(h.result(91), Some(Err(_))));
 }
 #[test]
-fn review_3018_exact_partial_restore_working_control() {
+fn pinfix_exact_partial_restore_working_control() {
+    // TS cancel/replace context: reference/bybit/bybit.exchange.ts:3221-3224.
+    // Preserve master's exact old-stop restore per brief-pinfix-3342.md.
     a_refused_partial_replacement_puts_the_exact_old_stop_back();
 }
 
@@ -2226,7 +2229,9 @@ fn partial_edits_refuse_filled_or_unprotected_orders_before_cancel() {
 }
 
 #[test]
-fn partial_restore_requires_positive_standalone_provenance() {
+fn pinfix_partial_restore_requires_positive_standalone_provenance() {
+    // TS cancel/replace context: reference/bybit/bybit.exchange.ts:3221-3224.
+    // Lead preservation rule keeps master's native-lineage guarded put-back beyond this TS flow.
     for shape in [
         "standalone",
         "attached",
@@ -3150,6 +3155,128 @@ fn partial_replacement_and_put_back_preserve_each_native_trigger_source() {
                 let restore = h.take("/v5/position/trading-stop");
                 let payload: serde_json::Value = serde_json::from_str(body(&restore)).unwrap();
                 assert_eq!(payload[field], source, "put-back {profile:?}/{kind}");
+            }
+        }
+    }
+}
+
+fn assert_applied_restored_partial_failure(h: &Harness) {
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+            _ => None,
+        })
+        .expect("partial edit failure");
+    let elements = error
+        .elements
+        .as_ref()
+        .expect("partial edit indexed outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert_eq!(elements.len(), 3);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == "partial")
+    );
+    assert!(matches!(
+        &elements[1].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(matches!(
+        &elements[2].result,
+        ElementResult::Applied {
+            effect: AppliedEffect::TradingStop,
+            ..
+        }
+    ));
+    assert!(
+        !elements
+            .iter()
+            .any(|row| matches!(row.result, ElementResult::Placed { .. }))
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "no suffix, resend or rollback write"
+    );
+}
+
+#[test]
+fn legacy_partial_replacement_preserves_raw_trigger_without_a_new_tick_gate() {
+    // TS cancel then default-Market replacement: reference/bybit/bybit.exchange.ts:3191-3225,2883-2891.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Partial TP/SL cancel-replace, Full conversion and protective put-back
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(95.049), None);
+    accept_cancel(&mut h, profile);
+    let request = h.take("/v5/position/trading-stop");
+    assert!(body(&request).contains("95.049"));
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"replacement refused"}"#,
+    );
+    let restore = h.take("/v5/position/trading-stop");
+    h.reply(restore.id, 200, OK);
+    assert_applied_restored_partial_failure(&h);
+}
+
+fn seed_limit_partial(h: &mut Harness, profile: Profile, kind: &str) {
+    seed(h, profile, "Sell", kind, "MarkPrice", false, true);
+    let (price, trigger) = if kind == "StopLoss" {
+        ("89", "90")
+    } else {
+        ("111", "110")
+    };
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"order","data":[{
+            "category":profile.category(),"symbol":profile.symbol(),"orderId":"partial",
+            "side":"Sell","orderType":"Limit","orderStatus":"Untriggered",
+            "stopOrderType":kind,"tpslMode":"Partial","qty":"7","cumExecQty":"0",
+            "price":price,"leavesQty":"7","triggerPrice":trigger,"triggerBy":"MarkPrice",
+            "reduceOnly":true,"closeOnTrigger":true,"positionIdx":0
+        }]})
+        .to_string(),
+    );
+}
+
+#[test]
+fn legacy_limit_partial_replacement_uses_default_market_execution() {
+    // TS cancel then default-Market replacement: reference/bybit/bybit.exchange.ts:3191-3225,2883-2891.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Partial TP/SL cancel-replace, Full conversion and protective put-back
+    for profile in PROFILES {
+        for kind in ["StopLoss", "TakeProfit"] {
+            for amount in [0.0, 8.0] {
+                let mut h = ready(profile);
+                seed_limit_partial(&mut h, profile, kind);
+                amend(
+                    &mut h,
+                    Some(if kind == "StopLoss" { 95.0 } else { 105.0 }),
+                    Some(amount),
+                );
+                accept_cancel(&mut h, profile);
+                let request = h.take("/v5/position/trading-stop");
+                let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+                assert_eq!(
+                    wire["tpslMode"],
+                    if amount == 0.0 { "Full" } else { "Partial" }
+                );
+                for field in ["slOrderType", "tpOrderType", "slLimitPrice", "tpLimitPrice"] {
+                    assert!(wire.get(field).is_none(), "legacy TS omits {field}");
+                }
+                h.reply(request.id, 200, OK);
+                assert!(matches!(h.result(91), Some(Ok(_))));
             }
         }
     }

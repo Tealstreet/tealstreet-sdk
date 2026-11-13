@@ -327,6 +327,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,338,200 B; current measurement + 10 KiB, rounded up.
   // #3391 head 133b901dc12b (master b99d9867a1d8): local optimized web/Node 2,341,308 B.
   // build.sh --venue bybit; Rust 1.99.0, bindgen 0.2.129, Binaryen 132; +10 KiB rounded up.
+  // #3342 merged head 2b623dc76a03: local optimized web/node 2,351,685 B; +10 KiB, rounded up.
+  // build.sh --venue bybit; Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132, twice -Oz.
+  // #3342 fix round 091d0b980aef: local merged-head optimized web/node 2,354,730 B; +10 KiB rounded up.
+  // Same build.sh/toolchain above; SHA256 170c1e44400fd4b682818cdd37b01d7a322d11d6c3b9677f53b638b3165a1167.
+  // #3342 fix e1e8114b948c: optimized web/Node 2,355,973 B + 10 KiB, rounded up.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 twice -Oz; both parent histories retained.
   // #3372 head 48cb0d34c168: CI run 43328678379/job 131568212209, artifact 13995125309.
   // CI merge cff6adaa9fc1 (base 908bedbe6f1a): optimized web/Node/replay 2,338,561 B.
   // Current CI size + 10 KiB, rounded up; historical provenance/tests retained.
@@ -350,7 +356,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // CI source 81ae648f2f29 has the same tree; all web/Node/replay copies 2,346,773 B.
   // Module SHA256 207116edb828e944a3ef5bc12e9e23bdccd4d3cdcbba1795c9b30b1d43a9d21a.
   // Current CI bytes + 10 KiB, rounded up: 10,475 B reserve; parent histories retained.
-  bybit: 2_357_248,
+  // #3342 run 43452683819/job 131979457461, artifact wasm-family-bybit: web/Node/replay 2,360,107 B.
+  // CI source 0d075971b309 has e0b3a4b9f1f9's tree; pinned tools above; +10 KiB rounded up.
+  // SHA256 99f3fea9eac4f64b632943b980f506558dacd2a9b769a3717d27ca29b50848cd.
+  bybit: 2_370_560,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
