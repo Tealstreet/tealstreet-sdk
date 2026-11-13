@@ -276,8 +276,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3317 engine/host throughput profile: local optimized web/node 2,754,487 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitget.
-  bitget: 2_764_800,
-  bitgetusdc: 2_764_800,
+  // #3317 master merge 20d61cbdf174: run 43517857744, family job 132204972157.
+  // Optimized web 2,769,255 B + 10 KiB, rounded up to KiB; both aliases share the module.
+  bitget: 2_780_160,
+  bitgetusdc: 2_780_160,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262

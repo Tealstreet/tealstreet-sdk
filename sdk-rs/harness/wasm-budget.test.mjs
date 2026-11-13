@@ -2870,3 +2870,20 @@ for (const [family, artifact, measured, minimumCap, moduleSha256] of [
     }
   });
 }
+
+// #3317 master merge 20d61cbdf174: run 43517857744, family job 132204972157 measured web 2,769,255 B.
+// Both aliases share one Bitget module; require the measured reserve and retain the hard boundary.
+for (const venue of ['bitget', 'bitgetusdc']) {
+  test(`#3317 fresh Bitget composition retains measured reserve for ${venue}`, () => {
+    const measured = 2_769_255;
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    assert.equal(venueFamily(venue), 'bitget');
+    assert.equal(minimumCap, 2_780_160);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
