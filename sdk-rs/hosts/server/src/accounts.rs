@@ -22,6 +22,8 @@ pub(crate) use admission::ProbePermit;
 pub(crate) mod identity;
 
 #[cfg(test)]
+mod all_venues_tests;
+#[cfg(test)]
 mod identity_tests;
 
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
