@@ -622,10 +622,10 @@ for the same name. Each connection retains at most 64 unexpired offers.
 The matching init adds `signingMode:"delegated"` and
 `sealed:{attemptId, enc, ciphertext}`. There is no Bybit-named init field.
 DELEGATED uses the shared hosted eligibility for the requested venue.
-Fresh private COSIGNED inits require possession proof independently of the
-DELEGATED hosted eligibility, including clients omitting the mode field. Only the exact
-proof-ready venue names can complete that shared admission lifecycle; other
-private names refuse without attaching an account. Matching COSIGNED inits on
+Fresh private COSIGNED inits require possession proof independently of
+DELEGATED hosted eligibility, including clients omitting the mode field. Only
+the exact COSIGNED proof-ready venue names can complete COSIGNED admission;
+other private COSIGNED names refuse without attaching an account. Matching inits on
 an already-admitted connection, including a resumed account, retain their
 snapshot-only behavior. Account settings and engine options remain unchanged.
 Plaintext credentials are never init settings or account fingerprints.
@@ -695,12 +695,12 @@ message. Auth kinds are permanent refusals; rate, network, timeout and venue
 availability failures are transient. Replies retain the init's registration ID;
 clients without one retain the original envelope bytes. Verified admission does
 not replace a running account with different settings. A supported private
-COSIGNED venue without a proof returns the permanent `proof-unavailable` init
+COSIGNED venue without proof readiness returns the permanent `proof-unavailable` init
 refusal before probe I/O or attachment; unsupported names retain `unsupported`.
 DELEGATED retains its shared hosted eligibility and private-startup proof.
 Public-only accounts, unsupported/unhosted venues and existing early-subscription
-handling retain their previous paths. Fixed
-synthetic interoperability and RFC test data live in `tests/data/`.
+handling retain their previous paths. Fixed synthetic interoperability and RFC
+test data live in `tests/data/`.
 
 The shared startup admission runner makes exact `bybit`, `binance`, `okx`,
 `bitget`, `blofin` and `kucoin` proof-ready for COSIGNED. It runs the selected

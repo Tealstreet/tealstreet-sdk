@@ -628,7 +628,7 @@ impl Session {
             self.refuse_handover(&init.account_name, false);
             return;
         }
-        if !crate::delegated::probe::ready(&init.exchange_name) {
+        if !delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name) {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "proof unavailable");
             self.handover_out(&init.account_name)

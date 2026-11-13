@@ -590,8 +590,8 @@ fn admission_enabled_venues_require_an_offline_suite() {
             "{venue}: missing offline suite"
         );
     }
-    // Execution modes now share hosted support; the staged probe catalog is
-    // test coverage, not an admission allowlist (Sam, 2026-11-13).
+    // DELEGATED uses shared hosted support rather than a separate rollout list.
+    // The catalog above pins COSIGNED proof coverage; it does not gate DELEGATED.
     for rule in rules["venues"].as_object().unwrap().values() {
         assert!(rule.get("delegated").is_none());
     }

@@ -6,7 +6,7 @@ The server builds native private-startup requests on the account's existing
 route. The joining device returns signatures through the existing `sign-req` /
 `sign-res` wire; it does not provide the request or a verification result.
 
-COSIGNED proof readiness is independent of the DELEGATED rollout declaration.
+COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The exact proof-ready venue names are:
 
 | Venue | Probe |
@@ -41,6 +41,8 @@ same-user COSIGNED resumes within the existing 60-second window keep the current
 resume contract. Token expiry, lease authority, output retirement and captured
 connection/generation checks continue to apply.
 
-This does not enable another DELEGATED venue, change its handover or local
-signer, alter account identity or retention, change the socket protocol version,
-or grant permission to retry an interrupted write.
+DELEGATED retains the generic hosted eligibility rule, its handover and local
+signer. KuCoin mainnet now has a configured Futures origin and qualifies under
+that rule; its private-startup proof is still required. Account identity,
+retention and socket protocol version are unchanged, and no refusal grants
+permission to retry an interrupted write.

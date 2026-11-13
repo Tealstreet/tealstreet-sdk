@@ -224,8 +224,8 @@ async fn load(
 
 async fn venue_case(venue: &'static str) {
     assert!(
-        !crate::delegated::enabled(venue),
-        "test requires DELEGATED flag off"
+        crate::delegated::enabled(venue),
+        "shared hosted eligibility does not replace a fresh COSIGNED proof"
     );
     let (io, seen): (MockVenue, Arc<Mutex<Seen>>) = MockVenue::for_admission(venue);
     let registry = crate::accounts::testing::e2e_registry("alice", io);
@@ -436,10 +436,13 @@ fn cosigned_kucoin_probe_setup_uses_the_existing_futures_origin() {
 }
 
 #[tokio::test]
-async fn cosigned_bybit_proof_runs_even_with_delegated_rollout_disabled() {
+async fn cosigned_bybit_proof_ignores_obsolete_delegated_rollout_field() {
     crate::delegated::with_test_declaration(
-        json!({"venues":{"bybit":{"delegated":{"enabled":false}}}}),
+        json!({"venues":{"bybit":{"remoteSigning":{"enabled":true},"delegated":{"enabled":false}}}}),
         async {
+            // Preserve the production hosted/identity policy across the spawned
+            // proof task; the obsolete delegated flag must not select admission.
+            assert!(crate::delegated::enabled("bybit"));
             let registry = crate::accounts::testing::e2e_registry(
                 "alice",
                 MockVenue::new(KEY.into(), MATERIAL.into()),

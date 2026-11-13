@@ -4,12 +4,12 @@ use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 
-// Exact venues with a private-startup possession proof and matching negative suite.
-// Other private joins refuse explicitly; this does not enable DELEGATED rollout.
+// Exact COSIGNED venues with a private-startup proof and matching negative suite.
+// Other COSIGNED joins refuse explicitly; DELEGATED uses shared hosted eligibility.
 pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] =
     &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
 
-pub(crate) fn ready(venue: &str) -> bool {
+pub(crate) fn cosigned_ready(venue: &str) -> bool {
     PRIVATE_STARTUP_VENUES.contains(&venue)
 }
 
@@ -91,9 +91,6 @@ pub(crate) async fn run<T: Transport + 'static>(
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
-    if !ready(venue) {
-        return Err(ProbeRefusal::INVALID);
-    }
     let options: safe_cex_venues::EngineOptions =
         serde_json::from_str(options_json).map_err(|_| ProbeRefusal::INVALID)?;
     if options.frame_fed

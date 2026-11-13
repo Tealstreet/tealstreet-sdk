@@ -140,7 +140,10 @@ impl Registry {
                     "hosted_delegated",
                 )
             }
-            (None, Some(link)) if init.signing_mode.as_deref() != Some("delegated") => {
+            (None, Some(link))
+                if init.signing_mode.as_deref() != Some("delegated")
+                    && crate::delegated::probe::cosigned_ready(&init.exchange_name) =>
+            {
                 let prepared =
                     prepare(init, false, Some(link.clone())).map_err(|_| ProbeRefusal::INVALID)?;
                 let remote = prepared.remote.ok_or(ProbeRefusal::INVALID)?;
