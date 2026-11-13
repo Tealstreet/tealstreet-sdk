@@ -205,7 +205,7 @@ fn wallet_paradex_key_only_shape_uses_the_existing_trusted_mapping() {
     let init = InitPayload {
         account_name: "fixture".into(),
         exchange_name: "paradex".into(),
-        key: MATERIAL.into(),
+        key: "0x456".into(),
         paradex_address: Some("0x123".into()),
         subkey_address: Some("0x456".into()),
         ..Default::default()
@@ -213,7 +213,8 @@ fn wallet_paradex_key_only_shape_uses_the_existing_trusted_mapping() {
     assert!(
         prepare_delegated(
             &init,
-            DelegatedPair::new(MATERIAL.into(), String::new(), None)
+            DelegatedPair::new("0x456".into(), String::new(), None)
+                .with_signing_key(MATERIAL.into())
         )
         .is_ok()
     );

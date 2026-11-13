@@ -51,11 +51,15 @@ impl Drop for ProbePermit {
 impl Credentials {
     /// Each handover copy is guarded until trusted native setup consumes it.
     pub(crate) fn pair(&self) -> DelegatedPair {
-        DelegatedPair::new(
+        let pair = DelegatedPair::new(
             self.key.as_str().to_owned(),
             self.secret.as_str().to_owned(),
             self.passphrase.as_ref().map(|v| v.as_str().to_owned()),
-        )
+        );
+        match &self.signing_key {
+            Some(material) => pair.with_signing_key(material.as_str().to_owned()),
+            None => pair,
+        }
     }
 }
 

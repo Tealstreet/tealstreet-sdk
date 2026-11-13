@@ -9,6 +9,7 @@ import { hexToBytes } from '@noble/hashes/utils.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import fixed from '../../../../sdk-rs/hosts/server/tests/fixtures/delegated-handover-vectors.json';
+import wallet from '../../../../sdk-rs/hosts/server/tests/fixtures/delegated-wallet-handover.json';
 import { sealDelegatedHandover } from '../delegatedHandover';
 import { sealHandoverHpke } from '../delegatedHandoverHpke';
 import rfc from './fixtures/rfc9180-x25519-chacha20poly1305.json';
@@ -95,9 +96,25 @@ afterEach(() => {
 });
 
 describe('DELEGATED handover seal', () => {
+  it('keeps key-only signing material exclusively inside the encrypted full init', () => {
+    vi.mocked(x25519.utils.randomSecretKey).mockReturnValueOnce(new Uint8Array(32).fill(wallet.senderSeedByte));
+    const sealed = sealDelegatedHandover(wallet.input);
+    expect(sealed).toEqual(wallet.frame.d.sealed);
+    const frame = { ...wallet.frame, d: { ...wallet.frame.d, sealed } };
+    expect(JSON.stringify(frame)).not.toContain(wallet.input.signingKey);
+    expect(aad(wallet.input).toString()).not.toContain(wallet.input.signingKey);
+    expect(open(sealed, wallet.input)).toEqual({
+      key: wallet.input.key, secret: '', signingKey: wallet.input.signingKey,
+    });
+  });
   it('seals a key-only wallet shape for trusted server-side credential validation', () => {
-    const context = { ...input, exchangeName: 'paradex', secret: '' };
-    expect(open(sealDelegatedHandover(context), context)).toEqual({ key: input.key, secret: '' });
+    const context = wallet.input;
+    expect(open(sealDelegatedHandover(context), context)).toEqual({
+      key: context.key, secret: '', signingKey: context.signingKey,
+    });
+  });
+  it('refuses an empty private signing field', () => {
+    expect(() => sealDelegatedHandover({ ...wallet.input, signingKey: '' })).toThrow('Unable to seal');
   });
   it('seals the requested non-Bybit venue with the unchanged venue-bound proof', () => {
     const context = { ...input, exchangeName: 'binance' };

@@ -64,6 +64,13 @@ including Paradex derived-key validation, for both the probe and resident actor.
 It cannot be claimed by client JSON or applied to a different venue. The shared
 admission/probe algorithm, lifetime checks and refusal classification are unchanged.
 
+Key-only setup keeps its private scalar in the sealed credentials' `signingKey`,
+never `InitPayload.key`. For that mapping the public init key equals `subkeyAddress`
+and the sealed public key; it remains in the unchanged HPKE context. Other
+mappings reject `signingKey` and empty signing secrets. The canonical registry
+setup validates the material before the unchanged private-startup proof. There
+is no fallback to the old scalar-in-init layout.
+
 The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
 unchanged in both modes. Other hosted venues retain their current account-label
 identity; that distinction does not gate DELEGATED or COSIGNED admission.

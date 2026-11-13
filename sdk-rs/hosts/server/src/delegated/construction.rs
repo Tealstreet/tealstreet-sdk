@@ -10,6 +10,7 @@ pub struct DelegatedPair {
     key: Zeroizing<String>,
     secret: Zeroizing<String>,
     passphrase: Option<Zeroizing<String>>,
+    signing_key: Option<Zeroizing<String>>,
 }
 impl DelegatedPair {
     pub fn new(key: String, secret: String, passphrase: Option<String>) -> Self {
@@ -17,8 +18,15 @@ impl DelegatedPair {
             key: Zeroizing::new(key),
             secret: Zeroizing::new(secret),
             passphrase: passphrase.map(Zeroizing::new),
+            signing_key: None,
         }
     }
+    /// Private key-only material comes exclusively from the encrypted credentials.
+    pub fn with_signing_key(mut self, signing_key: String) -> Self {
+        self.signing_key = Some(Zeroizing::new(signing_key));
+        self
+    }
+
     pub(crate) fn validate(&self, init: &InitPayload) -> Result<(), String> {
         if !crate::delegated::enabled(&init.exchange_name) {
             return Err("DELEGATED is not enabled for this venue".into());
@@ -30,6 +38,15 @@ impl DelegatedPair {
             || self.key.is_empty()
             || self.key.len() > 1_048_576
             || self.key.contains(['\r', '\n', '\0'])
+            || !super::valid_credential_shape(
+                &init.exchange_name,
+                &self.secret,
+                self.signing_key.as_deref().map(String::as_str),
+            )
+            || self.signing_key.as_ref().is_some_and(|material| {
+                material.as_str() == init.key
+                    || init.subkey_address.as_deref() != Some(init.key.as_str())
+            })
         {
             return Err("Invalid DELEGATED account setup".into());
         }
@@ -106,7 +123,10 @@ pub fn prepare_delegated(
     }
     let mut native: safe_cex_venues::EngineOptions = serde_json::from_value(options.clone())
         .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
-    native.key = Some(std::mem::take(&mut pair.key));
+    native.key = Some(match pair.signing_key.as_mut() {
+        Some(material) => std::mem::take(&mut **material),
+        None => std::mem::take(&mut pair.key),
+    });
     native.secret = Some(std::mem::take(&mut pair.secret));
     native.passphrase = pair
         .passphrase

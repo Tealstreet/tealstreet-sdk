@@ -97,6 +97,7 @@ pub struct Credentials {
     pub key: Zeroizing<String>,
     pub secret: Zeroizing<String>,
     pub passphrase: Option<Zeroizing<String>>,
+    pub signing_key: Option<Zeroizing<String>>,
 }
 
 impl<'de> Deserialize<'de> for Credentials {
@@ -240,10 +241,29 @@ impl Opening {
             sealed,
         )?;
         let fields = plaintext::parse(plaintext.as_bytes_mut())?;
-        if fields.key.as_str() != key || key.is_empty() || fields.secret.is_empty() {
+        if fields.key.as_str() != key
+            || key.is_empty()
+            || !valid_credential_shape(
+                exchange,
+                &fields.secret,
+                fields.signing_key.as_deref().map(String::as_str),
+            )
+        {
             return Err(Refused);
         }
         Ok(fields)
+    }
+}
+
+fn key_only_mapping(venue: &str) -> bool {
+    safe_cex_venues::signer_setup_mapping(venue) == Some(safe_cex_venues::SetupMapping::Paradex)
+}
+
+fn valid_credential_shape(venue: &str, secret: &str, signing_key: Option<&str>) -> bool {
+    if key_only_mapping(venue) {
+        signing_key.is_some_and(|value| !value.is_empty())
+    } else {
+        signing_key.is_none() && !secret.is_empty()
     }
 }
 
@@ -675,3 +695,7 @@ pub(crate) mod tests {
         assert_eq!(owner.attempts.len(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "delegated/wallet_wire_tests.rs"]
+mod wallet_wire_tests;

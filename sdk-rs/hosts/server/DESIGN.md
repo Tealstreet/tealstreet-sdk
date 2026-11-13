@@ -623,7 +623,13 @@ HKDF-SHA256 and ChaCha20-Poly1305. The application info is
 `tealstreet/delegated-handover/v1`; associated data joins the attempt ID, process
 boot ID, exchange name and init key with `|`. `enc` and `ciphertext` are padded
 standard base64. Decrypted JSON contains `key`, `secret` and optional
-`passphrase`; its key must match the init key. The opener and parsed credential
+`passphrase` and optional `signingKey`; its public key must match the nonsecret
+init key. The registry's key-only setup takes its private scalar exclusively
+from sealed `signingKey`, with the public init identity equal to `subkeyAddress`.
+Other credential mappings refuse that field and still require their signing
+secret. The previous scalar-in-init layout refuses without a fallback. The
+canonical trusted setup validates credential material before the same probe.
+The opener and parsed credential
 fields erase their owned buffers on drop. Handover parsing retains the JSON
 string contract, including escaped strings and optional or null `passphrase`.
 JSON input is limited to 12,272 bytes, consistent with the envelope limit.
