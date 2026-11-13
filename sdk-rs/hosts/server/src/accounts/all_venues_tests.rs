@@ -249,3 +249,6 @@ fn hosted_backpack_identity_uses_validated_public_key_bytes() {
         assert!(identity::digest("alice", &init("backpack", key)).is_err());
     }
 }
+
+#[path = "lighter_identity_tests.rs"]
+mod lighter;
