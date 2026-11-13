@@ -12,18 +12,18 @@ const job = (text, name) => {
 
 test('Bitget bounded collection leaves time to publish original-attempt evidence', () => {
   // #3317: master 93ce5a61df moved collection into bitget-paired-run.mjs.
-  // Its deadline publishes a refusal instead of letting the job cancel evidence;
-  // keep the bounded runner and its ten-minute setup/teardown/upload reserve.
+  // Master 589038b822 adds two measured witnesses within an 80/90-minute bound;
+  // retain its exact deadline and ten-minute evidence-publication reserve.
   const runner = readFileSync(new URL('./bitget-paired-run.mjs', import.meta.url), 'utf8');
   const deadline = /timeoutMs = (\d+) \* 60_000/.exec(runner);
   assert.ok(deadline, 'the collector needs an explicit bounded deadline');
   const collectionMinutes = Number(deadline[1]);
-  assert.equal(collectionMinutes, 35);
+  assert.equal(collectionMinutes, 80);
   const verify = text => {
     const paired = job(text, 'bitget-paired');
     const timeout = /^    timeout-minutes: (\d+)$/m.exec(paired);
     assert.ok(timeout, 'the physical producer needs a bounded job window');
-    assert.equal(Number(timeout[1]), 45);
+    assert.equal(Number(timeout[1]), 90);
     assert.ok(Number(timeout[1]) - collectionMinutes >= 10,
       'the collector must leave an evidence-publication reserve');
     assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
@@ -31,7 +31,7 @@ test('Bitget bounded collection leaves time to publish original-attempt evidence
   };
   verify(source);
   const deadlineRegression = source.replace(job(source, 'bitget-paired'),
-    job(source, 'bitget-paired').replace(/timeout-minutes: \d+/, 'timeout-minutes: 35'));
+    job(source, 'bitget-paired').replace(/timeout-minutes: \d+/, 'timeout-minutes: 80'));
   assert.throws(() => verify(deadlineRegression));
 });
 function verifyWorkflow(text) {
