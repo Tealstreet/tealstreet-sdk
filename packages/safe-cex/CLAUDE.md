@@ -47,14 +47,20 @@ read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
-Bybit DELEGATED handover. Its standalone module needs no WASM, Node Buffer or
+DELEGATED handover for a hosted-supported venue. Its standalone module needs no WASM, Node Buffer or
 browser base64 globals; the host supplies the usual secure random source for
-Noble. Call it only after the host's per-venue DELEGATED enablement check. It does
+Noble. Call it only after the host's hosted-signing and server-origin eligibility check. It does
 not select signing modes, open sockets or change LOCAL/COSIGNED setup.
 Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
 context; the result contains only the attempt ID and padded-base64 encapsulation
 and ciphertext. Context fields preserve exact UTF-8 bytes and cannot contain
 the protocol's `|` separator. Optional passphrases preserve absence versus empty.
+The key-only registry mapping (currently Paradex) supplies `signingKey` in
+sealed credentials and `secret: ''`; the public input `key` and init key equal `subkeyAddress`, never
+the private scalar. The optional private field is not copied into the result or
+HPKE context. The receiver rejects scalar-in-init layouts, foreign credential
+layouts and empty CEX secrets; existing trusted setup validates actual material.
+HMAC callers omit `signingKey` and retain byte-identical envelopes.
 The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
 one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
 fixtures exercise the same production sender. The shared fixture lives with
@@ -62,6 +68,18 @@ the server tests for receiver interoperability; Rust consumption depends on
 the server handover implementation landing.
 
 ## DELEGATED order outbox
+
+`OutboxOptions`, every connection ticket, persisted intent and proof bind the
+authenticated `owner`, account label, actual `venue` and immutable `accountId`.
+Hosts must change `accountId` when account credentials, network or admission
+identity are replaced, and preserve it through socket reconnects. Storage keys
+and sequence checkpoints include this entire scope. A replacement mismatch
+retires the old ticket and refuses before handoff. Restore rejects an unbound
+or mismatched scope before any writes/compaction; it preserves the stored
+history for host reconciliation and never adopts it into the current account.
+Restore arms expiry only after all rows and final compaction succeed. Every
+failed open retires the partial instance and cancels its timers, including if
+scheduling itself fails; already queued callbacks cannot write after retirement.
 
 `enqueue(params, { intentId })` accepts a caller-owned canonical lowercase UUIDv7.
 Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a different
@@ -86,9 +104,15 @@ activate DELEGATED writes or replace admission. Unknown modes (including null)
 are refused as `invalidInput` / `notSent` during conversion and factory creation.
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
-the other venue actions exist. `activate(connection, { DELEGATED_BYBIT })` checks
+the other venue actions exist. `activate(connection, { DELEGATED })` checks
 the host-owned feature flag, the captured box/router transport proofs, and only
-the advertised `delegatedActivationScopeV1` place/close capabilities. Amend, venue
+the advertised `delegatedActivationScopeV1` place/close capabilities. Discover
+box capabilities using `?exchangeName=<joined venue>` and retain its
+`delegatedVenueV1`; activation refuses a missing or mismatched venue. The neutral
+`DELEGATED` flag replaces `DELEGATED_BYBIT`, and `delegatedDisabled` replaces
+`delegatedBybitDisabled`. `requireDelegatedActivation` takes the connection venue
+as its third argument. `OutboxConnection.venue` is an `ExchangeName`; its trusted
+low-level connection still requires a remote-signing-supported venue. Amend, venue
 cancel, cancel-all and nuke are not activation prerequisites. A failed activation
 retires the old ticket, including deferred work, and throws a named reason.
 The existing low-level `connect` API still requires prior host admission.
@@ -101,7 +125,7 @@ in the captured payload. Router queued-intent cancellation keeps its separate
 existing semantics. These admission helpers do not alter handoff, deadline,
 restore, evidence or replay rules below.
 
-`DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
+`DelegatedOutbox` is an opt-in host-neutral module for admitted DELEGATED single-order
 submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
 missing/false flags disable writes and receipts. Hosts inject scoped persistence,
@@ -137,7 +161,7 @@ whole intent: a locally known never-attempted intent, a declined adapter handoff
 with no earlier possible handoff, or an admitted authoritative router refusal.
 A failed reconnect attempt cannot prove an earlier handoff did not occur.
 The private runtime brand is read only by the outbox; plain state writes cannot
-manufacture the result. JSON stores the evidence kind and its owner/account,
+manufacture the result. JSON stores the evidence kind and its owner/account/venue/incarnation,
 intent ID, sequence and fingerprint binding. Restore validates that evidence and
 reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
 including their unsupported error outcome. No-evidence clock-epoch/deadline
@@ -166,8 +190,8 @@ non-forwarding. Storage failure keeps the row for a later flush retry.
 Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
 listed retired intent IDs in that scope and advance its durable sequence using
 the maximum of old/new values. Preserve all other records. `load` returns an
-`OutboxSnapshot` with sequence progress and records (legacy record arrays are
-accepted for migration). `put` preserves checkpoint metadata. Compaction failure
+`OutboxSnapshot` with sequence progress and records (record arrays require the
+same complete account binding). `put` preserves checkpoint metadata. Compaction failure
 keeps records until a later flush retries. Unrelated retirement failure never
 rejects enqueue or hides its durable intent ID after handoff. Close the old
 outbox before replacing it with a new writer for the same scope.
@@ -197,7 +221,8 @@ not-sent and replay evidence constructors; no direct not-sent assignment is
 permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
 action unknown; queue cancellation is explicit, never a venue cancel.
 
-Action outcomes are typed `applied`, proven `refused/notSent`, or `unknown`.
+Action outcomes are typed `applied`, proven `refused/notSent`, `unsupported`
+for a pre-dispatch schema rejection, or `unknown`.
 Applied results survive later uncertain queue-cancel replies. A proven refusal
 also survives later uncertainty, while its subsequent authoritative refused
 outcome may supply the refusal message after a negative ACK.
@@ -211,6 +236,39 @@ stale replies. Action persistence uses version-2 rows with the exact action and
 result, retaining atomic scoped checkpoints/retirement and all version-1 placement
 records. See `docs/plans/callers/delegated-action-frames.md` and the shared
 `delegated-actions-v1.json` fixture.
+
+The entire typed DELEGATED WS API is one version, v1. New operations extend v1
+additively, without per-operation versions; v2 is reserved for a major redesign.
+Unknown operations or fields must fail closed with a typed `unsupported` outcome,
+never silent omission or execution of the known subset. Unsupported outcomes
+remain terminal across restore without creating replay evidence. Storage row
+versions are independent of the wire version.
+
+The additive full-write vocabulary uses the same v1 action frames. Batch and
+protective placements, reduce-only close, settings, symbol/batch/account cancellation,
+close-only/stop-only nukes and native algo/EXEC operations additionally require
+`delegatedFullWriteActionsV1` and `delegatedFullWriteLedgerV1`, together with the
+four existing flags on the admitted ticket. Old four-action routers confer no
+expanded admission. Native dispatch/completion stays on the hosted account;
+there is no browser-sign or legacy-method fallback. Algo action receipts remain
+unknown and reconcile from account events, never an assumed applied result.
+Accepted long-lived jobs keep their account scope; queued admission and EXEC
+continuations keep their captured registration/deadline fences. The complete
+closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
+LOCAL and COSIGNED method forwarding is unchanged.
+
+Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
+unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
+keeps the same job and schedule; never emulate amendment with automatic
+stop-and-replace.
+
+The hosted typed v1 action decoder rejects duplicate object keys recursively in
+placement orders, close orders, scheduling values and algo payloads before they
+can hide unknown or malformed fields. Binding/hash checks retain precedence;
+schema rejection returns typed `unsupported` before ACK or native work.
+
+Native account-wide cancellation requires the venue's `nukeAccountCancel`
+capability; it never falls back to an incomplete symbol census.
 
 ## Mirror CI invariants (don't "clean these up")
 

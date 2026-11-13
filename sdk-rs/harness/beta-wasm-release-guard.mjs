@@ -70,15 +70,15 @@ export const assertNotHeld = (hold) => {
 };
 
 /**
- * `sha` must have a completed Rust SDK master push run whose "Rust / required coverage"
- * job (the correctness aggregate branch protection requires) succeeded. CPU
- * certification is non-blocking, so its noise must not stop a release.
+ * Require a Rust SDK push run on master with head_sha === sha, whose
+ * "Rust / required coverage" job is completed with conclusion success.
+ * #3489 relaxed whole-run completion; the run may still be in progress.
  */
 export const assertCertified = async ({ api, repo, sha, sleep = pause }) => {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('source must be a full commit SHA');
   const { status, json } = await getWithRetry(api, `/repos/${repo}/actions/workflows/rust.yml/runs?head_sha=${sha}&event=push&branch=master&per_page=20`, sleep);
   if (status !== 200) throw new Error(`Rust SDK run lookup returned HTTP ${status}`);
-  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push' && run.status === 'completed');
+  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push');
   for (const run of runs) {
     for (let page = 1; page <= 10; page += 1) {
       const jobs = await getWithRetry(api, `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=${JOBS_PER_PAGE}&page=${page}`, sleep);

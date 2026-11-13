@@ -5,28 +5,35 @@ TS/Rust fixtures: `sdk-rs/hosts/server/tests/data/delegated-actions-v1.json`.
 
 ## Implementation and release boundary
 
-Box-side action dispatch stays entirely within `sdk-rs/hosts/server`. Its
-adapters call the existing native amend, cancel, cancel-all and nuke paths;
-this version adds no crates and changes nothing under `sdk-rs/engine`,
-`sdk-rs/venues/*` or `sdk-rs/algos`. No exception to this boundary is required.
+Box-side action dispatch lives in `sdk-rs/hosts/server`. Its adapters call
+the existing native write paths; this version adds no crates and changes nothing
+under `sdk-rs/engine` or `sdk-rs/venues/*`.
+
+The full-write fix round also extends `sdk-rs/algos/exec/src/native.rs` with a
+native-only guarded EXEC entry point. This explicit boundary exception is needed
+because deferred EXEC commands can enter the shared chaser/TWAP factories without
+calling the command-port adapter. Factory identity and resource counters must
+remain account-scoped while each action retains its own continuation fence.
 
 The server's nuke account-port adapter carries the original registration and
 checks it before every native command, including later close legs after an
 awaited cancel. Retirement fences those new legs without undoing an earlier
 handoff or turning its uncertainty into a not-sent proof.
 
-`hosts/server` is excluded from the beta-wasm fingerprint, so the Rust changes
-require a box roll without a full SDK release, a new wasm pin or the lane
-fingerprint gate. The TypeScript API and router capability still require their
-own integration; action admission remains gated by all required capability flags.
-If a future change genuinely requires Rust code outside `hosts/server`, record
-an explicit decision here with the reason and the resulting SDK release, wasm
-pin and lane fingerprint gate requirements before implementing that exception.
+`hosts/server` is excluded from the beta-wasm fingerprint, but the shared EXEC
+file is a fingerprint input. The guarded entry point and checks compile only for
+native hosts; ordinary LOCAL/COSIGNED and WASM EXEC paths retain their existing
+semantics. Nevertheless, this PR now requires the SDK release/wasm pin and lane
+fingerprint gates, including CPU certification: Rust slower than TS fails with
+no new threshold or tolerance. No byte-equivalence claim replaces those gates.
+The hosted service requires a box roll. The TypeScript API and router capability
+still require their own integration; action admission remains gated by all
+required capability flags.
 
 ## Capability and admission
 
 The box advertises transports.accountWorkerWebSocket.delegatedOrderActionsV1.
-It is true only with delegated-order-frames compiled, DELEGATED_BYBIT enabled,
+It is true only with delegated-order-frames compiled, hosted signing/origin support available,
 and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` at process startup. It defaults off;
 activation changes require a box drain/restart and fresh admission, as placement
 does. Each session captures its activation at creation.
@@ -37,7 +44,7 @@ An SDK action requires all four flags explicitly true on the captured admitted
 socket: delegatedOrderFramesV1, delegatedOrderLedgerV1, delegatedOrderActionsV1,
 and delegatedOrderActionLedgerV1. Missing/false flags never downgrade to an
 unledgered callMethod. Existing placement calls retain their two-flag gate.
-Only the connection's admitted private Bybit DELEGATED account/current
+Only the connection's admitted private DELEGATED account/current
 registration may dispatch actions. Auth, lease/drain, key age and owner checks
 apply before execution and again after deferred work; replacement/logout retires
 old work and receipts. The existing DO-start/socket admission guard also applies.
@@ -182,3 +189,180 @@ completed-history compaction and restore, including adoption of an existing SDK
 key. It remains subject to the existing 1,056-record total bound; exhaustion
 refuses new keys rather than forgetting reservations. Frame shapes, fingerprints
 and the storage methods/checkpoint atomicity are unchanged.
+
+## Full LOCAL write coverage (additive v1 vocabulary)
+
+The same `order.action` / `order.actionAck` / `order.actionOutcome` /
+`order.actionCancelQueued` frame family now also carries the local native write
+surface. Its version, canonical domain, UUIDv7 namespace, ten-second admission
+bounds, durable claim-before-forward rule, no-replay rule and registration fence
+are unchanged. `order.submit` remains byte-compatible.
+
+The entire typed DELEGATED API has one wire version: **v1**. Every added
+operation belongs additively to v1; operations have no individual version field.
+A future v2 is reserved for a major protocol redesign, not another write verb.
+The existing version-2 *storage row* discriminator distinguishes actions from
+placement records and is not a WS API version.
+
+A bounded, authenticated v1 action whose operation or fields are not supported
+fails closed before any dispatch, returning `order.actionOutcome` with
+`version:1`, `outcome:"unsupported"`, `result:null`, and
+`error:{message:"Unsupported v1 action schema",outcome:"unsupported"}`.
+This includes unknown envelope/request/action fields, nested order/target/update
+fields, unknown algo operations, and unknown nested algo fields. Invalid action
+shapes also receive this schema rejection. The server validates registration,
+UUIDv7, sequence, age and the fingerprint over the untouched raw action first;
+it never strips unknown fields and executes a recognized subset. Invalid or
+unbounded identity/binding data still receives the existing generic error or
+admission refusal and never dispatches. A schema rejection emits no positive ACK.
+
+The SDK preserves `unsupported` as a terminal result across persistence and
+restore. It never brands that result as replayable or forwards the intent again;
+later uncertainty or an inconsistent applied receipt cannot revoke it. The NX
+router must preserve and durably record this outcome under the same v1 identity,
+forward no rejected request, and return the same typed rejection for unknown
+operations/fields it detects itself. This is only a pre-dispatch rejection of
+that exact intent: an already-forwarded or uncertain ledger row must remain
+uncertain, never be reclassified as unsupported by a newer schema check.
+Queue-cancel rejections must not fabricate
+proof about an earlier action; the existing queue-cancel contract is unchanged.
+
+Expanded operations additionally require the box's
+`delegatedFullWriteActionsV1` and the router's `delegatedFullWriteLedgerV1`,
+both explicitly true on the captured admitted connection, together with the four
+original action/placement flags. The box advertises the new flag under the same
+compiled/runtime switch; an older router's four-action attestation is insufficient.
+Missing flags keep new writes queued without sending or accepting receipts. Never
+fall back to legacy `callMethod`, another channel, HTTP or browser signing.
+The existing private Bybit-only DELEGATED admission is not widened. Venue-specific
+operations on an incapable account return a proven pre-dispatch refusal.
+
+| Local operation | Action payload (all include `kind`) |
+| --- | --- |
+| Single/batch placements, bracket/TP/SL/trailing/opening triggers | `place {orders:[DelegatedOrderParams]}` |
+| Native amend | Existing `amend {order,update}` |
+| Single/batch venue cancel | Existing `cancel {order}`, or `cancelOrders {orders:[{id,symbol,type?}]}` |
+| Cancel symbol / account | `cancelSymbol {symbol}`; `cancelAll {symbols?:string[]}` adds explicit coverage to known and attempted symbols |
+| Native account-wide cancel (also used internally by nuke) | `cancelAccountOrders {}`; requires `nukeAccountCancel`, with no symbol-census fallback |
+| Symbol/hedge leverage | `setLeverage {symbol,leverage,side?:'long'|'short'}` |
+| All leverage | `setAllLeverage {leverage}`; native account setting or positions/known published rails fan-out |
+| Margin / position mode | `setMarginType {isolated,symbol?}`; `setPositionMode {hedged,symbol?}` |
+| One/partial/hedge position close | `close {order}`; explicit native size, `reduceOnly:true`, market/limit only |
+| Close all / cancel and close / cancel and stop algos | `closeAll {}` / existing `nuke {}` / `nukeOrders {}` |
+| Stop only account algos | `stopAlgos {}` |
+| Dead-man cancel / clear | `scheduleCancel {time:<safe UTCms integer> \| null}` |
+| Venue settings | `setStpMode {mode:'EXPIRE_TAKER'\|'EXPIRE_MAKER'\|'EXPIRE_BOTH'}`; `setAccountTier {tier:'standard'\|'premium'\|'plus'}` |
+| CORE runCommand / hosted CLI | `algo {op:'exec',data:{command,symbol?}}` |
+| Chaser lifecycle | `algo {op:'chaser:start',data:ChaserOrderOptions}`; terminate takes a job ID; terminateAll takes `{}` |
+| TWAP lifecycle / restore | `algo {op:'twap:start',data:TwapOptions}`; resume/pause/stop/cleanup take a job ID; state takes persisted rows |
+
+New placement/close results are `{kind,orderIds}` (1–32 bounded IDs), only after
+native completion. They do not replace caller-supplied client IDs with the action
+intent ID: protective and split shapes use the native ID policy. Explicit caller
+IDs retain the native whole-batch preflight. A close has no second browser-side
+placement. Other completed synchronous writes return `{kind}`; setting results
+must be native unit completions. Malformed results remain unknown. Any partial
+native effects prevent a whole-action `notSent` proof, even if a later leg refused.
+The generic command-group completion waits for all leverage/cancel-all legs.
+
+`DelegatedOrderParams` is a closed native placement shape: symbol, type, side,
+amount and the existing optional price/trigger/protection, time-in-force,
+reduce-only, caller-ID, slippage, STP, Bybit BBO and implied-volatility fields.
+Native guards and capabilities still decide whether the venue supports a shape.
+There are at most 32 orders/targets/symbols per action and the original 64 KiB
+UTF-8 frame limit still applies. Use explicit intents for larger work; a transport
+retry never splits or automatically replays it. Single `cancel` also retains an
+optional order type for protective routing and requires the expanded flags when
+that context is supplied.
+
+`cancelAccountOrders` invokes only the native account-wide cancellation command,
+and refuses before dispatch if the venue lacks `nukeAccountCancel`. It does not
+stop algos or approximate account coverage with currently observed symbols.
+Its internal method translation is DELEGATED-only; LOCAL/COSIGNED are unchanged.
+The new internal account-cancel/STP/tier methods are reachable only after typed
+action validation; legacy DELEGATED `callMethod` does not acquire these names.
+
+Algo actions preserve the existing native algo protocol, including interruption
+restore pauses and drain admission. Their ACK means admitted, not completed.
+The action outcome is conservatively unknown: job state/ordinary correlated
+`exec-result`, `chaser:*`, `twap:*` and store events reconcile the asynchronous
+operation. The SDK refuses an `applied` receipt for `kind:'algo'`; dispatch alone
+cannot manufacture a completed venue write. The router records the unknown
+outcome and must never re-forward the action. EXEC receives the intent as its
+`reqId`, rather than accepting a second caller-controlled correlation ID.
+
+Typed `chaser:start` validation closes the nested `terminate` shape to `type`,
+`value` and optional `anchorPrice`; types are `price`, `percent` or `usd`.
+Size, maxAttempts, optional delay and termination numbers must be finite and
+nonnegative. Optional booleans, bounded identity strings and origin values are
+checked before native decoding. Unknown nested fields or malformed scalar values
+return the existing v1 typed `unsupported` outcome with no positive ACK, job or
+native write. This stricter wire boundary leaves legacy native chaser parsing
+and native cadence unchanged; existing valid optional shapes remain supported.
+
+Queued algo admission captures the original registration and deadline and checks
+both before and after the actor's store read. A typed EXEC uses the resident
+account port for factory identity and shared parallel/nuke counters, while its
+own adapter retains the captured registration/deadline. It rechecks the fence
+before each native command, after awaits before completing the next instruction,
+and before direct shared chaser/TWAP factory handoffs. Expired or retired work is
+dropped; late replies cannot start sibling jobs. Overlapping typed EXECs and
+legacy EXECs share one account factory without sharing action guards.
+Accepted long-lived chases/TWAPs belong to the native
+account scope, as in LOCAL, and retain the account/user/router-lease authority;
+a socket handover does not restart them. TWAP options/restored state must name
+the admitted account. No payload may name another account to route a command.
+Persisted TWAP `activeMarket` is just `{symbol}` on this typed API; the hosted
+engine's catalogue supplies all market facts. The existing algo validation still
+rejects invalid schedules and enforces restoration/uncertainty rules.
+
+The expanded corpus `delegated-full-writes-v1.json` pins the method mapping and
+canonical hashes in both SDK and Rust tests. The original four-kind corpus and
+placement protocol remain unchanged. Server implementation is in `hosts/server`
+with the guarded native shared-EXEC exception described above. No engine, venue,
+budget, CPU threshold or tolerance changes are included.
+
+A zero-amount amend is also an expanded action: native Bybit Partial protection
+uses zero for full-position sizing. It requires the two expanded capability
+flags and remains subject to the native protective-amend guard. Ordinary orders
+whose venue requires a positive amount still refuse before dispatch. Price
+updates remain strictly positive. The original positive-amount amend contract
+and its existing fingerprints are unchanged.
+
+DELEGATED placement translation also enforces LOCAL's execution-control
+capabilities before any batch leg: unsupported STP, options, Bybit BBO/tick
+controls and a venue's refusal of caller slippage are whole-intent pre-dispatch
+refusals. This covers both `place`/`close` actions and the existing `order.submit`
+family; a venue cannot silently discard a requested execution constraint.
+
+A completed, explicit reduce-only protection-only placement may have no native
+order ID: Bybit's trading-stop command accepts a setting and the stream supplies
+the protection row later. After authoritative native completion, that case returns
+`{kind:"place",orderIds:[],protectionApplied:true}`. The marker is derived only
+from the captured protective command shape plus native completion, never from an
+ACK or a missing reply. The SDK accepts it only for a protection-only request;
+ordinary empty placement results and interrupted protection writes stay unknown.
+No venue order ID is invented.
+
+## Existing algo lifecycle and deferred parameter changes
+
+The typed v1 vocabulary already carries chaser start/terminate/terminateAll and
+TWAP start/pause/resume/stop/cleanup/state through the resident hosted factories.
+Pause/resume keeps the TWAP job ID and its remaining schedule; it does not replace
+parameters, create a new job, or imply that any venue write completed. Algo
+action outcomes remain `unknown`, reconciled through the existing account events.
+
+Parameter amendment is deferred. `chaser:amend` and `twap:amend` are unknown
+operations and return the existing typed `unsupported` outcome before dispatch.
+Do not emulate amendment with automatic stop-and-replace or change the wire
+version. Client controls can expose the existing lifecycle only.
+
+## Recursive JSON validation
+
+The server checks original typed-action payloads recursively for duplicate object
+keys, including placement order arrays, close orders, scheduling values and algo
+data/restore arrays. A duplicate cannot discard an earlier unknown or malformed
+field before the closed schema is checked. The admitted,
+fingerprint-bound request receives typed `unsupported` before positive ACK, job
+admission or native IO. Other admission, age and fingerprint refusals still take
+precedence. LOCAL/COSIGNED method forwarding is unchanged.

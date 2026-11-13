@@ -27,8 +27,8 @@ fn statuses(sent: &mut crate::out::Receiver) -> Vec<Value> {
 async fn delegated_restart_ambiguous_unjoined_request_requires_an_explicit_venue() {
     crate::delegated::with_test_declaration(
         json!({"venues": {
-            "bybit": {"delegated": {"enabled": true}},
-            "binance": {"delegated": {"enabled": true}}
+            "bybit": {"remoteSigning": {"enabled": true}},
+            "binance": {"remoteSigning": {"enabled": true}}
         }}),
         async {
             let f = fixture().await;
@@ -145,6 +145,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         "restart cannot fabricate lost chases or TWAP schedules"
     );
 
+    let owner = session.joined["acct"].account.registry_name().to_owned();
     let options: Value = serde_json::from_str(WEB_TWAP).unwrap();
     let now = crate::accounts::now_ms();
     let mut state = json!({
@@ -158,7 +159,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         .msg(AccountMsg {
             op: "twap:state".into(),
             account_name: Some("acct".into()),
-            data: json!([{"id":"client-held-twap", "options":options, "state":state}]),
+            data: json!([{"id":"client-held-twap", "ownerId":owner, "options":options, "state":state}]),
         })
         .await;
     assert_partial_action_refusal(&mut sent, "twap:state");
@@ -169,7 +170,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         .msg(AccountMsg {
             op: "twap:state".into(),
             account_name: Some("acct".into()),
-            data: json!([{"id":"client-held-twap", "options":options, "state":state}]),
+            data: json!([{"id":"client-held-twap", "ownerId":owner, "options":options, "state":state}]),
         })
         .await;
     let restored = twap_row(&mut sent, "paused").await;

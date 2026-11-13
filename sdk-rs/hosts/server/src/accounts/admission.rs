@@ -1,6 +1,9 @@
 use super::*;
 use crate::delegated::{Credentials, probe::ProbeRefusal};
-use safe_cex_crypto::signer::Secret;
+
+#[cfg(test)]
+#[path = "admission_deadline_tests.rs"]
+mod deadline_tests;
 
 pub(crate) struct ProbePermit {
     user: String,
@@ -9,11 +12,14 @@ pub(crate) struct ProbePermit {
     pub(super) token_expires_at: Option<u64>,
     pub(super) current: Arc<AtomicBool>,
     pending: PendingInits,
-    account_name: String,
+    registry_name: String,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
-        if self.user != user || self.fingerprint != admission_fingerprint(init) {
+        if self.user != user
+            || identity::registry_name(user, init).as_ref() != Ok(&self.registry_name)
+            || self.fingerprint != admission_fingerprint(init)
+        {
             return Err(ProbeRefusal::INVALID);
         }
         if self
@@ -33,7 +39,7 @@ impl ProbePermit {
 
 impl Drop for ProbePermit {
     fn drop(&mut self) {
-        let key = (self.user.clone(), self.account_name.clone());
+        let key = (self.user.clone(), self.registry_name.clone());
         let mut pending = self.pending.lock().unwrap();
         if let Some(incarnation) = pending.get_mut(&key) {
             incarnation
@@ -47,15 +53,17 @@ impl Drop for ProbePermit {
 }
 
 impl Credentials {
-    /// Each temporary signer owns its existing zeroizing Secret allocation.
+    /// Each handover copy is guarded until trusted native setup consumes it.
     pub(crate) fn pair(&self) -> DelegatedPair {
-        DelegatedPair::new(
+        let pair = DelegatedPair::new(
             self.key.as_str().to_owned(),
-            Secret::new(self.secret.as_str().to_owned()),
-            self.passphrase
-                .as_ref()
-                .map(|v| Secret::new(v.as_str().to_owned())),
-        )
+            self.secret.as_str().to_owned(),
+            self.passphrase.as_ref().map(|v| v.as_str().to_owned()),
+        );
+        match &self.signing_key {
+            Some(material) => pair.with_signing_key(material.as_str().to_owned()),
+            None => pair,
+        }
     }
 }
 
@@ -77,11 +85,13 @@ impl Registry {
         if self.router_leases.enforced() && lease.is_none() {
             return Err(ProbeRefusal::TRANSIENT);
         }
+        let registry_name =
+            identity::registry_name(user, init).map_err(|_| ProbeRefusal::INVALID)?;
         let fingerprint = admission_fingerprint(init);
         let current = Arc::new(AtomicBool::new(true));
         let mut pending = self.pending_inits.lock().unwrap();
         pending
-            .entry((user.into(), init.account_name.clone()))
+            .entry((user.into(), registry_name.clone()))
             .or_insert_with(|| InitIncarnation {
                 fingerprint: fingerprint.clone(),
                 public_only: false,
@@ -98,7 +108,7 @@ impl Registry {
             token_expires_at: None,
             current,
             pending: self.pending_inits.clone(),
-            account_name: init.account_name.clone(),
+            registry_name,
         };
         permit.check(user, init)?;
         Ok(permit)
@@ -115,10 +125,13 @@ impl Registry {
     ) -> Result<ProbePermit, ProbeRefusal> {
         permit.token_expires_at = Some(token.as_ref().ok_or(ProbeRefusal::INVALID)?.1);
         permit.check(user, init)?;
+        let mut config = self.engine_config.clone();
+        config.trusted_signer_state = None;
         let (plan, options, provider, mode) = match (candidate, link.as_ref()) {
             (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
                 let prepared =
                     prepare_delegated(init, candidate.pair()).map_err(|_| ProbeRefusal::INVALID)?;
+                prepared.resident.configure(&mut config);
                 (
                     prepared.plan,
                     prepared.options,
@@ -147,7 +160,6 @@ impl Registry {
             .unwrap_or(plan);
         let token_provider = ProxyToken::new();
         token_provider.set(token);
-        let mut config = self.engine_config.clone();
         config.log_label = None;
         config.signing_mode = Some(mode);
         let (mut result, receive) = tokio::sync::oneshot::channel();
@@ -187,7 +199,11 @@ impl Registry {
             }
             receive.await.map_err(|_| ProbeRefusal::TRANSIENT)?
         };
-        tokio::time::timeout(Duration::from_secs(30), work)
+        let timeout = safe_cex_remote_signer::SIGN_TIMEOUT
+            + Duration::from_millis(u64::from(
+                safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+            ));
+        tokio::time::timeout(timeout, work)
             .await
             .map_err(|_| ProbeRefusal::TRANSIENT)??;
         permit.check(user, init)?;
@@ -217,7 +233,7 @@ impl Registry {
             .accounts
             .lock()
             .unwrap()
-            .get(&(user.into(), init.account_name.clone()))
+            .get(&(user.into(), proof.registry_name.clone()))
             .cloned();
         if let Some(account) = existing
             && (account.is_public()

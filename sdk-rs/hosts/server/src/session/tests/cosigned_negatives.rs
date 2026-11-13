@@ -134,6 +134,76 @@ struct Resident {
     _sent: crate::out::Receiver,
 }
 
+#[tokio::test]
+async fn cosigned_probe_deadline_refuses_and_releases_its_engine() {
+    let f = fixture_with_auth(true).await;
+    f.gate.forget_permits(1000);
+    let (mut session, mut sent) = candidate(&f, "alice");
+    let mut done = session.take_verified();
+    session.init(init(Some("timed-proof"))).await.unwrap();
+    let link = session.pending_verifications["acct"]
+        .cosigned_link
+        .clone()
+        .unwrap();
+    let mut device = Device::default();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while f.private_reads.load(Ordering::SeqCst) == 0 {
+            tokio::select! {
+                Some(text) = sent.recv() => {
+                    device.answer(&mut session, serde_json::from_str(&text).unwrap(), Answer::Correct).await;
+                }
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+            }
+        }
+    })
+    .await
+    .expect("the signed private read is held by the fixture");
+
+    tokio::time::pause();
+    let budget = safe_cex_remote_signer::SIGN_TIMEOUT
+        + Duration::from_millis(u64::from(
+            safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+        ));
+    tokio::time::advance(budget + Duration::from_millis(1)).await;
+    let completion = done.recv().await.unwrap();
+    tokio::time::resume();
+    // Discard other challenges already queued by the temporary startup.
+    while sent.try_recv().is_ok() {}
+    session.verification_completed(completion).await.unwrap();
+    assert_eq!(
+        sent.try_recv().unwrap(),
+        envelope::with_instance_id(envelope::init_unverified("acct", true), "timed-proof")
+    );
+    assert!(!link.is_available());
+    assert!(session.pending_verifications.is_empty());
+    assert!(session.joined.is_empty());
+    assert!(f.registry.held("alice", "acct", session.socket).is_none());
+    assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while crate::accounts::testing::engine_count(&f.registry) != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("probe actor disposed");
+    session.close();
+}
+
+#[tokio::test]
+async fn cosigned_rpc_expiry_completion_preserves_request_and_registration() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let mut resident = Resident::start(&f, &mut device).await;
+    assert_rpc_expiry_completion(
+        &f,
+        resident.session.as_mut().unwrap(),
+        &mut resident._sent,
+        Some("resident"),
+    )
+    .await;
+    resident.untouched(&f);
+}
+
 impl Resident {
     async fn start(f: &Fixture, device: &mut Device) -> Self {
         let (mut session, mut sent) = candidate(f, "alice");
@@ -223,6 +293,15 @@ fn refused(f: &Fixture, session: &Session, sent: &mut crate::out::Receiver, id: 
         || raw.clone(),
         |id| envelope::with_instance_id(raw.clone(), id),
     );
+    unattached_after_refusal(f, session, sent, expected);
+}
+
+fn unattached_after_refusal(
+    f: &Fixture,
+    session: &Session,
+    sent: &mut crate::out::Receiver,
+    expected: String,
+) {
     assert_eq!(sent.try_recv().unwrap(), expected);
     assert!(sent.try_recv().is_err());
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
@@ -398,7 +477,7 @@ async fn cosigned_two_users_switch_during_deferred_private_reads() {
 }
 
 #[tokio::test]
-async fn cosigned_test_admission_does_not_start_other_venue_proofs() {
+async fn cosigned_test_admission_does_not_start_unhosted_venue_proofs() {
     let mut f = fixture_with_auth(true).await;
     crate::accounts::testing::set_join_admission(Arc::get_mut(&mut f.registry).unwrap(), true);
     let mut device = Device::default();
@@ -406,7 +485,7 @@ async fn cosigned_test_admission_does_not_start_other_venue_proofs() {
     let before = f.private_reads.load(Ordering::SeqCst);
     let (mut session, mut sent) = candidate(&f, "alice");
     let mut request = init(Some("other-venue"));
-    request.exchange_name = "bybitspot".into();
+    request.exchange_name = "hyrotrader".into();
     session.init(request).await.unwrap();
     refused(&f, &session, &mut sent, Some("other-venue"));
     assert_eq!(f.private_reads.load(Ordering::SeqCst), before);
@@ -529,7 +608,12 @@ async fn shared_admission_rechecks_token_before_attachment() {
     .await;
     session.identity.token = Some(("synthetic-expired".into(), 0));
     session.verification_completed(result).await.unwrap();
-    refused(&f, &session, &mut sent, None);
+    unattached_after_refusal(
+        &f,
+        &session,
+        &mut sent,
+        envelope::error(Some("acct"), crate::auth::TOKEN_EXPIRED),
+    );
     resident.untouched(&f);
     session.close();
 }
@@ -645,7 +729,10 @@ async fn shared_admission_rechecks_token_on_a_matching_init() {
     session.identity.token = Some(("synthetic-expired".into(), 0));
     session.init(init(Some("elapsed"))).await.unwrap();
     assert!(session.pending_verifications.is_empty());
-    let expected = envelope::with_instance_id(envelope::init_unverified("acct", false), "elapsed");
+    let expected = envelope::with_instance_id(
+        envelope::error(Some("acct"), crate::auth::TOKEN_EXPIRED),
+        "elapsed",
+    );
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let text = resident
@@ -657,7 +744,7 @@ async fn shared_admission_rechecks_token_on_a_matching_init() {
                 break;
             }
             // The resident's private startup may still publish after the earlier drain.
-            // An expired re-init must not produce any new-registration output.
+            // Other resident output keeps the admitted registration.
             let frame: Value = serde_json::from_str(&text).unwrap();
             assert_eq!(frame["d"]["accountName"], "acct");
             assert_eq!(frame["d"]["instanceId"], "resident");
@@ -665,6 +752,11 @@ async fn shared_admission_rechecks_token_on_a_matching_init() {
     })
     .await
     .expect("expired matching init emits its exact refusal");
+    assert!(
+        resident.session.as_ref().unwrap().joined["acct"]
+            .out
+            .order_binding(Some("resident"))
+    );
     resident.untouched(&f);
 }
 

@@ -120,13 +120,7 @@ pub fn policy(venue: &str) -> Option<Policy> {
     })
 }
 
-/// Whether hosted DELEGATED construction is enabled for this exact venue.
-pub fn delegated_enabled(venue: &str) -> bool {
-    rules()
-        .get("venues")
-        .and_then(|venues| venues.get(venue))
-        .and_then(|rule| rule.get("delegated"))
-        .and_then(|policy| policy.get("enabled"))
-        .and_then(Value::as_bool)
-        == Some(true)
+/// The same parsed policy used by hosted remote-account construction.
+pub fn supports_remote_signing(venue: &str) -> bool {
+    policy(venue).is_some_and(|policy| policy.enabled)
 }

@@ -19,13 +19,21 @@ pub const HANDOVER_TTL_MS: u64 = 30_000;
 const MAX_ATTEMPTS: usize = 64;
 const MAX_CIPHERTEXT: usize = 16 * 1024;
 
-/// Admission follows the exact venue's shared opt-in declaration.
-/// Do not add a second venue allowlist beside the declaration.
+/// Execution location adds no venue allowlist to hosted construction support.
 pub fn enabled(venue: &str) -> bool {
-    with_rules(|rules| rules["venues"][venue]["delegated"]["enabled"].as_bool() == Some(true))
+    let signing = safe_cex_remote_signer::supports_remote_signing(venue);
+    #[cfg(test)]
+    let signing = TEST_DECLARATION
+        .try_with(|rules| {
+            signing && rules["venues"][venue]["remoteSigning"]["enabled"].as_bool() == Some(true)
+        })
+        .unwrap_or(signing);
+    signing
+        && crate::accounts::refuse_unhosted(venue).is_ok()
+        && safe_cex_native::resolve::rest_base_url(venue, false).is_ok()
 }
 
-/// Used for global capabilities and legacy requests with only one possible venue.
+/// Global protocol availability; individual actions still check the account venue.
 pub(crate) fn enabled_venues() -> Vec<String> {
     with_rules(|rules| {
         let Some(venues) = rules["venues"].as_object() else {
@@ -33,7 +41,7 @@ pub(crate) fn enabled_venues() -> Vec<String> {
         };
         venues
             .iter()
-            .filter(|(_, rule)| rule["delegated"]["enabled"].as_bool() == Some(true))
+            .filter(|(venue, _)| enabled(venue))
             .map(|(venue, _)| venue.clone())
             .collect()
     })
@@ -89,6 +97,7 @@ pub struct Credentials {
     pub key: Zeroizing<String>,
     pub secret: Zeroizing<String>,
     pub passphrase: Option<Zeroizing<String>>,
+    pub signing_key: Option<Zeroizing<String>>,
 }
 
 impl<'de> Deserialize<'de> for Credentials {
@@ -232,10 +241,29 @@ impl Opening {
             sealed,
         )?;
         let fields = plaintext::parse(plaintext.as_bytes_mut())?;
-        if fields.key.as_str() != key || key.is_empty() || fields.secret.is_empty() {
+        if fields.key.as_str() != key
+            || key.is_empty()
+            || !valid_credential_shape(
+                exchange,
+                &fields.secret,
+                fields.signing_key.as_deref().map(String::as_str),
+            )
+        {
             return Err(Refused);
         }
         Ok(fields)
+    }
+}
+
+fn key_only_mapping(venue: &str) -> bool {
+    safe_cex_venues::signer_setup_mapping(venue) == Some(safe_cex_venues::SetupMapping::Paradex)
+}
+
+fn valid_credential_shape(venue: &str, secret: &str, signing_key: Option<&str>) -> bool {
+    if key_only_mapping(venue) {
+        signing_key.is_some_and(|value| !value.is_empty())
+    } else {
+        signing_key.is_none() && !secret.is_empty()
     }
 }
 
@@ -324,9 +352,9 @@ pub(crate) mod tests {
     async fn venue_declaration_controls_admission_without_a_venue_allowlist() {
         for opted_in in [false, true] {
             let declaration = serde_json::json!({"venues": {
-                "bybit": {"delegated": {"enabled": false}},
-                "binance": {"delegated": {"enabled": opted_in}},
-                "invalid": {"delegated": {"enabled": "true"}}
+                "bybit": {"remoteSigning": {"enabled": false}},
+                "binance": {"remoteSigning": {"enabled": opted_in}},
+                "invalid": {"remoteSigning": {"enabled": "true"}}
             }});
             with_test_declaration(declaration, async {
                 assert_eq!(enabled("binance"), opted_in);
@@ -348,8 +376,8 @@ pub(crate) mod tests {
             let mut owner = Handovers::default();
             let offer = with_test_declaration(
                 serde_json::json!({"venues": {
-                    "bybit": {"delegated": {"enabled": true}},
-                    "binance": {"delegated": {"enabled": true}}
+                    "bybit": {"remoteSigning": {"enabled": true}},
+                    "binance": {"remoteSigning": {"enabled": true}}
                 }}),
                 async { owner.issue("fixture", "binance", 100).unwrap() },
             )
@@ -363,8 +391,8 @@ pub(crate) mod tests {
             let opening = owner.take("fixture", &sealed, 101).unwrap();
             with_test_declaration(
                 serde_json::json!({"venues": {
-                    "bybit": {"delegated": {"enabled": true}},
-                    "binance": {"delegated": {"enabled": opted_in}}
+                    "bybit": {"remoteSigning": {"enabled": true}},
+                    "binance": {"remoteSigning": {"enabled": opted_in}}
                 }}),
                 async {
                     assert_eq!(
@@ -430,15 +458,25 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn production_declaration_keeps_other_venues_disabled() {
+    fn production_support_is_venue_generic_and_refuses_missing_origins() {
+        // Sam's 2026-11-13 ruling replaces the former Bybit-only declaration.
         for venue in [
+            "bybit",
             "bybitspot",
             "bybitinverse",
             "bybitdemo",
+            "binance",
             "okx",
-            "kraken",
+        ] {
+            assert!(enabled(venue), "{venue}");
+        }
+        for venue in [
+            "hyrotrader",
+            "binanceoptions",
+            "kucoin",
             "",
             "BYBIT",
+            "unknown",
         ] {
             assert!(!enabled(venue), "{venue}");
         }
@@ -657,3 +695,7 @@ pub(crate) mod tests {
         assert_eq!(owner.attempts.len(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "delegated/wallet_wire_tests.rs"]
+mod wallet_wire_tests;
