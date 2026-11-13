@@ -618,12 +618,13 @@ for the same name. Each connection retains at most 64 unexpired offers.
 The matching init adds `signingMode:"delegated"` and
 `sealed:{attemptId, enc, ciphertext}`. This path checks the shared venue opt-in
 declaration for the requested venue; only exact Bybit is currently enabled.
-The same declaration opts private COSIGNED
-inits into the shared admission lifecycle, including clients omitting the mode
-field. Matching COSIGNED inits on an already-admitted connection, including a
-resumed account, retain their snapshot-only behavior. Account settings and
-engine options remain unchanged. Plaintext credentials are never init settings
-or account fingerprints.
+Fresh private COSIGNED inits require possession proof independently of the
+DELEGATED declaration, including clients omitting the mode field. Only the exact
+proof-ready venue names can complete that shared admission lifecycle; other
+private names refuse without attaching an account. Matching COSIGNED inits on
+an already-admitted connection, including a resumed account, retain their
+snapshot-only behavior. Account settings and engine options remain unchanged.
+Plaintext credentials are never init settings or account fingerprints.
 
 The handover uses RFC 9180 base mode with X25519/HKDF-SHA256,
 HKDF-SHA256 and ChaCha20-Poly1305. The application info is
@@ -669,27 +670,31 @@ Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
 message. Auth kinds are permanent refusals; rate, network, timeout and venue
 availability failures are transient. Replies retain the init's registration ID;
 clients without one retain the original envelope bytes. Verified admission does
-not replace a running account with different settings. Public-only accounts,
-venues outside the opt-in, and existing early-subscription handling retain their
-previous paths. Fixed synthetic interoperability and RFC test data
-live in `tests/data/`.
+not replace a running account with different settings. A supported private
+COSIGNED venue without a proof returns the permanent `proof-unavailable` init
+refusal before probe I/O or attachment; unsupported names retain `unsupported`.
+DELEGATED still requires its exact venue opt-in. Public-only accounts and
+existing early-subscription handling retain their previous paths. Fixed
+synthetic interoperability and RFC test data live in `tests/data/`.
 
-The shared startup admission runner also has staged entries for `binance`,
-`okx`, `bitget`, `blofin` and `kucoin`. It runs the selected venue's existing
-native private startup with either the remote provider or the local provider;
-it does not build a second set of REST requests. Its result classifier uses
-engine `ErrorKind` values: authentication failures are invalid, rate limits and
-transport failures are transient, and complete private startup is accepted.
+The shared startup admission runner makes exact `bybit`, `binance`, `okx`,
+`bitget`, `blofin` and `kucoin` proof-ready for COSIGNED. It runs the selected
+venue's existing native private startup with either the remote provider or the
+local provider; it does not build a second set of REST requests. Its result
+classifier uses engine `ErrorKind` values: authentication failures are invalid,
+rate limits and transport failures are transient, and complete private startup
+is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
 frame-fed accounts cannot satisfy this check.
 
-Entries are separate from rollout declarations. These five entries leave all
-activation flags off. The offline admission suite must cover each entry before
-it can be enabled: valid startup, a different signing key, a prior signature,
-a consumed response, a different handed-over pair, and a reused sealed handover.
-The suite verifies the actual native HTTP signatures against synthetic venue
-responses. Existing Bybit session tests additionally cover resident-account and
-registration preservation. These offline checks do not replace live venue
+COSIGNED proof readiness is separate from DELEGATED rollout declarations.
+These entries do not enable any additional DELEGATED venue. COSIGNED coverage
+includes valid startup, a different signing key, a prior signature and a
+consumed response. Before a DELEGATED venue is enabled, its offline admission
+suite must additionally cover a different handed-over pair and a reused sealed
+handover. The suite verifies the actual native HTTP signatures against synthetic
+venue responses. Existing Bybit session tests additionally cover resident-account
+and registration preservation. These offline checks do not replace live venue
 validation or the existing server-origin and signing requirements for rollout.
 
 ## Frames (claude-19pt8s, web hosted client)
