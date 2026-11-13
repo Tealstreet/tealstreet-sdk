@@ -4,7 +4,6 @@ use crate::out::Out;
 use crate::router_lease::{Assertion, Config, Heartbeat};
 use crate::session::{Identity, Session};
 use axum::http::{HeaderMap, Uri};
-use safe_cex_crypto::signer::Secret;
 use safe_cex_native::{HttpRoute, WsRoute, WsRoutes};
 use std::future::Future;
 use std::task::Poll;
@@ -129,11 +128,7 @@ fn setup(key: &str) -> (InitPayload, DelegatedPair) {
             key: key.into(),
             ..Default::default()
         },
-        DelegatedPair::new(
-            key.into(),
-            Secret::new("synthetic-construction-material".into()),
-            None,
-        ),
+        DelegatedPair::new(key.into(), "synthetic-construction-material".into(), None),
     )
 }
 

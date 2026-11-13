@@ -1,6 +1,5 @@
 use super::*;
 use crate::delegated::{DelegatedPair, prepare_delegated};
-use safe_cex_crypto::signer::Secret;
 
 fn init() -> InitPayload {
     InitPayload {
@@ -13,7 +12,7 @@ fn init() -> InitPayload {
 fn pair() -> DelegatedPair {
     DelegatedPair::new(
         "synthetic-key".into(),
-        Secret::new("synthetic-signing-fixture".into()),
+        "synthetic-signing-fixture".into(),
         None,
     )
 }
@@ -161,19 +160,13 @@ async fn mode_is_captured_before_the_init_pacing_deferral() {
 }
 
 #[tokio::test]
-async fn every_unflagged_venue_refuses_before_mutating_a_running_cosigned_account() {
+async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = tests::registry();
             let mut init = init();
             let account = testing::trading_account(&registry, "A", &init);
-            for venue in [
-                "bybitspot",
-                "bybitinverse",
-                "bybitdemo",
-                "hyperliquid",
-                "binance",
-            ] {
+            for venue in ["hyrotrader", "binanceoptions", "kucoin", "unknown"] {
                 init.exchange_name = venue.into();
                 let result = registry
                     .obtain_delegated("A", &init, 8, None, Arc::new(|_| true), pair())
@@ -274,7 +267,7 @@ async fn handed_over_key_is_checked_before_matching_delegated_reuse() {
             let account = resident_account(&registry, "A");
             let wrong = DelegatedPair::new(
                 "other-synthetic-key".into(),
-                Secret::new("synthetic-signing-fixture".into()),
+                "synthetic-signing-fixture".into(),
                 None,
             );
             let result = registry

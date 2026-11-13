@@ -10,6 +10,8 @@ struct JsonFields {
     secret: String,
     #[serde(default)]
     passphrase: Option<String>,
+    #[serde(default, rename = "signingKey")]
+    signing_key: Option<String>,
 }
 
 fn compare(bytes: &[u8]) {
@@ -25,6 +27,10 @@ fn compare(bytes: &[u8]) {
     }
     match (actual, expected) {
         (Ok(actual), Ok(expected)) => {
+            assert!(
+                actual.signing_key.as_deref().map(String::as_str)
+                    == expected.signing_key.as_deref()
+            );
             assert!(actual.key.as_str() == expected.key);
             assert!(actual.secret.as_str() == expected.secret);
             assert!(
@@ -92,6 +98,7 @@ fn differential_corpus_matches_serde() {
                 if let Some(passphrase) = passphrase {
                     fields.push(format!("{}:{passphrase}", quoted("passphrase", unicode)));
                 }
+                fields.push(format!("{}:{phrase}", quoted("signingKey", unicode)));
                 for rotation in 0..fields.len() {
                     fields.rotate_left(rotation);
                     for reverse in [false, true] {
@@ -144,6 +151,7 @@ fn sealed_handover_preserves_quoted_passphrase() {
 #[test]
 fn every_truncation_refuses_and_clears() {
     for json in [
+        br#"{"key":"synthetic-key","secret":"","signingKey":"synthetic-\u0073calar"}"#.as_slice(),
         br#"{"key":"synthetic-key","secret":"synthetic-secret"}"#.as_slice(),
         br#"{"key":"synthetic-\u006bey","secret":"\uD83D\uDE00","passphrase":"quote\"slash\\"}"#
             .as_slice(),
@@ -176,7 +184,7 @@ fn malformed_corpus_refuses_and_clears() {
         r#"{"nested":"synthetic"}"#,
         r#"["synthetic"]"#,
     ] {
-        for field in ["key", "secret", "passphrase"] {
+        for field in ["key", "secret", "passphrase", "signingKey"] {
             let mut fields = vec![
                 r#""key":"synthetic-key""#.to_owned(),
                 r#""secret":"synthetic-secret""#.to_owned(),
@@ -192,6 +200,8 @@ fn malformed_corpus_refuses_and_clears() {
         r#""key":"synthetic-second""#,
         r#""secret":"synthetic-second""#,
         r#""passphrase":null,"passphrase":null"#,
+        r#""signingKey":null,"signingKey":null"#,
+        r#""signingKey":"synthetic-one","signingKey":"synthetic-two"#,
         r#""secr\u0065t":"synthetic-second""#,
     ] {
         let json = format!(r#"{{"key":"synthetic-key","secret":"synthetic-secret",{duplicate}}}"#);
@@ -227,7 +237,7 @@ fn malformed_corpus_refuses_and_clears() {
         "[]",
         r#"[null,"synthetic-secret"]"#,
         r#"["synthetic-key"]"#,
-        r#"["synthetic-key","synthetic-secret",null,null]"#,
+        r#"["synthetic-key","synthetic-secret",null,null,null]"#,
         r#"{"key" "synthetic-key","secret":"synthetic-secret"}"#,
         r#"{"key":"synthetic-key","secret":"synthetic-secret",}"#,
     ] {
@@ -294,13 +304,15 @@ proptest! {
         key in prop::collection::vec(prop_oneof![Just('"'), Just('\\'), Just('\n'), any::<char>()], 0..48),
         secret in prop::collection::vec(prop_oneof![Just('"'), Just('\\'), Just('\t'), any::<char>()], 0..48),
         passphrase in prop::option::of(prop::collection::vec(prop_oneof![Just('"'), Just('\\'), Just('\0'), any::<char>()], 0..48)),
+        signing_key in prop::option::of(prop::collection::vec(prop_oneof![Just('"'), Just('\\'), Just('\0'), any::<char>()], 0..48)),
         unicode in any::<bool>(),
     ) {
-        let fields = JsonFields { key:key.into_iter().collect(), secret:secret.into_iter().collect(), passphrase:passphrase.map(|value| value.into_iter().collect()) };
+        let fields = JsonFields { key:key.into_iter().collect(), secret:secret.into_iter().collect(), passphrase:passphrase.map(|value| value.into_iter().collect()), signing_key:signing_key.map(|value| value.into_iter().collect()) };
         let key = quoted(&fields.key, unicode);
         let secret = quoted(&fields.secret, unicode);
         let passphrase = fields.passphrase.as_deref().map(|value| quoted(value, unicode)).unwrap_or_else(|| "null".to_owned());
-        let json = format!(r#"{{"key":{key},"secret":{secret},"passphrase":{passphrase}}}"#);
+        let signing_key = fields.signing_key.as_deref().map(|value| quoted(value, unicode)).unwrap_or_else(|| "null".to_owned());
+        let json = format!(r#"{{"key":{key},"secret":{secret},"passphrase":{passphrase},"signingKey":{signing_key}}}"#);
         compare(json.as_bytes());
     }
 

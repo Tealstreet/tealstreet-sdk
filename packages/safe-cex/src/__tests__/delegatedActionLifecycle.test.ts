@@ -9,6 +9,8 @@ function harness() {
   const options: OutboxOptions = {
     owner: 'alice',
     accountName: 'main',
+    venue: 'bybit',
+    accountId: 'account-A',
     storage: {
       async load() {
         return [...rows.values()].map((row) => structuredClone(row));
@@ -31,6 +33,7 @@ function harness() {
   const connection: OutboxConnection = {
     owner: 'alice',
     accountName: 'main',
+    accountId: 'account-A',
     venue: 'bybit',
     signingMode: 'delegated',
     ready: true,

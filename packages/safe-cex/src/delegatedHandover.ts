@@ -7,9 +7,12 @@ export type DelegatedHandoverInput = Readonly<{
   attemptId: string;
   bootId: string;
   exchangeName: string;
+  /** Public init identity; key-only setup uses its public subkeyAddress. */
   key: string;
   secret: string;
   passphrase?: string;
+  /** Private key-only material; never copy into unsealed account settings. */
+  signingKey?: string;
 }>;
 
 export type SealedDelegatedHandover = Readonly<{
@@ -61,29 +64,29 @@ function validContext(value: unknown): value is string {
   return true;
 }
 
-/** Seal one Bybit DELEGATED attempt using the host-provided ephemeral public key.
+/** Seal one DELEGATED attempt using the host-provided ephemeral public key.
  * Input and output key/ciphertext encodings are canonical padded base64.
  * The caller owns venue enablement and the attempt's connection/lifecycle.
  */
 export function sealDelegatedHandover(input: DelegatedHandoverInput): SealedDelegatedHandover {
   let plaintext: Uint8Array | undefined;
   try {
-    const { publicKey, attemptId, bootId, exchangeName, key, secret, passphrase } = input;
-    if (exchangeName !== 'bybit') throw new Error('Unsupported DELEGATED exchange');
+    const { publicKey, attemptId, bootId, exchangeName, key, secret, passphrase, signingKey } = input;
     if (
+      !validContext(exchangeName) ||
       !validContext(attemptId) ||
       !validContext(bootId) ||
       !validContext(key) ||
       typeof publicKey !== 'string' ||
       typeof secret !== 'string' ||
-      secret.length === 0 ||
-      (passphrase !== undefined && typeof passphrase !== 'string')
+      (passphrase !== undefined && typeof passphrase !== 'string') ||
+      (signingKey !== undefined && (typeof signingKey !== 'string' || signingKey.length === 0))
     ) {
       throw new Error('Invalid DELEGATED handover');
     }
     const recipient = recipientBytes(publicKey);
     const aad = utf8ToBytes([attemptId, bootId, exchangeName, key].join('|'));
-    plaintext = utf8ToBytes(JSON.stringify({ key, secret, passphrase }));
+    plaintext = utf8ToBytes(JSON.stringify({ key, secret, passphrase, signingKey }));
     const sealed = sealHandoverHpke(recipient, INFO, aad, plaintext);
     return { attemptId, enc: base64(sealed.enc), ciphertext: base64(sealed.ciphertext) };
   } catch {
