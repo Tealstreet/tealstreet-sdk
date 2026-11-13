@@ -282,6 +282,11 @@ Its internal method translation is DELEGATED-only; LOCAL/COSIGNED are unchanged.
 The new internal account-cancel/STP/tier methods are reachable only after typed
 action validation; legacy DELEGATED `callMethod` does not acquire these names.
 
+TWAP-state rows may carry `ownerId` and a nonnegative safe-integer
+`ownerGeneration`. Both fields remain in the v1 fingerprint; neither is filled
+from the current account. Missing generation stays wire-compatible but cannot
+authorize restoration when the native host binds owner and generation.
+
 Algo actions preserve the existing native algo protocol, including interruption
 restore pauses and drain admission. Their ACK means admitted, not completed.
 The action outcome is conservatively unknown: job state/ordinary correlated

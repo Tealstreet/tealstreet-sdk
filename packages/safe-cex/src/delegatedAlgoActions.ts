@@ -17,7 +17,11 @@ export type DelegatedAlgoAction =
   | { kind: 'algo'; op: 'chaser:terminate' | 'twap:resume' | 'twap:pause' | 'twap:stop' | 'twap:cleanup'; data: string }
   | { kind: 'algo'; op: 'chaser:terminateAll'; data: Record<string, never> }
   | { kind: 'algo'; op: 'twap:start'; data: Options }
-  | { kind: 'algo'; op: 'twap:state'; data: { id: string; ownerId?: string; options: Options; state: State }[] };
+  | {
+      kind: 'algo';
+      op: 'twap:state';
+      data: { id: string; ownerId?: string; ownerGeneration?: number; options: Options; state: State }[];
+    };
 const optionsFields = [
   'accountName',
   'activeMarket',
@@ -166,9 +170,11 @@ export function isDelegatedAlgoAction(v: Record<string, unknown>): v is Record<s
         d.every(
           (row) =>
             record(row) &&
-            keys(row, ['id', 'ownerId', 'options', 'state']) &&
+            keys(row, ['id', 'ownerId', 'ownerGeneration', 'options', 'state']) &&
             target(row.id) &&
             (!('ownerId' in row) || target(row.ownerId)) &&
+            (!('ownerGeneration' in row) ||
+              (number(row.ownerGeneration) && Number.isSafeInteger(row.ownerGeneration))) &&
             options(row.options) &&
             state(row.state),
         )

@@ -324,6 +324,19 @@ pub fn init_unverified(account_name: &str, transient: bool) -> String {
     )
 }
 
+/// A supported venue without a possession proof never takes a legacy admission path.
+pub fn init_proof_unavailable(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Key verification is not available for this venue; account not attached",
+            {"forceToast": true, "initRefused": true, "kind": "proof-unavailable",
+             "transient": false, "outcome": "notSent"}
+        ]),
+    )
+}
+
 /// Retired or unavailable venues refuse before routing, signing or engine work.
 pub fn init_unsupported(account_name: &str, venue: &str) -> String {
     let error = safe_cex_venues::unsupported_venue(venue);

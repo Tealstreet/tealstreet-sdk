@@ -52,7 +52,7 @@ Already accepted chaser/TWAP jobs retain their existing account lifetime.
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
 handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
 `remoteSigning` policy and a configured server origin, with the existing
-unhosted refusal preserved. There is no mode-specific venue list or
+unhosted refusal preserved. There is no separate DELEGATED venue allowlist or
 `delegated.enabled` declaration. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
@@ -80,11 +80,39 @@ The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
 unchanged in both modes. Other hosted venues retain their current account-label
 identity; that distinction does not gate DELEGATED or COSIGNED admission.
 
-The same hosted eligibility selects private COSIGNED admissions. Both modes
-share the off-loop probe, refusal classification, token/lease checks and account
-attachment. A pending COSIGNED signer belongs only to its joining connection;
-probe frames are consumed internally. Matching COSIGNED inits on an admitted
-connection and COSIGNED resumes retain their existing snapshot path.
+Private COSIGNED admissions require possession proof independently of
+DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
+DELEGATED's shared probe. Both modes share refusal classification, token/lease
+checks and account attachment. A private account is never attached
+as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
+OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
+other private COSIGNED joins return the typed `proof-unavailable` init refusal.
+A pending COSIGNED signer belongs only to its joining connection; probe frames
+are consumed internally. Matching COSIGNED inits on an admitted connection and
+COSIGNED resumes retain their existing snapshot path. The exact wire names and
+rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
+
+Shared admission serializes temporary proofs by verified user, credential and
+venue/network/site scope. One proof runs with at most four waiting reservations;
+overflow uses the existing transient refusal. Labels, settings, routing and
+signing mode do not split the queue. Waiting uses the existing proof deadline
+and rechecks captured token, init and lease authority before native work. The
+active reservation remains on the engine thread through probe cleanup, including
+cancellation. Reservation counts retire under the same map lock as admission,
+so concurrent final cancellation removes idle entries even while destructor
+fields still retain queue references. No successful proof is cached.
+
+## TWAP restore binding
+
+Native TWAP restore authority carries both the verified owner and generation.
+Identity-keyed accounts seed that binding from the registry identity digest;
+other native accounts retain their verified user binding. Label changes do not
+change identity or generation. Native identity restoration can remap matching
+persisted labels only after preserving both owner tags; missing/stale generations
+never inherit the current generation. Algo inputs capture this binding alongside
+any typed action receipt, and both guards survive deferred dispatch. Typed v1
+TWAP-state rows carry optional safe-integer `ownerGeneration` through validation
+and fingerprinting without backfill; the native restore gate remains mandatory.
 
 ## DELEGATED order frames
 

@@ -17,8 +17,8 @@ pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT, RETIRED_IDS_KEPT, SC
 
 pub use instance::TwapInstance;
 pub use types::{
-    InFlightSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapState,
-    TwapStatus,
+    InFlightSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapOwner,
+    TwapState, TwapStatus,
 };
 
 use std::collections::{HashSet, VecDeque};
@@ -194,6 +194,8 @@ pub struct TwapBook {
     owner_id: Option<String>,
     /// The `accountName` every TWAP here must carry; `activeTWAPs` lists by it.
     account_name: String,
+    owner: Option<TwapOwner>,
+    legacy_restore: bool,
     entries: Vec<Entry>,
     /// Completed or stopped ids, oldest first, that a restore must not revive.
     retired: VecDeque<String>,
@@ -204,29 +206,66 @@ pub struct TwapBook {
 struct Entry {
     instance: TwapInstance,
     owner_id: Option<String>,
+    owner_generation: Option<u64>,
     /// False once removed from the TS manager; the entry lingers only while
     /// in-flight placements or slice timeouts can still act.
     managed: bool,
 }
 
 impl TwapBook {
+    /// Unbound books can start new TWAPs but cannot adopt persisted rows.
     pub fn new(account_name: impl Into<String>) -> Self {
         Self {
             #[cfg(not(target_arch = "wasm32"))]
             owner_id: None,
             account_name: account_name.into(),
+            owner: None,
+            legacy_restore: false,
             entries: Vec::new(),
             retired: VecDeque::new(),
             retired_set: HashSet::new(),
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn new_with_owner(account_name: impl Into<String>, owner: String) -> Self {
+    /// Bind restore authority at construction, never from a persisted row.
+    pub fn with_owner(account_name: impl Into<String>, owner: TwapOwner) -> Self {
         Self {
-            owner_id: Some(owner),
+            owner: Some(owner),
             ..Self::new(account_name)
         }
+    }
+
+    /// Native identity books permit a label change only after matching both owner tags.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_with_owner(account_name: impl Into<String>, owner: TwapOwner) -> Self {
+        Self {
+            owner_id: Some(owner.owner_id.clone()),
+            owner: Some(owner),
+            ..Self::new(account_name)
+        }
+    }
+
+    /// Interim WASM compatibility only: callers without an owner retain account-name checks.
+    pub fn with_legacy_restore(account_name: impl Into<String>) -> Self {
+        Self {
+            legacy_restore: true,
+            ..Self::new(account_name)
+        }
+    }
+
+    /// A host binding changed: drop its pending schedule without relabelling saved rows.
+    pub fn rebind_owner(&mut self, owner: Option<TwapOwner>) -> bool {
+        if self.owner == owner {
+            return false;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.owner_id.is_some() {
+            self.owner_id = owner.as_ref().map(|owner| owner.owner_id.clone());
+        }
+        self.owner = owner;
+        self.legacy_restore = false;
+        self.entries.clear();
+        true
     }
 
     /// Apply one `twap:*` op from the hosted protocol.
@@ -296,16 +335,16 @@ impl TwapBook {
         effects: &mut Vec<TwapEffect>,
     ) -> Result<String, String> {
         validate::options(&options)
-            .and_then(|()| self.owns(&options))
+            .and_then(|()| self.owns_account(&options))
             .and_then(|()| self.has_capacity())
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
-        #[cfg(not(target_arch = "wasm32"))]
-        let owner_id = self.owner_id.clone();
-        #[cfg(target_arch = "wasm32")]
-        let owner_id = None;
-        self.add(instance, owner_id);
+        self.add(
+            instance,
+            self.owner.as_ref().map(|owner| owner.owner_id.clone()),
+            self.owner.as_ref().map(|owner| owner.generation),
+        );
         if let Some(instance) = self.managed_mut(&id) {
             instance.start(env, view, effects);
         }
@@ -417,6 +456,9 @@ impl TwapBook {
                 if let Some(owner_id) = &entry.owner_id {
                     row["ownerId"] = Value::String(owner_id.clone());
                 }
+                if let Some(generation) = entry.owner_generation {
+                    row["ownerGeneration"] = Value::from(generation);
+                }
                 result.insert(instance.id.clone(), row);
             }
         }
@@ -451,12 +493,32 @@ impl TwapBook {
     }
 
     /// A TWAP naming another account would trade here yet never be listed.
-    fn owns(&self, options: &TwapOptions) -> Result<(), String> {
+    fn owns_account(&self, options: &TwapOptions) -> Result<(), String> {
         if options.account_name != self.account_name {
             return Err(format!(
                 "it names account {:?}, not {:?}",
                 options.account_name, self.account_name
             ));
+        }
+        Ok(())
+    }
+
+    fn owns(&self, entry: &PersistedTwap) -> Result<(), String> {
+        self.owns_account(&entry.options)?;
+        if self.legacy_restore {
+            return Ok(());
+        }
+        let Some(owner) = self
+            .owner
+            .as_ref()
+            .filter(|owner| !owner.owner_id.is_empty())
+        else {
+            return Err("current TWAP owner is unavailable".into());
+        };
+        if entry.owner_id.as_deref() != Some(owner.owner_id.as_str())
+            || entry.owner_generation != Some(owner.generation)
+        {
+            return Err("persisted TWAP owner or generation does not match".into());
         }
         Ok(())
     }
@@ -505,10 +567,16 @@ impl TwapBook {
     }
 
     /// `Map.set`: a known id keeps its position and takes the new instance.
-    fn add(&mut self, instance: TwapInstance, owner_id: Option<String>) {
+    fn add(
+        &mut self,
+        instance: TwapInstance,
+        owner_id: Option<String>,
+        owner_generation: Option<u64>,
+    ) {
         let entry = Entry {
             instance,
             owner_id,
+            owner_generation,
             managed: true,
         };
         match self
@@ -542,9 +610,12 @@ impl TwapBook {
             #[cfg(not(target_arch = "wasm32"))]
             let entry = {
                 let mut entry = entry;
-                if entry.owner_id != self.owner_id {
+                if self.owner_id.is_some() && entry.owner_id != self.owner_id {
                     effects.push(TwapEffect::Log {
-                        message: "TWAP not restored: account identity differs".into(),
+                        message: format!(
+                            "TWAP {} not restored: persisted TWAP owner or generation does not match",
+                            entry.options.symbol()
+                        ),
                     });
                     continue;
                 }
@@ -577,7 +648,7 @@ impl TwapBook {
                 continue;
             }
             if let Err(reason) = validate::restored(&entry.options, &entry.state, env.now_ms())
-                .and_then(|()| self.owns(&entry.options))
+                .and_then(|()| self.owns(&entry))
                 .and_then(|()| self.has_capacity())
             {
                 effects.push(TwapEffect::Log {
@@ -590,6 +661,7 @@ impl TwapBook {
             self.add(
                 TwapInstance::new(entry.id, entry.options, Some(entry.state), env),
                 entry.owner_id,
+                entry.owner_generation,
             );
             if let Some(instance) = self.managed_mut(&id) {
                 // Persisted at once, so the host sees which rows it adopted.

@@ -240,8 +240,15 @@ pub(crate) fn algo(op: &str, data: &Value) -> Result<(), &'static str> {
             data.as_array().is_some_and(|rows| {
                 rows.len() <= 32
                     && rows.iter().all(|row| {
-                        only(row, &["id", "ownerId", "options", "state"])
-                            && twap_options(&row["options"])
+                        // Preserve supplied generation evidence; never backfill it from the host.
+                        only(
+                            row,
+                            &["id", "ownerId", "ownerGeneration", "options", "state"],
+                        ) && row.get("ownerGeneration").is_none_or(|generation| {
+                            generation
+                                .as_u64()
+                                .is_some_and(|value| value <= 9_007_199_254_740_991)
+                        }) && twap_options(&row["options"])
                             && twap_state(&row["state"])
                     })
             }) && serde_json::from_value::<Vec<safe_cex_algo_twap::PersistedTwap>>(data.clone())
@@ -478,6 +485,36 @@ pub(crate) fn placement_capabilities(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn twap_restore_generation_is_optional_wire_evidence_but_never_coerced() {
+        let cases: Vec<Value> =
+            serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
+                .unwrap();
+        let data = cases
+            .iter()
+            .find(|case| case["action"]["op"] == "twap:state")
+            .unwrap()["action"]["data"]
+            .clone();
+        assert!(algo("twap:state", &data).is_ok());
+        for generation in [json!(0), json!(7), json!(9_007_199_254_740_991u64)] {
+            let mut owned = data.clone();
+            owned[0]["ownerGeneration"] = generation;
+            assert!(algo("twap:state", &owned).is_ok());
+        }
+        for generation in [
+            Value::Null,
+            json!("7"),
+            json!(true),
+            json!(-1),
+            json!(0.5),
+            json!(9_007_199_254_740_992u64),
+        ] {
+            let mut invalid = data.clone();
+            invalid[0]["ownerGeneration"] = generation;
+            assert!(algo("twap:state", &invalid).is_err(), "{invalid}");
+        }
+    }
+
     #[test]
     fn j6_chaser_closes_nested_and_scalar_fields_without_changing_legacy_decode() {
         let valid = json!({"symbol":"BTCUSDT","size":0.001,"side":"buy","maxAttempts":3,"delay":500,

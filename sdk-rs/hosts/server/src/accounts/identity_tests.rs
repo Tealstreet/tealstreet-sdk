@@ -259,8 +259,8 @@ fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> 
         init.fingerprint(),
         Arc::new(crate::algos::Running::new(registry.algos_ended.clone())),
     );
+    testing::bind_identity(&mut account, init);
     let inner = Arc::get_mut(&mut account).unwrap();
-    inner.identity = identity::digest(user, init).unwrap();
     if init.signing_mode.as_deref() == Some("delegated") {
         let prepared = prepare_delegated(
             init,
@@ -553,8 +553,7 @@ async fn fixround_fatal_signer_notices_reach_each_live_alias() {
                     first.fingerprint(),
                     Arc::new(crate::algos::Running::new(registry.algos_ended.clone())),
                 );
-                Arc::get_mut(&mut account).unwrap().identity =
-                    identity::digest("u", &first).unwrap();
+                testing::bind_identity(&mut account, &first);
                 testing::register(&registry, &account);
                 let mut outputs = Vec::new();
                 for (holder, label) in [(7, "first"), (7, "second"), (8, "parked"), (9, "legacy")] {
@@ -712,4 +711,29 @@ async fn public_fallback_cannot_reset_identity_settings_through_a_label() {
             }
         })
         .await;
+}
+
+#[test]
+fn twap_binding_tracks_verified_identity_across_labels_and_key_changes() {
+    let first = init();
+    let same = InitPayload {
+        account_name: "renamed".into(),
+        ..first.clone()
+    };
+    let other = InitPayload {
+        key: "synthetic-key-B".into(),
+        ..first.clone()
+    };
+    let a = identity::digest("u", &first).unwrap().unwrap();
+    let same = identity::digest("u", &same).unwrap().unwrap();
+    let b = identity::digest("u", &other).unwrap().unwrap();
+    let binding = crate::twap_owner::Binding::new(&a);
+    let original = binding.snapshot();
+    assert_eq!(original.owner_id, a);
+    assert!(!binding.rebind_owner(&same));
+    assert_eq!(binding.snapshot(), original);
+    assert_ne!(crate::twap_owner::Binding::new(&b).snapshot(), original);
+    assert!(binding.rebind_owner(&b));
+    assert!(binding.rebind_owner(&a));
+    assert_ne!(binding.snapshot().generation, original.generation);
 }
