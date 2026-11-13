@@ -243,19 +243,30 @@ async fn venue_case(venue: &'static str) {
     resident.close();
 }
 
-macro_rules! venue_test {
-    ($name:ident,$venue:literal) => {
-        #[tokio::test]
-        async fn $name() {
-            venue_case($venue).await;
-        }
-    };
+#[tokio::test]
+async fn cosigned_binance_requires_connection_proof() {
+    venue_case("binance").await;
 }
-venue_test!(cosigned_binance_requires_connection_proof, "binance");
-venue_test!(cosigned_okx_requires_connection_proof, "okx");
-venue_test!(cosigned_bitget_requires_connection_proof, "bitget");
-venue_test!(cosigned_blofin_requires_connection_proof, "blofin");
-venue_test!(cosigned_kucoin_requires_connection_proof, "kucoin");
+
+#[tokio::test]
+async fn cosigned_okx_requires_connection_proof() {
+    venue_case("okx").await;
+}
+
+#[tokio::test]
+async fn cosigned_bitget_requires_connection_proof() {
+    venue_case("bitget").await;
+}
+
+#[tokio::test]
+async fn cosigned_blofin_requires_connection_proof() {
+    venue_case("blofin").await;
+}
+
+#[tokio::test]
+async fn cosigned_kucoin_requires_connection_proof() {
+    venue_case("kucoin").await;
+}
 
 #[tokio::test]
 async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
