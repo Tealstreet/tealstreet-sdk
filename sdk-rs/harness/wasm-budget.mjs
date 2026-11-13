@@ -238,7 +238,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,211,230 B + 10 KiB, rounded up to KiB.
   // #3302 run 43319605083, CI merge fb0f9b777241: optimized web/Node 2,245,672 B.
   // Job 131537312211 / artifact 13990380922; current bytes + 10 KiB, rounded up.
-  asterdex: 2_256_896,
+  // #3302 web/Node: reviewed 3df8707ddee4 measured 2,256,476 B; isolated a5b5284402c8 measured 2,247,295 B.
+  // build.sh --venue asterdex; Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; +10 KiB, retain higher floor.
+  // Isolated WASM SHA256 b75f55fc133ad54919521fd09bd1274e4f6ddf54f9d761656b7d62a985830d36.
+  asterdex: 2_267_136,
   // #3438 merged-head local build.sh --venue backpack: web/node 2,036,671 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   backpack: 2_046_976,

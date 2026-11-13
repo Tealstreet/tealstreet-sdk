@@ -2174,3 +2174,30 @@ for (const [venue, measured] of [
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
+
+// sam-mbp2/codex-4t8vx1: build.sh --venue asterdex at 3df8707ddee4.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; equal web/Node bytes.
+test('#3302 reviewed merge retains the measured AsterDEX reserve', () => {
+  const measured = 2_256_476;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.equal(minimumCap, 2_267_136);
+  assert.ok(cap >= minimumCap, `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
+
+// Isolated build.sh --venue asterdex at a5b5284402c8: equal web/Node bytes.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
+test('#3302 fresh merged build keeps current reserve and the reviewed higher floor', () => {
+  const measured = 2_247_295;
+  const currentMinimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const reviewedMinimum = Math.ceil((2_256_476 + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.equal(currentMinimum, 2_257_920);
+  assert.ok(cap >= Math.max(currentMinimum, reviewedMinimum));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
