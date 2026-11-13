@@ -2215,3 +2215,75 @@ test('#3391 round 2 current CI merge retains AsterDEX measured reserve', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
+
+// Run 43328298773: CI source 46852c576bd1 has ca7e7ea34bf6's exact tree.
+// The original-attempt optimized web modules independently establish these reserve floors.
+for (const [family, artifact, measured] of [
+  ['bitunix', 13994321229, 1_950_059],
+  ['grvt', 13993179391, 1_998_120],
+  ['kraken', 13992739463, 2_268_250],
+  ['lighter', 13994720808, 2_155_019],
+  ['orderly', 13993673114, 1_777_708],
+  ['polymarket', 13994907058, 1_659_395],
+  ['weex', 13993473438, 2_018_592],
+]) {
+  test(`#3391 reviewed ${family} artifact ${artifact} retains measured reserve`, () => {
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const aliases = Object.keys(WASM_VENUE_OVERRIDES).filter(venue => venueFamily(venue) === family);
+    assert.ok(aliases.length > 0, family);
+    for (const venue of aliases) {
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+      assert.equal(cap, WASM_VENUE_OVERRIDES[family], venue);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
+
+// #3391 fresh integrated local build at 133b901dc12b; master b99d9867a1d8.
+// build.sh --venue FAMILY, Rust 1.99.0 / bindgen 0.2.129 / Binaryen 132, twice -Oz.
+for (const [family, measured, minimumCap] of [
+  ['apexomni', 2_092_245, 2_103_296],
+  ['asterdex', 2_221_326, 2_232_320],
+  ['backpack', 2_039_182, 2_050_048],
+  ['binance', 2_269_830, 2_280_448],
+  ['bingx', 2_129_010, 2_140_160],
+  ['bitget', 2_479_808, 2_490_368],
+  ['bitrue', 1_906_065, 1_916_928],
+  ['bitunix', 1_952_459, 1_963_008],
+  ['blofin', 2_063_570, 2_074_624],
+  ['bybit', 2_341_308, 2_352_128],
+  ['coinbase', 2_112_360, 2_122_752],
+  ['cryptocom', 1_813_558, 1_824_768],
+  ['grvt', 2_000_353, 2_011_136],
+  ['hyperliquid', 2_234_627, 2_245_632],
+  ['kraken', 2_270_539, 2_281_472],
+  ['kucoin', 1_862_963, 1_873_920],
+  ['kucoinspot', 2_471_856, 2_482_176],
+  ['lighter', 2_158_209, 2_168_832],
+  ['mexc', 1_956_731, 1_967_104],
+  ['okx', 2_048_578, 2_059_264],
+  ['orderly', 1_779_876, 1_790_976],
+  ['paradex', 2_307_385, 2_318_336],
+  ['phemex', 2_135_165, 2_146_304],
+  ['polymarket', 1_661_564, 1_672_192],
+  ['txflow', 1_925_609, 1_936_384],
+  ['weex', 2_021_024, 2_031_616],
+  ['woo', 2_665_054, 2_675_712],
+]) {
+  test(`#3391 fresh integrated ${family} retains measured reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const aliases = Object.keys(WASM_VENUE_OVERRIDES).filter(venue => venueFamily(venue) === family);
+    assert.ok(aliases.length > 0, family);
+    for (const venue of aliases) {
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+      assert.equal(cap, WASM_VENUE_OVERRIDES[family], venue);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
