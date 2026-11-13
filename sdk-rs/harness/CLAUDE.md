@@ -15,10 +15,16 @@ HyroTrader main-thread/process CPU and every other venue's CPU objectives retain
   retained, so recorded revalidation never re-measures.
 - Warnings: `cpu-annotations.mjs` emits `::warning` / `::error` plus a step-summary table; warnings never block.
 - Bitget steady: the paired counterbalanced certificate accepts only when its candidate Rust/TS ratio is at most
-  1.00x and its frozen creep bound `q <= 1.023110` also holds; the 0.90 readiness miss is a warning.
+  `1 + BITGET_STEADY_NOISE` (Sam, 2026-11-12: the observed baseline range from runs 43273706928 and
+  43281701341) and its frozen creep bound `q <= 1.023110` also holds; the 0.90 readiness miss is a warning.
+  Master push and nightly runs measure even identical bytes and retain the baseline and landed-master ratios.
 - Checks: correctness is "Rust / replay correctness" and "Rust / replay measurement"; CPU is
   "Rust / CPU gate (<suite>)" (plan, certify, status). "Rust / required coverage" depends on no CPU job.
 - Nightly: `.github/workflows/rust-cpu-nightly.yml` and `cpu-nightly.mjs` dispatch rust.yml on master, then file
   or update one `cpu-regression` issue for suites whose CPU gate failed on two adjacent UTC nights (the last run each night).
   Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and
   multiple runs on one night must not hide the previous night.
+
+BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
+The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
+normal factories still refuse Spot. Shipped family size checks run before the fixture build.

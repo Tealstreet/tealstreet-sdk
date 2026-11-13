@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../../store/store.interface';
@@ -1131,7 +1132,7 @@ export class BitunixExchange extends BaseExchange {
     return rows
       .map((row) => mapBitunixClosedPosition(row, opts.accountName || ''))
       .filter((entry): entry is ClosedPnlEntry => entry !== null)
-      .sort((a, b) => b.closedTime - a.closedTime);
+      .sort(compareClosedPnlTimes);
   };
 
   /**

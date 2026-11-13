@@ -1,4 +1,6 @@
 import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
+import type { SerializedCommandError } from '../commandOutcome';
+import type { OHLCVFrameRejection, OrderBookFrameRejection } from '../exchanges/base';
 import type { PackedTickerDelta } from '../store/store.interface';
 import type { StoreData, Writable } from '../types';
 
@@ -63,8 +65,10 @@ export type StoreWorkerOutgoingOp =
   // Orderbook
   | 'listenOrderBook'
   | 'listenOrderBook:delta'
+  | 'listenOrderBook:rejected'
   // OHLCV
   | 'listenOHLCV'
+  | 'listenOHLCV:rejected'
   // Trading events
   | 'fill'
   | 'updatePositions:done'
@@ -95,6 +99,7 @@ export type StoreWorkerOutgoingOp =
   | 'grafana-pws-sub'
   | 'grafana-http-request'
   | 'grafana-http-response'
+  | 'ws-diagnostic'
   // Infrastructure (ExchangeServerWorker only)
   | 'connection-state'
   | 'session-lost'
@@ -174,4 +179,14 @@ export interface PerfFixtureConfig {
 export type StoreWorkerCommandProgress = CommandProgress & {
   account: string;
   generation: number;
+};
+
+/** JSON-safe rejection messages retain the subscriber's routing identity. */
+export type StoreWorkerOrderBookFrameRejection = Omit<OrderBookFrameRejection, 'error'> & {
+  subId: string;
+  error: SerializedCommandError;
+};
+export type StoreWorkerOHLCVFrameRejection = Omit<OHLCVFrameRejection, 'error'> & {
+  subId: string;
+  error: SerializedCommandError;
 };

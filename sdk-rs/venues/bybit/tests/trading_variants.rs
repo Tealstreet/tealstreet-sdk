@@ -1898,7 +1898,7 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     let create = h.take("/v5/order/create");
     let id = link(&create);
     let original = body(&create).to_owned();
-    assert!(original.contains("\"triggerDirection\":\"1\""));
+    assert!(original.contains("\"triggerDirection\":1"));
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
@@ -6924,4 +6924,172 @@ fn spot_ts_parity_identity_and_execution_controls_remain_atomic() {
             "atomic TS checks must precede the valid prefix"
         );
     }
+}
+
+#[test]
+fn hyro_v1_already_gone_chase_cancel_is_satisfied_without_resending() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 991, vec![order("BTCUSDT", 0.1)]);
+    created(&mut h, "chase-gone");
+    h.command(Command::CancelOrders {
+        command: 992,
+        ids: vec!["chase-gone".into()],
+    });
+    let request = h.take("/v5/order/cancel");
+    assert_eq!(
+        Harness::header(&request, "Content-Type").as_deref(),
+        Some("application/json")
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110001,"retMsg":"already filled"}"#,
+    );
+    assert!(h.result(992).expect("cancel completes").is_ok());
+    assert!(!h.unknown.contains(&992));
+    assert!(!h.has_request("/v5/order/cancel"));
+    answer_reconcile(&mut h);
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+#[test]
+fn hyro_v1_conditional_trigger_direction_is_numeric_and_writes_are_strict_json() {
+    for (side, expected) in [(OrderSide::Buy, 1), (OrderSide::Sell, 2)] {
+        let mut h = ready(Variant::Hyrotrader);
+        let mut opts = order("BTCUSDT", 0.1);
+        opts.kind = OrderType::Conditional;
+        opts.side = side;
+        opts.trigger_price = Some(if expected == 1 { 70000. } else { 60000. });
+        place(&mut h, 990, vec![opts]);
+        let request = h.take("/v5/order/create");
+        assert_eq!(
+            Harness::header(&request, "Content-Type").as_deref(),
+            Some("application/json")
+        );
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(payload["triggerDirection"].as_i64(), Some(expected));
+    }
+}
+
+#[test]
+fn hyro_v1_unsupported_modes_are_typed_and_send_nothing() {
+    use safe_cex_engine::{Action, ErrorKind, Notice, Outcome};
+    for command in [
+        Command::SetMarginType {
+            command: 993,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+        Command::SetPositionMode {
+            command: 993,
+            hedged: true,
+            symbol: None,
+        },
+    ] {
+        let mut h = ready(Variant::Hyrotrader);
+        h.engine.handle_command(h.now, command, None).unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 993,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("typed refusal");
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(error.message.contains("only"));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+#[test]
+fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
+    let mut h = ready(Variant::Inverse);
+    place(&mut h, 1, vec![order("BTCUSD", 25.6)]);
+    let mode = h.take("/v5/position/list");
+    assert!(mode.url.contains("category=inverse&symbol=BTCUSD"));
+    h.reply(
+        mode.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSD","positionIdx":0}]}}"#,
+    );
+    let request = h.take("/v5/order/create-batch");
+    assert!(body(&request).contains("\"category\":\"inverse\""));
+    assert_eq!(body(&request).matches("\"qty\":\"10\"").count(), 2);
+    assert_eq!(body(&request).matches("\"qty\":\"6\"").count(), 1);
+}
+
+#[test]
+fn inverse_position_mode_paces_its_coins() {
+    let mut h = ready(Variant::Inverse);
+    let mut second = h.engine.store().markets()[0].clone();
+    second.base = "ZZZ".into();
+    second.symbol = "ZZZUSD".into();
+    second.id = "ZZZUSD".into();
+    let mut markets = h.engine.store().markets().to_vec();
+    markets.push(second);
+    h.engine.store_mut().set_markets(markets);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond(
+        "/v5/position/switch-mode",
+        200,
+        r#"{"retCode":0,"result":{}}"#,
+    );
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    h.advance(250.0);
+    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+}
+
+#[test]
+fn inverse_position_mode_switches_a_named_symbol_alone() {
+    let mut h = ready(Variant::Inverse);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: Some("BTCUSD".into()),
+    });
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"inverse","symbol":"BTCUSD","mode":3}"#
+    );
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
+}
+
+#[test]
+fn inverse_position_mode_tries_every_coin_past_a_refusal() {
+    let mut h = ready(Variant::Inverse);
+    let mut second = h.engine.store().markets()[0].clone();
+    second.base = "ZZZ".into();
+    second.symbol = "ZZZUSD".into();
+    second.id = "ZZZUSD".into();
+    h.engine.store_mut().update_markets(|_| {});
+    let mut markets = h.engine.store().markets().to_vec();
+    markets.push(second);
+    h.engine.store_mut().set_markets(markets);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond(
+        "/v5/position/switch-mode",
+        200,
+        r#"{"retCode":10001,"retMsg":"refused"}"#,
+    );
+    h.advance(250.0);
+    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
 }

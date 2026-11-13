@@ -88,6 +88,15 @@ and excludes the retired SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Rost
 changes must update this independent fixture and the strict native enum, not
 replace equality checks with floors.
 
+`get_exchange_metadata_with_options` mirrors the live Bitget account-mode and
+TP/SL-path resolution through `ExchangeMetadataOptions`; the existing boolean
+`get_exchange_metadata` entrypoint keeps its Bybit unified-account behavior and
+conservative Bitget entry defaults. Static Bitget metadata offers no trigger
+selector. Supported UTA entries and position protection offer Last/Mark with
+explicit Mark defaults, while inverse UTA remains unavailable. The native
+metadata target compares all fields against 96 live TypeScript context cases;
+regenerate the static snapshot with `corepack yarn rust:metadata`, never by hand.
+
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the
 source's numeric count, not an integer restriction. Optional numbers/venue ID/
@@ -208,6 +217,11 @@ ExchangeOptions.polymarket carries the five runtime account fields consumed by t
 ExchangeOptions and ExchangeAccountConfig declare coinbaseJwtAlgorithm here for
 hosted CDP signing. Regenerate their public TypeScript declarations from options.rs;
 the optional algorithm is the closed union es256 | edDsa and rejects explicit null.
+
+Both canonical account models also declare optional signingMode with the existing
+account-worker literals local | cosigned | delegated. Absence preserves legacy
+selection; explicit null and unknown literals refuse decoding. Regenerate the
+public declarations from options.rs; signingMode is metadata, not new authority.
 
 Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
 
@@ -345,3 +359,13 @@ codec preserves required identity/leverage and optional margin/mode without
 adding exposure fields. Regenerate with the scoped `store` example and
 `store-generate.cjs`; PositionSettings does not replace Position or its display
 contract.
+
+## Closed-PnL unknown values
+
+`history.rs` owns generated `ClosedPnlEntry`. Its seven financial fields and
+`time`/`closedTime` are required nullable values; zero is a measurement, null is
+unknown. Existing string/number variants remain accepted. The strict private
+reader rejects absent keys while allowing explicit null. Regenerate with the
+scoped `history` Cargo example and `history-generate.cjs`; run `history_fixtures`
+and `tests/history-contract.cjs`. Native projection has its own missing-value
+matrix and actual JSON fixture consumed through the SDK host and worker paths.

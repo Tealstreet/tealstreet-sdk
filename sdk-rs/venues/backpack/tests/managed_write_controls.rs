@@ -417,3 +417,31 @@ fn public_data_only_mode_refuses_even_a_trusted_signing_identity() {
             .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
     );
 }
+
+#[test]
+fn hosted_transport_lost_child_stops_before_next_child() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut engine, _) = ready();
+    engine.handle(2000., Event::Command(Command::PlaceOrders {
+        command: 723,
+        orders: serde_json::from_str(r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}]"#)?,
+    }));
+    let entry = requests(&mut engine).pop().ok_or("entry missing")?;
+    reply(&mut engine, &entry, 200, r#"{"id":"accepted-entry"}"#);
+    let child = requests(&mut engine).pop().ok_or("child missing")?;
+    engine.handle(
+        2000.,
+        Event::HttpFailed {
+            request: child.id,
+            error: "ambiguous transport loss",
+        },
+    );
+    let out = actions(&mut engine);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    let error = failure(&out, 723);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.partial.as_ref().ok_or("prior ids missing")?.order_ids,
+        ["accepted-entry"]
+    );
+    Ok(())
+}

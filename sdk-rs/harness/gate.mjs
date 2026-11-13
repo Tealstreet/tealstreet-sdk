@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, expectedCheckpointPlan } from './tape.mjs';
-import { venueOf } from './venues.mjs';
+import { replayVenueOf } from './venues.mjs';
 import { COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
@@ -167,7 +167,7 @@ const compare = (label, a, b) => {
   }
 };
 
-const venue = venueOf(values.venue);
+const venue = replayVenueOf(values.venue);
 const isPrivate =
   tapeRecords.find((record) => record.type === 'config')?.private ??
   tapeRecords.find((record) => record.type === 'meta')?.private ??

@@ -20,6 +20,21 @@ Startup retry explanations are diagnostic copies when cached, so a native read
 failure cannot bypass masking in the later retry warning. Deactivation refusal
 text uses the same text policy while its status flag remains unchanged.
 
+## Public-data frame rejection messages
+
+Book and candle subscription handlers forward typed rejection observers as
+`listenOrderBook:rejected` and `listenOHLCV:rejected`. Each message carries its
+`subId`, stream, symbol, candle interval where applicable, and the existing
+JSON-safe serialized error; receivers restore the error for the optional third
+observer. Rejections fan out to every current subscriber, cancel pending data
+throttles, and send no substitute data. Unsubscribe and handler disposal remove
+these observers. Registration is visible before calling the source, so a
+synchronous unsubscribe or disposal fences data and rejections immediately and
+releases the late handle exactly once. Cancelled registrations cannot overwrite
+a replacement subscription or trigger a candle repair; a thrown source
+registration releases its reservation so callers can retry.
+Worker owner/generation fences apply to these messages too.
+
 ## History result completeness
 
 Successful `callMethod:done` replies include optional `data.completeness:
@@ -351,7 +366,9 @@ phase tag and never ship it. Counts from this tag are a floor, not a census.
   postMessaging `{op: '<event>', data: [...args]}` for a fixed
   set (`error`, `warning`, `log`, `exec-log`, `exec-result`,
   `chaser:complete`, `grafana-info`, `grafana-error`, `grafana-pws`, `grafana-pws-sub`,
-  `grafana-http-request`, `grafana-http-response`). Adding a new
+  `grafana-http-request`, `grafana-http-response`, `ws-diagnostic`). The latter
+  carries one sanitized `WsDiagnosticEvent` object and remains default-off via
+  `__workerConfig.wsDiagnosticsEnabled`. Adding a new
   bridged event requires adding it both to the worker-side
   forwarder in `_setupExchangeEventListeners` and the main-side
   `workerListener` switch in `exchangeAccountController.ts`, plus
