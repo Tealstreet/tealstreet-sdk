@@ -185,6 +185,8 @@ it.each<{ version: 'v1' | 'v3' }>([{ version: 'v1' }, { version: 'v3' }])('actua
   } finally { host.dispose(); }
 });
 
+// Advancing 31 simulated minutes drives real WASM polling; allow slower runners
+// more wall time while retaining every polling, session and signing assertion.
 it('actual SDK V1 PayloadSigner loads and polls REST without private session work or WS signing', async () => {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(1_748_310_859_508);
@@ -259,4 +261,4 @@ it('actual SDK V1 PayloadSigner loads and polls REST without private session wor
   expect(payloadSigner).toHaveBeenCalledTimes(calls);
   expect(JSON.stringify(payloadSigner.mock.calls)).not.toContain('fixture-material');
   expect(JSON.stringify(logs)).not.toContain('fixture-material');
-});
+}, 20_000);
