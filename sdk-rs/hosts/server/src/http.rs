@@ -1616,7 +1616,7 @@ mod tests {
                 let registry = crate::accounts::tests::registry();
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
                 let account =
-                    crate::accounts::tests::held_account_counted(&registry, link, String::new());
+                    crate::accounts::tests::held_account_counted(&registry, link, String::new(), None);
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let op = |op: &str, data: &str| {
                     let input = crate::algos::AlgoInput::Op {

@@ -217,3 +217,6 @@ async fn hosted_lighter_identity_drops_a_completion_when_login_switches_during_m
     old.close();
     caller.close();
 }
+
+#[path = "lighter_identity_admission_tests.rs"]
+mod admission;

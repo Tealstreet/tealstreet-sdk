@@ -869,7 +869,7 @@ async fn reviewer_fresh_registration_receives_its_own_rebuild_refusal() {
             let (account, owner, _) = fixture(Some("existing-owner")).await;
             let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
             let mut payload = init(Some("registration-A"));
-            payload.key = "synthetic-different-credentials".into();
+            payload.enable_spot_markets = Some(true);
             attempt.init(payload.clone()).await.unwrap();
             let mut replies = Vec::new();
             while let Ok(frame) = sent.try_recv() {
@@ -942,7 +942,7 @@ async fn same_registration_rebuild_refusal_retries_stay_silent() {
             let (account, owner, _) = fixture(Some("owner")).await;
             let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
             let mut payload = init(Some("one-click"));
-            payload.key = "synthetic-other-key".into();
+            payload.enable_spot_markets = Some(true);
             refused_registration(&mut attempt, &mut sent, &payload, true).await;
             for _ in 0..4 {
                 refused_registration(&mut attempt, &mut sent, &payload, false).await;
@@ -962,7 +962,7 @@ async fn interleaved_refused_registrations_each_receive_exactly_one_error() {
             let (account, owner, _) = fixture(Some("owner")).await;
             let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
             let mut payload = init(None);
-            payload.key = "synthetic-other-key".into();
+            payload.enable_spot_markets = Some(true);
             for (id, notify) in [
                 (None, true),
                 (Some("A"), true),
@@ -993,13 +993,13 @@ async fn legacy_rebuild_refusal_suppression_and_changed_reasons_are_byte_exact()
             let (account, owner, _) = fixture(None).await;
             let (mut attempt, mut sent) = user_session(owner.registry.clone(), "u");
             let mut payload = init(None);
-            payload.key = "synthetic-other-key".into();
+            payload.enable_spot_markets = Some(true);
             refused_registration(&mut attempt, &mut sent, &payload, true).await;
             refused_registration(&mut attempt, &mut sent, &payload, false).await;
-            payload.testnet = Some(true);
+            payload.enable_inverse_markets = Some(true);
             refused_registration(&mut attempt, &mut sent, &payload, true).await;
             refused_registration(&mut attempt, &mut sent, &payload, false).await;
-            payload.testnet = None;
+            payload.enable_inverse_markets = None;
             refused_registration(&mut attempt, &mut sent, &payload, true).await;
             payload.instance_id = Some("".into());
             refused_registration(&mut attempt, &mut sent, &payload, false).await;
@@ -1026,7 +1026,9 @@ async fn reviewer_refused_fresh_registration_does_not_reuse_a_stopped_registrati
         let (mut other, mut other_sent) = user_session(registry, "u");
         other.init(replacement).await.unwrap();
         while sent.try_recv().is_ok() {}
-        let fresh = init(Some("fresh-registration-C"));
+        let mut fresh = init(Some("fresh-registration-C"));
+        fresh.key = "synthetic-key-B".into();
+        fresh.enable_spot_markets = Some(true);
         refused_registration(&mut original, &mut sent, &fresh, true).await;
         for op in ["callMethod", "updatePositions", "chaser:start", "twap:start"] {
             stopped_reply(&mut original, &mut sent, op, Some("fresh-registration-C")).await;
@@ -1090,7 +1092,10 @@ async fn refused_registration_without_id_removes_the_old_stopped_reply_id() {
                 let (mut other, _) = user_session(registry, "u");
                 other.init(replacement).await.unwrap();
                 while sent.try_recv().is_ok() {}
-                refused_registration(&mut session, &mut sent, &init(id), true).await;
+                let mut fresh = init(id);
+                fresh.key = "synthetic-key-B".into();
+                fresh.enable_spot_markets = Some(true);
+                refused_registration(&mut session, &mut sent, &fresh, true).await;
                 for op in [
                     "callMethod",
                     "updatePositions",
@@ -1116,7 +1121,7 @@ async fn disposal_after_a_refused_registration_cannot_restore_the_old_reply_id()
             let (mut other, _) = user_session(original.registry.clone(), "u");
             other.init(init(Some("holder-B"))).await.unwrap();
             let mut fresh = init(Some("fresh-C"));
-            fresh.key = "synthetic-other-key".into();
+            fresh.enable_spot_markets = Some(true);
             let expected = envelope::init_refused(
                 "acct",
                 &original

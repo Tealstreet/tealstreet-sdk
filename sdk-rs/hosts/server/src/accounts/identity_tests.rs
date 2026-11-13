@@ -141,7 +141,7 @@ fn identity_outputs_keep_twap_labels_local_and_preserve_owner_ids() {
 }
 
 #[test]
-fn unflagged_and_public_accounts_keep_their_existing_identity_path() {
+fn private_hosted_and_public_accounts_select_their_identity_paths() {
     let private = InitPayload {
         exchange_name: "bybitinverse".into(),
         ..init()
@@ -150,8 +150,12 @@ fn unflagged_and_public_accounts_keep_their_existing_identity_path() {
         key: "synthetic-key-B".into(),
         ..private.clone()
     };
-    assert!(identity::digest("u", &private).unwrap().is_none());
-    assert_ne!(private.fingerprint(), another_key.fingerprint());
+    assert!(identity::digest("u", &private).unwrap().is_some());
+    assert_eq!(private.fingerprint(), another_key.fingerprint());
+    assert_ne!(
+        identity::digest("u", &private).unwrap(),
+        identity::digest("u", &another_key).unwrap()
+    );
     let public = InitPayload {
         public_only: Some(true),
         ..init()
@@ -511,6 +515,7 @@ async fn label_lookup_selects_the_requested_holder_across_identity_modes() {
             let identity_account = account(&registry, "u", &identified);
             let legacy = InitPayload {
                 exchange_name: "bybitinverse".into(),
+                key: "synthetic-other-key".into(),
                 ..identified.clone()
             };
             let legacy_account = account(&registry, "u", &legacy);
