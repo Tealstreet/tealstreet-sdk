@@ -2,6 +2,64 @@ use super::*;
 use safe_cex_engine::signing::{Algorithm, Capability, KeyRef};
 
 #[tokio::test]
+async fn stopped_delegated_account_is_released_by_resumable_session_close() {
+    let f = fixture().await;
+    let (mut alice, _sent) = user_session(f.registry.clone(), "alice");
+    let mut ready = alice.take_verified();
+    let init = payload(&mut alice, Some("stopped-registration"));
+    alice.init(init).await.unwrap();
+    finish(&mut alice, &mut ready).await;
+    let account = f.registry.held("alice", "acct", alice.socket).unwrap();
+    let holder = alice.socket;
+    let provider = account.delegated.as_ref().unwrap().provider();
+    assert!(alice.identity.resumable);
+    assert!(!alice.moved);
+
+    assert!(f.registry.drain(Duration::from_secs(5)).await);
+    assert_eq!(
+        f.registry.account_count(),
+        1,
+        "keep stop-notice delivery live"
+    );
+    assert_eq!(
+        provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+        Capability::Unsupported
+    );
+    alice.close();
+    f.registry.undrain();
+    assert!(!f.registry.holds(&account, holder));
+    assert_eq!(f.registry.account_count(), 0);
+
+    tokio::time::pause();
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(49 * 60 * 60)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(f.registry.account_count(), 0);
+    assert_eq!(
+        provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+        Capability::Unsupported
+    );
+    tokio::time::resume();
+    let (mut returning, _sent) = user_session(f.registry.clone(), "alice");
+    let mut ready = returning.take_verified();
+    let init = payload(&mut returning, Some("fresh-registration"));
+    returning.init(init).await.unwrap();
+    finish(&mut returning, &mut ready).await;
+    let current = f.registry.held("alice", "acct", returning.socket).unwrap();
+    assert!(!Arc::ptr_eq(&account, &current));
+    assert_eq!(
+        current
+            .delegated
+            .as_ref()
+            .unwrap()
+            .provider()
+            .can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+        Capability::Supported
+    );
+    returning.close();
+}
+
+#[tokio::test]
 async fn restart_notice_precedes_handover_and_echoes_only_the_current_registration() {
     for id in [Some("restart-registration"), None, Some("")] {
         let registry = crate::accounts::tests::registry();

@@ -466,3 +466,39 @@ async fn delegated_stopped_accounts_retire_without_rearming_retention() {
         })
         .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn stopped_delegated_resumable_holders_release_only_their_own_incarnation() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident(&registry, "A");
+            hold(&account, 8);
+            registry.stop(&account, "stopped", None, DisposalCause::Stopped);
+
+            registry.park("wrong-owner".into(), "B", vec![(account.clone(), 7)]);
+            assert!(registry.holds(&account, 7));
+            registry.park("first-close".into(), "A", vec![(account.clone(), 7)]);
+            assert!(!registry.holds(&account, 7));
+            assert!(registry.holds(&account, 8));
+            assert_eq!(registry.account_count(), 1, "keep the other live holder");
+            assert!(account.holders.lock().unwrap().retention.is_none());
+
+            registry.park("last-close".into(), "A", vec![(account.clone(), 8)]);
+            assert!(!registry.holds(&account, 8));
+            assert_eq!(registry.account_count(), 0);
+            assert!(registry.parked.lock().unwrap().is_empty());
+
+            let (replacement, _inbox) = resident(&registry, "A");
+            registry.park("late-close".into(), "A", vec![(account.clone(), 7)]);
+            advance(RETAIN + Duration::from_secs(60 * 60)).await;
+            assert_eq!(registry.account_count(), 1);
+            assert!(Arc::ptr_eq(
+                &registry.held("A", &replacement.name, 7).unwrap(),
+                &replacement
+            ));
+            assert!(replacement.handle.disposal_cause().is_none());
+            registry.dispose(&replacement, Disposal::PageDisposed);
+        })
+        .await;
+}
