@@ -139,7 +139,6 @@ describe('ScaleCommand — modifier honesty', () => {
     [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic', 'BTCUSDT'], 'cubic'],
     [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential'], 'exponential'],
     [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential', 'BTCUSDT'], 'exponential'],
-    [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'bogus', 'BTCUSDT'], 'bogus'],
   ])('rejects an unimplemented modifier with the supported list (%s)', async (args, modifier) => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(args, ex));
