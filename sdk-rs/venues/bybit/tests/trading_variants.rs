@@ -4172,12 +4172,22 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 91, vec![order("BTCUSDT", 1.0)]);
     place(&mut h, 92, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|request| request.url.contains("/v5/order/create"))
+            .count(),
+        1
+    );
     let create = h.take("/v5/order/create");
     let id = link(&create);
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
     });
+    let expected = format!(
+        "The outcome is unknown. Check Open Orders. HyroTrader order outcome is unknown (orderLinkId {id}). Reconcile before placing a replacement: lost"
+    );
     for command in [91, 92] {
         let notices: Vec<_> = h
             .command_notices
@@ -4191,7 +4201,12 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
             .iter()
             .filter(|(c, _)| *c == command)
             .collect();
+        assert_eq!(errors.len(), 1, "command {command}");
+        assert_eq!(errors[0].1, expected, "command {command}");
         assert!(errors[0].1.contains(&id));
+        let failure = applied_failure(&h, command);
+        assert_eq!(failure.message, expected, "command {command}");
+        assert!(failure.presents, "command {command}");
         assert_eq!(
             outcome(&h, command),
             Some(safe_cex_engine::Outcome::Unknown)
@@ -4204,6 +4219,9 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
                 .contains(&id)
         );
     }
+    assert!(!h.has_request("/v5/order/create"));
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/order/create"));
 }
 
 /// A Hyro create refused 10002 is resent once, signed with the clock Bybit
