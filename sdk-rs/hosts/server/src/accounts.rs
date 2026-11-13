@@ -2028,11 +2028,16 @@ impl Registry {
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
-                if account.delegated.is_some()
-                    && (holders.disposed
-                        || !holders.by_id.get(&holder).is_some_and(Option::is_some))
-                {
-                    continue;
+                if account.delegated.is_some() {
+                    if !holders.by_id.get(&holder).is_some_and(Option::is_some) {
+                        continue;
+                    }
+                    if holders.disposed {
+                        // Stopped accounts keep live holders only for their final notices.
+                        drop(holders);
+                        self.release(&account, holder, Disposal::SocketClosed);
+                        continue;
+                    }
                 }
                 holders.by_id.remove(&holder);
                 holders.by_id.insert(park_holder, None);
