@@ -1595,3 +1595,127 @@ async fn typed_twap_start_keeps_connection_labels_on_a_shared_identity() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn typed_algo_admission_keeps_the_initiating_socket_token_expiry() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let cases: Vec<Value> =
+                serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
+                    .unwrap();
+            for op in ["chaser:start", "twap:start"] {
+                for expired in [false, true] {
+                    let registry = crate::accounts::tests::registry();
+                    let tape = Tape::default();
+                    let (account, inbox) =
+                        delegated_account_with_algo_inbox(&registry, "A", "bybit", tape.clone());
+                    let (mut session, mut sent) =
+                        joined(registry.clone(), "A", account.clone()).await;
+                    let (keeper, _kept, _) = Out::channel(256);
+                    account.hold_registration(
+                        9999,
+                        keeper.outbox(),
+                        Some(("valid-keeper".into(), crate::accounts::now_ms() + 60_000)),
+                        "synthetic-main",
+                    );
+                    let expires = crate::accounts::now_ms() + if expired { 500 } else { 60_000 };
+                    session.identity.token = Some(("initiating-token".into(), expires));
+                    let payload = cases
+                        .iter()
+                        .find(|case| case["action"]["op"] == op)
+                        .unwrap()["action"]
+                        .clone();
+                    action(&mut session, payload, 1, false).await;
+                    assert_eq!(
+                        action_frame(&mut sent, "order.actionAck").await["d"]["received"],
+                        true
+                    );
+                    // The actor does not consume its inbox until after this deferral.
+                    tokio::time::sleep(Duration::from_millis(650)).await;
+                    assert_eq!(session.token_expired(), expired);
+                    assert!(session.account_out("synthetic-main").action_active());
+                    assert!(account.running.io_allowed());
+                    let account =
+                        testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox);
+                    let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+                    if !expired {
+                        tokio::time::timeout(Duration::from_secs(3), async {
+                            while tape.writes.lock().unwrap().is_empty() {
+                                tokio::task::yield_now().await;
+                            }
+                        })
+                        .await
+                        .expect("valid token must admit the native job and write");
+                    }
+                    let writes = tape.writes.lock().unwrap().clone();
+                    let jobs = account.running.jobs().0;
+                    session.close();
+                    registry.dispose(&account, Disposal::PageDisposed);
+                    if expired {
+                        assert!(
+                            writes.is_empty(),
+                            "{op}: expired queued admission wrote {writes:?}"
+                        );
+                        assert!(
+                            jobs.is_empty(),
+                            "{op}: expired queued admission created {jobs:?}"
+                        );
+                        assert_eq!(outcome["d"]["outcome"], "refused", "{outcome}");
+                        assert!(
+                            outcome["d"]["error"]["message"]
+                                .as_str()
+                                .unwrap()
+                                .contains("expired"),
+                            "{outcome}"
+                        );
+                    } else {
+                        assert!(
+                            !jobs.is_empty(),
+                            "{op}: positive control did not create a job"
+                        );
+                        assert_eq!(outcome["d"]["outcome"], "unknown");
+                    }
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn typed_exec_continuations_keep_socket_expiry_without_expiring_accepted_jobs() {
+    tokio::task::LocalSet::new().run_until(async {
+        for command in ["chase buy $100", "twap buy $1000 into 2 over 1"] {
+            for control in ["expired", "valid", "accepted-job"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                let (keeper, _kept, _) = Out::channel(256);
+                account.hold_registration(9999, keeper.outbox(), Some(("valid-keeper".into(), crate::accounts::now_ms() + 60_000)), "synthetic-main");
+                session.identity.token = Some(("initiating-token".into(), crate::accounts::now_ms() + if control == "valid" { 60_000 } else { 500 }));
+                let delay = if control == "expired" { 800 } else { 50 };
+                let payload = json!({"kind":"algo","op":"exec","data":{"command":format!("sleep {delay}ms; {command}"),"symbol":"BTCUSDT"}});
+                action(&mut session, payload, 1, false).await;
+                let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+                assert_eq!(outcome["d"]["outcome"], "unknown");
+                assert!(account.running.jobs().1 > 0, "EXEC must enter its sleep deferral");
+                assert!(tape.writes.lock().unwrap().is_empty());
+                tokio::time::sleep(Duration::from_millis(1_100)).await;
+                assert_eq!(session.token_expired(), control != "valid");
+                assert!(session.account_out("synthetic-main").action_active());
+                assert!(account.running.io_allowed(), "the valid holder keeps account IO live");
+                let writes = tape.writes.lock().unwrap().clone();
+                let jobs = account.running.jobs().0;
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+                if control == "expired" {
+                    assert!(writes.is_empty(), "{command}: expired EXEC continuation wrote {writes:?}");
+                    assert!(jobs.is_empty(), "{command}: expired EXEC continuation created {jobs:?}");
+                } else {
+                    assert!(!writes.is_empty(), "{control} {command}: positive control did not write");
+                    assert!(!jobs.is_empty(), "{control} {command}: accepted jobs keep account lifetime");
+                }
+            }
+        }
+    }).await;
+}

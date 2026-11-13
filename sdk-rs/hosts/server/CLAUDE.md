@@ -45,6 +45,10 @@ The existing socket close remains at expiry plus `TOKEN_GRACE` (30 seconds);
 the grace permits reconnection, not new admissions or commands. Expiry belongs
 to the requesting socket and never fences another holder's account transport.
 
+Typed action guards retain that socket expiry through actor queues/store awaits,
+EXEC continuations and native command dispatch, alongside registration and age.
+Already accepted chaser/TWAP jobs retain their existing account lifetime.
+
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
 handover pair. Admission follows the exact venue's `delegated.enabled` in construction-rules.json;
 only `bybit` is currently opted in. The account retains the existing LocalSigner provider,

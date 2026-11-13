@@ -501,15 +501,23 @@ impl ActionDeadline {
 pub(crate) struct ActionGuard {
     registration: Out,
     deadline: ActionDeadline,
+    // Another holder's live account token cannot renew this socket's authority.
+    token_expires_at_ms: Option<u64>,
 }
 impl ActionGuard {
-    pub(crate) fn new(registration: Out, deadline: ActionDeadline) -> Self {
+    pub(crate) fn new(
+        registration: Out,
+        deadline: ActionDeadline,
+        token_expires_at_ms: Option<u64>,
+    ) -> Self {
         Self {
             registration,
             deadline,
+            token_expires_at_ms,
         }
     }
     pub(crate) fn check(&self) -> Result<(), &'static str> {
+        crate::auth::Verifier::check_expiry(self.token_expires_at_ms, crate::accounts::now_ms())?;
         if self.deadline.expired() {
             Err("Action expired; no further action command was sent")
         } else if !self.registration.action_active() {
@@ -539,9 +547,10 @@ impl NukeReceipt {
         id: Value,
         seq: u64,
         deadline: ActionDeadline,
+        token_expires_at_ms: Option<u64>,
     ) -> Self {
         Self {
-            guard: ActionGuard::new(out, deadline),
+            guard: ActionGuard::new(out, deadline, token_expires_at_ms),
             reply: Some((name, id, seq)),
             kind: "nuke",
         }
@@ -750,6 +759,7 @@ mod tests {
                 monotonic: std::time::Instant::now() + std::time::Duration::from_secs(10),
                 key_expires_at_ms: crate::accounts::now_ms() + 10_000,
             },
+            None,
         );
         assert!(receipt.active());
         old.retire_order_receipts();

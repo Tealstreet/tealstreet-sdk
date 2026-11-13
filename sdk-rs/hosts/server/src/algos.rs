@@ -1162,8 +1162,8 @@ pub(crate) async fn run_with_identity(
                     }
                 }
                 Some(AlgoInput::Nuke { mode, request_id, action }) => {
-                    if action.as_ref().is_some_and(|receipt| receipt.expired()) {
-                        if let Some(receipt) = action { receipt.finish(Err(crate::order_actions::expired_outcome())); }
+                    if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"unknown"}))); }
                         continue;
                     }
                     if !running.io_allowed() || action.as_ref().is_some_and(|receipt| !receipt.active()) {
@@ -1189,10 +1189,11 @@ pub(crate) async fn run_with_identity(
                         ),
                         None => cx.clone(),
                     };
-                    let started = match admission.as_ref() {
-                        _ if action.as_ref().is_some_and(|receipt| receipt.expired()) => Err(crate::order_actions::expired_outcome()),
+                    let action_refusal = action.as_ref().and_then(|receipt| receipt.guard().check().err());
+                    let started = match (action_refusal, admission.as_ref()) {
+                        (Some(message), _) => Err(serde_json::json!({"message":message,"outcome":"unknown"})),
                         _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"})),
-                        Some(Err(error)) => Err(error.clone()),
+                        (_, Some(Err(error))) => Err(error.clone()),
                         _ => match seen {
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>

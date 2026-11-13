@@ -85,6 +85,7 @@ impl Session {
                 id.clone(),
                 request.seq,
                 deadline,
+                self.token_expires_at_ms(),
             )
             .with_kind("algo");
             let Some(algos) = self.joined[&name].account.algos.clone() else {
@@ -204,6 +205,7 @@ impl Session {
             id.clone(),
             seq,
             deadline,
+            self.token_expires_at_ms(),
         )
         .with_kind(kind);
         let Some(algos) = account.algos.clone() else {

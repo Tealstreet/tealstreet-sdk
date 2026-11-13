@@ -1952,6 +1952,7 @@ impl Session {
         };
         let account = self.joined[name].account.clone();
         let dispatch_out = self.account_out(name);
+        let action_expires_at_ms = self.token_expires_at_ms();
         let symbols = if method == "cancelAllOrders"
             && (account.delegated.is_none()
                 || matches!(order_frame, Some(OrderReceipt::Action { .. })))
@@ -1985,8 +1986,12 @@ impl Session {
             kind,
             deadline,
         }) = order_frame
-            && let Err(message) =
-                crate::order_actions::ActionGuard::new(dispatch_out.clone(), deadline).check()
+            && let Err(message) = crate::order_actions::ActionGuard::new(
+                dispatch_out.clone(),
+                deadline,
+                action_expires_at_ms,
+            )
+            .check()
         {
             crate::order_actions::settle(
                 &dispatch_out,
@@ -2064,8 +2069,12 @@ impl Session {
             kind,
             deadline,
         }) = order_frame
-            && let Err(message) =
-                crate::order_actions::ActionGuard::new(dispatch_out.clone(), deadline).check()
+            && let Err(message) = crate::order_actions::ActionGuard::new(
+                dispatch_out.clone(),
+                deadline,
+                action_expires_at_ms,
+            )
+            .check()
         {
             crate::order_actions::settle(
                 &dispatch_out,
@@ -2361,9 +2370,10 @@ impl Session {
             None
         };
         let out = self.account_out(name);
+        let expires_at_ms = self.token_expires_at_ms();
         let action_guard = match order_frame {
             Some(OrderReceipt::Action { deadline, .. }) => Some(
-                crate::order_actions::ActionGuard::new(out.clone(), deadline),
+                crate::order_actions::ActionGuard::new(out.clone(), deadline, expires_at_ms),
             ),
             _ => None,
         };
@@ -2393,7 +2403,6 @@ impl Session {
         let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
-        let expires_at_ms = self.token_expires_at_ms();
         let send = move || {
             if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
                 if let Some(entry) = pending.lock().unwrap().remove(&id) {
