@@ -90,7 +90,7 @@ Commands that do not need the venue — `alias`, `simulation`, `fatfinger`,
 ## "HyroTrader production REST URL is not configured"
 
 This is not an API-key rejection. Current CLI builds default to
-`https://sim-bybit.hyro.trade`, so you should normally see this only on an
+`https://sim-tealstreet.hyro.site`, so you should normally see this only on an
 older build or when a custom environment clears the configured Hyro endpoints.
 
 Update the CLI first. If HyroTrader or Tealstreet gave you a different
