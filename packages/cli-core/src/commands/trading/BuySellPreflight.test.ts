@@ -61,6 +61,46 @@ describe.each(['buy', 'sell'])('%s fan-out preflight', (side) => {
     expect(placeOrder).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, true])('refuses a lost or unusable placement capability before writing (%s)', async (capability) => {
+    const { run, exchange, placeOrder, store } = fixture();
+    let reads = 0;
+    Object.defineProperty(exchange, 'placeOrder', {
+      get: () => ++reads === 1 ? placeOrder : capability,
+    });
+    await expect(run(`${side} BTCUSDT,ETHUSDT $1000 best`)).rejects.toThrow(
+      'Exchange does not support placing orders',
+    );
+    expect(placeOrder).not.toHaveBeenCalled();
+    expect(store.getBudgetSpent()).toBe(0);
+  });
+
+  it.each(['', 'at 49000', 'best'])('preserves the placement receiver (%s)', async (mode) => {
+    const { run, exchange, placeOrder } = fixture();
+    exchange.placeOrder = function (order) {
+      expect(this).toBe(exchange);
+      return placeOrder(order);
+    };
+    await expect(run(`${side} $100 ${mode}`)).resolves.toMatchObject({ success: true });
+    expect(placeOrder).toHaveBeenCalledOnce();
+  });
+
+  it('waits for each accepted leg before placing and charging the next', async () => {
+    const { run, placeOrder, store } = fixture();
+    store.setBudget(2000);
+    let finishFirst: (() => void) | undefined;
+    placeOrder.mockImplementationOnce(() => new Promise<string[]>((resolve) => {
+      finishFirst = () => resolve(['first-id']);
+    })).mockResolvedValueOnce(['second-id']);
+    const pending = run(`${side} BTCUSDT,ETHUSDT $1000 best`);
+    await vi.waitFor(() => expect(placeOrder).toHaveBeenCalledOnce());
+    expect(store.getBudgetSpent()).toBe(0);
+    if (!finishFirst) throw new Error('First placement did not start');
+    finishFirst();
+    await expect(pending).resolves.toMatchObject({ data: { orderIds: ['first-id', 'second-id'] } });
+    expect(placeOrder).toHaveBeenCalledTimes(2);
+    expect(store.getBudgetSpent()).toBe(1960);
+  });
+
   it.each(['at 49000', 'best'])('refuses a later sub-lot leg before any write, including retry: %s', async (mode) => {
     const { run, placeOrder, store } = fixture();
     store.setBudget(10000);

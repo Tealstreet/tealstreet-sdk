@@ -535,7 +535,9 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
             let policy = safe_cex_venues::remote_signing_policy(venue);
-            let expected = if policy.enabled && !policy.payload_supported {
+            let expected = if venue == "polymarket" {
+                "Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply".into()
+            } else if policy.enabled && !policy.payload_supported {
                 format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
             } else if policy.enabled {
                 format!(
@@ -575,7 +577,7 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
 
 #[cfg(feature = "bybit")]
 #[test]
-fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
+fn hyro_raw_config_preserves_network_and_refuses_environment_fallback() {
     use safe_cex_venues::HyroConfig;
     let config = |mode, production_rest: &str| {
         serde_json::json!({
@@ -597,8 +599,11 @@ fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
         (None, "https://prod.example", true, "prod-test"),
         (Some("demo"), "https://prod.example", false, "sim"),
         (Some("demo"), "https://prod.example", true, "sim-test"),
-        (None, "", false, "sim"),
-        (None, "", true, "sim-test"),
+        (Some("production"), "https://prod.example", false, "prod"),
+        (Some("production"), "", true, "prod-test"),
+        (Some("demo"), "", false, "sim"),
+        (Some("demo"), "", true, "sim-test"),
+        (None, "", true, "prod-test"),
     ] {
         let raw = config(mode, prod);
         let selected = serde_json::from_value::<HyroConfig>(raw.clone())
@@ -620,6 +625,42 @@ fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
                 .to_string(),
         )
         .unwrap();
+    }
+    for mode in [None, Some("production")] {
+        let raw = config(mode, "");
+        let error = serde_json::from_value::<HyroConfig>(raw.clone())
+            .unwrap()
+            .resolve(false)
+            .err()
+            .expect("explicit production must refuse missing livenet");
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert_eq!(
+            rejected(
+                "hyrotrader",
+                &serde_json::json!({
+                    "publicDataOnly":true,"hyrotrader":raw
+                })
+                .to_string()
+            ),
+            "HyroTrader REST/public/private URLs are not configured"
+        );
+    }
+    for testnet in [false, true] {
+        for field in ["rest", "publicWs", "privateWs"] {
+            let mut raw = config(Some("production"), "https://prod.example");
+            raw["production"][field][if testnet { "testnet" } else { "livenet" }] = "".into();
+            let error = construct(
+                "hyrotrader",
+                &serde_json::json!({
+                    "publicDataOnly":true,"testnet":testnet,"hyrotrader":raw
+                })
+                .to_string(),
+            )
+            .expect_err("missing selected production endpoint must refuse before I/O");
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+        }
     }
     let mut incomplete = config(None, "https://prod.example");
     incomplete["production"]["publicWs"]["livenet"] = "".into();
@@ -770,10 +811,6 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             "hyperliquidspot",
             "Hyperliquid requires its primary signing provider",
         ),
-        (
-            "orderly",
-            "Injected signing is not supported for this venue yet",
-        ),
     ] {
         assert_eq!(
             rejected(
@@ -783,6 +820,16 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             expected
         );
     }
+    let error = construct(
+        "orderly",
+        r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#,
+    ).expect_err("Orderly private injection stays closed");
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Orderly injected private signing admission is closed"
+    );
 }
 
 #[test]

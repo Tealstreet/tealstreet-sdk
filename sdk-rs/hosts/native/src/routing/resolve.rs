@@ -417,7 +417,10 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://api.testnet.paradex.trade/v1",
         ),
         "phemex" => pick("https://api.phemex.com", "https://testnet-api.phemex.com"),
+        "woo" => pick("https://api.woox.io", "https://api.staging.woox.io"),
         "bitunix" => "https://fapi.bitunix.com",
+        "backpack" if !testnet => "https://api.backpack.exchange",
+        "grvt" => pick("https://trades.grvt.io", "https://trades.testnet.grvt.io"),
         _ => return Err(RoutingError::NoBaseUrl(name.into())),
     })
 }
@@ -684,7 +687,7 @@ fn uses_tunnel(name: &str, o: &RoutingInputs) -> bool {
     match name {
         "paradex" => !public && !o.payload_signer,
         "hyperliquid" | "hyperliquidspot" | "kucoin" | "kucoinspot" => !public,
-        "bingx" => !public && o.tealstreet_tunnel != Some(false),
+        "bingx" | "bingxspot" => !public && o.tealstreet_tunnel != Some(false),
         "weex" | "grvt" | "blofin" | "mexc" => false,
         _ => o.tealstreet_tunnel.unwrap_or(false),
     }

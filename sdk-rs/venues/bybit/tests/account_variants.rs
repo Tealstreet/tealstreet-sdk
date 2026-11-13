@@ -1114,3 +1114,174 @@ fn spot_page_mirror_shows_the_sources_resting_orders() {
 }
 
 const SPOT_OPEN_ORDERS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"category":"spot","list":[{"orderId":"spot-limit","orderLinkId":"tealstreet-1","blockTradeId":"","symbol":"BTCUSDT","price":"60000","qty":"0.001","side":"Buy","isLeverage":"0","positionIdx":0,"orderStatus":"New","createType":"","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"","leavesQty":"0.001","leavesValue":"60","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"GTC","orderType":"Limit","stopOrderType":"","orderIv":"","marketUnit":"","triggerPrice":"0.00","takeProfit":"0.00","stopLoss":"0.00","tpslMode":"","ocoTriggerBy":"","tpLimitPrice":"","slLimitPrice":"","tpTriggerBy":"","slTriggerBy":"","triggerDirection":0,"triggerBy":"","lastPriceOnCreated":"","reduceOnly":false,"closeOnTrigger":false,"placeType":"","smpType":"None","smpGroup":0,"smpOrderId":"","createdTime":"1760880000000","updatedTime":"1760880000000"},{"orderId":"spot-stop","orderLinkId":"","blockTradeId":"","symbol":"BTCUSDT","price":"0","qty":"0.001","side":"Buy","isLeverage":"0","positionIdx":0,"orderStatus":"Untriggered","createType":"","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"","leavesQty":"0.001","leavesValue":"0","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"IOC","orderType":"Market","stopOrderType":"StopOrder","orderIv":"","marketUnit":"baseCoin","triggerPrice":"70000","takeProfit":"0.00","stopLoss":"0.00","tpslMode":"","ocoTriggerBy":"","tpLimitPrice":"","slLimitPrice":"","tpTriggerBy":"","slTriggerBy":"","triggerDirection":1,"triggerBy":"LastPrice","lastPriceOnCreated":"66666.6","reduceOnly":false,"closeOnTrigger":false,"placeType":"","smpType":"None","smpGroup":0,"smpOrderId":"","createdTime":"1760880000000","updatedTime":"1760880000000"},{"orderId":"spot-tpsl","orderLinkId":"","blockTradeId":"","symbol":"BTCUSDT","price":"0","qty":"0.001","side":"Sell","isLeverage":"0","positionIdx":0,"orderStatus":"Untriggered","createType":"","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"","leavesQty":"0.001","leavesValue":"0","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"IOC","orderType":"Market","stopOrderType":"tpslOrder","orderIv":"","marketUnit":"baseCoin","triggerPrice":"60000","takeProfit":"0.00","stopLoss":"0.00","tpslMode":"","ocoTriggerBy":"","tpLimitPrice":"","slLimitPrice":"","tpTriggerBy":"","slTriggerBy":"","triggerDirection":2,"triggerBy":"LastPrice","lastPriceOnCreated":"66666.6","reduceOnly":false,"closeOnTrigger":false,"placeType":"","smpType":"None","smpGroup":0,"smpOrderId":"","createdTime":"1760880000000","updatedTime":"1760880000000"}],"nextPageCursor":""}}"#;
+
+#[test]
+fn hyro_v1_flat_clear_without_side_or_leverage_removes_the_open_position() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    assert_eq!(h.engine.store().positions().len(), 1);
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","size":"0"}]}"#,
+    );
+    assert!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .all(|p| p.contracts == 0.)
+    );
+    assert!(!h.deactivated);
+}
+
+#[test]
+fn hyro_v1_entry_price_alias_is_admitted_on_rest_and_private_ws() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 200, EMPTY);
+    h.respond(
+        "/v5/position/list",
+        200,
+        &POSITIONS.replace("avgPrice", "entryPrice"),
+    );
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().loaded().positions);
+    assert_eq!(h.engine.store().positions()[0].entry_price, 50000.);
+    h.message("/v5/private", r#"{"topic":"position","data":[{"symbol":"BTCUSDT","side":"Buy","size":"2","entryPrice":"52000","markPrice":"53000","leverage":"10","unrealisedPnl":"2000"}]}"#);
+    assert_eq!(h.engine.store().positions()[0].entry_price, 52000.);
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.);
+    assert!(!h.deactivated);
+}
+
+#[test]
+fn hyro_v1_flat_rest_snapshot_without_side_or_leverage_completes_startup() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 200, EMPTY);
+    h.respond(
+        "/v5/position/list",
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","size":"0"}],"nextPageCursor":""}}"#,
+    );
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().loaded().positions);
+    assert!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .all(|p| p.contracts == 0.)
+    );
+    assert!(!h.deactivated);
+}
+
+fn hyro_flat_rest_snapshot(h: &mut Harness, leverage: Option<&str>) {
+    let mut row = serde_json::json!({"symbol":"BTCUSDT","size":"0"});
+    if let Some(leverage) = leverage {
+        row["leverage"] = serde_json::json!(leverage);
+    }
+    h.respond("/v5/order/realtime", 200, EMPTY);
+    h.respond(
+        "/v5/position/list",
+        200,
+        &serde_json::json!({"retCode":0,"result":{"list":[row],"nextPageCursor":""}}).to_string(),
+    );
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+}
+
+fn assert_hyro_same_leverage_is_local(h: &mut Harness, leverage: f64) {
+    h.command(Command::SetLeverage {
+        command: 98,
+        symbol: "BTCUSDT".into(),
+        leverage,
+        side: None,
+    });
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|request| request.url.contains("/v5/position/set-leverage"))
+            .count(),
+        0,
+        "a flat snapshot must not cause a redundant set-leverage write"
+    );
+    assert!(h.result(98).expect("local success").is_ok());
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().leverage,
+        leverage
+    );
+    assert!(h.engine.store().positions().is_empty());
+    assert!(!h.deactivated);
+}
+
+#[test]
+fn hyro_flat_rest_preserves_known_leverage_without_redundant_writes() {
+    // Legacy hyrotrader.exchange.ts:170-175; bybit.exchange.ts:3457-3480.
+    for leverage in [None, Some(""), Some("0"), Some("-2")] {
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_snapshot(&mut h);
+        h.advance(5000.);
+        hyro_flat_rest_snapshot(&mut h, leverage);
+        assert_hyro_same_leverage_is_local(&mut h, 10.);
+        h.advance(5000.);
+        hyro_flat_rest_snapshot(&mut h, leverage);
+        assert_hyro_same_leverage_is_local(&mut h, 10.);
+    }
+}
+
+#[test]
+fn hyro_flat_rest_without_prior_leverage_defaults_to_one_without_a_write() {
+    for leverage in [None, Some(""), Some("0"), Some("-2")] {
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_flat_rest_snapshot(&mut h, leverage);
+        assert_hyro_same_leverage_is_local(&mut h, 1.);
+    }
+}
+
+#[test]
+fn hyro_flat_rest_keeps_positive_leverage_and_writes_only_for_a_change() {
+    for leverage in ["10", "7"] {
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_snapshot(&mut h);
+        h.advance(5000.);
+        hyro_flat_rest_snapshot(&mut h, Some(leverage));
+        let expected = leverage.parse::<f64>().unwrap();
+        assert_hyro_same_leverage_is_local(&mut h, expected);
+        h.command(Command::SetLeverage {
+            command: 99,
+            symbol: "BTCUSDT".into(),
+            leverage: expected + 1.,
+            side: None,
+        });
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|request| request.url.contains("/v5/position/set-leverage"))
+                .count(),
+            1,
+            "a real leverage change still sends exactly one write"
+        );
+    }
+}
+
+#[test]
+fn hyro_v1_optional_position_fields_still_reject_supplied_nonfinite_numbers() {
+    for row in [
+        r#"{"symbol":"BTCUSDT","size":"0","leverage":"NaN"}"#,
+        r#"{"symbol":"BTCUSDT","side":"Buy","size":"2","avgPrice":"50000","entryPrice":"NaN","markPrice":"53000","leverage":"10","unrealisedPnl":"2000"}"#,
+    ] {
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_snapshot(&mut h);
+        assert!(h.closed.is_empty());
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"position","data":[{row}]}}"#),
+        );
+        assert!(!h.closed.is_empty());
+        assert_eq!(h.engine.store().positions()[0].contracts, 1.);
+    }
+}

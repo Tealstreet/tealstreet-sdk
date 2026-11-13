@@ -89,6 +89,8 @@ struct Run {
     queue: VecDeque<Leg>,
     active: Option<Active>,
     continue_on_error: bool,
+    stop_after_spot_order: bool,
+    deferred_error: Option<String>,
     ids: Vec<String>,
     error: Option<VenueError>,
     /// Live rows a cancel-all did not list. The stream can lag a venue-side
@@ -142,6 +144,16 @@ enum Decision {
 enum Gate {
     Done,
     Fail(VenueError),
+}
+
+fn spot_unknown(mut error: VenueError) -> VenueError {
+    error.message = format!(
+        "The outcome is unknown. Check Open Orders. {}",
+        error.message
+    );
+    error.outcome = Some(Outcome::Unknown);
+    error.presents = true;
+    error
 }
 
 fn internal(message: &str) -> VenueError {
@@ -555,6 +567,8 @@ impl BybitLinear {
             queue: legs,
             active: None,
             continue_on_error: job.continue_on_error,
+            stop_after_spot_order: false,
+            deferred_error: job.deferred_error,
             ids: Vec::new(),
             error: None,
             unlisted: Vec::new(),
@@ -664,7 +678,11 @@ impl BybitLinear {
                         .map_or_else(|| "[]".into(), |intent| intent.ids()),
                     None => serde_json::to_string(&run.ids).unwrap_or_default(),
                 };
-                let sealed = match run.error.take() {
+                let failure = run
+                    .error
+                    .take()
+                    .or_else(|| run.deferred_error.take().map(not_sent));
+                let sealed = match failure {
                     Some(error) => cx.fail_plan(&run.plan, error).map(|()| false),
                     None => cx.done_plan(&run.plan, ids.clone()).map(|()| true),
                 };
@@ -1050,9 +1068,15 @@ impl BybitLinear {
                     }
                     Decision::Next(Vec::new())
                 }
-                Err(error) => {
+                Err(failure) => {
+                    // A stable prefix lets logs count failed proofs per check.
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        "partial.proof_failed",
+                        format!("[proof-diag] {}", failure.reason),
+                    );
                     let _ = cx.inherit_plan_uncertainty(&run.plan);
-                    Decision::Failed(error)
+                    Decision::Failed(failure.error())
                 }
             }
         } else {
@@ -1077,7 +1101,9 @@ impl BybitLinear {
         let plan = run.plan.clone();
         match decision {
             Decision::ProofPoll(axis) => {
-                let planned = run.partial.as_ref().unwrap().proof(axis);
+                let flow = run.partial.as_ref().unwrap();
+                let planned = flow.proof(axis);
+                let delay_ms = flow.poll_delay_ms(axis);
                 run.queue.push_front(Leg {
                     planned,
                     intent: LegIntent::Command,
@@ -1088,7 +1114,7 @@ impl BybitLinear {
                         &plan,
                         &active.slot,
                         &active.context,
-                        100,
+                        delay_ms,
                         partial_call(Operation::Read, 1),
                     )
                     .is_err()
@@ -1150,6 +1176,16 @@ impl BybitLinear {
                 };
                 if continued.is_err() {
                     let _ = cx.fail_plan(&plan, internal("Bybit trading plan lost its call"));
+                    return;
+                }
+                if matches!(active.leg.planned.call, Call::PlaceLot { last: true })
+                    && run.stop_after_spot_order
+                {
+                    let error = run
+                        .error
+                        .take()
+                        .unwrap_or_else(|| internal("Bybit split order lost its refusal"));
+                    let _ = cx.fail_plan(&plan, error);
                     return;
                 }
             }
@@ -1226,8 +1262,18 @@ impl BybitLinear {
                 if entry.hyro.is_none() {
                     cx.command_error(id, error.message.clone());
                 }
-                if !run.continue_on_error {
-                    // Its cancel landed and nothing replaced it.
+                let spot_lot = matches!(active.leg.planned.call, Call::PlaceLot { .. });
+                if spot_lot && error.outcome == Some(Outcome::Unknown) {
+                    error = spot_unknown(error);
+                }
+                if spot_lot && matches!(active.leg.planned.call, Call::PlaceLot { last: false }) {
+                    run.stop_after_spot_order = true;
+                }
+                if !run.continue_on_error
+                    || (spot_lot
+                        && (error.outcome == Some(Outcome::Unknown)
+                            || matches!(active.leg.planned.call, Call::PlaceLot { last: true })))
+                {
                     let _ = match &stop_lost {
                         Some(note) => cx.fail_plan_noted(&plan, error, note),
                         None => cx.fail_plan(&plan, error),
@@ -1417,7 +1463,7 @@ impl BybitLinear {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: VenueError,
+        mut error: VenueError,
     ) {
         let Some(mut entry) = self.take_ordinary(&request) else {
             return;
@@ -1442,7 +1488,11 @@ impl BybitLinear {
                 matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
             })
         {
-            let _ = cx.present_plan_failure(&run.plan, error.message.clone());
+            // A transport refusal on the cancel-partial-stop leg surfaces as
+            // `NotSent`. The venue path has already composed the right
+            // user-facing message for the partial put-back; replace the raw
+            // transport text on this definite outcome.
+            let _ = cx.override_plan_failure_message(&run.plan, error.message.clone());
         }
         if matches
             && run
@@ -1457,6 +1507,24 @@ impl BybitLinear {
             return;
         }
         let active = run.active.take().expect("matched active leg");
+        if matches!(active.leg.planned.call, Call::PlaceLot { .. })
+            && !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
+        {
+            error = spot_unknown(error);
+        }
+        if matches!(active.leg.planned.call, Call::PlaceLot { .. })
+            && (error.outcome == Some(Outcome::Unknown)
+                || (run.stop_after_spot_order
+                    && matches!(active.leg.planned.call, Call::PlaceLot { last: true })))
+        {
+            let failure = if error.outcome == Some(Outcome::Unknown) {
+                error
+            } else {
+                run.error.take().unwrap_or(error)
+            };
+            let _ = cx.fail_plan(&run.plan, failure);
+            return;
+        }
         if cx
             .finish_plan_failed_call(&run.plan, &active.slot, &active.context)
             .is_err()
@@ -1906,7 +1974,7 @@ impl BybitLinear {
         let planned = &active.leg.planned;
         let local = self.local_order_lifecycle();
         match &planned.call {
-            Call::PlaceOne => {
+            Call::PlaceOne | Call::PlaceLot { .. } => {
                 let link = fields(&planned.body).order_link_id;
                 let Ok(id) = ack::created(result, link.as_deref()) else {
                     let evidence = ack::evidence_ids(result);

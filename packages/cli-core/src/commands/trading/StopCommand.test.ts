@@ -24,7 +24,7 @@ function pos(p: Partial<Position> = {}): Position {
     unrealizedPnl: p.unrealizedPnl ?? 0,
     contracts: p.contracts ?? 1,
     liquidationPrice: p.liquidationPrice ?? 0,
-  } as Position;
+  };
 }
 
 function makeExchange(positions: Position[] = []): ExchangeLike {
@@ -323,18 +323,41 @@ describe('StopCommand — sized stops (partial)', () => {
     expect(order.amount).toBe(0.01);
   });
 
-  it.each([
-    [['stop', '$600', 'at', '60000'], 60_000, 60_000],
-    [['stop', '600$', 'at', '60000', 'trigger', '65000'], 60_000, 65_000],
-  ])('sizes USD at the resolved stop price (%s)', async (args, price, triggerPrice) => {
+  it('sizes USD at the stop price, not the trigger or last price', async () => {
     const ex = makeExchange([pos()]);
     ex.store!.tickers![0].last = 80_000;
     ex.store!.tickers![0].mark = 80_000;
 
-    const result = await cmd.execute(ctx(args, ex));
+    const result = await cmd.execute(ctx(['stop', '600$', 'at', '60000', 'trigger', '65000'], ex));
 
     expect(result.success).toBe(true);
-    expect(lastOrder(ex)).toMatchObject({ price, triggerPrice, amount: 0.01 });
+    expect(lastOrder(ex)).toMatchObject({ price: 60_000, triggerPrice: 65_000, amount: 0.01 });
+  });
+
+  it.each(['$27', '0$'])('refuses explicit %s that rounds to zero instead of placing a Full stop', async (size) => {
+    const ex = makeExchange([pos()]);
+    ex.name = 'bybit';
+
+    const result = await cmd.execute(ctx(['stop', size, 'at', '60000'], ex));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/size.*lot step.*stop not placed/i);
+    expect(ex.placeOrder).not.toHaveBeenCalled();
+
+    const full = await cmd.execute(ctx(['stop', 'at', '60000'], ex));
+    expect(full.success).toBe(true);
+    expect(lastOrder(ex).amount).toBe(0);
+  });
+
+  it('sizes a USD stop at its tick-rounded limit price', async () => {
+    const ex = makeExchange([pos({ symbol: 'MEMEUSDT', contracts: 100_000 })]);
+    Object.assign(ex.store!.markets![0], { symbol: 'MEMEUSDT', base: 'MEME', precision: { amount: 1, price: 0.001 } });
+    Object.assign(ex.store!.tickers![0], { symbol: 'MEMEUSDT', last: 0.002, mark: 0.002 });
+
+    const result = await cmd.execute(ctx(['stop', '$20', 'at', '0.0015', 'trigger', '0.003'], ex, 'MEMEUSDT'));
+
+    expect(result.success).toBe(true);
+    expect(lastOrder(ex)).toMatchObject({ price: 0.002, triggerPrice: 0.003, amount: 10_000 });
   });
 
   it.each(['$27', '0$'])('refuses explicit %s that rounds to zero instead of placing a Full stop', async (size) => {

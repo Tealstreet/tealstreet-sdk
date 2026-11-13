@@ -357,7 +357,15 @@ impl Managed {
         &self,
         registry: &request_context_registry::ContextRegistry,
         now: f64,
+        provider_floor: u64,
     ) -> Result<(), Error> {
+        if self
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| !recipe.provider_current(provider_floor))
+        {
+            return Err(Error::Revoked);
+        }
         self.validate(registry, now)?;
         registry.egress_live(self.lifecycle.context())
     }
@@ -369,7 +377,6 @@ impl Managed {
         }
     }
 
-    #[cfg(feature = "http-plans")]
     pub(super) fn released_delivery(&self, delivery: &request_context_registry::Delivery) -> bool {
         self.delivery() == *delivery
             && self.lifecycle.release().is_some()
@@ -1670,6 +1677,9 @@ impl<V: Venue> Engine<V> {
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
+        if !self.http_preparation_pending(token) {
+            return;
+        }
         self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
@@ -1680,7 +1690,11 @@ impl<V: Venue> Engine<V> {
             return;
         }
         let prepared_result = managed
-            .validate_send(&self.io.core.request_contexts, now)
+            .validate_send(
+                &self.io.core.request_contexts,
+                now,
+                self.io.core.signing.provider_floor(),
+            )
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -1766,7 +1780,8 @@ impl<V: Venue> Engine<V> {
     fn resume_prepared_signing(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         let readiness = match self.io.core.prepare_http_signing(now, token, prepared) {
             Ok(readiness) => readiness,
-            Err((reason, error)) => {
+            Err(failure) => {
+                let (reason, error) = *failure;
                 self.http_preparation_failed(now, token, reason, error);
                 return;
             }
@@ -1866,7 +1881,8 @@ impl<V: Venue> Engine<V> {
         let permit = match self.io.core.complete_http_signing(now, &mut completion) {
             Ok(Some(ready)) => ready,
             Ok(None) => return,
-            Err((reason, error)) => {
+            Err(failure) => {
+                let (reason, error) = *failure;
                 let token = completion
                     .preparation
                     .expect("a failed completion has a preparation");
@@ -1952,6 +1968,15 @@ impl<V: Venue> Engine<V> {
         mut error: VenueError,
     ) {
         self.assert_live();
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&token.attempt().request)
+            .is_some_and(|managed| managed.lifecycle.preparation() == token)
+        {
+            return;
+        }
         self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
@@ -2157,6 +2182,15 @@ impl<V: Venue> Engine<V> {
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&permit.attempt().request)
+            .is_some_and(|managed| managed.lifecycle.is_current_permit(permit))
+        {
+            return Err(Error::Revoked);
+        }
         #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
@@ -2195,7 +2229,11 @@ impl<V: Venue> Engine<V> {
             );
             return Err(Error::Revoked);
         }
-        if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
+        if let Err(error) = managed.validate_send(
+            &self.io.core.request_contexts,
+            now,
+            self.io.core.signing.provider_floor(),
+        ) {
             self.http_preparation_failed(
                 now,
                 preparation,
@@ -2491,7 +2529,8 @@ impl<V: Venue> Engine<V> {
     }
 
     fn reprepare_http(&mut self, now: f64, token: Preparation) {
-        if let Err((reason, error)) = self.io.core.reprepare_http(now, token) {
+        if let Err(failure) = self.io.core.reprepare_http(now, token) {
+            let (reason, error) = *failure;
             self.http_preparation_failed(now, token, reason, error);
         }
     }
@@ -2765,8 +2804,18 @@ impl<V: Venue> Engine<V> {
                     },
                 );
                 if recorded.is_ok() {
-                    self.venue
-                        .observe_unproven_http_response(now, &pending.value, response);
+                    if self.io.core.unknown_outcome_telemetry.is_some() {
+                        self.io
+                            .core
+                            .request_contexts
+                            .remember_engine_unknown(&delivery, Some(response.status));
+                    }
+                    self.venue.observe_unproven_http_response(
+                        now,
+                        self.io.core.protocol_clock.at(now),
+                        &pending.value,
+                        response,
+                    );
                     #[cfg(feature = "http-plans")]
                     let plan = self
                         .io
@@ -2965,7 +3014,7 @@ impl crate::engine::IoCore {
         &mut self,
         now: f64,
         completion: &mut HttpSigningCompletion,
-    ) -> Result<Option<Permit>, (Error, VenueError)> {
+    ) -> Result<Option<Permit>, Box<(Error, VenueError)>> {
         #[cfg(feature = "dispatch-nonce")]
         let pending = completion.pending.as_mut().expect("unconsumed completion");
         #[cfg(not(feature = "dispatch-nonce"))]
@@ -2981,18 +3030,20 @@ impl crate::engine::IoCore {
         };
         let token = managed.lifecycle.preparation();
         completion.preparation = Some(token);
-        if let Err(reason) = managed.validate_send(&self.request_contexts, now) {
+        if let Err(reason) =
+            managed.validate_send(&self.request_contexts, now, self.signing.provider_floor())
+        {
             if let Some(action) = completion.outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
-            return Err((
+            return Err(Box::new((
                 reason,
                 if reason == Error::TimedOut {
                     crate::signing::SignError::TimedOut.venue_error()
                 } else {
                     VenueError::new("HTTP signing result is no longer valid")
                 },
-            ));
+            )));
         }
         if let Some(error) = completion.error {
             let reason = if error == crate::signing::SignError::TimedOut {
@@ -3000,17 +3051,17 @@ impl crate::engine::IoCore {
             } else {
                 Error::State
             };
-            return Err((reason, error.venue_error()));
+            return Err(Box::new((reason, error.venue_error())));
         }
         if completion.stale {
             #[cfg(feature = "dispatch-nonce")]
             if completion.nonce_stale {
                 if pending.nonce_repairs >= crate::signing_dispatch::MAX_NONCE_REPREPARES {
-                    return Err((
+                    return Err(Box::new((
                         Error::State,
                         VenueError::new("Signing nonce repair budget exhausted")
                             .kind(ErrorKind::Internal),
-                    ));
+                    )));
                 }
                 pending.nonce_repairs += 1;
             }
@@ -3033,10 +3084,10 @@ impl crate::engine::IoCore {
                 if let Some(action) = completion.outbound.as_mut() {
                     crate::signing_dispatch::wipe(action);
                 }
-                Err((
+                Err(Box::new((
                     result.err().unwrap_or(Error::Invalid),
                     VenueError::new("HTTP signing result is no longer valid"),
-                ))
+                )))
             }
         }
     }
@@ -3079,7 +3130,11 @@ impl crate::engine::IoCore {
 
     // Return refusals to the generic caller before it delivers any venue hook.
     #[inline(never)]
-    fn reprepare_http(&mut self, now: f64, token: Preparation) -> Result<(), (Error, VenueError)> {
+    fn reprepare_http(
+        &mut self,
+        now: f64,
+        token: Preparation,
+    ) -> Result<(), Box<(Error, VenueError)>> {
         let request = token.attempt().request;
         let Some(managed) = self.managed_http.get_mut(&request) else {
             return Ok(());
@@ -3090,8 +3145,13 @@ impl crate::engine::IoCore {
         // However it leaves, a re-prepared call is no longer parked.
         #[cfg(feature = "session-bearer")]
         self.bearer_parked.retain(|(_, parked)| *parked != request);
-        if let Err(error) = managed.validate_send(&self.request_contexts, now) {
-            return Err((error, VenueError::new("HTTP preparation window expired")));
+        if let Err(error) =
+            managed.validate_send(&self.request_contexts, now, self.signing.provider_floor())
+        {
+            return Err(Box::new((
+                error,
+                VenueError::new("HTTP preparation window expired"),
+            )));
         }
         #[cfg(feature = "http-mutation-barriers")]
         if managed
@@ -3099,10 +3159,10 @@ impl crate::engine::IoCore {
             .as_ref()
             .is_some_and(|member| member.announced && !member.bound)
         {
-            return Err((
+            return Err(Box::new((
                 Error::State,
                 VenueError::new("HTTP group binding failed before claim"),
-            ));
+            )));
         }
         if managed.waiting_route.take().is_some() {
             self.actions.push(Action::SetTimer {
@@ -3113,17 +3173,17 @@ impl crate::engine::IoCore {
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
         if managed.signing_attempt.is_some() && !self.signing.available_id() {
-            return Err((
+            return Err(Box::new((
                 Error::Capacity,
                 VenueError::new("HTTP signing identity capacity exhausted"),
-            ));
+            )));
         }
         let next = managed.lifecycle.reprepare();
         if let Err(error) = next {
-            return Err((
+            return Err(Box::new((
                 error,
                 VenueError::new("HTTP request cannot be prepared again"),
-            ));
+            )));
         }
         #[cfg(feature = "http-mutation-barriers")]
         if let Some(member) = &mut managed.group {
@@ -3166,7 +3226,7 @@ impl crate::engine::IoCore {
         now: f64,
         token: Preparation,
         prepared: Prepared,
-    ) -> Result<SigningReadiness, (Error, VenueError)> {
+    ) -> Result<SigningReadiness, Box<(Error, VenueError)>> {
         let request = token.attempt().request;
         let Some(managed) = self.managed_http.get_mut(&request) else {
             return Ok(SigningReadiness::Waiting);
@@ -3175,7 +3235,10 @@ impl crate::engine::IoCore {
             return Ok(SigningReadiness::Waiting);
         }
         if let Err(error) = managed.validate(&self.request_contexts, now) {
-            return Err((error, VenueError::new("HTTP signing window expired")));
+            return Err(Box::new((
+                error,
+                VenueError::new("HTTP signing window expired"),
+            )));
         }
         if prepared.expires_at.is_some_and(|at| now >= at) {
             return Ok(SigningReadiness::Reprepare);
@@ -3185,7 +3248,10 @@ impl crate::engine::IoCore {
             .check(managed.lifecycle.context().pacing(), now)
         {
             Err(error) => {
-                return Err((error, VenueError::new("Invalid HTTP signing pacing")));
+                return Err(Box::new((
+                    error,
+                    VenueError::new("Invalid HTTP signing pacing"),
+                )));
             }
             Ok(Some(at)) => {
                 managed.waiting_route = Some(prepared);
@@ -3224,7 +3290,10 @@ impl crate::engine::IoCore {
         managed.lifecycle.begin_signing().and_then(|_| {
             self.signing
                 .activate_managed(attempt, managed.lifecycle.deadline())
-                .map_err(|_| Error::State)
+                .map_err(|error| match error {
+                    crate::signing::SignError::Refused => Error::Revoked,
+                    _ => Error::State,
+                })
         })?;
         if was_waiting {
             self.actions.push(Action::SetTimer {
@@ -3540,6 +3609,7 @@ mod tests {
         fn observe_unproven_http_response(
             &mut self,
             now: f64,
+            _: f64,
             _: &Pending,
             response: Response<'_>,
         ) {
@@ -4355,13 +4425,7 @@ mod tests {
             .get_mut(&token.attempt().request)
             .unwrap();
         assert!(deadline < managed.lifecycle.deadline());
-        managed.lifecycle = Lifecycle::with_deadline(
-            managed.lifecycle.context().clone(),
-            token.attempt(),
-            0.,
-            deadline,
-        )
-        .unwrap();
+        managed.lifecycle.narrow_test_window(0., deadline);
         assert_eq!(managed.lifecycle.preparation(), token);
     }
 

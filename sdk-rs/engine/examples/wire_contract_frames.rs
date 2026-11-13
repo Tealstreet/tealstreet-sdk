@@ -235,6 +235,63 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
+fn position_contract_cases() -> Vec<serde_json::Value> {
+    use safe_cex_engine::{QuantityUnits, store::Store, wire::FrameWriter};
+    let mut cases = Vec::new();
+    for liquidation in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 123.5] {
+        let mut store = Store::default();
+        store.set_markets(vec![market("A", None)]);
+        let mut row = position("A");
+        row.liquidation_price = liquidation;
+        row.leverage = f64::NAN;
+        row.unrealized_pnl = f64::INFINITY;
+        row.realized_pnl = Some(f64::INFINITY);
+        row.margin_size = None;
+        row.last_update = None;
+        let raw = serde_json::to_value(&row).unwrap();
+        store.set_positions(vec![row]);
+        let pending = store.take_pending();
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        store.write(&pending, &mut writer);
+        cases.push(serde_json::json!({"frame": hex(&writer.finish()), "raw": raw}));
+    }
+    for (units, inverse, size, expected) in [
+        (QuantityUnits::NativePlacement, false, 0.1, 3.0),
+        (QuantityUnits::NativePlacement, true, 100.0, 10.0),
+        (QuantityUnits::InverseNative, true, 100.0, 1000.0),
+        (QuantityUnits::ContractCount, false, 0.1, 3.0),
+        (QuantityUnits::ContractCount, true, 100.0, 10.0),
+        (QuantityUnits::InverseContractSized, true, 100.0, 10.0),
+    ] {
+        let mut store = Store::default();
+        let mut instrument = market("A", None);
+        instrument.contract_size = Some(size);
+        instrument.is_inverse = Some(inverse);
+        store.set_quantity_units(units);
+        store.set_markets(vec![instrument]);
+        let mut row = position("A");
+        row.contracts = 0.3;
+        store.set_positions(vec![row]);
+        let pending = store.take_pending();
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        store.write(&pending, &mut writer);
+        cases.push(serde_json::json!({"frame": hex(&writer.finish()), "expectedNative": expected}));
+    }
+    let mut store = Store::default();
+    let mut instrument = market("A", None);
+    instrument.is_inverse = Some(true);
+    store.set_quantity_units(safe_cex_engine::QuantityUnits::ContractCount);
+    store.set_markets(vec![instrument]);
+    let mut row = position("A");
+    row.notional = f64::NAN;
+    store.set_positions(vec![row]);
+    let pending = store.take_pending();
+    let mut writer = FrameWriter::new(Vec::new(), 0.0);
+    store.write(&pending, &mut writer);
+    cases.push(serde_json::json!({"frame": hex(&writer.finish()), "invalidNative": true}));
+    cases
+}
+
 fn main() {
     let mut engine = support::seeded_engine(FixtureVenue {
         book: Book::default(),
@@ -278,6 +335,6 @@ fn main() {
     let resumed = hex(engine.take_market_frame(1005.).unwrap());
     println!(
         "{}",
-        serde_json::json!({"initial": initial, "deltaMid": delta_mid, "clearMid": clear_mid, "reordered": reordered, "resumed": resumed})
+        serde_json::json!({"initial": initial, "deltaMid": delta_mid, "clearMid": clear_mid, "reordered": reordered, "resumed": resumed, "positionCases": position_contract_cases()})
     );
 }

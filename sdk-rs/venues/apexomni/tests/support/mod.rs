@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod hosted_parity;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 pub type TestEngine = Engine<ApexOmni>;
@@ -136,7 +137,13 @@ pub fn fixture_provider(
         policy,
     )
     .unwrap();
-    (std::sync::Arc::new(signer), identities)
+    (
+        std::sync::Arc::new(hosted_parity::Parity {
+            local: signer,
+            ids: identities.clone(),
+        }),
+        identities,
+    )
 }
 /// A seeded engine for a private account: refs in `Options`, material in the
 /// provider. `options.identity` is replaced by the fixture's.

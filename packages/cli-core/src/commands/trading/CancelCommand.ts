@@ -67,6 +67,8 @@ export class CancelCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     const orders = exchange.store?.orders ?? [];
     const head = (args[1] ?? '').toLowerCase();
     const sub = (args[2] ?? '').toLowerCase();
@@ -301,11 +303,6 @@ export class CancelCommand extends TradingBaseCommand {
   private resolveCancelMarket(exchange: ExchangeLike, input: string): string | undefined {
     const token = input.trim().toUpperCase();
     if (!token || FILTER_KEYWORDS.includes(token.toLowerCase())) return undefined;
-    const resolved = this.transformSymbol(exchange, token);
-    const market = exchange.store?.markets?.find((m) => m.symbol === resolved);
-    // Prefix matches can turn filter keywords or IDs into markets (sx9 -> SUSDT).
-    const complete = resolved.toUpperCase() === token || market?.base.toUpperCase() === token ||
-      (market !== undefined && `${market.base}${market.quote}`.toUpperCase() === token);
-    return complete && this.validateSymbol(exchange, resolved) ? resolved : undefined;
+    return this.validateSymbols(exchange, [token])[0];
   }
 }

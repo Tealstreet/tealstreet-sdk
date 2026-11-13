@@ -86,6 +86,9 @@ pub struct ServerConfig {
     pub signing_mode: Option<&'static str>,
     /// Optional deployment-owned observation of actual upstream socket topics.
     pub interest_observer: Option<safe_cex_engine::socket_lifecycle::InterestObserver>,
+    /// In-process facts from trusted local setup, never deserialized from account JSON.
+    #[cfg(feature = "venues")]
+    pub trusted_signer_state: Option<safe_cex_venues::TrustedSignerState>,
 }
 
 impl Default for ServerConfig {
@@ -105,6 +108,8 @@ impl Default for ServerConfig {
             log_label: None,
             signing_mode: None,
             interest_observer: None,
+            #[cfg(feature = "venues")]
+            trusted_signer_state: None,
         }
     }
 }
@@ -452,8 +457,13 @@ pub fn spawn_venue_account<T: Transport + 'static>(
             spawn_account(Host::new(engine, self.transport), self.config)
         }
     }
-    let options = serde_json::from_str(options_json)
+    let mut options = serde_json::from_str(options_json)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    if let Some(state) = &config.trusted_signer_state {
+        state
+            .apply(venue, &mut options)
+            .map_err(construction_refusal)?;
+    }
     let spawn = Spawn { transport, config };
     let entropy = Some(crate::production_entropy());
     let result = match signer {

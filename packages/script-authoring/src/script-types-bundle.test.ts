@@ -24,6 +24,10 @@ import { CORE_TYPES_DTS } from './script-types-bundle';
 const DRIFT_TEST_TIMEOUT_MS = 180_000;
 
 describe('script-types-bundle drift', () => {
+  it('declares unknown liquidation prices as nullable in user script typings', () => {
+    expect(CORE_TYPES_DTS).toMatch(/readonly liquidationPrice:\s*number\s*\|\s*null;/);
+  });
+
   it(
     'the complete committed file matches the shared generator',
     () => {

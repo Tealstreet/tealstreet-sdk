@@ -10,6 +10,7 @@ const frame = (overrides: object = {}) =>
     markets: () => undefined,
     tickers: () => undefined,
     tickerDeltas: () => undefined,
+    tickerObservations: () => undefined,
     orders: () => undefined,
     positions: () => undefined,
     balance: () => undefined,
@@ -48,6 +49,7 @@ const fills = (symbol?: string) => ({
   side: Uint32Array.of(0),
   rows: Float64Array.of(100, 0.5),
   orderId: () => 'tracked',
+  fillId: () => 'execution-1',
   ...(symbol !== undefined && { symbol: () => symbol }),
 });
 
@@ -93,6 +95,8 @@ it.each(
       enums: Uint32Array.of(0),
       id: () => 'orphan-position',
       symbol: () => 'ORPHAN',
+      contractsNative: [undefined],
+      unrealizedPnlNative: [undefined],
       ...Object.fromEntries(
         [
           'entryPrice',
@@ -114,7 +118,7 @@ it.each(
   },
 );
 
-it('leaves unknown fill sides and derivative kinds absent', () => {
+it('refuses unknown fill sides and leaves unknown derivative kinds absent', () => {
   const store = new DefaultStore();
   const applier = new FrameApplier(store);
   const product = {
@@ -137,5 +141,5 @@ it('leaves unknown fill sides and derivative kinds absent', () => {
   applier.apply(current);
   expect(store.markets[0].info.instrumentKind).toBeUndefined();
   expect(store.markets[0].option).toBeUndefined();
-  expect(applier.fills(current)[0].side).toBeUndefined();
+  expect(() => applier.fills(current)).toThrow('Invalid Fill side');
 });

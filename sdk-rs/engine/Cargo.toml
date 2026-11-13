@@ -71,6 +71,7 @@ underlying-tokens = []
 test-support = []
 
 [dependencies]
+safe-cex-position-math.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -78,3 +79,7 @@ zeroize.workspace = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "managed_frame_profile"
+required-features = ["managed-sockets"]

@@ -2,8 +2,20 @@ import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import uniqBy from 'lodash/uniqBy';
 
-import { Market, Order, OrderStatus, Position, RequestOutcome, StoreData, Ticker, Writable } from '../types';
+import { initialStoreData as defaultStore } from '../generated/StoreData';
+import {
+  Market,
+  Order,
+  OrderStatus,
+  Position,
+  PositionSettings,
+  RequestOutcome,
+  StoreData,
+  Ticker,
+  Writable,
+} from '../types';
 import { clone } from '../utils/clone';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
 
 // Longer than any REST snapshot is in flight; short enough that a wrong "final" heals.
@@ -28,42 +40,7 @@ export const PACKED_TICKER_FIELDS = [
 
 type PackedTickerField = (typeof PACKED_TICKER_FIELDS)[number];
 
-export const defaultStore: StoreData = {
-  latency: null,
-  balance: { used: 0, free: 0, total: 0, upnl: 0 },
-  markets: [],
-  tickers: [],
-  positions: [],
-  displayedPositions: [],
-  displayedMargin: { longExposure: 0, shortExposure: 0, totalNotional: 0 },
-  ordersRisk: {},
-  activeChasers: [],
-  activeTWAPs: [],
-  orders: [],
-  messageHandlerStats: {},
-  requestStats: { ok: 0, rateLimit: 0, auth: 0, network: 0, other: 0 },
-  fetchedLeverage: {},
-  loaded: {
-    balance: false,
-    orders: false,
-    markets: false,
-    tickers: false,
-    positions: false,
-  },
-  options: {
-    isHedged: false,
-  },
-  updateIds: {
-    positions: 0,
-    orders: 0,
-  },
-  socketHealth: {
-    publicHealthy: false,
-    privateHealthy: false,
-    publicInitialized: false,
-    privateInitialized: false,
-  },
-};
+export { initialStoreData as defaultStore } from '../generated/StoreData';
 
 export class DefaultStore implements Store {
   private listeners = new Set<(data: StoreData, fromWorker?: boolean) => void>();
@@ -142,12 +119,11 @@ export class DefaultStore implements Store {
       markets: [...this.markets],
       tickers: [...this.tickers],
       positions: [...this.positions],
+      positionSettings: Object.fromEntries(
+        Object.entries(this.positionSettings).map(([id, settings]) => [id, { ...settings }]),
+      ),
       displayedPositions: [...this.displayedPositions],
-      displayedMargin: {
-        longExposure: this.displayedMargin?.longExposure ?? 0,
-        shortExposure: this.displayedMargin?.shortExposure ?? 0,
-        totalNotional: this.displayedMargin?.totalNotional ?? 0,
-      },
+      displayedMargin: { ...(this.displayedMargin ?? { longExposure: 0, shortExposure: 0, totalNotional: 0 }) },
       ordersRisk: { ...this.ordersRisk },
       activeChasers: [...this.activeChasers],
       activeTWAPs: [...this.activeTWAPs],
@@ -207,6 +183,10 @@ export class DefaultStore implements Store {
 
   get positions() {
     return this.state.positions;
+  }
+
+  get positionSettings() {
+    return this.state.positionSettings;
   }
 
   get displayedPositions() {
@@ -287,13 +267,14 @@ export class DefaultStore implements Store {
     return { packed };
   }
 
-  consumeTickerDeltas() {
+  consumeTickerDeltas(): Array<[number, Partial<Ticker>]> {
     if (this.pendingTickerDeltas.size === 0) {
-      return [] as Array<[number, Partial<Ticker>]>;
+      return [];
     }
-    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(
-      ([index, changes]) => [index, changes] as [number, Partial<Ticker>],
-    );
+    const deltas = Array.from(this.pendingTickerDeltas.entries()).map(([index, changes]): [number, Partial<Ticker>] => [
+      index,
+      changes,
+    ]);
     this.pendingTickerDeltas.clear();
     return deltas;
   }
@@ -301,7 +282,7 @@ export class DefaultStore implements Store {
   private stripTickerInfo = (ticker: Ticker): Ticker => {
     if (!ticker.info) return ticker;
     const { info: _info, ...tickerWithoutInfo } = ticker;
-    return tickerWithoutInfo as Ticker;
+    return tickerWithoutInfo;
   };
 
   private stripTickerInfoFromChanges = (changes: Partial<Ticker>): Partial<Ticker> => {
@@ -480,9 +461,9 @@ export class DefaultStore implements Store {
     // check for dupes
     const positions = uniqBy(this.state.positions, 'id');
     if (positions.length !== this.state.positions.length) {
-      console.warn('Duplicate positions detected...');
+      diagnosticConsole.warn('Duplicate positions detected...');
       if (removeDupes) {
-        console.error('Removing duplicate positions');
+        diagnosticConsole.error('Removing duplicate positions');
         Object.assign(this.state, { positions });
       }
     }
@@ -490,7 +471,7 @@ export class DefaultStore implements Store {
     // check for negative contracts
     const negativePositions = positions.filter((p) => p.contracts < 0);
     if (negativePositions.length > 0) {
-      console.warn(
+      diagnosticConsole.warn(
         'Negative contracts detected:',
         negativePositions.map((p) => ({ id: p.id, symbol: p.symbol, side: p.side, contracts: p.contracts })),
       );
@@ -625,7 +606,7 @@ export class DefaultStore implements Store {
 
     // A worker's store already kept its terminal orders closed.
     if (!fromWorker && normalizedChanges.orders) {
-      const orders = this.keepTerminalOrdersClosed(normalizedChanges.orders as Order[]);
+      const orders = this.keepTerminalOrdersClosed(normalizedChanges.orders);
       if (orders !== normalizedChanges.orders) ensureMutableChanges().orders = orders;
     }
     Object.assign(this.state, normalizedChanges);
@@ -806,7 +787,7 @@ export class DefaultStore implements Store {
     if (idx > -1) {
       this.updateInArray('positions', idx, position);
     } else {
-      this.state.positions.push({ ...position });
+      this.state.positions.push({ ...this.state.positionSettings[position.id], ...position });
     }
     this.auditPositions();
 
@@ -845,7 +826,7 @@ export class DefaultStore implements Store {
         if (positionIndexById) {
           positionIndexById[position.id] = this.state.positions.length;
         }
-        this.state.positions.push({ ...position });
+        this.state.positions.push({ ...this.state.positionSettings[position.id], ...position });
       }
     });
 
@@ -858,33 +839,25 @@ export class DefaultStore implements Store {
     this.notify();
   };
 
-  /**
-   * Creates an empty position from actual position.
-   *
-   * Use to mark position is closed when wiping any other position information is not desired.
-   *
-   * @param position
-   */
-  createEmptyPositionFrom = (position: Position) => {
+  /** Preserve reported settings without manufacturing a position or financial values. */
+  createEmptyPositionFrom = (position: Position): PositionSettings => {
     return {
-      ...position,
-      entryPrice: 0,
-      notional: 0,
-      unrealizedPnl: 0,
-      contracts: 0,
-      liquidationPrice: 0,
-      marginSize: 0,
-      info: undefined,
-      extra: undefined,
+      id: position.id,
+      symbol: position.symbol,
+      side: position.side,
+      leverage: position.leverage,
+      ...(position.marginType !== undefined && { marginType: position.marginType }),
+      ...(position.positionMode !== undefined && { positionMode: position.positionMode }),
     };
   };
 
-  /**
-   * does the same thing as a function above but cleans up unannounced positions.
-   *
-   * @param positions
-   */
+  /** Full snapshots replace exposure; last-reported settings live separately. */
   addOrUpdatePositionsFull = (positions: Position[]) => {
+    const settings = Object.assign(
+      Object.create(null) as Record<string, PositionSettings>,
+      this.state.positionSettings,
+    );
+    for (const position of this.state.positions) settings[position.id] = this.createEmptyPositionFrom(position);
     const usedIds = new Set<string>();
     const positionIndexById =
       positions.length > 1 && this.state.positions.length > 1 ? this.buildIdIndexMap(this.state.positions) : undefined;
@@ -897,13 +870,13 @@ export class DefaultStore implements Store {
         if (positionIndexById) {
           positionIndexById[position.id] = this.state.positions.length;
         }
-        this.state.positions.push({ ...position });
+        this.state.positions.push({ ...settings[position.id], ...position });
       }
     });
+    for (const position of this.state.positions) settings[position.id] = this.createEmptyPositionFrom(position);
     Object.assign(this.state, {
-      positions: this.state.positions.map((position) =>
-        usedIds.has(position.id) ? position : this.createEmptyPositionFrom(position),
-      ),
+      positions: this.state.positions.filter((position) => usedIds.has(position.id)),
+      positionSettings: settings,
     });
 
     this.state.updateIds.positions += 1;

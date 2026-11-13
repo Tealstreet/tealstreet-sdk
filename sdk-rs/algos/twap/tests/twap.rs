@@ -10,6 +10,10 @@ use safe_cex_algo_twap::{
 };
 use serde_json::{Value, json};
 
+#[path = "twap/identity.rs"]
+#[cfg(not(target_arch = "wasm32"))]
+mod identity;
+
 struct Env {
     now: f64,
     units: Vec<f64>,
@@ -168,7 +172,8 @@ fn state_updates(effects: &[TwapEffect]) -> Vec<&Value> {
 fn refused(message: &str) -> Result<Vec<String>, SliceFailure> {
     Err(SliceFailure {
         message: message.to_owned(),
-        nothing_placed: true,
+        outcome: Some(safe_cex_engine::error::Outcome::NotSent),
+        ..Default::default()
     })
 }
 
@@ -563,12 +568,12 @@ fn a_refused_last_chase_slice_ends_with_the_true_count() {
     assert_eq!(update[&id]["state"]["ordersExecuted"], 0);
 
     view.refuse_chasers.set(false);
-    env.advance(book.wake_at().unwrap() - env.now);
+    env.advance(book.get(&id).unwrap().state.next_order_at - env.now);
     book.wake(&mut env, &view);
     assert_eq!(book.get(&id).unwrap().state.orders_executed, 1);
 
     view.refuse_chasers.set(true);
-    env.advance(book.wake_at().unwrap() - env.now);
+    env.advance(book.get(&id).unwrap().state.next_order_at - env.now);
     let last = book.wake(&mut env, &view);
     assert_eq!(
         logs(&last),
@@ -597,7 +602,12 @@ fn a_chase_twap_that_started_every_slice_ends_without_a_shortfall_error() {
 fn no_timeout_without_timeout_pct() {
     let (mut book, mut env, view, _, _) = start_chase(json!({}));
     env.advance(60_000.0);
-    assert_eq!(book.wake_at(), Some(env.now + 60_000.0));
+    assert!(book.wake(&mut env, &view).is_empty());
+    assert_eq!(
+        book.wake_at(),
+        Some(env.now + 250.0),
+        "observe child uncertainty without a timeout action"
+    );
     env.advance(60_000.0);
     let effects = book.wake(&mut env, &view);
     assert!(removed_chasers(&effects).is_empty());
@@ -690,7 +700,7 @@ fn a_timed_out_slice_sends_no_market_if_its_order_may_still_be_open() {
     assert!(market_amounts(&effects).is_empty());
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        TwapEffect::Log { message } if message.contains("may still be open")
+        TwapEffect::Log { message } if message == "The outcome is unknown. Check Open Orders"
     )));
 }
 
@@ -932,6 +942,51 @@ fn persisted(id: &str, status: &str, next_order_at: f64) -> Value {
 }
 
 #[test]
+fn restored_owner_round_trip_matches_the_worker_fixture() {
+    let expected: Value = serde_json::from_str(include_str!(
+        "../../../../packages/safe-cex/src/__tests__/fixtures/twap-owner-state.json"
+    ))
+    .unwrap();
+    let mut row = expected["retained-A"].clone();
+    row["id"] = json!("retained-A");
+    let (mut env, view) = (Env::new(), View::default());
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut book = TwapBook::new_with_owner("test-account", "A".into());
+    #[cfg(target_arch = "wasm32")]
+    let mut book = TwapBook::new("test-account");
+    let effects = book.handle("twap:state", &json!([row]), &mut env, &view);
+    assert_eq!(book.serialize_state(), expected);
+    assert_eq!(state_updates(&effects), vec![&expected]);
+    book.handle("twap:pause", &json!("retained-A"), &mut env, &view);
+    let mut row = book.serialize_state()["retained-A"].clone();
+    row["id"] = json!("retained-A");
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut reloaded = TwapBook::new_with_owner("test-account", "A".into());
+    #[cfg(target_arch = "wasm32")]
+    let mut reloaded = TwapBook::new("test-account");
+    reloaded.handle("twap:state", &json!([row]), &mut env, &view);
+    assert_eq!(reloaded.serialize_state()["retained-A"]["ownerId"], "A");
+}
+
+#[test]
+fn native_legacy_untagged_rows_keep_their_persistence_shape() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    book.handle(
+        "twap:state",
+        &json!([persisted("legacy", "paused", 0.)]),
+        &mut env,
+        &view,
+    );
+    let snapshot = book.serialize_state();
+    assert!(snapshot["legacy"].get("ownerId").is_none());
+    assert_eq!(
+        snapshot["legacy"]["state"]["ordersSizes"],
+        json!([0.5, 0.5])
+    );
+}
+
+#[test]
 fn restore_resumes_running_twaps_and_skips_known_ids() {
     let (mut env, view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
@@ -1087,9 +1142,8 @@ fn restore_skips_entries_outside_the_bounds_and_keeps_going() {
 }
 
 #[test]
-fn an_unknown_placement_outcome_still_advances_the_slice() {
-    // TS parity: the slice counts as executed and the next one is scheduled;
-    // the failure log says the order may be live.
+fn an_unknown_placement_outcome_halts_the_action() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:255-280.
     let (mut env, view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
@@ -1098,17 +1152,14 @@ fn an_unknown_placement_outcome_still_advances_the_slice() {
         &mut env,
         &id,
         &effects,
-        Err(SliceFailure {
-            message: "outcome unknown, the order may be live: timeout".into(),
-            nothing_placed: false,
-        }),
+        Err(SliceFailure::new("timeout").outcome(safe_cex_engine::error::Outcome::Unknown)),
     );
     assert_eq!(
         logs(&settled),
-        ["TWAP BTCUSDT slice failed: outcome unknown, the order may be live: timeout"]
+        ["The outcome is unknown. Check Open Orders"]
     );
-    assert_eq!(book.get(&id).unwrap().state.orders_executed, 1);
-    assert!(book.wake_at().is_some());
+    assert!(book.get(&id).is_none());
+    assert!(book.wake_at().is_none());
 }
 
 #[test]
@@ -1444,18 +1495,13 @@ fn an_unreconciled_in_flight_slice_is_counted_and_never_placed_again() {
         json!({ "size": 0.5, "clientOrderId": "c1" }),
     );
     let effects = book.handle("twap:state", &restore, &mut env, &view);
-    assert!(effects.contains(&TwapEffect::Log {
-        message: "TWAP BTCUSDT: a 0.5 slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.".into()
-    }));
-    let instance = book.get("restored").unwrap();
-    assert_eq!(instance.state.orders_executed, 1);
-    assert_eq!(instance.state.in_flight, None);
-    let persisted = state_updates(&effects).last().copied().unwrap().clone();
-    assert!(persisted["restored"]["state"].get("inFlight").is_none());
-
-    // Only the remaining slice is placed.
-    let woken = book.wake(&mut env, &view);
-    assert_eq!(market_amounts(&woken), vec![0.5]);
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:291-310.
+    assert_eq!(
+        logs(&effects),
+        ["The outcome is unknown. Check Open Orders"]
+    );
+    assert!(book.get("restored").is_none());
+    assert!(placements(&book.wake(&mut env, &view)).is_empty());
 }
 
 #[test]
@@ -1464,7 +1510,7 @@ fn a_last_slice_in_flight_is_restored_and_completes_without_placing() {
     let mut book = TwapBook::new("test-account");
     let restore = in_flight_row(&env, json!([]), 1, json!({ "size": 0.5 }));
     book.handle("twap:state", &restore, &mut env, &view);
-    assert_eq!(book.get("restored").unwrap().state.orders_executed, 2);
+    assert!(book.get("restored").is_none());
     let woken = book.wake(&mut env, &view);
     assert!(placements(&woken).is_empty());
     assert!(
@@ -1528,4 +1574,107 @@ fn a_restored_paused_twap_is_persisted_so_the_host_sees_it_adopted() {
     let effects = book.handle("twap:state", &restore, &mut env, &view);
     let persisted = state_updates(&effects).last().copied().unwrap().clone();
     assert_eq!(persisted["restored"]["state"]["status"], "paused");
+}
+
+#[test]
+fn a_late_remainder_success_updates_unknown_journal_without_restarting() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:181-194,255-280.
+    let (mut book, mut env, mut view, id, first_chaser) =
+        start_chase(json!({ "timeoutPct": 50, "timeoutAction": "market" }));
+    env.advance(60_000.0);
+    book.wake(&mut env, &view);
+    let first = settle_chaser(&mut book, &mut env, &mut view, &first_chaser, 0.2);
+    assert_eq!(market_amounts(&first), [0.2]);
+    env.advance(59_750.0);
+    book.wake(&mut env, &view);
+    let second_chaser = chaser_ids(&view).pop().unwrap();
+    view.chasers.insert(
+        second_chaser.clone(),
+        ChaserProgress {
+            remaining_size: 0.2,
+            ..Default::default()
+        },
+    );
+    env.advance(60_000.0);
+    book.wake(&mut env, &view);
+    let second = settle_chaser(&mut book, &mut env, &mut view, &second_chaser, 0.2);
+    assert_eq!(market_amounts(&second), [0.2]);
+    let unknown = book.remainder_settled(
+        &id,
+        3,
+        Err(SliceFailure::new("timeout").outcome(safe_cex_engine::error::Outcome::Unknown)),
+    );
+    assert_eq!(
+        logs(&unknown),
+        ["The outcome is unknown. Check Open Orders"]
+    );
+    let late = book.remainder_settled(&id, 1, Ok(vec!["late-native".to_owned()]));
+    let error = late
+        .iter()
+        .find_map(|effect| match effect {
+            TwapEffect::Outcome { error, .. } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["late-native"]);
+    let rows = error.elements.as_ref().unwrap();
+    assert!(
+        matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["late-native"])
+    );
+    assert!(matches!(
+        &rows[3].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(placements(&late).is_empty());
+    env.advance(600_000.0);
+    assert!(book.wake(&mut env, &view).is_empty());
+    assert!(book.get(&id).is_none());
+}
+
+#[test]
+fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:249-280.
+    let (mut env, mut view) = (Env::new(), View::default());
+    view.step = Some(1.0);
+    let mut book = TwapBook::new("test-account");
+    let (id, first) = start(
+        &mut book,
+        &mut env,
+        &view,
+        json!({ "size": 1.5, "ordersCount": 3 }),
+    );
+    assert!(placements(&first).is_empty());
+    env.advance(book.wake_at().unwrap() - env.now);
+    let second = book.wake(&mut env, &view);
+    assert_eq!(market_amounts(&second), [1.0]);
+    let settled = settle_all(
+        &mut book,
+        &mut env,
+        &id,
+        &second,
+        Err(SliceFailure::new("timeout").outcome(safe_cex_engine::error::Outcome::Unknown)),
+    );
+    let error = settled
+        .iter()
+        .find_map(|effect| match effect {
+            TwapEffect::Outcome { error, .. } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    let rows = error.elements.as_ref().unwrap();
+    assert!(matches!(
+        &rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { .. }
+    ));
+    assert!(matches!(
+        &rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(matches!(
+        &rows[2].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { .. }
+    ));
+    assert!(book.wake_at().is_none());
 }

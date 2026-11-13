@@ -381,6 +381,148 @@ fn spot_market_buys_use_base_amount_and_single_endpoint() {
 }
 
 #[test]
+fn spot_split_limit_entries_follow_legacy_protection_attachment() {
+    for entries in [1, 2] {
+        let mut h = ready(Variant::Spot);
+        let orders = (0..entries)
+            .map(|_| {
+                let mut opts = order("BTCUSDT", 2500.);
+                opts.take_profit = Some(110.);
+                opts
+            })
+            .collect();
+        place(&mut h, 3, orders);
+        let mut ids = Vec::new();
+        for index in 0..entries * 4 {
+            let request = h.take("/v5/order/create");
+            let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(sent["category"], "spot");
+            assert_eq!(sent["orderType"], "Limit");
+            let protected = index % 4 == 0 || index % 4 == 3;
+            assert_eq!(sent.get("takeProfit").is_some(), protected);
+            assert_eq!(sent.get("tpOrderType").is_some(), protected);
+            assert_eq!(sent["qty"], if index % 4 == 3 { "120" } else { "793.333" });
+            let id = format!("spot-{index}");
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({
+                    "retCode": 0, "result": {"orderId": id}
+                })
+                .to_string(),
+            );
+            ids.push(id);
+        }
+        assert_eq!(h.result(3), Some(&Ok(serde_json::to_string(&ids).unwrap())));
+        assert!(!h.unknown.contains(&3));
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+fn spot_split_plan_market(minimum: &str, maximum: &str) -> Harness {
+    let instruments = support::INSTRUMENTS
+        .replace(
+            "\"minOrderQty\":\"0.001\"",
+            &format!("\"minOrderQty\":\"{minimum}\""),
+        )
+        .replace(
+            "\"maxOrderQty\":\"1190.000\"",
+            &format!("\"maxOrderQty\":\"{maximum}\""),
+        );
+    let h = ready_listing_with_instruments(options(Variant::Spot), EMPTY, Some(instruments));
+    let market = h.engine.store().market("BTCUSDT").expect("fixture market");
+    assert_eq!(
+        market.limits.amount.min,
+        minimum.parse::<f64>().expect("fixture minimum")
+    );
+    assert_eq!(
+        market.limits.amount.max,
+        maximum.parse::<f64>().expect("fixture maximum")
+    );
+    assert_eq!(market.precision.amount, 0.001);
+    h
+}
+
+fn protected_spot_split_order(amount: f64) -> PlaceOrderOpts {
+    let mut opts = order("BTCUSDT", amount);
+    opts.take_profit = Some(110.);
+    opts.stop_loss = Some(90.);
+    opts
+}
+
+fn assert_spot_split_plan_quantities(amount: f64, quantities: &[&str]) {
+    let mut h = spot_split_plan_market("0.01", "1190");
+    place(&mut h, 92, vec![protected_spot_split_order(amount)]);
+    let mut total = 0.;
+    for (index, quantity) in quantities.iter().enumerate() {
+        let request = h.take("/v5/order/create");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
+        assert_eq!(sent["qty"], *quantity);
+        let protected = index == 0 || index + 1 == quantities.len();
+        for field in ["takeProfit", "stopLoss", "tpOrderType", "slOrderType"] {
+            assert_eq!(sent.get(field).is_some(), protected, "{field} lot {index}");
+        }
+        let qty = quantity.parse::<f64>().expect("fixture quantity");
+        assert!((0.01..=1190.).contains(&qty));
+        assert_eq!(safe_cex_engine::num::adjust(qty, 0.001), qty);
+        total += qty;
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({
+                "retCode": 0, "result": {"orderId": format!("lot-{index}")}
+            })
+            .to_string(),
+        );
+    }
+    assert_eq!(total, amount);
+    assert!(matches!(h.result(92), Some(Ok(_))));
+    assert!(h.requests.is_empty());
+}
+
+#[test]
+fn spot_split_plan_exact_maximum_keeps_both_stops() {
+    assert_spot_split_plan_quantities(1190., &["1190"]);
+}
+
+#[test]
+fn spot_split_plan_exact_minimum_tail_uses_legacy_main_lots() {
+    assert_spot_split_plan_quantities(1190.01, &["595", "595", "0.01"]);
+}
+
+#[test]
+fn spot_ts_parity_does_not_preflight_small_main_lots_or_off_grid_caps() {
+    // TS reference/bybit/bybitspot.exchange.ts:828-841 rounds each main lot independently.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | split-tail
+    for (minimum, maximum, amount, quantities) in [
+        ("0.75", "1", 1.001, vec!["0.5", "0.5", "0.001"]),
+        (
+            "0.01",
+            "1190.0005",
+            1190.02,
+            vec!["595.001", "595.001", "0.019"],
+        ),
+        ("0.0001", "0.0004", 0.002, vec!["0"; 5]),
+    ] {
+        let mut h = spot_split_plan_market(minimum, maximum);
+        place(&mut h, 196, vec![protected_spot_split_order(amount)]);
+        for (index, quantity) in quantities.iter().enumerate() {
+            let request = h.take("/v5/order/create");
+            let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(wire["qty"], *quantity);
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({"retCode":0,"result":{"orderId":format!("wire-{index}")}})
+                    .to_string(),
+            );
+        }
+        assert!(matches!(h.result(196), Some(Ok(_))));
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+#[test]
 fn spot_stops_use_native_filter_and_derivative_controls_fail_before_writes() {
     let mut h = ready(Variant::Spot);
     let mut opts = order("BTCUSDT", 0.1);
@@ -1482,7 +1624,7 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     let create = h.take("/v5/order/create");
     let id = link(&create);
     let original = body(&create).to_owned();
-    assert!(original.contains("\"triggerDirection\":\"1\""));
+    assert!(original.contains("\"triggerDirection\":1"));
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
@@ -2123,6 +2265,54 @@ fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
         );
         assert_eq!(h.unknown == [2], unknown, "{case}");
     }
+}
+
+fn assert_native_rate_limit_create_unknown(code: i64) {
+    for variant in [Variant::Spot, Variant::Demo] {
+        let mut h = ready(variant);
+        place(&mut h, 9069, vec![order("BTCUSDT", 0.1)]);
+        let path = if variant.is_spot() {
+            "/v5/order/create"
+        } else {
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/create-batch"
+        };
+        let request = h.take(path);
+        h.reply(
+            request.id,
+            200,
+            &format!(r#"{{"retCode":{code},"retMsg":"rate limited","result":{{}}}}"#),
+        );
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9069,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("one terminal create failure");
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(error.venue_code, Some(code.to_string()));
+        h.advance(1500.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "a released rate-limited create cannot fall back or resend"
+        );
+    }
+}
+
+#[test]
+fn native_system_frequency_limit_keeps_released_creates_unknown() {
+    assert_native_rate_limit_create_unknown(429);
+}
+
+#[test]
+fn native_legacy_ip_limit_keeps_released_creates_unknown() {
+    assert_native_rate_limit_create_unknown(10018);
 }
 
 fn demo_reduce_only_resting(h: &mut Harness) {
@@ -5282,5 +5472,291 @@ fn engine_ambiguity_429_clock_code_cannot_replay() {
         assert!(!h.notices.iter().any(
             |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
         ));
+    }
+}
+
+#[test]
+fn hyro_v1_conditional_trigger_direction_is_numeric_and_writes_are_strict_json() {
+    for (side, expected) in [(OrderSide::Buy, 1), (OrderSide::Sell, 2)] {
+        let mut h = ready(Variant::Hyrotrader);
+        let mut opts = order("BTCUSDT", 0.1);
+        opts.kind = OrderType::Conditional;
+        opts.side = side;
+        opts.trigger_price = Some(if expected == 1 { 70000. } else { 60000. });
+        place(&mut h, 990, vec![opts]);
+        let request = h.take("/v5/order/create");
+        assert_eq!(
+            Harness::header(&request, "Content-Type").as_deref(),
+            Some("application/json")
+        );
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(payload["triggerDirection"].as_i64(), Some(expected));
+    }
+}
+
+#[test]
+fn hyro_v1_already_gone_chase_cancel_is_satisfied_without_resending() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 991, vec![order("BTCUSDT", 0.1)]);
+    created(&mut h, "chase-gone");
+    h.command(Command::CancelOrders {
+        command: 992,
+        ids: vec!["chase-gone".into()],
+    });
+    let request = h.take("/v5/order/cancel");
+    assert_eq!(
+        Harness::header(&request, "Content-Type").as_deref(),
+        Some("application/json")
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110001,"retMsg":"already filled"}"#,
+    );
+    assert!(h.result(992).expect("cancel completes").is_ok());
+    assert!(!h.unknown.contains(&992));
+    assert!(!h.has_request("/v5/order/cancel"));
+    answer_reconcile(&mut h);
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+#[test]
+fn hyro_v1_unsupported_modes_are_typed_and_send_nothing() {
+    use safe_cex_engine::{Action, ErrorKind, Notice, Outcome};
+    for command in [
+        Command::SetMarginType {
+            command: 993,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+        Command::SetPositionMode {
+            command: 993,
+            hedged: true,
+            symbol: None,
+        },
+    ] {
+        let mut h = ready(Variant::Hyrotrader);
+        h.engine.handle_command(h.now, command, None).unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 993,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("typed refusal");
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(error.message.contains("only"));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+fn spot_parity_error(h: &Harness, command: u32) -> &safe_cex_engine::VenueError {
+    h.notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: id, error } if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .expect("Spot command journal/telemetry failure")
+}
+
+#[test]
+fn spot_ts_parity_sends_the_below_minimum_tail_after_valid_lots() {
+    // TS reference/bybit/bybitspot.exchange.ts:828-846 sends [595,595,0.001].
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | split-tail
+    let mut h = spot_split_plan_market("0.01", "1190");
+    place(&mut h, 191, vec![protected_spot_split_order(1190.001)]);
+    for (i, qty) in ["595", "595", "0.001"].iter().enumerate() {
+        let request = h.take("/v5/order/create");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["qty"], *qty);
+        if i == 2 {
+            h.reply(
+                request.id,
+                200,
+                r#"{"retCode":110007,"retMsg":"tail refused"}"#,
+            );
+        } else {
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({"retCode":0,"result":{"orderId":format!("placed-{i}")}})
+                    .to_string(),
+            );
+        }
+    }
+    let error = spot_parity_error(&h, 191);
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["placed-0", "placed-1"]
+    );
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn spot_ts_parity_batch_keeps_prefix_before_a_missing_market() {
+    // TS reference/bybit/bybitspot.exchange.ts:755-758,881-887 formats each order in series.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | multi-order-batch
+    let mut h = ready(Variant::Spot);
+    place(
+        &mut h,
+        192,
+        vec![
+            order("BTCUSDT", 1.0),
+            order("MISSINGUSDT", 1.0),
+            order("BTCUSDT", 1.0),
+        ],
+    );
+    let first = h.take("/v5/order/create");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"placed-prefix"}}"#,
+    );
+    let error = spot_parity_error(&h, 192);
+    assert!(error.message.contains("Market MISSINGUSDT not found"));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["placed-prefix"]);
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn spot_ts_parity_protects_only_first_main_lot_and_remainder() {
+    // TS reference/bybit/bybitspot.exchange.ts:833-841 omits brackets after main lot zero.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | split-tpsl
+    let mut h = ready(Variant::Spot);
+    place(&mut h, 193, vec![protected_spot_split_order(2500.0)]);
+    for (i, qty) in ["793.333", "793.333", "793.333", "120"].iter().enumerate() {
+        let request = h.take("/v5/order/create");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["qty"], *qty);
+        for key in ["stopLoss", "takeProfit", "slOrderType", "tpOrderType"] {
+            assert_eq!(wire.get(key).is_some(), i == 0 || i == 3, "{key} lot {i}");
+        }
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":0,"result":{"orderId":format!("placed-{i}")}})
+                .to_string(),
+        );
+    }
+    assert!(matches!(h.result(193), Some(Ok(_))));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn spot_ts_parity_definite_lot_refusal_finishes_order_then_stops_batch() {
+    // TS reference/bybit/bybitspot.exchange.ts:844-870,881-887 finishes lots then throws.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | multi-order-batch
+    let mut h = spot_split_plan_market("0.01", "1190");
+    place(
+        &mut h,
+        194,
+        vec![protected_spot_split_order(1190.01), order("BTCUSDT", 1.0)],
+    );
+    for i in 0..3 {
+        let request = h.take("/v5/order/create");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["qty"], ["595", "595", "0.01"][i]);
+        if i == 0 {
+            h.reply(
+                request.id,
+                200,
+                r#"{"retCode":110007,"retMsg":"first lot refused"}"#,
+            );
+        } else {
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({"retCode":0,"result":{"orderId":format!("placed-{i}")}})
+                    .to_string(),
+            );
+        }
+    }
+    h.advance(1_201.0);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "next caller order must stop"
+    );
+    assert_eq!(
+        spot_parity_error(&h, 194)
+            .partial
+            .as_ref()
+            .unwrap()
+            .order_ids,
+        ["placed-1", "placed-2"]
+    );
+}
+
+#[test]
+fn spot_ts_parity_unknown_stops_lots_and_batch_with_canonical_evidence() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybitspot.exchange.ts:844-856.
+    const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+    for status in [Some(200), Some(503), None] {
+        let mut h = spot_split_plan_market("0.01", "1190");
+        place(
+            &mut h,
+            195,
+            vec![protected_spot_split_order(1190.01), order("BTCUSDT", 1.0)],
+        );
+        let first = h.take("/v5/order/create");
+        h.reply(
+            first.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"placed-prefix"}}"#,
+        );
+        let uncertain = h.take("/v5/order/create");
+        if let Some(status) = status {
+            h.reply(
+                uncertain.id,
+                status,
+                r#"{"retCode":10016,"retMsg":"unconfirmed"}"#,
+            );
+        } else {
+            h.event(Event::HttpFailed {
+                request: uncertain.id,
+                error: "reply lost",
+            });
+        }
+        h.advance(1_201.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "no tail, next caller or retry"
+        );
+        let error = spot_parity_error(&h, 195);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["placed-prefix"]);
+        assert!(h.unknown.contains(&195));
+    }
+}
+
+#[test]
+fn spot_ts_parity_identity_and_execution_controls_remain_atomic() {
+    // TS reference/bybit/bybitspot.exchange.ts:881-885 checks IDs/execution before mapSeries.
+    for identity in [true, false] {
+        let mut h = ready(Variant::Spot);
+        let mut invalid = order("BTCUSDT", 1.0);
+        if identity {
+            invalid.client_order_id = Some("invalid id!".into());
+        } else {
+            invalid.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.0,
+            });
+        }
+        place(&mut h, 197, vec![order("BTCUSDT", 1.0), invalid]);
+        assert!(matches!(h.result(197), Some(Err(_))));
+        assert!(
+            h.requests.is_empty(),
+            "atomic TS checks must precede the valid prefix"
+        );
     }
 }

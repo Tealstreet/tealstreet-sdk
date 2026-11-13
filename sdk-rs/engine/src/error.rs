@@ -162,11 +162,14 @@ pub struct VenueError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_decode: Option<HistoryDecode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub venue_message: Option<String>,
+    pub venue_message: Option<Box<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial: Option<Box<Partial>>,
+    /// Indexed outcomes recorded by the venue's existing write path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elements: Option<Box<crate::write_plan::ElementOutcomes>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub builder_authorization: Option<Box<BuilderAuthorization>>,
     /// A stop or take-profit edit whose replacement was refused after its cancel landed.
@@ -237,7 +240,7 @@ impl VenueError {
     }
 
     pub fn venue_message(mut self, message: impl Into<String>) -> Self {
-        self.venue_message = Some(message.into());
+        self.venue_message = Some(message.into().into_boxed_str());
         self
     }
 

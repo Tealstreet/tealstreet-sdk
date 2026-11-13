@@ -18,6 +18,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../store/store.base';
 
 const WALLET = '0x1111111111111111111111111111111111111111';
+const COINBASE_KEY = ['organizations', 'fixture', 'apiKeys', 'fixture'].join('/');
 const PRIVATE_KEY = `0x${'22'.repeat(32)}`;
 const running: RustEngineExchange[] = [];
 
@@ -73,15 +74,7 @@ it('Polymarket private accounts need a wallet private key', () =>
 it('Orderly private accounts need an application id', () =>
   startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
-// Unadopted native families still refuse payload callbacks before I/O.
-it('unadopted private venues refuse a payload signer before any I/O', () =>
-  startRejects(
-    'coinbase',
-    { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    'Rust coinbase delegated signing is unsupported in this build',
-  ));
-
-it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo'] as const)(
+it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'coinbase', 'coinbasespot'] as const)(
   'compiled %s admits owned PayloadSigner setup before startup without local credentials or I/O', async (name) => {
     setWasmEngineLoader(loadNodeEngine);
     let calls = 0;
@@ -89,8 +82,9 @@ it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybi
     const io = () => { ioCalls++; throw new Error('Capability construction must not issue transport work'); };
     setRustEngineTransport(() => ({ now: () => 1700000000123, request: io, connect: io,
       setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
+    const key = name === 'coinbase' || name === 'coinbasespot' ? COINBASE_KEY : 'owned-public';
     for (const secret of ['', 'unused-local']) {
-      const exchange = new RustEngineExchange(name, { key: 'owned-public', secret,
+      const exchange = new RustEngineExchange(name, { key, secret,
         payloadSigner: () => { calls++; return { signature: 'ab'.repeat(32) }; } }, new DefaultStore());
       running.push(exchange);
       await expect(exchange.loadCapabilities()).resolves.toBeDefined();
@@ -168,7 +162,7 @@ it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
     }, 'Rust Paradex private accounts require a key, Paradex address and subkey address'),
 );
 
-it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
+it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
   'compiled native payload refusal on %s keeps startup and validation classification before I/O', async (name) => {
     setWasmEngineLoader(loadNodeEngine);
     const requests: string[] = [];
@@ -182,7 +176,7 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot',
     setRustEngineTransport(() => transport);
     let signatures = 0;
     // A venue with hosted remote signing but no payload signing refuses in the bridge, at construction.
-    const bridgeRefuses = deriveRemoteSigningPolicy(name)?.payloadSupported === false;
+    const bridgeRefuses = deriveRemoteSigningPolicy(name)?.enabled === true && deriveRemoteSigningPolicy(name)?.payloadSupported === false;
     for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
       const options = {
         key: 'key', secret, apiKeyIndex: '2', testnet: true,
@@ -202,7 +196,9 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot',
       }
       const exchange = new RustEngineExchange(name, options, new DefaultStore());
       running.push(exchange);
-      const message = `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
+      const message = name === 'polymarket'
+        ? 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply'
+        : `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
       await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });
       await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: message });
     }

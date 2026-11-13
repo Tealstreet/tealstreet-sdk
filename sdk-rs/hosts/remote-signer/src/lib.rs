@@ -14,10 +14,11 @@ use serde_json::{Map, Value, json};
 pub use link::{
     ECHO_PAD_CAP, EchoSize, MAX_RESPONSE_FIELD, Outbox, SIGN_TIMEOUT, SignerLink, SocketId,
 };
+pub use policy::supports_remote_signing;
 pub use provider::{FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, RemoteProvider};
 
 use policy::PassphraseRule;
-use provider::{Inner, Owned};
+use provider::{Family, Inner, Owned, PublicProvider};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetupError(pub &'static str);
@@ -31,17 +32,19 @@ impl std::error::Error for SetupError {}
 /// One hosted account's signer and the engine options to construct it with.
 pub struct RemoteAccount {
     pub provider: Provider,
-    /// Engine options without credentials, carrying the opaque signing
-    /// identities, `remoteSigning: true` and the raw public-mode intent.
+    /// Credential-free options with the resolved public mode. Public accounts
+    /// have empty identities and no remote signing authority.
     pub options_json: String,
-    inner: Arc<Inner>,
+    inner: Option<Arc<Inner>>,
 }
 
 impl RemoteAccount {
     /// Called once after `MAX_CONSECUTIVE_FAILURES` failures spanning at least
     /// `FATAL_MIN_STREAK`; the server disposes the account, as today.
     pub fn on_fatal(&self, callback: impl FnOnce() + Send + 'static) {
-        self.inner.set_fatal(Box::new(callback));
+        if let Some(inner) = &self.inner {
+            inner.set_fatal(Box::new(callback));
+        }
     }
 }
 
@@ -85,6 +88,49 @@ pub fn remote_account(
             .and_then(Value::as_str)
             .map(str::to_owned)
     };
+    let requested = options
+        .get("publicMode")
+        .filter(|mode| mode.is_object())
+        .map_or_else(
+            || options.get("publicDataOnly"),
+            |mode| mode.get("requested"),
+        )
+        .filter(|value| value.is_boolean())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let kucoin = Family::of(venue) == Family::Kucoin;
+    let public_only = requested == Value::Bool(true)
+        || (kucoin
+            && options
+                .get("key")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty));
+    if public_only {
+        strip_credentials(&mut options);
+        options.insert("signing".into(), json!({}));
+        if secret_shaped(&options) {
+            return Err(SetupError(
+                "Engine options for a remote-signed account carry signing material",
+            ));
+        }
+        options.insert("publicDataOnly".into(), true.into());
+        options.insert("remoteSigning".into(), false.into());
+        options.insert("payloadSigner".into(), false.into());
+        options.insert(
+            "publicMode".into(),
+            json!({
+                "requested": requested,
+                "remoteSigner": false,
+                "payloadSigner": false,
+                "apiKeyIndexPresent": false,
+            }),
+        );
+        return Ok(RemoteAccount {
+            provider: Arc::new(PublicProvider),
+            options_json: Value::Object(options).to_string(),
+            inner: None,
+        });
+    }
     if text(&options, "secret").is_some_and(|secret| !secret.is_empty()) {
         return Err(SetupError("A remote-signed account holds no secret"));
     }
@@ -102,27 +148,20 @@ pub fn remote_account(
     if key.is_empty() || key.contains(['\r', '\n', '\0']) || key.len() > 1_048_576 {
         return Err(SetupError("Invalid public key"));
     }
-    let requested = options
-        .get("publicMode")
-        .and_then(|mode| mode.get("requested"))
-        .cloned()
-        .or_else(|| options.get("publicDataOnly").cloned())
-        .filter(Value::is_boolean)
-        .unwrap_or(Value::Null);
-    let public_only = requested == Value::Bool(true);
     let passphrase = text(&options, "passphrase").filter(|value| !value.is_empty());
-    if passphrase.is_none()
+    if !kucoin
+        && passphrase.is_none()
         && policy
             .passphrase
             .is_some_and(|rule| rule != PassphraseRule::Optional)
-        && !(policy.passphrase == Some(PassphraseRule::RequiredForPrivate) && public_only)
     {
         return Err(SetupError(
             "Rust engine primary signing credentials require a passphrase",
         ));
     }
-    let passphrase = match (&policy.passphrase_header, passphrase) {
-        (Some(_), Some(value)) => {
+    let (passphrase, passphrase_value) = match (kucoin, &policy.passphrase_header, passphrase) {
+        (true, _, _) => (Some(reference("passphrase")), None),
+        (false, Some(_), Some(value)) => {
             if value.len() > 8192
                 || value
                     .bytes()
@@ -130,34 +169,54 @@ pub fn remote_account(
             {
                 return Err(SetupError("Invalid passphrase"));
             }
-            Some((reference("passphrase"), value.into_bytes()))
+            (Some(reference("passphrase")), Some(value.into_bytes()))
         }
-        _ => None,
+        _ => (None, None),
+    };
+    let broker = if kucoin {
+        options
+            .get_mut("extra")
+            .and_then(|extra| extra.get_mut("kucoinBroker"))
+            .and_then(Value::as_object_mut)
+            .and_then(|broker| {
+                ["partner", "brokerName"]
+                    .iter()
+                    .all(|field| {
+                        broker
+                            .get(*field)
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| !value.trim().is_empty())
+                    })
+                    .then(|| reference("broker"))
+            })
+    } else {
+        None
     };
     let primary = Owned {
         credential: reference("credential"),
         signing: reference("signing"),
         public: key.into_bytes(),
         passphrase,
+        passphrase_value,
+        broker,
     };
     let mut identity = json!({ "credential": primary.credential.0, "signing": primary.signing.0 });
-    if let Some((passphrase, _)) = &primary.passphrase {
+    if let Some(passphrase) = &primary.passphrase {
         identity["passphrase"] = passphrase.0.clone().into();
+    }
+    if let Some(broker) = &primary.broker {
+        identity["extra"] = json!({ "kucoinBroker": broker.0 });
     }
     let api_key_index_present = options
         .get("apiKeyIndex")
         .is_some_and(|value| !value.is_null() && value != "" && value != 0);
-    for field in CREDENTIAL_FIELDS {
-        options.remove(field);
-    }
-    if let Some(Value::Object(auth)) = options.get_mut("auth") {
-        auth.remove("privateKey");
-    }
+    strip_credentials(&mut options);
     if secret_shaped(&options) {
         return Err(SetupError(
             "Engine options for a remote-signed account carry signing material",
         ));
     }
+    options.insert("publicDataOnly".into(), false.into());
     options.insert("signing".into(), json!({ "primary": identity }));
     options.insert("remoteSigning".into(), true.into());
     options.insert("payloadSigner".into(), false.into());
@@ -182,8 +241,23 @@ pub fn remote_account(
             inner: inner.clone(),
         }),
         options_json: Value::Object(options).to_string(),
-        inner,
+        inner: Some(inner),
     })
+}
+
+fn strip_credentials(options: &mut Map<String, Value>) {
+    for field in CREDENTIAL_FIELDS {
+        options.remove(field);
+    }
+    if let Some(Value::Object(auth)) = options.get_mut("auth") {
+        auth.remove("privateKey");
+    }
+    if let Some(Value::Object(broker)) = options
+        .get_mut("extra")
+        .and_then(|extra| extra.get_mut("kucoinBroker"))
+    {
+        broker.remove("brokerKey");
+    }
 }
 
 /// Any field still named like signing material after stripping, at any depth.

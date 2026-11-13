@@ -105,24 +105,20 @@ export interface OemsPositionRef extends OemsPositionAddress {
    * (`packages/script-api-core/src/order/positionSizing.ts`), which both
    * `getPositionNativeSize` and `getPositionNativeContracts` now call.
    *
-   * **This used to say "including the `extra.contractsNative` preference",
-   * meaning: return that value outright when it is non-zero.** That was the
-   * drift, written down as a requirement. `extra.contractsNative` can be
-   * STALE — `getPositionNativeSize.test.ts` pins a case where it reads 0.1
-   * against a real 0.4 — so the rule is `Math.max(fromExtra, derived)`, and a
-   * producer following the old wording sized every percentage close at a
-   * quarter. `resolvePlan.sizeClose` takes `full` straight from this field.
+   * Native evidence wins only when coherent with the current position; an
+   * unresolved conflict or unavailable quantity is null. Never select a maximum.
    */
-  readonly nativeContracts: number;
+  readonly nativeContracts: number | null;
   readonly entryPrice: number;
   /** From the symbol's ticker, not the position — safe-cex `Position` has no
    *  mark price of its own. */
   readonly markPrice: number;
   /** The venue's own number. Not `contracts × markPrice`, which is wrong on an
-   *  inverse contract. */
-  readonly notional: number;
+   *  inverse contract. Null when unavailable; a known zero stays zero. */
+  readonly notional: number | null;
   readonly unrealizedPnl: number;
-  readonly liquidationPrice: number;
+  /** Null when the venue has no usable liquidation threshold. */
+  readonly liquidationPrice: number | null;
   readonly leverage: number;
   /**
    * Load-bearing for anything that sizes a close. In `hedged` mode the two
@@ -140,8 +136,9 @@ export interface OemsOrderRef extends OemsOrderAddress {
   readonly filled: number;
   readonly remaining: number;
   /** `remaining` in the venue's own units — the unit an amend's `amount` is
-   *  in. Same distinction as `OemsPositionRef.nativeContracts`. */
-  readonly nativeRemaining: number;
+   *  in. Same distinction as `OemsPositionRef.nativeContracts`. Null when
+   *  unavailable; a known zero stays zero. */
+  readonly nativeRemaining: number | null;
   readonly price: number;
   readonly reduceOnly: boolean;
 }

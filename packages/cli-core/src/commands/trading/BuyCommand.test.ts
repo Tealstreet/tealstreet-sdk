@@ -965,16 +965,13 @@ describe('BuyCommand', () => {
       expect(order.timeInForce).toBe(OrderTimeInForce.GoodTillCancel);
     });
 
-    it('`po` on a market order is silently ignored (no timeInForce flip)', async () => {
+    it('refuses post-only on a market order before writing', async () => {
       const exchange = createMockExchange();
       const ctx = createMockContext(['buy', '$100', 'po'], exchange, 'BTCUSDT');
       const r = await command.execute(ctx);
-      expect(r.success).toBe(true);
-      const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(order.type).toBe(OrderType.Market);
-      // Market orders default to GoodTillCancel; the `po` keyword
-      // doesn't flip it.
-      expect(order.timeInForce).toBe(OrderTimeInForce.GoodTillCancel);
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/po requires a limit order/);
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
     });
 
     it('`po` combines with `reduce`', async () => {
@@ -1142,16 +1139,13 @@ describe('BuyCommand', () => {
   // POSITION (you're closing), not free balance. The mock has no balance,
   // so a balance-scope resolution would throw — position scope succeeds.
   describe('reduce-only percent sizing', () => {
-    it.each([
-      ['buy', '50%', 'reduce'],
-      ['buy', '50%pos', 'at', '40000', 'reduce'],
-    ])('sizes a position-scoped reduce order from the position (%s %s)', async (...args) => {
+    it('sizes a bare `%` reduce order from the position, not balance', async () => {
       const exchange = createMockExchange();
       // Short position of 4 contracts; `buy 50% reduce` closes half of it.
       (exchange.store as { positions: unknown[] }).positions = [
         { symbol: 'BTCUSDT', side: 'short', contracts: -4, leverage: 10 },
       ];
-      const r = await command.execute(createMockContext(args, exchange, 'BTCUSDT'));
+      const r = await command.execute(createMockContext(['buy', '50%', 'reduce'], exchange, 'BTCUSDT'));
       expect(r.success).toBe(true);
       expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 2, reduceOnly: true }));
     });

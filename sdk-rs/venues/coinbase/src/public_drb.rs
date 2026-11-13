@@ -409,7 +409,7 @@ impl Coinbase {
                     }
                     cx.store
                         .set_tickers(tickers.into_iter().map(|(t, _)| t).collect());
-                    if self.credentials.is_none() {
+                    if !self.signers.has_primary() {
                         cx.store.set_orders(vec![]);
                         cx.store.set_positions(vec![]);
                         cx.store.set_balance(Default::default());
@@ -990,7 +990,8 @@ impl Coinbase {
                     );
                     return None;
                 }
-                let end = to_ms.unwrap_or(cx.now).min(cx.now).floor();
+                let utc_now = cx.protocol_now();
+                let end = to_ms.unwrap_or(utc_now).min(utc_now).floor();
                 let start = from_ms
                     .unwrap_or(end - interval.ms() * f64::from(limit.unwrap_or(300).clamp(1, 1000)))
                     .max(0.);

@@ -71,7 +71,11 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
         ),
         row(Key::Int(10003), Verdict::Refused(ErrorKind::AuthInvalid)),
         row(Key::Int(10005), Verdict::Refused(ErrorKind::AuthPermission)),
+        // HTTP 200 can carry system or legacy IP limits. Released writes stay
+        // Unknown through the engine's rate-limit rule; reads retain their kind.
+        row(Key::Int(429), Verdict::Refused(ErrorKind::RateLimited)),
         row(Key::Int(10006), Verdict::Refused(ErrorKind::RateLimited)),
+        row(Key::Int(10018), Verdict::Refused(ErrorKind::RateLimited)),
         row(Key::Int(10010), Verdict::Refused(ErrorKind::AuthPermission)),
         row(Key::Int(33004), Verdict::Refused(ErrorKind::AuthExpired)),
         row(Key::Int(10001), Verdict::Refused(ErrorKind::InvalidInput)),
@@ -227,6 +231,53 @@ fn the_bybit_table_satisfies_the_engine_invariants() {
     safe_cex_engine::classify::assert_table(&BYBIT);
     safe_cex_engine::classify::assert_table(&MARGIN_MODE_ALREADY_SET);
     safe_cex_engine::classify::assert_table(&PROTECTIVE);
+}
+
+#[cfg(test)]
+#[test]
+fn native_rate_limits_keep_read_and_write_intents_distinct() {
+    use safe_cex_engine::classify::{self, Native, NativeCode, Released};
+    use safe_cex_engine::{Outcome, Response};
+
+    let response = Response {
+        status: 200,
+        headers: "retry-after: 2",
+        body: "",
+    };
+    for code in [10006, 429, 10018] {
+        let native = Native {
+            code: NativeCode::Int(code),
+            message: "rate limited",
+        };
+        let released = Released::Response(&response);
+        let read = classify::read(&BYBIT, released, Some(&native), "rate limited").error;
+        assert_eq!(read.kind, Some(ErrorKind::RateLimited), "{code}");
+        assert_eq!(read.outcome, None, "{code}");
+        assert_eq!(read.retry_after_ms, Some(2000.0), "{code}");
+        for table in [&BYBIT, &PROTECTIVE] {
+            for intent in [
+                Intent::Place,
+                Intent::Cancel,
+                Intent::Amend,
+                Intent::Setting,
+            ] {
+                let verdict = classify::verdict(table, intent, released, Some(&native));
+                let error =
+                    classify::error(verdict, intent, released, Some(&native), "rate limited");
+                assert_eq!(
+                    error.kind,
+                    Some(ErrorKind::RateLimited),
+                    "{code}/{intent:?}"
+                );
+                assert_eq!(error.outcome, Some(Outcome::Unknown), "{code}/{intent:?}");
+                assert_eq!(
+                    error.venue_code,
+                    Some(code.to_string()),
+                    "{code}/{intent:?}"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
