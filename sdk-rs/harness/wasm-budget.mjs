@@ -222,23 +222,35 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3448 merged head 9b737161757f: CI run 43061512265, artifact 13873588589.
   // Optimized web/node 2,197,821 B + 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.
+  // #3438 merged-head local build.sh --venue asterdex: web/node 2,197,178 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3425 run 43176700451/job 131043125663, CI source cca7b8337ad3:
   // web/Node 2,208,996 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; retain unknown instead of a partial value.
   // #3448 head 9a736b2a6bf1: run 43198030267/job 131114624468, artifact 13934600864.
   // Optimized web/Node 2,211,230 B + 10 KiB, rounded up to KiB.
   asterdex: 2_222_080,
-  backpack: 2_040_832,
+  // #3438 merged-head local build.sh --venue backpack: web/node 2,036,671 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  backpack: 2_046_976,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
-  binance: 2_274_304,
-  bingx: 2_139_136,
+  // #3438 merged-head local build.sh --venue binance: web/node 2,270,372 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  binance: 2_281_472,
+  // #3438 merged-head local build.sh --venue bingx: web/node 2,130,988 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  bingx: 2_142_208,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
-  bitget: 2_492_416,
-  bitgetusdc: 2_492_416,
+  // #3438 merged-head local build.sh --venue bitget: web/node 2,486,531 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  bitget: 2_497_536,
+  // #3438 merged-head local build.sh --venue bitget: web/node 2,486,531 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  bitgetusdc: 2_497_536,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
@@ -246,14 +258,27 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3299 merged 2ca7125e8ab: local optimized web/node 1,901,720 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitrue.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
-  bitrue: 1_912_832,
+  // #3438 merged-head local build.sh --venue bitrue: web/node 1,908,695 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  bitrue: 1_918_976,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
+  // Nullable history output: local optimized web/node 1,927,088 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue bitunix; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
   // #3425 run 43176700451/job 131043125555, CI source cca7b8337ad3:
   // web/Node 1,942,038 B; current measured maximum + 10 KiB, rounded up.
   // Shared native-size policy must retain unknown/conflicting quantity refusals.
-  bitunix: 1_952_768,
-  blofin: 2_072_576,
+  // #3438 run 43204071123, artifact 13937985101, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,942,715 B; measured + 10 KiB rounded up; shared aliases equal.
+  bitunix: 1_953_792,
+  // Nullable history output: local optimized web/node 2,070,435 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue blofin; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
+  blofin: 2_080_768,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
+  // Nullable history output: local optimized web/node 2,329,857 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue bybit; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
   // #3425 run 43176700451/job 131043125392, CI source cca7b8337ad3:
   // web/Node 2,330,713 B; current measured maximum + 10 KiB, rounded up.
   // Nullable valuation plus inverse quote-capacity refusals remain in this family.
@@ -268,12 +293,20 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // measured web/node 2,094,041 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
   // measured 2,094,163 B; +10 KiB rounded up to KiB, shared with Coinbase Spot.
-  coinbase: 2_105_344,
-  cryptocom: 1_807_360,
+  // #3438 merged-head local build.sh --venue coinbase: web/node 2,103,909 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  coinbase: 2_114_560,
+  // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  cryptocom: 1_814_528,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
-  grvt: 1_991_680,
+  // #3438 merged-head local build.sh --venue grvt: web/node 1,988,047 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3438 run 43204071123, artifact 13936313617, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,990,569 B; measured + 10 KiB rounded up; shared aliases equal.
+  grvt: 2_000_896,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -285,19 +318,29 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
   // Master 05241cd0f4 changes no Hyperliquid build inputs; keep both parent provenance blocks.
   // Current CI run 42565604601, merge ec8633c44e98: web/node 2,225,586 B + 10 KiB, rounded up.
+  // #3438 run 42745609629, family job 129597324393: web 2,236,724 B.
+  // Current CI measurement + 10 KiB, rounded up; shared with Hyperliquid Spot (rule 17).
+  // #3438 merged-head local build.sh --venue hyperliquid: web/node 2,238,027 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3429 merged head 1bb3f1352988: local optimized web/node 2,238,274 B; +10 KiB rounded up.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; both aliases share the compiled family.
+  // #3438 merge cf112c51b87c + 3f94ec11a27f: optimized web/node 2,238,644 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3433 run 42742356027 at CI merge 972f1282ea16: web/node 2,236,421 B.
   // Current measured size + 10 KiB, rounded up to KiB; both aliases share the family.
   // #3433 branch 1547c3b2e287: optimized local web/node 2,237,725 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
-  // #3429 merged head 1bb3f1352988: local optimized web/node 2,238,274 B; +10 KiB rounded up.
-  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
-  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; both aliases share the compiled family.
   // #3433 merge b57d4ab06df2 + master 4d399f716231: optimized local web/node 2,238,332 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue hyperliquid.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up to KiB.
-  hyperliquid: 2_248_704,
-  hyperliquidspot: 2_248_704,
+  hyperliquid: 2_249_728,
+  // #3438 merged-head local build.sh --venue hyperliquid: web/node 2,238,027 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3438 merge cf112c51b87c + 3f94ec11a27f: optimized web/node 2,238,644 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  hyperliquidspot: 2_249_728,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:
@@ -306,18 +349,36 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3304 refusal ordering at 0b7e6ccf60f3ac4c202ffb595a2b6185b1f5fb1e: web/node 2,234,008 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue kraken;
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132. Measured + 10 KiB rounded up to KiB.
+  // #3438 merged-head local build.sh --venue kraken: web/node 2,247,702 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3425 run 43176700451/job 131043125504, CI source cca7b8337ad3:
   // web/Node 2,260,418 B; current measured maximum + 10 KiB, rounded up.
   // Keep unavailable mark valuation and distinct PF/inverse quantity rules.
   kraken: 2_271_232,
+  // #3438 merged-head local build.sh --venue kraken: web/node 2,247,702 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   krakenspot: 2_271_232,
-  kucoin: 1_872_896,
-  kucoinspot: 2_462_720,
+  // #3438 merged-head local build.sh --venue kucoin: web/node 1,866,880 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  kucoin: 1_878_016,
+  // #3438 merged-head local build.sh --venue kucoinspot: web/node 2,461,646 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3438 run 43204071123, artifact 13936822120, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,462,504 B; measured + 10 KiB rounded up; shared aliases equal.
+  kucoinspot: 2_472_960,
+  // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
   // web/Node 2,146,773 B; current measured maximum + 10 KiB, rounded up.
   // Shared engine valuation/native-size policy; no signing or admission expansion.
-  lighter: 2_157_568,
-  'lighter-robinhood': 2_157_568,
+  // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,147,387 B; measured + 10 KiB rounded up; shared aliases equal.
+  lighter: 2_158_592,
+  // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,147,387 B; measured + 10 KiB rounded up; shared aliases equal.
+  'lighter-robinhood': 2_158_592,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
   // #3299 restage run 42558057739 at 5dec79811311, jobs 128968431838/128968431872:
@@ -325,34 +386,66 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3299 merged 2ca7125e8ab: local optimized web/node 1,920,015 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
+  // #3438 merged-head local build.sh --venue mexc: web/node 1,927,089 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3433 head 99eed37c13cc: fresh optimized web/node 1,927,409 B + 10 KiB, rounded up to KiB.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue mexc.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132 (two -Oz passes).
+  // #3438 merge 6ec2b44e3f95 + d956d25f8b48: optimized web/node 1,927,721 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3425 run 43176700451/job 131043125322, CI source cca7b8337ad3:
   // web/Node 1,946,379 B; current measured maximum + 10 KiB, rounded up.
   // Shared native sizing with current master broker behavior retained.
-  mexc: 1_956_864,
-  okx: 2_053_120,
-  orderly: 1_773_568,
+  // #3438 run 43204071123, artifact 13937850519, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,947,010 B; measured + 10 KiB rounded up; shared aliases equal.
+  mexc: 1_957_888,
+  // Nullable history output: local optimized web/node 2,052,533 B.
+  // SAFE_CEX_WASM_OPT=required build.sh --venue okx; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  // Current measured size + 10 KiB, rounded up to KiB (rule 17).
+  okx: 2_063_360,
+  // #3438 merged-head local build.sh --venue orderly: web/node 1,769,717 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  orderly: 1_780_736,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
-  paradex: 2_306_048,
+  // #3438 merged-head local build.sh --venue paradex: web/node 2,301,551 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  paradex: 2_312_192,
+  // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
+  // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
+  // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,104,206 B + 10 KiB, rounded up.
+  // #3438 merged-head local build.sh --venue phemex: web/node 2,118,601 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3429 run 42729630872 at a2be15368b4: CI web/node 2,125,299 B.
   // Shared-helper fix: local web/node 2,127,824 B; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue phemex; measured + 10 KiB, rounded up.
-  phemex: 2_138_112,
-  polymarket: 1_652_736,
+  // #3438 merge cf112c51b87c + 3f94ec11a27f: optimized web/node 2,128,251 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  phemex: 2_139_136,
+  // #3438 merged-head local build.sh --venue polymarket: web/node 1,647,100 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3438 run 43204071123, artifact 13937575821, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 1,651,961 B; measured + 10 KiB rounded up; shared aliases equal.
+  polymarket: 1_662_976,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
-  txflow: 1_934_336,
+  // #3438 merged-head local build.sh --venue txflow: web/node 1,928,662 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  txflow: 1_939_456,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
+  // #3438 run 42745609629, family job 129597324422: web 1,991,983 B.
+  // Current CI measurement + 10 KiB, rounded up to KiB (rule 17).
+  // #3438 merged-head local build.sh --venue weex: web/node 1,993,495 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3429 merged head 1bb3f1352988: local optimized web/node 1,993,725 B; +10 KiB rounded up.
+  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; current measured headroom per rule 17.
+  // #3438 merge cf112c51b87c + 3f94ec11a27f: optimized web/node 1,994,023 B.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3433 run 42742356027 at CI merge 972f1282ea16: web/node 1,991,688 B.
   // Current measured size + 10 KiB, rounded up to KiB.
   // #3433 branch 1547c3b2e287: optimized local web/node 1,993,200 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB, rounded up.
-  // #3429 merged head 1bb3f1352988: local optimized web/node 1,993,725 B; +10 KiB rounded up.
-  // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
-  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; current measured headroom per rule 17.
   // #3433 merge b57d4ab06df2 + master 4d399f716231: optimized local web/node 1,993,711 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue weex.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up to KiB.
@@ -366,7 +459,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 2,631,851 B + 10 KiB, rounded up.
   // #3442 CI run 42749390151, job 129609649777 at ded39a35466: web/node 2,654,237 B.
   // Current CI size + 10 KiB, rounded up to KiB.
-  woo: 2_665_472,
+  // #3438 run 43204071123, artifact 13937331538, source 0340fd57a506 (head 7464a40315bc tree).
+  // Verified web/Node 2,655,496 B; measured + 10 KiB rounded up; shared aliases equal.
+  woo: 2_666_496,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

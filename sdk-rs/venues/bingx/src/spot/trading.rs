@@ -563,7 +563,7 @@ impl BingxSpot {
             Box::new(recipe),
             Pending::Write(Box::new(request)),
         ) {
-            self.write_failed(cx, *r, error.venue_error());
+            self.write_failed(cx, *r, error.venue_error(), true);
         }
     }
     pub(super) fn write_failed(
@@ -571,27 +571,28 @@ impl BingxSpot {
         cx: &mut Cx<'_, Pending>,
         r: Request,
         mut error: VenueError,
+        report_unknown: bool,
     ) {
         if !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
             error.message = UNKNOWN_TEXT.into();
-            // Pending delivery is engine-owned and happens once. Report the
-            // venue-decoded uncertainty separately from journal completion;
-            // neither this event nor late callbacks grant another send.
-            let operation = match r.step.kind {
-                Call::Place { .. } => "place",
-                Call::Cancel { .. } => "cancel",
-                Call::CancelAll => "cancelAll",
-            };
-            cx.event(
-                Level::Error,
-                "order.outcome_unknown",
-                UNKNOWN_TEXT,
-                vec![
-                    ("command", r.command.into()),
-                    ("outcome", "unknown".into()),
-                    ("operation", operation.into()),
-                ],
-            );
+            if report_unknown {
+                // Venue decoding owns this diagnostic; engine-sealed failures use its hook.
+                let operation = match r.step.kind {
+                    Call::Place { .. } => "place",
+                    Call::Cancel { .. } => "cancel",
+                    Call::CancelAll => "cancelAll",
+                };
+                cx.event(
+                    Level::Error,
+                    "order.outcome_unknown",
+                    UNKNOWN_TEXT,
+                    vec![
+                        ("command", r.command.into()),
+                        ("outcome", "unknown".into()),
+                        ("operation", operation.into()),
+                    ],
+                );
+            }
         }
         error.presents = true;
         if let Some(run) = self.jobs.get_mut(&r.command) {
@@ -737,7 +738,7 @@ impl BingxSpot {
                 }
                 self.finish_step(cx, &r);
             } else {
-                self.write_failed(cx, r, error);
+                self.write_failed(cx, r, error, true);
             }
         }
     }

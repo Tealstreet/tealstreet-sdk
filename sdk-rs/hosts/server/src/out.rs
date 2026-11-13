@@ -35,6 +35,15 @@ struct Owner {
     captured: Arc<()>,
 }
 
+/// Retires one temporary producer without retiring an account's output.
+pub(crate) struct OutputLifetime(Owner);
+
+impl Drop for OutputLifetime {
+    fn drop(&mut self) {
+        *self.0.current.lock().unwrap() = Weak::new();
+    }
+}
+
 impl Owner {
     fn is_current(&self) -> bool {
         Weak::ptr_eq(
@@ -64,6 +73,11 @@ pub struct Receiver {
 }
 
 impl Receiver {
+    #[cfg(test)]
+    pub(crate) fn queued(&self) -> usize {
+        self.rx.len()
+    }
+
     pub async fn recv(&mut self) -> Option<String> {
         loop {
             if let Some(text) = self.rx.recv().await?.into_current() {
@@ -82,6 +96,21 @@ impl Receiver {
 }
 
 impl Out {
+    pub(crate) fn isolated(&self) -> (Self, OutputLifetime) {
+        let captured = Arc::new(());
+        let owner = Owner {
+            current: Arc::new(Mutex::new(Arc::downgrade(&captured))),
+            captured,
+        };
+        (
+            Self {
+                owner: Some(owner.clone()),
+                ..self.clone()
+            },
+            OutputLifetime(owner),
+        )
+    }
+
     pub fn channel(capacity: usize) -> (Self, Receiver, Arc<Notify>) {
         let (tx, rx) = mpsc::channel(capacity);
         let overflow = Arc::new(Notify::new());
