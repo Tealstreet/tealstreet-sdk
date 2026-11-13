@@ -35,8 +35,8 @@ const PLACE_AND_CLOSE: DelegatedActions = DelegatedActions {
 };
 
 /// Sam's 2026-11-11 policy: later venue actions do not gate this protocol slice.
-fn activation_allowed(delegated_bybit: bool, actions: &DelegatedActions) -> bool {
-    delegated_bybit && actions.place && actions.close == Close::ReduceOnly
+fn activation_allowed(hosted_venue: bool, actions: &DelegatedActions) -> bool {
+    hosted_venue && actions.place && actions.close == Close::ReduceOnly
 }
 
 pub fn enabled() -> bool {
@@ -48,8 +48,8 @@ pub fn enabled_for(venue: &str) -> bool {
     cfg!(feature = "delegated-order-frames") && crate::delegated::enabled(venue)
 }
 
-pub fn action_capabilities() -> DelegatedActions {
-    if activation_allowed(enabled_for("bybit"), &PLACE_AND_CLOSE) {
+pub fn action_capabilities(venue: Option<&str>) -> DelegatedActions {
+    if activation_allowed(venue.is_some_and(enabled_for), &PLACE_AND_CLOSE) {
         PLACE_AND_CLOSE
     } else {
         DelegatedActions {
@@ -255,6 +255,28 @@ fn canonical_value(value: &Value, out: &mut String, depth: usize) -> Result<(), 
 #[cfg(test)]
 mod activation_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn non_bybit_capabilities_do_not_depend_on_bybit_enablement() {
+        crate::delegated::with_test_declaration(
+            json!({"venues": {
+                "bybit": {"remoteSigning": {"enabled": false}},
+                "binance": {"remoteSigning": {"enabled": true}}
+            }}),
+            async {
+                let actions = serde_json::to_value(action_capabilities(Some("binance"))).unwrap();
+                assert_eq!(actions["place"], cfg!(feature = "delegated-order-frames"));
+                for venue in [None, Some("bybit"), Some("hyrotrader"), Some("unknown")] {
+                    let actions = serde_json::to_value(action_capabilities(venue)).unwrap();
+                    assert_eq!(actions["place"], false);
+                    assert_eq!(actions["close"], "unsupported");
+                }
+                assert!(!enabled_for("bybit"));
+                assert!(!enabled_for("hyrotrader"));
+            },
+        )
+        .await;
+    }
 
     #[test]
     fn place_and_reduce_only_close_activate_without_later_actions() {

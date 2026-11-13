@@ -1,7 +1,6 @@
 use super::*;
 use crate::accounts::testing;
 use crate::delegated::{DelegatedPair, prepare_delegated};
-use safe_cex_crypto::signer::Secret;
 use safe_cex_engine::{HttpRequest, RequestId, SocketId};
 use safe_cex_native::{
     BoundHttp, Events, HostEvent, HttpPrepareError, HttpPrepareFuture, PreparedHttp, ServerConfig,
@@ -337,7 +336,7 @@ fn delegated_account_with_algo_inbox(
         &setup,
         DelegatedPair::new(
             setup.key.clone(),
-            Secret::new(format!("synthetic-signing-fixture-{user}")),
+            format!("synthetic-signing-fixture-{user}"),
             None,
         ),
     )
@@ -406,7 +405,7 @@ async fn delegated_fixture_keeps_identity_when_native_algos_are_enabled_or_disab
                         Arc::new(|_| true),
                         DelegatedPair::new(
                             renamed.key.clone(),
-                            Secret::new("synthetic-signing-fixture-A".into()),
+                            "synthetic-signing-fixture-A".into(),
                             None,
                         ),
                     )
@@ -512,12 +511,12 @@ async fn reply(sent: &mut crate::out::Receiver, request: &str) -> Value {
 }
 
 #[tokio::test]
-async fn delegated_manual_writes_require_the_exact_venue_flag() {
+async fn delegated_manual_writes_require_hosted_venue_support() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = crate::accounts::tests::registry();
             let tape = Tape::default();
-            let account = delegated_account(&registry, "A", "bybitspot", tape.clone());
+            let account = delegated_account(&registry, "A", "hyrotrader", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             call(&mut session, "flag", "placeOrder", json!([placement()])).await;
             let result = reply(&mut sent, "flag").await;
@@ -761,8 +760,8 @@ async fn venue_declaration_controls_existing_order_admission() {
             for opted_in in [false, true] {
                 crate::delegated::with_test_declaration(
                     json!({"venues": {
-                        "bybit": {"delegated": {"enabled": true}},
-                        "binance": {"delegated": {"enabled": opted_in}}
+                        "bybit": {"remoteSigning": {"enabled": true}},
+                        "binance": {"remoteSigning": {"enabled": opted_in}}
                     }}),
                     async {
                         let registry = crate::accounts::tests::registry();

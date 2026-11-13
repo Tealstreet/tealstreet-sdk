@@ -22,6 +22,8 @@ function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const options: OutboxOptions = {
     owner,
     accountName: 'main',
+    venue: 'bybit',
+    accountId: 'account-A',
     storage: {
       async load(scope) {
         return [...rows.values()].filter((r) => r.owner === scope.owner);
@@ -45,6 +47,7 @@ function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const connection: OutboxConnection = {
     owner,
     accountName: 'main',
+    accountId: 'account-A',
     venue: 'bybit',
     signingMode: 'delegated',
     ready: true,

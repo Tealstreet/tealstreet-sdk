@@ -50,15 +50,38 @@ EXEC continuations and native command dispatch, alongside registration and age.
 Already accepted chaser/TWAP jobs retain their existing account lifetime.
 
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
-handover pair. Admission follows the exact venue's `delegated.enabled` in construction-rules.json;
-only `bybit` is currently opted in. The account retains the existing LocalSigner provider,
+handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
+`remoteSigning` policy and a configured server origin, with the existing
+unhosted refusal preserved. There is no mode-specific venue list or
+`delegated.enabled` declaration. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
+Legacy and typed full-write method admission both use this shared eligibility.
+
+DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
+layouts. Guarded handover strings move into the zeroizing native options for
+that setup; only its provider, identities and required public metadata remain.
+Hyperliquid wallet addresses survive construction and resident reconfiguration.
+Opaque `TrustedSignerState` carries non-JSON setup facts through native config,
+including Paradex derived-key validation, for both the probe and resident actor.
+It cannot be claimed by client JSON or applied to a different venue. The shared
+admission/probe algorithm, lifetime checks and refusal classification are unchanged.
+
+Key-only setup keeps its private scalar in the sealed credentials' `signingKey`,
+never `InitPayload.key`. For that mapping the public init key equals `subkeyAddress`
+and the sealed public key; it remains in the unchanged HPKE context. Other
+mappings reject `signingKey` and empty signing secrets. The canonical registry
+setup validates the material before the unchanged private-startup proof. There
+is no fallback to the old scalar-in-init layout.
+
+The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
+unchanged in both modes. Other hosted venues retain their current account-label
+identity; that distinction does not gate DELEGATED or COSIGNED admission.
 
 Private COSIGNED admissions require possession proof independently of the
-DELEGATED opt-in. Both modes share the off-loop probe, refusal classification,
+DELEGATED hosted eligibility. Both modes share the off-loop probe, refusal classification,
 token/lease checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
 OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
@@ -73,10 +96,15 @@ rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
 amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
 advertisement exposes exactly that partial set. The existing compiled feature,
-Bybit declaration, runtime frame switch, router ledger and per-connection
-ownership/registration checks remain required. `DELEGATED_BYBIT` is the host's
+hosted venue support, runtime frame switch, router ledger and per-connection
+ownership/registration checks remain required. `DELEGATED` is the host's
 per-user feature flag, not a new box environment variable. SDK `activate` checks
-it before using the advertised partial set. Unsupported legacy method aliases
+it before using the advertised partial set. Hosts query `/account/capabilities`
+with `?exchangeName=<joined venue>` (or `/capabilities` with the same query).
+`delegatedVenueV1` must match the joined venue; the unscoped response advertises
+no actions. Unjoined handover requests must include `data.exchangeName`;
+a joined account may supply its stored venue. The init remains
+`signingMode:"delegated"` plus `sealed`, with no venue-specific mode field. Unsupported legacy method aliases
 also return `DelegatedActionUnavailable` before a native plan is produced. A
 close remains a placement with `reduceOnly: true`, using the existing outbox and
 venue enforcement. Queued-intent cancellation remains a separate router operation.
@@ -104,8 +132,8 @@ signals reconnect without wrapping the counter.
 ## DELEGATED action frames v1
 
 The additive `order.action` family dispatches amend, venue cancel, cancel-all and
-nuke on the admitted Bybit DELEGATED account. `delegatedOrderActionsV1` follows
-the existing feature/Bybit gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
+nuke on the admitted DELEGATED account, using its own venue. `delegatedOrderActionsV1` follows
+the existing feature/hosted-venue gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
 activation. Each session captures activation at creation; changes require the
 existing box drain/restart and fresh admission. Hosts also require the router's separate
 `delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests

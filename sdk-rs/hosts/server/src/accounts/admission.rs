@@ -1,6 +1,9 @@
 use super::*;
 use crate::delegated::{Credentials, probe::ProbeRefusal};
-use safe_cex_crypto::signer::Secret;
+
+#[cfg(test)]
+#[path = "admission_deadline_tests.rs"]
+mod deadline_tests;
 
 pub(crate) struct ProbePermit {
     user: String,
@@ -50,15 +53,17 @@ impl Drop for ProbePermit {
 }
 
 impl Credentials {
-    /// Each temporary signer owns its existing zeroizing Secret allocation.
+    /// Each handover copy is guarded until trusted native setup consumes it.
     pub(crate) fn pair(&self) -> DelegatedPair {
-        DelegatedPair::new(
+        let pair = DelegatedPair::new(
             self.key.as_str().to_owned(),
-            Secret::new(self.secret.as_str().to_owned()),
-            self.passphrase
-                .as_ref()
-                .map(|v| Secret::new(v.as_str().to_owned())),
-        )
+            self.secret.as_str().to_owned(),
+            self.passphrase.as_ref().map(|v| v.as_str().to_owned()),
+        );
+        match &self.signing_key {
+            Some(material) => pair.with_signing_key(material.as_str().to_owned()),
+            None => pair,
+        }
     }
 }
 
@@ -121,10 +126,13 @@ impl Registry {
     ) -> Result<ProbePermit, ProbeRefusal> {
         permit.token_expires_at = Some(token.as_ref().ok_or(ProbeRefusal::INVALID)?.1);
         permit.check(user, init)?;
+        let mut config = self.engine_config.clone();
+        config.trusted_signer_state = None;
         let (plan, options, provider, mode) = match (candidate, link.as_ref()) {
             (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
                 let prepared =
                     prepare_delegated(init, candidate.pair()).map_err(|_| ProbeRefusal::INVALID)?;
+                prepared.resident.configure(&mut config);
                 (
                     prepared.plan,
                     prepared.options,
@@ -153,7 +161,6 @@ impl Registry {
             .unwrap_or(plan);
         let token_provider = ProxyToken::new();
         token_provider.set(token);
-        let mut config = self.engine_config.clone();
         config.log_label = None;
         config.signing_mode = Some(mode);
         let (mut result, receive) = tokio::sync::oneshot::channel();
@@ -193,7 +200,11 @@ impl Registry {
             }
             receive.await.map_err(|_| ProbeRefusal::TRANSIENT)?
         };
-        tokio::time::timeout(Duration::from_secs(30), work)
+        let timeout = safe_cex_remote_signer::SIGN_TIMEOUT
+            + Duration::from_millis(u64::from(
+                safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+            ));
+        tokio::time::timeout(timeout, work)
             .await
             .map_err(|_| ProbeRefusal::TRANSIENT)??;
         permit.check(user, init)?;
