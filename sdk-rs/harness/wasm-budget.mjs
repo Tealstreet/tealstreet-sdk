@@ -213,6 +213,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3281 merge: max(d9b5310e7d1, 6c158931c59) for every parent cap.
 // Current master dominates; retain both parents' measurement provenance
 // and the #3281 measured-headroom regression (run 42422693183, 5025f1670c7).
+// #3391 run 43040714236 at 86083b569b50: exact-head failing family sizes + 10 KiB, rounded up.
+// Preserve larger existing caps; per-family byte measurements and job IDs are pinned in wasm-budget.test.mjs.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3300 post-#3306: run 42557412385, job 128966462873, CI merge 291f65994cda.
   // Optimized web/node measured 2,078,907 B; CI plus 10 KiB rounded up to KiB.
