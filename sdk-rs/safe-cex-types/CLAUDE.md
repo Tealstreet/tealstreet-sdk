@@ -345,3 +345,13 @@ codec preserves required identity/leverage and optional margin/mode without
 adding exposure fields. Regenerate with the scoped `store` example and
 `store-generate.cjs`; PositionSettings does not replace Position or its display
 contract.
+
+## Closed-PnL unknown values
+
+`history.rs` owns generated `ClosedPnlEntry`. Its seven financial fields and
+`time`/`closedTime` are required nullable values; zero is a measurement, null is
+unknown. Existing string/number variants remain accepted. The strict private
+reader rejects absent keys while allowing explicit null. Regenerate with the
+scoped `history` Cargo example and `history-generate.cjs`; run `history_fixtures`
+and `tests/history-contract.cjs`. Native projection has its own missing-value
+matrix and actual JSON fixture consumed through the SDK host and worker paths.

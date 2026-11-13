@@ -60,6 +60,13 @@ income.category = 'funding';
 income.category = 'gross';
 declare let closed: GeneratedClosedPnlEntry;
 closed.fees = '0'; closed.leverage = 0; closed.provenance = 'derived';
+closed.notional = null; closed.contracts = null; closed.entryPrice = null;
+closed.exitPrice = null; closed.unrealizedPnl = null; closed.fees = null;
+closed.leverage = null; closed.time = null; closed.closedTime = null;
+// @ts-expect-error Nullable values remain required, not undefined.
+closed.fees = undefined;
+// @ts-expect-error Unknown PnL cannot be added without checking for null.
+const uncheckedPnl = closed.unrealizedPnl + 1;
 // @ts-expect-error Closed-PnL provenance is required.
 const missingProvenance: GeneratedClosedPnlEntry = { symbol: 'BTC' };
 `;
@@ -99,7 +106,10 @@ const missingProvenance: GeneratedClosedPnlEntry = { symbol: 'BTC' };
     .join('\n');
   integrated = integrated.slice(0, referenceEnd) + '\n' + replacementExports + integrated.slice(referenceEnd);
   const integratedAst = ts.createSourceFile(publicPath, integrated, ts.ScriptTarget.Latest, true);
-  assert.deepEqual(integratedAst.referencedFiles.map((file) => file.fileName), ['./env.d.ts']);
+  assert.deepEqual(
+    integratedAst.referencedFiles.map((file) => file.fileName),
+    ['./env.d.ts'],
+  );
   const beforeIntegration = host.getSourceFile.bind(host);
   host.getSourceFile = (file, version, ...args) =>
     file === publicPath

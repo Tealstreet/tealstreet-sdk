@@ -46,7 +46,27 @@ is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
 
+The existing Bybit opt-in also selects private COSIGNED admissions. Both modes
+share the off-loop probe, refusal classification, token/lease checks and account
+attachment. A pending COSIGNED signer belongs only to its joining connection;
+probe frames are consumed internally. Matching COSIGNED inits on an admitted
+connection and COSIGNED resumes retain their existing snapshot path.
+
 ## DELEGATED order frames
+
+Sam's 2026-11-11 policy allows activation with place and reduce-only close before
+amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
+advertisement exposes exactly that partial set. The existing compiled feature,
+Bybit declaration, runtime frame switch, router ledger and per-connection
+ownership/registration checks remain required. `DELEGATED_BYBIT` is the host's
+per-user feature flag, not a new box environment variable. SDK `activate` checks
+it before using the advertised partial set. Unsupported legacy method aliases
+also return `DelegatedActionUnavailable` before a native plan is produced. A
+close remains a placement with `reduceOnly: true`, using the existing outbox and
+venue enforcement. Queued-intent cancellation remains a separate router operation.
+Raw exec and chaser/TWAP starts, resumes or running-state restoration return the
+same named refusal. Paused TWAP restoration and existing stop/cleanup controls
+remain available; this does not resume or replay an interrupted intent.
 
 DELEGATED `order.submit` messages use the existing method translation,
 native command completion and order audit, with the intent UUIDv7 as both request
@@ -74,7 +94,9 @@ activation. Each session captures activation at creation; changes require the
 existing box drain/restart and fresh admission. Hosts also require the router's separate
 `delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
 bind UUIDv7 identity, version, action kind and target IDs in a separate canonical
-fingerprint domain. Placement's four frames and fingerprints are unchanged.
+fingerprint domain. Dedicated action receipts use the full method translator
+after that admission; legacy aliases keep the separate place/close restriction.
+Placement's four frames and fingerprints are unchanged.
 
 Amend/cancel/cancel-all use the existing method translator, native command
 completion and audit. Internal action dispatch carries the original deadline

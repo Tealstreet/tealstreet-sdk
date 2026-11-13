@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { venueFamily } from '../hosts/wasm/js/venues.mjs';
+import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
@@ -1845,6 +1845,86 @@ test('#3300 pinned master merge c4d663622c01 retains measured ApeX Omni headroom
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
 
+
+test('nullable history output retains current measured family headroom', () => {
+  // Pinned local build.sh --venue FAMILY: Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  for (const [venue, measured, minimumCap] of [
+    ['bybit', 2_329_857, 2_340_864],
+    ['okx', 2_052_533, 2_063_360],
+    ['blofin', 2_070_435, 2_080_768],
+    ['bitunix', 1_927_088, 1_937_408],
+
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3438 nullable history retains measured shared-family headroom', () => {
+  for (const [venue, measured] of [
+    ['hyperliquid', 2_236_724],
+    ['hyperliquidspot', 2_236_724],
+    ['weex', 1_991_983],
+  ]) {
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3438 merged-head measurements cover every wasm family', () => {
+  // Optimized web/node builds: Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+  const measurements = [
+    ['apexomni', 2_092_636],
+    ['asterdex', 2_197_178],
+    ['backpack', 2_036_671],
+    ['binance', 2_270_372],
+    ['bingx', 2_130_988],
+    ['bitget', 2_486_531],
+    ['bitrue', 1_908_695],
+    ['bitunix', 1_926_520],
+    ['blofin', 2_069_819],
+    ['bybit', 2_329_362],
+    ['coinbase', 2_103_909],
+    ['cryptocom', 1_803_468],
+    ['grvt', 1_988_047],
+    ['hyperliquid', 2_238_027],
+    ['kraken', 2_247_702],
+    ['kucoin', 1_866_880],
+    ['kucoinspot', 2_461_646],
+    ['lighter', 2_133_346],
+    ['mexc', 1_927_089],
+    ['okx', 2_051_925],
+    ['orderly', 1_769_717],
+    ['paradex', 2_301_551],
+    ['phemex', 2_118_601],
+    ['polymarket', 1_647_100],
+    ['txflow', 1_928_662],
+    ['weex', 1_993_495],
+    ['woo', 2_655_191],
+  ];
+  assert.deepEqual(measurements.map(([family]) => family).sort(), [...venueFamilies].sort());
+  const aliases = { bitget: ['bitgetusdc'], hyperliquid: ['hyperliquidspot'], kraken: ['krakenspot'], lighter: ['lighter-robinhood'] };
+  const covered = measurements.flatMap(([family]) => [family, ...(aliases[family] ?? [])]);
+  assert.deepEqual(covered.sort(), Object.keys(WASM_VENUE_OVERRIDES).sort());
+  for (const [family, measured] of measurements) {
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    for (const venue of [family, ...(aliases[family] ?? [])]) {
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  }
+});
+
 test('#3429 Phemex current-head size has measured plus 10 KiB headroom', () => {
   // CI run 42729630872, head a2be15368b4: web/node measured 2,125,299 bytes.
   // Same pinned build after the shared-helper fix: web/node 2,127,824 bytes.
@@ -1988,4 +2068,47 @@ test('#3372 CI run 43328678379 retains current Bybit reserve', () => {
   assert.ok(cap >= minimumCap, 'Bybit retains the current CI measurement plus 10 KiB');
   assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+// #3438 run 43204071123; source 0340fd57a506 has head 7464a40315bc's exact tree.
+// Original-attempt artifacts: verified ZIP digests, manifest hashes and equal web/Node bytes.
+for (const [family, artifact, measured] of [
+  ['bitunix', 13937985101, 1_942_715],
+  ['grvt', 13936313617, 1_990_569],
+  ['kucoinspot', 13936822120, 2_462_504],
+  ['lighter', 13936986915, 2_147_387],
+  ['mexc', 13937850519, 1_947_010],
+  ['polymarket', 13937575821, 1_651_961],
+  ['woo', 13937331538, 2_655_496],
+]) {
+  test(`#3438 ${family} artifact ${artifact} retains integrated-build headroom`, () => {
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${family}: ${cap} < ${minimumCap}`);
+    const aliases = family === 'lighter' ? [family, 'lighter-robinhood'] : [family];
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      assert.equal(WASM_VENUE_OVERRIDES[venue], cap, venue);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
+
+
+test('#3438 master merge retains newly measured conflict-family headroom', () => {
+  // Merge cf112c51b87c + 3f94ec11a27f; pinned build.sh web/node sizes.
+  for (const [venue, measured, minimumCap, resolvedCap = minimumCap] of [
+    ['phemex', 2_128_251, 2_139_136],
+    ['hyperliquid', 2_238_644, 2_249_728],
+    ['hyperliquidspot', 2_238_644, 2_249_728],
+    ['weex', 1_994_023, 2_004_992, 2_021_376],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(cap, resolvedCap);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
