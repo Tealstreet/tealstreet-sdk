@@ -318,92 +318,97 @@ export class DelegatedOutbox {
 
   static async open(options: OutboxOptions): Promise<DelegatedOutbox> {
     const box = new DelegatedOutbox(options);
-    const saved = await options.storage.load(box.scope);
-    const rows = Array.isArray(saved) ? saved : saved.intents;
-    if (!Array.isArray(saved)) {
-      if (saved.version !== 1 || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0)
-        throw new Error('Invalid outbox checkpoint');
-      box.sequence = saved.sequence;
-    }
-    if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
-      throw new Error('Outbox capacity exceeded');
-    // Reject the entire load before any persistence or compaction, including
-    // legacy records whose initiating account cannot be established.
-    if (rows.some((row) => !sameScope(row, box.scope))) throw new Error('Persisted outbox scope differs');
-    for (const saved of [...rows]) {
-      const row = clone(saved);
-      if (
-        ![1, 2].includes(row.version) ||
-        !sameScope(row, box.scope) ||
-        delegatedIntentTime(row.intentId) < 0 ||
-        !Number.isSafeInteger(row.seq) ||
-        row.seq < 1 ||
-        !Number.isFinite(row.createdAt) ||
-        row.createdAt < 0 ||
-        !STATES.includes(row.state) ||
-        !row.params ||
-        typeof row.params !== 'object' ||
-        Array.isArray(row.params) ||
-        typeof row.cancelPending !== 'boolean' ||
-        (row.callerSuppliedIntentId !== undefined && row.callerSuppliedIntentId !== true) ||
-        (row.retentionExpired !== undefined && (row.retentionExpired !== true || row.state !== 'unknown')) ||
-        box.intents.has(row.intentId)
-      )
-        throw new Error('Invalid persisted intent');
-      if (
-        (row.version === 2 &&
-          (!isDelegatedAction(row.action) || Object.keys(row.params).length > 0 || row.state === 'placed')) ||
-        (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
-      )
-        throw new Error('Invalid persisted action');
-      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
-        throw new Error('Invalid persisted action result');
-      if (
-        row.state === 'unsupported' &&
-        (!row.action ||
-          row.result !== undefined ||
-          row.cancelPending ||
-          !record(row.error) ||
-          row.error.outcome !== 'unsupported' ||
-          typeof row.error.message !== 'string' ||
-          [...row.error.message].length > 512)
-      )
-        throw new Error('Invalid persisted unsupported action');
-      const fingerprint = row.action
-        ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
-        : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
-      if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
-      box.sequence = Math.max(box.sequence, row.seq);
-      // JSON cannot carry the private runtime brand. Validate and reissue it.
-      if (row.state === 'notSent' || row.state === 'refused') {
-        const proof = storedNotSentEvidence(row);
-        if (proof) markDelegatedNotSent(row, proof);
-        else unprovenNotSent(row);
+    try {
+      const saved = await options.storage.load(box.scope);
+      const rows = Array.isArray(saved) ? saved : saved.intents;
+      if (!Array.isArray(saved)) {
+        if (saved.version !== 1 || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0)
+          throw new Error('Invalid outbox checkpoint');
+        box.sequence = saved.sequence;
       }
-      // A persisted handoff can have crossed the physical socket boundary.
-      if (row.state === 'sending' || row.state === 'acknowledged') {
-        row.state = 'unknown';
-        row.cancelPending = false;
-      }
-      // Legacy terminal labels cannot settle a still-pending router cancellation.
-      if (row.cancelPending && ['notSent', 'canceled'].includes(row.state)) unprovenNotSent(row);
-      if (row.state === 'queued') {
-        const proof = storedNoHandoffEvidence(row);
+      if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
+        throw new Error('Outbox capacity exceeded');
+      // Reject the entire load before any persistence or compaction, including
+      // legacy records whose initiating account cannot be established.
+      if (rows.some((row) => !sameScope(row, box.scope))) throw new Error('Persisted outbox scope differs');
+      for (const saved of [...rows]) {
+        const row = clone(saved);
         if (
-          row.clockEpoch !== options.clock.epoch ||
-          box.expired(row) ||
-          !proof ||
-          !markDelegatedReplayable(row, proof)
+          ![1, 2].includes(row.version) ||
+          !sameScope(row, box.scope) ||
+          delegatedIntentTime(row.intentId) < 0 ||
+          !Number.isSafeInteger(row.seq) ||
+          row.seq < 1 ||
+          !Number.isFinite(row.createdAt) ||
+          row.createdAt < 0 ||
+          !STATES.includes(row.state) ||
+          !row.params ||
+          typeof row.params !== 'object' ||
+          Array.isArray(row.params) ||
+          typeof row.cancelPending !== 'boolean' ||
+          (row.callerSuppliedIntentId !== undefined && row.callerSuppliedIntentId !== true) ||
+          (row.retentionExpired !== undefined && (row.retentionExpired !== true || row.state !== 'unknown')) ||
+          box.intents.has(row.intentId)
         )
-          unprovenNotSent(row);
+          throw new Error('Invalid persisted intent');
+        if (
+          (row.version === 2 &&
+            (!isDelegatedAction(row.action) || Object.keys(row.params).length > 0 || row.state === 'placed')) ||
+          (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
+        )
+          throw new Error('Invalid persisted action');
+        if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
+          throw new Error('Invalid persisted action result');
+        if (
+          row.state === 'unsupported' &&
+          (!row.action ||
+            row.result !== undefined ||
+            row.cancelPending ||
+            !record(row.error) ||
+            row.error.outcome !== 'unsupported' ||
+            typeof row.error.message !== 'string' ||
+            [...row.error.message].length > 512)
+        )
+          throw new Error('Invalid persisted unsupported action');
+        const fingerprint = row.action
+          ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
+          : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
+        if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
+        box.sequence = Math.max(box.sequence, row.seq);
+        // JSON cannot carry the private runtime brand. Validate and reissue it.
+        if (row.state === 'notSent' || row.state === 'refused') {
+          const proof = storedNotSentEvidence(row);
+          if (proof) markDelegatedNotSent(row, proof);
+          else unprovenNotSent(row);
+        }
+        // A persisted handoff can have crossed the physical socket boundary.
+        if (row.state === 'sending' || row.state === 'acknowledged') {
+          row.state = 'unknown';
+          row.cancelPending = false;
+        }
+        // Legacy terminal labels cannot settle a still-pending router cancellation.
+        if (row.cancelPending && ['notSent', 'canceled'].includes(row.state)) unprovenNotSent(row);
+        if (row.state === 'queued') {
+          const proof = storedNoHandoffEvidence(row);
+          if (
+            row.clockEpoch !== options.clock.epoch ||
+            box.expired(row) ||
+            !proof ||
+            !markDelegatedReplayable(row, proof)
+          )
+            unprovenNotSent(row);
+        }
+        box.intents.set(row.intentId, row);
+        await box.persist(row);
       }
-      box.intents.set(row.intentId, row);
-      await box.persist(row);
-      box.arm(row);
+      if (box.pendingCount() > MAX_PENDING) throw new Error('Outbox capacity exceeded');
+      await box.compact();
+      for (const row of box.intents.values()) box.arm(row);
+      return box;
+    } catch (error) {
+      box.close();
+      throw error;
     }
-    if (box.pendingCount() > MAX_PENDING) throw new Error('Outbox capacity exceeded');
-    await box.compact();
-    return box;
   }
 
   private constructor(private readonly options: OutboxOptions) {

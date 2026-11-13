@@ -77,6 +77,9 @@ and sequence checkpoints include this entire scope. A replacement mismatch
 retires the old ticket and refuses before handoff. Restore rejects an unbound
 or mismatched scope before any writes/compaction; it preserves the stored
 history for host reconciliation and never adopts it into the current account.
+Restore arms expiry only after all rows and final compaction succeed. Every
+failed open retires the partial instance and cancels its timers, including if
+scheduling itself fails; already queued callbacks cannot write after retirement.
 
 `enqueue(params, { intentId })` accepts a caller-owned canonical lowercase UUIDv7.
 Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a different

@@ -1,6 +1,8 @@
 import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
 import type { ExchangeName } from '../types';
 
+import { setImmediate } from 'node:timers/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import { DelegatedOutbox } from '../delegatedOutbox';
@@ -177,5 +179,133 @@ describe('DELEGATED immutable account binding', () => {
     expect(original.writes).toEqual([]);
     expect(other.writes).toEqual([]);
     box.close();
+  });
+});
+
+describe('DELEGATED failed restore lifecycle', () => {
+  for (const failure of ['binding', 'validation', 'storage', 'compaction', 'schedule']) {
+    for (const retry of [false, true]) {
+      it(`retires ${failure} failure callbacks (retry writer=${retry})`, async () => {
+        const original = fixture();
+        const seed = await DelegatedOutbox.open(original.options);
+        await seed.enqueue(params);
+        await seed.enqueue(params);
+        if (failure === 'compaction') {
+          for (let i = 0; i < 33; i++) await seed.enqueue(params);
+        }
+        seed.close();
+        const loaded = structuredClone(original.rows);
+        if (failure === 'compaction') {
+          for (const row of loaded.slice(2)) row.state = 'canceled';
+        }
+        if (failure === 'validation') loaded[1].seq = 0;
+        let now = 0;
+        let attempts = 0;
+        let writes = 0;
+        let schedules = 0;
+        const tasks: Array<{ callback: () => void; cancelled: boolean }> = [];
+        const options: OutboxOptions = {
+          ...original.options,
+          clock: { ...original.options.clock, now: () => now },
+          schedule: (callback) => {
+            if (++schedules === 2 && failure === 'schedule') throw new Error('synthetic schedule failure');
+            const task = { callback, cancelled: false };
+            tasks.push(task);
+            return () => {
+              task.cancelled = true;
+            };
+          },
+          storage: {
+            load: async () => loaded,
+            put: async (scope, row) => {
+              if (++attempts === 2 && failure === 'storage') throw new Error('synthetic storage failure');
+              writes++;
+              await original.options.storage.put(scope, row);
+              if (failure === 'binding') loaded[1].accountId = 'replaced-account';
+            },
+            compact: async () => {
+              if (failure === 'compaction') throw new Error('synthetic compaction failure');
+            },
+          },
+        };
+        await expect(DelegatedOutbox.open(options)).rejects.toThrow();
+        let writer: DelegatedOutbox | undefined;
+        if (retry) {
+          writer = await DelegatedOutbox.open({
+            ...options,
+            schedule: () => () => undefined,
+            storage: {
+              ...options.storage,
+              load: async () => structuredClone(original.rows.slice(0, 1)),
+              compact: async () => undefined,
+            },
+          });
+          const ticket = writer.connect(original.connection);
+          await writer.flush(ticket);
+          expect(original.writes).toHaveLength(1);
+          writer.disconnect(ticket);
+          await writer.flush(ticket);
+          expect(original.rows[0].state).toBe('unknown');
+        }
+        const before = structuredClone(original.rows);
+        const writesBefore = writes;
+        now = 10_000;
+        // Deliver even canceled callbacks, like an already queued host callback.
+        for (const task of tasks) task.callback();
+        await setImmediate();
+        expect(writes).toBe(writesBefore);
+        expect(original.rows).toEqual(before);
+        expect(tasks.every((task) => task.cancelled)).toBe(true);
+        writer?.close();
+      });
+    }
+  }
+
+  it('does not schedule expiry while a later restore write is pending', async () => {
+    const original = fixture();
+    const seed = await DelegatedOutbox.open(original.options);
+    await seed.enqueue(params);
+    await seed.enqueue(params);
+    seed.close();
+    const callbacks: Array<() => void> = [];
+    let now = 0;
+    let attempts = 0;
+    let entered: () => void = () => undefined;
+    let rejectWrite: (error: Error) => void = () => undefined;
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((_resolve, reject) => {
+      rejectWrite = reject;
+    });
+    const options: OutboxOptions = {
+      ...original.options,
+      clock: { ...original.options.clock, now: () => now },
+      schedule: (callback) => {
+        callbacks.push(callback);
+        return () => undefined;
+      },
+      storage: {
+        ...original.options.storage,
+        put: async (scope, row) => {
+          if (++attempts === 2) {
+            entered();
+            await blocked;
+          }
+          await original.options.storage.put(scope, row);
+        },
+      },
+    };
+    const rejected = expect(DelegatedOutbox.open(options)).rejects.toThrow('synthetic deferred failure');
+    await waiting;
+    const before = structuredClone(original.rows);
+    now = 10_000;
+    for (const callback of callbacks) callback();
+    await setImmediate();
+    const during = structuredClone(original.rows);
+    rejectWrite(new Error('synthetic deferred failure'));
+    await rejected;
+    expect(during).toEqual(before);
+    expect(callbacks).toHaveLength(0);
   });
 });
