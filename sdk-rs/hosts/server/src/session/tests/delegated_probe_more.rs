@@ -75,7 +75,7 @@ async fn a_valid_pair_joins_without_comparing_or_replacing_resident_material() {
 }
 
 #[tokio::test]
-async fn another_public_key_cannot_replace_a_running_delegated_account() {
+async fn a_refused_different_key_cannot_replace_a_running_delegated_account() {
     let f = fixture().await;
     let (mut resident, _sent) = user_session(f.registry.clone(), "alice");
     let mut ready = resident.take_verified();
@@ -83,6 +83,7 @@ async fn another_public_key_cannot_replace_a_running_delegated_account() {
     resident.init(init).await.unwrap();
     finish(&mut resident, &mut ready).await;
     let original = f.registry.held("alice", "acct", resident.socket).unwrap();
+    f.code.store(10003, Ordering::SeqCst);
     let (mut candidate, mut sent) = user_session(f.registry.clone(), "alice");
     let mut done = candidate.take_verified();
     let mut init = payload(&mut candidate, None);
@@ -195,7 +196,11 @@ async fn native_probe_deadline_refuses_and_releases_its_engine() {
     session.init(init).await.unwrap();
     wait_reads(&f).await;
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(31)).await;
+    let budget = safe_cex_remote_signer::SIGN_TIMEOUT
+        + Duration::from_millis(u64::from(
+            safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+        ));
+    tokio::time::advance(budget + Duration::from_millis(1)).await;
     let completion = done.recv().await.unwrap();
     tokio::time::resume();
     session.verification_completed(completion).await.unwrap();

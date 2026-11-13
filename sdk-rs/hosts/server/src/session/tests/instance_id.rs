@@ -1185,11 +1185,12 @@ async fn delegated_mode_refusal_reply(
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = crate::accounts::tests::registry();
-            let payload = init(requested_id);
+            let mut payload = init(requested_id);
+            payload.exchange_name = "bybit".into();
             let pair = || {
                 crate::delegated::DelegatedPair::new(
                     payload.key.clone(),
-                    safe_cex_crypto::signer::Secret::new("synthetic-registration-fixture".into()),
+                    "synthetic-registration-fixture".into(),
                     None,
                 )
             };
@@ -1209,6 +1210,7 @@ async fn delegated_mode_refusal_reply(
                 crate::delegated::fingerprint(&payload),
                 Arc::default(),
             );
+            crate::accounts::testing::bind_identity(&mut account, &payload);
             let inner = Arc::get_mut(&mut account).unwrap();
             inner.link = None;
             inner.delegated = Some(prepared.resident);
@@ -1295,11 +1297,14 @@ async fn queued_mode_refusal_retired_queue(
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = crate::accounts::tests::registry();
-            let payload = init(requested_id);
+            let payload = InitPayload {
+                exchange_name: "bybit".into(),
+                ..init(requested_id)
+            };
             let pair = || {
                 crate::delegated::DelegatedPair::new(
                     payload.key.clone(),
-                    safe_cex_crypto::signer::Secret::new("synthetic-registration-fixture".into()),
+                    "synthetic-registration-fixture".into(),
                     None,
                 )
             };
@@ -1322,6 +1327,7 @@ async fn queued_mode_refusal_retired_queue(
             let inner = Arc::get_mut(&mut account).unwrap();
             inner.link = None;
             inner.delegated = Some(prepared.resident);
+            crate::accounts::testing::bind_identity(&mut account, &payload);
             crate::accounts::testing::register(&registry, &account);
             let (mut session, mut sent) = user_session(registry.clone(), "u");
             {
@@ -1362,7 +1368,10 @@ async fn queued_mode_refusal_retired_queue(
             };
             let user = if switch_user { "v" } else { "u" };
             let replacement_id = requested_id.map(|_| "replacement-B");
-            let replacement = init(replacement_id);
+            let replacement = InitPayload {
+                exchange_name: "bybit".into(),
+                ..init(replacement_id)
+            };
             let current =
                 crate::accounts::testing::trading_account(&registry, user, &replacement);
             session.init(replacement).await.unwrap();

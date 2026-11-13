@@ -309,6 +309,41 @@ async fn admission_hmac_private_startup_accepts_valid_pairs() {
         .await;
 }
 
+#[tokio::test]
+async fn hosted_venues_use_real_delegated_construction_and_the_existing_probe() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for &venue in VENUES {
+                if safe_cex_native::resolve::rest_base_url(venue, false).is_err() {
+                    continue;
+                }
+                let init = crate::envelope::InitPayload {
+                    exchange_name: venue.into(),
+                    account_name: "fixture".into(),
+                    key: KEY.into(),
+                    signing_mode: Some("delegated".into()),
+                    ..Default::default()
+                };
+                for (material, accepted) in [(SECRET, true), ("different-material", false)] {
+                    let pair = crate::delegated::DelegatedPair::new(
+                        KEY.into(),
+                        material.into(),
+                        Some(PASS.into()),
+                    );
+                    let prepared = crate::delegated::prepare_delegated(&init, pair)
+                        .unwrap_or_else(|_| panic!("{venue}: hosted venue must construct"));
+                    let (result, seen) = check(venue, prepared).await;
+                    assert_eq!(result.is_ok(), accepted, "{venue}: {result:?}");
+                    assert!(seen.lock().unwrap().signed_reads > 0);
+                    if !accepted {
+                        assert!(matches!(result, Err(ProbeRefusal { transient: false })));
+                    }
+                }
+            }
+        })
+        .await;
+}
+
 #[derive(Clone, Copy)]
 enum DeviceAnswer {
     Correct,
@@ -478,8 +513,16 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
 #[tokio::test]
 async fn admission_hmac_handover_is_single_use_and_bound_to_the_attempt_and_pair() {
     for &venue in VENUES {
+        if safe_cex_native::resolve::rest_base_url(venue, false).is_err() {
+            assert!(
+                crate::delegated::Handovers::default()
+                    .issue("pending", venue, 0)
+                    .is_err()
+            );
+            continue;
+        }
         crate::delegated::with_test_declaration(
-            json!({"venues": {venue: {"delegated": {"enabled": true}}}}),
+            json!({"venues": {venue: {"remoteSigning": {"enabled": true}}}}),
             async {
                 let mut handovers = crate::delegated::Handovers::default();
                 let offer = handovers.issue("pending", venue, 0).unwrap();
@@ -535,19 +578,10 @@ fn admission_enabled_venues_require_an_offline_suite() {
             "{venue}: missing offline suite"
         );
     }
-    for (venue, rule) in rules["venues"].as_object().unwrap() {
-        if rule["delegated"]["enabled"] == true {
-            assert!(
-                venue == "bybit" || VENUES.contains(&venue.as_str()),
-                "{venue}: add and pass admission checks before enabling"
-            );
-        }
-    }
-    for &venue in VENUES {
-        assert_ne!(
-            rules["venues"][venue]["delegated"]["enabled"], true,
-            "{venue}: this change must keep rollout off"
-        );
+    // Execution modes now share hosted support; the staged probe catalog is
+    // test coverage, not an admission allowlist (Sam, 2026-11-13).
+    for rule in rules["venues"].as_object().unwrap().values() {
+        assert!(rule.get("delegated").is_none());
     }
 }
 

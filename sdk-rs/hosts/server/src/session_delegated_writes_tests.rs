@@ -1,7 +1,6 @@
 use super::*;
 use crate::accounts::testing;
 use crate::delegated::{DelegatedPair, prepare_delegated};
-use safe_cex_crypto::signer::Secret;
 use safe_cex_engine::{HttpRequest, RequestId, SocketId};
 use safe_cex_native::{
     BoundHttp, Events, HostEvent, HttpPrepareError, HttpPrepareFuture, PreparedHttp, ServerConfig,
@@ -25,9 +24,11 @@ mod action_frames;
 #[derive(Clone, Default)]
 struct Tape {
     writes: Arc<Mutex<Vec<String>>>,
+    requests: Arc<Mutex<Vec<Value>>>,
     client_order_ids: Arc<Mutex<Vec<String>>>,
     reduce_only: Arc<Mutex<Vec<bool>>>,
     hold: bool,
+    two_orders: bool,
     close_unknown: bool,
     closed_positions: Arc<std::sync::atomic::AtomicBool>,
     defer_positions: Arc<std::sync::atomic::AtomicBool>,
@@ -100,8 +101,13 @@ impl Transport for Tape {
         let path = request.url.split('?').next().unwrap();
         let mutation = path.contains("/v5/order/create")
             || path.contains("/v5/order/amend")
-            || path.contains("/v5/order/cancel");
+            || path.contains("/v5/order/cancel")
+            || path.contains("/v5/position/set-leverage")
+            || path.contains("/v5/position/switch-mode")
+            || path.contains("/v5/account/set-margin-mode")
+            || path.contains("/v5/position/trading-stop");
         if mutation {
+            self.requests.lock().unwrap().push(json!({"path":path,"body":serde_json::from_str::<Value>(request.body.as_deref().unwrap_or("null")).unwrap()}));
             if path.contains("/create") {
                 let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
                 let rows = body
@@ -170,9 +176,10 @@ impl Transport for Tape {
             } else if path.ends_with("-batch") {
                 let payload: Value =
                     serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-                let rows: Vec<Value> = payload["request"].as_array().unwrap().iter().map(|row|
-                    json!({"orderId":row.get("orderId").and_then(Value::as_str).unwrap_or("native-one"),"orderLinkId":row["orderLinkId"],"symbol":row["symbol"]})
-                ).collect();
+                let rows: Vec<Value> = payload["request"].as_array().unwrap().iter().enumerate().map(|(index, row)| {
+                    let fallback = if index == 0 { "native-one".to_owned() } else { format!("native-{}", index + 1) };
+                    json!({"orderId":row.get("orderId").and_then(Value::as_str).unwrap_or(&fallback),"orderLinkId":row["orderLinkId"],"symbol":row["symbol"]})
+                }).collect();
                 let codes: Vec<Value> = rows.iter().map(|_| json!({"code":0,"msg":"OK"})).collect();
                 json!({"retCode":0,"retMsg":"OK","result":{"list":rows},"retExtInfo":{"list":codes}})
             } else {
@@ -208,11 +215,21 @@ impl Transport for Tape {
                 "coin":[{"coin":"USDT","walletBalance":"10000","equity":"10000","usdValue":"10000",
                     "availableToWithdraw":"10000","unrealisedPnl":"0","locked":"0"}]}]}})
         } else if path.ends_with("/order/realtime") {
-            json!({"retCode":0,"result":{"list":[{"orderId":"resting-order","orderLinkId":"resting-client",
+            let mut result = json!({"retCode":0,"result":{"list":[{"orderId":"resting-order","orderLinkId":"resting-client",
                 "symbol":"BTCUSDT","orderType":"Limit","side":"Buy","orderStatus":"New",
                 "price":"50000","qty":"0.001","cumExecQty":"0","leavesQty":"0.001",
                 "reduceOnly":false,"timeInForce":"GTC","positionIdx":0,
-                "createdTime":"1000","updatedTime":"1000"}],"nextPageCursor":""}})
+                "createdTime":"1000","updatedTime":"1000"}],"nextPageCursor":""}});
+            if self.two_orders {
+                let mut second = result["result"]["list"][0].clone();
+                second["orderId"] = "second-resting-order".into();
+                second["orderLinkId"] = "second-resting-client".into();
+                result["result"]["list"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(second);
+            }
+            result
         } else if path.ends_with("/position/list") {
             if self
                 .defer_positions
@@ -287,7 +304,6 @@ fn delegated_account(registry: &Registry, user: &str, venue: &str, tape: Tape) -
     delegated_account_with_algo_inbox(registry, user, venue, tape).0
 }
 
-#[cfg(feature = "delegated-order-frames")]
 fn delegated_account_with_algos(
     registry: &Registry,
     user: &str,
@@ -320,7 +336,7 @@ fn delegated_account_with_algo_inbox(
         &setup,
         DelegatedPair::new(
             setup.key.clone(),
-            Secret::new(format!("synthetic-signing-fixture-{user}")),
+            format!("synthetic-signing-fixture-{user}"),
             None,
         ),
     )
@@ -351,8 +367,61 @@ fn delegated_account_with_algo_inbox(
     inner.handle = handle;
     inner.link = None;
     inner.delegated = Some(prepared.resident);
+    if venue == "bybit" {
+        testing::bind_identity(&mut account, &setup);
+    }
     testing::register(registry, &account);
     (account, inbox)
+}
+
+#[tokio::test]
+async fn delegated_fixture_keeps_identity_when_native_algos_are_enabled_or_disabled() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for start_algos in [false, true] {
+                let registry = crate::accounts::tests::registry();
+                let account = delegated_account_with_algos(
+                    &registry,
+                    "A",
+                    "bybit",
+                    Tape::default(),
+                    start_algos,
+                );
+                let mut renamed = init("bybit");
+                renamed.key = "synthetic-key-A".into();
+                renamed.account_name = "renamed-label".into();
+                let identity = crate::accounts::identity::digest("A", &renamed)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(account.registry_name(), identity);
+                assert!(testing::holdings(&registry).contains_key(&("A".into(), identity)));
+                let holder = registry.next_id();
+                let joined = registry
+                    .obtain_delegated(
+                        "A",
+                        &renamed,
+                        holder,
+                        None,
+                        Arc::new(|_| true),
+                        DelegatedPair::new(
+                            renamed.key.clone(),
+                            "synthetic-signing-fixture-A".into(),
+                            None,
+                        ),
+                    )
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&account, &joined));
+                assert!(Arc::ptr_eq(
+                    &account,
+                    &registry.held("A", &renamed.account_name, holder).unwrap()
+                ));
+                assert!(registry.held("B", &renamed.account_name, holder).is_none());
+                assert_eq!(registry.account_count(), 1);
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
 }
 
 async fn joined(
@@ -442,12 +511,12 @@ async fn reply(sent: &mut crate::out::Receiver, request: &str) -> Value {
 }
 
 #[tokio::test]
-async fn delegated_manual_writes_require_the_exact_venue_flag() {
+async fn delegated_manual_writes_require_hosted_venue_support() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = crate::accounts::tests::registry();
             let tape = Tape::default();
-            let account = delegated_account(&registry, "A", "bybitspot", tape.clone());
+            let account = delegated_account(&registry, "A", "hyrotrader", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             call(&mut session, "flag", "placeOrder", json!([placement()])).await;
             let result = reply(&mut sent, "flag").await;
@@ -691,8 +760,8 @@ async fn venue_declaration_controls_existing_order_admission() {
             for opted_in in [false, true] {
                 crate::delegated::with_test_declaration(
                     json!({"venues": {
-                        "bybit": {"delegated": {"enabled": true}},
-                        "binance": {"delegated": {"enabled": opted_in}}
+                        "bybit": {"remoteSigning": {"enabled": true}},
+                        "binance": {"remoteSigning": {"enabled": opted_in}}
                     }}),
                     async {
                         let registry = crate::accounts::tests::registry();

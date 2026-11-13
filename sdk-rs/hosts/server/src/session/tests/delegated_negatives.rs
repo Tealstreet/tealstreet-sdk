@@ -205,6 +205,21 @@ async fn delegated_candidates_preserve_the_running_account() {
                 }
                 candidate.verification_completed(completion).await.unwrap();
             }
+            if case == "other-pair" {
+                let other = f
+                    .registry
+                    .held("alice", "acct", candidate.socket)
+                    .expect("separately verified identity is admitted independently");
+                assert!(!Arc::ptr_eq(&other, &resident.account));
+                assert_ne!(other.registry_name(), resident.account.registry_name());
+                assert!(!Arc::ptr_eq(
+                    &other.delegated.as_ref().unwrap().provider(),
+                    &resident.provider,
+                ));
+                candidate.close();
+                resident.untouched(&f);
+                continue;
+            }
             assert!(
                 f.registry.held("alice", "acct", candidate.socket).is_none(),
                 "candidate refused"

@@ -190,6 +190,8 @@ pub enum TwapEffect {
 /// One account's TWAPs, in insertion order like the TS `Map`.
 #[derive(Debug)]
 pub struct TwapBook {
+    #[cfg(not(target_arch = "wasm32"))]
+    owner_id: Option<String>,
     /// The `accountName` every TWAP here must carry; `activeTWAPs` lists by it.
     account_name: String,
     entries: Vec<Entry>,
@@ -210,10 +212,20 @@ struct Entry {
 impl TwapBook {
     pub fn new(account_name: impl Into<String>) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            owner_id: None,
             account_name: account_name.into(),
             entries: Vec::new(),
             retired: VecDeque::new(),
             retired_set: HashSet::new(),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_with_owner(account_name: impl Into<String>, owner: String) -> Self {
+        Self {
+            owner_id: Some(owner),
+            ..Self::new(account_name)
         }
     }
 
@@ -289,7 +301,11 @@ impl TwapBook {
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
-        self.add(instance, None);
+        #[cfg(not(target_arch = "wasm32"))]
+        let owner_id = self.owner_id.clone();
+        #[cfg(target_arch = "wasm32")]
+        let owner_id = None;
+        self.add(instance, owner_id);
         if let Some(instance) = self.managed_mut(&id) {
             instance.start(env, view, effects);
         }
@@ -522,6 +538,29 @@ impl TwapBook {
                     });
                     return;
                 }
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            let entry = {
+                let mut entry = entry;
+                if entry.owner_id != self.owner_id {
+                    effects.push(TwapEffect::Log {
+                        message: "TWAP not restored: account identity differs".into(),
+                    });
+                    continue;
+                }
+                if self.owner_id.is_some() {
+                    if entry.state.account_name != entry.options.account_name {
+                        effects.push(TwapEffect::Log {
+                            message:
+                                "TWAP not restored: state names another account than its options"
+                                    .into(),
+                        });
+                        continue;
+                    }
+                    entry.options.account_name = self.account_name.clone();
+                    entry.state.account_name = self.account_name.clone();
+                }
+                entry
             };
             // Another holder already restored or started it: one TWAP per id.
             if self
