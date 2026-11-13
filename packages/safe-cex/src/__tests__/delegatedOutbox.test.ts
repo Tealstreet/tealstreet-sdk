@@ -22,6 +22,8 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const options: OutboxOptions = {
     owner,
     accountName: 'main',
+    venue: 'bybit',
+    accountId: 'account-A',
     storage: {
       async load(scope) {
         const intents = [...rows.values()]
@@ -52,6 +54,7 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const connection = (instanceId = 'registration'): OutboxConnection => ({
     owner,
     accountName: 'main',
+    accountId: 'account-A',
     venue: 'bybit',
     signingMode: 'delegated',
     ready: true,
@@ -545,11 +548,12 @@ describe('DELEGATED host-neutral outbox', () => {
       ) {
         return sort.call(
           this,
-          compare && ((a: T, b: T) => {
-            const result = compare(a, b);
-            comparisons.push(result);
-            return result;
-          }),
+          compare &&
+            ((a: T, b: T) => {
+              const result = compare(a, b);
+              comparisons.push(result);
+              return result;
+            }),
         );
       });
       // compact sorts synchronously before its storage await; restore the global
@@ -587,11 +591,10 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(saved).not.toHaveProperty('noHandoffEvidence');
     expect(saved).not.toHaveProperty('notSentEvidence');
     old.close();
-    const restored = await DelegatedOutbox.open(f.options);
-    await restored.flush(restored.connect(f.connection()));
+    const before = structuredClone([...f.rows.values()]);
+    await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('Persisted outbox scope differs');
     expect(f.writes).toHaveLength(1);
-    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
-    restored.close();
+    expect([...f.rows.values()]).toEqual(before);
   });
   it('restores a proven never-sent queued row and sends it exactly once', async () => {
     const f = fixture();
@@ -612,18 +615,17 @@ describe('DELEGATED host-neutral outbox', () => {
     expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
     restored.close();
   });
-  it('restores a legacy queued row without persisted proof as unknown without sending', async () => {
+  it('refuses an unbound legacy queued row without rewriting its unresolved history', async () => {
     const f = fixture();
     const box = await LegacyOutbox.open(f.options as unknown as LegacyOutboxOptions);
     const id = await box.enqueue(params);
     expect([...f.rows.values()][0]).toMatchObject({ intentId: id, state: 'queued', clockEpoch: 'boot-A' });
     expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
     box.close();
-    const restored = await DelegatedOutbox.open(f.options);
-    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
-    await restored.flush(restored.connect(f.connection()));
+    const before = structuredClone([...f.rows.values()]);
+    await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('Persisted outbox scope differs');
     expect(f.writes).toHaveLength(0);
-    restored.close();
+    expect([...f.rows.values()]).toEqual(before);
   });
   it.each(['notSent', 'canceled'] as const)(
     'rollout restores unresolved legacy %s cancellations conservatively',
@@ -910,37 +912,40 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toEqual([]);
     restored.close();
   });
-  it.each([undefined, null, 0, ''])('fences a non-boolean return (%s) as unknown after a physical write', async (result) => {
-    const f = fixture();
-    const box = await DelegatedOutbox.open(f.options);
-    let attempts = 0;
-    const connection = box.connect({
-      ...f.connection(),
-      send: (frame) => {
-        attempts++;
-        f.writes.push(frame);
-        // Exercise an invalid JS adapter return without widening the TS contract.
-        return result as unknown as boolean;
-      },
-    });
-    const id = await box.enqueue(params);
-    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
-    expect([...f.rows.values()][0]).toMatchObject({ state: 'unknown' });
-    expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
-    expect([...f.rows.values()][0]).not.toHaveProperty('notSentEvidence');
-    await box.flush(connection);
-    box.close();
-    // Reload before the original deadline in the same epoch: time cannot fence a replay for us.
-    const restored = await DelegatedOutbox.open(f.options);
-    await restored.flush(restored.connect(f.connection()));
-    expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
-    f.advance(60_000);
-    await restored.flush(restored.connect(f.connection()));
-    expect(restored.entries()[0].state).toBe('unknown');
-    expect(attempts).toBe(1);
-    expect(f.writes).toHaveLength(1);
-    restored.close();
-  });
+  it.each([undefined, null, 0, ''])(
+    'fences a non-boolean return (%s) as unknown after a physical write',
+    async (result) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      let attempts = 0;
+      const connection = box.connect({
+        ...f.connection(),
+        send: (frame) => {
+          attempts++;
+          f.writes.push(frame);
+          // Exercise an invalid JS adapter return without widening the TS contract.
+          return result as unknown as boolean;
+        },
+      });
+      const id = await box.enqueue(params);
+      expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+      expect([...f.rows.values()][0]).toMatchObject({ state: 'unknown' });
+      expect([...f.rows.values()][0]).not.toHaveProperty('noHandoffEvidence');
+      expect([...f.rows.values()][0]).not.toHaveProperty('notSentEvidence');
+      await box.flush(connection);
+      box.close();
+      // Reload before the original deadline in the same epoch: time cannot fence a replay for us.
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection()));
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+      f.advance(60_000);
+      await restored.flush(restored.connect(f.connection()));
+      expect(restored.entries()[0].state).toBe('unknown');
+      expect(attempts).toBe(1);
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    },
+  );
   it('expires unknown retention explicitly after 24 hours and recovers capacity durably', async () => {
     const f = fixture();
     const expired: DelegatedIntent[] = [];

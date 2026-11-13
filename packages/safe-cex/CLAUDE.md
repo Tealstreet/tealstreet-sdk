@@ -63,6 +63,15 @@ the server handover implementation landing.
 
 ## DELEGATED order outbox
 
+`OutboxOptions`, every connection ticket, persisted intent and proof bind the
+authenticated `owner`, account label, actual `venue` and immutable `accountId`.
+Hosts must change `accountId` when account credentials, network or admission
+identity are replaced, and preserve it through socket reconnects. Storage keys
+and sequence checkpoints include this entire scope. A replacement mismatch
+retires the old ticket and refuses before handoff. Restore rejects an unbound
+or mismatched scope before any writes/compaction; it preserves the stored
+history for host reconciliation and never adopts it into the current account.
+
 `enqueue(params, { intentId })` accepts a caller-owned canonical lowercase UUIDv7.
 Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a different
 canonical payload for the same ID throws `intentConflict`. Identical retries
@@ -143,7 +152,7 @@ whole intent: a locally known never-attempted intent, a declined adapter handoff
 with no earlier possible handoff, or an admitted authoritative router refusal.
 A failed reconnect attempt cannot prove an earlier handoff did not occur.
 The private runtime brand is read only by the outbox; plain state writes cannot
-manufacture the result. JSON stores the evidence kind and its owner/account,
+manufacture the result. JSON stores the evidence kind and its owner/account/venue/incarnation,
 intent ID, sequence and fingerprint binding. Restore validates that evidence and
 reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
 including their unsupported error outcome. No-evidence clock-epoch/deadline
@@ -172,8 +181,8 @@ non-forwarding. Storage failure keeps the row for a later flush retry.
 Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
 listed retired intent IDs in that scope and advance its durable sequence using
 the maximum of old/new values. Preserve all other records. `load` returns an
-`OutboxSnapshot` with sequence progress and records (legacy record arrays are
-accepted for migration). `put` preserves checkpoint metadata. Compaction failure
+`OutboxSnapshot` with sequence progress and records (record arrays require the
+same complete account binding). `put` preserves checkpoint metadata. Compaction failure
 keeps records until a later flush retries. Unrelated retirement failure never
 rejects enqueue or hides its durable intent ID after handoff. Close the old
 outbox before replacing it with a new writer for the same scope.

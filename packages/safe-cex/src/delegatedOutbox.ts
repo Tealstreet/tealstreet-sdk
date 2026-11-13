@@ -22,6 +22,9 @@ export { createDelegatedIntentId } from './delegatedOrderFrames';
 export interface OutboxScope {
   owner: string;
   accountName: string;
+  venue: ExchangeName;
+  /** Stable through reconnect; replaced when the account's admission identity changes. */
+  accountId: string;
 }
 const delegatedNotSentBrand = Symbol('delegatedNotSent');
 const delegatedReplayBrand = Symbol('delegatedReplay');
@@ -96,7 +99,6 @@ export interface OutboxOptions extends OutboxScope {
   changed?(intent: DelegatedIntent): void;
 }
 export interface OutboxConnection extends OutboxScope {
-  venue: ExchangeName;
   signingMode: 'delegated';
   ready: boolean;
   capabilities: DelegatedActivationCapabilities;
@@ -152,12 +154,29 @@ function readNotSentEvidence(value: unknown): DelegatedNotSentEvidence | undefin
   }
 }
 
+function validBinding(value: { venue: ExchangeName; accountId: string }): boolean {
+  return (
+    typeof value.accountId === 'string' &&
+    value.accountId.length > 0 &&
+    deriveRemoteSigningPolicy(value.venue)?.enabled === true
+  );
+}
+
+function sameScope(value: unknown, expected: OutboxScope): boolean {
+  return (
+    record(value) &&
+    value.owner === expected.owner &&
+    value.accountName === expected.accountName &&
+    value.venue === expected.venue &&
+    value.accountId === expected.accountId
+  );
+}
+
 function storedEvidence(row: DelegatedIntent, value: unknown): DelegatedNotSentEvidence | undefined {
   if (
     !record(value) ||
     value.version !== 1 ||
-    value.owner !== row.owner ||
-    value.accountName !== row.accountName ||
+    !sameScope(value, row) ||
     value.intentId !== row.intentId ||
     value.seq !== row.seq ||
     value.fingerprint !== row.fingerprint
@@ -185,7 +204,11 @@ function unprovenNotSent(row: DelegatedIntent): void {
 /** Only positive evidence for this intent can construct a notSent result. */
 export function markDelegatedNotSent(row: DelegatedIntent, evidence: DelegatedNotSentEvidence): boolean {
   const proof = readNotSentEvidence(evidence);
-  if (!proof || (proof.kind === 'noHandoff' && !['queued', 'canceled', 'notSent'].includes(row.state))) {
+  if (
+    !validBinding(row) ||
+    !proof ||
+    (proof.kind === 'noHandoff' && !['queued', 'canceled', 'notSent'].includes(row.state))
+  ) {
     unprovenNotSent(row);
     return false;
   }
@@ -194,6 +217,8 @@ export function markDelegatedNotSent(row: DelegatedIntent, evidence: DelegatedNo
     version: 1,
     owner: row.owner,
     accountName: row.accountName,
+    venue: row.venue,
+    accountId: row.accountId,
     intentId: row.intentId,
     seq: row.seq,
     fingerprint: row.fingerprint,
@@ -217,7 +242,7 @@ export function markDelegatedReplayable(
   evidence: DelegatedNotSentEvidence,
 ): row is DelegatedReplayableIntent {
   const proof = readNotSentEvidence(evidence);
-  if (!proof || proof.kind !== 'noHandoff' || row.state !== 'queued') {
+  if (!validBinding(row) || !proof || proof.kind !== 'noHandoff' || row.state !== 'queued') {
     unprovenNotSent(row);
     return false;
   }
@@ -235,6 +260,8 @@ export function markDelegatedReplayable(
     version: 1,
     owner: row.owner,
     accountName: row.accountName,
+    venue: row.venue,
+    accountId: row.accountId,
     intentId: row.intentId,
     seq: row.seq,
     fingerprint: row.fingerprint,
@@ -290,6 +317,9 @@ export class DelegatedOutbox {
     }
     if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
       throw new Error('Outbox capacity exceeded');
+    // Reject the entire load before any persistence or compaction, including
+    // legacy records whose initiating account cannot be established.
+    if (rows.some((row) => !sameScope(row, box.scope))) throw new Error('Persisted outbox scope differs');
     for (const saved of [...rows]) {
       const row = clone(saved);
       if (
@@ -357,9 +387,15 @@ export class DelegatedOutbox {
   }
 
   private constructor(private readonly options: OutboxOptions) {
-    if (!options.owner || !options.accountName || !options.clock.epoch) throw new Error('Outbox scope is required');
+    if (!options.owner || !options.accountName || !options.clock.epoch || !validBinding(options))
+      throw new Error('Outbox scope is required');
     if (typeof options.storage.compact !== 'function') throw new Error('Outbox storage requires atomic compaction');
-    this.scope = Object.freeze({ owner: options.owner, accountName: options.accountName });
+    this.scope = Object.freeze({
+      owner: options.owner,
+      accountName: options.accountName,
+      venue: options.venue,
+      accountId: options.accountId,
+    });
   }
 
   /** Explicit host admission for the place/reduce-only-close protocol slice. */
@@ -376,15 +412,14 @@ export class DelegatedOutbox {
 
   /** Low-level connection: the host must already have completed admission. */
   connect(connection: OutboxConnection): Readonly<OutboxConnection> {
+    if (this.connection) this.disconnect(this.connection);
     if (
       !this.active ||
-      connection.owner !== this.scope.owner ||
-      connection.accountName !== this.scope.accountName ||
+      !sameScope(connection, this.scope) ||
       deriveRemoteSigningPolicy(connection.venue)?.enabled !== true ||
       connection.signingMode !== 'delegated'
     )
       throw new Error('Outbox connection scope differs');
-    if (this.connection) this.disconnect(this.connection);
     this.sent.clear();
     this.canceled.clear();
     this.outcomeSequences.clear();
@@ -775,6 +810,7 @@ export class DelegatedOutbox {
     return (
       this.active &&
       this.connection === connection &&
+      sameScope(connection, this.scope) &&
       connection.ready &&
       connection.capabilities.delegatedOrderFramesV1 === true &&
       connection.capabilities.delegatedOrderLedgerV1 === true
@@ -789,6 +825,7 @@ export class DelegatedOutbox {
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
+      !sameScope(row, connection) ||
       !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
       !this.replayable(row) ||
       this.sent.get(row.intentId) === connection
@@ -814,7 +851,12 @@ export class DelegatedOutbox {
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !this.replayable(row)) return;
+    if (
+      !sameScope(row, connection) ||
+      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !this.replayable(row)
+    )
+      return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -872,13 +914,19 @@ export class DelegatedOutbox {
 
   private async sendCancellation(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
+      !sameScope(row, connection) ||
       !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
       !row.cancelPending ||
       this.canceled.get(row.intentId) === connection
     )
       return;
     await this.persist(row);
-    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !row.cancelPending) return;
+    if (
+      !sameScope(row, connection) ||
+      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !row.cancelPending
+    )
+      return;
     if (
       connection.send(
         this.frame(connection, row.action ? 'order.actionCancelQueued' : 'order.cancelQueued', {

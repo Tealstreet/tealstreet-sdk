@@ -1,5 +1,6 @@
 import type { DelegatedAction } from '../delegatedActions';
 import type { OutboxConnection, OutboxOptions } from '../delegatedOutbox';
+import type { ExchangeName } from '../types';
 
 import { describe, expect, it } from 'vitest';
 
@@ -8,12 +9,14 @@ import { DelegatedOutbox } from '../delegatedOutbox';
 
 const params = { symbol: 'BTCUSDT', side: 'buy', type: 'market', amount: 0.001 };
 
-async function fixture(owner = 'alice') {
+async function fixture(owner = 'alice', venue: ExchangeName = 'bybit') {
   const writes: string[] = [];
   let entropy = 0;
   const options: OutboxOptions = {
     owner,
     accountName: 'main',
+    venue,
+    accountId: 'account-A',
     clock: { epoch: 'synthetic-boot', now: () => 0, unix: () => 1_700_000_000_000 },
     random: (bytes) => bytes.fill(++entropy),
     schedule: () => () => undefined,
@@ -36,7 +39,8 @@ async function fixture(owner = 'alice') {
   const connection = {
     owner,
     accountName: 'main',
-    venue: 'bybit' as const,
+    accountId: 'account-A',
+    venue,
     signingMode: 'delegated' as const,
     ready: true,
     capabilities,
@@ -50,7 +54,7 @@ async function fixture(owner = 'alice') {
 
 describe('DELEGATED place and reduce-only close activation', () => {
   it('activates an admitted non-Bybit hosted venue without changing order bytes', async () => {
-    const f = await fixture();
+    const f = await fixture('alice', 'binance');
     const control = await fixture();
     f.box.activate(
       {
