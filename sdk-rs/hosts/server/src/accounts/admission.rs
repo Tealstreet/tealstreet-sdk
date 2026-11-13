@@ -2,6 +2,10 @@ use super::*;
 use crate::delegated::{Credentials, probe::ProbeRefusal};
 use safe_cex_crypto::signer::Secret;
 
+#[cfg(test)]
+#[path = "admission_deadline_tests.rs"]
+mod deadline_tests;
+
 pub(crate) struct ProbePermit {
     user: String,
     fingerprint: String,
