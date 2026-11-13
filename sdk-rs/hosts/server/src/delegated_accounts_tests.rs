@@ -33,6 +33,7 @@ fn resident_account(registry: &Registry, user: &str) -> Arc<Account> {
         running,
     );
     let inner = Arc::get_mut(&mut account).expect("unshared fixture");
+    inner.identity = identity::digest(user, &init).unwrap();
     inner.public_only = false;
     inner.link = None;
     inner.delegated = Some(
@@ -74,7 +75,7 @@ async fn apply_settings_is_required_even_when_only_the_delegated_copy_holds_the_
                     .accounts
                     .lock()
                     .unwrap()
-                    .get(&("A".into(), changed.account_name))
+                    .get(&("A".into(), account.registry_name().to_owned()))
                     .is_some_and(|current| Arc::ptr_eq(current, &account))
             );
             registry.dispose(&account, Disposal::PageDisposed);
@@ -91,7 +92,7 @@ async fn cosigned_cannot_attach_to_or_rebuild_a_delegated_engine() {
         assert!(registry.rebuild_refusal("A", &init, false, 8).is_some());
         let result = registry.obtain("A", &init, false, 8, None, Arc::new(|_| true)).await;
         assert!(matches!(result, Err(ref e) if e == "Account signing mode differs; account not attached"));
-        assert!(registry.accounts.lock().unwrap().get(&("A".into(), init.account_name.clone())).is_some_and(|a| Arc::ptr_eq(a, &account)));
+        assert!(registry.accounts.lock().unwrap().get(&("A".into(), account.registry_name().to_owned())).is_some_and(|a| Arc::ptr_eq(a, &account)));
         assert!(original.disposal_cause().is_none()); assert!(!registry.holds(&account, 8));
         registry.dispose(&account, Disposal::PageDisposed);
     }).await;
@@ -241,14 +242,20 @@ async fn a_deferred_delegated_build_keeps_its_original_user_and_init_generation(
     let b = registry
         .begin_init(
             "B",
-            &init.account_name,
+            &identity::registry_name("B", &init).unwrap(),
             false,
             &crate::delegated::fingerprint(&init),
             None,
         )
         .unwrap();
     let replacement = registry
-        .begin_init("A", &init.account_name, false, &init.fingerprint(), None)
+        .begin_init(
+            "A",
+            &identity::registry_name("A", &init).unwrap(),
+            false,
+            &init.fingerprint(),
+            None,
+        )
         .unwrap();
     tokio::time::advance(Duration::from_secs(1)).await;
     assert!(
@@ -326,7 +333,7 @@ async fn a_public_reinit_cannot_replace_a_running_delegated_account() {
                     .accounts
                     .lock()
                     .unwrap()
-                    .get(&("A".into(), account.name.clone()))
+                    .get(&("A".into(), account.registry_name().to_owned()))
                     .is_some_and(|current| Arc::ptr_eq(current, &account))
             );
             registry.dispose(&account, Disposal::PageDisposed);
