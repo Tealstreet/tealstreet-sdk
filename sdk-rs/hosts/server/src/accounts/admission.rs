@@ -9,12 +9,15 @@ pub(crate) struct ProbePermit {
     pub(super) token_expires_at: Option<u64>,
     pub(super) current: Arc<AtomicBool>,
     pending: PendingInits,
-    account_name: String,
+    registry_name: String,
     reservation: Option<proof_queue::Reservation>,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
-        if self.user != user || self.fingerprint != admission_fingerprint(init) {
+        if self.user != user
+            || identity::registry_name(user, init).as_ref() != Ok(&self.registry_name)
+            || self.fingerprint != admission_fingerprint(init)
+        {
             return Err(ProbeRefusal::INVALID);
         }
         if self
@@ -34,7 +37,7 @@ impl ProbePermit {
 
 impl Drop for ProbePermit {
     fn drop(&mut self) {
-        let key = (self.user.clone(), self.account_name.clone());
+        let key = (self.user.clone(), self.registry_name.clone());
         let mut pending = self.pending.lock().unwrap();
         if let Some(incarnation) = pending.get_mut(&key) {
             incarnation
@@ -78,12 +81,14 @@ impl Registry {
         if self.router_leases.enforced() && lease.is_none() {
             return Err(ProbeRefusal::TRANSIENT);
         }
+        let registry_name =
+            identity::registry_name(user, init).map_err(|_| ProbeRefusal::INVALID)?;
         let reservation = self.proof_queues.reserve(user, init)?;
         let fingerprint = admission_fingerprint(init);
         let current = Arc::new(AtomicBool::new(true));
         let mut pending = self.pending_inits.lock().unwrap();
         pending
-            .entry((user.into(), init.account_name.clone()))
+            .entry((user.into(), registry_name.clone()))
             .or_insert_with(|| InitIncarnation {
                 fingerprint: fingerprint.clone(),
                 public_only: false,
@@ -100,7 +105,7 @@ impl Registry {
             token_expires_at: None,
             current,
             pending: self.pending_inits.clone(),
-            account_name: init.account_name.clone(),
+            registry_name,
             reservation: Some(reservation),
         };
         permit.check(user, init)?;
@@ -241,7 +246,7 @@ impl Registry {
             .accounts
             .lock()
             .unwrap()
-            .get(&(user.into(), init.account_name.clone()))
+            .get(&(user.into(), proof.registry_name.clone()))
             .cloned();
         if let Some(account) = existing
             && (account.is_public()

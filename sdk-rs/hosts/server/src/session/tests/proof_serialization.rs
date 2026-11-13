@@ -34,6 +34,7 @@ async fn proof_queue_serializes_modes_across_sockets_and_labels() {
     assert!(second.joined.is_empty());
     f.gate.add_permits(1000);
     finish(&mut first, &mut first_done).await;
+    let resident = first.joined["acct"].account.clone();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             tokio::select! {
@@ -49,14 +50,23 @@ async fn proof_queue_serializes_modes_across_sockets_and_labels() {
                     }}).to_string()).await.unwrap();
                 }
                 completion = done.recv() => {
-                    second.verification_completed(completion.unwrap()).await.unwrap();
+                    let completion = completion.unwrap();
+                    assert!(completion.probe.as_ref().unwrap().permit.is_ok());
+                    second.verification_completed(completion).await.unwrap();
                     break;
                 }
             }
         }
     }).await.expect("waiting proof starts and independently verifies");
-    assert!(second.joined.contains_key("renamed"));
-    assert!(first.joined.contains_key("acct"));
+    // Identity-keyed actors refuse cross-mode attachment even after a valid proof;
+    // the queued COSIGNED proof cannot replace the existing DELEGATED resident.
+    assert!(second.joined.is_empty());
+    assert_eq!(
+        sent.try_recv().unwrap(),
+        envelope::with_instance_id(envelope::init_unverified("renamed", false), "second"),
+    );
+    assert!(Arc::ptr_eq(&first.joined["acct"].account, &resident));
+    assert_eq!(f.registry.account_count(), 1);
     second.close();
     first.close();
 }
