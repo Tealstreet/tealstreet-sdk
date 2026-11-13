@@ -1,6 +1,7 @@
 //! Complete source-owned exchange metadata, separate from credential/routing projections.
 #[path = "exchange_metadata_generated.rs"]
 mod generated;
+use crate::OrderStopTriggerType;
 use crate::object_map::JsObjectMap;
 pub use generated::{ExchangeFeatures, ExchangeMetadata, ExchangeMetadataOrderAmendment};
 use indexmap::IndexMap;
@@ -32,15 +33,52 @@ fn snapshot() -> &'static Snapshot {
 pub fn exchange_metadata() -> JsObjectMap<ExchangeMetadata> {
     snapshot().metadata.clone()
 }
+/// Context used by the live TypeScript `getExchangeMetadata` resolver.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExchangeMetadataOptions<'a> {
+    pub is_unified: bool,
+    pub bitget_account_mode: Option<&'a str>,
+    pub tpsl_order_path: Option<&'a str>,
+}
+
 pub fn get_exchange_metadata(exchange: &str, is_unified: bool) -> Result<ExchangeMetadata, String> {
-    if exchange == "bybit" && is_unified {
+    get_exchange_metadata_with_options(
+        exchange,
+        ExchangeMetadataOptions {
+            is_unified,
+            ..ExchangeMetadataOptions::default()
+        },
+    )
+}
+
+pub fn get_exchange_metadata_with_options(
+    exchange: &str,
+    options: ExchangeMetadataOptions<'_>,
+) -> Result<ExchangeMetadata, String> {
+    if exchange == "bybit" && options.is_unified {
         return Ok(snapshot().unified.clone());
     }
-    snapshot()
+    let mut metadata = snapshot()
         .metadata
         .get(exchange)
         .cloned()
-        .ok_or_else(|| format!("Unknown exchange metadata: {exchange}"))
+        .ok_or_else(|| format!("Unknown exchange metadata: {exchange}"))?;
+    if matches!(exchange, "bitget" | "bitgetusdc" | "bitgetinverse") {
+        // The inverse engine has no UTA route, including position protection.
+        if exchange == "bitgetinverse" && options.bitget_account_mode == Some("uta") {
+            return Ok(metadata);
+        }
+        let path = options.tpsl_order_path.unwrap_or("entry");
+        if path == "position" || (path == "entry" && options.bitget_account_mode == Some("uta")) {
+            metadata.supported_tpsl_trigger_types = vec![
+                OrderStopTriggerType::LastPrice,
+                OrderStopTriggerType::MarkPrice,
+            ];
+            metadata.default_tp_trigger_type = Some(OrderStopTriggerType::MarkPrice);
+            metadata.default_sl_trigger_type = Some(OrderStopTriggerType::MarkPrice);
+        }
+    }
+    Ok(metadata)
 }
 pub fn is_exchange_supported_on_mobile(exchange: &str) -> bool {
     snapshot()

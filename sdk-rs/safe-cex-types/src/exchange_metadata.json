@@ -1559,9 +1559,7 @@
         "45.76.52.241",
         "108.61.247.61"
       ],
-      "supportedTPSLTriggerTypes": [
-        "mark_price"
-      ],
+      "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
       "stopOrderPendingUpdateDelay": 4000,
       "requiresCors": true,
@@ -1674,9 +1672,7 @@
         "45.76.52.241",
         "108.61.247.61"
       ],
-      "supportedTPSLTriggerTypes": [
-        "mark_price"
-      ],
+      "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
       "stopOrderPendingUpdateDelay": 4000,
       "requiresCors": true,
@@ -1790,9 +1786,7 @@
         "45.76.52.241",
         "108.61.247.61"
       ],
-      "supportedTPSLTriggerTypes": [
-        "mark_price"
-      ],
+      "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
       "stopOrderPendingUpdateDelay": 4000,
       "requiresCors": true,

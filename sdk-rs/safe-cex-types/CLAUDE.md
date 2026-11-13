@@ -88,6 +88,15 @@ and excludes the retired SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Rost
 changes must update this independent fixture and the strict native enum, not
 replace equality checks with floors.
 
+`get_exchange_metadata_with_options` mirrors the live Bitget account-mode and
+TP/SL-path resolution through `ExchangeMetadataOptions`; the existing boolean
+`get_exchange_metadata` entrypoint keeps its Bybit unified-account behavior and
+conservative Bitget entry defaults. Static Bitget metadata offers no trigger
+selector. Supported UTA entries and position protection offer Last/Mark with
+explicit Mark defaults, while inverse UTA remains unavailable. The native
+metadata target compares all fields against 96 live TypeScript context cases;
+regenerate the static snapshot with `corepack yarn rust:metadata`, never by hand.
+
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the
 source's numeric count, not an integer restriction. Optional numbers/venue ID/

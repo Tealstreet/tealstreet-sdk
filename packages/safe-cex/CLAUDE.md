@@ -214,6 +214,14 @@ records. See `docs/plans/callers/delegated-action-frames.md` and the shared
 
 ## Mirror CI invariants (don't "clean these up")
 
+Bitget TP/SL metadata is account/path-specific through `getExchangeMetadata`:
+`bitgetAccountMode: 'classic' | 'uta'` and `tpslOrderPath: 'entry' | 'position'`.
+Classic/unknown entries offer no selector while their preset default is
+UNPROVEN; supported UTA entries and position TP/SL offer Last and Mark. Inverse
+UTA has no native route and offers no selections. The conservative
+static list is empty for Bitget and both siblings. Web consumers must adopt the
+path-aware call; see `docs/plans/callers/bitget-tpsl-trigger-types.md`.
+
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean
 sliced install with **no dependency hoisting and no leaked DOM lib** (see
 `mirrors/README.md`). Two things look removable but are load-bearing:
