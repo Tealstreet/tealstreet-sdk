@@ -7,11 +7,11 @@ import test from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { createHmac } from 'node:crypto';
 import { expectedGateCases, validateGateCoverage } from './ci-gate-suites.mjs';
-import { venueOf } from './venues.mjs';
+import { replayVenueOf } from './venues.mjs';
 import { spotReplayRecords, SPOT_SOCKET, SPOT_PRIVATE_SOCKET } from './bingxspot-fixtures.mjs';
 
 test('Spot uses the independent Spot oracle, with no perpetual adapter fallback', () => {
-  const spot = venueOf('bingxspot');
+  const spot = replayVenueOf('bingxspot');
   assert.equal(spot.rust, 'bingxspot');
   assert.equal(spot.ts.className, 'BingxSpotReplayExchange');
   assert.equal(spot.rustFixture, 'bingxSpotReplayFixture');
@@ -42,7 +42,7 @@ test('fixture build flag is opt-in and refuses unrelated families', t => {
 });
 
 test('Spot signing validation rejects perpetual routes, mutated economics and missing auth', () => {
-  const spot = venueOf('bingxspot');
+  const spot = replayVenueOf('bingxspot');
   const params = { quantity: 0.002, side: 'SELL', symbol: 'BTC-USDT', timestamp: Date.now(), type: 'MARKET' };
   const canonical = Object.entries(params).sort(([a], [b]) => a < b ? -1 : 1)
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
@@ -57,7 +57,7 @@ test('Spot signing validation rejects perpetual routes, mutated economics and mi
 });
 
 test('Spot protocol audit requires actual ticker/book and explicit private subscriptions', () => {
-  const audit = venueOf('bingxspot').createSocketAudit('rust', { isPrivate: true, books: ['BTCUSDT'] });
+  const audit = replayVenueOf('bingxspot').createSocketAudit('rust', { isPrivate: true, books: ['BTCUSDT'] });
   const send = (url, dataType) => audit.sent(url, JSON.stringify({ reqType: 'sub', dataType, id: 'fixture' }));
   send(SPOT_SOCKET, 'BTC-USDT@ticker');
   send(SPOT_SOCKET, 'BTC-USDT@depth50');

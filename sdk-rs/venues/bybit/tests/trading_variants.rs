@@ -1632,7 +1632,7 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     let create = h.take("/v5/order/create");
     let id = link(&create);
     let original = body(&create).to_owned();
-    assert!(original.contains("\"triggerDirection\":\"1\""));
+    assert!(original.contains("\"triggerDirection\":1"));
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
@@ -6047,6 +6047,86 @@ fn engine_ambiguity_429_clock_code_cannot_replay() {
         assert!(!h.notices.iter().any(
             |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
         ));
+    }
+}
+
+#[test]
+fn hyro_v1_conditional_trigger_direction_is_numeric_and_writes_are_strict_json() {
+    for (side, expected) in [(OrderSide::Buy, 1), (OrderSide::Sell, 2)] {
+        let mut h = ready(Variant::Hyrotrader);
+        let mut opts = order("BTCUSDT", 0.1);
+        opts.kind = OrderType::Conditional;
+        opts.side = side;
+        opts.trigger_price = Some(if expected == 1 { 70000. } else { 60000. });
+        place(&mut h, 990, vec![opts]);
+        let request = h.take("/v5/order/create");
+        assert_eq!(
+            Harness::header(&request, "Content-Type").as_deref(),
+            Some("application/json")
+        );
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(payload["triggerDirection"].as_i64(), Some(expected));
+    }
+}
+
+#[test]
+fn hyro_v1_already_gone_chase_cancel_is_satisfied_without_resending() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 991, vec![order("BTCUSDT", 0.1)]);
+    created(&mut h, "chase-gone");
+    h.command(Command::CancelOrders {
+        command: 992,
+        ids: vec!["chase-gone".into()],
+    });
+    let request = h.take("/v5/order/cancel");
+    assert_eq!(
+        Harness::header(&request, "Content-Type").as_deref(),
+        Some("application/json")
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110001,"retMsg":"already filled"}"#,
+    );
+    assert!(h.result(992).expect("cancel completes").is_ok());
+    assert!(!h.unknown.contains(&992));
+    assert!(!h.has_request("/v5/order/cancel"));
+    answer_reconcile(&mut h);
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+#[test]
+fn hyro_v1_unsupported_modes_are_typed_and_send_nothing() {
+    use safe_cex_engine::{Action, ErrorKind, Notice, Outcome};
+    for command in [
+        Command::SetMarginType {
+            command: 993,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+        Command::SetPositionMode {
+            command: 993,
+            hedged: true,
+            symbol: None,
+        },
+    ] {
+        let mut h = ready(Variant::Hyrotrader);
+        h.engine.handle_command(h.now, command, None).unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 993,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("typed refusal");
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(error.message.contains("only"));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
 }
 

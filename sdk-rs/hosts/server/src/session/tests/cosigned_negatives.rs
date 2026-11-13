@@ -134,6 +134,21 @@ struct Resident {
     _sent: crate::out::Receiver,
 }
 
+#[tokio::test]
+async fn cosigned_rpc_expiry_completion_preserves_request_and_registration() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let mut resident = Resident::start(&f, &mut device).await;
+    assert_rpc_expiry_completion(
+        &f,
+        resident.session.as_mut().unwrap(),
+        &mut resident._sent,
+        Some("resident"),
+    )
+    .await;
+    resident.untouched(&f);
+}
+
 impl Resident {
     async fn start(f: &Fixture, device: &mut Device) -> Self {
         let (mut session, mut sent) = candidate(f, "alice");
@@ -223,6 +238,15 @@ fn refused(f: &Fixture, session: &Session, sent: &mut crate::out::Receiver, id: 
         || raw.clone(),
         |id| envelope::with_instance_id(raw.clone(), id),
     );
+    unattached_after_refusal(f, session, sent, expected);
+}
+
+fn unattached_after_refusal(
+    f: &Fixture,
+    session: &Session,
+    sent: &mut crate::out::Receiver,
+    expected: String,
+) {
     assert_eq!(sent.try_recv().unwrap(), expected);
     assert!(sent.try_recv().is_err());
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
@@ -529,7 +553,12 @@ async fn shared_admission_rechecks_token_before_attachment() {
     .await;
     session.identity.token = Some(("synthetic-expired".into(), 0));
     session.verification_completed(result).await.unwrap();
-    refused(&f, &session, &mut sent, None);
+    unattached_after_refusal(
+        &f,
+        &session,
+        &mut sent,
+        envelope::error(Some("acct"), crate::auth::TOKEN_EXPIRED),
+    );
     resident.untouched(&f);
     session.close();
 }
@@ -645,7 +674,10 @@ async fn shared_admission_rechecks_token_on_a_matching_init() {
     session.identity.token = Some(("synthetic-expired".into(), 0));
     session.init(init(Some("elapsed"))).await.unwrap();
     assert!(session.pending_verifications.is_empty());
-    let expected = envelope::with_instance_id(envelope::init_unverified("acct", false), "elapsed");
+    let expected = envelope::with_instance_id(
+        envelope::error(Some("acct"), crate::auth::TOKEN_EXPIRED),
+        "elapsed",
+    );
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let text = resident
@@ -657,7 +689,7 @@ async fn shared_admission_rechecks_token_on_a_matching_init() {
                 break;
             }
             // The resident's private startup may still publish after the earlier drain.
-            // An expired re-init must not produce any new-registration output.
+            // Other resident output keeps the admitted registration.
             let frame: Value = serde_json::from_str(&text).unwrap();
             assert_eq!(frame["d"]["accountName"], "acct");
             assert_eq!(frame["d"]["instanceId"], "resident");
@@ -665,6 +697,11 @@ async fn shared_admission_rechecks_token_on_a_matching_init() {
     })
     .await
     .expect("expired matching init emits its exact refusal");
+    assert!(
+        resident.session.as_ref().unwrap().joined["acct"]
+            .out
+            .order_binding(Some("resident"))
+    );
     resident.untouched(&f);
 }
 

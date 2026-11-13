@@ -6,6 +6,10 @@ export type ExchangeAccountConfig = {
     testnet?: boolean;
     apiKey: string;
     apiSecret: string;
+    /**
+     * Account-worker mode; absent keeps existing signing selection.
+     */
+    signingMode?: "local" | "cosigned" | "delegated";
     passphrase?: string;
     secondary_apiKey?: string;
     secondary_apiSecret?: string;
