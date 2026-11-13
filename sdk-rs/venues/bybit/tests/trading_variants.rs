@@ -6724,6 +6724,8 @@ fn applied_cancel_batch_keeps_native_target_rows_and_stops_later_chunks() {
                 .collect(),
         });
         let request = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["request"].as_array().unwrap().len(), 10);
         let rows: Vec<_> = (0..10)
             .map(|index| serde_json::json!({"orderId":format!("batch-cancel-{index}")}))
             .collect();
@@ -6744,8 +6746,8 @@ fn applied_cancel_batch_keeps_native_target_rows_and_stops_later_chunks() {
         let partial = applied_failure(&h, 155)
             .partial
             .as_ref()
-            .expect("native batch counts");
-        assert_eq!(partial.total, Some(10));
+            .expect("whole caller cancellation counts");
+        assert_eq!(partial.total, Some(12));
         assert_eq!(partial.failed_index, Some(1));
         assert_eq!(
             applied_failure(&h, 155).venue_code.as_deref(),
