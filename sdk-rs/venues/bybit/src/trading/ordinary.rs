@@ -605,17 +605,25 @@ impl BybitLinear {
             )
         }
         .ok()?;
-        let cancellations = Cancellations::new(
-            &entry.command,
-            &legs
-                .iter()
-                .flat_map(|leg| match &leg.planned.call {
-                    Call::Cancel { ids } => ids.as_slice(),
-                    _ => &[],
-                })
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-        );
+        // Mixed cancel/amend commands need every effect in the shared write journal.
+        let cancellations = if legs
+            .iter()
+            .all(|leg| matches!(leg.planned.call, Call::Cancel { .. }))
+        {
+            Cancellations::new(
+                &entry.command,
+                &legs
+                    .iter()
+                    .flat_map(|leg| match &leg.planned.call {
+                        Call::Cancel { ids } => ids.as_slice(),
+                        _ => &[],
+                    })
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
         if let Some(report) = &cancellations {
             report.retain(cx, &plan);
         }
