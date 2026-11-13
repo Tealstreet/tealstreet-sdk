@@ -222,6 +222,7 @@ pub struct Message<'a> {
     pub data_type: Str<'a>,
     pub data: Option<&'a serde_json::value::RawValue>,
     pub tickers: Option<Vec<LiveTicker<'a>>>,
+    pub depth: Option<Depth>,
     pub ping: Option<serde::de::IgnoredAny>,
     pub pong: Option<serde::de::IgnoredAny>,
 }
@@ -234,6 +235,7 @@ impl<'a> Message<'a> {
                 data_type: message.data_type,
                 data: message.data,
                 tickers: None,
+                depth: None,
                 ping: message.ping,
                 pong: message.pong,
             })
@@ -270,6 +272,7 @@ impl<'de> Deserialize<'de> for Message<'de> {
                     data_type: Cow::Borrowed(""),
                     data: None,
                     tickers: None,
+                    depth: None,
                     ping: None,
                     pong: None,
                 };
@@ -295,6 +298,12 @@ impl<'de> Deserialize<'de> for Message<'de> {
                                 .next_value::<Option<Contracts<'de>>>()?
                                 .map(|data| data.0);
                         }
+                        MessageField::Data
+                            if message.data_type.starts_with("market.depth.")
+                                && message.data_type.ends_with(".step0.level100") =>
+                        {
+                            message.depth = map.next_value()?;
+                        }
                         MessageField::Data => message.data = map.next_value()?,
                         MessageField::Ping => message.ping = map.next_value()?,
                         MessageField::Pong => message.pong = map.next_value()?,
@@ -313,6 +322,31 @@ impl<'de> Deserialize<'de> for Message<'de> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn depth_is_decoded_during_the_first_envelope_pass() {
+        let frame = r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[{"price":"91","volume":2}],"asks":[{"price":92,"volume":"3"}]}}"#;
+        let message = Message::decode(frame).unwrap();
+        assert!(
+            message.data.is_none(),
+            "valid depth must not be scanned as raw JSON and parsed a second time"
+        );
+        let depth = message.depth.unwrap();
+        assert_eq!((depth.bids[0].price, depth.bids[0].volume), (91., 2.));
+        assert_eq!((depth.asks[0].price, depth.asks[0].volume), (92., 3.));
+    }
+
+    #[test]
+    fn reordered_and_malformed_depth_keep_the_raw_fallback() {
+        for frame in [
+            r#"{"data":{"bids":[{"price":"91","volume":2}],"asks":[]},"dataType":"market.depth.BTC-USDT.step0.level100"}"#,
+            r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[{"price":"91","volume":2}],"asks":[{"price":true,"volume":3}]}}"#,
+        ] {
+            let message = Message::decode(frame).unwrap();
+            assert!(message.data.is_some());
+            assert!(message.depth.is_none());
+        }
+    }
+
     #[test]
     fn ticker_rows_are_decoded_during_the_first_envelope_pass() {
         let row =
