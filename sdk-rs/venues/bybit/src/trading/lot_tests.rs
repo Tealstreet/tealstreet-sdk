@@ -66,9 +66,11 @@ fn check_lots(variant: Variant, single: bool) {
                     opts.stop_loss = stop_loss;
                     let lots = venue.format_lots(cx, &opts).unwrap();
                     assert_eq!(lots.len(), if variant.is_spot() { 4 } else { 3 });
+                    let mut sum = 0.0;
                     for (index, lot) in lots.into_iter().enumerate() {
                         let body = if single { lot.single } else { lot.item }.finish();
                         let sent: CreateLot = serde_json::from_str(&body).unwrap();
+                        sum += sent.qty.parse::<f64>().unwrap();
                         assert_eq!(
                             sent.qty,
                             if variant.is_spot() || index == 2 {
@@ -103,6 +105,8 @@ fn check_lots(variant: Variant, single: bool) {
                                 .then_some("Market")
                         );
                     }
+                    // KNOWN-ISSUE: legacy TS under-allocates (sum 4 of requested 5); kept for exact TS parity per Sam's decision
+                    assert_eq!(sum, if variant.is_spot() { 4.0 } else { 5.0 });
                 },
             );
             seeded_engine(probe).start(1000.);

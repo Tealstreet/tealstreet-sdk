@@ -295,6 +295,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).
   blofin: 2_080_768,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
+  // #3372 merge keeps max(PR 2,295,808, master 2,326,528); prior run 42484598496 measured 2,285,327 B.
+  // #3372 restage at merge 41d4292d6f3: build.sh --venue bybit, pinned Binaryen132, web/node 2,323,991 B.
+  // Current measured size + 10 KiB, rounded up to KiB; both parent provenance blocks retained.
+  // #3372 head 5858609a705: CI run 43052995465, job 130635861554, artifact 13869852410.
+  // CI merge cc0145a0f0ba (base d956d25f8b48): optimized web/node/replay each 2,331,744 B.
+  // Current CI size + 10 KiB, rounded up to KiB; historical provenance and tests retained.
   // #3397 run 42571903722 attempt 2, job 129025076016: 2,316,667 B + 10 KiB rounded up.
   // #3397 merge fcee82e27df: local optimized web/node 2,329,775 B.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue bybit.
@@ -305,6 +311,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125392, CI source cca7b8337ad3:
   // web/Node 2,330,713 B; current measured maximum + 10 KiB, rounded up.
   // Nullable valuation plus inverse quote-capacity refusals remain in this family.
+  // #3372 head 48cb0d34c168: CI run 43328678379/job 131568212209, artifact 13995125309.
+  // CI merge cff6adaa9fc1 (base 908bedbe6f1a): optimized web/Node/replay 2,338,561 B.
+  // Current CI size + 10 KiB, rounded up; historical provenance/tests retained.
+  // #3372 reduced head 5429d69bb2c3: run 43341438240/job 131611062815, artifact 14000097059.
+  // CI merge fc362e3e5ebd: web/Node/replay 2,338,212 B; the same cap retains 10,844 B.
   // #3472 source f6a275af12092d378f8812f5260b4a3a07b7b0ee: fresh optimized web/node 2,332,186 B.
   // build.sh --venue bybit; Rust1.99, bindgen0.2.129, Binaryen132 twice-Oz.
   // SHA256 2f99b9639875bdb29dfde985745ca9f91b1e3903dcbd3b9052e2a788548d6db2.
@@ -321,6 +332,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3317 merge 688531f4bfcb + master 159102c8a9a7: optimized local web/Node 2,479,523 B.
   // build.sh --venue bybit; Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
   // Fresh minimum is 2,490,368 B; retain the recorded CI floor of 2,492,416 B.
+  // #3372 merged head 41026bb9ab40: run 43381322258, artifact 14016926715.
+  // CI source 15801feeeb97 has the same tree; all web/Node/replay copies measure 2,338,820 B.
+  // SHA-256 106ff1f90f5866c2d654e8534b2eceba9f0be73e9b525e3b729614f1ea54079c.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required -Oz build.
+  // Current measured bytes + 10 KiB, rounded up: 11,260 B reserve; prior provenance retained.
   bybit: 2_492_416,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
@@ -429,6 +445,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Verified web/Node 2,462,504 B; measured + 10 KiB rounded up; shared aliases equal.
   // #3317 run 43321890002/job 131545235949, artifact 13991900630; CI source e969a3bf1c92.
   // Web/Node 2,463,737 B; current measured maximum + 10 KiB, rounded up to KiB.
+  // #3372 head 5f32a22a8c6c: CI run 43303561061/job 131481481601, artifact 13983990723.
+  // CI merge c75a34b4bd34 (base dda0e1868f38): optimized web/Node 2,463,988 B.
+  // Current measured size + 10 KiB, rounded up; historical provenance/tests retained.
+  // That pre-reduction 2,475,008-byte cap is superseded: passive Plan element reports
+  // now link only for their Bybit adopter, removing 1,484 B from KuCoin Spot.
+  // Head 5429d69bb2c3: run 43341438240/job 131611062986, artifact 13999827413.
+  // CI merge fc362e3e5ebd (base 80a802868f09): web/Node/replay each 2,462,504 B.
+  // Current measured size + 10 KiB, rounded up: 10,456 B reserve, matching master.
+  // Master integration retains its larger 2,475,008 B parent floor; reduction history above remains historical.
   kucoinspot: 2_475_008,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
