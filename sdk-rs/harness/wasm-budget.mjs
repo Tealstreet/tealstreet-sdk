@@ -230,7 +230,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/node measured 2,078,907 B; CI plus 10 KiB rounded up to KiB.
   // #3300 merge c4d663622c01: local optimized web/node 2,092,748 B; measured + 10 KiB rounded up.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue apexomni, twice -Oz.
-  apexomni: 2_103_296,
+  // #3302 run 43517974996, source 0375249bc56e, artifact 14081617722: web/Node/replay 2,093,078 B.
+  // Pinned Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; measured + 10 KiB rounded up.
+  // Retain historical floors and cap+1 refusal; the former cap missed the reserve by 22 B.
+  apexomni: 2_104_320,
   // #3448 merged head 9b737161757f: CI run 43061512265, artifact 13873588589.
   // Optimized web/node 2,197,821 B + 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,187,368 B + 10 KiB, rounded up.

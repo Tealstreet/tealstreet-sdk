@@ -2873,3 +2873,14 @@ test('#3302 J6 identity master merge keeps the measured AsterDEX reserve', () =>
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
+
+test('#3302 run 43517974996 retains merged-head ApeX reserve and exact boundaries', () => {
+  const measured = 2_093_078;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.apexomni;
+  assert.equal(minimumCap, 2_104_320);
+  assert.ok(cap >= minimumCap, `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'apexomni'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
+});
