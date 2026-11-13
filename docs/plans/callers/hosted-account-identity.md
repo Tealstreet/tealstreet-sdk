@@ -52,8 +52,10 @@ token deadline and lease generation also fence deferred actor publication.
 
 Sibling products share the venue family namespace: Bybit, Binance, OKX, Bitget,
 KuCoin, Hyperliquid, BingX and Coinbase variants each use their family. Mainnet,
-testnet and demo namespaces are separate. OKX EU, Bybit regional sites and the
-Lighter Robinhood deployment remain separate namespaces.
+testnet and demo namespaces follow the native venue routing. Bybit demo with
+`testnet: true` uses ordinary Bybit testnet. OKX testnet and demo aliases share
+the simulated-trading namespace. OKX EU, Bybit regional sites and the Lighter
+Robinhood deployment remain separate namespaces.
 
 The identity is an unsalted, domain-separated SHA-256 digest of length-delimited
 user, scope and canonical public key ID. Existing Bybit identities keep their
@@ -95,6 +97,10 @@ resolution is pending. A signing responder that uses `keyId` must compare the
 canonical public credential within the current user and venue/network scope;
 it must not select a secret across accounts merely because a label matches.
 The same metadata requirement applies to an explicit settings request.
+
+Native TWAP state must retain its identity `ownerId` when an account label changes.
+A legacy record without that owner cannot be attributed from its label and is
+refused by the existing owner fence; hosts must not automatically replay it.
 
 Order submit, acknowledgement, outcome and receipt formats are unchanged.
 An unknown write outcome is never re-sent by this work. Identity or metadata

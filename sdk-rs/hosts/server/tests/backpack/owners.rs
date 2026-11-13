@@ -84,6 +84,7 @@ fn owned(registry: &Registry, user: &str, client: u32) -> Result<Owned> {
     // Keep the registry's test account shell, with the real signed native actor.
     slot.handle.dispose();
     slot.handle = handle;
+    testing::bind_identity(&mut account, &init);
     testing::register(registry, &account);
     Ok(Owned {
         account,
