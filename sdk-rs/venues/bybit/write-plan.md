@@ -5,6 +5,10 @@ whole-command price, precision or minimum-notional gate. Existing capability,
 caller-ID and option preflight checks remain, alongside existing price formatting
 and engine-owned custody, signing and physical classification.
 
+Position-mode changes use the single linear/USDT request from both TS adapters,
+discarding the requested symbol (`bybitinverse.exchange.ts:2318–2335`). Success
+and refusal have no per-coin continuation.
+
 Perpetual lot quantities follow `reference/bybit/bybit.exchange.ts:2718–2731`:
 emit `ceil(amount / max)` equal rounded lots, then the rounded remainder. This
 preserves TS rounding even when the emitted total differs from the requested

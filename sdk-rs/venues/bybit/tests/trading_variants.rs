@@ -7055,7 +7055,7 @@ fn inverse_create_keeps_legacy_integer_clamp_before_allocation() {
 }
 
 #[test]
-fn inverse_position_mode_paces_its_coins() {
+fn inverse_position_mode_legacy_success_has_no_second_coin() {
     let mut h = ready(Variant::Inverse);
     let mut second = h.engine.store().markets()[0].clone();
     second.base = "ZZZ".into();
@@ -7069,22 +7069,30 @@ fn inverse_position_mode_paces_its_coins() {
         hedged: true,
         symbol: None,
     });
-    h.respond(
-        "/v5/position/switch-mode",
-        200,
-        r#"{"retCode":0,"result":{}}"#,
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
     );
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
     assert!(
         !h.has_request("/v5/position/switch-mode"),
         "{:?}",
         h.paths()
     );
     h.advance(250.0);
-    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
 }
 
 #[test]
-fn inverse_position_mode_switches_a_named_symbol_alone() {
+fn inverse_position_mode_legacy_discards_a_named_symbol() {
     let mut h = ready(Variant::Inverse);
     h.command(Command::SetPositionMode {
         command: 1,
@@ -7094,14 +7102,14 @@ fn inverse_position_mode_switches_a_named_symbol_alone() {
     let request = h.take("/v5/position/switch-mode");
     assert_eq!(
         body(&request),
-        r#"{"category":"inverse","symbol":"BTCUSD","mode":3}"#
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
     );
     h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
     assert_eq!(h.result(1), Some(&Ok("[]".into())));
 }
 
 #[test]
-fn inverse_position_mode_tries_every_coin_past_a_refusal() {
+fn inverse_position_mode_legacy_refusal_has_no_second_coin() {
     let mut h = ready(Variant::Inverse);
     let mut second = h.engine.store().markets()[0].clone();
     second.base = "ZZZ".into();
@@ -7116,11 +7124,25 @@ fn inverse_position_mode_tries_every_coin_past_a_refusal() {
         hedged: true,
         symbol: None,
     });
-    h.respond(
-        "/v5/position/switch-mode",
-        200,
-        r#"{"retCode":10001,"retMsg":"refused"}"#,
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
     );
+    h.reply(request.id, 200, r#"{"retCode":10001,"retMsg":"refused"}"#);
     h.advance(250.0);
-    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
+    assert!(
+        h.result(1)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("refused")
+    );
 }
