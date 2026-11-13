@@ -1358,7 +1358,21 @@ async fn exec_review_f2_keeps_factory_identity_across_legacy_and_overlapping_typ
             let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             if prior_legacy {
-                session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":"exec","data":{"command":"tasks","reqId":"legacy-before-typed","symbol":"BTCUSDT"}}}).to_string()).await.unwrap();
+                // Master intentionally refuses this legacy DELEGATED WS op.
+                // A refusal must not masquerade as a seeded native factory.
+                session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":"exec","data":{"command":"tasks","reqId":"legacy-ws-refused","symbol":"BTCUSDT"}}}).to_string()).await.unwrap();
+                let refused = exec_review_result(&mut sent, "legacy-ws-refused").await;
+                assert_eq!(refused["success"], false);
+                assert!(refused["error"].as_str().unwrap().contains("DelegatedActionUnavailable"));
+                assert!(tape.writes.lock().unwrap().is_empty());
+                // Exercise the resident factory's actual legacy entry (used by
+                // COSIGNED/native callers), without reopening the refused WS API.
+                account.algos.as_ref().unwrap().send(crate::algos::AlgoInput::Op {
+                    op: "exec".into(),
+                    data: json!({"command":"tasks","reqId":"legacy-before-typed","symbol":"BTCUSDT"}).to_string(),
+                    origin: "native-legacy-identity-control".into(),
+                    action: None,
+                }).unwrap();
                 let seed = exec_review_result(&mut sent, "legacy-before-typed").await;
                 assert_eq!(seed["success"], true, "native legacy factory seed never ran: {seed}");
             } else {
