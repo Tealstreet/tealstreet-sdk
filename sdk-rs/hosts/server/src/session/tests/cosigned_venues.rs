@@ -19,6 +19,7 @@ enum Answer {
 struct Device {
     prior: HashMap<String, String>,
     replayed: usize,
+    other_key: bool,
 }
 impl Device {
     async fn answer(&mut self, venue: &str, session: &mut Session, frame: Value, mode: Answer) {
@@ -26,13 +27,19 @@ impl Device {
         let preimage = request["wsAuth"]["toSign"].as_str().unwrap();
         let socket_auth =
             preimage.contains("/users/self/verify") || preimage.contains("/user/verify");
-        let material = if !socket_auth && matches!(mode, Answer::OtherKey) {
+        let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
+        let signing_key = if self.other_key {
+            "synthetic-other-key"
+        } else {
+            KEY
+        };
+        let material = if use_other_key {
             "synthetic-other-material"
         } else {
             MATERIAL
         };
         let mut options = serde_json::from_value(
-            json!({"key":KEY,"secret":material,"passphrase":"synthetic-passphrase"}),
+            json!({"key":signing_key,"secret":material,"passphrase":"synthetic-passphrase"}),
         )
         .unwrap();
         let (provider, identities) =
@@ -115,7 +122,11 @@ async fn proof(
     answer: Answer,
 ) {
     let mut done = session.take_verified();
-    session.init(payload(venue)).await.unwrap();
+    let mut init = payload(venue);
+    if device.other_key {
+        init.key = "synthetic-other-key".into();
+    }
+    session.init(init).await.unwrap();
     assert!(
         session.pending_verifications.contains_key("acct"),
         "{venue}: every fresh connection must prove its own key"
@@ -124,7 +135,7 @@ async fn proof(
     assert!(
         session
             .registry
-            .held("alice", "acct", session.socket)
+            .held(session.user(), "acct", session.socket)
             .is_none()
     );
     session
@@ -167,6 +178,23 @@ async fn venue_case(venue: &'static str) {
     );
     let (io, seen): (MockVenue, Arc<Mutex<Seen>>) = MockVenue::for_admission(venue);
     let registry = crate::accounts::testing::e2e_registry("alice", io);
+    // The other credential is valid under its own public key. It cannot prove KEY.
+    let (mut other, mut other_sent) = user_session(registry.clone(), "other-valid-key");
+    other.identity.resumable = false;
+    let mut other_device = Device {
+        other_key: true,
+        ..Default::default()
+    };
+    proof(
+        venue,
+        &mut other,
+        &mut other_sent,
+        &mut other_device,
+        Answer::Correct,
+    )
+    .await;
+    load(venue, &mut other, &mut other_sent, &mut other_device).await;
+    other.close();
     let (mut resident, mut output) = user_session(registry.clone(), "alice");
     resident.identity.resumable = false;
     let mut device = Device::default();
@@ -258,10 +286,15 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
         let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
             .map(|s| serde_json::from_str(&s).unwrap())
             .collect();
+        let expected_kind = if safe_cex_venues::supported(venue) {
+            "proof-unavailable"
+        } else {
+            "unsupported"
+        };
         assert!(
             frames
                 .iter()
-                .any(|f| f["d"]["data"][1]["kind"] == "proof-unavailable"
+                .any(|f| f["d"]["data"][1]["kind"] == expected_kind
                     && f["d"]["data"][1]["initRefused"] == true
                     && f["d"]["instanceId"] == "proof-registration"),
             "{venue}: {frames:?}"
@@ -309,4 +342,15 @@ async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
     assert!(a_done.try_recv().is_err());
     assert!(a_sent.try_recv().is_err());
     bob.close();
+}
+
+#[test]
+fn cosigned_kucoin_probe_setup_uses_the_existing_futures_origin() {
+    assert_eq!(
+        safe_cex_native::resolve::rest_base_url("kucoin", false).unwrap(),
+        "https://api-futures.kucoin.com"
+    );
+    assert!(safe_cex_native::resolve::rest_base_url("kucoin", true).is_err());
+    let link = safe_cex_remote_signer::SignerLink::new(1, Arc::new(|_| true));
+    assert!(crate::accounts::prepare(&payload("kucoin"), false, Some(link)).is_ok());
 }

@@ -72,10 +72,22 @@ impl VenueIo {
             "POST"
         };
         let suffix = r.body.as_deref().unwrap_or("");
-        let mac = |payload: String, encoding| {
-            hmac_sha256(SECRET.as_bytes(), payload.as_bytes(), encoding)
-        };
         let h = |name: &str| header(r, name).unwrap_or("");
+        let key = h(match self.venue {
+            "binance" => "X-MBX-APIKEY",
+            "okx" => "OK-ACCESS-KEY",
+            "bitget" | "blofin" => "ACCESS-KEY",
+            "kucoin" => "KC-API-KEY",
+            _ => unreachable!(),
+        });
+        let material = match key {
+            KEY => SECRET,
+            "synthetic-other-key" => "synthetic-other-material",
+            _ => return false,
+        };
+        let mac = |payload: String, encoding| {
+            hmac_sha256(material.as_bytes(), payload.as_bytes(), encoding)
+        };
         match self.venue {
             "binance" => {
                 let Some((_, query)) = r.url.split_once('?') else {
@@ -84,7 +96,7 @@ impl VenueIo {
                 let Some((payload, sig)) = query.rsplit_once("&signature=") else {
                     return false;
                 };
-                h("X-MBX-APIKEY") == KEY && sig == mac(payload.into(), Encoding::Hex)
+                h("X-MBX-APIKEY") == key && sig == mac(payload.into(), Encoding::Hex)
             }
             "okx" | "bitget" => {
                 let prefix = if self.venue == "okx" {
@@ -93,7 +105,7 @@ impl VenueIo {
                     "ACCESS-"
                 };
                 let sig = h(&(prefix.to_owned() + "SIGN"));
-                h(&(prefix.to_owned() + "KEY")) == KEY
+                h(&(prefix.to_owned() + "KEY")) == key
                     && h(&(prefix.to_owned() + "PASSPHRASE")) == PASS
                     && sig
                         == mac(
@@ -116,13 +128,13 @@ impl VenueIo {
                     ),
                     Encoding::Hex,
                 );
-                h("ACCESS-KEY") == KEY
+                h("ACCESS-KEY") == key
                     && h("ACCESS-PASSPHRASE") == PASS
                     && sig == safe_cex_crypto::encode(hex.as_bytes(), Encoding::Base64)
             }
             "kucoin" => {
                 let sig = h("KC-API-SIGN");
-                h("KC-API-KEY") == KEY
+                h("KC-API-KEY") == key
                     && sig
                         == mac(
                             format!("{}{method}{}{suffix}", h("KC-API-TIMESTAMP"), path(r)),
