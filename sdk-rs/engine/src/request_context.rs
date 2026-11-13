@@ -1490,6 +1490,7 @@ impl PreparedWriteSeal {
         self.failure.as_ref()
     }
 
+    #[cfg(feature = "plan-element-reports")]
     pub(crate) fn retain_missing_elements(
         &mut self,
         elements: Option<&crate::write_plan::ElementOutcomes>,
@@ -2060,7 +2061,7 @@ impl CommandWrites {
         Ok(error)
     }
 
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "plan-element-reports")]
     pub(crate) fn retain_failed_attempt_elements(
         &mut self,
         id: RequestId,

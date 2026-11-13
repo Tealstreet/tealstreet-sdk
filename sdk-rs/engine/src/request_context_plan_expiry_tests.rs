@@ -331,6 +331,7 @@ mod plan_expiry_cleanup {
         assert!(e.io.core.managed_http.is_empty());
     }
     #[test]
+    #[cfg(feature = "plan-element-reports")]
     fn idle_element_reports_require_the_current_issuer_generation_and_no_active_call() {
         use crate::write_plan::{Element, ElementResult, WritePlan};
         let (mut e, tokens) = setup(1, Phase::Released);
@@ -376,6 +377,32 @@ mod plan_expiry_cleanup {
     }
 
     #[test]
+    #[cfg(not(feature = "plan-element-reports"))]
+    fn plan_expiry_without_element_reports_keeps_the_engine_terminal_contract() {
+        let (mut e, tokens) = setup(1, Phase::Released);
+        e.venue.report_elements = true;
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
+        e.handle(20_000., Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let error = actions.iter().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        }).unwrap();
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert!(error.elements.is_none(), "non-adopters must not retain cleanup reports");
+        assert_eq!(e.venue.cleaned, [0]);
+        assert!(e.io.core.managed_http.is_empty());
+        assert!(actions.iter().all(|action| match action {
+            Action::Http(_) => false,
+            Action::ManagedHttp(action) => matches!(action.as_ref(), HttpAction::Cancel { .. }),
+            _ => true,
+        }), "expiry may cancel existing host work but cannot prepare or bind another request");
+        assert_eq!(tokens.len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "plan-element-reports")]
     fn plan_expiry_keeps_passive_cleanup_elements_without_reclassifying_timeout() {
         for phase in [Phase::Preparation, Phase::Released] {
             let (mut e, _) = setup(1, phase);

@@ -20,6 +20,7 @@ pub(super) struct State {
 
 struct Body {
     handle: Plan,
+    #[cfg(feature = "plan-element-reports")]
     idle_elements: Option<Box<crate::write_plan::ElementOutcomes>>,
     receipt_cap: Option<(u64, f64)>,
     policy: PlanPolicy,
@@ -212,11 +213,16 @@ impl ContextRegistry {
         let owner = self.owner_entry(plan.owner()).expect("live Plan owner");
         let mut reports = Vec::new();
         let (journal, legacy) = if let Some(writes) = owner.writes.as_ref() {
-            let mut prepared = writes.prepare_seal(error, note)?;
-            let body = self.plan_body(plan)?;
-            if body.entries.iter().all(|entry| entry.call.is_none()) {
-                prepared.retain_missing_elements(body.idle_elements.as_deref());
-            }
+            let prepared = writes.prepare_seal(error, note)?;
+            #[cfg(feature = "plan-element-reports")]
+            let prepared = {
+                let mut prepared = prepared;
+                let body = self.plan_body(plan)?;
+                if body.entries.iter().all(|entry| entry.call.is_none()) {
+                    prepared.retain_missing_elements(body.idle_elements.as_deref());
+                }
+                prepared
+            };
             if prepared.is_failure() {
                 for message in writes.reports() {
                     reports.try_reserve(1).map_err(|_| Error::Capacity)?;
@@ -808,6 +814,7 @@ impl crate::engine::CoreCx<'_> {
         });
         body.push(Body {
             handle: handle.clone(),
+            #[cfg(feature = "plan-element-reports")]
             idle_elements: None,
             receipt_cap,
             policy,
@@ -1722,6 +1729,7 @@ impl crate::engine::CoreCx<'_> {
                 self.io.core.http_delivery.as_ref(),
             )?;
             // Cleanup cannot seal early, but its passive report must survive the final seal.
+            #[cfg(feature = "plan-element-reports")]
             if let Some(elements) = error.elements {
                 let request = self
                     .io
@@ -2007,6 +2015,7 @@ impl ContextRegistry {
 impl<P> Cx<'_, P> {
     /// Retain passive outcomes for failures between calls under this exact live Plan.
     /// Active calls and existing terminal reports win; no execution authority changes.
+    #[cfg(feature = "plan-element-reports")]
     pub fn retain_idle_plan_elements(
         &mut self,
         plan: &Plan,
