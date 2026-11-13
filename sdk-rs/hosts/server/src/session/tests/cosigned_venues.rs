@@ -8,6 +8,57 @@ const READY: &[&str] = &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
 
+#[tokio::test]
+async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for delegated in [false, true] {
+                let registry = crate::accounts::tests::registry();
+                let (mut session, mut sent) = user_session(registry.clone(), "fixture");
+                let mut completed = session.take_verified();
+                let mut init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "hyperliquidspot".into(),
+                    key: KEY.into(),
+                    ..Default::default()
+                };
+                if delegated {
+                    init.signing_mode = Some("delegated".into());
+                    let offer = session
+                        .handovers
+                        .issue("acct", "hyperliquidspot", crate::accounts::now_ms())
+                        .unwrap();
+                    init.sealed = Some(crate::delegated::tests::seal(
+                        &offer,
+                        "hyperliquidspot",
+                        KEY,
+                        br#"{"key":"synthetic-key","secret":"synthetic-material"}"#,
+                    ));
+                }
+                // Admission schedules the proof without polling it. No private IO or
+                // account attachment is authorized merely by starting verification.
+                session.admission_init(init);
+                assert!(session.joined.is_empty());
+                assert_eq!(registry.account_count(), 0);
+                if delegated {
+                    assert!(session.pending_verifications.contains_key("acct"));
+                    assert!(sent.try_recv().is_err());
+                } else {
+                    assert!(session.pending_verifications.is_empty());
+                    assert_eq!(
+                        sent.try_recv().unwrap(),
+                        envelope::init_proof_unavailable("acct")
+                    );
+                }
+                session.close();
+                tokio::task::yield_now().await;
+                assert!(completed.try_recv().is_err());
+                assert_eq!(registry.account_count(), 0);
+            }
+        })
+        .await;
+}
+
 #[derive(Clone, Copy)]
 enum Answer {
     Correct,
