@@ -457,6 +457,8 @@ merely because its name is registered in Rust.
 log events, telemetry or retained diagnostic buffers receive them. It shares the
 HTTP diagnostic string policy; live command and market messages stay untouched.
 Its parity fixtures are pinned to the host diagnostic contract at `6fde9450cf`.
+Structured `ws-diagnostic` events use this same detached redaction boundary before
+emitter listeners and worker forwarding; live-result events retain their identity.
 
 `BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
 One throwing listener cannot starve later listeners for the same event; errors
@@ -2040,6 +2042,28 @@ REST routed through the HOW adapter appears as WS frames, not XHRs.
 The exchange emits `grafana-http-request` / `grafana-http-response` /
 `error` / `warning` events on `BaseExchange.emitter` — check your
 consuming app's CLAUDE.md for the capture playbook.
+
+Rust engine sockets also emit the opt-in `ws-diagnostic` event with a
+`WsDiagnosticEvent` object: `{ venue, channel, direction, message }`. Channels
+are public/private/business and directions are send/receive. This is generic
+across venues, including Hyro. The package exports `setWsDiagnosticsEnabled`,
+`isWsDiagnosticsEnabled` and the event type. The switch defaults off in each
+realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
+`ExchangeWorker` forwards `{ op: 'ws-diagnostic', data: [event] }`; consuming web
+controllers must handle that op and re-emit it before rendering Requests Log rows.
+
+Diagnostics run after socket I/O and validate both field names and values.
+Only closed protocol/status/error enums, bounded integers and success booleans
+survive. IDs, topics, scalar data, messages and other free-form strings become
+fixed placeholders, including nested/encoded echoes inside retained fields.
+Arrays retain at most 32 sanitized entries. Challenge/signature material,
+connection URLs/headers and binary contents are never included. Opaque,
+malformed, oversized and excessive-depth content is withheld. Heartbeats are
+omitted, output is capped and frames are sampled per socket. Disabling the
+switch drops queued entries too, even if it is re-enabled before their callbacks
+run. Queued socket diagnostics capture the cancellation generation and recheck
+it before each structured/legacy callback. Existing private grafana events remain
+available with the same sanitized frame text; do not display both as duplicate rows.
 
 ## Worker Position Refresh Bridge
 

@@ -85,6 +85,8 @@ export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 
 export { createEngineTransport, resolveEngineRoutingPlan } from './transport/engine';
 export type { EngineRoutingPlan } from './transport/engine';
+export { setWsDiagnosticsEnabled, isWsDiagnosticsEnabled } from './utils/wsDiagnostics';
+export type { WsDiagnosticEvent } from './transport/requestsLog';
 
 export { sealDelegatedHandover } from './delegatedHandover';
 export type { DelegatedHandoverInput, SealedDelegatedHandover } from './delegatedHandover';
