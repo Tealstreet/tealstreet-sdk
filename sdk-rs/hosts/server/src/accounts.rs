@@ -2490,6 +2490,30 @@ pub mod testing {
 
     use super::*;
 
+    pub fn identity_digest(user: &str, init: &InitPayload) -> Result<Option<String>, String> {
+        identity::digest(user, init)
+    }
+
+    /// Trusted public registration fixture; JSON must never create this evidence.
+    pub fn set_registered_lighter_key(init: &mut InitPayload, user: &str, public: &[u8]) {
+        let public = safe_cex_crypto::admission::PublicKey::new(
+            safe_cex_crypto::admission::Family::Schnorr,
+            public,
+        )
+        .unwrap();
+        init.lighter_registered_key = Some(
+            identity::RegisteredLighterKey::new(
+                user.into(),
+                identity::scope(init),
+                identity::decimal(init.application_id.as_deref(), i64::MAX as u64).unwrap(),
+                identity::decimal(init.api_key_index.as_deref(), 254).unwrap() as u8,
+                &public,
+                Arc::new(|| true),
+            )
+            .unwrap(),
+        );
+    }
+
     pub fn bind_identity(account: &mut Arc<Account>, init: &InitPayload) {
         let identity = identity::digest(&account.user, init).unwrap();
         Arc::get_mut(account)
