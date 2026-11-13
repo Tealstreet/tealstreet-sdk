@@ -58,6 +58,7 @@ passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
+Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
 layouts. Guarded handover strings move into the zeroizing native options for
