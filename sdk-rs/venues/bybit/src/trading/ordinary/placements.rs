@@ -3,7 +3,7 @@
 //! that may have been sent, by link, on both order axes.
 use super::{
     CALL_ATTEMPTS, CALL_TIMEOUT_MS, Decision, Gate, HyroCall, Leg, LegIntent, Ordinary, Request,
-    Run, Stage, call_bound, internal,
+    Run, Stage, call_bound, internal, unknown_outcome,
 };
 use crate::hyro::{self, Found, Intent, LookupAxis, LotState, MAX_SENDS, Phase};
 use crate::trading::{Call, Planned, not_sent};
@@ -672,7 +672,7 @@ impl BybitLinear {
         };
         // The journal keeps the transport text; each observer gets this report,
         // then its own terminal naming the link, with the journal's outcome.
-        let error = run.failure(hyro::unknown(&link, &error.message));
+        let error = run.failure(unknown_outcome(hyro::unknown(&link, &error.message)));
         for root in &call.observers {
             if let Owner::Command { id, .. } = root.owner() {
                 cx.command_error(id, error.message.clone());
