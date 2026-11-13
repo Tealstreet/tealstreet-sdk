@@ -2,7 +2,8 @@
 
 This opt-in protocol uses the existing authenticated account socket and the
 existing method translation, native completion and order audit. It places one
-Bybit order per submit. LOCAL and COSIGNED retain their existing call protocol.
+order per submit through the joined venue's existing native plan. LOCAL and
+COSIGNED retain their existing call protocol.
 The frozen frame fixture is
 `sdk-rs/hosts/server/tests/data/delegated-orders-v1.json`; synthetic router replies
 are in `sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json`.

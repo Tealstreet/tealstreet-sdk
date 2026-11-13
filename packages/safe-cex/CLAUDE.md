@@ -107,7 +107,7 @@ in the captured payload. Router queued-intent cancellation keeps its separate
 existing semantics. These admission helpers do not alter handoff, deadline,
 restore, evidence or replay rules below.
 
-`DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
+`DelegatedOutbox` is an opt-in host-neutral module for admitted DELEGATED single-order
 submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
 missing/false flags disable writes and receipts. Hosts inject scoped persistence,
