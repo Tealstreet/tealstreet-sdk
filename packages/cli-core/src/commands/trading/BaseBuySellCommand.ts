@@ -383,6 +383,10 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     let accepted = 0;
     for (const order of prepared) {
       try {
+        if (!order.reduceOnly) {
+          const blocked = this.healthGate(ctx);
+          if (blocked) throw new Error(blocked);
+        }
         ids.push(...((await placeOrder.call(exchange, order)) ?? []));
       } catch (error) {
         if (accepted === 0) throw error;

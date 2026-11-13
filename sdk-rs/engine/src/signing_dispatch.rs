@@ -906,12 +906,12 @@ pub(crate) fn wipe(action: &mut Action) {
         Action::Http(http) => wipe_http(http),
         // A Bind may carry the Session Bearer, the engine's one token copy, or
         // a release domain's held signed request.
-        #[cfg(any(feature = "session-bearer", feature = "release-domains"))]
-        Action::ManagedHttp(managed) => {
-            if let crate::request_context::HttpAction::Bind { request, .. } = &mut **managed {
-                wipe_http(request);
-            }
-        }
+        Action::ManagedHttp(managed) => match managed.as_mut() {
+            crate::request_context::HttpAction::Prepare { request, .. }
+            | crate::request_context::HttpAction::Bind { request, .. } => wipe_http(request),
+            _ => {}
+        },
+        Action::SignedOutbound { outbound, .. } => wipe(outbound),
         Action::WsSend { text, .. } => text.zeroize(),
         Action::WsConnect { url, headers, .. } => {
             url.zeroize();
