@@ -5,6 +5,8 @@
 // Shared with Hyro's adoption (hyro.rs).
 pub(crate) mod acknowledgement;
 pub(crate) mod codes;
+#[cfg(test)]
+mod lot_tests;
 pub(crate) mod ordinary;
 mod partial;
 
@@ -42,6 +44,9 @@ struct LocalWrite {
 /// What a response means for its job.
 enum Call {
     PlaceOne,
+    PlaceLot {
+        last: bool,
+    },
     /// Single-order bodies to place one by one if the venue refuses the
     /// whole batch (a refusal places nothing, so this cannot double-place).
     PlaceBatch {
@@ -225,6 +230,8 @@ struct Job {
     steps: VecDeque<Step>,
     /// Run every step even after a failure (independent orders of one batch).
     continue_on_error: bool,
+    /// A later caller's formatting refusal follows the already formatted prefix.
+    deferred_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -644,25 +651,40 @@ impl BybitLinear {
         self.position_idx(cx, symbol, side, true)
     }
 
-    fn full_position_opposite(&self, cx: &Cx<'_, Pending>, opts: &PlaceOrderOpts) -> bool {
+    fn full_position_opposite(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<bool, String> {
         let side = match opts.side {
             OrderSide::Buy => PositionSide::Short,
             OrderSide::Sell => PositionSide::Long,
         };
-        cx.store.positions().iter().any(|p| {
-            p.symbol == opts.symbol
-                && p.side == side
-                && p.contracts != 0.0
-                && if self.category_for(&opts.symbol) == Category::Inverse {
-                    p.notional
-                } else {
-                    p.contracts
-                } >= opts.amount
-        })
+        let mut full = false;
+        for p in cx
+            .store
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == opts.symbol && p.side == side && p.contracts != 0.0)
+        {
+            let size = if self.category_for(&opts.symbol) == Category::Inverse {
+                p.notional
+            } else {
+                p.contracts
+            };
+            if !size.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            full |= size >= opts.amount;
+        }
+        Ok(full)
     }
 
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
         self.check_ids(cx, orders)?;
+        if self.variant.is_spot() {
+            return self.plan_spot_place(cx, orders);
+        }
         let mut job = Job {
             continue_on_error: true,
             ..Job::default()
@@ -695,7 +717,7 @@ impl BybitLinear {
             if self.variant.is_spot() && opts.kind == OrderType::TrailingStopLoss {
                 return Err("Bybit spot has no trailing-position stops".into());
             }
-            if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts) {
+            if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts)? {
                 let body = self.position_stop(cx, opts)?;
                 job.steps.push_back(trading_stop_step(body));
             } else if opts.kind == OrderType::TrailingStopLoss {
@@ -762,8 +784,50 @@ impl BybitLinear {
         Ok(job)
     }
 
-    /// One order as create bodies, split into lots above the market's
-    /// maximum size; only the first lot carries the attached TP/SL.
+    fn plan_spot_place(
+        &self,
+        cx: &Cx<'_, Pending>,
+        orders: &[PlaceOrderOpts],
+    ) -> Result<Job, String> {
+        for opts in orders {
+            execution_params(opts, true, false)?;
+        }
+        let mut job = Job {
+            continue_on_error: true,
+            ..Job::default()
+        };
+        for opts in orders {
+            let formatted = if opts.kind == OrderType::TrailingStopLoss {
+                Err("Bybit spot has no trailing-position stops".into())
+            } else {
+                self.format_lots(cx, opts)
+            };
+            let lots = match formatted {
+                Ok(lots) => lots,
+                Err(error) if job.steps.is_empty() => return Err(error),
+                Err(error) => {
+                    job.deferred_error = Some(error);
+                    break;
+                }
+            };
+            let count = lots.len();
+            for (index, lot) in lots.into_iter().enumerate() {
+                job.steps.push_back(Step {
+                    delay_ms: 0.0,
+                    requests: vec![Planned {
+                        receipts: lot.receipts,
+                        path: "/v5/order/create",
+                        body: lot.single.finish(),
+                        call: Call::PlaceLot {
+                            last: index + 1 == count,
+                        },
+                    }],
+                });
+            }
+        }
+        Ok(job)
+    }
+
     pub(crate) fn hyro_stop(
         &self,
         cx: &Cx<'_, Pending>,
@@ -777,13 +841,15 @@ impl BybitLinear {
             return self.trailing_stop(cx, opts).map(Some);
         }
         if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit)
-            && self.full_position_opposite(cx, opts)
+            && self.full_position_opposite(cx, opts)?
         {
             return self.position_stop(cx, opts).map(Some);
         }
         Ok(None)
     }
 
+    /// Spot uses legacy equal main lots plus remainder, with brackets on the first
+    /// main lot and remainder. Derivative splitting retains its existing rules.
     pub(crate) fn format_lots(
         &self,
         cx: &Cx<'_, Pending>,
@@ -901,12 +967,53 @@ impl BybitLinear {
         if remaining / max > 1000.0 {
             return Err("Order exceeds the safe split bound".into());
         }
-        while max > 0.0 && remaining > max {
-            sizes.push(max);
-            remaining = num::adjust(remaining - max, p_amount);
+        let mut remainder_index = None;
+        if self.variant.is_spot() {
+            let count = if amount > max {
+                (amount / max).ceil()
+            } else {
+                1.0
+            };
+            let rest = if amount > max {
+                num::adjust(amount % max, p_amount)
+            } else {
+                0.0
+            };
+            let quantity = num::adjust((amount - rest) / count, p_amount);
+            let mut index = 0.0;
+            while index < count {
+                sizes.push(quantity);
+                index += 1.0;
+            }
+            if rest != 0.0 {
+                remainder_index = Some(sizes.len());
+                sizes.push(rest);
+            }
+        } else {
+            if remaining > max && num::adjust(max, p_amount) != max {
+                return Err("Market maximum quantity is not aligned to quantity precision".into());
+            }
+            while max > 0.0 && remaining > max {
+                sizes.push(max);
+                remaining = num::adjust(remaining - max, p_amount);
+            }
+            sizes.push(remaining);
+            if sizes.iter().any(|qty| *qty < market.limits.amount.min) {
+                return Err("Order split contains a lot below the market minimum".into());
+            }
+            if sizes.iter().any(|qty| {
+                !qty.is_finite() || *qty <= 0.0 || *qty > max || num::adjust(*qty, p_amount) != *qty
+            }) {
+                return Err(
+                    "Order split contains a lot outside the maximum quantity or precision".into(),
+                );
+            }
+            if num::adjust(sizes.iter().sum(), p_amount) != amount {
+                return Err("Order split quantities do not preserve the requested total".into());
+            }
         }
-        sizes.push(remaining);
-        let lot = |qty: f64, brackets: bool, category: bool| {
+        let lot = |qty: f64, first: bool, category: bool| {
+            let brackets = first;
             let mut body = Body::new();
             if category {
                 body = body.str("category", self.category_for(&opts.symbol).as_str());
@@ -926,9 +1033,14 @@ impl BybitLinear {
             } else {
                 body.bool("reduceOnly", reduce_only)
             };
+            let body = body.opt_str("triggerPrice", trigger_price.map(number).as_deref());
+            let body = match direction {
+                Some(direction) if self.variant.is_hyro() => {
+                    body.int("triggerDirection", if direction == "1" { 1 } else { 2 })
+                }
+                _ => body.opt_str("triggerDirection", direction),
+            };
             let body = body
-                .opt_str("triggerPrice", trigger_price.map(number).as_deref())
-                .opt_str("triggerDirection", direction)
                 .opt_str(
                     "triggerBy",
                     (!self.variant.is_spot())
@@ -978,8 +1090,8 @@ impl BybitLinear {
                     })
                     .collect(),
                 category: self.category_for(&opts.symbol),
-                item: lot(qty, index == 0, false),
-                single: lot(qty, index == 0, true),
+                item: lot(qty, index == 0 || remainder_index == Some(index), false),
+                single: lot(qty, index == 0 || remainder_index == Some(index), true),
             })
             .collect())
     }

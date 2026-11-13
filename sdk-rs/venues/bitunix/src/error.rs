@@ -94,20 +94,32 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
                 Outcome::Rejected
             },
         );
-        // A released native rate response cannot prove that the write was refused.
-        // Keep this text in the classified fact as well as the terminal fallback.
-        if kind == ErrorKind::RateLimited {
-            error
-                .message
-                .push_str(". The outcome is unknown. Check Open Orders");
-            // A replacement can follow a refused native amend. Present the
-            // uncertainty instead of that stale refusal, without changing facts.
-            error.presents = true;
-        }
     }
     error
 }
 pub(crate) const NO_DATA: &str = "Bitunix response has no data";
+
+pub(crate) fn unproven_evidence(
+    response: Response<'_>,
+    evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+) {
+    #[derive(Deserialize)]
+    struct Metadata<'a> {
+        #[serde(default, borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+        #[serde(default, borrow, deserialize_with = "crate::wire::text")]
+        msg: Cow<'a, str>,
+    }
+    if let Ok(envelope) = serde_json::from_str::<Metadata<'_>>(response.body) {
+        if let Some(code) = envelope
+            .code
+            .and_then(|raw| serde_json::from_str::<Code>(raw.get()).ok())
+        {
+            evidence.venue_code(&code.0.to_string());
+        }
+        evidence.venue_message(&envelope.msg);
+    }
+}
 
 pub(crate) fn response_data<'a>(
     response: &Response<'a>,
@@ -245,11 +257,6 @@ mod tests {
                         assert_eq!(
                             error.message,
                             format!("verbatim. {}", safe_cex_engine::error::IP_WHITELIST_HINT)
-                        );
-                    } else if write && kind == ErrorKind::RateLimited {
-                        assert_eq!(
-                            error.message,
-                            "verbatim. The outcome is unknown. Check Open Orders"
                         );
                     } else {
                         assert_eq!(error.message, "verbatim");

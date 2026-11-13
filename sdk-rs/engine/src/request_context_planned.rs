@@ -838,6 +838,7 @@ impl crate::engine::CoreCx<'_> {
         let execution = match (moved, founder_root) {
             (Some((identity, _)), Some(root)) => {
                 let physical = CommandOwner {
+                    engine_unknown: None,
                     request_class: owner.request_class,
                     generation: identity,
                     phase: CommandPhase::Planned(State { body }),
@@ -2323,6 +2324,37 @@ impl<P> Cx<'_, P> {
             .as_mut()
             .ok_or(Error::State)?
             .present_failure(message.into())
+    }
+
+    /// Replace the projected venue text for a live Mutation Plan's failure
+    /// on any outcome, including definite `Rejected`/`NotSent`. Use this where
+    /// the venue path has already composed the correct user-facing message
+    /// (protective put-back after a cancel, batch-unknown summary, locally
+    /// re-presented reason) and the venue's raw text would be strictly less
+    /// informative. Only the message: outcome and protection stay projected.
+    /// The latest call replaces any earlier words.
+    pub fn override_plan_failure_message(
+        &mut self,
+        plan: &Plan,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .force_present_failure(message.into())
     }
 
     /// Retire the current unissued call of an independent complete Plan that

@@ -57,6 +57,7 @@ const BASE_URLS: Partial<Record<ExchangeName, string>> = {
   hyperliquidspot: 'https://api.hyperliquid.xyz',
   blofin: 'https://openapi.blofin.com',
   bingx: 'https://open-api.bingx.com',
+  bingxspot: 'https://open-api.bingx.com',
   lighter: 'https://mainnet.zklighter.elliot.ai',
   'lighter-robinhood': 'https://mainnet.zklighter.elliot.ai',
   paradex: 'https://api.prod.paradex.trade',

@@ -533,7 +533,7 @@
       "requiresApiKeyIndex": false,
       "enabled": false,
       "enabledInDev": true,
-      "enableInPreview": false,
+      "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
       "orderbookTickDelay": 60,
@@ -621,7 +621,7 @@
       "exchangeName": "hyrotrader",
       "supportsOptionsToggle": false,
       "supportsInverseToggle": false,
-      "latencyDomain": "hyrotrader-simulator",
+      "latencyDomain": "sim-tealstreet.hyro.site",
       "features": {
         "kline": true,
         "orderbook": true,
@@ -1559,9 +1559,7 @@
         "45.76.52.241",
         "108.61.247.61"
       ],
-      "supportedTPSLTriggerTypes": [
-        "mark_price"
-      ],
+      "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
       "stopOrderPendingUpdateDelay": 4000,
       "requiresCors": true,
@@ -1674,9 +1672,7 @@
         "45.76.52.241",
         "108.61.247.61"
       ],
-      "supportedTPSLTriggerTypes": [
-        "mark_price"
-      ],
+      "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
       "stopOrderPendingUpdateDelay": 4000,
       "requiresCors": true,
@@ -1790,9 +1786,7 @@
         "45.76.52.241",
         "108.61.247.61"
       ],
-      "supportedTPSLTriggerTypes": [
-        "mark_price"
-      ],
+      "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
       "stopOrderPendingUpdateDelay": 4000,
       "requiresCors": true,
@@ -2833,6 +2827,117 @@
         "orders": true,
         "positions": true,
         "balance": true
+      }
+    },
+    "bingxspot": {
+      "logo": "/static/exchanges/logos/BINGX/logo.svg",
+      "lightLogo": "/static/exchanges/logos/BINGX/light.png",
+      "darkLogo": "/static/exchanges/logos/BINGX/dark.png",
+      "refImage": "",
+      "requiresPassphrase": false,
+      "requiresApplicationId": false,
+      "requiresApiKeyIndex": false,
+      "enabled": false,
+      "enabledInDev": false,
+      "enableInPreview": false,
+      "supportedOnMobile": false,
+      "supportsTestnet": false,
+      "orderbookTickDelay": 60,
+      "prettyName": "BingX Spot",
+      "leverageMagnets": [
+        1,
+        10,
+        20,
+        50,
+        100,
+        125,
+        150
+      ],
+      "tvIntraDayMultipliers": [
+        "1",
+        "5",
+        "15",
+        "30",
+        "60",
+        "240"
+      ],
+      "tvMaxGetBarFetches": 2,
+      "candleApiCountLimit": 1440,
+      "defaultQuote": "USDT",
+      "positionModes": [
+        "oneway"
+      ],
+      "marginTypes": [
+        "isolated"
+      ],
+      "hasIndependentHedgedLeverageInIsolatedMargin": false,
+      "hasIndependentHedgedLeverageInCrossMargin": false,
+      "supportsTrailingStopLoss": false,
+      "supportsOpeningTriggerOrders": false,
+      "privateProxyIps": [
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
+      ],
+      "supportedTPSLTriggerTypes": [],
+      "orderPendingUpdateDelay": 250,
+      "stopOrderPendingUpdateDelay": 250,
+      "requiresCors": true,
+      "hasEmptyPositions": true,
+      "klineCallbackResetThreshold": 20,
+      "positionModeIsGlobal": false,
+      "marginTypeIsGlobal": false,
+      "requiresNoSecret": false,
+      "supportsVault": false,
+      "leverageIsGlobal": false,
+      "forbidCors": false,
+      "disconnectWarningThreshold": 20000,
+      "supportsFeeRates": false,
+      "marketOrderDelayInSeconds": 2,
+      "privateProxyRegions": {},
+      "autoDownSizeReduceOrders": false,
+      "reduceOrdersLockPositionSize": false,
+      "tickInterval": 2000,
+      "supportsChaser": false,
+      "supportsPositionMargin": false,
+      "supportsClosedPnLEndpoint": false,
+      "supportsPartialStops": false,
+      "supportsInfinityStops": false,
+      "supportsMaxCrossLeverage": false,
+      "supportsTunnel": true,
+      "supportsWsRoute": false,
+      "requiresOmniKeySeed": false,
+      "leverageSliderDisabled": true,
+      "supportsFetchSymbolMaxLeverage": false,
+      "unifiedMargin": true,
+      "supportsReadOnlyKey": false,
+      "alwaysCalculateUnrealizedPnlFromLastPrice": false,
+      "forceAccountPositionModeChangeOnExchangeItself": false,
+      "hideMarginTypeSelector": true,
+      "hidePositionModeSelector": true,
+      "hideLightweightChartsPopovers": false,
+      "supportsTPSLCloseAttribute": false,
+      "fetchLeverageOnMarginSymbolChange": false,
+      "enforceWsTunnel": true,
+      "doesNotSupportOpenInterest": true,
+      "supportsKlineSeconds": true,
+      "fetchOHLCVInWorker": false,
+      "supportsPublicOnly": false,
+      "exchangeName": "bingxspot",
+      "refLink": "https://teal.link/bingx20",
+      "latencyDomain": "open-api-ws.bingx.com",
+      "features": {
+        "kline": true,
+        "orderbook": true,
+        "orders": true,
+        "balance": true,
+        "positions": false
       }
     },
     "bitrue": {

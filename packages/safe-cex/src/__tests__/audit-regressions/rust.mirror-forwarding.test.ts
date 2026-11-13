@@ -63,6 +63,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   fetchPositionMode: 'worker',
   fetchStpMode: 'worker',
   fetchLeverageForSymbol: 'worker',
+  resolveLeverageContext: 'worker',
   fetchSymbolMaxLeverage: 'worker',
   fetchAccountTier: 'worker',
   fetchOrderBook: 'worker',
@@ -148,6 +149,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   refreshAccountSettings: 'worker',
   refreshAccountOrders: 'worker',
   ingestSourceFrame: 'mirror',
+  setWorkerOwner: 'mirror',
 };
 
 /** Each must reach the worker by name here (a swallowed local failure would otherwise pass). */
@@ -161,6 +163,7 @@ const FORWARDED_WHOLE = new Set<string>([
   'fetchStpMode',
   'changeStpMode',
   'fetchOrderBook',
+  'fetchClosedPnl',
   // Answer from rails when they can; this record makes them read the venue, through the worker.
   'fetchLeverageForSymbol',
   'fetchSymbolMaxLeverage',

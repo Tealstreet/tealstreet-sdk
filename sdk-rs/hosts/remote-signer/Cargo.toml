@@ -9,11 +9,16 @@ description = "Native Signer that forwards sign work to the client's device over
 safe-cex-engine.workspace = true
 base64.workspace = true
 getrandom.workspace = true
+serde.workspace = true
+bs58 = "0.5"
 serde_json.workspace = true
 sha2.workspace = true
 tokio = { version = "1.53.3", features = ["sync", "time"] }
 
 [dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
+safe-cex-crypto = { workspace = true, features = ["ed25519"] }
+safe-cex-venues = { workspace = true, features = ["orderly", "kucoin", "kucoinspot", "hosted-signing", "backpack"] }
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }
 
 [lints]

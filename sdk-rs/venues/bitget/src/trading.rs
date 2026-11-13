@@ -6,7 +6,11 @@ use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
 };
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::*;
+use safe_cex_engine::model::{
+    MarginType, Market, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide,
+    OrderStatus, OrderType, PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType,
+    TimeInForce,
+};
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     ConditionOwner, ConditionWait, Context, Credential, HttpOwnerRetirement, Operation, Plan,
@@ -21,11 +25,16 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[cfg(test)]
+#[path = "protective_quote_tests.rs"]
+mod protective_quote_tests;
+
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
 /// Native wait for Classic/UTA account detection (scoped engine condition wait).
 const DETECTION_MS: u32 = 10_000;
 const DETECTION: &str = "Bitget account detection did not complete";
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 /// Bitget's native write codes: 40009 earns the one fresh resend; 40010, 40725,
 /// 45001 and the system, upgrade, busy and timeout codes prove nothing; the read side's key refusals keep their auth kind
@@ -207,6 +216,8 @@ struct Job {
     fallback: Option<VecDeque<Planned>>,
     rollback: Option<Planned>,
     error: Option<VenueError>,
+    /// A Classic batch refusal TS continues past, retained for reporting.
+    batch_error: Option<VenueError>,
     ids: Vec<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
@@ -585,6 +596,14 @@ impl BitgetFutures {
             self.refuse_entry(cx, not_sent(error));
             return;
         }
+        if let Command::PlaceOrders { orders, .. } = &command {
+            for order in orders {
+                if let Err(error) = self.tpsl_trigger_selection(order) {
+                    self.refuse_entry(cx, not_sent(error).kind(ErrorKind::InvalidInput));
+                    return;
+                }
+            }
+        }
         // In-job reads sign with the static Read role; writes with Primary.
         let (read_credential, _) = self.read_selection(paths::ACCOUNT);
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
@@ -738,6 +757,7 @@ impl BitgetFutures {
             fallback: None,
             rollback: None,
             error: None,
+            batch_error: None,
             ids: vec![],
             effective: false,
             replaces_stop: None,
@@ -1055,6 +1075,30 @@ impl BitgetFutures {
             error = original;
             job.note = note;
         }
+        if error.outcome == Some(Outcome::Unknown)
+            && job.live.as_ref().is_some_and(|call| !call.read())
+        {
+            let request = job.live.as_ref().map_or_else(String::new, |call| {
+                serde_json::to_string(&call.payload).expect("native order payload")
+            });
+            // A prior refusal may supply the journal's projected message.
+            // Keep the uncertainty visible even when that refusal wins selection.
+            let unknown = format!("{UNKNOWN_TEXT}; unconfirmed request {request}");
+            job.note = Some(match job.note.take() {
+                Some(note) => format!("{note}; {unknown}"),
+                None => unknown,
+            });
+            cx.event(
+                Level::Warn,
+                "order.outcome_unknown",
+                UNKNOWN_TEXT,
+                vec![
+                    ("command", job.id.into()),
+                    ("placedCount", (job.ids.len() as f64).into()),
+                    ("unknownRequest", request.into()),
+                ],
+            );
+        }
         // The cancel landed and nothing replaced it: lead with what the user must act on.
         if job.effective
             && job.ids.is_empty()
@@ -1132,7 +1176,7 @@ impl BitgetFutures {
         mut job: Job,
         current: Option<(&Slot, &Context)>,
     ) {
-        if let Some(error) = job.error.take() {
+        if let Some(error) = job.error.take().or_else(|| job.batch_error.take()) {
             return self.end(cx, job, current, error);
         }
         let ids = serde_json::to_string(&job.ids).expect("order ids");
@@ -1799,11 +1843,37 @@ impl BitgetFutures {
         })
     }
 
+    fn tpsl_trigger_selection(&self, order: &PlaceOrderOpts) -> Result<(), String> {
+        let attached = order.take_profit.is_some() || order.stop_loss.is_some();
+        let selections = [
+            order.trigger_type,
+            order.tp_trigger_type,
+            order.sl_trigger_type,
+        ];
+        if (is_algo(order.kind) || attached)
+            && selections.contains(&Some(StopTriggerType::IndexPrice))
+        {
+            return Err("Bitget TP/SL trigger supports Last or Mark, not Index".into());
+        }
+        if attached
+            && !is_algo(order.kind)
+            && selections.iter().any(Option::is_some)
+            && !(self.account.detected && self.account.uta)
+        {
+            return Err("Bitget entry preset trigger selection requires a detected UTA account; Classic preset default is unproven, omit the selection or use position TP/SL".into());
+        }
+        Ok(())
+    }
+
     fn place_calls(
         &self,
         cx: &Cx<'_, Pending>,
         orders: &[PlaceOrderOpts],
     ) -> Result<Vec<Planned>, String> {
+        // Recheck the detected route after queued work or an account-mode change.
+        for order in orders {
+            self.tpsl_trigger_selection(order)?;
+        }
         let mut calls = vec![];
         let mut groups: Vec<(String, Vec<Payload>)> = vec![];
         for o in orders.iter().filter(|o| !is_algo(o.kind)) {
@@ -1830,7 +1900,7 @@ impl BitgetFutures {
             if max <= 0.0 {
                 return Err("Bitget maximum size is smaller than one lot".into());
             }
-            let mut left = total;
+            let max = if cap.is_finite() { cap } else { max };
             let count = (total / max).ceil() as usize;
             if o.client_order_id.is_some() && count > 1 {
                 return Err("Bitget caller clientOrderId would split across native orders".into());
@@ -1838,9 +1908,15 @@ impl BitgetFutures {
             if count > 10_000 {
                 return Err("Bitget order exceeds the split bound".into());
             }
-            while left > 0.0 {
-                let size = left.min(max);
-                left = num::adjust(left - size, m.precision.amount);
+            // TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2059-2073,2127-2141.
+            // Both routes repeat the rounded equal lot, then append its rounded remainder.
+            let rest = if total > max {
+                num::adjust(total % max, m.precision.amount)
+            } else {
+                0.0
+            };
+            let size = num::adjust((total - rest) / count as f64, m.precision.amount);
+            for size in std::iter::repeat_n(size, count).chain((rest != 0.0).then_some(rest)) {
                 let payload = self.normal_payload(cx, o, size)?;
                 if self.account.uta {
                     calls.push(Planned {
@@ -1944,8 +2020,12 @@ impl BitgetFutures {
             p.time_in_force = (o.kind == OrderType::Limit).then_some(tif(o.time_in_force));
             p.take_profit = o.take_profit.map(|v| number(v, m.precision.price));
             p.stop_loss = o.stop_loss.map(|v| number(v, m.precision.price));
-            p.tp_trigger_by = o.take_profit.map(|_| uta_trigger(o.tp_trigger_type));
-            p.sl_trigger_by = o.stop_loss.map(|_| uta_trigger(o.sl_trigger_type));
+            p.tp_trigger_by = o
+                .take_profit
+                .map(|_| uta_trigger(o.tp_trigger_type.or(o.trigger_type)));
+            p.sl_trigger_by = o
+                .stop_loss
+                .map(|_| uta_trigger(o.sl_trigger_type.or(o.trigger_type)));
             p.tp_order_type = o.take_profit.map(|_| "market");
             p.sl_order_type = o.stop_loss.map(|_| "market");
         } else {
@@ -1965,16 +2045,23 @@ impl BitgetFutures {
         let position = cx.store.positions().iter().find(|p| {
             p.symbol == o.symbol && p.side == protected_position(o.side) && p.contracts > 0.0
         });
-        let capacity = position.map_or(0.0, |p| {
-            floor_lot(
-                if self.inverse() {
-                    p.notional
-                } else {
-                    p.contracts
-                },
-                m.precision.amount,
-            )
-        });
+        let capacity = if let Some(position) = position {
+            let size = if self.inverse() {
+                position.notional
+            } else {
+                position.contracts
+            };
+            if !size.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            let capacity = floor_lot(size, m.precision.amount);
+            if !capacity.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            capacity
+        } else {
+            0.0
+        };
         let requested = num::adjust(o.amount, m.precision.amount);
         let size = if o.amount == 0.0 || capacity < m.precision.amount {
             0.0
@@ -1996,7 +2083,6 @@ impl BitgetFutures {
 
     fn algo_payload(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Payload, String> {
         let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
-        let (plan, size) = self.plan_size(cx, o)?;
         let mut p = self.classic(cx, &o.symbol)?;
         p.client_oid = Some(mint(cx)?);
         p.reduce_only = (!cx.store.hedged()).then_some("YES");
@@ -2025,6 +2111,7 @@ impl BitgetFutures {
             ));
             p.callback_ratio = Some(num::format(ratio));
         } else {
+            let (plan, size) = self.plan_size(cx, o)?;
             p.plan_type = Some(plan);
             p.size = (size > 0.0).then(|| num::format(size));
             p.hold_side = Some(if cx.store.hedged() {
@@ -2295,11 +2382,16 @@ impl BitgetFutures {
         at: f64,
     ) {
         if last.is_some() || mark.is_some() {
-            self.trading
-                .references
-                .entry(symbol.into())
-                .or_default()
-                .update(last, mark, at);
+            // Borrow the usual seeded symbol instead of allocating a lookup key per ticker.
+            if let Some(quote) = self.trading.references.get_mut(symbol) {
+                quote.update(last, mark, at);
+            } else {
+                self.trading
+                    .references
+                    .entry(symbol.into())
+                    .or_default()
+                    .update(last, mark, at);
+            }
         }
     }
 
@@ -3415,7 +3507,8 @@ impl BitgetFutures {
                         .is_ok_and(|reply| status == 200 && reply.code.0 == Some(0.0)))
                 || batch_unknown;
             if uncertain && !request.call.read() {
-                message.push_str("; outcome unknown, check Open Orders");
+                message.push_str("; ");
+                message.push_str(UNKNOWN_TEXT);
             }
             let native_unchanged = !uncertain
                 && explicit_rejection
@@ -3426,7 +3519,9 @@ impl BitgetFutures {
             let (_, _, native_unknown) =
                 self.record_once(cx, &request, native, answer, &message, &mut recorded);
             let mut error = match &parsed {
-                _ if unproven => VenueError::new(message).outcome(Outcome::Unknown),
+                _ if unproven || batch_unknown => {
+                    VenueError::new(message).outcome(Outcome::Unknown)
+                }
                 Ok(reply) if explicit_rejection => {
                     // The table's kind for the native code, else its documented
                     // status row; a 401/403/429 carries no code (`native_code`).
@@ -3470,6 +3565,21 @@ impl BitgetFutures {
                 job.error = Some(error);
                 job.calls.clear();
                 job.calls.push_back(rollback);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            // TS Classic batches throw on failureList or HTTP failure, but
+            // continue after a bare HTTP-200 business refusal. Keep its fact.
+            if status == 200
+                && explicit_rejection
+                && request.call.path == paths::BATCH_PLACE
+                && parsed.as_ref().is_ok_and(|reply| {
+                    reply
+                        .data
+                        .as_ref()
+                        .is_none_or(|data| data.failure_list.is_empty())
+                })
+            {
+                job.batch_error.get_or_insert(error);
                 return self.drive(cx, job, At::Data(&request.slot, &request.context));
             }
             if (native_unknown || error.outcome == Some(Outcome::Unknown))

@@ -1,18 +1,118 @@
 import { BaseCommand } from '../BaseCommand';
-import type { CommandContext } from '../Command';
+import type { CommandContext, CommandResult } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
-import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
+import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
-import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
+import { nativeCloseSize, prepareCliAmendPrice } from '../../order/prepareCliOrder';
+import type { Market } from '@tealstreet/safe-cex/src/types';
+import { nativeAmountRules } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
+import { roundPercentageCloseSize } from '@tealstreet/script-api-core/src/order/orderPricing';
+
+// Preserve MEXC's original native intent until shared preparation can validate it.
+const roundParsedSize = (exchange: ExchangeLike, market: Market | undefined, raw: number): number =>
+  market && nativeAmountRules(market, exchange.name).basePerContract !== undefined
+    ? raw
+    : adjust(raw, amountPrecisionOf(market));
+
+class OrderArgumentError extends Error {
+  override name = 'OrderArgumentError';
+  readonly kind = 'invalidInput';
+  readonly outcome = 'notSent';
+}
 
 /**
  * Base class for trading commands with utility methods for size/price processing
  */
 export abstract class TradingBaseCommand extends BaseCommand {
+  // Resolve the leading symbol slot before scanning modifiers, so an alias
+  // such as REDUCE has only its symbol role in this position.
+  protected resolveLeadingSymbolSlot(ctx: CommandContext, index: number): CommandContext {
+    const token = ctx.args._[index];
+    if (!ctx.exchange || !token) return ctx;
+    const symbols = this.validateSymbols(ctx.exchange, token.split(','));
+    if (symbols.length === 0) return ctx;
+    const args = [...ctx.args._];
+    args[index] = symbols.join(',');
+    return { ...ctx, args: { ...ctx.args, _: args } };
+  }
+
+  protected refuseAmbiguousOrderToken(token: string): never {
+    const message = `Ambiguous argument "${token}": use a full market symbol or an explicit leading symbol. Nothing was sent.`;
+    throw new OrderArgumentError(message);
+  }
+
+  // Modifier aliases need a resolved scope. Operand slots (including TWAP's
+  // two-token timeout policy) cannot establish that scope or become symbols.
+  protected assertUnambiguousOrderModifiers(
+    ctx: CommandContext,
+    leadingSymbolIndex: number,
+    modifiers: readonly string[],
+    operands: Readonly<Record<string, number>> = {},
+    symbolAfter = leadingSymbolIndex,
+  ): void {
+    if (ctx.exchange === null) return;
+    const args = ctx.args._;
+    const catalog = ctx.exchange.store?.markets;
+    if (args[leadingSymbolIndex] === '%all%') return;
+    if (this.validateSymbols(ctx.exchange, args[leadingSymbolIndex]?.split(',')).length > 0) return;
+    const operandSlots = new Set<number>();
+    const keywordSlots = new Set<number>();
+    for (let index = 1; index < args.length; index++) {
+      if (operandSlots.has(index)) continue;
+      const count = operands[args[index].toLowerCase()] ?? 0;
+      if (count > 0 && args[index + 1] !== undefined) {
+        keywordSlots.add(index);
+        for (let offset = 1; offset <= count; offset++) operandSlots.add(index + offset);
+      }
+    }
+    const candidates: string[] = [];
+    for (let index = Math.max(1, symbolAfter + 1); index < args.length; index++) {
+      if (operandSlots.has(index) || keywordSlots.has(index)) continue;
+      const token = args[index];
+      if (token === '%all%') return;
+      const listed = token.split(',').every((symbol) => resolveCompleteMarketSymbol(catalog, symbol) !== undefined);
+      if (listed === false) continue;
+      if (modifiers.includes(token.toLowerCase())) candidates.push(token);
+      else return;
+    }
+    const ambiguous = candidates[0];
+    if (ambiguous !== undefined) this.refuseAmbiguousOrderToken(ambiguous);
+  }
+
+  protected refuseUnknownOrderArgs(
+    ctx: CommandContext,
+    consumed: number[],
+    {
+      allowSymbol = true,
+      symbolLists = false,
+      symbolAfter = 0,
+      allowAll = false,
+      side,
+    }: {
+      allowSymbol?: boolean;
+      symbolLists?: boolean;
+      symbolAfter?: number;
+      allowAll?: boolean;
+      side?: PositionSide;
+    } = {},
+  ): CommandResult | undefined {
+    if (allowSymbol && ctx.exchange) {
+      for (let i = ctx.args._.length - 1; i > symbolAfter; i--) {
+        if (consumed.includes(i)) continue;
+        const parts = ctx.args._[i].split(',');
+        if (!symbolLists && parts.length > 1) continue;
+        if (this.validateSymbols(ctx.exchange, parts, allowAll, side).length > 0) {
+          consumed.push(i);
+          break;
+        }
+      }
+    }
+    return this.refuseUnknownArgs(ctx, consumed);
+  }
+
   /**
    * Check if a string looks like a price (e.g., "100", "100.5", "+100", "-50", "5%", "$100")
    */
@@ -139,7 +239,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
         // NATIVE contracts. `position.contracts` is base and differs by
         // `contractSize`, so `close 50%` on an OKX-shaped market asked for a
         // multiple of the position rather than half of it.
-        return adjust((nativePositionSize(position, market) * pct) / 100, amountPrecisionOf(market));
+        const full = nativeCloseSize(exchange, position);
+        return defaultPercentScope === 'position'
+          ? roundPercentageCloseSize(full, Math.min(pct, 100), market, exchange.name)
+          : roundParsedSize(exchange, market, (full * pct) / 100);
       }
 
       // balance scope
@@ -158,7 +261,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       // explanation in `notionalToSize`.
       if (market.isInverse) {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-        return adjust(notional / contractSize, amountPrecisionOf(market));
+        return roundParsedSize(exchange, market, notional / contractSize);
       }
       const conversionPrice =
         price === undefined
@@ -168,7 +271,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
         throw new Error(`Price not available for ${symbol}`);
       }
       // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return adjust(baseToNativeContracts(market, notional / conversionPrice), amountPrecisionOf(market));
+      return roundParsedSize(exchange, market, baseToNativeContracts(market, notional / conversionPrice));
     }
 
     if (this.looksLikeSize(trimmed)) {
@@ -205,11 +308,10 @@ export abstract class TradingBaseCommand extends BaseCommand {
    */
   protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number, price?: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
-    const amountPrecision = amountPrecisionOf(market);
 
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-      return adjust(notional / contractSize, amountPrecision);
+      return roundParsedSize(exchange, market, notional / contractSize);
     }
 
     // Use the same validated tick-rounded price that order preparation sends.
@@ -224,7 +326,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     // on its linear swaps (1000 DOGE, 0.01 BTC), so the base amount has to be
     // divided by it to get the native contract count.
     const baseAmount = notional / conversionPrice;
-    return adjust(baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), amountPrecision);
+    return roundParsedSize(exchange, market, baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount));
   }
 
   /**
@@ -253,15 +355,28 @@ export abstract class TradingBaseCommand extends BaseCommand {
     if (!Array.isArray(symbols)) {
       return [];
     }
-    if (allowAll && symbols.includes('%all%')) {
+    if (symbols.includes('%all%')) {
+      if (!allowAll || symbols.length !== 1) return [];
       return (exchange.store?.positions ?? [])
         .filter((position) => position.side === side)
         .map((position) => position.symbol);
     }
-    return symbols
-      .filter((symbol) => !this.tokenLooksLikeNonSymbol(symbol))
-      .map((symbol) => this.transformSymbol(exchange, symbol))
-      .filter((symbol) => this.validateSymbol(exchange, symbol));
+    const resolved = symbols.map((symbol) => {
+      if (this.tokenLooksLikeNonSymbol(symbol)) return undefined;
+      const complete = resolveCompleteMarketSymbol(exchange.store?.markets, symbol);
+      return complete !== undefined && this.validateSymbol(exchange, complete) ? complete : undefined;
+    });
+    if (!resolved.every((symbol): symbol is string => symbol !== undefined)) return [];
+    this.assertUniqueSymbols(resolved);
+    return resolved;
+  }
+
+  protected assertUniqueSymbols(symbols: string[]): void {
+    const seen = new Set<string>();
+    for (const symbol of symbols) {
+      if (seen.has(symbol)) throw new Error(`Duplicate market target "${symbol}". Nothing was sent.`);
+      seen.add(symbol);
+    }
   }
 
   /**

@@ -45,10 +45,10 @@ const market: Market = {
   precision: { amount: 0.001, price: 0.1 },
   limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
 };
-const ticker = {
+const ticker: Ticker = {
   id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100,
-  percentage: 0, fundingRate: 0, volume: 0, quoteVolume: 0, openInterest: 0,
-} as Ticker;
+  percentage: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0, openInterest: 0,
+};
 
 function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOptions> = {}) {
   const commands: Control[] = [];

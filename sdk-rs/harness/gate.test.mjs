@@ -119,7 +119,7 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
     import { createHash } from 'node:crypto';
     import { syncBuiltinESMExports } from 'node:module';
     import { expectedCheckpointPlan } from ${JSON.stringify(new URL('./tape.mjs', import.meta.url).href)};
-    import { venueOf } from ${JSON.stringify(new URL('./venues.mjs', import.meta.url).href)};
+    import { replayVenueOf } from ${JSON.stringify(new URL('./venues.mjs', import.meta.url).href)};
     const records = ${JSON.stringify(records)};
     const venue = ${JSON.stringify(venue)};
     const isPrivate = ${JSON.stringify(isPrivate)};
@@ -177,7 +177,7 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
         // Orderly and Coinbase require exactly one result per taped command.
         // This smoke tape has none; populated command comparisons run below.
         commands: strictCommandCount ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
-        checkpoints: args.includes('--performance') ? [] : expectedCheckpointPlan(records, venueOf(venue), impl).map((point) => ({ ...point, markets: [], tickers: [], books: {}, ...(isPrivate ? { account: emptyAccount() } : {}) })),
+        checkpoints: args.includes('--performance') ? [] : expectedCheckpointPlan(records, replayVenueOf(venue), impl).map((point) => ({ ...point, markets: [], tickers: [], books: {}, ...(isPrivate ? { account: emptyAccount() } : {}) })),
         transportReceipt: {},
         ...(isPrivate ? { account: emptyAccount() } : {}),
       };
