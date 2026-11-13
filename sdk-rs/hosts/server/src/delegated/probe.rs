@@ -224,8 +224,8 @@ mod tests {
             .run_until(async {
                 crate::delegated::with_test_declaration(
                     serde_json::json!({"venues": {
-                        "bybit": {"delegated": {"enabled": true}},
-                        "binance": {"delegated": {"enabled": true}}
+                        "bybit": {"remoteSigning": {"enabled": true}},
+                        "binance": {"remoteSigning": {"enabled": true}}
                     }}),
                     async {
                         let init = crate::envelope::InitPayload {
@@ -236,7 +236,7 @@ mod tests {
                         };
                         let pair = crate::delegated::DelegatedPair::new(
                             init.key.clone(),
-                            safe_cex_crypto::signer::Secret::new("synthetic".into()),
+                            "synthetic".into(),
                             None,
                         );
                         let prepared = crate::delegated::prepare_delegated(&init, pair)
@@ -337,3 +337,7 @@ mod tests {
 #[cfg(test)]
 #[path = "probe_tests.rs"]
 mod venue_tests;
+
+#[cfg(test)]
+#[path = "wallet_probe_tests.rs"]
+mod wallet_tests;

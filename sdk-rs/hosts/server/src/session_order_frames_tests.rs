@@ -151,7 +151,7 @@ async fn order_frames_refuse_pending_missing_modes_and_mismatched_client_ids() {
         for case in ["pending", "missing", "resume", "flag", "client-id", "intent", "sequence", "binding", "fingerprint", "key-age"] {
             let registry = crate::accounts::tests::registry();
             let tape = Tape::default();
-            let venue = if case == "flag" { "bybitspot" } else { "bybit" };
+            let venue = if case == "flag" { "hyrotrader" } else { "bybit" };
             let account = delegated_account(&registry, "A", venue, tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             if case == "pending" {

@@ -9,6 +9,7 @@ import { hexToBytes } from '@noble/hashes/utils.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import fixed from '../../../../sdk-rs/hosts/server/tests/fixtures/delegated-handover-vectors.json';
+import wallet from '../../../../sdk-rs/hosts/server/tests/fixtures/delegated-wallet-handover.json';
 import { sealDelegatedHandover } from '../delegatedHandover';
 import { sealHandoverHpke } from '../delegatedHandoverHpke';
 import rfc from './fixtures/rfc9180-x25519-chacha20poly1305.json';
@@ -95,6 +96,32 @@ afterEach(() => {
 });
 
 describe('DELEGATED handover seal', () => {
+  it('keeps key-only signing material exclusively inside the encrypted full init', () => {
+    vi.mocked(x25519.utils.randomSecretKey).mockReturnValueOnce(new Uint8Array(32).fill(wallet.senderSeedByte));
+    const sealed = sealDelegatedHandover(wallet.input);
+    expect(sealed).toEqual(wallet.frame.d.sealed);
+    const frame = { ...wallet.frame, d: { ...wallet.frame.d, sealed } };
+    expect(JSON.stringify(frame)).not.toContain(wallet.input.signingKey);
+    expect(aad(wallet.input).toString()).not.toContain(wallet.input.signingKey);
+    expect(open(sealed, wallet.input)).toEqual({
+      key: wallet.input.key, secret: '', signingKey: wallet.input.signingKey,
+    });
+  });
+  it('seals a key-only wallet shape for trusted server-side credential validation', () => {
+    const context = wallet.input;
+    expect(open(sealDelegatedHandover(context), context)).toEqual({
+      key: context.key, secret: '', signingKey: context.signingKey,
+    });
+  });
+  it('refuses an empty private signing field', () => {
+    expect(() => sealDelegatedHandover({ ...wallet.input, signingKey: '' })).toThrow('Unable to seal');
+  });
+  it('seals the requested non-Bybit venue with the unchanged venue-bound proof', () => {
+    const context = { ...input, exchangeName: 'binance' };
+    const sealed = sealDelegatedHandover(context);
+    expect(open(sealed, context)).toEqual({ key: input.key, secret: input.secret });
+    expect(() => open(sealed, input)).toThrow();
+  });
   it('matches RFC 9180 appendix A.2.1 sequence zero', () => {
     vi.mocked(x25519.utils.randomSecretKey).mockReturnValueOnce(hexToBytes(rfc.skEm));
     const sealed = sealHandoverHpke(
@@ -172,9 +199,9 @@ describe('DELEGATED handover seal', () => {
     expect(open(sealDelegatedHandover(input))).toEqual({ key: input.key, secret: input.secret });
   });
 
-  it.each(['binance', 'bybitspot', 'bybitdemo', 'hyrotrader', 'BYBIT', ''])('does not enable %s', (exchangeName) => {
+  // Eligibility belongs to the host; malformed proof contexts always refuse.
+  it.each(['', 'binance|other', String.fromCharCode(0xd800)])('refuses invalid venue context %s', (exchangeName) => {
     expect(() => sealDelegatedHandover({ ...input, exchangeName })).toThrow('DELEGATED');
-    expect(x25519.utils.randomSecretKey).not.toHaveBeenCalled();
   });
 
   it.each(['attemptId', 'bootId', 'key'] as const)('requires an unambiguous %s', (field) => {

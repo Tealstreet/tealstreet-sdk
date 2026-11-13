@@ -113,7 +113,7 @@ async fn action_frames_refuse_wrong_version_fingerprint_registration_mode_and_ex
     tokio::task::LocalSet::new().run_until(async {
         for case in ["version","fingerprint","binding","mode","expired","pending"] {
             let registry = crate::accounts::tests::registry(); let tape = Tape::default();
-            let account = delegated_account(&registry,"A",if case == "mode" {"bybitspot"} else {"bybit"},tape.clone());
+            let account = delegated_account(&registry,"A",if case == "mode" {"hyrotrader"} else {"bybit"},tape.clone());
             let (mut session,mut sent) = joined(registry.clone(),"A",account.clone()).await;
             let payload = json!({"kind":"cancelAll"});
             let mut id = action_key();

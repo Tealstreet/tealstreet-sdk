@@ -120,6 +120,29 @@ async fn health_and_capabilities_answer_without_venue_io() {
 }
 
 #[tokio::test]
+async fn capability_discovery_is_scoped_to_the_requested_account_venue() {
+    let address = server().await;
+    for route in ["/capabilities", "/account/capabilities"] {
+        for (venue, supported) in [("binance", true), ("hyrotrader", false), ("unknown", false)] {
+            let (status, body) = get(&address, &format!("{route}?exchangeName={venue}")).await;
+            assert_eq!(status, 200);
+            let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+            let transport = &body["transports"]["accountWorkerWebSocket"];
+            assert_eq!(transport["delegatedVenueV1"], venue);
+            assert_eq!(
+                transport["delegatedActivationScopeV1"]["place"],
+                supported && cfg!(feature = "delegated-order-frames")
+            );
+        }
+        let (_, body) = get(&address, route).await;
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let transport = &body["transports"]["accountWorkerWebSocket"];
+        assert!(transport["delegatedVenueV1"].is_null());
+        assert_eq!(transport["delegatedActivationScopeV1"]["place"], false);
+    }
+}
+
+#[tokio::test]
 async fn invalid_tokens_are_refused_before_the_upgrade() {
     let address = server().await;
     let error =

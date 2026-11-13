@@ -264,11 +264,7 @@ fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> 
     if init.signing_mode.as_deref() == Some("delegated") {
         let prepared = prepare_delegated(
             init,
-            DelegatedPair::new(
-                init.key.clone(),
-                safe_cex_crypto::signer::Secret::new("synthetic-secret".into()),
-                None,
-            ),
+            DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
         )
         .unwrap();
         inner.delegated = Some(prepared.resident);
