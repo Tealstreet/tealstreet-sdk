@@ -55,6 +55,15 @@ is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
 
+DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
+layouts. Guarded handover strings move into the zeroizing native options for
+that setup; only its provider, identities and required public metadata remain.
+Hyperliquid wallet addresses survive construction and resident reconfiguration.
+Opaque `TrustedSignerState` carries non-JSON setup facts through native config,
+including Paradex derived-key validation, for both the probe and resident actor.
+It cannot be claimed by client JSON or applied to a different venue. The shared
+admission/probe algorithm, lifetime checks and refusal classification are unchanged.
+
 The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
 unchanged in both modes. Other hosted venues retain their current account-label
 identity; that distinction does not gate DELEGATED or COSIGNED admission.

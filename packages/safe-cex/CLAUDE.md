@@ -55,6 +55,9 @@ Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
 context; the result contains only the attempt ID and padded-base64 encapsulation
 and ciphertext. Context fields preserve exact UTF-8 bytes and cannot contain
 the protocol's `|` separator. Optional passphrases preserve absence versus empty.
+Key-only wallet callers supply `secret: ''`; sealing validates the envelope,
+while the server's existing trusted setup validates the venue's credential
+shape. An empty CEX signing secret still refuses before private admission.
 The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
 one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
 fixtures exercise the same production sender. The shared fixture lives with

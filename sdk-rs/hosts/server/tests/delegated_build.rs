@@ -1,4 +1,3 @@
-use safe_cex_crypto::signer::Secret;
 use safe_cex_exchange_server::accounts::{engine_options, prepare};
 use safe_cex_exchange_server::delegated::{DelegatedPair, prepare_delegated};
 use safe_cex_exchange_server::envelope::InitPayload;
@@ -17,7 +16,7 @@ fn init(venue: &str) -> InitPayload {
 fn pair() -> DelegatedPair {
     DelegatedPair::new(
         "synthetic-key".into(),
-        Secret::new("synthetic-signing-fixture".into()),
+        "synthetic-signing-fixture".into(),
         None,
     )
 }
@@ -170,7 +169,7 @@ fn delegated_pair_binding_and_empty_material_refuse_with_fixed_errors() {
     ] {
         let result = prepare_delegated(
             &init("bybit"),
-            DelegatedPair::new(key.into(), Secret::new(material.into()), None),
+            DelegatedPair::new(key.into(), material.into(), None),
         );
         assert!(matches!(result, Err(ref e) if e == "Invalid DELEGATED account setup"));
     }

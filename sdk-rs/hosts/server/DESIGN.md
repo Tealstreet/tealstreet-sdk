@@ -643,7 +643,14 @@ any running account unchanged.
 Both modes use a temporary native account for the requested venue's normal private
 startup reads, disposed before admission. COSIGNED uses a pending signing link
 owned only by the joining connection; DELEGATED uses the supplied pair through
-the existing local signer. The shared completion rechecks the token and captured
+the existing trusted `prepare_local_signer_for` mapping. Wallet public addresses
+remain public engine metadata; key-only private material is consumed by its
+existing setup rather than treated as an HMAC pair. Setup's opaque
+`TrustedSignerState` accompanies the provider through native `ServerConfig` for
+both probe and resident construction. It preserves non-deserializable facts
+such as Paradex Ethereum-derived-key validation without exposing material or
+letting JSON assert those facts. Reconfiguration retains the resident's public
+signer metadata and opaque facts. The shared completion rechecks the token and captured
 router lease before attaching the account. Pending signing links are retired on
 completion or cancellation.
 An accepted pair starts a DELEGATED account when none exists, or joins the

@@ -327,8 +327,8 @@ async fn hosted_venues_use_real_delegated_construction_and_the_existing_probe() 
                 for (material, accepted) in [(SECRET, true), ("different-material", false)] {
                     let pair = crate::delegated::DelegatedPair::new(
                         KEY.into(),
-                        safe_cex_crypto::signer::Secret::new(material.into()),
-                        Some(safe_cex_crypto::signer::Secret::new(PASS.into())),
+                        material.into(),
+                        Some(PASS.into()),
                     );
                     let prepared = crate::delegated::prepare_delegated(&init, pair)
                         .unwrap_or_else(|_| panic!("{venue}: hosted venue must construct"));

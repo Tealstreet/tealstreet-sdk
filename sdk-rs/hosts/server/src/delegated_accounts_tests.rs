@@ -1,6 +1,5 @@
 use super::*;
 use crate::delegated::{DelegatedPair, prepare_delegated};
-use safe_cex_crypto::signer::Secret;
 
 fn init() -> InitPayload {
     InitPayload {
@@ -13,7 +12,7 @@ fn init() -> InitPayload {
 fn pair() -> DelegatedPair {
     DelegatedPair::new(
         "synthetic-key".into(),
-        Secret::new("synthetic-signing-fixture".into()),
+        "synthetic-signing-fixture".into(),
         None,
     )
 }
@@ -268,7 +267,7 @@ async fn handed_over_key_is_checked_before_matching_delegated_reuse() {
             let account = resident_account(&registry, "A");
             let wrong = DelegatedPair::new(
                 "other-synthetic-key".into(),
-                Secret::new("synthetic-signing-fixture".into()),
+                "synthetic-signing-fixture".into(),
                 None,
             );
             let result = registry

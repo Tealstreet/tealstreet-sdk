@@ -95,6 +95,10 @@ afterEach(() => {
 });
 
 describe('DELEGATED handover seal', () => {
+  it('seals a key-only wallet shape for trusted server-side credential validation', () => {
+    const context = { ...input, exchangeName: 'paradex', secret: '' };
+    expect(open(sealDelegatedHandover(context), context)).toEqual({ key: input.key, secret: '' });
+  });
   it('seals the requested non-Bybit venue with the unchanged venue-bound proof', () => {
     const context = { ...input, exchangeName: 'binance' };
     const sealed = sealDelegatedHandover(context);

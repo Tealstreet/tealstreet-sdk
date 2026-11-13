@@ -76,7 +76,6 @@ export function sealDelegatedHandover(input: DelegatedHandoverInput): SealedDele
       !validContext(key) ||
       typeof publicKey !== 'string' ||
       typeof secret !== 'string' ||
-      secret.length === 0 ||
       (passphrase !== undefined && typeof passphrase !== 'string')
     ) {
       throw new Error('Invalid DELEGATED handover');

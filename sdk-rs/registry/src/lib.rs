@@ -1,6 +1,10 @@
 //! Every Rust venue, constructed by name from one options shape. Hosts (wasm,
 //! native) parse the account options once and receive the venue's engine
 //! through a [`Visit`]or; each venue's construction rules live here.
+#[cfg(feature = "dispatch-signing")]
+mod trusted_signer_state;
+#[cfg(feature = "dispatch-signing")]
+pub use trusted_signer_state::TrustedSignerState;
 #[cfg(feature = "kraken")]
 mod kraken_setup;
 #[cfg(feature = "mexc")]

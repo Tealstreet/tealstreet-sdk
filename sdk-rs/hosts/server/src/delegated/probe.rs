@@ -236,7 +236,7 @@ mod tests {
                         };
                         let pair = crate::delegated::DelegatedPair::new(
                             init.key.clone(),
-                            safe_cex_crypto::signer::Secret::new("synthetic".into()),
+                            "synthetic".into(),
                             None,
                         );
                         let prepared = crate::delegated::prepare_delegated(&init, pair)
@@ -337,3 +337,7 @@ mod tests {
 #[cfg(test)]
 #[path = "probe_tests.rs"]
 mod venue_tests;
+
+#[cfg(test)]
+#[path = "wallet_probe_tests.rs"]
+mod wallet_tests;

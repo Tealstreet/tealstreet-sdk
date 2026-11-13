@@ -1,7 +1,6 @@
 use super::*;
 use crate::accounts::testing;
 use crate::delegated::{DelegatedPair, prepare_delegated};
-use safe_cex_crypto::signer::Secret;
 use safe_cex_engine::{HttpRequest, RequestId, SocketId};
 use safe_cex_native::{
     BoundHttp, Events, HostEvent, HttpPrepareError, HttpPrepareFuture, PreparedHttp, ServerConfig,
@@ -319,7 +318,7 @@ fn delegated_account_with_algo_inbox(
         &setup,
         DelegatedPair::new(
             setup.key.clone(),
-            Secret::new(format!("synthetic-signing-fixture-{user}")),
+            format!("synthetic-signing-fixture-{user}"),
             None,
         ),
     )
@@ -388,7 +387,7 @@ async fn delegated_fixture_keeps_identity_when_native_algos_are_enabled_or_disab
                         Arc::new(|_| true),
                         DelegatedPair::new(
                             renamed.key.clone(),
-                            Secret::new("synthetic-signing-fixture-A".into()),
+                            "synthetic-signing-fixture-A".into(),
                             None,
                         ),
                     )

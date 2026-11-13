@@ -1,23 +1,22 @@
 //! Trusted DELEGATED account construction; socket handover is a separate step.
 use crate::accounts::{engine_options, routing_plan};
 use crate::envelope::InitPayload;
-use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::Provider;
 use serde_json::json;
-use std::sync::Arc;
+use zeroize::Zeroizing;
 
 /// A handed-over pair, consumed by trusted construction. Never a socket payload.
 pub struct DelegatedPair {
-    key: String,
-    secret: Secret,
-    passphrase: Option<Secret>,
+    key: Zeroizing<String>,
+    secret: Zeroizing<String>,
+    passphrase: Option<Zeroizing<String>>,
 }
 impl DelegatedPair {
-    pub fn new(key: String, secret: Secret, passphrase: Option<Secret>) -> Self {
+    pub fn new(key: String, secret: String, passphrase: Option<String>) -> Self {
         Self {
-            key,
-            secret,
-            passphrase,
+            key: Zeroizing::new(key),
+            secret: Zeroizing::new(secret),
+            passphrase: passphrase.map(Zeroizing::new),
         }
     }
     pub(crate) fn validate(&self, init: &InitPayload) -> Result<(), String> {
@@ -27,7 +26,7 @@ impl DelegatedPair {
         if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
             return Err("DELEGATED requires a private account".into());
         }
-        if self.key != init.key
+        if self.key.as_str() != init.key
             || self.key.is_empty()
             || self.key.len() > 1_048_576
             || self.key.contains(['\r', '\n', '\0'])
@@ -44,6 +43,7 @@ impl DelegatedPair {
 pub struct ResidentCopy {
     provider: Provider,
     identities: safe_cex_engine::signing::Identities,
+    state: Option<safe_cex_venues::TrustedSignerState>,
 }
 impl ResidentCopy {
     #[cfg(test)]
@@ -51,12 +51,17 @@ impl ResidentCopy {
         Self {
             provider,
             identities: Default::default(),
+            state: None,
         }
     }
 
     /// Trusted host ingress, as with a remote account's provider.
     pub fn provider(&self) -> Provider {
         self.provider.clone()
+    }
+
+    pub(crate) fn configure(&self, config: &mut safe_cex_native::ServerConfig) {
+        config.trusted_signer_state = self.state.clone();
     }
 
     pub(crate) fn reconfigure(&self, init: &InitPayload) -> Result<PreparedDelegated, String> {
@@ -67,6 +72,7 @@ impl ResidentCopy {
         let fields = options.as_object_mut().expect("engine options object");
         fields.remove("key");
         fields.remove("passphrase");
+        write_public_options(fields, self.state.as_ref());
         fields.insert("signing".into(), json!(self.identities));
         fields.insert("publicDataOnly".into(), false.into());
         fields.insert("remoteSigning".into(), false.into());
@@ -89,24 +95,26 @@ pub struct PreparedDelegated {
 /// It performs construction, not remote credential verification.
 pub fn prepare_delegated(
     init: &InitPayload,
-    pair: DelegatedPair,
+    mut pair: DelegatedPair,
 ) -> Result<PreparedDelegated, String> {
     pair.validate(init)?;
     let plan = routing_plan(init, false)?;
-    let setup = LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new(pair.key),
-            secret: pair.secret,
-            passphrase: pair.passphrase,
-            ..Default::default()
-        }),
-        secondary: None,
-    };
-    let (signer, identities) = LocalSigner::from_setup_with_policy(
-        setup,
-        safe_cex_venues::signer_setup_policy(&init.exchange_name),
-    )
-    .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
+    let mut options = engine_options(init, false);
+    let fields = options.as_object_mut().expect("engine options object");
+    if let Some(serde_json::Value::String(key)) = fields.remove("key") {
+        drop(Zeroizing::new(key));
+    }
+    let mut native: safe_cex_venues::EngineOptions = serde_json::from_value(options.clone())
+        .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
+    native.key = Some(std::mem::take(&mut pair.key));
+    native.secret = Some(std::mem::take(&mut pair.secret));
+    native.passphrase = pair
+        .passphrase
+        .as_mut()
+        .map(|value| std::mem::take(&mut **value));
+    let (provider, identities) =
+        safe_cex_venues::prepare_local_signer_for(&init.exchange_name, &mut native)
+            .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
     if identities
         .primary
         .as_ref()
@@ -114,10 +122,10 @@ pub fn prepare_delegated(
     {
         return Err("Invalid DELEGATED account setup".into());
     }
-    let mut options = engine_options(init, false);
+    let state = safe_cex_venues::TrustedSignerState::capture(&init.exchange_name, &native);
     let fields = options.as_object_mut().expect("engine options object");
-    fields.remove("key");
     fields.remove("passphrase");
+    write_public_options(fields, Some(&state));
     fields.insert("signing".into(), json!(identities));
     fields.insert("publicDataOnly".into(), false.into());
     fields.insert("remoteSigning".into(), false.into());
@@ -126,8 +134,9 @@ pub fn prepare_delegated(
         plan,
         options: options.to_string(),
         resident: ResidentCopy {
-            provider: Arc::new(signer),
+            provider,
             identities,
+            state: Some(state),
         },
     })
 }
@@ -138,6 +147,18 @@ pub(crate) fn fingerprint(init: &InitPayload) -> String {
         serde_json::from_str(&init.fingerprint()).expect("fingerprint object");
     fields["hostedSigningMode"] = "delegated".into();
     fields.to_string()
+}
+
+fn write_public_options(
+    fields: &mut serde_json::Map<String, serde_json::Value>,
+    state: Option<&safe_cex_venues::TrustedSignerState>,
+) {
+    fields.remove("key");
+    if let Some(state) = state {
+        for (name, value) in state.public_options() {
+            fields.insert(name.into(), value.into());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -159,8 +180,7 @@ mod tests {
                         key: "synthetic-key".into(),
                         ..Default::default()
                     };
-                    let pair =
-                        DelegatedPair::new(init.key.clone(), Secret::new("synthetic".into()), None);
+                    let pair = DelegatedPair::new(init.key.clone(), "synthetic".into(), None);
                     assert_eq!(prepare_delegated(&init, pair).is_ok(), opted_in);
                 },
             )
