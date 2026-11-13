@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
@@ -1979,7 +1980,7 @@ export class BybitExchange extends BaseExchange {
         } while (cursor && page < MAX_CLOSED_PNL_PAGES);
       }
 
-      return entries.sort((a, b) => b.closedTime - a.closedTime);
+      return entries.sort(compareClosedPnlTimes);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.retMsg || err?.message);
       return [];

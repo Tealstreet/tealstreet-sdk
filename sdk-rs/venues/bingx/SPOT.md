@@ -23,6 +23,33 @@ Admission is a separate follow-up after smoke, not part of this change.
   migration or live trading has been validated.
 - WASM size caps remain owned by the lead and are not edited here.
 
+### Opt-in smoke configuration
+
+The harness has a smoke-only endpoint and sizing profile. It is excluded from
+the default smoke venue and credential lists. Resolve it only after explicit
+authorization for the transport/egress, Read + Spot Trading permissions (no
+withdrawals), bounded placement/cancellation scope and stream/renewal duration:
+
+```js
+liveSmokeProfile('bingxspot', 'mainnet', env, {
+  enableBingxSpot: true,
+  authorized: true,
+});
+```
+
+Both booleans must be explicit on each call, including dry runs. Credentials
+use `RUST_LIVE_SMOKE_BINGX_SPOT_MAINNET_KEY` and
+`RUST_LIVE_SMOKE_BINGX_SPOT_MAINNET_SECRET`; perpetual credentials are never a
+fallback. Only the Spot REST routes and `/market` socket are allowed. Sizing
+requires an active matching Spot catalog row, quantity increments/minima/maxima
+and monetary minima/maxima; the native notional ceiling can only lower the
+shared smoke cap.
+
+This configuration does not open the standard CLI, registry or WASM factories.
+A separately approved smoke-only constructor is still required to execute a
+probe. No live-key proof, compressed-stream coverage or renewal-duration result
+is supplied by fixture tests, and trading admission remains a separate change.
+
 ## Official protocol
 
 The current [BingX Spot v3 docs](https://bingx-api.github.io/docs-v3/#/en/Spot/Introduction)
@@ -134,10 +161,14 @@ nonempty arrays or unrecognized object fields remain Unknown. This includes
 execution quantities and order status even when the native order ID is absent
 or null; a contradictory error header cannot erase that execution evidence.
 
-KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. Transport-loss
-and HTTP 503 cases sealed before Spot decoding retain their Unknown outcome,
-accepted-ID and no-resend pins; only their independent telemetry assertion is
-deferred to the shared engine work.
+Engine-sealed transport and HTTP 408/429/5xx Unknowns use the shared engine
+telemetry hook and emit the same diagnostic once, with command/request correlation,
+outcome and HTTP status only when present. The hook has no native call context,
+so it never guesses an operation or copies error text, response bodies or signing
+material. Managed HTTP failure callbacks leave this diagnostic to the engine;
+venue-decoded failures retain the operation-specific diagnostic above. Outcomes,
+accepted IDs, journals and no-resend behavior are unchanged; late callbacks cannot
+emit another diagnostic or completion.
 
 Released HTTP 408/429/5xx, transport failures, malformed or contradictory
 acknowledgements and unlisted errors remain **Unknown**. There is no write resend or fallback-domain

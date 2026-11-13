@@ -1,6 +1,15 @@
 use super::*;
 use safe_cex_remote_signer::SignerLink;
 
+// The image workflow runs `cargo test -p safe-cex-exchange-server` alone: its
+// tests compete at full intra-crate parallelism and can starve each other,
+// unlike Rust / native test, which spreads the load across the workspace run.
+// Two different Resident::start callers exceeded five seconds there. The handle
+// exposes loaded state through read(), not a load-completion receiver, so keep
+// the existing readiness check with scheduling headroom and a bounded wait.
+// Loading is a fixture precondition, not a latency assertion.
+const ADMITTED_ACCOUNT_LOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Clone, Copy)]
 enum Answer {
     Correct,
@@ -144,7 +153,7 @@ impl Resident {
         session.verification_completed(result).await.unwrap();
         let account = f.registry.held("alice", "acct", session.socket).unwrap();
         assert!(account.delegated.is_none());
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(ADMITTED_ACCOUNT_LOAD_TIMEOUT, async {
             loop {
                 let loaded = account.handle.read(|store| {
                     let s = store.loaded(); s.markets && s.balance && s.orders && s.positions

@@ -58,6 +58,8 @@ pub mod hosted_wallet;
 mod hyperliquid_setup;
 #[cfg(feature = "lighter")]
 mod lighter_setup;
+#[cfg(feature = "lighter")]
+pub use safe_cex_venue_lighter::registration as lighter_registration;
 #[cfg(feature = "paradex")]
 mod paradex_setup;
 #[cfg(any(feature = "phemex", feature = "okx"))]

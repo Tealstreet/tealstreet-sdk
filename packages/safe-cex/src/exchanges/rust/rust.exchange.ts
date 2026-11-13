@@ -1,4 +1,3 @@
-import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
 import type {
   AccountAuthResult,
   AlgoStopAllResult,
@@ -50,8 +49,15 @@ import type {
   UpdateOrderOpts,
   ValidateAccountResult,
 } from '../../types';
+import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, WorkerForwardedMethod } from '../base';
+import type {
+  CallableMethodsInWorker,
+  EngineSnapshot,
+  ExchangeCapabilities,
+  OHLCVFrameRejection,
+  OrderBookFrameRejection,
+} from '../base';
 import type { BaseWebSocket } from '../base.ws';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
@@ -72,6 +78,7 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { SECONDARY_READ_KEYS_ENABLED } from '../../secondaryReadKeys';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
+import { WorkerFrameRecoveryScopes } from '../../store/workerFrameRecoveryScopes';
 import { bybitPublicRateLimitReport } from '../../transport/bybitPublicRateLimitTelemetry';
 import { assertEngineAccountRouting, createEngineTransport, withSecondaryReadKeyPolicy } from '../../transport/engine';
 import { withRequestsLog } from '../../transport/requestsLog';
@@ -2307,28 +2314,52 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private applyEngineFrame(buffer: ArrayBuffer, recover: boolean, snapshot = false) {
-    let frame: Frame;
+    if (this.isDisposed) return;
+    let frame: Frame | undefined;
+    let notified: Set<string> | undefined;
+    const rejected = (section: 'frame' | 'books' | 'candles', error: unknown) => {
+      if (notified?.has(section)) return;
+      (notified ??= new Set()).add(section);
+      let symbols: readonly string[] = [];
+      try {
+        if (frame) symbols = this.applier.marketSymbolsFor(frame);
+      } catch {
+        /* Unknown identities fan out. */
+      }
+      const signal = new WorkerFrameRecoveryScopes().reject(section, error, frame, symbols);
+      if (section === 'frame' || section === 'books')
+        this.dispatchFrameEvent(() => this.emitter.emit('workerBookFrameRejected', signal));
+      if (this.isDisposed) return;
+      if (section === 'frame' || section === 'candles')
+        this.dispatchFrameEvent(() => this.emitter.emit('workerCandleFrameRejected', signal));
+    };
     try {
       frame = new Frame(buffer);
     } catch (error) {
       this.applier.invalidateMarketIdentity();
+      rejected('frame', error);
       diagnosticConsole.error('Invalid engine frame', error);
       if (recover) this.recoverEngineFrame();
       return;
     }
+    const decoded = frame;
     const previousMarkets = this.store.markets;
     let needsSnapshot = false;
     try {
       this.applier.apply(frame, !this.frameConsumerDecodesMarketData || this.feedBookListeners.size > 0);
     } catch (error) {
       needsSnapshot = error instanceof FrameApplyError;
+      if (error instanceof FrameApplyError && error.bookRejected) rejected('books', error);
       diagnosticConsole.error('Engine frame apply failed', error);
     }
-    const read = <T>(section: () => T[]): T[] => {
+    if (this.isDisposed) return;
+    const read = <T>(section: () => T[], stream?: 'books' | 'candles'): T[] => {
+      if (this.isDisposed) return [];
       try {
         return section();
       } catch (error) {
         needsSnapshot = true;
+        if (stream) rejected(stream, error);
         diagnosticConsole.error('Engine frame section failed', error);
         return [];
       }
@@ -2351,8 +2382,10 @@ export class RustEngineExchange extends BaseExchange {
         diagnosticConsole.error('Engine public feed section failed', error);
       }
       if (publicChanged)
-        for (const observer of this.publicFeedObservers)
+        for (const observer of this.publicFeedObservers) {
           this.dispatchFrameEvent(() => observer.updated(catalogChanged));
+          if (this.isDisposed) return;
+        }
     }
     let sharedFailure: Error | undefined;
     let sendSharedSnapshot = false;
@@ -2379,18 +2412,22 @@ export class RustEngineExchange extends BaseExchange {
         this.startupFailure = sharedFailure;
       }
     }
-    for (const fill of read(() => this.applier.fills(frame)))
+    for (const fill of read(() => this.applier.fills(decoded))) {
       this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
+      if (this.isDisposed) return;
+    }
     if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.size) {
-      for (const { symbol, orderbook } of read(() => this.applier.books(frame))) {
+      for (const { symbol, orderbook } of read(() => this.applier.books(decoded), 'books')) {
         const listeners = this.bookListeners.get(symbol);
         if (!this.capabilityRecord?.isolatedBookSubscriptions)
           listeners?.forEach((listener) => {
+            if (this.isDisposed) return;
             if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener))
               this.dispatchFrameEvent(() => listener(orderbook));
           });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
+            if (this.isDisposed) return;
             if (listeners.has(id) && (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener)))
               this.dispatchFrameEvent(() =>
                 listener({
@@ -2399,17 +2436,23 @@ export class RustEngineExchange extends BaseExchange {
                 }),
               );
           }
+        if (this.isDisposed) return;
       }
     }
+    if (this.isDisposed) return;
     if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.size) {
-      for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
+      for (const { symbol, interval, candle } of read(() => this.applier.candles(decoded), 'candles')) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
+          if (this.isDisposed) return;
           if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.has(listener))
             this.dispatchFrameEvent(() => listener(candle));
         });
+        if (this.isDisposed) return;
       }
     }
+    if (this.isDisposed) return;
     this.dispatchFrameEvent(() => this.onFrame?.(buffer, snapshot));
+    if (this.isDisposed) return;
     if (sharedFailure) {
       const failure = sharedFailure;
       this.dispatchFrameEvent(() => this.emitAndLogError(failure));
@@ -3786,7 +3829,16 @@ export class RustEngineExchange extends BaseExchange {
   fetchPublicTrades = (symbol: string, limit?: number) =>
     this.command<PublicTrade[]>({ op: 'fetchPublicTrades', symbol, limit });
 
-  listenOrderBook = (symbol: string, callback: (book: OrderBook) => void) => {
+  listenOrderBook = (
+    symbol: string,
+    callback: (book: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => {
+    const stopRejections = this.observeOrderBookFrameRejections(symbol, onRejection);
+    if (onRejection) {
+      const original = callback;
+      callback = (book) => original(book);
+    }
     let listeners = this.bookListeners.get(symbol);
     const first = !listeners;
     if (!listeners) {
@@ -3801,6 +3853,7 @@ export class RustEngineExchange extends BaseExchange {
     const callbacks = listeners;
     if (first) this.bookDemand(symbol, true);
     return () => {
+      stopRejections();
       if (!callbacks.delete(listenerId)) return;
       if (callbacks.size === 0 && this.bookListeners.get(symbol) === callbacks) {
         this.bookListeners.delete(symbol);
@@ -3826,7 +3879,16 @@ export class RustEngineExchange extends BaseExchange {
     };
   };
 
-  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+  listenOHLCV = (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => {
+    const stopRejections = this.observeOHLCVFrameRejections(opts, onRejection);
+    if (onRejection) {
+      const original = callback;
+      callback = (candle) => original(candle);
+    }
     const { interval } = opts;
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
@@ -3839,6 +3901,7 @@ export class RustEngineExchange extends BaseExchange {
     const callbacks = listeners;
     if (first) this.candleDemand(opts.symbol, interval, true);
     return () => {
+      stopRejections();
       callbacks.delete(callback);
       if (callbacks.size === 0 && this.candleListeners.get(key) === callbacks) {
         this.candleListeners.delete(key);

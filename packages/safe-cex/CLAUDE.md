@@ -838,7 +838,13 @@ approval fields; the old class export stays available without prototype repair.
 ## Native reported closed-PnL output
 
 `fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
-`history_output`. Bybit inverse sizes, OKX contract conversion, fee signs,
+`history_output`. All seven financial fields and both timestamps are required
+nullable values: unknown inputs and unknown/overflowed derived results stay null;
+measured zero stays zero. Missing close time never borrows opening time, and
+unknown close times sort last without dropping the row. Numeric strings remain
+accepted by the public contract for derived/reference producers. Consumers must
+propagate unknown through totals rather than coerce null to zero.
+Bybit inverse sizes, OKX contract conversion, fee signs,
 account labels and newest-close ordering are native output policy. The four TS
 closed-PnL mappers live only under test references. `fetchClosedPositions`
 remains the raw journal contract; it is never a fallback for reported PnL.
