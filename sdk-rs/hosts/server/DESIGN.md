@@ -642,6 +642,13 @@ owned only by the joining connection; DELEGATED uses the supplied pair through
 the existing local signer. The shared completion rechecks the token and captured
 router lease before attaching the account. Pending signing links are retired on
 completion or cancellation.
+
+The shared admission timeout is the existing remote signer's `SIGN_TIMEOUT`
+plus the native private-read `RequestClass::Read` budget (currently 15 s + 20 s).
+The same timeout covers pacing and the complete probe for both modes, without
+adding a timer or resetting the budget between stages. Expiry retains the
+transient refusal and temporary-account/pending-signer cleanup.
+
 An accepted pair starts a DELEGATED account when none exists, or joins the
 matching running DELEGATED account while retaining its existing signer. This
 does not compare secret material or replace an existing account's settings.
