@@ -28,6 +28,9 @@ after a proven refusal; Unknown stops the remaining writes. A failed entry skips
 its own protective children.
 These inherited partial-placement cases remain known issues for Sam.
 
+Prepared protective put-backs retain the same rounded quantities without an
+extra rounded-wire bounds check.
+
 The engine's `WritePlan` observes dispatch and reports indexed outcomes without
 adding a validation gate or choosing continuation. Proven placements retain
 native IDs, ambiguous writes remain unknown, and skipped children are not sent.

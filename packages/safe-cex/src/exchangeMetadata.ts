@@ -919,7 +919,9 @@ const BitgetMetadata: ExchangeMetadata = {
   // a value nothing consumed. Contrast bitunix,
   // which initialises `useFallbackUrl` from the flag, and lighter, whose
   // routing is `wsRouteCandidates` — the flag is real for both.
-  supportedTPSLTriggerTypes: [OrderStopTriggerType.MarkPrice],
+  // Classic entry presets have no documented selector or proven default.
+  // Account/path-aware callers use getExchangeMetadata for selectable TP/SL.
+  supportedTPSLTriggerTypes: [],
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   latencyDomain: 'api.bitget.com',
   features: {
@@ -2331,6 +2333,19 @@ export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string,
   const metadata = exchangeMetadata[exchange];
   if (!metadata) {
     throw unknownExchangeMetadata(exchange);
+  }
+  if (['bitget', 'bitgetusdc', 'bitgetinverse'].includes(exchange)) {
+    // The native inverse engine has no UTA route.
+    if (exchange === 'bitgetinverse' && opts.bitgetAccountMode === 'uta') return metadata;
+    const path = opts.tpslOrderPath ?? 'entry';
+    if (path === 'position' || (path === 'entry' && opts.bitgetAccountMode === 'uta')) {
+      return {
+        ...metadata,
+        supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
+        defaultTPTriggerType: OrderStopTriggerType.MarkPrice,
+        defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
+      };
+    }
   }
   return metadata;
 };

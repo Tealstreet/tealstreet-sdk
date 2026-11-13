@@ -24,6 +24,11 @@ apiKey: string,
 apiSecret: string, 
 /**
  * @ts-mutable
+ * Account-worker mode; absent keeps existing signing selection.
+ */
+signingMode?: "local" | "cosigned" | "delegated", 
+/**
+ * @ts-mutable
  */
 passphrase?: string, 
 /**

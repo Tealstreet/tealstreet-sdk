@@ -6,7 +6,11 @@ use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
 };
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::*;
+use safe_cex_engine::model::{
+    MarginType, Market, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide,
+    OrderStatus, OrderType, PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType,
+    TimeInForce,
+};
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     ConditionOwner, ConditionWait, Context, Credential, HttpOwnerRetirement, Operation, Plan,
@@ -20,6 +24,10 @@ use safe_cex_engine::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+#[cfg(test)]
+#[path = "protective_quote_tests.rs"]
+mod protective_quote_tests;
 
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
@@ -587,6 +595,14 @@ impl BitgetFutures {
         if let Err(error) = validation {
             self.refuse_entry(cx, not_sent(error));
             return;
+        }
+        if let Command::PlaceOrders { orders, .. } = &command {
+            for order in orders {
+                if let Err(error) = self.tpsl_trigger_selection(order) {
+                    self.refuse_entry(cx, not_sent(error).kind(ErrorKind::InvalidInput));
+                    return;
+                }
+            }
         }
         // In-job reads sign with the static Read role; writes with Primary.
         let (read_credential, _) = self.read_selection(paths::ACCOUNT);
@@ -1827,11 +1843,37 @@ impl BitgetFutures {
         })
     }
 
+    fn tpsl_trigger_selection(&self, order: &PlaceOrderOpts) -> Result<(), String> {
+        let attached = order.take_profit.is_some() || order.stop_loss.is_some();
+        let selections = [
+            order.trigger_type,
+            order.tp_trigger_type,
+            order.sl_trigger_type,
+        ];
+        if (is_algo(order.kind) || attached)
+            && selections.contains(&Some(StopTriggerType::IndexPrice))
+        {
+            return Err("Bitget TP/SL trigger supports Last or Mark, not Index".into());
+        }
+        if attached
+            && !is_algo(order.kind)
+            && selections.iter().any(Option::is_some)
+            && !(self.account.detected && self.account.uta)
+        {
+            return Err("Bitget entry preset trigger selection requires a detected UTA account; Classic preset default is unproven, omit the selection or use position TP/SL".into());
+        }
+        Ok(())
+    }
+
     fn place_calls(
         &self,
         cx: &Cx<'_, Pending>,
         orders: &[PlaceOrderOpts],
     ) -> Result<Vec<Planned>, String> {
+        // Recheck the detected route after queued work or an account-mode change.
+        for order in orders {
+            self.tpsl_trigger_selection(order)?;
+        }
         let mut calls = vec![];
         let mut groups: Vec<(String, Vec<Payload>)> = vec![];
         for o in orders.iter().filter(|o| !is_algo(o.kind)) {
@@ -1978,8 +2020,12 @@ impl BitgetFutures {
             p.time_in_force = (o.kind == OrderType::Limit).then_some(tif(o.time_in_force));
             p.take_profit = o.take_profit.map(|v| number(v, m.precision.price));
             p.stop_loss = o.stop_loss.map(|v| number(v, m.precision.price));
-            p.tp_trigger_by = o.take_profit.map(|_| uta_trigger(o.tp_trigger_type));
-            p.sl_trigger_by = o.stop_loss.map(|_| uta_trigger(o.sl_trigger_type));
+            p.tp_trigger_by = o
+                .take_profit
+                .map(|_| uta_trigger(o.tp_trigger_type.or(o.trigger_type)));
+            p.sl_trigger_by = o
+                .stop_loss
+                .map(|_| uta_trigger(o.sl_trigger_type.or(o.trigger_type)));
             p.tp_order_type = o.take_profit.map(|_| "market");
             p.sl_order_type = o.stop_loss.map(|_| "market");
         } else {
@@ -2336,11 +2382,16 @@ impl BitgetFutures {
         at: f64,
     ) {
         if last.is_some() || mark.is_some() {
-            self.trading
-                .references
-                .entry(symbol.into())
-                .or_default()
-                .update(last, mark, at);
+            // Borrow the usual seeded symbol instead of allocating a lookup key per ticker.
+            if let Some(quote) = self.trading.references.get_mut(symbol) {
+                quote.update(last, mark, at);
+            } else {
+                self.trading
+                    .references
+                    .entry(symbol.into())
+                    .or_default()
+                    .update(last, mark, at);
+            }
         }
     }
 

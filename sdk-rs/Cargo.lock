@@ -4129,6 +4129,7 @@ dependencies = [
  "safe-cex-exec",
  "safe-cex-native",
  "safe-cex-remote-signer",
+ "safe-cex-venue-backpack",
  "safe-cex-venues",
  "sentry",
  "serde",
