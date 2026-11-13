@@ -1332,6 +1332,23 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
     }).await;
 }
 
+async fn exec_review_result(sent: &mut crate::out::Receiver, id: &str) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["t"] == "msg"
+                && frame["d"]["op"] == "exec-result"
+                && frame["d"]["data"]["reqId"] == id
+            {
+                return frame["d"]["data"].clone();
+            }
+        }
+        panic!("missing EXEC result for {id}")
+    })
+    .await
+    .expect("bounded EXEC factory seed result")
+}
+
 #[tokio::test]
 async fn exec_review_f2_keeps_factory_identity_across_legacy_and_overlapping_typed_calls() {
     tokio::task::LocalSet::new().run_until(async {
@@ -1342,6 +1359,8 @@ async fn exec_review_f2_keeps_factory_identity_across_legacy_and_overlapping_typ
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             if prior_legacy {
                 session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":"exec","data":{"command":"tasks","reqId":"legacy-before-typed","symbol":"BTCUSDT"}}}).to_string()).await.unwrap();
+                let seed = exec_review_result(&mut sent, "legacy-before-typed").await;
+                assert_eq!(seed["success"], true, "native legacy factory seed never ran: {seed}");
             } else {
                 action(&mut session, json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}), 1, false).await;
                 action_frame(&mut sent, "order.actionOutcome").await;
