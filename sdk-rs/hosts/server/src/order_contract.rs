@@ -174,6 +174,21 @@ pub fn action_fingerprint(
     {
         return Err("not sent: invalid update");
     }
+    action_wire_fingerprint(account, id, action, seq)
+}
+
+/// Hash the untouched v1 payload from a potentially newer client so a schema
+/// rejection can still be bound to its original identity. This grants no
+/// permission to dispatch: the caller must separately validate the closed schema.
+pub(crate) fn action_wire_fingerprint(
+    account: &str,
+    id: &str,
+    action: &Value,
+    seq: u64,
+) -> Result<String, &'static str> {
+    if key_time(id).is_none() || seq == 0 || seq > 9_007_199_254_740_991 {
+        return Err("not sent: invalid intent");
+    }
     let value = json!({"accountName":account,"action":action,"intentId":id,"seq":seq,"version":1});
     let mut canonical = String::from("tealstreet/delegated-action/v1\0");
     canonical_value(&value, &mut canonical, 0)?;

@@ -385,7 +385,16 @@ async fn token_expiry_stops_an_action_nuke_waiting_for_startup() {
                 crate::order_actions::ActionDeadline::new(&intent, 0., std::time::Instant::now())
                     .unwrap();
             session.identity.token.as_mut().unwrap().1 = now_ms() + 100;
-            session.send_action_nuke("acct", &json!(intent), 1, deadline);
+            session.send_action_nuke(
+                "acct",
+                &json!(intent),
+                OrderReceipt::Action {
+                    seq: 1,
+                    kind: "nuke",
+                    deadline,
+                },
+                "all",
+            );
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             assert_eq!(
                 placed.load(Ordering::SeqCst),

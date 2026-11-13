@@ -14,10 +14,14 @@ mod more;
 #[path = "delegated_restart.rs"]
 mod restart;
 
+#[path = "delegated_identity.rs"]
+mod identity;
+
 struct Fixture {
     registry: Arc<Registry>,
     code: Arc<AtomicUsize>,
     private_reads: Arc<AtomicUsize>,
+    orders: Arc<Mutex<Vec<Value>>>,
     private_writes: Arc<AtomicUsize>,
     gate: Arc<tokio::sync::Semaphore>,
     server: tokio::task::JoinHandle<()>,
@@ -36,12 +40,14 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let code = Arc::new(AtomicUsize::new(0));
     let private_reads = Arc::new(AtomicUsize::new(0));
+    let orders = Arc::new(Mutex::new(Vec::new()));
     let private_writes = Arc::new(AtomicUsize::new(0));
     let rejected = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(tokio::sync::Semaphore::new(1000));
     let (codes, reads, wait) = (code.clone(), private_reads.clone(), gate.clone());
     let writes = private_writes.clone();
     let proof_rejections = rejected.clone();
+    let order_requests = orders.clone();
     let app = axum::Router::new().route("/ws", axum::routing::get(|ws: axum::extract::WebSocketUpgrade| async {
         ws.on_upgrade(|mut socket| async move {
             while let Some(Ok(frame)) = socket.recv().await {
@@ -52,11 +58,27 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
                 }
             }
         })
-    })).fallback(move |method: axum::http::Method, uri: Uri, headers: HeaderMap| {
+    })).fallback(move |method: axum::http::Method, uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
         let (codes, reads, wait) = (codes.clone(), reads.clone(), wait.clone());
         let writes = writes.clone();
         let rejected = proof_rejections.clone();
+        let orders = order_requests.clone();
         async move {
+            if uri.path().contains("/v5/order/create") {
+                writes.fetch_add(1, Ordering::SeqCst);
+                assert!(headers.contains_key("x-bapi-api-key"));
+                assert!(headers.contains_key("x-bapi-sign"));
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                let rows = body.get("request").and_then(Value::as_array).cloned().unwrap_or_else(|| vec![body]);
+                orders.lock().unwrap().extend(rows.clone());
+                let result = if uri.path().ends_with("-batch") {
+                    let rows: Vec<_> = rows.iter().map(|row| json!({"orderId":"loopback-order","orderLinkId":row["orderLinkId"],"symbol":row["symbol"]})).collect();
+                    json!({"retCode":0,"retMsg":"OK","result":{"list":rows},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}})
+                } else {
+                    json!({"retCode":0,"retMsg":"OK","result":{"orderId":"loopback-order","orderLinkId":rows[0]["orderLinkId"]}})
+                };
+                return axum::Json(result).into_response();
+            }
             if headers.contains_key("x-bapi-api-key") {
                 assert!(headers.contains_key("x-bapi-sign"));
                 if method != axum::http::Method::GET {
@@ -79,6 +101,11 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
                 json!({"category":"linear","list":[{"symbol":"BTCUSDT","lastPrice":"60000","markPrice":"60000","indexPrice":"60000","bid1Price":"59999","ask1Price":"60001","fundingRate":"0.0001","nextFundingTime":"1760342400000"}]})
             } else if uri.path().contains("account/info") {
                 json!({"unifiedMarginStatus":4,"marginMode":"REGULAR_MARGIN"})
+            } else if uri.path().contains("position/list") {
+                json!({"category":"linear","list":[{"symbol":"BTCUSDT","positionIdx":0,
+                    "side":"Buy","size":"0.001","leverage":"10","avgPrice":"50000",
+                    "markPrice":"50000","positionValue":"50","positionIM":"5",
+                    "unrealisedPnl":"0","cumRealisedPnl":"0","liqPrice":"0"}],"nextPageCursor":""})
             } else { json!({"category":"linear","list":[],"nextPageCursor":""}) };
             axum::Json(json!({"retCode":0,"retMsg":"OK","result":result})).into_response()
         }
@@ -111,6 +138,7 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
         registry: crate::accounts::testing::probe_registry(plan),
         code,
         private_reads,
+        orders,
         private_writes,
         gate,
         server,

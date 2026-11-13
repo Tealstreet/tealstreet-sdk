@@ -309,6 +309,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current CI size + 10 KiB, rounded up; historical provenance/tests retained.
   // #3372 reduced head 5429d69bb2c3: run 43341438240/job 131611062815, artifact 14000097059.
   // CI merge fc362e3e5ebd: web/Node/replay 2,338,212 B; the same cap retains 10,844 B.
+  // #3472 source f6a275af12092d378f8812f5260b4a3a07b7b0ee: fresh optimized web/node 2,332,186 B.
+  // build.sh --venue bybit; Rust1.99, bindgen0.2.129, Binaryen132 twice-Oz.
+  // SHA256 2f99b9639875bdb29dfde985745ca9f91b1e3903dcbd3b9052e2a788548d6db2.
+  // Generated from wasm-budget-venue.json: ceil((max(web,node) + 10 KiB) / KiB).
   // #3397 run 43364338606/job 131685537135, artifact 14009728045:
   // source ba06b221f45f has head fa06619c7d21's tree; web/Node/replay 2,332,649 B.
   // SHA-256 70cd348f758b71303b71e47a7231223bd06078e79b1e56e095dcca7a7f8d2aa2.

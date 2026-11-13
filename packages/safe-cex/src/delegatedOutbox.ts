@@ -3,7 +3,12 @@ import type { DelegatedActivationCapabilities, DelegatedActivationFlags } from '
 
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
-import { delegatedActionFingerprint, isDelegatedAction, isDelegatedActionResult } from './delegatedActions';
+import {
+  delegatedActionFingerprint,
+  isDelegatedAction,
+  isDelegatedActionResult,
+  isDelegatedFullWriteAction,
+} from './delegatedActions';
 import { DelegatedActivationError, requireDelegatedAction, requireDelegatedActivation } from './delegatedActivation';
 import {
   createDelegatedIntentId,
@@ -26,7 +31,7 @@ const delegatedReplayBrand = Symbol('delegatedReplay');
 type ProvenNotSent = 'notSent' & { readonly [delegatedNotSentBrand]: true };
 export type DelegatedReplayableIntent = DelegatedIntent & { readonly [delegatedReplayBrand]: true };
 export type IntentState =
-  'queued' | 'sending' | 'acknowledged' | 'applied' | 'placed' | 'refused' | 'unknown' | ProvenNotSent | 'canceled';
+  'queued' | 'sending' | 'acknowledged' | 'applied' | 'placed' | 'refused' | 'unsupported' | 'unknown' | ProvenNotSent | 'canceled';
 
 export type DelegatedNotSentEvidence =
   | { kind: 'noHandoff'; source: 'local'; attempted: false }
@@ -50,6 +55,7 @@ export type StoredDelegatedNotSentEvidence = Readonly<DelegatedNotSentEvidence &
 export type StoredDelegatedNoHandoffEvidence = Readonly<NoHandoffEvidence & EvidenceBinding>;
 
 export interface DelegatedIntent extends OutboxScope {
+  /** Persistence schema: action rows use 2; every typed WS action uses v1. */
   version: 1 | 2;
   action?: DelegatedAction;
   result?: DelegatedActionResult;
@@ -68,7 +74,7 @@ export interface DelegatedIntent extends OutboxScope {
   /** Unknown history expired after 24 hours; never evidence of non-forwarding. */
   retentionExpired?: boolean;
   venueOrderId?: string;
-  error?: { message: string; outcome?: 'unknown' | ProvenNotSent };
+  error?: { message: string; outcome?: 'unknown' | 'unsupported' | ProvenNotSent };
 }
 export interface OutboxStorage {
   load(scope: Readonly<OutboxScope>): Promise<DelegatedIntent[] | OutboxSnapshot>;
@@ -97,7 +103,10 @@ export interface OutboxConnection extends OutboxScope {
   venue: 'bybit';
   signingMode: 'delegated';
   ready: boolean;
-  capabilities: DelegatedActivationCapabilities;
+  capabilities: DelegatedActivationCapabilities & {
+    delegatedFullWriteActionsV1?: boolean;
+    delegatedFullWriteLedgerV1?: boolean;
+  };
   instanceId?: string;
   /**
    * True only for physical handoff; explicit false proves no send or buffering.
@@ -117,6 +126,7 @@ const STATES: readonly string[] = [
   'placed',
   'applied',
   'refused',
+  'unsupported',
   'unknown',
   'notSent',
   'canceled',
@@ -315,8 +325,19 @@ export class DelegatedOutbox {
         (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
       )
         throw new Error('Invalid persisted action');
-      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind)))
+      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
         throw new Error('Invalid persisted action result');
+      if (
+        row.state === 'unsupported' &&
+        (!row.action ||
+          row.result !== undefined ||
+          row.cancelPending ||
+          !record(row.error) ||
+          row.error.outcome !== 'unsupported' ||
+          typeof row.error.message !== 'string' ||
+          [...row.error.message].length > 512)
+      )
+        throw new Error('Invalid persisted unsupported action');
       const fingerprint = row.action
         ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
         : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
@@ -626,7 +647,7 @@ export class DelegatedOutbox {
       const row = this.intents.get(data.intentId);
       if (!row || data.seq !== row.seq) return;
       if (row.action) {
-        if (!this.actionCurrent(connection) || !this.actionReceipt(row, parsed.t, data)) return;
+        if (!this.actionCurrent(connection, row.action) || !this.actionReceipt(row, parsed.t, data)) return;
       } else if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
         if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return;
         if (row.retentionExpired && data.received) return;
@@ -704,9 +725,10 @@ export class DelegatedOutbox {
     // positive no-handoff proof. A refused outcome after ACK(false) can still
     // attach its authoritative refusal message.
     if (row.state === 'applied' && data.outcome !== 'applied') return false;
+    if (row.state === 'unsupported' && data.outcome !== 'unsupported') return false;
     if (row.state === 'notSent' && storedNotSentEvidence(row) && data.outcome === 'unknown') return false;
     if (data.outcome === 'applied') {
-      if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind)) return false;
+      if (data.error !== null || !isDelegatedActionResult(data.result, row.action.kind, row.action)) return false;
       row.result = clone(data.result);
       row.state = 'applied';
       delete row.error;
@@ -729,6 +751,10 @@ export class DelegatedOutbox {
           errorOutcome: 'notSent',
           venueOrderId: null,
         });
+      } else if (data.outcome === 'unsupported' && data.error.outcome === 'unsupported') {
+        // A closed-schema rejection is terminal, but is never a replay brand.
+        row.state = 'unsupported';
+        row.error = { message: data.error.message, outcome: 'unsupported' };
       } else if (data.outcome === 'unknown' && data.error.outcome === 'unknown') {
         row.state = 'unknown';
         row.error = { message: data.error.message, outcome: 'unknown' };
@@ -740,11 +766,15 @@ export class DelegatedOutbox {
     return true;
   }
 
-  private actionCurrent(connection: Readonly<OutboxConnection>): boolean {
+  private actionCurrent(connection: Readonly<OutboxConnection>, action?: DelegatedAction): boolean {
     return (
       this.current(connection) &&
       connection.capabilities.delegatedOrderActionsV1 === true &&
-      connection.capabilities.delegatedOrderActionLedgerV1 === true
+      connection.capabilities.delegatedOrderActionLedgerV1 === true &&
+      (!action ||
+        !isDelegatedFullWriteAction(action) ||
+        (connection.capabilities.delegatedFullWriteActionsV1 === true &&
+          connection.capabilities.delegatedFullWriteLedgerV1 === true))
     );
   }
 
@@ -787,7 +817,7 @@ export class DelegatedOutbox {
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
-      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
       !this.replayable(row) ||
       this.sent.get(row.intentId) === connection
     )
@@ -812,7 +842,8 @@ export class DelegatedOutbox {
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !this.replayable(row)) return;
+    if (!(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) || !this.replayable(row))
+      return;
     if (this.expired(row)) {
       this.expire(row);
       return;
@@ -870,13 +901,14 @@ export class DelegatedOutbox {
 
   private async sendCancellation(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
-      !(row.action ? this.actionCurrent(connection) : this.current(connection)) ||
+      !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
       !row.cancelPending ||
       this.canceled.get(row.intentId) === connection
     )
       return;
     await this.persist(row);
-    if (!(row.action ? this.actionCurrent(connection) : this.current(connection)) || !row.cancelPending) return;
+    if (!(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) || !row.cancelPending)
+      return;
     if (
       connection.send(
         this.frame(connection, row.action ? 'order.actionCancelQueued' : 'order.cancelQueued', {
@@ -1024,6 +1056,7 @@ export class DelegatedOutbox {
         row.state === 'applied' ||
         row.state === 'placed' ||
         row.state === 'refused' ||
+        row.state === 'unsupported' ||
         row.state === 'notSent' ||
         row.state === 'canceled')
     );

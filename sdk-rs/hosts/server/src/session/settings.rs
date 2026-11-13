@@ -1,7 +1,7 @@
 use super::*;
 
 impl Session {
-    pub(super) fn apply_settings(&mut self, request: envelope::ApplySettings) {
+    pub(super) fn reset_settings(&mut self, request: envelope::ApplySettings) {
         let name = request.account_name;
         if let Some(pending) = self.pending_verifications.get(&name) {
             pending.out.send(envelope::error(Some(&name), "verifying"));
@@ -24,7 +24,7 @@ impl Session {
                         .is_some_and(|current| Arc::ptr_eq(&current, &joined.account))
             });
         if !admitted
-            || !self.registry.apply_settings(
+            || !self.registry.reset_settings(
                 &self.joined[&name].account,
                 self.socket,
                 self.joined[&name].out.outbox(),

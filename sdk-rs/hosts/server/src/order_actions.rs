@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 pub struct Target {
     pub id: String,
     pub symbol: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub kind: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -46,18 +48,105 @@ fn serialize_update<S: serde::Serializer>(
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Action {
-    Amend { order: Target, update: Update },
-    Cancel { order: Target },
-    CancelAll {},
+    Amend {
+        order: Target,
+        update: Update,
+    },
+    Cancel {
+        order: Target,
+    },
+    CancelAll {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        symbols: Option<Vec<String>>,
+    },
     Nuke {},
+    Place {
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize_array")]
+        orders: Vec<Value>,
+    },
+    CancelOrders {
+        orders: Vec<Target>,
+    },
+    CancelSymbol {
+        symbol: String,
+    },
+    SetLeverage {
+        symbol: String,
+        #[serde(serialize_with = "crate::order_contract::serialize_age_ms")]
+        leverage: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        side: Option<String>,
+    },
+    SetAllLeverage {
+        #[serde(serialize_with = "crate::order_contract::serialize_age_ms")]
+        leverage: f64,
+    },
+    SetMarginType {
+        isolated: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        symbol: Option<String>,
+    },
+    SetPositionMode {
+        hedged: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        symbol: Option<String>,
+    },
+    Close {
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize")]
+        order: Value,
+    },
+    CloseAll {},
+    NukeOrders {},
+    StopAlgos {},
+    CancelAccountOrders {},
+    ScheduleCancel {
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize")]
+        time: Value,
+    },
+    SetStpMode {
+        mode: String,
+    },
+    SetAccountTier {
+        tier: String,
+    },
+    Algo {
+        op: String,
+        #[serde(deserialize_with = "crate::full_writes::unique_json::deserialize")]
+        data: Value,
+    },
 }
 impl Action {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Amend { .. } => "amend",
             Self::Cancel { .. } => "cancel",
-            Self::CancelAll {} => "cancelAll",
+            Self::CancelAll { .. } => "cancelAll",
             Self::Nuke {} => "nuke",
+            Self::Place { .. } => "place",
+            Self::CancelOrders { .. } => "cancelOrders",
+            Self::CancelSymbol { .. } => "cancelSymbol",
+            Self::SetLeverage { .. } => "setLeverage",
+            Self::SetAllLeverage { .. } => "setAllLeverage",
+            Self::SetMarginType { .. } => "setMarginType",
+            Self::SetPositionMode { .. } => "setPositionMode",
+            Self::Close { .. } => "close",
+            Self::CloseAll {} => "closeAll",
+            Self::NukeOrders {} => "nukeOrders",
+            Self::StopAlgos {} => "stopAlgos",
+            Self::CancelAccountOrders {} => "cancelAccountOrders",
+            Self::ScheduleCancel { .. } => "scheduleCancel",
+            Self::SetStpMode { .. } => "setStpMode",
+            Self::SetAccountTier { .. } => "setAccountTier",
+            Self::Algo { .. } => "algo",
+        }
+    }
+    pub fn full_write(&self) -> bool {
+        match self {
+            Self::Amend { update, .. } => update.amount == Some(0.0),
+            Self::Cancel { order } => order.kind.is_some(),
+            Self::CancelAll { symbols } => symbols.is_some(),
+            Self::Nuke {} => false,
+            _ => true,
         }
     }
     pub fn call(&self) -> Result<(&'static str, Vec<Value>), &'static str> {
@@ -66,15 +155,29 @@ impl Action {
                 && order.id.len() <= 256
                 && !order.symbol.is_empty()
                 && order.symbol.len() <= 256
+                && order.kind.as_ref().is_none_or(|kind| {
+                    matches!(
+                        kind.as_str(),
+                        "market"
+                            | "limit"
+                            | "conditional"
+                            | "stop_market"
+                            | "take_profit_market"
+                            | "trailing_stop_market"
+                    )
+                })
         };
         match self {
+            Self::Algo { op, data } => {
+                crate::full_writes::algo(op, data)?;
+                Ok(("delegatedAlgo", vec![json!(op), data.clone()]))
+            }
             Self::Amend { order, update } => {
                 if !valid_target(order)
+                    || order.kind.is_some()
                     || (update.price.is_none() && update.amount.is_none())
-                    || [update.price, update.amount]
-                        .into_iter()
-                        .flatten()
-                        .any(|v| !v.is_finite() || v <= 0.0)
+                    || update.price.is_some_and(|v| !v.is_finite() || v <= 0.0)
+                    || update.amount.is_some_and(|v| !v.is_finite() || v < 0.0)
                 {
                     return Err("not sent: invalid amendment");
                 }
@@ -89,10 +192,139 @@ impl Action {
                 }
                 Ok(("cancelOrders", vec![json!([order])]))
             }
-            Self::CancelAll {} => Ok(("cancelAllOrders", vec![])),
+            Self::CancelAll { symbols } => {
+                if symbols.as_ref().is_some_and(|rows| {
+                    rows.len() > 32 || rows.iter().any(|s| !crate::full_writes::text(s))
+                }) {
+                    return Err("not sent: invalid cancellation symbols");
+                }
+                Ok((
+                    "cancelAllOrders",
+                    symbols.as_ref().map_or_else(Vec::new, |v| vec![json!(v)]),
+                ))
+            }
             Self::Nuke {} => Ok(("nuke", vec![])),
+            Self::Place { orders } => {
+                if orders.is_empty()
+                    || orders.len() > 32
+                    || orders.iter().any(|v| !crate::full_writes::order(v, false))
+                {
+                    return Err("not sent: invalid placement batch");
+                }
+                Ok(("placeOrders", vec![json!(orders)]))
+            }
+            Self::Close { order } => {
+                if !crate::full_writes::order(order, true) {
+                    return Err("not sent: close must be reduce-only");
+                }
+                Ok(("placeOrder", vec![order.clone()]))
+            }
+            Self::CancelOrders { orders } => {
+                if orders.is_empty() || orders.len() > 32 || orders.iter().any(|v| !valid_target(v))
+                {
+                    return Err("not sent: invalid cancellation batch");
+                }
+                Ok(("cancelOrders", vec![json!(orders)]))
+            }
+            Self::CancelSymbol { symbol } => {
+                if !crate::full_writes::text(symbol) {
+                    return Err("not sent: invalid symbol");
+                }
+                Ok(("cancelSymbolOrders", vec![json!(symbol)]))
+            }
+            Self::SetLeverage {
+                symbol,
+                leverage,
+                side,
+            } => {
+                if !crate::full_writes::text(symbol)
+                    || !leverage.is_finite()
+                    || *leverage <= 0.0
+                    || side
+                        .as_ref()
+                        .is_some_and(|s| !matches!(s.as_str(), "long" | "short"))
+                {
+                    return Err("not sent: invalid leverage");
+                }
+                Ok((
+                    "setLeverage",
+                    vec![json!(symbol), json!(leverage), json!(side)],
+                ))
+            }
+            Self::SetAllLeverage { leverage } => {
+                if !leverage.is_finite() || *leverage <= 0.0 {
+                    return Err("not sent: invalid leverage");
+                }
+                Ok(("setAllLeverage", vec![json!(leverage)]))
+            }
+            Self::SetMarginType { isolated, symbol } => {
+                if symbol
+                    .as_ref()
+                    .is_some_and(|s| !crate::full_writes::text(s))
+                {
+                    return Err("not sent: invalid symbol");
+                }
+                Ok(("changeMarginType", vec![json!(isolated), json!(symbol)]))
+            }
+            Self::SetPositionMode { hedged, symbol } => {
+                if symbol
+                    .as_ref()
+                    .is_some_and(|s| !crate::full_writes::text(s))
+                {
+                    return Err("not sent: invalid symbol");
+                }
+                Ok(("changePositionMode", vec![json!(hedged), json!(symbol)]))
+            }
+            Self::CloseAll {} => Ok(("nukePositions", vec![])),
+            Self::NukeOrders {} => Ok(("nukeOrders", vec![])),
+            Self::StopAlgos {} => Ok(("stopAccountAlgos", vec![])),
+            Self::CancelAccountOrders {} => Ok(("delegatedCancelAccountOrders", vec![])),
+            Self::ScheduleCancel { time } => {
+                if !time.is_null()
+                    && !time.as_f64().is_some_and(|v| {
+                        v.is_finite()
+                            && (0.0..=9_007_199_254_740_991.0).contains(&v)
+                            && v.fract() == 0.0
+                    })
+                {
+                    return Err("not sent: invalid scheduled cancel time");
+                }
+                Ok(("scheduleCancel", vec![time.clone()]))
+            }
+            Self::SetStpMode { mode } => {
+                if !matches!(
+                    mode.as_str(),
+                    "EXPIRE_TAKER" | "EXPIRE_MAKER" | "EXPIRE_BOTH"
+                ) {
+                    return Err("not sent: invalid STP mode");
+                }
+                Ok(("delegatedSetStpMode", vec![json!(mode)]))
+            }
+            Self::SetAccountTier { tier } => {
+                if !matches!(tier.as_str(), "standard" | "premium" | "plus") {
+                    return Err("not sent: invalid account tier");
+                }
+                Ok(("delegatedSetAccountTier", vec![json!(tier)]))
+            }
         }
     }
+}
+
+/// Decode only routing/binding metadata first. Unsupported payloads remain raw
+/// until their identity has been checked; unknown fields are never discarded
+/// on a path that can execute a native write.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireRequest {
+    pub version: u8,
+    pub account_name: String,
+    pub instance_id: Option<String>,
+    pub intent_id: String,
+    pub seq: u64,
+    #[serde(serialize_with = "crate::order_contract::serialize_age_ms")]
+    pub age_ms: f64,
+    pub fingerprint: String,
+    pub action: Value,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -138,6 +370,30 @@ pub fn refuse(out: &Out, name: &str, id: &Value, seq: u64, message: &str) {
     );
 }
 
+/// Decode the original text strictly after admission/hash validation. Never
+/// execute a schema normalized through Value (which collapses duplicate tags).
+pub(crate) fn decode_request(text: &str) -> Result<Request, serde_json::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Frame {
+        #[serde(rename = "t")]
+        _kind: String,
+        d: Request,
+    }
+    serde_json::from_str::<Frame>(text).map(|frame| frame.d)
+}
+
+/// Schema rejection is terminal but never fabricates replay/no-handoff brands.
+/// Only the bound, authenticated pre-dispatch path may emit this outcome.
+pub fn unsupported(out: &Out, name: &str, id: &Value, seq: u64) {
+    out.action_outcome(
+        name,
+        json!({"version":1,"intentId":id,"seq":seq,
+        "outcome":"unsupported","result":null,
+        "error":{"message":"Unsupported v1 action schema","outcome":"unsupported"}}),
+    );
+}
+
 pub fn settle(
     out: &Out,
     name: &str,
@@ -151,7 +407,13 @@ pub fn settle(
     match answer {
         Ok(result) => {
             let applied = match kind {
-                "amend" => {
+                "place"
+                    if result["protectionApplied"] == true
+                        && result["orderIds"].as_array().is_some_and(Vec::is_empty) =>
+                {
+                    Some(json!({"kind":"place","orderIds":[],"protectionApplied":true}))
+                }
+                "amend" | "place" | "close" => {
                     let ids = result.as_array().or_else(|| result["orderIds"].as_array());
                     ids.filter(|ids| {
                         !ids.is_empty()
@@ -161,9 +423,25 @@ pub fn settle(
                                     .is_some_and(|id| !id.is_empty() && id.len() <= 256)
                             })
                     })
-                    .map(|ids| json!({"kind":"amend","orderIds":ids}))
+                    .map(|ids| json!({"kind":kind,"orderIds":ids}))
                 }
-                "cancel" | "cancelAll" | "nuke" => Some(json!({"kind":kind})),
+                "cancel" | "cancelAll" | "nuke" | "closeAll" | "nukeOrders" | "stopAlgos" => {
+                    Some(json!({"kind":kind}))
+                }
+                "cancelOrders"
+                | "cancelSymbol"
+                | "cancelAccountOrders"
+                | "setLeverage"
+                | "setAllLeverage"
+                | "setMarginType"
+                | "setPositionMode"
+                | "scheduleCancel"
+                | "setStpMode"
+                | "setAccountTier"
+                    if result.is_null() =>
+                {
+                    Some(json!({"kind":kind}))
+                }
                 _ => None,
             };
             if let Some(result) = applied {
@@ -173,7 +451,13 @@ pub fn settle(
             }
         }
         Err(error) => {
-            let not_sent = error["outcome"] == "notSent";
+            // A later unsent leg cannot erase earlier native effects in a batch.
+            let partial = error["partialOrderIds"]
+                .as_array()
+                .is_some_and(|v| !v.is_empty())
+                || error["partialOrderCount"].as_u64().is_some_and(|v| v > 0)
+                || error["elements"].as_array().is_some_and(|v| !v.is_empty());
+            let not_sent = error["outcome"] == "notSent" && !partial;
             data["outcome"] = if not_sent { "refused" } else { "unknown" }.into();
             let message: String = error["message"]
                 .as_str()
@@ -221,15 +505,23 @@ impl ActionDeadline {
 pub(crate) struct ActionGuard {
     registration: Out,
     deadline: ActionDeadline,
+    // Another holder's live account token cannot renew this socket's authority.
+    token_expires_at_ms: Option<u64>,
 }
 impl ActionGuard {
-    pub(crate) fn new(registration: Out, deadline: ActionDeadline) -> Self {
+    pub(crate) fn new(
+        registration: Out,
+        deadline: ActionDeadline,
+        token_expires_at_ms: Option<u64>,
+    ) -> Self {
         Self {
             registration,
             deadline,
+            token_expires_at_ms,
         }
     }
     pub(crate) fn check(&self) -> Result<(), &'static str> {
+        crate::auth::Verifier::check_expiry(self.token_expires_at_ms, crate::accounts::now_ms())?;
         if self.deadline.expired() {
             Err("Action expired; no further action command was sent")
         } else if !self.registration.action_active() {
@@ -250,6 +542,7 @@ pub(crate) fn expired_outcome() -> Value {
 pub struct NukeReceipt {
     guard: ActionGuard,
     reply: Option<(String, Value, u64)>,
+    kind: &'static str,
 }
 impl NukeReceipt {
     pub(crate) fn new(
@@ -258,11 +551,17 @@ impl NukeReceipt {
         id: Value,
         seq: u64,
         deadline: ActionDeadline,
+        token_expires_at_ms: Option<u64>,
     ) -> Self {
         Self {
-            guard: ActionGuard::new(out, deadline),
+            guard: ActionGuard::new(out, deadline, token_expires_at_ms),
             reply: Some((name, id, seq)),
+            kind: "nuke",
         }
+    }
+    pub(crate) fn with_kind(mut self, kind: &'static str) -> Self {
+        self.kind = kind;
+        self
     }
     pub(crate) fn guard(&self) -> ActionGuard {
         self.guard.clone()
@@ -275,7 +574,7 @@ impl NukeReceipt {
     }
     pub fn finish(mut self, result: Result<Value, Value>) {
         if let Some((name, id, seq)) = self.reply.take() {
-            settle(&self.guard.registration, &name, &id, seq, "nuke", result);
+            settle(&self.guard.registration, &name, &id, seq, self.kind, result);
         }
     }
 }
@@ -287,7 +586,7 @@ impl Drop for NukeReceipt {
                 &name,
                 &id,
                 seq,
-                "nuke",
+                self.kind,
                 Err(
                     json!({"message":"Action interrupted; check orders and positions","outcome":"unknown"}),
                 ),
@@ -299,6 +598,38 @@ impl Drop for NukeReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn amendment_rejects_unused_target_routing_type() {
+        let action: Action = serde_json::from_value(json!({
+            "kind":"amend", "order":{"id":"resting","symbol":"BTCUSDT","type":"stop_market"},
+            "update":{"price":49000}
+        }))
+        .unwrap();
+        assert!(action.call().is_err());
+    }
+    #[test]
+    fn full_write_contract_accepts_each_local_write_and_preserves_exact_payload() {
+        let cases: Vec<Value> =
+            serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
+                .unwrap();
+        for case in cases {
+            let action: Action = serde_json::from_value(case["action"].clone())
+                .unwrap_or_else(|e| panic!("{}: {e}", case["action"]["kind"]));
+            assert!(action.full_write());
+            assert_eq!(serde_json::to_value(&action).unwrap(), case["action"]);
+            assert_eq!(
+                crate::order_contract::action_fingerprint(
+                    "main",
+                    "018bcfe5-6800-7101-8101-010101010101",
+                    &case["action"],
+                    1
+                )
+                .unwrap(),
+                case["fingerprint"]
+            );
+            assert_eq!(action.call().unwrap().0, case["method"].as_str().unwrap());
+        }
+    }
     #[tokio::test]
     async fn registered_action_result_reserves_binding_expansion_before_size_check() {
         let (socket, mut sent, _) = Out::channel(4);
@@ -389,6 +720,37 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn full_write_results_require_completion_and_preserve_partial_uncertainty() {
+        for (kind, answer, expected) in [
+            ("setLeverage", Ok(Value::Null), "applied"),
+            ("setLeverage", Ok(json!(false)), "unknown"),
+            ("place", Ok(json!([])), "unknown"),
+            ("close", Ok(json!(["native-close"])), "applied"),
+            (
+                "place",
+                Err(json!({"outcome":"notSent","partialOrderIds":["native-first"]})),
+                "unknown",
+            ),
+            (
+                "cancelOrders",
+                Err(json!({"outcome":"notSent","elements":[{"effect":"cancelled"}]})),
+                "unknown",
+            ),
+            (
+                "setMarginType",
+                Err(json!({"outcome":"notSent","message":"unsupported"})),
+                "refused",
+            ),
+            ("algo", Ok(Value::Null), "unknown"),
+        ] {
+            let (out, mut sent, _) = Out::channel(4);
+            settle(&out, "main", &json!("intent"), 1, kind, answer);
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            assert_eq!(frame["d"]["outcome"], expected, "{kind}: {frame}");
+        }
+    }
+
+    #[tokio::test]
     async fn retirement_rejects_a_deferred_nuke_and_drops_its_result() {
         let (out, mut sent, _) = Out::channel(4);
         let old = out.with_instance_id(Some("old"));
@@ -401,6 +763,7 @@ mod tests {
                 monotonic: std::time::Instant::now() + std::time::Duration::from_secs(10),
                 key_expires_at_ms: crate::accounts::now_ms() + 10_000,
             },
+            None,
         );
         assert!(receipt.active());
         old.retire_order_receipts();
