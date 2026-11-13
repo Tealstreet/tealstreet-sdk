@@ -883,6 +883,36 @@ pub async fn run(
     placed: crate::accounts::PlacedSymbols,
     held: Arc<AtomicBool>,
     running: Arc<Running>,
+    inbox: mpsc::UnboundedReceiver<AlgoInput>,
+) {
+    run_with_identity(
+        handle,
+        client,
+        who,
+        emit,
+        broadcast,
+        link_signer,
+        placed,
+        held,
+        running,
+        None,
+        inbox,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_with_identity(
+    handle: AccountHandle,
+    client: u64,
+    who: crate::audit::Who,
+    emit: Emit,
+    broadcast: Broadcast,
+    link_signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
+    placed: crate::accounts::PlacedSymbols,
+    held: Arc<AtomicBool>,
+    running: Arc<Running>,
+    identity: Option<String>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     // An algo host that cannot run never takes the account with it: the account's
@@ -919,11 +949,17 @@ pub async fn run(
     let cx = AlgoCx::new(port.clone(), scope.clone());
     let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
     let book = chasers.book();
-    let twap = Rc::new(safe_cex_algo_twap::factory::TwapFactory::new(
-        &name,
-        cx.clone(),
-        Rc::new(book.clone()),
-    ));
+    let twap = Rc::new(match identity {
+        Some(identity) => safe_cex_algo_twap::factory::TwapFactory::new_with_owner(
+            &name,
+            cx.clone(),
+            Rc::new(book.clone()),
+            identity,
+        ),
+        None => {
+            safe_cex_algo_twap::factory::TwapFactory::new(&name, cx.clone(), Rc::new(book.clone()))
+        }
+    });
     // Exec's chase/TWAP handoff shares this account's book and TWAP schedule,
     // under the server's trusted account name, never one from the payload.
     // A nuke ends with the venue's cancel-all, scoped as hosted `cancelAllOrders`.

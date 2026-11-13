@@ -1168,6 +1168,10 @@ fn an_unknown_replacement_is_never_read_or_put_back() {
         reply(&mut e, &place, status, REFUSED);
         let out = actions(&mut e);
         let error = failure(&out);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(error.message.contains("outcome is unknown"));
+        assert!(error.message.contains("Check Open Orders"));
+        assert!(!error.message.to_ascii_lowercase().contains("rejected"));
         assert_eq!(error.protection, None, "{status}");
         assert!(
             !out.iter().any(|a| matches!(a, Action::Http(r) if r.method == Method::Get && r.url.contains("/api/v1/orders?"))),
@@ -1249,7 +1253,7 @@ fn a_trigger_veto_takes_its_direction_from_planning_not_last_price() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_keep_classification_and_unknown_guidance() {
     use safe_cex_engine::{ErrorKind, Outcome, Response};
     let market = r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1}]"#;
     for (status, body, kind, outcome) in [
@@ -1305,6 +1309,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             "{status} {body}: {}",
             error.message
         );
+        assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
     }
 }
 
@@ -1726,6 +1731,7 @@ fn an_unknown_put_back_says_check_open_orders_never_re_place() {
         }
         let out = actions(&mut e);
         let error = failure(&out);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(
             error.message.contains("put-back's outcome is unknown")
                 && error.message.contains("Check Open Orders")
@@ -1768,4 +1774,65 @@ fn repair_never_retires_a_put_back_in_flight() {
         "the put-back's answer still lands: {}",
         error.message
     );
+}
+
+#[test]
+fn rounded_original_quantity_does_not_gate_guarded_amend_or_put_back()
+-> Result<(), Box<dyn std::error::Error>> {
+    // Keep the existing guarded put-back; TS reference/backpack/backpack.exchange.ts:918-925
+    // formats quantities without rechecking rounded bounds.
+    let mut e = resting_stop();
+    e.store_mut().update_markets(|market| {
+        market.precision.amount = 0.1;
+        market.limits.amount.max = 0.95;
+    });
+    let mut original = e.store().order("123").cloned().ok_or("missing original")?;
+    original.amount = 0.95;
+    original.remaining = 0.95;
+    e.store_mut().upsert_order(original);
+    e.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "123".into(),
+            price: Some(125.),
+            amount: Some(0.4),
+        }),
+    );
+    let cancel = requests(&mut e).pop().ok_or("missing guarded cancel")?;
+    assert_eq!(cancel.method, Method::Delete);
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
+    let replacement = posts(&actions(&mut e)).pop().ok_or("missing replacement")?;
+    let row: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().ok_or("missing body")?)?;
+    assert_eq!(row["triggerQuantity"], "0.4");
+    reply(&mut e, &replacement, 400, REFUSED);
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.method == Method::Get && r.url.contains("/api/v1/orders"))
+        .ok_or("missing proof read")?;
+    reply(&mut e, &read, 200, "[]");
+    let restore = posts(&actions(&mut e)).pop().ok_or("missing put-back")?;
+    let row: serde_json::Value =
+        serde_json::from_str(restore.body.as_deref().ok_or("missing body")?)?;
+    assert_eq!(row["triggerQuantity"], "1.0");
+    assert_eq!(row["triggerPrice"], "130.00");
+    reply(
+        &mut e,
+        &restore,
+        200,
+        r#"{"id":"777","status":"New","orderType":"Market","side":"Ask"}"#,
+    );
+    let out = actions(&mut e);
+    assert_eq!(
+        failure(&out).protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert!(posts(&out).is_empty());
+    Ok(())
 }

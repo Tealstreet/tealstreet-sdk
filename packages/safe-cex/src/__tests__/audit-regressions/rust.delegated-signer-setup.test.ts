@@ -242,6 +242,7 @@ describe('trusted delegated signer setup capsule', () => {
     const setup = new DelegatedSignerSetup('binance', input);
     expect(setup.primaryComplete).toBe(false);
     // Effective public mode: the unused callback confers no signing authority.
+    expect(setup.hasSecondary).toBe(false);
     expect(setup.credentialPresence).toEqual({ key: false, secret: false });
     expect(setup.usesPayloadSigner).toBe(false);
     expect(setup.signerAlgorithms).toEqual([]);

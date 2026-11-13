@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 
-import { legacyWhitelistVenues } from '../../../../packages/proxy-ips-lists/src/legacyWhitelist';
-import { whitelistIpGroups } from '../../../../packages/proxy-ips-lists/src/whitelist';
+import { docsWhitelistIpGroups, proxyFleetWhitelistVenues } from './proxyFleetIpData';
 
-/** Same display-only sources and copy policy as the web account form. */
+/** Display-only whitelist snapshot for the docs site's self-contained Vercel build. */
 export default function ProxyFleetIps({ exchange }: { exchange?: string }) {
   const [chosenExchange, setExchange] = useState('bybit');
   const venue = exchange ?? chosenExchange;
-  const groups = whitelistIpGroups(venue);
+  const groups = docsWhitelistIpGroups(venue);
   const list = (ips: readonly string[], label: string) => (
     <ul aria-label={label}>
       {ips.map((ip) => (
@@ -28,7 +27,7 @@ export default function ProxyFleetIps({ exchange }: { exchange?: string }) {
               setExchange(event.target.value);
             }}
           >
-            {legacyWhitelistVenues.map((name) => (
+            {proxyFleetWhitelistVenues.map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>

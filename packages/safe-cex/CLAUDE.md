@@ -63,6 +63,44 @@ the server handover implementation landing.
 
 ## DELEGATED order outbox
 
+`enqueue(params, { intentId })` accepts a caller-owned canonical lowercase UUIDv7.
+Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a different
+canonical payload for the same ID throws `intentConflict`. Identical retries
+return the existing durable ID without another sequence, deadline or submission,
+including after restore. A failed original put refuses retries with
+`intentNotDurable`. Caller-key reservation updates only the last successfully
+committed snapshot, preserving its handoff state and evidence even if a newer
+receipt could not be persisted. A retry never makes that newer outcome durable,
+renews replay permission, or replaces a committed handoff with an in-memory
+queued label. Persisted no-handoff claims still pass the evidence constructors.
+Caller-key rows remain reserved through ordinary history
+compaction, within the existing total capacity of 1,056 records; exhaustion
+refuses new intents rather than forgetting a key. Hosts must preserve scoped
+storage and close a writer before replacing it.
+
+Saved accounts and exchange options accept optional `signingMode` using the
+existing account-worker wire values `local`, `cosigned`, and `delegated`.
+`accountToExchangeOptions` forwards the account mode and permits a validated
+override. Absence preserves existing signer selection; this metadata does not
+activate DELEGATED writes or replace admission. Unknown modes (including null)
+are refused as `invalidInput` / `notSent` during conversion and factory creation.
+
+Sam's 2026-11-11 policy allows activation with place and reduce-only close before
+the other venue actions exist. `activate(connection, { DELEGATED_BYBIT })` checks
+the host-owned feature flag, the captured box/router transport proofs, and only
+the advertised `delegatedActivationScopeV1` place/close capabilities. Amend, venue
+cancel, cancel-all and nuke are not activation prerequisites. A failed activation
+retires the old ticket, including deferred work, and throws a named reason.
+The existing low-level `connect` API still requires prior host admission.
+`enqueueAction(actionName, params)` permits place or a close with literal
+`reduceOnly: true` and visibly refuses every other string action before storage
+or a frame; it never chooses another signing mode. Supported string actions
+capture JSON parameters once before validation; fingerprints, persistence and
+handoff use those captured values. A close requires literal `reduceOnly: true`
+in the captured payload. Router queued-intent cancellation keeps its separate
+existing semantics. These admission helpers do not alter handoff, deadline,
+restore, evidence or replay rules below.
+
 `DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
 submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
@@ -136,7 +174,9 @@ outbox before replacing it with a new writer for the same scope.
 
 ## DELEGATED account actions
 
-`DelegatedOutbox.enqueueAction` adds the versioned `order.action` family for
+`DelegatedOutbox.enqueueAction(action, options)` retains the separate typed
+action API, gated by the boolean `delegatedOrderActionsV1`, independently of
+`delegatedActivationScopeV1`. It adds the versioned `order.action` family for
 amend, venue cancel, cancel-all and nuke. Existing `enqueue` placement frames and
 `cancelQueued` semantics stay unchanged. Action writes/receipts require both
 `delegatedOrderActionsV1` (box) and `delegatedOrderActionLedgerV1` (router), as well
@@ -203,6 +243,14 @@ Native account-wide cancellation requires the venue's `nukeAccountCancel`
 capability; it never falls back to an incomplete symbol census.
 
 ## Mirror CI invariants (don't "clean these up")
+
+Bitget TP/SL metadata is account/path-specific through `getExchangeMetadata`:
+`bitgetAccountMode: 'classic' | 'uta'` and `tpslOrderPath: 'entry' | 'position'`.
+Classic/unknown entries offer no selector while their preset default is
+UNPROVEN; supported UTA entries and position TP/SL offer Last and Mark. Inverse
+UTA has no native route and offers no selections. The conservative
+static list is empty for Bitget and both siblings. Web consumers must adopt the
+path-aware call; see `docs/plans/callers/bitget-tpsl-trigger-types.md`.
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean
 sliced install with **no dependency hoisting and no leaked DOM lib** (see
@@ -447,6 +495,8 @@ merely because its name is registered in Rust.
 log events, telemetry or retained diagnostic buffers receive them. It shares the
 HTTP diagnostic string policy; live command and market messages stay untouched.
 Its parity fixtures are pinned to the host diagnostic contract at `6fde9450cf`.
+Structured `ws-diagnostic` events use this same detached redaction boundary before
+emitter listeners and worker forwarding; live-result events retain their identity.
 
 `BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
 One throwing listener cannot starve later listeners for the same event; errors
@@ -842,7 +892,13 @@ approval fields; the old class export stays available without prototype repair.
 ## Native reported closed-PnL output
 
 `fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
-`history_output`. Bybit inverse sizes, OKX contract conversion, fee signs,
+`history_output`. All seven financial fields and both timestamps are required
+nullable values: unknown inputs and unknown/overflowed derived results stay null;
+measured zero stays zero. Missing close time never borrows opening time, and
+unknown close times sort last without dropping the row. Numeric strings remain
+accepted by the public contract for derived/reference producers. Consumers must
+propagate unknown through totals rather than coerce null to zero.
+Bybit inverse sizes, OKX contract conversion, fee signs,
 account labels and newest-close ordering are native output policy. The four TS
 closed-PnL mappers live only under test references. `fetchClosedPositions`
 remains the raw journal contract; it is never a fallback for reported PnL.
@@ -2024,6 +2080,28 @@ REST routed through the HOW adapter appears as WS frames, not XHRs.
 The exchange emits `grafana-http-request` / `grafana-http-response` /
 `error` / `warning` events on `BaseExchange.emitter` — check your
 consuming app's CLAUDE.md for the capture playbook.
+
+Rust engine sockets also emit the opt-in `ws-diagnostic` event with a
+`WsDiagnosticEvent` object: `{ venue, channel, direction, message }`. Channels
+are public/private/business and directions are send/receive. This is generic
+across venues, including Hyro. The package exports `setWsDiagnosticsEnabled`,
+`isWsDiagnosticsEnabled` and the event type. The switch defaults off in each
+realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
+`ExchangeWorker` forwards `{ op: 'ws-diagnostic', data: [event] }`; consuming web
+controllers must handle that op and re-emit it before rendering Requests Log rows.
+
+Diagnostics run after socket I/O and validate both field names and values.
+Only closed protocol/status/error enums, bounded integers and success booleans
+survive. IDs, topics, scalar data, messages and other free-form strings become
+fixed placeholders, including nested/encoded echoes inside retained fields.
+Arrays retain at most 32 sanitized entries. Challenge/signature material,
+connection URLs/headers and binary contents are never included. Opaque,
+malformed, oversized and excessive-depth content is withheld. Heartbeats are
+omitted, output is capped and frames are sampled per socket. Disabling the
+switch drops queued entries too, even if it is re-enabled before their callbacks
+run. Queued socket diagnostics capture the cancellation generation and recheck
+it before each structured/legacy callback. Existing private grafana events remain
+available with the same sanitized frame text; do not display both as duplicate rows.
 
 ## Worker Position Refresh Bridge
 

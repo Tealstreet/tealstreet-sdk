@@ -133,12 +133,10 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
     assert_eq!(ready[0]["d"]["data"]["status"], "key-available");
     assert_eq!(ready[0]["d"]["instanceId"], "returned-key");
     assert!(f.registry.held("alice", "acct", session.socket).is_some());
+    let restore_guard = f.registry.interruptions.account("alice", "acct");
+    let restore_epoch = restore_guard.epoch(None);
     assert!(
-        f.registry
-            .interruptions
-            .account("alice", "acct")
-            .epoch(None)
-            != crate::interruption::RestoreEpoch::default(),
+        restore_epoch != crate::interruption::RestoreEpoch::default(),
         "key admission must not erase the interruption's restore fence"
     );
     assert_eq!(
@@ -147,9 +145,10 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         "restart cannot fabricate lost chases or TWAP schedules"
     );
 
+    let owner = session.joined["acct"].account.registry_name().to_owned();
     let options: Value = serde_json::from_str(WEB_TWAP).unwrap();
     let now = crate::accounts::now_ms();
-    let state = json!({
+    let mut state = json!({
         "accountName":"acct", "activeMarket":options["activeMarket"],
         "size":0.1, "ordersSizes":[0.01,0.01,0.01], "side":"buy",
         "status":"running", "ordersCount":10, "ordersExecuted":7,
@@ -160,7 +159,18 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         .msg(AccountMsg {
             op: "twap:state".into(),
             account_name: Some("acct".into()),
-            data: json!([{"id":"client-held-twap", "options":options, "state":state}]),
+            data: json!([{"id":"client-held-twap", "ownerId":owner, "options":options, "state":state}]),
+        })
+        .await;
+    assert_partial_action_refusal(&mut sent, "twap:state");
+    assert_eq!(session.joined["acct"].account.running.counts(), (0, 0));
+
+    state["status"] = json!("paused");
+    session
+        .msg(AccountMsg {
+            op: "twap:state".into(),
+            account_name: Some("acct".into()),
+            data: json!([{"id":"client-held-twap", "ownerId":owner, "options":options, "state":state}]),
         })
         .await;
     let restored = twap_row(&mut sent, "paused").await;
@@ -177,19 +187,64 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
             data: json!("client-held-twap"),
         })
         .await;
-    let resumed = twap_row(&mut sent, "running").await;
-    assert_eq!(
-        resumed["status"], "running",
-        "only explicit resume releases the existing job fence"
+    assert_partial_action_refusal(&mut sent, "twap:resume");
+    assert!(
+        restore_guard.epoch(None) == restore_epoch
+            && restore_guard.must_pause("client-held-twap", restore_epoch),
+        "paused restoration and refused resume must keep the interruption fence"
     );
-    assert_eq!(resumed["ordersExecuted"], 7);
+    let account = &session.joined["acct"].account;
+    assert_eq!(
+        account.running.counts(),
+        (0, 1),
+        "the paused schedule stays in the retained job inventory"
+    );
+    assert!(Arc::ptr_eq(
+        account,
+        &f.registry.held("alice", "acct", session.socket).unwrap()
+    ));
+    account
+        .algos
+        .as_ref()
+        .unwrap()
+        .send(crate::algos::AlgoInput::Joined)
+        .unwrap();
+    let still_paused = twap_row(&mut sent, "paused").await;
+    assert_eq!(
+        still_paused, restored,
+        "refused resume must retain the paused schedule and its progress"
+    );
     session.close();
+}
+
+fn assert_partial_action_refusal(sent: &mut crate::out::Receiver, op: &str) {
+    let errors: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|frame| serde_json::from_str::<Value>(&frame).unwrap())
+        .filter(|frame| frame["d"]["op"] == "error")
+        .collect();
+    let expected = envelope::with_instance_id(
+        envelope::error(
+            Some("acct"),
+            &format!(
+                "DelegatedActionUnavailable: DELEGATED {op} is unavailable; only place and reduce-only close are enabled"
+            ),
+        ),
+        "returned-key",
+    );
+    assert_eq!(
+        errors,
+        vec![serde_json::from_str::<Value>(&expected).unwrap()]
+    );
 }
 
 async fn twap_row(sent: &mut crate::out::Receiver, status: &str) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(frame) = sent.recv().await {
             let frame: Value = serde_json::from_str(&frame).unwrap();
+            assert_ne!(
+                frame["d"]["op"], "error",
+                "unexpected algo refusal: {frame}"
+            );
             if frame["d"]["op"] == "store"
                 && let Some(row) = frame["d"]["data"]["activeTWAPs"]
                     .as_array()

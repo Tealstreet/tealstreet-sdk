@@ -95,7 +95,7 @@ fn fetch_reported_row(extra: &str) -> Result<String, String> {
 fn reported_pnl_valid_control_keeps_native_bytes() {
     assert_eq!(
         fetch_reported_row(r#", "closedPnl":"-4.25""#).unwrap(),
-        r#"[{"provenance":"venue","symbol":"BTCUSDT","notional":0.0,"contracts":2.0,"entryPrice":90.0,"exitPrice":100.0,"unrealizedPnl":-4.25,"side":"long","fees":0.0,"time":1.0,"closedTime":2.0,"account":"fixture-account","leverage":0.0}]"#
+        r#"[{"provenance":"venue","symbol":"BTCUSDT","notional":null,"contracts":2.0,"entryPrice":90.0,"exitPrice":100.0,"unrealizedPnl":-4.25,"side":"long","fees":null,"time":1.0,"closedTime":2.0,"account":"fixture-account","leverage":null}]"#
     );
 }
 

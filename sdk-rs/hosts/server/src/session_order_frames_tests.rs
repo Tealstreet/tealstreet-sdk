@@ -339,6 +339,8 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
             };
             let a = delegated_account(&registry, "A", "bybit", a_tape.clone());
             let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
+            // Re-verification uses the authenticated admission boundary.
+            alice.identity.token = Some(("synthetic-valid-token".into(), u64::MAX));
             alice.joined.get_mut("synthetic-main").unwrap().out =
                 alice.out.with_instance_id(Some("alice-old"));
             assert!(alice.resnapshot("synthetic-main").await);
@@ -367,7 +369,7 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
                 alice.out.with_instance_id(Some("alice-new")),
             );
             let mut verified = alice.take_verified();
-            alice.start_probe_verification("synthetic-main".into(), async move {
+            alice.start_probe_verification("synthetic-main".into(), None, async move {
                 (
                     Ok(candidate),
                     Some(ProbedInit {

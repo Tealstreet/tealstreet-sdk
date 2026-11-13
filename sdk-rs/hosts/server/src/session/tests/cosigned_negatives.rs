@@ -1,6 +1,15 @@
 use super::*;
 use safe_cex_remote_signer::SignerLink;
 
+// The image workflow runs `cargo test -p safe-cex-exchange-server` alone: its
+// tests compete at full intra-crate parallelism and can starve each other,
+// unlike Rust / native test, which spreads the load across the workspace run.
+// Two different Resident::start callers exceeded five seconds there. The handle
+// exposes loaded state through read(), not a load-completion receiver, so keep
+// the existing readiness check with scheduling headroom and a bounded wait.
+// Loading is a fixture precondition, not a latency assertion.
+const ADMITTED_ACCOUNT_LOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Clone, Copy)]
 enum Answer {
     Correct,
@@ -86,7 +95,6 @@ fn init(id: Option<&str>) -> InitPayload {
 
 fn candidate(f: &Fixture, user: &str) -> (Session, crate::out::Receiver) {
     let (mut session, sent) = user_session(f.registry.clone(), user);
-    session.cosigned_admission_test = true;
     session.identity.resumable = false;
     (session, sent)
 }
@@ -126,6 +134,21 @@ struct Resident {
     _sent: crate::out::Receiver,
 }
 
+#[tokio::test]
+async fn cosigned_rpc_expiry_completion_preserves_request_and_registration() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let mut resident = Resident::start(&f, &mut device).await;
+    assert_rpc_expiry_completion(
+        &f,
+        resident.session.as_mut().unwrap(),
+        &mut resident._sent,
+        Some("resident"),
+    )
+    .await;
+    resident.untouched(&f);
+}
+
 impl Resident {
     async fn start(f: &Fixture, device: &mut Device) -> Self {
         let (mut session, mut sent) = candidate(f, "alice");
@@ -141,11 +164,11 @@ impl Resident {
             Some("resident"),
         )
         .await;
-        assert!(result.cosigned.as_ref().unwrap().proof.is_ok());
+        assert!(result.probe.as_ref().unwrap().permit.is_ok());
         session.verification_completed(result).await.unwrap();
         let account = f.registry.held("alice", "acct", session.socket).unwrap();
         assert!(account.delegated.is_none());
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(ADMITTED_ACCOUNT_LOAD_TIMEOUT, async {
             loop {
                 let loaded = account.handle.read(|store| {
                     let s = store.loaded(); s.markets && s.balance && s.orders && s.positions
@@ -215,6 +238,15 @@ fn refused(f: &Fixture, session: &Session, sent: &mut crate::out::Receiver, id: 
         || raw.clone(),
         |id| envelope::with_instance_id(raw.clone(), id),
     );
+    unattached_after_refusal(f, session, sent, expected);
+}
+
+fn unattached_after_refusal(
+    f: &Fixture,
+    session: &Session,
+    sent: &mut crate::out::Receiver,
+    expected: String,
+) {
     assert_eq!(sent.try_recv().unwrap(), expected);
     assert!(sent.try_recv().is_err());
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
@@ -256,7 +288,7 @@ async fn cosigned_session_negatives_preserve_the_running_account() {
                     id,
                 )
                 .await;
-                assert!(stale.cosigned.as_ref().unwrap().proof.is_ok());
+                assert!(stale.probe.as_ref().unwrap().permit.is_ok());
                 let old_link = session.pending_verifications["acct"]
                     .cosigned_link
                     .clone()
@@ -287,7 +319,7 @@ async fn cosigned_session_negatives_preserve_the_running_account() {
             };
             let result =
                 complete(&mut session, &mut sent, &mut done, &mut device, answer, id).await;
-            assert!(result.cosigned.as_ref().unwrap().proof.is_err());
+            assert!(result.probe.as_ref().unwrap().permit.is_err());
             assert!(
                 result.candidate.is_err(),
                 "COSIGNED completion retains no credential copy"
@@ -316,7 +348,7 @@ async fn cosigned_session_negatives_preserve_the_running_account() {
                 Some("fresh"),
             )
             .await;
-            assert!(result.cosigned.as_ref().unwrap().proof.is_ok());
+            assert!(result.probe.as_ref().unwrap().permit.is_ok());
             resident.untouched(&f);
             fresh.verification_completed(result).await.unwrap();
             assert!(Arc::ptr_eq(
@@ -391,7 +423,8 @@ async fn cosigned_two_users_switch_during_deferred_private_reads() {
 
 #[tokio::test]
 async fn cosigned_test_admission_does_not_start_other_venue_proofs() {
-    let f = fixture_with_auth(true).await;
+    let mut f = fixture_with_auth(true).await;
+    crate::accounts::testing::set_join_admission(Arc::get_mut(&mut f.registry).unwrap(), true);
     let mut device = Device::default();
     let resident = Resident::start(&f, &mut device).await;
     let before = f.private_reads.load(Ordering::SeqCst);
@@ -403,5 +436,300 @@ async fn cosigned_test_admission_does_not_start_other_venue_proofs() {
     assert_eq!(f.private_reads.load(Ordering::SeqCst), before);
     resident.untouched(&f);
     one_actor(&f).await;
+    session.close();
+}
+
+#[tokio::test]
+async fn shared_admission_keeps_pending_operations_isolated() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let resident = Resident::start(&f, &mut device).await;
+    for mode in [Some("cosigned"), Some("local"), None] {
+        let (mut session, mut sent) = candidate(&f, "alice");
+        let mut done = session.take_verified();
+        let mut request = init(Some("joining"));
+        request.signing_mode = mode.map(str::to_owned);
+        session.init(request).await.unwrap();
+        assert!(session.pending_verifications.contains_key("acct"));
+        assert!(session.joined.is_empty());
+        assert!(f.registry.held("alice", "acct", session.socket).is_none());
+        for op in [
+            "sendSnapshot",
+            "callMethod",
+            "chaser:start",
+            "twap:state",
+            "exec",
+            "subscribeOHLCV",
+        ] {
+            session
+                .msg(AccountMsg {
+                    op: op.into(),
+                    account_name: Some("acct".into()),
+                    data: json!({"requestId":7,"method":"nuke","args":[]}),
+                })
+                .await;
+            let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            if op == "callMethod" {
+                assert_eq!(frame["d"]["data"]["result"]["message"], "verifying");
+            } else {
+                assert_eq!(frame["d"]["data"][0], "verifying");
+            }
+            assert_eq!(frame["d"]["instanceId"], "joining");
+        }
+        assert!(session.early.is_empty());
+        resident.untouched(&f);
+        let result = complete(
+            &mut session,
+            &mut sent,
+            &mut done,
+            &mut device,
+            Answer::Correct,
+            Some("joining"),
+        )
+        .await;
+        resident.untouched(&f);
+        session.verification_completed(result).await.unwrap();
+        assert!(Arc::ptr_eq(
+            &resident.account,
+            &session.joined["acct"].account
+        ));
+        assert_eq!(resident.link.socket(), session.socket);
+        session.close();
+        resident.untouched(&f);
+    }
+}
+
+#[tokio::test]
+async fn shared_admission_checks_each_device_response() {
+    for answer in [Answer::OtherKey, Answer::Replay] {
+        let f = fixture_with_auth(true).await;
+        let mut device = Device::default();
+        let resident = Resident::start(&f, &mut device).await;
+        let (mut session, mut sent) = candidate(&f, "alice");
+        let mut done = session.take_verified();
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        session.init(init(None)).await.unwrap();
+        assert!(session.pending_verifications.contains_key("acct"));
+        let link = session.pending_verifications["acct"]
+            .cosigned_link
+            .clone()
+            .unwrap();
+        let result = complete(
+            &mut session,
+            &mut sent,
+            &mut done,
+            &mut device,
+            answer,
+            None,
+        )
+        .await;
+        session.verification_completed(result).await.unwrap();
+        refused(&f, &session, &mut sent, None);
+        assert!(!link.is_available());
+        assert!(f.rejected.load(Ordering::SeqCst) > 0);
+        resident.untouched(&f);
+        one_actor(&f).await;
+        session.close();
+    }
+}
+
+#[tokio::test]
+async fn shared_admission_rechecks_token_before_attachment() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let resident = Resident::start(&f, &mut device).await;
+    let (mut session, mut sent) = candidate(&f, "alice");
+    let mut done = session.take_verified();
+    session.init(init(None)).await.unwrap();
+    assert!(session.pending_verifications.contains_key("acct"));
+    let result = complete(
+        &mut session,
+        &mut sent,
+        &mut done,
+        &mut device,
+        Answer::Correct,
+        None,
+    )
+    .await;
+    session.identity.token = Some(("synthetic-expired".into(), 0));
+    session.verification_completed(result).await.unwrap();
+    unattached_after_refusal(
+        &f,
+        &session,
+        &mut sent,
+        envelope::error(Some("acct"), crate::auth::TOKEN_EXPIRED),
+    );
+    resident.untouched(&f);
+    session.close();
+}
+
+#[tokio::test]
+async fn shared_admission_retains_the_cosigned_resume_window() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let mut resident = Resident::start(&f, &mut device).await;
+    let mut previous = resident.session.take().unwrap();
+    previous.identity.resumable = true;
+    let from = previous.resume_id.clone();
+    previous.close();
+    let (mut elapsed, _elapsed_sent) = candidate(&f, "alice");
+    elapsed.identity.resumable = true;
+    elapsed.identity.resume_from = Some(from.clone());
+    elapsed.identity.token = Some(("synthetic-expired".into(), 0));
+    elapsed.open().await;
+    assert!(elapsed.joined.is_empty());
+    assert!(f.registry.held("alice", "acct", elapsed.socket).is_none());
+    elapsed.close();
+    let (mut resumed, _sent) = candidate(&f, "alice");
+    resumed.identity.resumable = true;
+    resumed.identity.resume_from = Some(from);
+    let mut done = resumed.take_verified();
+    resumed.open().await;
+    assert!(Arc::ptr_eq(
+        &resident.account,
+        &resumed.joined["acct"].account
+    ));
+    resumed.init(init(Some("resumed"))).await.unwrap();
+    assert!(resumed.pending_verifications.is_empty());
+    assert!(done.try_recv().is_err());
+    assert_eq!(resident.link.socket(), resumed.socket);
+    assert!(Arc::ptr_eq(
+        &resident.account,
+        &resumed.joined["acct"].account
+    ));
+    resumed.identity.resumable = false;
+    resumed.close();
+}
+
+#[tokio::test]
+async fn shared_admission_dispose_retires_queued_signing_output() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let resident = Resident::start(&f, &mut device).await;
+    let (mut session, mut sent) = candidate(&f, "alice");
+    let mut done = session.take_verified();
+    session.init(init(Some("pending"))).await.unwrap();
+    assert!(session.pending_verifications.contains_key("acct"));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while sent.queued() == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the probe queued its signing request");
+    session
+        .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+        .await
+        .unwrap();
+    assert!(
+        sent.try_recv().is_err(),
+        "retired admission output is dropped at dequeue"
+    );
+    assert!(done.try_recv().is_err());
+    resident.untouched(&f);
+    one_actor(&f).await;
+    session.close();
+}
+
+#[tokio::test]
+async fn shared_admission_delegated_resume_uses_a_pending_init() {
+    let f = fixture_with_auth(true).await;
+    let (mut resident, _resident_sent) = user_session(f.registry.clone(), "alice");
+    let mut ready = resident.take_verified();
+    let request = super::super::payload(&mut resident, Some("resident"));
+    resident.init(request).await.unwrap();
+    super::super::finish(&mut resident, &mut ready).await;
+    let account = resident.joined["acct"].account.clone();
+    let from = resident.resume_id.clone();
+    resident.close();
+    let (mut resumed, mut sent) = candidate(&f, "alice");
+    resumed.identity.resumable = true;
+    resumed.identity.resume_from = Some(from);
+    let mut done = resumed.take_verified();
+    resumed.open().await;
+    assert!(resumed.joined.is_empty());
+    assert!(f.registry.held("alice", "acct", resumed.socket).is_none());
+    assert!(account.handle.disposal_cause().is_none());
+    let session: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+    assert_eq!(session["t"], "session");
+    assert_eq!(session["d"]["resumed"], false);
+    assert!(sent.try_recv().is_err());
+    let request = super::super::payload(&mut resumed, Some("admitted"));
+    resumed.init(request).await.unwrap();
+    assert!(resumed.pending_verifications.contains_key("acct"));
+    assert!(resumed.joined.is_empty());
+    super::super::finish(&mut resumed, &mut done).await;
+    assert!(Arc::ptr_eq(&account, &resumed.joined["acct"].account));
+    resumed.identity.resumable = false;
+    resumed.close();
+}
+
+#[tokio::test]
+async fn shared_admission_rechecks_token_on_a_matching_init() {
+    let f = fixture_with_auth(true).await;
+    let mut device = Device::default();
+    let mut resident = Resident::start(&f, &mut device).await;
+    while resident._sent.try_recv().is_ok() {}
+    let session = resident.session.as_mut().unwrap();
+    session.identity.token = Some(("synthetic-expired".into(), 0));
+    session.init(init(Some("elapsed"))).await.unwrap();
+    assert!(session.pending_verifications.is_empty());
+    let expected = envelope::with_instance_id(
+        envelope::error(Some("acct"), crate::auth::TOKEN_EXPIRED),
+        "elapsed",
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let text = resident
+                ._sent
+                .recv()
+                .await
+                .expect("resident output remains open");
+            if text == expected {
+                break;
+            }
+            // The resident's private startup may still publish after the earlier drain.
+            // Other resident output keeps the admitted registration.
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(frame["d"]["accountName"], "acct");
+            assert_eq!(frame["d"]["instanceId"], "resident");
+        }
+    })
+    .await
+    .expect("expired matching init emits its exact refusal");
+    assert!(
+        resident.session.as_ref().unwrap().joined["acct"]
+            .out
+            .order_binding(Some("resident"))
+    );
+    resident.untouched(&f);
+}
+
+#[tokio::test]
+async fn shared_admission_uses_a_probe_after_the_resume_window() {
+    let mut f = fixture_with_auth(true).await;
+    Arc::get_mut(&mut f.registry).unwrap().resume_grace = Duration::from_millis(1);
+    let mut device = Device::default();
+    let mut resident = Resident::start(&f, &mut device).await;
+    let mut previous = resident.session.take().unwrap();
+    previous.identity.resumable = true;
+    let from = previous.resume_id.clone();
+    previous.close();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while f.registry.account_count() != 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the previous resume window elapsed");
+    let (mut session, _sent) = candidate(&f, "alice");
+    session.identity.resumable = true;
+    session.identity.resume_from = Some(from);
+    session.open().await;
+    assert!(session.joined.is_empty());
+    session.init(init(Some("fresh"))).await.unwrap();
+    assert!(session.pending_verifications.contains_key("acct"));
+    assert!(f.registry.held("alice", "acct", session.socket).is_none());
+    session.identity.resumable = false;
     session.close();
 }

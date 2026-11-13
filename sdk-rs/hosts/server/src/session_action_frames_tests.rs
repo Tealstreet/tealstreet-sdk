@@ -45,6 +45,42 @@ fn native_request_rows(tape: &Tape, suffix: &str) -> Vec<Value> {
 }
 
 #[tokio::test]
+async fn dedicated_actions_coexist_with_partial_activation_on_the_same_session() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            call(
+                &mut session,
+                "legacy-cancel",
+                "cancelOrders",
+                json!([[{"id":"resting-order","symbol":"BTCUSDT"}]]),
+            )
+            .await;
+            let refused = reply(&mut sent, "legacy-cancel").await;
+            assert_eq!(refused["success"], false);
+            assert_eq!(refused["result"]["name"], "DelegatedActionUnavailable");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            let id = action(
+                &mut session,
+                json!({"kind":"cancel","order":{"id":"resting-order","symbol":"BTCUSDT"}}),
+                1,
+                false,
+            )
+            .await;
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["intentId"], id);
+            assert_eq!(result["d"]["outcome"], "applied");
+            assert_eq!(tape.writes.lock().unwrap().as_slice(), &["cancel"]);
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn action_frames_use_real_native_amend_cancel_cancel_all_and_nuke_paths() {
     tokio::task::LocalSet::new().run_until(async {
         for (kind, payload, expected) in [
@@ -886,7 +922,13 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
                     "DELEGATED must never ask a browser to sign"
                 );
                 let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
-                action(&mut session, case["action"].clone(), 1, false).await;
+                let mut payload = case["action"].clone();
+                if payload["op"] == "twap:state" {
+                    for row in payload["data"].as_array_mut().unwrap() {
+                        row["ownerId"] = account.registry_name().into();
+                    }
+                }
+                action(&mut session, payload, 1, false).await;
                 let result = action_frame(&mut sent, "order.actionOutcome").await;
                 let unsupported =
                     matches!(kind, "scheduleCancel" | "setStpMode" | "setAccountTier")
@@ -1296,6 +1338,23 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
     }).await;
 }
 
+async fn exec_review_result(sent: &mut crate::out::Receiver, id: &str) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["t"] == "msg"
+                && frame["d"]["op"] == "exec-result"
+                && frame["d"]["data"]["reqId"] == id
+            {
+                return frame["d"]["data"].clone();
+            }
+        }
+        panic!("missing EXEC result for {id}")
+    })
+    .await
+    .expect("bounded EXEC factory seed result")
+}
+
 #[tokio::test]
 async fn exec_review_f2_keeps_factory_identity_across_legacy_and_overlapping_typed_calls() {
     tokio::task::LocalSet::new().run_until(async {
@@ -1305,7 +1364,23 @@ async fn exec_review_f2_keeps_factory_identity_across_legacy_and_overlapping_typ
             let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             if prior_legacy {
-                session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":"exec","data":{"command":"tasks","reqId":"legacy-before-typed","symbol":"BTCUSDT"}}}).to_string()).await.unwrap();
+                // Master intentionally refuses this legacy DELEGATED WS op.
+                // A refusal must not masquerade as a seeded native factory.
+                session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":"exec","data":{"command":"tasks","reqId":"legacy-ws-refused","symbol":"BTCUSDT"}}}).to_string()).await.unwrap();
+                let refused = exec_review_result(&mut sent, "legacy-ws-refused").await;
+                assert_eq!(refused["success"], false);
+                assert!(refused["error"].as_str().unwrap().contains("DelegatedActionUnavailable"));
+                assert!(tape.writes.lock().unwrap().is_empty());
+                // Exercise the resident factory's actual legacy entry (used by
+                // COSIGNED/native callers), without reopening the refused WS API.
+                account.algos.as_ref().unwrap().send(crate::algos::AlgoInput::Op {
+                    op: "exec".into(),
+                    data: json!({"command":"tasks","reqId":"legacy-before-typed","symbol":"BTCUSDT"}).to_string(),
+                    origin: "native-legacy-identity-control".into(),
+                    action: None,
+                }).unwrap();
+                let seed = exec_review_result(&mut sent, "legacy-before-typed").await;
+                assert_eq!(seed["success"], true, "native legacy factory seed never ran: {seed}");
             } else {
                 action(&mut session, json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}), 1, false).await;
                 action_frame(&mut sent, "order.actionOutcome").await;
@@ -1795,4 +1870,75 @@ async fn j6b_duplicate_algo_fields_are_typed_unsupported_before_ack_or_native_io
             }
         }
     }).await;
+}
+
+#[tokio::test]
+async fn typed_twap_start_keeps_connection_labels_on_a_shared_identity() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let cases: Vec<Value> =
+                serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
+                    .unwrap();
+            let start = cases
+                .iter()
+                .find(|case| case["action"]["op"] == "twap:start")
+                .unwrap()["action"]
+                .clone();
+            for label in ["synthetic-main", "phone-label"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account =
+                    delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                let instance = (label != account.name).then_some("phone-registration");
+                if instance.is_some() {
+                    let out = session
+                        .out
+                        .account(label)
+                        .with_account_label(label)
+                        .with_instance_id(instance);
+                    account.hold_registration(session.socket, out.outbox(), None, label);
+                    session.join(account.clone(), out).await;
+                    assert!(Arc::ptr_eq(
+                        &account,
+                        &registry.held("A", label, session.socket).unwrap()
+                    ));
+                }
+                let mut payload = start.clone();
+                payload["data"]["accountName"] = label.into();
+                let id = action_key();
+                let fingerprint =
+                    crate::order_contract::action_fingerprint(label, &id, &payload, 1).unwrap();
+                session
+                    .handle(
+                        &json!({"t":"order.action","d":{"version":1,
+                        "accountName":label,"instanceId":instance,"intentId":id,
+                        "seq":1,"ageMs":0,"fingerprint":fingerprint,"action":payload}})
+                        .to_string(),
+                    )
+                    .await
+                    .unwrap();
+                let ack = action_frame(&mut sent, "order.actionAck").await;
+                assert_eq!(ack["d"]["received"], true);
+                assert_eq!(ack["d"]["accountName"], label);
+                assert_eq!(ack["d"]["instanceId"].as_str(), instance);
+                let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+                assert_eq!(outcome["d"]["outcome"], "unknown");
+                assert_eq!(outcome["d"]["accountName"], label);
+                assert_eq!(outcome["d"]["instanceId"].as_str(), instance);
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while !tape.writes.lock().unwrap().iter().any(|op| op == "create") {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("typed TWAP through {label} must place on its identity")
+                });
+                assert!(registry.held("B", label, session.socket).is_none());
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
 }

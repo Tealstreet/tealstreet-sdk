@@ -1,5 +1,4 @@
 import type { DelegatedIntent, OutboxCompaction, OutboxConnection, OutboxOptions } from '../delegatedOutbox';
-
 import type { OutboxOptions as LegacyOutboxOptions } from './fixtures/delegatedOutbox.7232375420';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -87,6 +86,382 @@ function response(id: string, op: string, data: Record<string, unknown>) {
 }
 
 describe('DELEGATED host-neutral outbox', () => {
+  describe('caller-supplied intent identity', () => {
+    const intentId = '018bcfe5-6800-7000-8000-000000000001';
+
+    it.each([
+      { source: 'caller', retry: false },
+      { source: 'caller', retry: true },
+      { source: 'SDK', retry: false },
+      { source: 'SDK', retry: true },
+    ])(
+      'retry then restore: "never replay them automatically or interpret failure as proof that no order exists"; prevent "a double placement manufactured inside the SDK" ($source key, retry=$retry)',
+      async ({ source, retry }) => {
+        // Both quoted invariants are from packages/safe-cex/CLAUDE.md.
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        box.connect(f.connection());
+        const id = await box.enqueue(params, source === 'caller' ? { intentId } : undefined);
+        const beforeRetry = [...f.rows.values()][0];
+        expect(beforeRetry.state).toBe('sending');
+        expect(f.writes).toHaveLength(1);
+        if (retry) {
+          f.advance(100);
+          expect(await box.enqueue(params, { intentId: id })).toBe(id);
+          expect(f.writes).toHaveLength(1);
+        }
+        const afterRetry = [...f.rows.values()][0];
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(f.writes.filter((frame) => JSON.parse(frame).t === 'order.submit')).toHaveLength(1);
+        expect(afterRetry).toEqual(retry ? { ...beforeRetry, callerSuppliedIntentId: true } : beforeRetry);
+        expect(restored.entries()[0]).toMatchObject({
+          intentId: id,
+          state: 'unknown',
+          fingerprint: beforeRetry.fingerprint,
+          seq: beforeRetry.seq,
+        });
+        restored.close();
+      },
+    );
+
+    it.each([false, true])(
+      'retry then restore preserves a committed handoff marker when its connection retires before dispatch (retry=%s)',
+      async (retry) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const connection = box.connect(f.connection());
+        const put = f.options.storage.put;
+        f.options.storage.put = async (scope, row) => {
+          await put(scope, row);
+          if (row.state === 'sending') box.disconnect(connection);
+        };
+        const id = await box.enqueue(params);
+        f.options.storage.put = put;
+        const beforeRetry = [...f.rows.values()][0];
+        expect(beforeRetry.state).toBe('sending');
+        expect(box.entries()[0].state).toBe('queued');
+        expect(f.writes).toEqual([]);
+        if (retry) expect(await box.enqueue(params, { intentId: id })).toBe(id);
+        const afterRetry = [...f.rows.values()][0];
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(f.writes).toEqual([]);
+        expect(afterRetry).toEqual(retry ? { ...beforeRetry, callerSuppliedIntentId: true } : beforeRetry);
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+        restored.close();
+      },
+    );
+
+    it.each([false, true])(
+      'retry then restore preserves uncertainty when receipt persistence failed (retry=%s)',
+      async (retry) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const connection = box.connect(f.connection());
+        const id = await box.enqueue(params, { intentId });
+        const beforeRetry = [...f.rows.values()][0];
+        const put = f.options.storage.put;
+        f.options.storage.put = async () => {
+          throw new Error('receipt storage unavailable');
+        };
+        await expect(
+          box.receive(
+            connection,
+            response(id, 'order.outcome', {
+              outcome: 'placed',
+              clientOrderId: id,
+              venueOrderId: 'synthetic-native-order',
+            }),
+          ),
+        ).rejects.toThrow('receipt storage unavailable');
+        expect(box.entries()[0].state).toBe('placed');
+        f.options.storage.put = put;
+        if (retry) expect(await box.enqueue(params, { intentId: id })).toBe(id);
+        const afterRetry = [...f.rows.values()][0];
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+        expect(afterRetry).toEqual(beforeRetry);
+        expect(f.writes).toHaveLength(1);
+        restored.close();
+      },
+    );
+
+    it.each(['queued', 'expired', 'routerRefusal'] as const)(
+      'SDK-key adoption preserves the committed evidence gate (%s)',
+      async (kind) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const id = await box.enqueue(params);
+        if (kind === 'expired') {
+          f.advance(10_000);
+          await box.flush(box.connect(f.connection()));
+        } else if (kind === 'routerRefusal') {
+          const connection = box.connect(f.connection());
+          await box.flush(connection);
+          await box.receive(connection, response(id, 'order.ack', { received: false }));
+        }
+        const committed = [...f.rows.values()][0];
+        expect(committed.state).toBe(kind === 'queued' ? 'queued' : 'notSent');
+        expect(kind === 'queued' ? committed.noHandoffEvidence : committed.notSentEvidence).toMatchObject({
+          intentId: id,
+          seq: 1,
+          fingerprint: committed.fingerprint,
+          kind: kind === 'routerRefusal' ? 'routerRefusal' : 'noHandoff',
+        });
+        expect(await box.enqueue(params, { intentId: id })).toBe(id);
+        expect([...f.rows.values()][0]).toEqual({ ...committed, callerSuppliedIntentId: true });
+        box.close();
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0].state).toBe(kind === 'queued' ? 'sending' : 'notSent');
+        expect(f.writes).toHaveLength(kind === 'expired' ? 0 : 1);
+        restored.close();
+      },
+    );
+
+    it.each([
+      '',
+      'not-a-uuid',
+      '018bcfe5-6800-4000-8000-000000000001',
+      '018bcfe5-6800-7000-c000-000000000001',
+      null,
+      7,
+    ])('refuses invalid key %s before storage or send', async (invalid) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      await expect(box.enqueue(params, { intentId: invalid as string })).rejects.toMatchObject({
+        name: 'DelegatedIntentError',
+        code: 'invalidIntentId',
+      });
+      expect(box.entries()).toEqual([]);
+      expect(f.rows.size).toBe(0);
+      expect(f.writes).toEqual([]);
+      box.close();
+    });
+
+    it('dedupes canonical params without another sequence, timer, or send', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      expect(await box.enqueue(params, { intentId })).toBe(intentId);
+      const original = box.entries()[0];
+      f.advance(100);
+      expect(
+        await box.enqueue(
+          { price: 50_000, amount: 0.001, type: 'limit', side: 'buy', symbol: 'BTCUSDT' },
+          { intentId },
+        ),
+      ).toBe(intentId);
+      expect(box.entries()).toEqual([original]);
+      expect(f.writes).toHaveLength(1);
+      const next = await box.enqueue(params);
+      expect(box.entries().find((row) => row.intentId === next)?.seq).toBe(2);
+      box.close();
+    });
+
+    it('refuses changed params for the same key, including after restore', async () => {
+      const f = fixture();
+      let box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      await box.enqueue(params, { intentId });
+      for (const restored of [false, true]) {
+        if (restored) {
+          box.close();
+          box = await DelegatedOutbox.open(f.options);
+          box.connect(f.connection());
+        }
+        await expect(box.enqueue({ ...params, amount: 2 }, { intentId })).rejects.toMatchObject({
+          name: 'DelegatedIntentError',
+          code: 'intentConflict',
+        });
+        expect(await box.enqueue(params, { intentId })).toBe(intentId);
+        expect(box.entries()).toHaveLength(1);
+        expect(f.writes).toHaveLength(1);
+      }
+      box.close();
+    });
+
+    it('waits for original persistence when a duplicate arrives during the deferral', async () => {
+      const f = fixture();
+      const put = f.options.storage.put;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      f.options.storage.put = async (...args) => {
+        await gate;
+        await put(...args);
+      };
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      const first = box.enqueue(params, { intentId });
+      let settled = false;
+      const duplicate = box.enqueue(params, { intentId }).then((id) => {
+        settled = true;
+        return id;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(f.writes).toEqual([]);
+      release();
+      expect(await Promise.all([first, duplicate])).toEqual([intentId, intentId]);
+      expect(f.writes).toHaveLength(1);
+      expect(box.entries()).toHaveLength(1);
+      box.close();
+    });
+
+    it('does not report a duplicate durable when original persistence fails', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      f.options.storage.put = async () => {
+        throw new Error('storage unavailable');
+      };
+      const first = box.enqueue(params, { intentId });
+      const duplicate = box.enqueue(params, { intentId });
+      await expect(first).rejects.toThrow('storage unavailable');
+      await expect(duplicate).rejects.toMatchObject({ name: 'DelegatedIntentError', code: 'intentNotDurable' });
+      expect(f.writes).toEqual([]);
+      box.close();
+    });
+
+    it('keeps completed caller identity through compaction and restore', async () => {
+      const f = fixture();
+      let box = await DelegatedOutbox.open(f.options);
+      await box.cancel(await box.enqueue(params, { intentId }));
+      for (let i = 0; i < 40; i++) {
+        await box.cancel(await box.enqueue(params));
+        f.advance(1);
+      }
+      box.close();
+      box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      expect(await box.enqueue(params, { intentId })).toBe(intentId);
+      await expect(box.enqueue({ ...params, price: 1 }, { intentId })).rejects.toMatchObject({
+        code: 'intentConflict',
+      });
+      expect(f.writes).toEqual([]);
+      expect(box.entries().find((row) => row.intentId === intentId)?.state).toBe('canceled');
+      box.close();
+    });
+
+    it('requires a durable reservation when adopting an SDK-minted key, including after a failed put', async () => {
+      const f = fixture();
+      let box = await DelegatedOutbox.open(f.options);
+      const id = await box.enqueue(params);
+      await box.cancel(id);
+      const put = f.options.storage.put;
+      f.options.storage.put = async () => {
+        throw new Error('reservation unavailable');
+      };
+      await expect(box.enqueue(params, { intentId: id })).rejects.toThrow('reservation unavailable');
+      await expect(box.enqueue(params, { intentId: id })).rejects.toThrow('reservation unavailable');
+      f.options.storage.put = put;
+      expect(await box.enqueue(params, { intentId: id })).toBe(id);
+      for (let i = 0; i < 40; i++) {
+        await box.cancel(await box.enqueue(params));
+        f.advance(1);
+      }
+      box.close();
+      box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      expect(await box.enqueue(params, { intentId: id })).toBe(id);
+      expect(f.writes).toEqual([]);
+      expect(box.entries().find((row) => row.intentId === id)?.callerSuppliedIntentId).toBe(true);
+      box.close();
+    });
+
+    it('dedupes at capacity and refuses new keys without forgetting completed caller identities', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      for (let i = 0; i < 1056; i++) {
+        const id = `018bcfe5-6800-7000-8000-${i.toString(16).padStart(12, '0')}`;
+        await box.cancel(await box.enqueue(params, { intentId: id }));
+      }
+      expect(await box.enqueue(params, { intentId })).toBe(intentId);
+      await expect(box.enqueue(params, { intentId: '018bcfe5-6800-7000-8000-ffffffffffff' })).rejects.toThrow('full');
+      expect(box.entries()).toHaveLength(1056);
+      expect(f.rows.size).toBe(1056);
+      expect(f.writes).toEqual([]);
+      box.close();
+    });
+
+    it('keeps SDK-key adoption scoped when the owner switches during reservation persistence', async () => {
+      const a = fixture();
+      const alice = await DelegatedOutbox.open(a.options);
+      const id = await alice.enqueue(params);
+      const put = a.options.storage.put;
+      let release!: () => void;
+      let started!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      a.options.storage.put = async (scope, row) => {
+        started();
+        await gate;
+        await put(scope, row);
+      };
+      const adoption = alice.enqueue(params, { intentId: id });
+      await entered;
+      alice.close();
+      const b = fixture('bob', a.rows);
+      const bob = await DelegatedOutbox.open(b.options);
+      bob.connect(b.connection());
+      expect(await bob.enqueue(params, { intentId: id })).toBe(id);
+      release();
+      expect(await adoption).toBe(id);
+      expect(a.writes).toEqual([]);
+      expect(b.writes).toHaveLength(1);
+      const saved = [...a.rows.values()];
+      expect(saved).toHaveLength(2);
+      expect(saved.find((row) => row.owner === 'alice')).toMatchObject({
+        intentId: id,
+        state: 'queued',
+        callerSuppliedIntentId: true,
+      });
+      expect(saved.find((row) => row.owner === 'bob')).toMatchObject({ intentId: id, state: 'sending' });
+      bob.close();
+    });
+
+    it('cannot reattribute a duplicate when the owner switches during original persistence', async () => {
+      const a = fixture();
+      const put = a.options.storage.put;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      a.options.storage.put = async (...args) => {
+        await gate;
+        await put(...args);
+      };
+      const alice = await DelegatedOutbox.open(a.options);
+      alice.connect(a.connection());
+      const first = alice.enqueue(params, { intentId });
+      const duplicate = expect(alice.enqueue(params, { intentId })).rejects.toThrow('closed');
+      await Promise.resolve();
+      alice.close();
+      const b = fixture('bob', a.rows);
+      const bob = await DelegatedOutbox.open(b.options);
+      bob.connect(b.connection());
+      expect(await bob.enqueue(params, { intentId })).toBe(intentId);
+      release();
+      await first;
+      await duplicate;
+      expect(a.writes).toEqual([]);
+      expect(b.writes).toHaveLength(1);
+      expect([...a.rows.values()].map((row) => row.owner).sort()).toEqual(['alice', 'bob']);
+      bob.close();
+    });
+  });
+
   describe('completed index subset', () => {
     type IndexedOutbox = {
       intents: Map<string, DelegatedIntent>;
@@ -330,7 +705,6 @@ describe('DELEGATED host-neutral outbox', () => {
     restored.close();
   });
 
-
   it('restores a legacy notSent row without evidence as unknown', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -390,18 +764,21 @@ describe('DELEGATED host-neutral outbox', () => {
       restored.close();
     },
   );
-  it.each(['sending', 'unknown'] as const)('refuses a local no-handoff claim for an already %s intent', async (state) => {
-    const f = fixture();
-    const box = await DelegatedOutbox.open(f.options);
-    box.connect(f.connection());
-    await box.enqueue(params);
-    if (state === 'unknown') f.advance(10_000);
-    const row = box.entries()[0];
-    expect(markDelegatedNotSent(row, { kind: 'noHandoff', source: 'adapter', handedOff: false })).toBe(false);
-    expect(row.state).toBe('unknown');
-    expect(row.notSentEvidence).toBeUndefined();
-    box.close();
-  });
+  it.each(['sending', 'unknown'] as const)(
+    'refuses a local no-handoff claim for an already %s intent',
+    async (state) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      await box.enqueue(params);
+      if (state === 'unknown') f.advance(10_000);
+      const row = box.entries()[0];
+      expect(markDelegatedNotSent(row, { kind: 'noHandoff', source: 'adapter', handedOff: false })).toBe(false);
+      expect(row.state).toBe('unknown');
+      expect(row.notSentEvidence).toBeUndefined();
+      box.close();
+    },
+  );
   it('rejects a live unbranded notSent claim even with copied JSON evidence', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -812,9 +1189,7 @@ describe('DELEGATED host-neutral outbox', () => {
       cancelPending: false,
     });
     expect(changes.at(-1)).toMatchObject({ state: priorHandoff ? 'unknown' : 'notSent', cancelPending: false });
-    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(
-      priorHandoff ? ['order.submit'] : [],
-    );
+    expect(f.writes.map((frame) => JSON.parse(frame).t)).toEqual(priorHandoff ? ['order.submit'] : []);
     box.close();
   });
   it('requires atomic compaction and upgrades legacy completed records on restore', async () => {

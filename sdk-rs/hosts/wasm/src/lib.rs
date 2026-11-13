@@ -4,6 +4,8 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "bingx-spot-replay")]
+mod bingx_spot_replay;
 #[cfg(feature = "hosted-operation-proof")]
 mod hosted_operation_proof;
 #[cfg(feature = "kraken")]

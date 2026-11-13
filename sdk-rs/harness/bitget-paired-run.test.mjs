@@ -42,11 +42,11 @@ test('normal collector success and failure keep their exit codes without a timeo
   }
 });
 
-test('workflow uses the internal deadline without enlarging the 45-minute job limit', () => {
+test('workflow uses the internal deadline with enough budget for both measured witnesses', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const job = /^  bitget-paired:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:\n)/m.exec(workflow)?.[1];
   assert(job);
-  assert.match(job, /timeout-minutes: 45/);
+  assert.match(job, /timeout-minutes: 90/);
   assert.match(job, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
   assert.doesNotMatch(job, /continue-on-error/);
   assert.match(job, /if: success\(\) \|\| failure\(\)/);
@@ -63,4 +63,33 @@ test('an external cancellation is forwarded to the detached process group', () =
   assert.equal(result.signal, null, 'wrapper must forward the signal and wait for its child');
   assert.equal(result.status, 143);
   assert.match(result.stderr, /SIGTERM/);
+});
+
+test('master push runs the paired job even when selection says replay is unnecessary', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const job = workflow.split('\n  bitget-paired:\n')[1].split('\n  cpu-plan:\n')[0];
+  assert.match(job, /if: needs.selection.outputs.replayRequired == 'true' \|\| \(github.event_name == 'push' && github.ref == 'refs\/heads\/master'\)/);
+});
+
+test('the actual Python collector measures identical master packages and only skips identical PR packages', () => {
+  // Execute the collector's pure decision directly, without running any builds
+  // or replay measurements. Extracting it avoids the CLI's top-level side effects.
+  const code = `import ast, pathlib
+path = pathlib.Path('sdk-rs/harness/collect-bitget-paired.py')
+tree = ast.parse(path.read_text())
+fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'skip_unchanged')
+ns = {}
+exec(compile(ast.Module(body=[fn], type_ignores=[]), str(path), 'exec'), ns)
+f = ns['skip_unchanged']
+assert not f({'witness':'tip', 'pullNumber':None}, True)
+assert not f({'witness':'tip', 'pullNumber':None}, False)
+assert f({'witness':'tip', 'pullNumber':42}, True)
+assert not f({'witness':'tip', 'pullNumber':42}, False)
+assert not f({'witness':'anchor', 'pullNumber':42}, True)
+# The independently tested function must actually guard the collector's shortcut.
+assert any(isinstance(n, ast.If) and isinstance(n.test, ast.Call) and isinstance(n.test.func, ast.Name) and n.test.func.id == 'skip_unchanged' for n in tree.body)
+print('collector policy controls passed')`;
+  const result = spawnSync('python3', ['-c', code], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /collector policy controls passed/);
 });

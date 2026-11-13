@@ -8,6 +8,10 @@ import type { WorkerFrameRejection } from '../store/workerFrameRecoveryScopes';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
 import type { HttpFailureRecord } from '../utils/httpFailureContext';
 import type {
+  StoreWorkerOHLCVFrameRejection,
+  StoreWorkerOrderBookFrameRejection,
+} from '../webworker/StoreWorkerPayload';
+import type {
   ClientOrderIdPlaceOrderOpts,
   ClientOrderIdRule,
   ClientOrderLookup,
@@ -547,9 +551,17 @@ export interface Exchange {
   fetchPublicTrades: (symbol: string, limit?: number) => Promise<PublicTrade[]>;
   getActiveTickerSymbols: () => string[];
   setActiveTickerSymbols: (symbols: string[]) => void;
-  listenOHLCV: (o: OHLCVOptions, c: (c: Candle) => void) => () => void;
+  listenOHLCV: (
+    o: OHLCVOptions,
+    c: (c: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => () => void;
   listenOHLCVs: (o: OHLCVSOptions, c: (c: Candle & { symbol: string; interval: Timeframe }) => void) => void;
-  listenOrderBook: (s: string, c: (o: OrderBook) => void) => () => void;
+  listenOrderBook: (
+    s: string,
+    c: (o: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => () => void;
   /** `reset`: a forced resubscribe; the venue re-sends its subscribe for a stream gone dead. */
   listenOHLCVWebworker: (
     o: OHLCVWebworkerOptions,
@@ -1436,8 +1448,14 @@ export class BaseExchange implements Exchange {
    * Exchanges should override this method and check usesExternalPublicData
    * to use direct WebSocket if not using gateway.
    */
-  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+  listenOHLCV = (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => {
     // If using external public data provider, route through it
+    if (this.externalPublicDataProvider instanceof InProcessPublicDataProvider)
+      return this.externalPublicDataProvider.subscribeCandle(opts, callback, onRejection);
     if (this.externalPublicDataProvider) {
       return this.externalPublicDataProvider.subscribeCandle(opts, callback);
     }
@@ -1458,8 +1476,14 @@ export class BaseExchange implements Exchange {
    * Exchanges should override this method and check usesExternalPublicData
    * to use direct WebSocket if not using gateway.
    */
-  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+  listenOrderBook = (
+    symbol: string,
+    callback: (orderBook: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => {
     // If using external public data provider, route through it
+    if (this.externalPublicDataProvider instanceof InProcessPublicDataProvider)
+      return this.externalPublicDataProvider.subscribeOrderbook(symbol, callback, onRejection);
     if (this.externalPublicDataProvider) {
       return this.externalPublicDataProvider.subscribeOrderbook(symbol, callback);
     }
@@ -1663,11 +1687,13 @@ export class BaseExchange implements Exchange {
 
     this.off('listenOHLCV');
     this.off('workerCandleFrameRejected');
+    this.off('listenOHLCV:rejected');
     this.off('subscribeOHLCV');
     this.off('unsubscribeOHLCV');
 
     this.off('listenOrderBook');
     this.off('workerBookFrameRejected');
+    this.off('listenOrderBook:rejected');
     this.off('subscribeOrderBook');
     this.off('unsubscribeOrderBook');
 
@@ -1689,6 +1715,7 @@ export class BaseExchange implements Exchange {
     this.off('grafana-info');
     this.off('grafana-pws');
     this.off('grafana-pws-sub');
+    this.off('ws-diagnostic');
 
     this.store.reset();
   }
@@ -1699,31 +1726,44 @@ export class BaseExchange implements Exchange {
     onRejection?: (signal: OHLCVFrameRejection) => void,
   ) {
     const subId = nanoid();
+    let active = true;
+    const handler = (event: { symbol: string; interval: string; candle: Candle }) => {
+      if (event.symbol === o.symbol && event.interval === o.interval) {
+        c(event.candle);
+      }
+    };
+    const stopRejections = this.observeOHLCVFrameRejections(o, onRejection);
+    const rejected = (signal: StoreWorkerOHLCVFrameRejection) => {
+      if (
+        active &&
+        !this.isDisposed &&
+        signal.subId === subId &&
+        signal.stream === 'ohlcv' &&
+        signal.symbol === o.symbol &&
+        signal.interval === o.interval
+      )
+        this.dispatchFrameEvent(() =>
+          onRejection?.({
+            stream: 'ohlcv',
+            symbol: o.symbol,
+            interval: o.interval,
+            error: deserializeCommandError(signal.error),
+          }),
+        );
+    };
+    this.emitter.on('listenOHLCV', handler);
+    if (onRejection) this.emitter.on('listenOHLCV:rejected', rejected);
     this.emitter.emit('subscribeOHLCV', {
       symbol: o.symbol,
       interval: o.interval,
       subId,
       ...(o.reset && { reset: true }),
     });
-    const handler = (event: { symbol: string; interval: string; candle: Candle }) => {
-      if (event.symbol === o.symbol && event.interval === o.interval) {
-        c(event.candle);
-      }
-    };
-    const rejected = (signal: WorkerFrameRejection) => {
-      if (
-        signal.candles === undefined ||
-        signal.candles.some((stream) => stream.symbol === o.symbol && stream.interval === o.interval)
-      )
-        this.dispatchFrameEvent(() =>
-          onRejection?.({ stream: 'ohlcv', symbol: o.symbol, interval: o.interval, error: signal.error }),
-        );
-    };
-    this.emitter.on('listenOHLCV', handler);
-    if (onRejection) this.emitter.on('workerCandleFrameRejected', rejected);
     return () => {
+      active = false;
       this.emitter.off('listenOHLCV', handler);
-      this.emitter.off('workerCandleFrameRejected', rejected);
+      stopRejections();
+      this.emitter.off('listenOHLCV:rejected', rejected);
       this.emitter.emit('unsubscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
     };
   }
@@ -1743,6 +1783,38 @@ export class BaseExchange implements Exchange {
   fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
     throw new Error('Engine snapshots are unavailable for this exchange');
   };
+
+  protected observeOrderBookFrameRejections(symbol: string, observer?: (signal: OrderBookFrameRejection) => void) {
+    let active = Boolean(observer) && !this.isDisposed;
+    const rejected = (signal: WorkerFrameRejection) => {
+      if (!active || this.isDisposed) return;
+      if (signal.books === undefined || signal.books.includes(symbol))
+        this.dispatchFrameEvent(() => observer?.({ stream: 'orderBook', symbol, error: signal.error }));
+    };
+    if (active) this.emitter.on('workerBookFrameRejected', rejected);
+    return () => {
+      active = false;
+      this.emitter.off('workerBookFrameRejected', rejected);
+    };
+  }
+
+  protected observeOHLCVFrameRejections(opts: OHLCVOptions, observer?: (signal: OHLCVFrameRejection) => void) {
+    const { symbol, interval } = opts;
+    let active = Boolean(observer) && !this.isDisposed;
+    const rejected = (signal: WorkerFrameRejection) => {
+      if (!active || this.isDisposed) return;
+      if (
+        signal.candles === undefined ||
+        signal.candles.some((stream) => stream.symbol === symbol && stream.interval === interval)
+      )
+        this.dispatchFrameEvent(() => observer?.({ stream: 'ohlcv', symbol, interval, error: signal.error }));
+    };
+    if (active) this.emitter.on('workerCandleFrameRejected', rejected);
+    return () => {
+      active = false;
+      this.emitter.off('workerCandleFrameRejected', rejected);
+    };
+  }
 
   protected dispatchFrameEvent(callback: () => void) {
     try {
@@ -1906,21 +1978,27 @@ export class BaseExchange implements Exchange {
     onRejection?: (signal: OrderBookFrameRejection) => void,
   ) {
     const subId = nanoid();
-    this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
+    let active = true;
     const handler = (event: { symbol: string; orderbook: OrderBook }) => {
       if (event.symbol === s) {
         c(event.orderbook);
       }
     };
-    const rejected = (signal: WorkerFrameRejection) => {
-      if (signal.books === undefined || signal.books.includes(s))
-        this.dispatchFrameEvent(() => onRejection?.({ stream: 'orderBook', symbol: s, error: signal.error }));
+    const stopRejections = this.observeOrderBookFrameRejections(s, onRejection);
+    const rejected = (signal: StoreWorkerOrderBookFrameRejection) => {
+      if (active && !this.isDisposed && signal.subId === subId && signal.stream === 'orderBook' && signal.symbol === s)
+        this.dispatchFrameEvent(() =>
+          onRejection?.({ stream: 'orderBook', symbol: s, error: deserializeCommandError(signal.error) }),
+        );
     };
     this.emitter.on('listenOrderBook', handler);
-    if (onRejection) this.emitter.on('workerBookFrameRejected', rejected);
+    if (onRejection) this.emitter.on('listenOrderBook:rejected', rejected);
+    this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
     return () => {
+      active = false;
       this.emitter.off('listenOrderBook', handler);
-      this.emitter.off('workerBookFrameRejected', rejected);
+      stopRejections();
+      this.emitter.off('listenOrderBook:rejected', rejected);
       this.emitter.emit('unsubscribeOrderBook', { symbol: s, subId });
     };
   }

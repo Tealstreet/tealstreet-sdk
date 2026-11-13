@@ -13,6 +13,7 @@ pub struct Out {
     accounts: Arc<Mutex<HashMap<String, Owner>>>,
     owner: Option<Owner>,
     instance_id: Option<Arc<str>>,
+    account_label: Option<Arc<str>>,
     pending_signs: Option<Arc<Mutex<PendingSigns>>>,
     order_receipts: Arc<Mutex<OrderReceipts>>,
 }
@@ -33,6 +34,15 @@ enum PendingSigns {
 struct Owner {
     current: Arc<Mutex<Weak<()>>>,
     captured: Arc<()>,
+}
+
+/// Retires one temporary producer without retiring an account's output.
+pub(crate) struct OutputLifetime(Owner);
+
+impl Drop for OutputLifetime {
+    fn drop(&mut self) {
+        *self.0.current.lock().unwrap() = Weak::new();
+    }
 }
 
 impl Owner {
@@ -64,6 +74,11 @@ pub struct Receiver {
 }
 
 impl Receiver {
+    #[cfg(test)]
+    pub(crate) fn queued(&self) -> usize {
+        self.rx.len()
+    }
+
     pub async fn recv(&mut self) -> Option<String> {
         loop {
             if let Some(text) = self.rx.recv().await?.into_current() {
@@ -82,6 +97,21 @@ impl Receiver {
 }
 
 impl Out {
+    pub(crate) fn isolated(&self) -> (Self, OutputLifetime) {
+        let captured = Arc::new(());
+        let owner = Owner {
+            current: Arc::new(Mutex::new(Arc::downgrade(&captured))),
+            captured,
+        };
+        (
+            Self {
+                owner: Some(owner.clone()),
+                ..self.clone()
+            },
+            OutputLifetime(owner),
+        )
+    }
+
     pub fn channel(capacity: usize) -> (Self, Receiver, Arc<Notify>) {
         let (tx, rx) = mpsc::channel(capacity);
         let overflow = Arc::new(Notify::new());
@@ -92,6 +122,7 @@ impl Out {
                 accounts: Arc::default(),
                 owner: None,
                 instance_id: None,
+                account_label: None,
                 pending_signs: None,
                 order_receipts: Arc::default(),
             },
@@ -135,6 +166,17 @@ impl Out {
             order_receipts: Arc::default(),
             ..self.clone()
         }
+    }
+
+    pub(crate) fn with_account_label(&self, label: &str) -> Self {
+        Self {
+            account_label: Some(Arc::from(label)),
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn account_label<'a>(&'a self, fallback: &'a str) -> &'a str {
+        self.account_label.as_deref().unwrap_or(fallback)
     }
 
     pub(crate) fn order_binding(&self, instance_id: Option<&str>) -> bool {
@@ -195,6 +237,17 @@ impl Out {
 
     pub(crate) fn retire_order_receipts(&self) {
         self.order_receipts.lock().unwrap().retired = true;
+    }
+
+    pub(crate) fn with_fresh_order_receipts(&self) -> Self {
+        Self {
+            order_receipts: Arc::default(),
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn shares_order_receipts(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.order_receipts, &other.order_receipts)
     }
 
     /// A resumed signer can reconnect before init supplies the new registration.
@@ -265,6 +318,10 @@ impl Out {
                 _ => {}
             }
         }
+        let text = match &self.account_label {
+            Some(label) => crate::envelope::with_account_label(text, label),
+            None => text,
+        };
         let text = match &self.instance_id {
             Some(instance_id) => crate::envelope::with_instance_id(text, instance_id),
             None => text,
