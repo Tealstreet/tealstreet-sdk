@@ -2557,3 +2557,21 @@ for (const [family, artifact, measured, minimumCap] of [
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   });
 }
+
+// #3391 fresh composition df6f095bd740 (master 353a3ab925b0).
+// build.sh --venue FAMILY; Rust1.99 / bindgen0.2.129 / Binaryen132, required twice -Oz.
+for (const [family, measured, minimumCap, moduleSha256] of [
+  ['woo', 2_667_111, 2_677_760, 'fa221b247c4c9d795922cf2a195d327c5bfc5b10ff5eac17f604268fb54ab1d8'],
+  ['kucoinspot', 2_473_416, 2_484_224, 'ce57c8df54582f153ec305930df9fa87fcf763ee80bc9552a27059926cebd28f'],
+
+]) {
+  test(`#3391 fresh merged ${family} retains measured 10 KiB reserve`, () => {
+    assert.match(moduleSha256, /^[0-9a-f]{64}$/);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${family}: ${cap} < fresh merged minimum ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
