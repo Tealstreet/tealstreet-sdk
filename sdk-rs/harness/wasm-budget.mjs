@@ -291,6 +291,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3372 head 48cb0d34c168: CI run 43328678379/job 131568212209, artifact 13995125309.
   // CI merge cff6adaa9fc1 (base 908bedbe6f1a): optimized web/Node/replay 2,338,561 B.
   // Current CI size + 10 KiB, rounded up; historical provenance/tests retained.
+  // #3372 reduced head 5429d69bb2c3: run 43341438240/job 131611062815, artifact 14000097059.
+  // CI merge fc362e3e5ebd: web/Node/replay 2,338,212 B; the same cap retains 10,844 B.
   bybit: 2_349_056,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
@@ -374,7 +376,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3372 head 5f32a22a8c6c: CI run 43303561061/job 131481481601, artifact 13983990723.
   // CI merge c75a34b4bd34 (base dda0e1868f38): optimized web/Node 2,463,988 B.
   // Current measured size + 10 KiB, rounded up; historical provenance/tests retained.
-  kucoinspot: 2_475_008,
+  // That pre-reduction 2,475,008-byte cap is superseded: passive Plan element reports
+  // now link only for their Bybit adopter, removing 1,484 B from KuCoin Spot.
+  // Head 5429d69bb2c3: run 43341438240/job 131611062986, artifact 13999827413.
+  // CI merge fc362e3e5ebd (base 80a802868f09): web/Node/replay each 2,462,504 B.
+  // Current measured size + 10 KiB, rounded up: 10,456 B reserve, matching master.
+  kucoinspot: 2_472_960,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3425 run 43176700451/job 131043125518, CI source cca7b8337ad3:
