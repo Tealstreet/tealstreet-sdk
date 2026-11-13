@@ -4,11 +4,14 @@ use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 
-// Explicit staging entries. Adding one requires the matching offline suite;
-// this test-only catalog does not gate runtime admission or change rollout declarations.
-#[cfg(test)]
+// Exact venues with a private-startup possession proof and matching negative suite.
+// Other private joins refuse explicitly; this does not enable DELEGATED rollout.
 pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] =
     &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
+
+pub(crate) fn ready(venue: &str) -> bool {
+    PRIVATE_STARTUP_VENUES.contains(&venue)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProbeOutcome {
@@ -88,6 +91,9 @@ pub(crate) async fn run<T: Transport + 'static>(
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
+    if !ready(venue) {
+        return Err(ProbeRefusal::INVALID);
+    }
     let options: safe_cex_venues::EngineOptions =
         serde_json::from_str(options_json).map_err(|_| ProbeRefusal::INVALID)?;
     if options.frame_fed

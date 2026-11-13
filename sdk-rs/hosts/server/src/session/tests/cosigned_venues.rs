@@ -263,10 +263,9 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
         "../../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    let registry = crate::accounts::testing::e2e_registry(
-        "alice",
-        MockVenue::new(KEY.into(), MATERIAL.into()),
-    );
+    let io = MockVenue::new(KEY.into(), MATERIAL.into());
+    let observed = io.observed.clone();
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
     for (venue, rule) in rules["venues"].as_object().unwrap() {
         if rule["remoteSigning"]["enabled"] != true || READY.contains(&venue.as_str()) {
             continue;
@@ -304,6 +303,25 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
                 .iter()
                 .any(|f| f["t"] == "sign-req" || f["d"]["op"] == "frame")
         );
+        assert!(
+            frames
+                .iter()
+                .any(|f| f["d"]["data"][1]["outcome"] == "notSent")
+        );
+        if expected_kind == "proof-unavailable" {
+            assert!(
+                frames
+                    .iter()
+                    .any(|f| f["d"]["data"][1]["transient"] == false)
+            );
+        }
+        let seen = observed.lock().unwrap();
+        assert_eq!(
+            (seen.preparations, seen.requests, seen.sockets),
+            (0, 0, 0),
+            "unready venue must not reach IO"
+        );
+        drop(seen);
         session.close();
     }
 }
@@ -353,4 +371,34 @@ fn cosigned_kucoin_probe_setup_uses_the_existing_futures_origin() {
     assert!(safe_cex_native::resolve::rest_base_url("kucoin", true).is_err());
     let link = safe_cex_remote_signer::SignerLink::new(1, Arc::new(|_| true));
     assert!(crate::accounts::prepare(&payload("kucoin"), false, Some(link)).is_ok());
+}
+
+#[tokio::test]
+async fn cosigned_bybit_proof_runs_even_with_delegated_rollout_disabled() {
+    crate::delegated::with_test_declaration(
+        json!({"venues":{"bybit":{"delegated":{"enabled":false}}}}),
+        async {
+            let registry = crate::accounts::testing::e2e_registry(
+                "alice",
+                MockVenue::new(KEY.into(), MATERIAL.into()),
+            );
+            let (mut session, mut sent) = user_session(registry.clone(), "alice");
+            session.identity.resumable = false;
+            session.init(payload("bybit")).await.unwrap();
+            assert!(session.pending_verifications.contains_key("acct"));
+            let request = tokio::time::timeout(Duration::from_secs(30), sent.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let request: Value = serde_json::from_str(&request).unwrap();
+            assert_eq!(
+                request["t"], "sign-req",
+                "native proof actually requested the joining signature"
+            );
+            assert!(session.joined.is_empty());
+            assert!(registry.held("alice", "acct", session.socket).is_none());
+            session.close();
+        },
+    )
+    .await;
 }

@@ -60,12 +60,13 @@ impl Credentials {
 }
 
 impl Registry {
-    pub(crate) fn join_admission_enabled(&self, venue: &str) -> bool {
+    pub(crate) fn private_join_requires_proof(&self) -> bool {
         #[cfg(any(test, feature = "test-support"))]
         if let Some(enabled) = self.join_admission_override {
             return enabled;
         }
-        crate::delegated::enabled(venue)
+        // Test fixtures may replace private venue IO; production has no proof opt-out.
+        true
     }
 
     pub(crate) fn probe_permit(

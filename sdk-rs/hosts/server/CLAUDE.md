@@ -53,11 +53,16 @@ is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
 
-The existing Bybit opt-in also selects private COSIGNED admissions. Both modes
-share the off-loop probe, refusal classification, token/lease checks and account
-attachment. A pending COSIGNED signer belongs only to its joining connection;
-probe frames are consumed internally. Matching COSIGNED inits on an admitted
-connection and COSIGNED resumes retain their existing snapshot path.
+Private COSIGNED admissions require possession proof independently of the
+DELEGATED opt-in. Both modes share the off-loop probe, refusal classification,
+token/lease checks and account attachment. A private account is never attached
+as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
+OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
+other private COSIGNED joins return the typed `proof-unavailable` init refusal.
+A pending COSIGNED signer belongs only to its joining connection; probe frames
+are consumed internally. Matching COSIGNED inits on an admitted connection and
+COSIGNED resumes retain their existing snapshot path. The exact wire names and
+rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 
 ## DELEGATED order frames
 

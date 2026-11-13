@@ -522,6 +522,17 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
     their build-time value; the session-start line maps each fresh token's handle.
   - At `exp + 30s` the socket closes with 1008. That 30s is the same reconnect grace as `PROXY_TOKEN_RECONNECT_GRACE_MS`.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
+- **Private COSIGNED join proof:** fresh connections use the same isolated native
+  probe and admission path as DELEGATED, independently of `delegated.enabled`.
+  Exact `bybit`, `binance`, `okx`, `bitget`, `blofin` and `kucoin` are proof-ready.
+  Other private COSIGNED venues return an init refusal with
+  `kind: "proof-unavailable"`, `initRefused: true`, `transient: false` and
+  `outcome: "notSent"`; they do not fall back to registry attachment.
+  The pending connection signs only its own server-built requests, receives no
+  resident account state, and cannot issue methods or start jobs. Only a proved
+  connection becomes a holder/signer. Existing same-connection snapshots and
+  same-user COSIGNED resume retain their behavior. See
+  [the host contract](../../../docs/plans/callers/cosigned-join-proof.md).
 - **Unauthenticated sockets:** they may only `init` the public pseudo-account `__pub_bybit`.
   - The validation is the same as `validateUnauthenticatedPublicInit`.
   - Only `sendSnapshot` and the subscribe/unsubscribe book and OHLCV `msg` ops are allowed.

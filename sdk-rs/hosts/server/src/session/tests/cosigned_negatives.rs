@@ -432,7 +432,12 @@ async fn cosigned_test_admission_does_not_start_other_venue_proofs() {
     let mut request = init(Some("other-venue"));
     request.exchange_name = "bybitspot".into();
     session.init(request).await.unwrap();
-    refused(&f, &session, &mut sent, Some("other-venue"));
+    unattached_after_refusal(
+        &f,
+        &session,
+        &mut sent,
+        envelope::with_instance_id(envelope::init_proof_unavailable("acct"), "other-venue"),
+    );
     assert_eq!(f.private_reads.load(Ordering::SeqCst), before);
     resident.untouched(&f);
     one_actor(&f).await;
