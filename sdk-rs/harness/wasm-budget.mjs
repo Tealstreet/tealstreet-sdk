@@ -298,7 +298,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3425 run 43176700451/job 131043125392, CI source cca7b8337ad3:
   // web/Node 2,330,713 B; current measured maximum + 10 KiB, rounded up.
   // Nullable valuation plus inverse quote-capacity refusals remain in this family.
-  bybit: 2_341_888,
+  // #3397 run 43364338606/job 131685537135, artifact 14009728045:
+  // source ba06b221f45f has head fa06619c7d21's tree; web/Node/replay 2,332,649 B.
+  // SHA-256 70cd348f758b71303b71e47a7231223bd06078e79b1e56e095dcca7a7f8d2aa2.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required -Oz build.
+  // Current measured bytes + 10 KiB, rounded up; retain all larger parent floors.
+  bybit: 2_342_912,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
@@ -318,7 +323,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Artifact 13990122410; SHA-256 fb12f0bb7360254bb91749840faf977e1d5977880f179fd2933dfcf79de15443.
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  cryptocom: 1_814_528,
+  // #3397 run 43364338606/job 131685537173, artifact 14010191105:
+  // source ba06b221f45f has head fa06619c7d21's tree; web/Node/replay 1,804,494 B.
+  // SHA-256 7f1d8ee00cedbffb70fce530ff87ee0fd4ad2238bc36790e4098ebbdd9bf88f8.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required -Oz build.
+  // Current measured bytes + 10 KiB, rounded up; retain all larger parent floors.
+  cryptocom: 1_815_552,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
   // CI size plus 10 KiB, rounded up to the KiB.
@@ -406,12 +416,18 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Artifact 13990221484; SHA-256 9a67744fac8df42080c232cc974f1c9bd15c16209c660ce4354992941100f919.
   // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
   // Verified web/Node 2,147,387 B; measured + 10 KiB rounded up; shared aliases equal.
-  lighter: 2_158_592,
+  // #3397 run 43364338606/job 131685537252, artifact 14010330544:
+  // source ba06b221f45f has head fa06619c7d21's tree; web/Node/replay 2,148,847 B.
+  // SHA-256 121b8a073e360e125207a6f776d9d6b682ae45a67c6f4df400474d8a27feec2e.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required -Oz build.
+  // Current measured bytes + 10 KiB, rounded up; retain all larger parent floors.
+  lighter: 2_159_616,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
   // Verified web/Node 2,147,387 B; measured + 10 KiB rounded up; shared aliases equal.
-  'lighter-robinhood': 2_158_592,
+  // Shared Lighter family: #3397 run 43364338606, artifact 14010330544 above.
+  'lighter-robinhood': 2_159_616,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
