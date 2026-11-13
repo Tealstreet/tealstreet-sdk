@@ -7,6 +7,20 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
+// #3391 merge aa2dc74ee433 + master aa78ef0a06b7; local optimized web/Node.
+// Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132, required two -Oz passes.
+// Both modules SHA256 b317a14e05a5e75e26c659a226c1e316f50301d81045fe51f14d520ba574c7e8.
+test('#3391 master merge retains fresh AsterDEX measured 10 KiB reserve', () => {
+  const measured = 2_231_055;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.equal(minimumCap, 2_241_536);
+  assert.ok(cap >= minimumCap, `asterdex: ${cap} must retain ${minimumCap} bytes`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
+
 // #3397 run 43364338606, source ba06b221f45fdacf7e90bd48cb4f4c93e5be9d2d:
 // tree equals head fa06619c7d21f13db5d6acd05f2cc2609fcdf9f8.
 // Verified artifact ZIP digests, replay manifests and identical web/Node/replay bytes.
