@@ -17,9 +17,10 @@ owner parameter is absent. This compatibility exception is interim; explicit
 null/invalid ownership never selects it. Bound restores require both original
 persisted tags; untagged saved rows do not resume.
 
-The native server initially binds TWAPs to the verified authenticated user and a
-generation derived from that user. Same-user reconnects, resumes and signing
-handovers keep the current generation, so the approved 60-second COSIGNED resume
+The native server initially binds TWAPs to the verified registry identity digest when present,
+otherwise the authenticated user, with a generation derived from that binding.
+Same-owner reconnects, resumes and signing handovers keep the current generation,
+so the approved 60-second COSIGNED resume
 window keeps running TWAPs. Fresh bindings for the same authenticated identity
 use the same initial generation across account rebuilds, restarts and box moves.
 An in-place authenticated owner change advances the binding's generation and
