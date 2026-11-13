@@ -871,7 +871,9 @@ Settings changes on a held Bybit identity use the admitted connection's
 The settings must name the same label and identity. Replacement construction and
 its captured authority checks succeed before retiring the resident account through
 the existing settings-disposal path. A failed replacement keeps that resident;
-DELEGATED retains the same provider. The reply is `applySettings:done` with
+DELEGATED retains the same provider. The captured token deadline is rechecked
+before engine placement and publication; expiry keeps the resident intact.
+The reply is `applySettings:done` with
 `{requestId, success, result}` and the current registration's `instanceId`.
 Parked holders and the DELEGATED resident copy participate in settings refusal.
 

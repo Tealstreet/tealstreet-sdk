@@ -476,7 +476,7 @@ struct InitAuthority {
     current: Arc<AtomicBool>,
     lease: Option<crate::router_lease::Permit>,
     probe_lease: Option<crate::router_lease::Permit>,
-    probe_expires_at: Option<u64>,
+    admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
 }
 
@@ -508,7 +508,7 @@ impl InitAuthority {
     fn check_admission(&self) -> Result<(), String> {
         self.check()?;
         if self
-            .probe_expires_at
+            .admission_expires_at
             .is_some_and(|expiry| expiry <= now_ms())
         {
             return Err("Account verification expired; initialization stopped".into());
@@ -1203,7 +1203,7 @@ impl Registry {
             current: Arc::new(AtomicBool::new(true)),
             lease,
             probe_lease: None,
-            probe_expires_at: None,
+            admission_expires_at: None,
             probe_current: None,
         };
         authority.check_admission()?;
@@ -1376,13 +1376,16 @@ impl Registry {
             identity::registry_name(user, init)?
         };
         let mut attempt = self.begin_init(user, &registry_name, public_only, &fingerprint)?;
+        if apply.is_some() {
+            attempt.authority.admission_expires_at = token.as_ref().map(|(_, expiry)| *expiry);
+        }
         let probed = proof.is_some();
         if let Some(proof) = proof {
             proof
                 .check(user, init)
                 .map_err(|_| "Account verification expired".to_owned())?;
             attempt.authority.probe_lease = proof.lease.clone();
-            attempt.authority.probe_expires_at = proof.token_expires_at;
+            attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
             attempt._probe = Some(proof);
         }
