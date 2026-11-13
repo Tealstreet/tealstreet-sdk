@@ -4422,7 +4422,7 @@ mod tests {
                 let recorded = |key: &str| {
                     !registry.allow_repair(
                         &account.user,
-                        &account.name,
+                        account.registry_name(),
                         key,
                         std::time::Instant::now(),
                     )
@@ -4435,7 +4435,7 @@ mod tests {
                 session.msg(candle("subscribeOHLCV", true)).await;
                 assert!(recorded(&key), "the reset of a held topic was repaired");
                 let later = std::time::Instant::now() + crate::accounts::REPAIR_EVERY;
-                assert!(registry.allow_repair(&account.user, &account.name, &key, later));
+                assert!(registry.allow_repair(&account.user, account.registry_name(), &key, later));
                 assert!(
                     registry.allow_repair(&account.user, "other", &key, std::time::Instant::now()),
                     "another account's same topic has its own window"
@@ -5099,21 +5099,29 @@ mod tests {
                 let (account, _algos) =
                     crate::accounts::tests::held_account_for_init(Some(link), &init);
                 crate::accounts::tests::register(&registry, &account);
-                let end = r#"{"t":"msg","d":{"op":"chaser:complete","data":{"id":"c1","filled":0.001,"replayed":true}}}"#;
+                let end = envelope::msg(
+                    "acct",
+                    "chaser:complete",
+                    json!({"id":"c1","filled":0.001,"replayed":true}),
+                );
                 (registry.keep_notice(&account, "r1"))(crate::algos::Kept {
                     notices: Vec::new(),
-                    ends: vec![end.to_owned()],
+                    ends: vec![end.clone()],
                 });
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {
                     user: Some("u".into()),
-            chat_handle: None,
+                    chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some("r1".into()),
                     resumable: true,
                 };
-                let mut session =
-                    Session::new(registry.clone(), Arc::new(Metrics::default()), identity, out);
+                let mut session = Session::new(
+                    registry.clone(),
+                    Arc::new(Metrics::default()),
+                    identity,
+                    out,
+                );
                 session.open().await;
                 let wire = format!(
                     r#"{{"t":"init","d":{}}}"#,
@@ -5124,7 +5132,11 @@ mod tests {
                 while let Ok(frame) = sent.try_recv() {
                     frames.push(frame);
                 }
-                assert_eq!(frames.iter().filter(|frame| *frame == end).count(), 1, "{frames:?}");
+                assert_eq!(
+                    frames.iter().filter(|frame| *frame == &end).count(),
+                    1,
+                    "{frames:?}"
+                );
                 assert!(
                     !frames.iter().any(|frame| frame.contains(r#""op":"error""#)),
                     "{frames:?}"
