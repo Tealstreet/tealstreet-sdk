@@ -25,4 +25,5 @@ pub mod session;
 pub mod state;
 pub mod telemetry;
 pub mod threads;
+pub mod twap_owner;
 pub mod user_drain;

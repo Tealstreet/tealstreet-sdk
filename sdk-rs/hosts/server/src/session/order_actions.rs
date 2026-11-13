@@ -108,6 +108,7 @@ impl Session {
                 op: op.clone(),
                 data: data.to_string(),
                 origin: format!("socket:{}", self.socket),
+                twap_owner: self.joined[&name].account.twap_owner.snapshot(),
                 action: Some(Box::new(receipt)),
             }) && let crate::algos::AlgoInput::Op {
                 action: Some(receipt),

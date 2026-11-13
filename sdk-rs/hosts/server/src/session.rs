@@ -607,8 +607,9 @@ impl Session {
 
     fn admission_init(&mut self, init: InitPayload) {
         self.cancel_verification(&init.account_name);
+        let delegated = init.signing_mode.as_deref() == Some("delegated");
         if !self.admission_token_valid()
-            || !crate::delegated::enabled(&init.exchange_name)
+            || delegated && !crate::delegated::enabled(&init.exchange_name)
             || init.public_only == Some(true)
             || init.account_name.starts_with("__pub_")
             || self
@@ -620,14 +621,26 @@ impl Session {
                     init.signing_mode.as_deref() == Some("delegated"),
                 )
                 .is_some()
-            || self.pending_verifications.len() >= 64
         {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated init refused");
             self.refuse_handover(&init.account_name, false);
             return;
         }
-        if init.signing_mode.as_deref() == Some("delegated") {
+        if self.pending_verifications.len() >= 64 {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "verification capacity reached");
+            self.refuse_handover(&init.account_name, true);
+            return;
+        }
+        if !delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name) {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "proof unavailable");
+            self.handover_out(&init.account_name)
+                .send(envelope::init_proof_unavailable(&init.account_name));
+            return;
+        }
+        if delegated {
             self.open_probed_handover(init);
         } else if init.sealed.is_some() {
             self.handovers.forget(&init.account_name);
@@ -1204,7 +1217,7 @@ impl Session {
             ));
             return Ok(());
         }
-        let admission_enabled = self.registry.join_admission_enabled(&init.exchange_name);
+        let admission_enabled = self.registry.private_join_requires_proof();
         if !public_only && admission_enabled {
             if !self.admission_token_valid() {
                 self.drop_early(&init.account_name, "verification refused");
@@ -1657,6 +1670,7 @@ impl Session {
                             op: op.to_owned(),
                             data: data.to_string(),
                             origin: format!("socket:{}", self.socket),
+                            twap_owner: self.joined[&name].account.twap_owner.snapshot(),
                             action: None,
                         })
                         .is_ok()
@@ -3060,6 +3074,7 @@ mod tests {
     use safe_cex_remote_signer::Outbox;
 
     mod apply_settings;
+    mod cosigned_venues;
     mod delegated_probe;
     mod token_expiry;
 
@@ -3417,6 +3432,7 @@ mod tests {
                 op: op.into(),
                 data: data.into(),
                 origin: "test".into(),
+                twap_owner: account.twap_owner.snapshot(),
                 action: None,
             })
             .unwrap();
@@ -4439,6 +4455,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            twap_owner: account.twap_owner.snapshot(),
                             action: None,
                         })
                         .unwrap();
@@ -4788,6 +4805,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            twap_owner: account.twap_owner.snapshot(),
                             action: None,
                         })
                         .unwrap();
@@ -4864,6 +4882,7 @@ mod tests {
                             op: "chaser:start".into(),
                             data: "not a chase".into(),
                             origin: "test".into(),
+                            twap_owner: account.twap_owner.snapshot(),
                             action: None,
                         })
                         .unwrap();
@@ -4947,6 +4966,7 @@ mod tests {
                         op: "chaser:start".into(),
                         data: "not a chase".into(),
                         origin: "test".into(),
+                        twap_owner: account.twap_owner.snapshot(),
                         action: None,
                     })
                     .unwrap();
