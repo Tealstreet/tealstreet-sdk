@@ -687,6 +687,7 @@ pub fn capabilities_json_for(venue: Option<&str>) -> serde_json::Value {
             "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
             "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
             "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedFullWriteActionsV1": crate::order_contract::runtime_enabled(),
             "delegatedActivationScopeV1": crate::order_contract::action_capabilities(venue),
             "delegatedVenueV1": venue,
         }},
@@ -1635,6 +1636,7 @@ mod tests {
                         op: op.into(),
                         data: data.into(),
                         origin: "test".into(),
+                        action: None,
                     };
                     account.algos.as_ref().unwrap().send(input).unwrap();
                 };
