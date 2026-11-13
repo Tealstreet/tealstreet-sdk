@@ -334,6 +334,7 @@ async fn fresh_verified_admission_after_resume_grace_resets_retention_but_a_pend
                     &account.name,
                     false,
                     &crate::delegated::fingerprint(&init),
+                    None,
                 )
                 .unwrap();
             assert!(pending.authority.check().is_ok());
