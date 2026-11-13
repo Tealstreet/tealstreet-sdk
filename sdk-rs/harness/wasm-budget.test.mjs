@@ -2349,3 +2349,16 @@ test('#3302 fresh merged build keeps current reserve and the reviewed higher flo
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
+
+// Standard isolated build at merge 1ccd7b26df0b: identical web/Node WASM bytes.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
+test('#3302 J6 identity master merge keeps the measured AsterDEX reserve', () => {
+  const measured = 2_257_016;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.asterdex;
+  assert.equal(minimumCap, 2_268_160);
+  assert.ok(cap >= Math.max(minimumCap, 2_267_136));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
+});
