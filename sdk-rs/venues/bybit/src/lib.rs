@@ -2820,6 +2820,17 @@ impl Venue for BybitLinear {
         }
     }
 
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Then::Ordinary(request) = &pending.then {
+            self.ordinary_cancel_evidence(request, evidence);
+        }
+    }
+
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_ordinary(cx);
     }
