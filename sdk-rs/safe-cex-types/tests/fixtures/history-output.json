@@ -88,6 +88,21 @@
       "account": "fixture",
       "contracts": "2.00",
       "leverage": "1.00"
+    },
+    {
+      "provenance": "venue",
+      "symbol": "BTC",
+      "notional": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "unrealizedPnl": null,
+      "side": "long",
+      "fees": null,
+      "time": null,
+      "closedTime": null,
+      "account": "fixture",
+      "contracts": null,
+      "leverage": null
     }
   ],
   "income": [

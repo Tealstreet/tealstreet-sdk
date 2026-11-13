@@ -111,6 +111,55 @@ describe('Rust-generated history command results', () => {
     expect(derived.independentlyVerifiable).toBe(false);
   });
 
+  it('preserves native nulls and measured zero through host, worker JSON and resolver', async () => {
+    const rows: ClosedPnlEntry[] = JSON.parse(
+      readFileSync(
+        new URL('../../../../sdk-rs/engine/tests/fixtures/history-unknown-output.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    const host = new EngineHost(
+      // @ts-expect-error A synchronous native command reply fixture supplies no lifecycle.
+      {
+        command(text: string) {
+          const { command } = JSON.parse(text);
+          return JSON.stringify([{ op: 'done', command, result: JSON.stringify(rows) }]);
+        },
+      },
+      {
+        now: () => 0,
+        setTimeout: () => {
+          throw new Error('synchronous');
+        },
+        clearTimeout: () => {},
+      },
+    );
+    try {
+      const result = await resolveClosedPositions(
+        { fetchClosedPnl: async () => JSON.parse(JSON.stringify(await host.command({ op: 'fetchClosedPnl' }))) },
+        { symbol: 'BTCUSDT' },
+        false,
+      );
+      expect(result.entries).toHaveLength(2);
+      for (const field of [
+        'notional',
+        'contracts',
+        'entryPrice',
+        'exitPrice',
+        'unrealizedPnl',
+        'fees',
+        'leverage',
+        'time',
+        'closedTime',
+      ] as const) {
+        expect(result.entries[0][field]).toBe(0);
+        expect(result.entries[1][field]).toBeNull();
+      }
+    } finally {
+      host.dispose();
+    }
+  });
+
   it('retains signed fees, funding and gross PnL as separate income records sharing a native bill ID', async () => {
     const income = nativeOutput().income;
     let served = false;
