@@ -433,3 +433,153 @@ fn cancel_replace_reports_applied_cancel_then_unknown_without_restore() -> Resul
     assert_eq!(transport.requests.len(), 2);
     Ok(())
 }
+
+fn assert_placement_sequence(engine: &mut Driver, quantities: &[Vec<&str>]) -> Result {
+    assert_placement_sequence_sum(engine, quantities).map(|_| ())
+}
+
+fn assert_placement_sequence_sum(engine: &mut Driver, quantities: &[Vec<&str>]) -> Result<f64> {
+    let mut expected_ids = vec![];
+    let mut sent_sum = 0.;
+    for (step, expected) in quantities.iter().enumerate() {
+        let packets = requests(engine);
+        assert_eq!(packets.len(), 1, "step {step}: exactly one legacy write");
+        let packet = packets.first().ok_or("missing placement")?;
+        assert_eq!(packet.method, Method::Post);
+        let wire: Value = serde_json::from_str(packet.body.as_deref().ok_or("missing body")?)?;
+        let rows = match &wire {
+            Value::Array(rows) => rows.clone(),
+            row => vec![row.clone()],
+        };
+        assert_eq!(rows.len(), expected.len());
+        assert!(
+            packet
+                .url
+                .ends_with(if wire.is_array() { "/orders" } else { "/order" })
+        );
+        let mut acknowledgements = vec![];
+        for (index, (row, quantity)) in rows.iter().zip(expected).enumerate() {
+            let sent = row.get("quantity").or_else(|| row.get("triggerQuantity"));
+            assert_eq!(sent, Some(&json!(quantity)), "step {step} row {index}");
+            sent_sum += sent
+                .and_then(Value::as_str)
+                .ok_or("missing quantity")?
+                .parse::<f64>()?;
+            let id = format!("placed-{step}-{index}");
+            expected_ids.push(id.clone());
+            acknowledgements.push(json!({
+                "operation":"Ok", "id":id, "clientId":row["clientId"],
+                "symbol":SYMBOL, "side":row["side"], "orderType":row["orderType"]
+            }));
+        }
+        let response = if wire.is_array() {
+            Value::Array(acknowledgements)
+        } else {
+            acknowledgements
+                .pop()
+                .ok_or("missing single acknowledgement")?
+        };
+        reply(engine, packet, 200, &response.to_string());
+    }
+    let out = actions(engine);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    let result = out
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandDone {
+                command: 901,
+                result,
+            }) => Some(result),
+            _ => None,
+        })
+        .ok_or("missing placement completion")?;
+    assert_eq!(serde_json::from_str::<Vec<String>>(result)?, expected_ids);
+    Ok(sent_sum)
+}
+
+#[test]
+fn rounded_pair_quantities_follow_legacy_ts_without_wire_bound_recheck() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:746-779,872-878,1203-1232 rounds after raw bounds.
+    // KNOWN-ISSUE: a rounded quantity may be rejected after earlier pairs were placed.
+    for (amounts, quantities) in [
+        (vec![0.4, 0.95], vec![vec!["0.4", "1.0"]]),
+        (vec![0.4, 0.5, 0.95], vec![vec!["0.4", "0.5"], vec!["1.0"]]),
+        (
+            vec![0.4, 0.5, 0.6, 0.95],
+            vec![vec!["0.4", "0.5"], vec!["0.6", "1.0"]],
+        ),
+    ] {
+        let mut engine = constrained(0.1, 0.95);
+        submit(&mut engine, amounts.into_iter().map(limit).collect())?;
+        assert_placement_sequence(&mut engine, &quantities)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn rounded_bracket_quantity_follows_legacy_ts() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:918-925,980-1047 sends rounded entry/TP/SL.
+    // KNOWN-ISSUE: native bounds can refuse a rounded entry or protective child after earlier writes.
+    for kind in ["limit", "market"] {
+        for prefix in [false, true] {
+            let mut orders = vec![];
+            let mut quantities = vec![];
+            if prefix {
+                orders.extend([limit(0.4), limit(0.5)]);
+                quantities.push(vec!["0.4", "0.5"]);
+            }
+            orders.push(json!({"symbol":SYMBOL,"type":kind,"side":"buy","amount":0.95,"price":140,"takeProfit":150,"stopLoss":130}));
+            quantities.push(vec!["1.0"]);
+            if kind == "limit" {
+                quantities.extend([vec!["1.0"], vec!["1.0"]]);
+            }
+            let mut engine = constrained(0.1, 0.95);
+            submit(&mut engine, orders)?;
+            assert_placement_sequence(&mut engine, &quantities)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn rounded_last_row_below_min_follows_legacy_ts() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:746-779,918-925 formats without rounded bounds.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 1 of requested 1.04); kept for exact TS parity per Sam's decision
+    let mut engine = constrained(0.14, 1.);
+    let amounts = [0.4, 0.5, 0.14];
+    assert_eq!(amounts.iter().sum::<f64>(), 1.04);
+    submit(&mut engine, amounts.into_iter().map(limit).collect())?;
+    let sent_sum = assert_placement_sequence_sum(&mut engine, &[vec!["0.4", "0.5"], vec!["0.1"]])?;
+    assert_eq!(sent_sum, 1.);
+    Ok(())
+}
+
+#[test]
+fn rounded_replacement_follows_legacy_cancel_then_place() -> Result {
+    // TS reference/backpack/backpack.exchange.ts:1096-1147 cancels then calls the rounded formatter.
+    let (mut engine, _) = ready_orders(&format!("[{ORDER}]"));
+    engine.store_mut().update_markets(|market| {
+        market.precision.amount = 0.1;
+        market.limits.amount.max = 0.95;
+    });
+    engine.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 901,
+            id: "123".into(),
+            price: Some(142.),
+            amount: Some(0.95),
+        }),
+    );
+    let packets = requests(&mut engine);
+    assert_eq!(packets.len(), 1, "legacy cancellation must be released");
+    let cancel = packets.first().ok_or("missing cancellation")?;
+    assert_eq!(cancel.method, Method::Delete);
+    reply(
+        &mut engine,
+        cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
+    assert_placement_sequence(&mut engine, &[vec!["1.0"]])
+}

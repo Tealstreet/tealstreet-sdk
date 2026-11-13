@@ -1677,6 +1677,9 @@ impl<V: Venue> Engine<V> {
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
+        if !self.http_preparation_pending(token) {
+            return;
+        }
         self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
@@ -1965,6 +1968,15 @@ impl<V: Venue> Engine<V> {
         mut error: VenueError,
     ) {
         self.assert_live();
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&token.attempt().request)
+            .is_some_and(|managed| managed.lifecycle.preparation() == token)
+        {
+            return;
+        }
         self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
@@ -2170,6 +2182,15 @@ impl<V: Venue> Engine<V> {
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&permit.attempt().request)
+            .is_some_and(|managed| managed.lifecycle.is_current_permit(permit))
+        {
+            return Err(Error::Revoked);
+        }
         #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
@@ -4404,13 +4425,7 @@ mod tests {
             .get_mut(&token.attempt().request)
             .unwrap();
         assert!(deadline < managed.lifecycle.deadline());
-        managed.lifecycle = Lifecycle::with_deadline(
-            managed.lifecycle.context().clone(),
-            token.attempt(),
-            0.,
-            deadline,
-        )
-        .unwrap();
+        managed.lifecycle.narrow_test_window(0., deadline);
         assert_eq!(managed.lifecycle.preparation(), token);
     }
 

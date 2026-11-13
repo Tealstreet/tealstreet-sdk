@@ -21,6 +21,7 @@ struct Fixture {
     registry: Arc<Registry>,
     code: Arc<AtomicUsize>,
     private_reads: Arc<AtomicUsize>,
+    private_writes: Arc<AtomicUsize>,
     gate: Arc<tokio::sync::Semaphore>,
     server: tokio::task::JoinHandle<()>,
     rejected: Arc<AtomicUsize>,
@@ -38,9 +39,11 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let code = Arc::new(AtomicUsize::new(0));
     let private_reads = Arc::new(AtomicUsize::new(0));
+    let private_writes = Arc::new(AtomicUsize::new(0));
     let rejected = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(tokio::sync::Semaphore::new(1000));
     let (codes, reads, wait) = (code.clone(), private_reads.clone(), gate.clone());
+    let writes = private_writes.clone();
     let proof_rejections = rejected.clone();
     let app = axum::Router::new().route("/ws", axum::routing::get(|ws: axum::extract::WebSocketUpgrade| async {
         ws.on_upgrade(|mut socket| async move {
@@ -52,12 +55,16 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
                 }
             }
         })
-    })).fallback(move |uri: Uri, headers: HeaderMap| {
+    })).fallback(move |method: axum::http::Method, uri: Uri, headers: HeaderMap| {
         let (codes, reads, wait) = (codes.clone(), reads.clone(), wait.clone());
+        let writes = writes.clone();
         let rejected = proof_rejections.clone();
         async move {
             if headers.contains_key("x-bapi-api-key") {
                 assert!(headers.contains_key("x-bapi-sign"));
+                if method != axum::http::Method::GET {
+                    writes.fetch_add(1, Ordering::SeqCst);
+                }
                 reads.fetch_add(1, Ordering::SeqCst);
                 wait.acquire().await.unwrap().forget();
                 if authenticate && !delegated_negatives::signed_read_is_valid(&uri, &headers) {
@@ -107,9 +114,92 @@ async fn fixture_with_auth(authenticate: bool) -> Fixture {
         registry: crate::accounts::testing::probe_registry(plan),
         code,
         private_reads,
+        private_writes,
         gate,
         server,
         rejected,
+    }
+}
+
+async fn assert_rpc_expiry_completion(
+    f: &Fixture,
+    session: &mut Session,
+    sent: &mut crate::out::Receiver,
+    instance_id: Option<&str>,
+) {
+    session
+        .handle(r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"fresh-rpc","method":"fetchPositions","args":[]}}}"#)
+        .await
+        .unwrap();
+    let fresh = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let text = sent.recv().await.expect("fresh RPC output");
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["d"]["op"] == "callMethod:done"
+                && frame["d"]["data"]["requestId"] == "fresh-rpc"
+            {
+                return frame;
+            }
+        }
+    })
+    .await
+    .expect("fresh RPC settles");
+    assert_eq!(fresh["d"]["data"]["success"], true);
+    let account = session.joined["acct"].account.clone();
+    let client = session.joined["acct"].client.id;
+    let next_command = session.joined["acct"].next_command;
+    let writes = f.private_writes.load(Ordering::SeqCst);
+    session.identity.token.as_mut().unwrap().1 = now_ms();
+    for (request_id, method, args) in [
+        ("n1", "nuke", json!([])),
+        (
+            "p1",
+            "placeOrder",
+            json!([{"symbol":"BTCUSDT", "side":"buy", "type":"market", "amount":0.001}]),
+        ),
+        ("r1", "fetchPositions", json!([])),
+    ] {
+        while sent.try_recv().is_ok() {}
+        let request = json!({"t":"msg", "d":{"op":"callMethod", "accountName":"acct",
+            "data":{"requestId":request_id, "method":method, "args":args}}});
+        assert_eq!(session.handle(&request.to_string()).await, Ok(()));
+        assert_eq!(f.private_writes.load(Ordering::SeqCst), writes);
+        assert_eq!(session.joined["acct"].next_command, next_command);
+        assert_eq!(session.joined["acct"].client.id, client);
+        assert!(Arc::ptr_eq(
+            &account,
+            &f.registry.held("alice", "acct", session.socket).unwrap()
+        ));
+        let replies: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+            .map(|text| serde_json::from_str::<Value>(&text).unwrap())
+            .filter(|frame| matches!(frame["d"]["op"].as_str(), Some("error" | "callMethod:done")))
+            .collect();
+        let mut expected = json!({"t":"msg", "d":{"op":"callMethod:done", "accountName":"acct",
+            "data":{"requestId":request_id, "success":false,
+            "result":{"name":"AuthExpired", "message":crate::auth::TOKEN_EXPIRED, "outcome":"notSent"}}}});
+        if let Some(id) = instance_id {
+            expected["d"]["instanceId"] = json!(id);
+        }
+        assert_eq!(
+            replies,
+            vec![expected],
+            "expired RPC must settle its caller"
+        );
+    }
+}
+
+#[tokio::test]
+async fn delegated_rpc_expiry_completion_preserves_request_and_registration() {
+    for instance_id in [None, Some("rpc-registration")] {
+        let f = fixture_with_auth(true).await;
+        let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+        let mut results = session.take_verified();
+        let init = payload(&mut session, instance_id);
+        session.init(init).await.unwrap();
+        finish(&mut session, &mut results).await;
+        assert!(session.joined["acct"].account.delegated.is_some());
+        assert_rpc_expiry_completion(&f, &mut session, &mut sent, instance_id).await;
+        session.close();
     }
 }
 fn payload(session: &mut Session, id: Option<&str>) -> InitPayload {
@@ -285,6 +375,38 @@ async fn verified_pair_starts_then_reuses_the_resident_account() {
     );
     assert!(original.handle.disposal_cause().is_none());
     assert_eq!(session.joined["acct"].subscriptions, subscriptions);
+    session.close();
+}
+
+#[tokio::test]
+async fn token_expiry_after_successful_probe_keeps_the_resident_registration() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut results = session.take_verified();
+    let init = payload(&mut session, Some("first"));
+    session.init(init).await.unwrap();
+    finish(&mut session, &mut results).await;
+    let client = session.joined["acct"].client.id;
+    let original = session.joined["acct"].account.clone();
+    let init = payload(&mut session, Some("second"));
+    session.init(init).await.unwrap();
+    let completed = tokio::time::timeout(Duration::from_secs(5), results.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(completed.candidate.is_ok());
+    assert!(completed.probe.as_ref().unwrap().permit.is_ok());
+    while sent.try_recv().is_ok() {}
+    session.identity.token.as_mut().unwrap().1 = now_ms();
+    session.verification_completed(completed).await.unwrap();
+    assert_eq!(session.joined["acct"].client.id, client);
+    assert!(Arc::ptr_eq(&session.joined["acct"].account, &original));
+    assert!(session.pending_verifications.is_empty());
+    assert!(
+        sent.try_recv()
+            .unwrap()
+            .contains("Tealstreet proxy token expired")
+    );
     session.close();
 }
 
