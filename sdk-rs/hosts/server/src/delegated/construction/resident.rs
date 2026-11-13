@@ -15,6 +15,7 @@ impl ProtectedBytes for crate::delegated_memory::SecretCopy {
 /// One owner controls all provider handles, without exporting signing material.
 pub struct ResidentCopy {
     signer: Arc<ResidentSigner>,
+    pub(super) identities: safe_cex_engine::signing::Identities,
     #[cfg(test)]
     test_provider: Option<Provider>,
 }
@@ -52,12 +53,16 @@ impl State {
 }
 
 impl ResidentCopy {
-    pub(super) fn new(signer: LocalSigner) -> Self {
+    pub(super) fn new(
+        signer: LocalSigner,
+        identities: safe_cex_engine::signing::Identities,
+    ) -> Self {
         Self {
             signer: Arc::new(ResidentSigner(Mutex::new(State {
                 signer: Some(signer),
                 deadline: None,
             }))),
+            identities,
             #[cfg(test)]
             test_provider: None,
         }
@@ -65,14 +70,15 @@ impl ResidentCopy {
 
     // COSIGNED admission fixtures pass their remote provider through the probe.
     #[cfg(test)]
-    pub(crate) fn test_provider(provider: Provider) -> Self {
-        Self {
+    pub(crate) fn test_provider(provider: Provider) -> Arc<Self> {
+        Arc::new(Self {
             signer: Arc::new(ResidentSigner(Mutex::new(State {
                 signer: None,
                 deadline: None,
             }))),
+            identities: Default::default(),
             test_provider: Some(provider),
-        }
+        })
     }
 
     pub fn provider(&self) -> Provider {
@@ -176,6 +182,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn settings_rebuild_keeps_the_shared_owner_until_the_last_account_drops() {
+        let (resident, releases) = resident();
+        let owner = Arc::new(resident);
+        let provider = owner.provider();
+        let prepared = owner
+            .reconfigure(&crate::envelope::InitPayload {
+                account_name: "synthetic-main".into(),
+                exchange_name: "bybit".into(),
+                key: "synthetic-key".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        drop(owner);
+        assert_eq!(releases.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+            Capability::Supported
+        );
+        drop(prepared);
+        assert!(releases.load(Ordering::SeqCst) > 0);
+        assert_eq!(
+            provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+            Capability::Unsupported
+        );
+    }
+
     fn resident() -> (ResidentCopy, Arc<AtomicUsize>) {
         let (resident, releases, _) = resident_with_read_fault();
         (resident, releases)
@@ -183,7 +216,7 @@ mod tests {
 
     fn resident_with_read_fault() -> (ResidentCopy, Arc<AtomicUsize>, Arc<AtomicBool>) {
         let memory = crate::delegated_memory::DelegatedMemory::prepare("bybit", true).unwrap();
-        let (signer, _) = LocalSigner::from_setup(LocalSetup {
+        let (signer, identities) = LocalSigner::from_setup(LocalSetup {
             primary: Some(LocalIdentity {
                 key: Secret::new("synthetic-key".into()),
                 secret: Secret::new("synthetic-secret".into()),
@@ -210,7 +243,7 @@ mod tests {
                 }))
             })
             .unwrap();
-        (ResidentCopy::new(signer), releases, armed)
+        (ResidentCopy::new(signer, identities), releases, armed)
     }
 
     fn request() -> SignRequest {

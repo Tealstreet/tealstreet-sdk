@@ -7,6 +7,7 @@ pub(super) const DELEGATED_RETENTION: Duration = Duration::from_secs(48 * 60 * 6
 pub(super) struct Retention {
     generation: u64,
     pub deadline: Instant,
+    pub(super) labels: std::collections::BTreeSet<String>,
     task: tokio::task::AbortHandle,
 }
 
@@ -20,13 +21,13 @@ impl Holders {
 
 impl Registry {
     /// Called after a real holder leaves. Only the current account can arm work.
-    pub(super) fn retain_delegated(self: &Arc<Self>, account: &Arc<Account>) {
+    pub(super) fn retain_delegated(self: &Arc<Self>, account: &Arc<Account>, labels: Vec<String>) {
         let Some(resident) = &account.delegated else {
             return;
         };
         let accounts = self.accounts.lock().unwrap();
         if !accounts
-            .get(&(account.user.clone(), account.name.clone()))
+            .get(&(account.user.clone(), account.registry_name().to_owned()))
             .is_some_and(|current| Arc::ptr_eq(current, account))
         {
             return;
@@ -49,8 +50,19 @@ impl Registry {
                 registry.expire_delegated(&account, generation);
             }
         });
+        let labels = labels
+            .into_iter()
+            .chain(
+                holders
+                    .labels
+                    .values()
+                    .flat_map(|labels| labels.keys().cloned()),
+            )
+            .chain(std::iter::once(account.name.clone()))
+            .collect();
         holders.retention = Some(Retention {
             generation,
+            labels,
             deadline,
             task: task.abort_handle(),
         });
@@ -60,7 +72,7 @@ impl Registry {
         // Map identity, account incarnation, timer generation and live admission
         // are checked under the same locks before any disposal can be attributed.
         let mut accounts = self.accounts.lock().unwrap();
-        let key = (account.user.clone(), account.name.clone());
+        let key = (account.user.clone(), account.registry_name().to_owned());
         if !accounts
             .get(&key)
             .is_some_and(|current| Arc::ptr_eq(current, account))
@@ -95,13 +107,17 @@ impl Registry {
 
     /// Explicit removal/disable also applies while this user's account is retained.
     pub(crate) fn dispose_delegated(&self, user: &str, name: &str) {
-        let account = self
-            .accounts
-            .lock()
-            .unwrap()
-            .get(&(user.into(), name.into()))
-            .cloned();
-        if let Some(account) = account.filter(|account| account.delegated.is_some()) {
+        let accounts = self.accounts.lock().unwrap();
+        let mut matches = accounts.values().filter(|account| {
+            if account.user != user || account.delegated.is_none() {
+                return false;
+            }
+            account.has_label(name)
+        });
+        let account = matches.next().cloned();
+        let unique = matches.next().is_none();
+        drop(accounts);
+        if let Some(account) = account.filter(|_| unique) {
             self.dispose_for(&account, Disposal::PageDisposed, "account disposed", None);
         }
     }

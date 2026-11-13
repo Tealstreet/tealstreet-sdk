@@ -70,9 +70,9 @@ export const assertNotHeld = (hold) => {
 };
 
 /**
- * `sha` must have a completed Rust SDK master push run whose "Rust / required coverage"
- * job (the correctness aggregate branch protection requires) succeeded. CPU
- * certification is non-blocking, so its noise must not stop a release.
+ * Require a Rust SDK push run on master with head_sha === sha, whose
+ * "Rust / required coverage" job is completed with conclusion success.
+ * #3489 relaxed whole-run completion; the run may still be in progress.
  */
 export const assertCertified = async ({ api, repo, sha, sleep = pause }) => {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('source must be a full commit SHA');

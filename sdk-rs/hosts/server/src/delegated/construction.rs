@@ -3,6 +3,7 @@ use crate::accounts::{engine_options, routing_plan};
 use crate::envelope::InitPayload;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use serde_json::json;
+use std::sync::Arc;
 
 /// A handed-over pair, consumed by trusted construction. Never a socket payload.
 pub struct DelegatedPair {
@@ -39,10 +40,34 @@ impl DelegatedPair {
 mod resident;
 pub use resident::ResidentCopy;
 
+impl ResidentCopy {
+    pub(crate) fn reconfigure(
+        self: &Arc<Self>,
+        init: &InitPayload,
+    ) -> Result<PreparedDelegated, String> {
+        if !super::enabled(&init.exchange_name) || init.public_only == Some(true) {
+            return Err("DELEGATED settings are not enabled for this account".into());
+        }
+        let mut options = engine_options(init, false);
+        let fields = options.as_object_mut().expect("engine options object");
+        fields.remove("key");
+        fields.remove("passphrase");
+        fields.insert("signing".into(), json!(self.identities));
+        fields.insert("publicDataOnly".into(), false.into());
+        fields.insert("remoteSigning".into(), false.into());
+        fields.insert("payloadSigner".into(), false.into());
+        Ok(PreparedDelegated {
+            plan: routing_plan(init, false)?,
+            options: options.to_string(),
+            resident: self.clone(),
+        })
+    }
+}
+
 pub struct PreparedDelegated {
     pub plan: safe_cex_native::RoutingPlan,
     pub options: String,
-    pub resident: ResidentCopy,
+    pub resident: Arc<ResidentCopy>,
 }
 
 /// Called only after the host has admitted and verified the handover.
@@ -99,7 +124,7 @@ pub fn prepare_delegated(
     Ok(PreparedDelegated {
         plan,
         options: options.to_string(),
-        resident: ResidentCopy::new(signer),
+        resident: Arc::new(ResidentCopy::new(signer, identities)),
     })
 }
 

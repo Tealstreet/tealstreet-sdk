@@ -12,10 +12,21 @@ fn resident(
     Arc<Account>,
     mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
 ) {
+    resident_with_identity(registry, user, Some("synthetic-key"))
+}
+
+fn resident_with_identity(
+    registry: &Registry,
+    user: &str,
+    key: Option<&str>,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
     let init = InitPayload {
         account_name: "synthetic-main".into(),
         exchange_name: "bybit".into(),
-        key: "synthetic-key".into(),
+        key: key.unwrap_or("synthetic-key").into(),
         ..Default::default()
     };
     let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
@@ -32,6 +43,9 @@ fn resident(
     );
     let inner = Arc::get_mut(&mut account).unwrap();
     inner.public_only = false;
+    if key.is_some() {
+        inner.identity = identity::digest(user, &init).unwrap();
+    }
     inner.delegated = Some(
         prepare_delegated(
             &init,
@@ -331,7 +345,7 @@ async fn fresh_verified_admission_after_resume_grace_resets_retention_but_a_pend
             let pending = registry
                 .begin_init(
                     "A",
-                    &account.name,
+                    account.registry_name(),
                     false,
                     &crate::delegated::fingerprint(&init),
                     None,
@@ -499,6 +513,152 @@ async fn stopped_delegated_resumable_holders_release_only_their_own_incarnation(
             ));
             assert!(replacement.handle.disposal_cause().is_none());
             registry.dispose(&replacement, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn retention_and_explicit_disposal_use_the_identity_key_after_alias_grace() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident_with_identity(&registry, "A", Some("synthetic-key"));
+            assert_ne!(account.registry_name(), account.name);
+            let provider = account.delegated.as_ref().unwrap().provider();
+            assert!(account.hold_label(
+                8,
+                Live {
+                    outbox: Arc::new(|_| true),
+                    token: None
+                },
+                "phone-label"
+            ));
+            registry.release_label(&account, 7, &account.name, Disposal::SocketClosed);
+            assert!(account.holders.lock().unwrap().retention.is_none());
+            registry.release_label(&account, 8, "phone-label", Disposal::SocketClosed);
+            assert!(account.holders.lock().unwrap().retention.is_some());
+            registry.dispose_delegated("B", &account.name);
+            assert_eq!(registry.account_count(), 1);
+            assert!(account.hold_label(
+                9,
+                Live {
+                    outbox: Arc::new(|_| true),
+                    token: None
+                },
+                "phone-label"
+            ));
+            assert!(account.holders.lock().unwrap().retention.is_none());
+            registry.release_label(&account, 9, "phone-label", Disposal::SocketClosed);
+            advance(Duration::from_secs(61)).await;
+            let public = InitPayload {
+                account_name: "phone-label".into(),
+                exchange_name: "bybit".into(),
+                public_only: Some(true),
+                ..Default::default()
+            };
+            assert!(
+                registry
+                    .signing_mode_refusal("A", &public, true, false)
+                    .is_some()
+            );
+            assert!(registry.rebuild_refusal("A", &public, true, 10).is_some());
+            assert!(
+                registry
+                    .signing_mode_refusal("B", &public, true, false)
+                    .is_none()
+            );
+            registry.dispose_delegated("B", "phone-label");
+            assert_eq!(registry.account_count(), 1);
+            registry.dispose_delegated("A", "phone-label");
+            assert_eq!(registry.account_count(), 0);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn retiring_old_settings_preserves_only_the_published_successors_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident_with_identity(&registry, "A", Some("synthetic-key"));
+            let resident = account.delegated.as_ref().unwrap().clone();
+            let provider = resident.provider();
+            let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+            let (mut successor, _successor_inbox) = testing::account_on(
+                testing::HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: Some(0.),
+                    ticker: true,
+                },
+                ("A", &account.name, &account.venue),
+                None,
+                "changed-settings".into(),
+                running,
+            );
+            let inner = Arc::get_mut(&mut successor).unwrap();
+            inner.identity = account.identity.clone();
+            inner.public_only = false;
+            inner.delegated = Some(resident);
+            testing::register(&registry, &successor);
+            hold(&successor, 8);
+            registry.stop_for_new_settings(&account, Arc::new(|_| true), Disposal::SettingsChanged);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            assert!(registry.holds(&successor, 8));
+            registry.dispose(&successor, Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 0);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ambiguous_unjoined_label_never_disposes_a_guessed_identity() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (first, _first_inbox) =
+                resident_with_identity(&registry, "A", Some("synthetic-key-A"));
+            let (second, _second_inbox) =
+                resident_with_identity(&registry, "A", Some("synthetic-key-B"));
+            hold(&second, 8);
+            registry.release(&second, 7, Disposal::SocketClosed);
+            registry.release(&first, 7, Disposal::SocketClosed);
+            registry.release(&second, 8, Disposal::SocketClosed);
+            let first_provider = first.delegated.as_ref().unwrap().provider();
+            let second_provider = second.delegated.as_ref().unwrap().provider();
+            registry.dispose_delegated("A", &first.name);
+            assert_eq!(registry.account_count(), 2);
+            let key = KeyRef("primary.signing".into());
+            assert_eq!(
+                first_provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            assert_eq!(
+                second_provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            registry.dispose(&first, Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 1);
+            registry.dispose_delegated("A", &second.name);
+            assert_eq!(registry.account_count(), 0);
+            assert_eq!(
+                first_provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+            assert_eq!(
+                second_provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
         })
         .await;
 }
