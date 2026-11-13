@@ -74,3 +74,59 @@ test('compact browser class metadata is closed and only belongs to preparation',
   }
   assert.throws(() => probe({ ...bind(), requestClass: 3 }), /managed schema/);
 });
+
+const wide = '18446744073709551615';
+const preparationV2 = `p2:${wide}:7:${wide}:${wide}`;
+const permitV2 = `r2:${wide}:7:${wide}:0:${wide}`;
+const prepareV2 = () => ({ ...prepare(), preparation: preparationV2 });
+const bindV2 = () => ({ ...bind(), preparation: preparationV2, permit: permitV2 });
+
+test('v2 managed prepare, bind and cancel retain v1 capability evidence', () => {
+  for (const action of [prepare(), bind(), prepareV2(), bindV2()]) {
+    assert.equal(probe(action).evidence, 'request');
+  }
+  for (const preparation of [preparationV2, 'p2:1:7:1:0']) {
+    assert.equal(probe({ op: 'managedHttp', phase: 'cancel', preparation, signing: 7 }).evidence, 'deferred');
+  }
+  assert.equal(probe({ ...prepareV2(), requestClass: 4 }).evidence, 'request');
+  assert.equal(probe({ ...bindV2(), permit: `r2:${wide}:7:${wide}:1:${wide}` }).evidence, 'request');
+});
+
+test('the widest v2 tokens preserve every u64 counter and the u32 request boundary', () => {
+  const preparation = `p2:${wide}:4294967295:${wide}:${wide}`;
+  const permit = `r2:${wide}:4294967295:${wide}:${wide}:${wide}`;
+  assert.equal(permit.length, 97);
+  for (const action of [
+    { ...prepareV2(), preparation },
+    { ...bindV2(), preparation, permit },
+  ]) assert.equal(probe({ ...action, packet: { ...packet, request: 4294967295 } }).evidence, 'request');
+});
+
+test('v2 issuer, request, generation and permit sequence remain canonical and bounded', () => {
+  for (const preparation of [
+    'p2:0:7:1:0', 'p2:01:7:1:0', 'p2:+1:7:1:0', 'p2:1:7:0:0',
+    'p2:1:0:1:0', 'p2:1:4294967296:1:0', 'p2:1:07:1:0', 'p2:1:7:01:0',
+    'p2:1:7:1:00', 'p2:1:7:1:-1', 'p2:1:7:1:0\n', 'p2:١:7:1:0',
+    'p2:18446744073709551616:7:1:0', 'p2:1:7:18446744073709551616:0',
+    'p2:1:7:1:18446744073709551616', 'p2:1:7:1', 'p2:1:7:1:0:0', 'p3:1:7:1:0',
+  ]) assert.throws(() => probe({ ...prepareV2(), preparation }), /managed schema/);
+  for (const permit of [
+    `r2:0:7:${wide}:0:1`, `r2:01:7:${wide}:0:1`, `r2:${wide}:7:${wide}:0:0`,
+    `r2:${wide}:7:${wide}:00:1`, `r2:${wide}:7:${wide}:0:01`,
+    `r2:${wide}:7:${wide}:18446744073709551616:1`,
+    `r2:${wide}:7:${wide}:0:18446744073709551616`,
+    `r2:${wide}:7:${wide}:0`, `r2:${wide}:7:${wide}:0:1:1`,
+  ]) assert.throws(() => probe({ ...bindV2(), permit }), /managed schema/);
+});
+
+test('managed bind rejects mixed versions and mismatched v2 owners before accepting evidence', () => {
+  for (const action of [
+    { ...bindV2(), permit }, { ...bind(), permit: permitV2 },
+    { ...bindV2(), permit: `r2:1:7:${wide}:0:1` },
+    { ...bindV2(), permit: `r2:${wide}:8:${wide}:0:1` },
+    { ...bindV2(), permit: `r2:${wide}:7:1:0:1` },
+    { ...prepareV2(), packet: { ...packet, request: 8 } },
+    { ...prepareV2(), permit: permitV2 }, { ...bindV2(), requestClass: 4 },
+    { ...prepareV2(), intent: 'secret' }, { ...prepareV2(), extra: true },
+  ]) assert.throws(() => probe(action), /managed schema/);
+});
