@@ -7,6 +7,28 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
+// #3397 run 43364338606, source ba06b221f45fdacf7e90bd48cb4f4c93e5be9d2d:
+// tree equals head fa06619c7d21f13db5d6acd05f2cc2609fcdf9f8.
+// Verified artifact ZIP digests, replay manifests and identical web/Node/replay bytes.
+// Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; required -Oz build.
+for (const [venue, family, artifact, measured, minimumCap] of [
+  ['bybit', 'bybit', 14009728045, 2_332_649, 2_342_912],
+  ['cryptocom', 'cryptocom', 14010191105, 1_804_494, 1_815_552],
+  ['lighter', 'lighter', 14010330544, 2_148_847, 2_159_616],
+  ['lighter-robinhood', 'lighter', 14010330544, 2_148_847, 2_159_616],
+]) {
+  test(`#3397 merged fa06619c: ${venue} artifact ${artifact} retains fresh measured headroom`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(venueFamily(venue), family);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(cap, WASM_VENUE_OVERRIDES[family]);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
+
 test('#3397 Orderly CI run 43192535364 retains measured 10 KiB headroom', () => {
   // Job 131096463465, artifact 13932495107; identical optimized web/Node modules.
   // SHA-256 e249271d883327d158591bfa298c49a23b60d4d25e105938ed86adfbc9927b3d.
