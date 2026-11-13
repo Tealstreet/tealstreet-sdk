@@ -63,6 +63,19 @@ attachment. A pending COSIGNED signer belongs only to its joining connection;
 probe frames are consumed internally. Matching COSIGNED inits on an admitted
 connection and COSIGNED resumes retain their existing snapshot path.
 
+Settings rebuilds share the protected resident owner with the published successor.
+Retiring the replaced actor preserves that successor; explicit disposal or the last
+account-owner drop still revokes the provider while engine handles remain.
+
+Retention captures disconnected labels until its deadline, so identity-keyed
+lookup, explicit disposal and public-fallback refusals survive resume-grace expiry.
+An unjoined label matching multiple identities refuses instead of choosing one.
+
+Stopped DELEGATED accounts keep live holders for final stop notices. A resumable
+disconnect releases that stopped holder through the normal release path instead
+of parking it or restarting retention; the final live holder leaving evicts the
+stopped account. Owner and account-incarnation checks still isolate late cleanup.
+
 ## DELEGATED order frames
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before

@@ -10,9 +10,12 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
+mod material;
 mod primitives;
 pub use key_material::KeyEncoding;
-
+#[cfg(not(target_arch = "wasm32"))]
+pub use material::ProtectedBytes;
+use material::{KeyMap, heap};
 /// Trusted provider setup only. Never place these values in venue/engine options.
 #[derive(Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,7 +23,6 @@ pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
-
 /// Trusted Lighter setup's public API-index principal, never wire material.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LighterPrincipal {
@@ -162,7 +164,6 @@ impl<'de> serde::Deserialize<'de> for Secret {
         <String as serde::Deserialize>::deserialize(deserializer).map(Self::new)
     }
 }
-
 /// Unicode White_Space trim into a fresh guarded buffer; the input is wiped on drop.
 fn trimmed(input: Secret) -> Secret {
     let Some(value) = input.0.as_deref() else {
@@ -174,7 +175,6 @@ fn trimmed(input: Secret) -> Secret {
     }
     Secret::new(text.to_owned())
 }
-
 // Decoded buffers stay guarded on every failure, including the second slot.
 struct DecodedIdentity {
     key: Zeroizing<Vec<u8>>,
@@ -255,23 +255,23 @@ impl DecodedIdentity {
         if !self.key.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.credential")), self.key);
+                .insert(KeyRef(format!("{slot}.credential")), heap!(self.key));
         }
         if !self.secret.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.signing")), self.secret);
+                .insert(KeyRef(format!("{slot}.signing")), heap!(self.secret));
         }
         if let Some(passphrase) = self.passphrase {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.passphrase")), passphrase);
+                .insert(KeyRef(format!("{slot}.passphrase")), heap!(passphrase));
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
                 let reference = Self::extra_ref(slot, name);
                 signer.roles.insert(reference.clone(), name);
-                signer.keys.insert(reference, bytes);
+                signer.keys.insert(reference, heap!(bytes));
             }
         }
     }
@@ -280,11 +280,11 @@ impl DecodedIdentity {
 pub struct LocalSigner {
     /// This provider's setup lifetime. Re-drawn by every material mutation,
     /// which must stay `&mut self` (pre-`Arc`): a borrowed incarnation may not
-    /// outlive a re-draw. `None` (allocation exhausted) never reads a seal.
+    /// outlive a re-draw. `None` (host storage or allocation exhaustion) never reads a seal.
     incarnation: Option<Incarnation>,
     #[cfg(feature = "schnorr")]
     lighter_principal: Option<(KeyRef, LighterPrincipal)>,
-    keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
+    keys: KeyMap,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
     roles: HashMap<KeyRef, ExtraKey>,
@@ -302,7 +302,7 @@ impl Default for LocalSigner {
             incarnation: Incarnation::fresh().ok(),
             #[cfg(feature = "schnorr")]
             lighter_principal: None,
-            keys: HashMap::new(),
+            keys: KeyMap::new(),
             roles: HashMap::new(),
             algorithms: HashMap::new(),
             shared: HashMap::new(),
@@ -313,7 +313,7 @@ impl LocalSigner {
     pub fn new() -> Self {
         Self::default()
     }
-    /// Ends every seal made under the previous material.
+    #[cfg(target_arch = "wasm32")]
     fn redraw(&mut self) {
         self.incarnation = Incarnation::fresh().ok();
     }
@@ -416,7 +416,7 @@ impl LocalSigner {
                 self.algorithms.remove(&reference);
             }
         }
-        self.keys.insert(reference, Zeroizing::new(bytes));
+        self.keys.insert(reference, heap!(Zeroizing::new(bytes)));
     }
     pub fn from_setup(
         setup: LocalSetup,
@@ -585,10 +585,9 @@ impl LocalSigner {
                 // `schnorr` builds can sign one, so only they pay for the check.
                 #[cfg(feature = "schnorr")]
                 if algorithm == Algorithm::SchnorrDigest
-                    && !signer
-                        .keys
-                        .get(signing)
-                        .is_some_and(|key| crate::lighter::canonical_scalar(key).unwrap_or(false))
+                    && !signer.keys.get(signing).is_some_and(|key| {
+                        crate::lighter::canonical_scalar(key.as_slice()).unwrap_or(false)
+                    })
                 {
                     return Err(SignError::InvalidRequest);
                 }
@@ -746,7 +745,8 @@ impl LocalSigner {
             return Err(SignError::InvalidRequest);
         }
         self.redraw();
-        self.keys.insert(reference.clone(), Zeroizing::new(bytes));
+        self.keys
+            .insert(reference.clone(), heap!(Zeroizing::new(bytes)));
         self.algorithms.insert(reference, algorithm);
         Ok(())
     }
@@ -3458,4 +3458,14 @@ mod owned_address_setup_tests {
             .unwrap();
         assert!(provider.create_public_address_setup(request(key)).is_none());
     }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod protected_tests;
+
+#[cfg(all(test, target_arch = "wasm32"))]
+#[test]
+fn wasm_local_signer_keeps_plain_zeroizing_storage() {
+    let signer = LocalSigner::new();
+    let _: &HashMap<KeyRef, Zeroizing<Vec<u8>>> = &signer.keys;
 }

@@ -23,8 +23,13 @@ the type provides no serializer or implicit clone.
 Each buffer owns separate anonymous pages. It attempts `mlock` before receiving
 bytes; unavailable locking emits one fixed, non-fatal warning per process.
 Drop zeroizes the entire allocation before unlocking and unmapping it, on both
-normal and error paths. No file or persistence API is involved. The existing
-local signing provider and its secret types remain unchanged.
+normal and error paths. No file or persistence API is involved.
+
+The DELEGATED builder uses the local provider's native protected-storage opt-in
+to place installed material in these buffers. One account-owned handle controls
+the provider handles shared with the engine. Disposal releases and erases the
+buffers immediately. Ordinary local setup keeps its default storage. See
+[DELEGATED retention](DELEGATED_RETENTION.md) for the client-disconnect lifecycle.
 
 ## Container runtime
 

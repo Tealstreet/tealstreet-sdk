@@ -16,6 +16,8 @@ mod restart;
 
 #[path = "delegated_identity.rs"]
 mod identity;
+#[path = "delegated_retention.rs"]
+mod retention;
 
 struct Fixture {
     registry: Arc<Registry>,

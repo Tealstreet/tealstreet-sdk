@@ -2,7 +2,6 @@
 use crate::accounts::{engine_options, routing_plan};
 use crate::envelope::InitPayload;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-use safe_cex_engine::signing::Provider;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -38,28 +37,14 @@ impl DelegatedPair {
     }
 }
 
-/// The account's resident provider; material stays in the existing LocalSigner.
-/// This handle neither serializes nor makes another copy of the material.
-#[derive(Clone)]
-pub struct ResidentCopy {
-    provider: Provider,
-    identities: safe_cex_engine::signing::Identities,
-}
+mod resident;
+pub use resident::ResidentCopy;
+
 impl ResidentCopy {
-    #[cfg(test)]
-    pub(crate) fn test_provider(provider: Provider) -> Self {
-        Self {
-            provider,
-            identities: Default::default(),
-        }
-    }
-
-    /// Trusted host ingress, as with a remote account's provider.
-    pub fn provider(&self) -> Provider {
-        self.provider.clone()
-    }
-
-    pub(crate) fn reconfigure(&self, init: &InitPayload) -> Result<PreparedDelegated, String> {
+    pub(crate) fn reconfigure(
+        self: &Arc<Self>,
+        init: &InitPayload,
+    ) -> Result<PreparedDelegated, String> {
         if !super::enabled(&init.exchange_name) || init.public_only == Some(true) {
             return Err("DELEGATED settings are not enabled for this account".into());
         }
@@ -82,7 +67,7 @@ impl ResidentCopy {
 pub struct PreparedDelegated {
     pub plan: safe_cex_native::RoutingPlan,
     pub options: String,
-    pub resident: ResidentCopy,
+    pub resident: Arc<ResidentCopy>,
 }
 
 /// Called only after the host has admitted and verified the handover.
@@ -92,6 +77,11 @@ pub fn prepare_delegated(
     pair: DelegatedPair,
 ) -> Result<PreparedDelegated, String> {
     pair.validate(init)?;
+    let memory = crate::delegated_memory::DelegatedMemory::prepare(
+        &init.exchange_name,
+        crate::delegated::enabled(&init.exchange_name),
+    )
+    .map_err(|_| "DELEGATED setup unavailable".to_owned())?;
     let plan = routing_plan(init, false)?;
     let setup = LocalSetup {
         primary: Some(LocalIdentity {
@@ -114,6 +104,15 @@ pub fn prepare_delegated(
     {
         return Err("Invalid DELEGATED account setup".into());
     }
+    let signer = signer
+        .with_protected_storage(|bytes| {
+            let mut protected = memory
+                .zeroed(bytes.len())
+                .map_err(|_| safe_cex_engine::signing::SignError::Unavailable)?;
+            protected.as_bytes_mut().copy_from_slice(bytes);
+            Ok(Box::new(protected))
+        })
+        .map_err(|_| "DELEGATED setup unavailable".to_owned())?;
     let mut options = engine_options(init, false);
     let fields = options.as_object_mut().expect("engine options object");
     fields.remove("key");
@@ -125,10 +124,7 @@ pub fn prepare_delegated(
     Ok(PreparedDelegated {
         plan,
         options: options.to_string(),
-        resident: ResidentCopy {
-            provider: Arc::new(signer),
-            identities,
-        },
+        resident: Arc::new(ResidentCopy::new(signer, identities)),
     })
 }
 

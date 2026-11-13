@@ -434,6 +434,21 @@ async fn replaced_identity_releases_only_its_label(keep_alias: bool, keep_other:
     other.close();
     assert!(!f.registry.holds(&previous, socket));
     assert!(!f.registry.holds(&current, socket));
+    assert!(
+        current.has_parked_holders(),
+        "DELEGATED retains its resident after disconnect"
+    );
+    assert_eq!(
+        f.registry.account_count(),
+        1 + usize::from(keep_alias || keep_other)
+    );
+    if keep_alias || keep_other {
+        assert!(previous.has_parked_holders());
+        f.registry
+            .dispose(&previous, crate::accounts::Disposal::PageDisposed);
+    }
+    f.registry
+        .dispose(&current, crate::accounts::Disposal::PageDisposed);
     assert_eq!(f.registry.account_count(), 0);
 }
 
