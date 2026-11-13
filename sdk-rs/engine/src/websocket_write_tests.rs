@@ -256,7 +256,11 @@ fn assert_websocket_binding_rejects_previous_engine(signed_write: bool) {
     assert_eq!(context_a.owner(), context_b.owner());
     assert_eq!(socket_a, socket_b);
     assert_eq!(request_a, request_b);
-    assert_eq!(binding_a.preparation(), binding_b.preparation());
+    assert_eq!(
+        binding_a.preparation().attempt(),
+        binding_b.preparation().attempt()
+    );
+    assert_ne!(binding_a.preparation(), binding_b.preparation());
     assert_eq!(b.websocket_write_socket(&binding_b), Some(socket_b));
     let foreign_socket = b.websocket_write_socket(&binding_a);
     let mut frames = Vec::new();

@@ -294,7 +294,11 @@ fn foreign_websocket_binding_cannot_retire_the_current_hosts_repeated_counters()
     drop(a);
     let frames = Arc::new(Mutex::new(Vec::new()));
     let (mut b, binding_b) = queued(frames.clone());
-    assert_eq!(binding_a.preparation(), binding_b.preparation());
+    assert_eq!(
+        binding_a.preparation().attempt(),
+        binding_b.preparation().attempt()
+    );
+    assert_ne!(binding_a.preparation(), binding_b.preparation());
     let socket_b = b.engine.venue().socket.unwrap();
     b.execute_websocket_write(binding_a);
     assert!(old_frames.lock().unwrap().is_empty());
