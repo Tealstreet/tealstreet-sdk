@@ -505,6 +505,7 @@ impl BybitLinear {
             call.observers.push(founder);
         }
         entry.stage = Stage::Plan(Box::new(Run {
+            cancellations: None,
             plan,
             partial: None,
             queue: legs,
