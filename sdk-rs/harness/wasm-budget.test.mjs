@@ -2092,7 +2092,8 @@ test('#3438 master merge retains newly measured conflict-family headroom', () =>
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     const cap = WASM_VENUE_OVERRIDES[venue];
-    assert.equal(cap, resolvedCap);
+    // A later integration can retain a larger measured parent floor.
+    assert.ok(cap >= resolvedCap, `${venue}: ${cap} < historical floor ${resolvedCap}`);
     assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
