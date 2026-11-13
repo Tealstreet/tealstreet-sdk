@@ -4,6 +4,7 @@ import { getExchangeMetadata } from './exchangeMetadata';
 import { normalizeBybitSiteId } from './exchanges/bybit/bybit.site';
 import { assertBetaVenue } from './exchanges/rust/betaVenues';
 import { createExchange } from './index';
+import { validateSigningMode } from './signingMode';
 import { getTransport } from './transport/registry';
 import { resolveAccountTransport } from './transport/tealstreet/transportResolution';
 import { diagnosticConsole } from './utils/diagnosticRedaction';
@@ -81,7 +82,9 @@ export function accountToExchangeOptions(
   account: ExchangeAccountConfig,
   overrides?: Partial<ExchangeOptions>,
 ): ExchangeOptions {
+  const signingMode = validateSigningMode(account.signingMode);
   const { extra: overrideExtra, ...optionOverrides } = overrides ?? {};
+  validateSigningMode(optionOverrides.signingMode);
   const metadata = getExchangeMetadata(account.exchange);
   const shouldForwardApplicationId =
     metadata.requiresApplicationId || isLighterExchange(account.exchange) || account.exchange === 'asterdex';
@@ -123,6 +126,7 @@ export function accountToExchangeOptions(
   const options: ExchangeOptions = {
     key: account.apiKey,
     secret: account.apiSecret,
+    ...(signingMode !== undefined ? { signingMode } : {}),
 
     // Passphrase (OKX, Bitget, BloFin, KuCoin, etc.)
     ...(metadata.requiresPassphrase && account.passphrase ? { passphrase: account.passphrase } : {}),

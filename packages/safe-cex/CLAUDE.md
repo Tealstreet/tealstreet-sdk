@@ -63,6 +63,28 @@ the server handover implementation landing.
 
 ## DELEGATED order outbox
 
+`enqueue(params, { intentId })` accepts a caller-owned canonical lowercase UUIDv7.
+Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a different
+canonical payload for the same ID throws `intentConflict`. Identical retries
+return the existing durable ID without another sequence, deadline or submission,
+including after restore. A failed original put refuses retries with
+`intentNotDurable`. Caller-key reservation updates only the last successfully
+committed snapshot, preserving its handoff state and evidence even if a newer
+receipt could not be persisted. A retry never makes that newer outcome durable,
+renews replay permission, or replaces a committed handoff with an in-memory
+queued label. Persisted no-handoff claims still pass the evidence constructors.
+Caller-key rows remain reserved through ordinary history
+compaction, within the existing total capacity of 1,056 records; exhaustion
+refuses new intents rather than forgetting a key. Hosts must preserve scoped
+storage and close a writer before replacing it.
+
+Saved accounts and exchange options accept optional `signingMode` using the
+existing account-worker wire values `local`, `cosigned`, and `delegated`.
+`accountToExchangeOptions` forwards the account mode and permits a validated
+override. Absence preserves existing signer selection; this metadata does not
+activate DELEGATED writes or replace admission. Unknown modes (including null)
+are refused as `invalidInput` / `notSent` during conversion and factory creation.
+
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
 the other venue actions exist. `activate(connection, { DELEGATED_BYBIT })` checks
 the host-owned feature flag, the captured box/router transport proofs, and only

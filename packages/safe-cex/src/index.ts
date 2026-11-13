@@ -14,6 +14,7 @@ import { getExchangeMetadata } from './exchangeMetadata';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
 import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { snapshotDelegatedSigningOptions } from './exchanges/rust/delegatedSigningSnapshot';
+import { validateSigningMode } from './signingMode';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
 import { unsupportedVenueError } from './unsupportedVenue';
@@ -137,6 +138,7 @@ export const createExchange = async (
   store?: Store,
 ): Promise<BaseExchange> => {
   options = snapshotDelegatedSigningOptions(exchangeName, options);
+  validateSigningMode(options.signingMode);
   assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
   // Rejected venues never start the clock, load WASM or construct transports.
