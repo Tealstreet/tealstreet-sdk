@@ -135,7 +135,13 @@ impl Session {
     }
 
     pub(super) fn action_cancel_queued(&mut self, cancel: CancelQueued) {
-        let out = self.order_out(&cancel.account_name, cancel.instance_id.as_deref());
+        self.forget_disposed();
+        let out = match self.joined.get(&cancel.account_name) {
+            Some(joined) if joined.out.order_binding(cancel.instance_id.as_deref()) => {
+                joined.out.clone()
+            }
+            _ => self.order_out(&cancel.account_name, cancel.instance_id.as_deref()),
+        };
         if !out.order_receipt_binding_bounded()
             || cancel.account_name.len() > 256
             || cancel.intent_id.len() > 128
