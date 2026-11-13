@@ -32,8 +32,10 @@ use safe_cex_engine::{
 };
 use std::collections::VecDeque;
 
+mod cancellations;
 mod placements;
 mod write_plan;
+use cancellations::Cancellations;
 
 /// Every native call (and its one fresh-signature resend) has a 20 s window.
 const CALL_TIMEOUT_MS: u32 = 20_000;
@@ -87,6 +89,7 @@ enum Stage {
 struct Run {
     plan: Plan,
     writes: Option<WritePlan>,
+    cancellations: Option<Cancellations>,
     partial: Option<Box<partial::Flow>>,
     /// Logical calls in native dispatch order.
     queue: VecDeque<Leg>,
@@ -602,9 +605,28 @@ impl BybitLinear {
             )
         }
         .ok()?;
+        let cancellations = Cancellations::new(
+            &entry.command,
+            &legs
+                .iter()
+                .flat_map(|leg| match &leg.planned.call {
+                    Call::Cancel { ids } => ids.as_slice(),
+                    _ => &[],
+                })
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        );
+        if let Some(report) = &cancellations {
+            report.retain(cx, &plan);
+        }
         Some(Run {
             plan,
-            writes,
+            writes: if cancellations.is_none() {
+                writes
+            } else {
+                None
+            },
+            cancellations,
             partial,
             queue: legs,
             active: None,
@@ -750,6 +772,11 @@ impl BybitLinear {
             self.park(id, entry);
             return;
         }
+        // A later Hyro leg waits for reconciled private state (legacy text).
+        if !self.private_ready() {
+            run.finish_failure(cx, not_sent(HYRO_RECOVERING));
+            return;
+        }
         let (Ok([slot]), Some(leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front()) else {
             run.finish_failure(cx, internal("Bybit trading plan is not serial"));
             return;
@@ -765,12 +792,6 @@ impl BybitLinear {
             run.finish_failure(cx, internal("Bybit trading plan refused its next leg"));
             return;
         };
-        // A later Hyro leg waits for reconciled private state (legacy text).
-        if !self.private_ready() {
-            let error = run.failure(not_sent(HYRO_RECOVERING));
-            let _ = cx.fail_plan(&run.plan, error);
-            return;
-        }
         if let Some(journal) = &mut run.writes {
             let pending =
                 VenueError::new("Write dispatched; awaiting outcome").outcome(Outcome::Unknown);
@@ -815,6 +836,9 @@ impl BybitLinear {
             );
         }
         let key = entry.hyro.as_ref().map(|call| call.key.clone());
+        if let (Some(report), Call::Cancel { ids }) = (&mut run.cancellations, &leg.planned.call) {
+            report.begin(ids);
+        }
         run.active = Some(Active {
             slot,
             context: context.clone(),
@@ -941,6 +965,23 @@ impl BybitLinear {
                 evidence.write_plan(writes);
                 return;
             }
+        }
+    }
+
+    pub(crate) fn ordinary_cancel_evidence(
+        &self,
+        request: &Request,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Some(entry) = self.trading.ordinary.get(&request.command)
+            && let Stage::Plan(run) = &entry.stage
+            && run
+                .active
+                .as_ref()
+                .is_some_and(|active| active.context == request.context)
+            && let Some(report) = &run.cancellations
+        {
+            report.unproven(evidence);
         }
     }
 
@@ -1170,11 +1211,12 @@ impl BybitLinear {
                 }
             }
         } else {
-            self.leg_decision(cx, id, &mut active, response)
+            self.leg_decision(cx, id, &mut active, response, run.cancellations.as_mut())
         };
         let decision = match decision {
             Decision::Failed(error)
-                if !matches!(active.leg.planned.call, Call::PartialProof(_)) =>
+                if run.cancellations.is_none()
+                    && !matches!(active.leg.planned.call, Call::PartialProof(_)) =>
             {
                 let error = unknown_outcome(error);
                 if response.status == 200 && error.outcome == Some(Outcome::Unknown) {
@@ -1337,6 +1379,9 @@ impl BybitLinear {
                     run.finish_failure(cx, internal("Bybit trading plan lost its call"));
                     return;
                 }
+                if let Some(report) = &run.cancellations {
+                    report.retain(cx, &plan);
+                }
                 if matches!(active.leg.planned.call, Call::PlaceLot { last: true })
                     && run.stop_after_spot_order
                 {
@@ -1364,6 +1409,9 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(mut error) => {
+                if let Some(report) = &mut run.cancellations {
+                    error = report.failure(cx, id, &active.leg.planned.call, error);
+                }
                 if matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
                     && error.outcome != Some(Outcome::Unknown)
                 {
@@ -1719,6 +1767,14 @@ impl BybitLinear {
             self.park(request.command, entry);
             return;
         };
+        if let Some(report) = &mut run.cancellations {
+            let mut error = error;
+            // Signing refusals retain NotSent; released transport failures are Unknown.
+            error.outcome.get_or_insert(Outcome::Unknown);
+            error = report.failure(cx, request.command, &active.leg.planned.call, error);
+            let _ = cx.fail_plan(&run.plan, error);
+            return;
+        }
         let error = if run.continue_on_error
             && !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
         {
@@ -1879,6 +1935,7 @@ impl BybitLinear {
         id: CommandId,
         active: &mut Active,
         response: &Response<'_>,
+        cancellations: Option<&mut Cancellations>,
     ) -> Decision {
         let context = &active.context;
         if matches!(
@@ -1903,10 +1960,20 @@ impl BybitLinear {
                 ext,
             }) => {
                 let http_ok = (200..300).contains(&response.status);
-                self.refused_leg(cx, id, active, code, message, result, ext, http_ok)
+                self.refused_leg(
+                    cx,
+                    id,
+                    active,
+                    code,
+                    message,
+                    result,
+                    ext,
+                    http_ok,
+                    cancellations,
+                )
             }
             Ok(Answer::Success { result, ext }) => {
-                self.accepted_leg(cx, active, response, result, ext)
+                self.accepted_leg(cx, active, response, result, ext, cancellations)
             }
         }
     }
@@ -1946,6 +2013,7 @@ impl BybitLinear {
         result: Option<&serde_json::value::RawValue>,
         ext: Option<&serde_json::value::RawValue>,
         http_ok: bool,
+        cancellations: Option<&mut Cancellations>,
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
@@ -2069,6 +2137,11 @@ impl BybitLinear {
         }
         match (verdict, &planned.call) {
             (Verdict::Satisfied(_), call) => {
+                if matches!(call, Call::Cancel { .. })
+                    && let Some(report) = cancellations
+                {
+                    report.already_gone(error);
+                }
                 self.satisfied_effects(cx, call);
                 Decision::Next(Vec::new())
             }
@@ -2249,6 +2322,7 @@ impl BybitLinear {
         response: &Response<'_>,
         result: Option<&serde_json::value::RawValue>,
         ext: Option<&serde_json::value::RawValue>,
+        cancellations: Option<&mut Cancellations>,
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
@@ -2367,6 +2441,9 @@ impl BybitLinear {
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
                 }
+                if let Some(report) = cancellations {
+                    report.accepted(target);
+                }
                 self.note_order_terminal(ids);
                 mark_canceled(cx, ids, local);
                 Decision::Next(Vec::new())
@@ -2401,6 +2478,11 @@ impl BybitLinear {
                 ) else {
                     return Decision::Lost;
                 };
+                if let Some(report) = cancellations
+                    && (200..300).contains(&response.status)
+                {
+                    report.rows(ids, &rows, response);
+                }
                 if !matches!(outcome, WriteResult::Failed(_)) {
                     let canceled: Vec<String> = rows
                         .iter()

@@ -2756,6 +2756,57 @@ fn partial_unknown_replacement_or_put_back_never_restores_or_resends() {
 }
 
 #[test]
+fn applied_batch_cancel_partial_stop_does_not_report_a_created_order_on_unknown_replacement() {
+    for profile in PROFILES {
+        for (status, response) in [
+            (
+                200,
+                r#"{"retCode":999999,"retMsg":"unknown replacement","result":{}}"#,
+            ),
+            (503, "replacement acknowledgement lost"),
+        ] {
+            let mut h = ready(profile);
+            seed(
+                &mut h,
+                profile,
+                "Sell",
+                "StopLoss",
+                "MarkPrice",
+                false,
+                true,
+            );
+            amend(&mut h, Some(95.0), None);
+            accept_cancel(&mut h, profile);
+            h.respond("/v5/position/trading-stop", status, response);
+            assert!(!h.has_request(profile.cancel_path()));
+            assert!(
+                !h.has_request("/v5/position/trading-stop"),
+                "{profile:?}/{status}: no replacement replay or put-back"
+            );
+            let errors: Vec<_> = h
+                .notices
+                .iter()
+                .filter_map(|notice| match notice {
+                    safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1, "{profile:?}/{status}");
+            let error = errors[0];
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert_eq!(error.protection, None);
+            assert!(
+                error
+                    .partial
+                    .as_ref()
+                    .is_none_or(|partial| partial.order_ids.is_empty()),
+                "{profile:?}/{status}: the cancelled stop is not a created order: {error:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn partial_final_cancel_veto_rechecks_fill_identity_and_protected_position() {
     use safe_cex_engine::request_context::Prepared;
     for change in ["fill", "price", "amount", "position"] {
