@@ -346,7 +346,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3342 run 43452683819/job 131979457461, artifact wasm-family-bybit: web/Node/replay 2,360,107 B.
   // CI source 0d075971b309 has e0b3a4b9f1f9's tree; pinned tools above; +10 KiB rounded up.
   // SHA256 99f3fea9eac4f64b632943b980f506558dacd2a9b769a3717d27ca29b50848cd.
-  bybit: 2_492_416,
+  // #3317 merged 371118f7c19c: run 43461440513, family 132020005385 / replay 132020005877.
+  // CI source 433d752a7d43 has the identical tree; optimized web/Node 2,539,197 B.
+  // SHA-256 a2d0a3997752168f38b5eea6f5b90bf4389c68494e48efb31645fca60aa319a0.
+  // Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; current CI + 10 KiB rounded up.
+  bybit: 2_549_760,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.

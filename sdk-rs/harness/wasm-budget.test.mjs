@@ -4,6 +4,29 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3317 run 43457064180 checks integration source 05d55b30c6f7, not just the PR tree.
+// Family job 131994663823 and replay job 131994664428 independently refused these bytes.
+// Current run 43461440513: family 132020005385 and replay 132020005877 agree;
+// integration 433d752a7d43 has merged head 371118f7c19c's tree and build-input fingerprint.
+for (const [source, measured, minimumCap] of [
+  ['CI integration 05d55b30c6f7', 2_516_764, 2_527_232],
+  ['CI composed master 433d752a7d43', 2_539_197, 2_549_760],
+]) {
+  test(`#3317 composed Bybit ${source} retains measured reserve for every alias`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const venue of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader']) {
+      const family = venueFamily(venue);
+      assert.equal(family, 'bybit');
+      const cap = WASM_VENUE_OVERRIDES[family];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+    }
+  });
+}
+
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
 
