@@ -4,14 +4,14 @@ use std::ptr::NonNull;
 use std::sync::OnceLock;
 use zeroize::{Zeroize, Zeroizing};
 
-/// Created only after the caller resolves its per-venue DELEGATED flag.
+/// Created only after the caller checks hosted signing and origin support.
 /// Preparation precedes receiving or opening any DELEGATED key material.
 #[derive(Debug)]
 pub struct DelegatedMemory(());
 
 impl DelegatedMemory {
-    pub fn prepare(_venue: &str, delegated_enabled: bool) -> io::Result<Self> {
-        if !delegated_enabled {
+    pub fn prepare(_venue: &str, hosted_supported: bool) -> io::Result<Self> {
+        if !hosted_supported {
             return Err(io::ErrorKind::Unsupported.into());
         }
         static READY: OnceLock<Result<(), io::ErrorKind>> = OnceLock::new();

@@ -851,7 +851,7 @@ Sizing, for 110 to 1,200 accounts per region (from the CI replay data):
 
 Account identity:
 
-- **Bybit private accounts with `delegated.enabled`:** `(verified uid, identity digest)`, for both hosted signing modes. Each connection maps its account labels to that identity and receives its own label and current `instanceId` on account frames. Different labels for the same identity share one actor.
+- **Hosted Bybit private accounts:** `(verified uid, identity digest)`, for both hosted signing modes. Each connection maps its account labels to that identity and receives its own label and current `instanceId` on account frames. Different labels for the same identity share one actor. This existing identity namespace is independent of venue-generic admission; other hosted venues keep their current account-label identity.
 - **Other accounts:** `(userId, accountName)` retains its existing behavior.
 - **Different users:** never share an account, even with equal names.
 - **Unauthenticated public:** `__pub_bybit` is a single shared, public-only bybit account.

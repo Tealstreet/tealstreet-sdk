@@ -55,6 +55,10 @@ is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
 
+The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
+unchanged in both modes. Other hosted venues retain their current account-label
+identity; that distinction does not gate DELEGATED or COSIGNED admission.
+
 The same hosted eligibility selects private COSIGNED admissions. Both modes
 share the off-loop probe, refusal classification, token/lease checks and account
 attachment. A pending COSIGNED signer belongs only to its joining connection;
