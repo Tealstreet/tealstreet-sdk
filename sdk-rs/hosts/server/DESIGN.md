@@ -848,8 +848,8 @@ Sizing, for 110 to 1,200 accounts per region (from the CI replay data):
 
 Account identity:
 
-- **Bybit private accounts with `delegated.enabled`:** `(verified uid, identity digest)`, for both hosted signing modes. Each connection maps its account labels to that identity and receives its own label and current `instanceId` on account frames. Different labels for the same identity share one actor.
-- **Other accounts:** `(userId, accountName)` retains its existing behavior.
+- **Private accounts on declared hosted venues:** `(verified uid, identity digest)`, for both hosted signing modes. Each connection maps its account labels to that identity and receives its own label and current `instanceId` on account frames. Different labels for the same identity share one actor.
+- **Public and unhosted accounts:** `(userId, accountName)` retains its existing behavior.
 - **Different users:** never share an account, even with equal names.
 - **Unauthenticated public:** `__pub_bybit` is a single shared, public-only bybit account.
 
@@ -861,12 +861,18 @@ The identity digest is lowercase SHA-256 hex. Its input starts with the UTF-8
 bytes `tealstreet/identity/v1`, followed by three UTF-8 components: verified uid,
 scope, and canonical public key id. Each component is prefixed by its byte length
 as an unsigned 64-bit big-endian integer. Scope is the compact JSON array
-`[venue, network, site]`, where network is `mainnet` or `testnet` and an absent
-site is the empty string. Credential trimming follows the venue's signer setup
+`[family, network, site]`; testnet and demo networks and regional namespaces
+remain separate. An absent site is the empty string. Credential trimming follows the venue's signer setup
 policy. The digest uses no process salt. Account labels and signing secrets are
-excluded. Enabled Bybit settings fingerprints exclude primary credentials.
+excluded. Private hosted settings fingerprints exclude public identity keys;
+GRVT's login key and provider-captured API passphrases participate through
+process-salted digests. Wallet IDs
+use canonical public signing values. Lighter IDs include the freshly resolved
+registered public key; its metadata owner, namespace, token deadline and lease
+generation remain bound through actor publication. See
+`docs/plans/callers/hosted-account-identity.md` for host field requirements.
 
-Settings changes on a held Bybit identity use the admitted connection's
+Settings changes on a held private identity use the admitted connection's
 `msg` operation `applySettings`, with `data: {requestId, settings: InitPayload}`.
 The settings must name the same label and identity. Replacement construction and
 its captured authority checks succeed before retiring the resident account through
@@ -877,9 +883,9 @@ The reply is `applySettings:done` with
 `{requestId, success, result}` and the current registration's `instanceId`.
 Parked holders and the DELEGATED resident copy participate in settings refusal.
 
-Bybit remote sign requests include `keyId` alongside the connection-local label.
-Hosted Bybit TWAP persistence carries the identity digest in `ownerId`.
-Restoration requires that identity and can follow a renamed label. Other TWAP
+Hosted remote sign requests include canonical `keyId` alongside the connection-local label.
+Hosted private TWAP persistence carries the identity digest in `ownerId`.
+Restoration requires that identity and can follow a renamed label. Public TWAP
 books retain their existing persistence shape. Connection-local labels and
 registration IDs remain the account binding at the hosted write-frame boundary.
 

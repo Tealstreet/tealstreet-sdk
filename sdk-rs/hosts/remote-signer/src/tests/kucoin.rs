@@ -136,6 +136,7 @@ async fn kucoin_provider_device_batch_matches_local_signer_with_independent_pass
                     passphrase_value: None,
                     broker: None,
                 },
+                None,
             )),
         };
         let work = graph(venue, &ids);

@@ -39,6 +39,10 @@ pub fn init(key: &str) -> InitPayload {
     }
 }
 
+pub fn public_key() -> String {
+    STANDARD.encode(safe_cex_crypto::ed25519::public_key(&[7; 32]).unwrap())
+}
+
 pub struct Device {
     pub link: Arc<SignerLink>,
     pub frames: mpsc::UnboundedReceiver<String>,
@@ -57,7 +61,7 @@ impl Device {
             KeyRef("device-public".into()),
             Some(KeyRef("device-signing".into())),
         );
-        local.insert(identity.credential.clone(), b"fixture-key".to_vec());
+        local.insert(identity.credential.clone(), public_key().into_bytes());
         local.insert_declared(
             identity.signing_ref()?.clone(),
             vec![7; 32],
@@ -77,7 +81,7 @@ impl Device {
         })
     }
     pub fn remote(&self) -> Result<(RemoteAccount, String)> {
-        let prepared = accounts::prepare(&init("fixture-key"), false, Some(self.link.clone()))?;
+        let prepared = accounts::prepare(&init(&public_key()), false, Some(self.link.clone()))?;
         let remote = prepared.remote.ok_or("no remote provider")?;
         Ok((remote, prepared.options))
     }
@@ -315,7 +319,8 @@ pub fn build(device: &Device, public: bool) -> Result<Box<dyn Driver>> {
     build_window(device, public, None)
 }
 fn build_window(device: &Device, public: bool, window: Option<f64>) -> Result<Box<dyn Driver>> {
-    let init = init(if public { "" } else { "fixture-key" });
+    let key = if public { String::new() } else { public_key() };
+    let init = init(&key);
     let prepared = accounts::prepare(
         &init,
         public,

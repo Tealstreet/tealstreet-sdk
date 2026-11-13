@@ -88,15 +88,23 @@ fn grvt_private_init_forwards_signer_address_and_preserves_subaccount() -> Check
 }
 
 #[test]
-fn grvt_private_fingerprint_changes_with_signer_or_subaccount() -> Check {
+fn grvt_private_identity_changes_with_signer_or_subaccount() -> Check {
     let init = init()?;
     let mut changed: Value = serde_json::to_value(&init)?;
     changed["grvtSignerAddress"] = "0x1111111111111111111111111111111111111111".into();
     let changed: InitPayload = serde_json::from_value(changed)?;
-    assert_ne!(init.fingerprint(), changed.fingerprint());
+    assert_eq!(init.fingerprint(), changed.fingerprint());
+    assert_ne!(
+        safe_cex_exchange_server::accounts::testing::identity_digest("alice", &init)?,
+        safe_cex_exchange_server::accounts::testing::identity_digest("alice", &changed)?,
+    );
     let mut changed = init.clone();
     changed.grvt_trading_account_id = Some("9007199254740994".into());
-    assert_ne!(init.fingerprint(), changed.fingerprint());
+    assert_eq!(init.fingerprint(), changed.fingerprint());
+    assert_ne!(
+        safe_cex_exchange_server::accounts::testing::identity_digest("alice", &init)?,
+        safe_cex_exchange_server::accounts::testing::identity_digest("alice", &changed)?,
+    );
     Ok(())
 }
 
@@ -136,10 +144,15 @@ fn grvt_missing_or_invalid_private_signer_address_refuses_before_order_dispatch(
             SOCKET,
             Arc::new(|_| panic!("construction contacted device")),
         );
-        let prepared = prepare(&init, false, Some(link))?;
-        let remote = prepared.remote.ok_or("missing remote provider")?;
+        assert!(prepare(&init, false, Some(link.clone())).is_err());
+        let remote = remote_account(
+            link,
+            "grvt",
+            Some(init.account_name.clone()),
+            &engine_options(&init, false).to_string(),
+        )?;
         let result = construct(
-            serde_json::from_str(&prepared.options)?,
+            serde_json::from_str(&remote.options_json)?,
             Some(remote.provider),
         );
         let error = result.err().ok_or("invalid hosted signer was accepted")?;

@@ -1,4 +1,4 @@
-//! Hosted account registry with identity keys for enabled private Bybit accounts.
+//! Hosted account registry keyed by canonical private identity.
 //! Connections keep their labels; live and parked holders share the account actor.
 use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 use crate::envelope::InitPayload;
@@ -9,7 +9,7 @@ use safe_cex_native::resolve::{self, AccountTransport, Provider};
 use safe_cex_native::{
     AccountHandle, NetworkTransport, ProxyTokenProvider, RoutingPlan, ServerConfig,
 };
-use safe_cex_remote_signer::{Outbox, SignerLink, remote_account};
+use safe_cex_remote_signer::{Outbox, SignerLink};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,7 +20,10 @@ use tokio::sync::mpsc;
 mod admission;
 pub(crate) use admission::ProbePermit;
 pub(crate) mod identity;
+mod identity_resolution;
 
+#[cfg(test)]
+mod all_venues_tests;
 #[cfg(test)]
 mod identity_tests;
 
@@ -69,6 +72,7 @@ impl ProxyToken {
 pub struct Account {
     pub user: String,
     pub name: String,
+    /// Product-scoped actor/algo owner; credential identity remains family-scoped.
     identity: Option<String>,
     pub venue: String,
     pub handle: AccountHandle,
@@ -477,6 +481,7 @@ struct InitAuthority {
     lease: Option<crate::router_lease::Permit>,
     probe_lease: Option<crate::router_lease::Permit>,
     admission_expires_at: Option<u64>,
+    resolved_identity: Option<identity::RegisteredLighterKey>,
     probe_current: Option<Arc<AtomicBool>>,
 }
 
@@ -507,6 +512,9 @@ impl InitAuthority {
 
     fn check_admission(&self) -> Result<(), String> {
         self.check()?;
+        if let Some(identity) = &self.resolved_identity {
+            identity.check()?;
+        }
         if self
             .admission_expires_at
             .is_some_and(|expiry| expiry <= now_ms())
@@ -872,13 +880,30 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         ]),
     };
     fields.insert("routing".into(), routing);
+    let captured_passphrase = safe_cex_venues::remote_signing_policy(&init.exchange_name)
+        .passphrase_header
+        .is_some();
     for field in ["key", "passphrase"] {
-        if identity::enabled(init) {
+        let provider_bound = (field == "key" && init.exchange_name == "grvt")
+            || (field == "passphrase" && captured_passphrase);
+        if identity::enabled(init) && !provider_bound {
             fields.remove(field);
             continue;
         }
         if let Some(Value::String(text)) = fields.get_mut(field) {
             *text = fingerprint_digest(text);
+        }
+    }
+    if identity::enabled(init) {
+        let identity_fields: &[&str] = match init.exchange_name.as_str() {
+            "hyperliquid" | "hyperliquidspot" => &["vault"],
+            "grvt" => &["grvtTradingAccountId", "grvtSignerAddress"],
+            "paradex" => &["paradexAddress"],
+            "lighter" | "lighter-robinhood" => &["applicationId", "apiKeyIndex"],
+            _ => &[],
+        };
+        for field in identity_fields {
+            fields.remove(*field);
         }
     }
     Value::Object(fields).to_string()
@@ -912,8 +937,17 @@ pub fn prepare(
             remote: None,
         });
     };
-    let remote = remote_account(link, venue, Some(init.account_name.clone()), &options)
-        .map_err(|error| error.to_string())?;
+    let key_id = identity::enabled(init)
+        .then(|| identity::key_id(init))
+        .transpose()?;
+    let remote = safe_cex_remote_signer::remote_account_with_key_id(
+        link,
+        venue,
+        Some(init.account_name.clone()),
+        &options,
+        key_id,
+    )
+    .map_err(|error| error.to_string())?;
     Ok(Prepared {
         plan,
         options: remote.options_json.clone(),
@@ -1209,6 +1243,7 @@ impl Registry {
             lease,
             probe_lease: None,
             admission_expires_at: None,
+            resolved_identity: None,
             probe_current: None,
         };
         authority.check_admission()?;
@@ -1390,6 +1425,8 @@ impl Registry {
             &fingerprint,
             expires_at_ms,
         )?;
+        attempt.authority.resolved_identity = init.lighter_registered_key.clone();
+        attempt.authority.check_admission()?;
         if apply.is_some() {
             attempt.authority.admission_expires_at = token.as_ref().map(|(_, expiry)| *expiry);
         }
@@ -1594,7 +1631,7 @@ impl Registry {
         let identity = if public_only {
             None
         } else {
-            identity::digest(user, init)?
+            identity::actor_digest(user, init)?
         };
         let registry_name = identity.as_deref().unwrap_or(&init.account_name);
         self.user_drains
@@ -2459,8 +2496,32 @@ pub mod testing {
 
     use super::*;
 
+    pub fn identity_digest(user: &str, init: &InitPayload) -> Result<Option<String>, String> {
+        identity::digest(user, init)
+    }
+
+    /// Trusted public registration fixture; JSON must never create this evidence.
+    pub fn set_registered_lighter_key(init: &mut InitPayload, user: &str, public: &[u8]) {
+        let public = safe_cex_crypto::admission::PublicKey::new(
+            safe_cex_crypto::admission::Family::Schnorr,
+            public,
+        )
+        .unwrap();
+        init.lighter_registered_key = Some(
+            identity::RegisteredLighterKey::new(
+                user.into(),
+                identity::scope(init),
+                identity::decimal(init.application_id.as_deref(), i64::MAX as u64).unwrap(),
+                identity::decimal(init.api_key_index.as_deref(), 254).unwrap() as u8,
+                &public,
+                Arc::new(|| true),
+            )
+            .unwrap(),
+        );
+    }
+
     pub fn bind_identity(account: &mut Arc<Account>, init: &InitPayload) {
-        let identity = identity::digest(&account.user, init).unwrap();
+        let identity = identity::actor_digest(&account.user, init).unwrap();
         Arc::get_mut(account)
             .expect("identity is bound before sharing the test account")
             .identity = identity;
@@ -2591,7 +2652,7 @@ pub mod testing {
             init.fingerprint(),
             running,
         );
-        Arc::get_mut(&mut account).unwrap().identity = identity::digest(user, init).unwrap();
+        Arc::get_mut(&mut account).unwrap().identity = identity::actor_digest(user, init).unwrap();
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account
@@ -2918,6 +2979,7 @@ pub(crate) mod tests {
         let init = InitPayload {
             account_name: "acct".into(),
             exchange_name: "hyrotrader".into(),
+            key: "synthetic-key".into(),
             ..Default::default()
         };
         let expected_control = prepare(&init, false, Some(SignerLink::new(8, Arc::new(|_| true))))
@@ -2979,7 +3041,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let new = InitPayload {
-            key: "synthetic-B".into(),
+            enable_spot_markets: Some(true),
             ..old.clone()
         };
         let stale = registry.obtain("u", &old, false, 7, None, Arc::new(|_| true));
@@ -3370,12 +3432,28 @@ pub(crate) mod tests {
         (account, inbox)
     }
 
+    pub(crate) fn held_account_for_init(
+        link: Option<Arc<SignerLink>>,
+        init: &InitPayload,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        let (mut account, inbox) = held_account_with(link, init.fingerprint());
+        testing::bind_identity(&mut account, init);
+        (account, inbox)
+    }
+
     /// `held_account_with` plus its real algo host, emitting as `build` wires it.
     pub(crate) fn held_account_running_algos(
         link: Arc<SignerLink>,
         fingerprint: String,
+        init: Option<&InitPayload>,
     ) -> Arc<Account> {
-        let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
+        let (mut account, inbox) = held_account_with(Some(link.clone()), fingerprint);
+        if let Some(init) = init {
+            testing::bind_identity(&mut account, init);
+        }
         run_algos(account, link, inbox)
     }
 
@@ -3425,6 +3503,7 @@ pub(crate) mod tests {
         registry: &Registry,
         link: Arc<SignerLink>,
         fingerprint: String,
+        init: Option<&InitPayload>,
     ) -> Arc<Account> {
         let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
         let venue = HeldLoad {
@@ -3432,7 +3511,10 @@ pub(crate) mod tests {
             load_after_ms: Some(0.),
             ticker: true,
         };
-        let (account, inbox) = held_account_on(venue, Some(link.clone()), fingerprint, running);
+        let (mut account, inbox) = held_account_on(venue, Some(link.clone()), fingerprint, running);
+        if let Some(init) = init {
+            testing::bind_identity(&mut account, init);
+        }
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account
@@ -3914,15 +3996,12 @@ pub(crate) mod tests {
                 let init = InitPayload {
                     account_name: "acct".into(),
                     exchange_name: "bitget".into(),
+                    key: "synthetic-key".into(),
                     ..InitPayload::default()
                 };
                 let link = SignerLink::new(7, Arc::new(|_| true));
-                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
-                registry
-                    .accounts
-                    .lock()
-                    .unwrap()
-                    .insert(("u".into(), "acct".into()), account.clone());
+                let (account, mut algos) = held_account_for_init(Some(link), &init);
+                register(&registry, &account);
                 let again = registry
                     .obtain("u", &init, false, 8, None, Arc::new(|_| true))
                     .await
@@ -3946,15 +4025,12 @@ pub(crate) mod tests {
                 let init = InitPayload {
                     account_name: "acct".into(),
                     exchange_name: "bitget".into(),
+                    key: "synthetic-key".into(),
                     ..InitPayload::default()
                 };
                 let link = SignerLink::new(7, Arc::new(|_| true));
-                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
-                registry
-                    .accounts
-                    .lock()
-                    .unwrap()
-                    .insert(("u".into(), "acct".into()), account.clone());
+                let (account, mut algos) = held_account_for_init(Some(link), &init);
+                register(&registry, &account);
                 let other = InitPayload {
                     enable_spot_markets: Some(true),
                     ..init.clone()
@@ -3986,7 +4062,7 @@ pub(crate) mod tests {
                     .accounts
                     .lock()
                     .unwrap()
-                    .get(&("u".into(), "acct".into()))
+                    .get(&("u".into(), account.registry_name().to_owned()))
                     .cloned();
                 assert!(current.is_some_and(|current| Arc::ptr_eq(&current, &account)));
 
@@ -3998,7 +4074,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_fingerprint_compares_credentials_without_keeping_them() {
+    fn public_key_identity_and_captured_passphrase_settings_remain_separate() {
         let init = InitPayload {
             account_name: "a".into(),
             exchange_name: "okx".into(),
@@ -4018,13 +4094,18 @@ pub(crate) mod tests {
             differing_fields(&fingerprint, &rotated.fingerprint()),
             ["passphrase"]
         );
+        assert_eq!(
+            identity::digest("u", &init).unwrap(),
+            identity::digest("u", &rotated).unwrap()
+        );
         let rekeyed = InitPayload {
             key: "other".into(),
-            ..init
+            ..init.clone()
         };
-        assert_eq!(
-            differing_fields(&fingerprint, &rekeyed.fingerprint()),
-            ["key"]
+        assert!(differing_fields(&fingerprint, &rekeyed.fingerprint()).is_empty());
+        assert_ne!(
+            identity::digest("u", &init).unwrap(),
+            identity::digest("u", &rekeyed).unwrap()
         );
     }
 
@@ -4059,7 +4140,7 @@ pub(crate) mod tests {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let link = SignerLink::new(7, Arc::new(|_| true));
-                let account = held_account_running_algos(link, String::new());
+                let account = held_account_running_algos(link, String::new(), None);
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let seen = Arc::new(Mutex::new(Vec::new()));
                 for id in [8, 9] {
@@ -4206,7 +4287,7 @@ pub(crate) mod tests {
     /// The browser's init frame, as ExchangeServerWorker sends it.
     fn init_frame(fields: &str) -> InitPayload {
         let frame = format!(
-            r#"{{"t":"init","d":{{"accountName":"a","exchangeName":"hyperliquid","key":"0xabc"{fields}}}}}"#
+            r#"{{"t":"init","d":{{"accountName":"a","exchangeName":"hyperliquid","key":"0x1111111111111111111111111111111111111111","signerAddress":"0x2222222222222222222222222222222222222222"{fields}}}}}"#
         );
         match serde_json::from_str::<crate::envelope::Inbound>(&frame).unwrap() {
             crate::envelope::Inbound::Init(init) => *init,
@@ -4259,10 +4340,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_venue_fields_change_the_init_fingerprint() {
+    fn a_vault_selects_an_identity_separately_from_runtime_settings() {
         let main = init_frame("");
         let vault = init_frame(r#","vault":"0x3333333333333333333333333333333333333333""#);
-        assert_ne!(main.fingerprint(), vault.fingerprint());
+        assert_eq!(main.fingerprint(), vault.fingerprint());
+        assert_ne!(
+            identity::digest("u", &main).unwrap(),
+            identity::digest("u", &vault).unwrap()
+        );
     }
 
     #[test]
@@ -4304,10 +4389,6 @@ pub(crate) mod tests {
         // What the Bybit engine reads still tells them apart.
         for other in [
             InitPayload {
-                key: "k2".into(),
-                ..bybit.clone()
-            },
-            InitPayload {
                 enable_spot_markets: Some(true),
                 ..bybit.clone()
             },
@@ -4318,10 +4399,20 @@ pub(crate) mod tests {
         ] {
             assert_ne!(other.fingerprint(), bybit.fingerprint(), "{other:?}");
         }
+        let rekeyed = InitPayload {
+            key: "k2".into(),
+            ..bybit.clone()
+        };
+        assert_eq!(rekeyed.fingerprint(), bybit.fingerprint());
+        assert_ne!(
+            identity::digest("u", &rekeyed).unwrap(),
+            identity::digest("u", &bybit).unwrap()
+        );
         // On Hyperliquid the builder is part of the engine.
         let hyperliquid = InitPayload {
             exchange_name: "hyperliquid".into(),
-            key: "0xabc".into(),
+            key: format!("0x{}", "1".repeat(40)),
+            signer_address: Some(format!("0x{}", "2".repeat(40))),
             ..bybit.clone()
         };
         assert_ne!(
@@ -4348,12 +4439,13 @@ pub(crate) mod tests {
                 let init = InitPayload {
                     account_name: "acct".into(),
                     exchange_name: "hyperliquid".into(),
-                    key: "0xabc".into(),
+                    key: format!("0x{}", "1".repeat(40)),
+                    signer_address: Some(format!("0x{}", "2".repeat(40))),
                     hyperliquid_builder: builder(10.0),
                     ..InitPayload::default()
                 };
                 let link = SignerLink::new(7, Arc::new(|_| true));
-                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                let (account, mut algos) = held_account_for_init(Some(link), &init);
                 register(&registry, &account);
                 // A different effective builder is a settings change too.
                 let default_builder = InitPayload {
@@ -4414,11 +4506,12 @@ pub(crate) mod tests {
                 let init = InitPayload {
                     account_name: "acct".into(),
                     exchange_name: "hyperliquid".into(),
-                    key: "0xabc".into(),
+                    key: format!("0x{}", "1".repeat(40)),
+                    signer_address: Some(format!("0x{}", "2".repeat(40))),
                     ..InitPayload::default()
                 };
                 let link = SignerLink::new(7, Arc::new(|_| true));
-                let (account, _algos) = held_account_with(Some(link), init.fingerprint());
+                let (account, _algos) = held_account_for_init(Some(link), &init);
                 register(&registry, &account);
                 let assigned = InitPayload {
                     hyperliquid_builder: Some(crate::envelope::HyperliquidBuilder {
@@ -4450,9 +4543,7 @@ pub(crate) mod tests {
                     ..InitPayload::default()
                 };
                 let link = SignerLink::new(1, Arc::new(|_| true));
-                let (mut account, mut algos) = held_account_with(Some(link), init.fingerprint());
-                Arc::get_mut(&mut account).unwrap().identity =
-                    identity::digest("u", &init).unwrap();
+                let (account, mut algos) = held_account_for_init(Some(link), &init);
                 register(&registry, &account);
                 let other_device = InitPayload {
                     hyperliquid_builder: Some(crate::envelope::HyperliquidBuilder {
@@ -4805,11 +4896,12 @@ mod apply_settings_tests {
                     let init = InitPayload {
                         account_name: "acct".into(),
                         exchange_name: "bitget".into(),
+                        key: "synthetic-key".into(),
                         ..Default::default()
                     };
-                    let (account, mut algos) = tests::held_account_with(
+                    let (account, mut algos) = tests::held_account_for_init(
                         Some(SignerLink::new(7, Arc::new(|_| true))),
-                        init.fingerprint(),
+                        &init,
                     );
                     testing::register(&registry, &account);
                     if parked {

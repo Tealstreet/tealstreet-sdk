@@ -164,7 +164,7 @@ impl Resident {
             Some("resident"),
         )
         .await;
-        assert!(result.probe.as_ref().unwrap().permit.is_ok());
+        assert!(result.proof_permit().is_ok());
         session.verification_completed(result).await.unwrap();
         let account = f.registry.held("alice", "acct", session.socket).unwrap();
         assert!(account.delegated.is_none());
@@ -288,7 +288,7 @@ async fn cosigned_session_negatives_preserve_the_running_account() {
                     id,
                 )
                 .await;
-                assert!(stale.probe.as_ref().unwrap().permit.is_ok());
+                assert!(stale.proof_permit().is_ok());
                 let old_link = session.pending_verifications["acct"]
                     .cosigned_link
                     .clone()
@@ -319,9 +319,9 @@ async fn cosigned_session_negatives_preserve_the_running_account() {
             };
             let result =
                 complete(&mut session, &mut sent, &mut done, &mut device, answer, id).await;
-            assert!(result.probe.as_ref().unwrap().permit.is_err());
+            assert!(result.proof_permit().is_err());
             assert!(
-                result.candidate.is_err(),
+                result.proof_candidate().is_err(),
                 "COSIGNED completion retains no credential copy"
             );
             session.verification_completed(result).await.unwrap();
@@ -348,7 +348,7 @@ async fn cosigned_session_negatives_preserve_the_running_account() {
                 Some("fresh"),
             )
             .await;
-            assert!(result.probe.as_ref().unwrap().permit.is_ok());
+            assert!(result.proof_permit().is_ok());
             resident.untouched(&f);
             fresh.verification_completed(result).await.unwrap();
             assert!(Arc::ptr_eq(

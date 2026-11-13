@@ -199,9 +199,9 @@ async fn delegated_candidates_preserve_the_running_account() {
                     .await
                     .unwrap()
                     .unwrap();
-                assert_eq!(completion.candidate.is_ok(), case == "other-pair");
+                assert_eq!(completion.proof_candidate().is_ok(), case == "other-pair");
                 if case == "other-pair" {
-                    assert!(completion.probe.as_ref().unwrap().permit.is_ok());
+                    assert!(completion.proof_permit().is_ok());
                 }
                 candidate.verification_completed(completion).await.unwrap();
             }

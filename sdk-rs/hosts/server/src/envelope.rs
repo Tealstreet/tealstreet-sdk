@@ -1,4 +1,5 @@
 //! Today's `wss /account` JSON envelope (NX `services/exchange-server/src/server.ts`).
+pub use crate::accounts::identity::RegisteredLighterKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -37,6 +38,21 @@ pub struct InitPayload {
     pub grvt_trading_account_id: Option<String>,
     #[serde(default, deserialize_with = "text")]
     pub grvt_signer_address: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "text",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub signer_address: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "text",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub paradex_public_key: Option<String>,
+    /// Resolved from the venue on this admission, never accepted from JSON.
+    #[serde(skip)]
+    pub lighter_registered_key: Option<RegisteredLighterKey>,
     pub tealstreet_proxy: Option<bool>,
     pub tealstreet_tunnel: Option<bool>,
     pub tealstreet_ws_route: Option<bool>,

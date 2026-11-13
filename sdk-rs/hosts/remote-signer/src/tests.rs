@@ -1123,3 +1123,46 @@ async fn enabled_bybit_requests_carry_the_public_key_id_and_other_variants_keep_
         assert_eq!(sent["wsAuth"]["toSign"], "GET/realtime1700000000000");
     }
 }
+
+#[tokio::test]
+async fn canonical_identity_hint_is_additive_to_the_existing_signing_wire() {
+    let mut wires = Vec::new();
+    for hint in [None, Some("canonical-public-id".to_owned())] {
+        let (link, seen) = device(Box::new(
+            |_| json!({"wsAuthSignature":safe_cex_crypto::hex(&MAC)}),
+        ));
+        let options = json!({"key":"pub"}).to_string();
+        let remote = match &hint {
+            None => remote_account(link, "binance", Some("main".into()), &options),
+            Some(_) => remote_account_with_key_id(
+                link,
+                "binance",
+                Some("main".into()),
+                &options,
+                hint.clone(),
+            ),
+        }
+        .unwrap();
+        let options: Value = serde_json::from_str(&remote.options_json).unwrap();
+        let (_, signing, _) = refs(&options);
+        let result = remote
+            .provider
+            .sign(request(
+                vec![Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key: signing,
+                    payload: vec![bytes("synthetic-public-read")],
+                }],
+                Default::default(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.values, [MAC.to_vec()]);
+        let mut wire = seen.lock().unwrap()[0].clone();
+        assert_eq!(wire.get("keyId").and_then(Value::as_str), hint.as_deref());
+        wire.as_object_mut().unwrap().remove("keyId");
+        wire.as_object_mut().unwrap().remove("id");
+        wires.push(wire);
+    }
+    assert_eq!(wires[0], wires[1]);
+}

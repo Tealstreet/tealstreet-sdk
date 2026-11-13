@@ -68,7 +68,7 @@ fn owned(registry: &Registry, user: &str, client: u32) -> Result<Owned> {
         Host::new(engine, native::Recorder(out)),
         ServerConfig::default(),
     )?;
-    let init = init("fixture-key");
+    let init = init(&public_key());
     let (mut account, _) = testing::account_on(
         testing::HeldLoad {
             placed: Arc::default(),
@@ -84,6 +84,7 @@ fn owned(registry: &Registry, user: &str, client: u32) -> Result<Owned> {
     // Keep the registry's test account shell, with the real signed native actor.
     slot.handle.dispose();
     slot.handle = handle;
+    testing::bind_identity(&mut account, &init);
     testing::register(registry, &account);
     Ok(Owned {
         account,
@@ -146,7 +147,7 @@ async fn proof(same_owner: bool) -> Result {
     let mut b = owned(&app.registry, "user-b", 202)?;
     let address = sessions::serve(app.clone()).await;
     let mut page = sessions::Page::open(&address, &token("user-a"), None).await;
-    page.init(&init("fixture-key")).await;
+    page.init(&init(&public_key())).await;
     let late_a = signature(&mut page, &mut a, 101).await?;
     assert!(a.wire.try_recv().is_err(), "A is awaiting its signature");
     let resume = page.resume_id.clone().ok_or("missing resume")?;
@@ -161,7 +162,7 @@ async fn proof(same_owner: bool) -> Result {
         .find(|frame| frame["t"] == "session")
         .ok_or("missing session")?;
     assert_eq!(session["d"]["resumed"], same_owner);
-    replacement.init(&init("fixture-key")).await;
+    replacement.init(&init(&public_key())).await;
     if same_owner {
         let replay = signature(&mut replacement, &mut a, 101).await?;
         assert_eq!(

@@ -77,10 +77,22 @@ pub async fn fetch_lighter_registered_key<T: Transport>(
     index: u8,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<PublicKey, Refused> {
+    let request = lighter_registration::request(network, account, index)?;
+    let body = read_public_metadata(transport, request, allowed.clone()).await?;
+    let public = lighter_registration::decode(&body, account, index)?;
+    let public = PublicKey::new(safe_cex_crypto::admission::Family::Schnorr, &public)
+        .map_err(|_| Refused)?;
+    if allowed() { Ok(public) } else { Err(Refused) }
+}
+
+pub(crate) async fn read_public_metadata<T: Transport>(
+    transport: &T,
+    request: safe_cex_engine::HttpRequest,
+    allowed: Arc<dyn Fn() -> bool + Send + Sync>,
+) -> Result<Vec<u8>, Refused> {
     if !allowed() {
         return Err(Refused);
     }
-    let request = lighter_registration::request(network, account, index)?;
     let id = request.id;
     let work = async {
         let prepared = transport
@@ -124,11 +136,7 @@ pub async fn fetch_lighter_registered_key<T: Transport>(
                     body.extend_from_slice(&chunk);
                 }
                 HostEvent::HttpEnd(request) if request == id && started => {
-                    let public = lighter_registration::decode(&body, account, index)?;
-                    let public =
-                        PublicKey::new(safe_cex_crypto::admission::Family::Schnorr, &public)
-                            .map_err(|_| Refused)?;
-                    return if allowed() { Ok(public) } else { Err(Refused) };
+                    return if allowed() { Ok(body) } else { Err(Refused) };
                 }
                 _ => return Err(Refused),
             }

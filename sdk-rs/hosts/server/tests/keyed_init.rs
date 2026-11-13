@@ -55,9 +55,15 @@ fn browser_init(venue: &str, proxied: bool) -> String {
     });
     let extra = match venue {
         "okx" | "bitget" | "blofin" => json!({ "passphrase": "pass" }),
-        "hyperliquid" | "hyperliquidspot" => json!({ "key": WALLET }),
+        "hyperliquid" | "hyperliquidspot" => json!({ "key": WALLET, "signerAddress": WALLET }),
         "lighter" => json!({ "applicationId": "281474976710654", "apiKeyIndex": "3" }),
-        "paradex" => json!({ "paradexAddress": WALLET, "subkeyAddress": WALLET }),
+        "paradex" => {
+            let mut scalar = [0; 32];
+            scalar[31] = 7;
+            json!({ "paradexAddress": WALLET, "subkeyAddress": WALLET,
+                "paradexPublicKey": format!("0x{}", safe_cex_crypto::hex(
+                    &safe_cex_crypto::starknet::public_key_bytes(&scalar))) })
+        }
         _ => json!({}),
     };
     for (field, value) in extra.as_object().unwrap() {
@@ -71,7 +77,17 @@ fn browser_init(venue: &str, proxied: bool) -> String {
 
 fn parse(text: &str) -> InitPayload {
     match serde_json::from_str::<Inbound>(text) {
-        Ok(Inbound::Init(init)) => *init,
+        Ok(Inbound::Init(init)) => {
+            let mut init = *init;
+            if init.exchange_name == "lighter" {
+                // This prepare-only fixture starts after trusted metadata resolution.
+                let public = safe_cex_crypto::lighter::public_key(&[7; 40]).unwrap();
+                safe_cex_exchange_server::accounts::testing::set_registered_lighter_key(
+                    &mut init, "alice", &public,
+                );
+            }
+            init
+        }
         Ok(_) => panic!("not an init"),
         Err(error) => panic!("init did not parse: {error}: {text}"),
     }
