@@ -1769,11 +1769,14 @@ async fn j6b_restored_twap_stays_paused_until_explicit_resume_and_account_stop()
             let cases: Vec<Value> =
                 serde_json::from_str(include_str!("../tests/data/delegated-full-writes-v1.json"))
                     .unwrap();
-            let restore = cases
+            let mut restore = cases
                 .into_iter()
                 .find(|c| c["action"]["op"] == "twap:state")
                 .unwrap()["action"]
                 .clone();
+            for row in restore["data"].as_array_mut().unwrap() {
+                row["ownerId"] = account.registry_name().into();
+            }
             action(&mut session, restore, 1, false).await;
             assert_eq!(
                 action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"],
