@@ -851,9 +851,40 @@ Sizing, for 110 to 1,200 accounts per region (from the CI replay data):
 
 Account identity:
 
-- **Key:** `(userId, accountName)`. The same user on two sockets shares one account actor, and both sockets receive its frames.
+- **Bybit private accounts with `delegated.enabled`:** `(verified uid, identity digest)`, for both hosted signing modes. Each connection maps its account labels to that identity and receives its own label and current `instanceId` on account frames. Different labels for the same identity share one actor.
+- **Other accounts:** `(userId, accountName)` retains its existing behavior.
 - **Different users:** never share an account, even with equal names.
 - **Unauthenticated public:** `__pub_bybit` is a single shared, public-only bybit account.
+
+Label lookups use the connection's registered labels. A conflicting legacy
+label binding is refused without rebuilding either account. Algo broadcasts
+reach every registered label while counting each socket once.
+
+The identity digest is lowercase SHA-256 hex. Its input starts with the UTF-8
+bytes `tealstreet/identity/v1`, followed by three UTF-8 components: verified uid,
+scope, and canonical public key id. Each component is prefixed by its byte length
+as an unsigned 64-bit big-endian integer. Scope is the compact JSON array
+`[venue, network, site]`, where network is `mainnet` or `testnet` and an absent
+site is the empty string. Credential trimming follows the venue's signer setup
+policy. The digest uses no process salt. Account labels and signing secrets are
+excluded. Enabled Bybit settings fingerprints exclude primary credentials.
+
+Settings changes on a held Bybit identity use the admitted connection's
+`msg` operation `applySettings`, with `data: {requestId, settings: InitPayload}`.
+The settings must name the same label and identity. Replacement construction and
+its captured authority checks succeed before retiring the resident account through
+the existing settings-disposal path. A failed replacement keeps that resident;
+DELEGATED retains the same provider. The captured token deadline is rechecked
+before engine placement and publication; expiry keeps the resident intact.
+The reply is `applySettings:done` with
+`{requestId, success, result}` and the current registration's `instanceId`.
+Parked holders and the DELEGATED resident copy participate in settings refusal.
+
+Bybit remote sign requests include `keyId` alongside the connection-local label.
+Hosted Bybit TWAP persistence carries the identity digest in `ownerId`.
+Restoration requires that identity and can follow a renamed label. Other TWAP
+books retain their existing persistence shape. Connection-local labels and
+registration IDs remain the account binding at the hosted write-frame boundary.
 
 Account construction, from `init`:
 
@@ -882,8 +913,10 @@ Sessions and resume (same semantics as today):
   - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
 - **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts use a fresh handover and shared admission; their previous parked holders retain the original expiry while verification is pending.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
-  - A different private fingerprint is refused until an admitted client uses
-    `apply-settings`; parked clients and resident copies keep their settings.
+  - A different private fingerprint is refused until an admitted client uses an
+    explicit settings action; parked clients and resident copies keep their settings.
+    The top-level `apply-settings` resets before re-init; identity-bound Bybit
+    accounts also support the staged `msg applySettings` action described above.
 - **Resume alias:** a used `resumeId` stays valid as an alias for 120s, which is `RESUME_ALIAS_MS`.
 - **Grace expiry:** parked accounts are disposed with the reason `no browser for 60s`, recorded in the order audit log. No browser is attached to tell, so when chases or TWAPs were running the registry keeps one notice per (user, account) and sends it as an `error` on that account's next init; it is dropped once delivered or after 24 hours.
 - **Stop notices name their algo.** Every "Chase on X stopped: …" or "TWAP on X stopped: …" (live, break-glass, SIGTERM, grace expiry, failed signer) is its own `error`, `data: [message, {forceToast: true, algo: {kind: "chase"|"twap", id}}]`, where `id` is the algo's `activeChasers`/`activeTWAPs` row id, so the page dedupes exactly. Errors the page missed still arrive joined in one notice without `algo`.

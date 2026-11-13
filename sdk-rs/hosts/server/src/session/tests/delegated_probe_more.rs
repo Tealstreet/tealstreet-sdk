@@ -75,7 +75,7 @@ async fn a_valid_pair_joins_without_comparing_or_replacing_resident_material() {
 }
 
 #[tokio::test]
-async fn another_public_key_cannot_replace_a_running_delegated_account() {
+async fn a_refused_different_key_cannot_replace_a_running_delegated_account() {
     let f = fixture().await;
     let (mut resident, _sent) = user_session(f.registry.clone(), "alice");
     let mut ready = resident.take_verified();
@@ -83,6 +83,7 @@ async fn another_public_key_cannot_replace_a_running_delegated_account() {
     resident.init(init).await.unwrap();
     finish(&mut resident, &mut ready).await;
     let original = f.registry.held("alice", "acct", resident.socket).unwrap();
+    f.code.store(10003, Ordering::SeqCst);
     let (mut candidate, mut sent) = user_session(f.registry.clone(), "alice");
     let mut done = candidate.take_verified();
     let mut init = payload(&mut candidate, None);
