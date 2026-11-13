@@ -2575,3 +2575,17 @@ for (const [family, measured, minimumCap, moduleSha256] of [
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   });
 }
+
+// #3391 new-head CI run 43454205848, source 81ae648f2f29ec50fc44519308d91a72132d8e37.
+// Source tree equals e5b6f01259b9; artifact 14051924992 archive/module digests independently verified.
+// All five optimized web/Node/replay copies: SHA256 207116edb828e944a3ef5bc12e9e23bdccd4d3cdcbba1795c9b30b1d43a9d21a.
+test('#3391 fresh CI composition retains Bybit measured 10 KiB reserve', () => {
+  const measured = 2_346_773;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_357_248);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < current CI minimum ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
