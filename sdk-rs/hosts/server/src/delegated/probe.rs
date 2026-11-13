@@ -336,4 +336,4 @@ mod tests {
 
 #[cfg(test)]
 #[path = "probe_tests.rs"]
-mod venue_tests;
+pub(crate) mod venue_tests;

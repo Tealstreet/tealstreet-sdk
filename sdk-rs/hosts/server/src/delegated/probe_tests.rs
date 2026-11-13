@@ -17,15 +17,15 @@ const SECRET: &str = "synthetic-material";
 const PASS: &str = "synthetic-passphrase";
 
 #[derive(Default)]
-struct Seen {
-    signed_reads: usize,
-    refused: usize,
+pub(crate) struct Seen {
+    pub(crate) signed_reads: usize,
+    pub(crate) refused: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
-struct VenueIo {
-    venue: &'static str,
-    seen: Arc<Mutex<Seen>>,
+pub(crate) struct VenueIo {
+    pub(crate) venue: &'static str,
+    pub(crate) seen: Arc<Mutex<Seen>>,
 }
 fn header<'a>(r: &'a HttpRequest, name: &str) -> Option<&'a str> {
     r.headers
@@ -317,7 +317,7 @@ enum DeviceAnswer {
 }
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
-fn operation(venue: &str, canonical: &str) -> String {
+pub(crate) fn operation(venue: &str, canonical: &str) -> String {
     if venue == "binance" {
         return canonical
             .split('&')
