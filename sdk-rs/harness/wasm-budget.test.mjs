@@ -2357,3 +2357,18 @@ test('#3372 merged CI run 43381322258 retains current Bybit reserve', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
+
+
+test('#3342 latest master composition retains fresh CI Bybit reserve', () => {
+  // Run 43452683819/job 131979457461; wasm-family-bybit, CI source 0d075971b309.
+  // Source tree equals e0b3a4b9f1f9af2ff541d4a564b28adf2da4bf06; all five WASM copies agree.
+  // SHA256 99f3fea9eac4f64b632943b980f506558dacd2a9b769a3717d27ca29b50848cd.
+  const measured = 2_360_107;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_370_560);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap, `bybit: ${cap} < ${minimumCap}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
