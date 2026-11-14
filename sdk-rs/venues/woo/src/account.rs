@@ -1921,6 +1921,7 @@ impl Woo {
         let Some(data) = msg.data else {
             return true;
         };
+        cx.record_socket_topic(&[&msg.topic]);
         if msg.topic == "executionreport" {
             if let Ok(row) = serde_json::from_str::<OrderRow<'_>>(data.get()) {
                 self.account_execution(cx, &row, false, None);

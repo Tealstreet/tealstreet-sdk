@@ -1085,6 +1085,9 @@ impl Kraken {
         if self.account.signed_challenge.is_none() {
             return true;
         }
+        if msg.event.is_empty() {
+            cx.record_socket_topic(&[msg.feed.strip_suffix("_snapshot").unwrap_or(&msg.feed)]);
+        }
         match msg.feed.as_ref() {
             "fills" | "fills_snapshot" => {
                 if let Some(raw) = msg.fills {

@@ -34,6 +34,41 @@ pub(super) struct Continuation<P> {
 }
 
 impl<P> Cx<'_, P> {
+    /// A decoded data topic, using borrowed fragments of its native subscription key.
+    pub fn record_socket_topic(&mut self, parts: &[&str]) -> bool {
+        if let Some((epoch, received_at)) = self.io.core.socket_stats_message {
+            return self
+                .io
+                .core
+                .socket_driver
+                .state
+                .record_topic(epoch, parts, received_at);
+        }
+        false
+    }
+
+    /// Binance-style native topics use a lowercase symbol and borrowed suffix fragments.
+    pub fn record_socket_symbol_topic(&mut self, symbol: &str, suffix: &[&str]) {
+        if let Some((epoch, received_at)) = self.io.core.socket_stats_message {
+            self.io.core.socket_driver.state.record_symbol_topic(
+                epoch,
+                symbol,
+                suffix,
+                received_at,
+            );
+        }
+    }
+
+    /// Append a native numeric topic ID using bounded stack storage.
+    pub fn record_socket_topic_number(&mut self, parts: &[&str], number: u64) {
+        if let Some((epoch, received_at)) = self.io.core.socket_stats_message {
+            self.io
+                .core
+                .socket_driver
+                .state
+                .record_number_topic(epoch, parts, number, received_at);
+        }
+    }
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut CoreCx<'_>) -> R) -> R {
         self.core().with_socket_driver(f)
     }
@@ -891,8 +926,10 @@ impl<V: Venue> Engine<V> {
                     };
                     assert!(cx.io.core.socket_message.is_none());
                     cx.io.core.socket_message = Some((epoch, now));
+                    cx.io.core.socket_stats_message = Some((epoch, now));
                     Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
                     cx.io.core.socket_message = None;
+                    cx.io.core.socket_stats_message = None;
                 }
             }
             Event::WsBinary { data, .. } => {

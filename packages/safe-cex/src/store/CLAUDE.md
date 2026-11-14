@@ -491,3 +491,17 @@ existing authoritative `fetchedLeverage` rails), not expect a closed row in
 the legacy reader. Omitted coins, currencies and info retain their prior values;
 explicit empty maps replace them. Direct `store.update({ balance })` still
 replaces the complete balance. The generated reader does not fabricate maps.
+
+## Native subscription diagnostics
+
+SCXF section 25 replaces the native-owned `messageHandlerStats` buckets on
+subscription changes and snapshots; periodic updates change only named topics.
+Separate shared public-provider buckets remain intact.
+Each native row carries a stable topic ID, public/business/futures/private group,
+subscribed/active flags and message age in milliseconds (NaN before data).
+`lastCallbacksCount` is one for a released subscription that has ever delivered
+and zero before its first receipt or after retirement;
+`hadHandlers` is true. Never-received timestamps stay zero. Empty snapshots clear
+unsubscribed topics. `FrameApplier.applyMessageHandlerStats` projects source
+telemetry separately for frame-fed trading engines, which own financial state
+but have no account socket subscriptions of their own.

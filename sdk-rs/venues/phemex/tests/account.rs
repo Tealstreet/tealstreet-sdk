@@ -2497,3 +2497,84 @@ fn an_unconfirmed_market_row_outrun_by_the_stream_is_eventually_checked_again() 
         "a saved unconfirmed Market row must not be forgotten forever; no later activeList read was issued"
     );
 }
+
+fn subscription_receipts(frame: &[u8]) -> Vec<(String, u32, f64)> {
+    use safe_cex_engine::wire::{section, sections};
+    let stats = sections(frame)
+        .find(|(kind, _)| *kind == section::MESSAGE_HANDLER_STATS)
+        .unwrap()
+        .1;
+    let strings = sections(frame)
+        .find(|(kind, _)| *kind == section::STRINGS)
+        .unwrap()
+        .1;
+    let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+    let text = |index: usize| {
+        let start =
+            u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap()) as usize;
+        let end =
+            u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap()) as usize;
+        let base = 4 + (count + 1) * 4;
+        std::str::from_utf8(&strings[base + start..base + end])
+            .unwrap()
+            .to_owned()
+    };
+    let rows: Vec<_> = stats[8..]
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .map(|row| {
+            (
+                text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize),
+                u32::from_le_bytes(row[8..12].try_into().unwrap()),
+                f64::from_le_bytes(row[16..24].try_into().unwrap()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows.len(),
+        u32::from_le_bytes(stats[..4].try_into().unwrap()) as usize
+    );
+    rows
+}
+
+#[test]
+fn subscription_receipt_observes_authenticated_aop_data_but_not_pongs() {
+    let (mut e, actions, socket) = started();
+    seed(&mut e, &actions);
+    authenticate(&mut e, socket);
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("aop_p.subscribe")))
+    );
+    let receipt = |rows: &[(String, u32, f64)]| {
+        let row = rows
+            .iter()
+            .find(|(topic, _, _)| topic.ends_with(".aop_p.subscribe"))
+            .unwrap();
+        (row.1, row.2)
+    };
+    let rows = subscription_receipts(e.snapshot_frame(NOW + 1.));
+    let untouched = receipt(&rows);
+    assert_eq!(untouched.0, 1);
+    assert!(untouched.1.is_nan());
+    push_orders(
+        &mut e,
+        socket,
+        "snapshot",
+        1,
+        &order("New", 1_700_000_000_000_000_001),
+    );
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+    let rows = subscription_receipts(e.snapshot_frame(NOW + 101.));
+    assert_eq!(receipt(&rows), (3, 1.));
+    e.handle(
+        NOW + 200.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"result":"pong"}"#,
+        },
+    );
+    let rows = subscription_receipts(e.snapshot_frame(NOW + 201.));
+    assert_eq!(receipt(&rows), (3, 101.));
+}

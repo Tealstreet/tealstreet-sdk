@@ -1337,6 +1337,7 @@ impl PhemexPerpetuals {
         if !has_data {
             return true;
         }
+        cx.record_socket_topic(&["aop_p.subscribe"]);
         if message
             .sequence
             .is_some_and(|s| self.account.sequence.is_some_and(|previous| s <= previous))
