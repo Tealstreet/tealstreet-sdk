@@ -482,7 +482,7 @@ impl Coinbase {
         );
     }
     fn drb_submit(&mut self, cx: &mut Cx<'_, Pending>, job: Job) {
-        if self.credentials.is_none()
+        if !self.signers.has_primary()
             || self.options.public_data_only
             || self.options.spot_only
             || self.options.testnet

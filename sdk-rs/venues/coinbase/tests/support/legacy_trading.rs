@@ -83,9 +83,7 @@ impl Session {
         )
     }
     fn with_options(kind: &'static str, options: Options) -> Self {
-        let mut venue = Coinbase::new(options).unwrap();
-        venue.account.legacy_protocol_fixture = true;
-        Self::with_engine(kind, safe_cex_engine::test_support::seeded_engine(venue))
+        Self::with_engine(kind, hosted_parity::engine(options))
     }
     fn with_engine(kind: &'static str, mut e: Engine<Coinbase>) -> Self {
         e.start(1000.0);

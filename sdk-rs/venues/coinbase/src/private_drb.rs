@@ -273,8 +273,10 @@ impl Coinbase {
             return;
         }
         let params = self
-            .credentials
-            .as_ref()
+            .signers
+            .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+            .ok()
+            .map(|(_, credentials)| credentials)
             .ok_or("drb credentials unavailable".to_owned())
             .and_then(|c| {
                 self.private_drb
@@ -692,8 +694,10 @@ impl Coinbase {
             .as_ref()
             .ok_or("drb private socket unavailable")?;
         let credentials = self
-            .credentials
-            .as_ref()
+            .signers
+            .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+            .ok()
+            .map(|(_, credentials)| credentials)
             .ok_or("drb credentials unavailable")?;
         let params = session.params(credentials, cx.now, |b| cx.fill_signing_entropy(b))?;
         self.drb_ws_send(cx, WsKind::Auth, "public/auth", params)
