@@ -3182,11 +3182,12 @@ test('#3225 refreshed private DRB artifacts retain 10 KiB and both Coinbase fami
   const minimumCap = 2_228_224;
   assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['coinbase', 'coinbasespot']) {
-    assert.equal(venueFamily(venue), 'coinbase');
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
     const cap = WASM_VENUE_OVERRIDES.coinbase;
     assert.ok(cap >= Math.max(minimumCap, 2_126_848));
-    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
