@@ -1024,6 +1024,10 @@ impl Lifecycle {
         }
         let id = FeedId(self.feeds.len());
         let implicit_stats = policy.role == SocketChannel::Private;
+        // Single-feed engines need one telemetry-bearing row, not Vec's four-row minimum.
+        if self.feeds.is_empty() {
+            self.feeds.reserve_exact(1);
+        }
         self.feeds.push(Feed {
             policy,
             generation: 0,
