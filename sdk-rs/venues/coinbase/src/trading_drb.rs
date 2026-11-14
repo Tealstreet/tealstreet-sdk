@@ -1041,7 +1041,7 @@ impl Coinbase {
                         || call
                             .params
                             .get("price")
-                            .is_some_and(|price| row["price"] != *price)
+                            .is_some_and(|price| row["price"].as_f64() != price.as_f64())
                         || call
                             .params
                             .get("time_in_force")
@@ -1322,7 +1322,11 @@ impl Coinbase {
                 .trading_drb
                 .recovery
                 .values()
-                .filter(|r| r.uncertain && r.call.label.is_some())
+                .filter(|r| {
+                    r.uncertain
+                        && r.call.label.is_some()
+                        && (r.call.symbol.is_empty() || symbols.contains(&r.call.symbol))
+                })
                 .map(|r| r.call.symbol.clone())
                 .collect();
             let refused = cx
@@ -1442,12 +1446,11 @@ fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
         return Err(uncertain("drb native order ACK side mismatch"));
     }
     let kind = crate::private_drb::wire::order_kind(value).map_err(uncertain)?;
-    let status = match n.order_state.as_str() {
-        "open" | "untriggered" => OrderStatus::Open,
-        "filled" if n.filled_amount == n.amount => OrderStatus::Closed,
-        "cancelled" => OrderStatus::Canceled,
-        _ => return Err(uncertain("drb native order state is unproven")),
-    };
+    let status = crate::private_drb::wire::order_status(&n.order_state).map_err(uncertain)?;
+    if n.order_state == "rejected" || (status == OrderStatus::Closed && n.filled_amount != n.amount)
+    {
+        return Err(uncertain("drb native order state is unproven"));
+    }
     // Keep ACK numeric-price strictness, then share the account codec's
     // trigger/execution projection so ACKs and later snapshots agree.
     if let Some(price) = n.price.as_f64() {
@@ -1498,13 +1501,16 @@ fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
     })
 }
 
-fn order_is_newer(cx: &Cx<'_, Pending>, order: &Order) -> bool {
-    cx.store.order(&order.id).is_none_or(|old| {
-        old.last_update <= order.last_update
-            && old.filled <= order.filled
-            && !(matches!(old.status, OrderStatus::Closed | OrderStatus::Canceled)
-                && order.status == OrderStatus::Open)
-    })
+pub(super) fn order_follows(old: &Order, order: &Order) -> bool {
+    old.last_update <= order.last_update
+        && old.filled <= order.filled
+        && !(matches!(old.status, OrderStatus::Closed | OrderStatus::Canceled)
+            && order.status == OrderStatus::Open)
+}
+pub(super) fn order_is_newer(cx: &Cx<'_, Pending>, order: &Order) -> bool {
+    cx.store
+        .order(&order.id)
+        .is_none_or(|old| order_follows(old, order))
 }
 
 #[cfg(test)]

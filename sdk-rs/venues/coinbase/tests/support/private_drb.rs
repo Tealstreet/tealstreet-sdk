@@ -1260,7 +1260,16 @@ fn snapshot_overlay_retains_terminal_order_and_zero_position() {
 fn reopened_position_omission_uses_fresh_snapshot_metadata() {
     let mut r = Rig::ready();
     let socket = r.subscribe();
-    let held = r.poll_requests();
+    for request in r.poll_requests() {
+        let value = if request.url.ends_with("get_account_summary") {
+            account_row()
+        } else if request.url.ends_with("get_positions") {
+            json!([position_row()])
+        } else {
+            json!([order_row()])
+        };
+        r.rpc(request, value);
+    }
     let mut row = position_row();
     row["leverage"] = json!(20);
     row["estimated_liquidation_price"] = json!(65000.);
@@ -1270,6 +1279,9 @@ fn reopened_position_omission_uses_fresh_snapshot_metadata() {
     row["size"] = json!(0);
     row["size_currency"] = json!(0);
     r.notification(socket, CHANNELS[0], json!({"positions":[row]}));
+    // Fresh means issued after the close, not merely a response containing
+    // different metadata. A pre-close request cannot prove the new incarnation.
+    let held = r.poll_requests();
     let mut row = position_row();
     row.as_object_mut().unwrap().remove("leverage");
     row.as_object_mut()
@@ -1653,4 +1665,358 @@ fn hosted_drb_auth_signs_http_and_socket_tokens_through_the_installed_provider()
     assert_eq!(ws["sub"], http["sub"]);
     assert!(ws.get("uri").is_none());
     assert!(ws.get("aud").is_none());
+}
+
+fn ready_with_full_order_version_cache() -> (Rig, SocketId) {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    for request in r.poll_requests() {
+        let result = if request.url.ends_with("get_open_orders") {
+            json!([order_row()])
+        } else if request.url.ends_with("get_positions") {
+            json!([position_row()])
+        } else {
+            account_row()
+        };
+        r.rpc(request, result);
+    }
+    let mut rows = Vec::new();
+    for i in 1..MAX_ROWS {
+        let mut row = order_row();
+        row["order_id"] = json!(format!("USDC-cache-{i}"));
+        rows.push(row);
+    }
+    for chunk in rows.chunks(32) {
+        let data = json!({"orders":chunk});
+        let frame = json!({"jsonrpc":"2.0","method":"subscription","params":{"channel":CHANNELS[0],"data":data}}).to_string();
+        assert!(frame.len() <= drb::MAX_FRAME_BYTES);
+        r.notification(socket, CHANNELS[0], data);
+    }
+    assert_eq!(r.e.venue().private_drb.versions.len(), MAX_ROWS);
+    assert!(r.e.venue().private_drb.pending.is_empty());
+    (r, socket)
+}
+
+fn assert_evicted_version_keeps_terminal_order(hold_read: bool) {
+    let (mut r, socket) = ready_with_full_order_version_cache();
+    let held = if hold_read { r.poll_requests() } else { vec![] };
+    let mut terminal = order_row();
+    terminal["order_state"] = json!("cancelled");
+    terminal["last_update_timestamp"] = json!(1700000002000u64);
+    terminal["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[terminal]}));
+    let mut fresh = order_row();
+    fresh["order_id"] = json!("USDC-new-cache-row");
+    r.notification(socket, CHANNELS[0], json!({"orders":[fresh]}));
+    assert!(!r.e.venue().private_drb.versions.contains_key("USDC-123"));
+    r.notification(socket, CHANNELS[0], json!({"orders":[order_row()]}));
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().status,
+        OrderStatus::Canceled,
+        "global version eviction must not reopen terminal evidence"
+    );
+    for request in held {
+        let result = if request.url.ends_with("get_account_summary") {
+            account_row()
+        } else {
+            json!([])
+        };
+        r.rpc(request, result);
+    }
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert!(r.e.store().order("USDC-new-cache-row").is_some());
+    if hold_read {
+        assert!(
+            r.e.store().order("USDC-cache-1").is_none(),
+            "the bounded nonoverflow census still applies unrelated omissions"
+        );
+    }
+}
+
+#[test]
+fn evicted_global_version_cannot_reopen_a_terminal_store_order() {
+    assert_evicted_version_keeps_terminal_order(false);
+}
+
+#[test]
+fn evicted_global_version_cannot_replace_retained_terminal_overlay() {
+    assert_evicted_version_keeps_terminal_order(true);
+}
+
+#[test]
+fn evicted_global_version_preserves_an_overlays_omitted_causal_floor() {
+    let (mut r, socket) = ready_with_full_order_version_cache();
+    let held = r.poll_requests();
+    let mut row = order_row();
+    row["last_update_timestamp"] = json!(1700000002000u64);
+    row["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+    row["price"] = json!(60010.);
+    r.notification(socket, CHANNELS[0], json!({"orders":[row]}));
+    let mut fresh = order_row();
+    fresh["order_id"] = json!("USDC-new-cache-row");
+    r.notification(socket, CHANNELS[0], json!({"orders":[fresh]}));
+    assert!(!r.e.venue().private_drb.versions.contains_key("USDC-123"));
+    let mut omitted = order_row();
+    omitted["last_update_timestamp"] = json!(1700000002000u64);
+    omitted["price"] = json!(60020.);
+    r.notification(socket, CHANNELS[0], json!({"orders":[omitted]}));
+    let mut stale = order_row();
+    stale["last_update_timestamp"] = json!(1700000002000u64);
+    stale["starbase_last_update_timestamp"] = json!(1700000002000000001u64);
+    stale["price"] = json!(60005.);
+    r.notification(socket, CHANNELS[0], json!({"orders":[stale]}));
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().price,
+        60020.,
+        "an omitted causal stamp must not erase the retained overlay floor"
+    );
+    for request in held {
+        let result = if request.url.ends_with("get_account_summary") {
+            account_row()
+        } else {
+            json!([])
+        };
+        r.rpc(request, result);
+    }
+    assert_eq!(r.e.store().order("USDC-123").unwrap().price, 60020.);
+    assert!(r.e.store().order("USDC-new-cache-row").is_some());
+    assert!(r.e.store().order("USDC-cache-1").is_none());
+}
+
+#[test]
+fn evicted_global_version_cannot_reopen_a_later_stamped_terminal_order() {
+    let (mut r, socket) = ready_with_full_order_version_cache();
+    let mut terminal = order_row();
+    terminal["order_state"] = json!("cancelled");
+    terminal["last_update_timestamp"] = json!(1700000002000u64);
+    terminal["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[terminal]}));
+    let mut fresh = order_row();
+    fresh["order_id"] = json!("USDC-new-cache-row");
+    r.notification(socket, CHANNELS[0], json!({"orders":[fresh]}));
+    assert!(!r.e.venue().private_drb.versions.contains_key("USDC-123"));
+    let mut stale = order_row();
+    stale["last_update_timestamp"] = json!(1700000003000u64);
+    stale["starbase_last_update_timestamp"] = json!(1700000002000000001u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[stale]}));
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().status,
+        OrderStatus::Canceled,
+        "a newer wall stamp cannot reopen an already terminal order"
+    );
+}
+
+#[test]
+fn evicted_global_version_cannot_decrease_filled_amount() {
+    let (mut r, socket) = ready_with_full_order_version_cache();
+    let mut partial = order_row();
+    partial["filled_amount"] = json!(0.05);
+    partial["last_update_timestamp"] = json!(1700000002000u64);
+    partial["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[partial]}));
+    let mut fresh = order_row();
+    fresh["order_id"] = json!("USDC-new-cache-row");
+    r.notification(socket, CHANNELS[0], json!({"orders":[fresh]}));
+    assert!(!r.e.venue().private_drb.versions.contains_key("USDC-123"));
+    let mut stale = order_row();
+    stale["last_update_timestamp"] = json!(1700000003000u64);
+    stale["starbase_last_update_timestamp"] = json!(1700000002000000001u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[stale]}));
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().filled,
+        0.05,
+        "global version eviction cannot reduce cumulative fills"
+    );
+}
+
+#[test]
+fn review266_preclose_census_cannot_restore_retired_position_metadata() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    let held = r.poll_requests();
+    let mut closed = position_row();
+    closed["direction"] = json!("zero");
+    closed["size"] = json!(0);
+    closed["size_currency"] = json!(0);
+    r.notification(socket, CHANNELS[0], json!({"positions":[closed]}));
+    let mut reopened = position_row();
+    reopened.as_object_mut().unwrap().remove("leverage");
+    reopened
+        .as_object_mut()
+        .unwrap()
+        .remove("estimated_liquidation_price");
+    reopened["size_currency"] = json!(-0.2);
+    r.notification(socket, CHANNELS[0], json!({"positions":[reopened]}));
+    for request in held {
+        let result = if request.url.ends_with("get_positions") {
+            json!([position_row()])
+        } else if request.url.ends_with("get_account_summary") {
+            account_row()
+        } else {
+            json!([])
+        };
+        r.rpc(request, result);
+    }
+    let p = r.e.store().position("BTC_USDC-PERPETUAL").unwrap();
+    assert_eq!(
+        (p.contracts, p.leverage, p.liquidation_price),
+        (0.2, 0., 0.)
+    );
+}
+
+#[test]
+fn review266_newer_rest_order_wins_over_an_older_stream_overlay() {
+    for same_millis in [false, true] {
+        let mut r = Rig::ready();
+        let socket = r.subscribe();
+        let held = r.poll_requests();
+        let mut live = order_row();
+        live["last_update_timestamp"] = json!(1700000002000u64);
+        live["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+        live["filled_amount"] = json!(0.05);
+        r.notification(socket, CHANNELS[0], json!({"orders":[live]}));
+        let mut snapshot = order_row();
+        snapshot["last_update_timestamp"] = json!(if same_millis {
+            1700000002000u64
+        } else {
+            1700000003000u64
+        });
+        snapshot["starbase_last_update_timestamp"] = json!(1700000003000000003u64);
+        snapshot["filled_amount"] = json!(0.075);
+        for request in held {
+            let result = if request.url.ends_with("get_open_orders") {
+                json!([snapshot])
+            } else if request.url.ends_with("get_account_summary") {
+                account_row()
+            } else {
+                json!([])
+            };
+            r.rpc(request, result);
+        }
+        assert_eq!(r.e.store().order("USDC-123").unwrap().filled, 0.075);
+    }
+}
+
+#[test]
+fn review266_snapshot_cannot_reopen_terminal_or_reduce_stream_fills() {
+    for terminal in [false, true] {
+        let mut r = Rig::ready();
+        let socket = r.subscribe();
+        let held = r.poll_requests();
+        let mut live = order_row();
+        live["last_update_timestamp"] = json!(1700000002000u64);
+        live["filled_amount"] = json!(0.05);
+        if terminal {
+            live["order_state"] = json!("cancelled");
+        }
+        r.notification(socket, CHANNELS[0], json!({"orders":[live]}));
+        let mut snapshot = order_row();
+        snapshot["last_update_timestamp"] = json!(1700000003000u64);
+        for request in held {
+            let result = if request.url.ends_with("get_open_orders") {
+                json!([snapshot])
+            } else if request.url.ends_with("get_account_summary") {
+                account_row()
+            } else {
+                json!([])
+            };
+            r.rpc(request, result);
+        }
+        let order = r.e.store().order("USDC-123").unwrap();
+        assert_eq!(order.filled, 0.05);
+        assert_eq!(
+            order.status,
+            if terminal {
+                OrderStatus::Canceled
+            } else {
+                OrderStatus::Open
+            }
+        );
+    }
+}
+
+#[test]
+fn review266_inherited_causal_floor_does_not_prove_rest_is_newer() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    let held = r.poll_requests();
+    let mut live = order_row();
+    live["last_update_timestamp"] = json!(1700000002000u64);
+    live["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+    live["price"] = json!(60010.);
+    r.notification(socket, CHANNELS[0], json!({"orders":[live]}));
+    let mut omitted = order_row();
+    omitted["last_update_timestamp"] = json!(1700000002000u64);
+    omitted["price"] = json!(60020.);
+    r.notification(socket, CHANNELS[0], json!({"orders":[omitted]}));
+    let mut snapshot = order_row();
+    snapshot["last_update_timestamp"] = json!(1700000002000u64);
+    snapshot["starbase_last_update_timestamp"] = json!(1700000002000000003u64);
+    snapshot["price"] = json!(60015.);
+    for request in held {
+        let result = if request.url.ends_with("get_open_orders") {
+            json!([snapshot])
+        } else if request.url.ends_with("get_account_summary") {
+            account_row()
+        } else {
+            json!([])
+        };
+        r.rpc(request, result);
+    }
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().price,
+        60020.,
+        "an inherited floor is not the omitted event's exact stamp"
+    );
+    let mut stale = order_row();
+    stale["last_update_timestamp"] = json!(1700000002000u64);
+    stale["starbase_last_update_timestamp"] = json!(1700000002000000001u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[stale]}));
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().price,
+        60020.,
+        "the admission floor is still retained"
+    );
+}
+
+#[test]
+fn review266_later_rest_millis_cannot_contradict_a_retained_causal_floor() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    let held = r.poll_requests();
+    let mut live = order_row();
+    live["last_update_timestamp"] = json!(1700000002000u64);
+    live["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+    live["price"] = json!(60010.);
+    r.notification(socket, CHANNELS[0], json!({"orders":[live]}));
+    let mut omitted = order_row();
+    omitted["last_update_timestamp"] = json!(1700000002000u64);
+    omitted["price"] = json!(60020.);
+    r.notification(socket, CHANNELS[0], json!({"orders":[omitted]}));
+    let mut snapshot = order_row();
+    snapshot["last_update_timestamp"] = json!(1700000003000u64);
+    snapshot["starbase_last_update_timestamp"] = json!(1700000002000000001u64);
+    snapshot["price"] = json!(60005.);
+    for request in held {
+        let result = if request.url.ends_with("get_open_orders") {
+            json!([snapshot])
+        } else if request.url.ends_with("get_account_summary") {
+            account_row()
+        } else {
+            json!([])
+        };
+        r.rpc(request, result);
+    }
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().price,
+        60020.,
+        "a later wall stamp cannot contradict retained causal evidence"
+    );
+    assert_eq!(
+        r.e.venue().private_drb.versions["USDC-123"].causal,
+        Some(1700000002000000002u64)
+    );
 }

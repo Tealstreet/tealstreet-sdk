@@ -452,3 +452,35 @@ fn queued_edits_resolve_only_omitted_fields_against_the_latest_order() {
         }
     }
 }
+
+#[test]
+fn review266_native_auth_refusal_preserves_the_classified_kind() {
+    for (code, kind) in [
+        (10019, ErrorKind::AuthPermission),
+        (13009, ErrorKind::AuthExpired),
+    ] {
+        let mut r = Rig::ready();
+        let auth = queued_edit_for_refresh(&mut r, 10000);
+        r.rpc_error(auth, code, "synthetic native auth refusal");
+        r.drain_due_timers();
+        let error = r.command_error(90);
+        assert_eq!(error.kind, Some(kind));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(
+            r.http
+                .iter()
+                .all(|request| !request.url.ends_with("private/edit"))
+        );
+        r.drain_due_timers();
+        assert_eq!(
+            r.actions
+                .iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 90, .. })
+                ))
+                .count(),
+            1
+        );
+    }
+}

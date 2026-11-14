@@ -58,8 +58,22 @@ fn flag(v: &Value, key: &str) -> Result<bool, String> {
 pub(super) struct OrderVersion {
     millis: f64,
     pub(super) causal: Option<u64>,
+    observed_causal: Option<u64>,
 }
 impl OrderVersion {
+    pub(super) fn provably_newer(self, previous: Self) -> bool {
+        self.millis >= previous.millis
+            // An inherited floor cannot establish exact ordering, but an
+            // explicitly older stamp still contradicts retained evidence.
+            && match (self.observed_causal, previous.causal) {
+                (Some(next), Some(floor)) => next > floor,
+                _ => true,
+            }
+            && match (self.observed_causal, previous.observed_causal) {
+                (Some(next), Some(old)) => next > old,
+                _ => self.millis > previous.millis,
+            }
+    }
     pub(super) fn supersedes(self, previous: Self) -> bool {
         // Without both causal stamps, equal milliseconds follow socket order;
         // the caller filters economic duplicates against the current store row.
@@ -84,6 +98,9 @@ pub(super) fn versioned_order(v: Value) -> Result<(Order, OrderVersion), String>
     let version = OrderVersion {
         millis: order.last_update,
         causal,
+        // The retained floor may later be inherited by an omitted field;
+        // only an actually observed stamp proves cross-source ordering.
+        observed_causal: causal,
     };
     Ok((order, version))
 }
@@ -259,17 +276,20 @@ pub(crate) fn order_prices(v: &Value, kind: OrderType) -> Result<OrderPrices, St
         execution: conditional.then_some(price),
     })
 }
+pub(crate) fn order_status(state: &str) -> Result<OrderStatus, String> {
+    match state {
+        "open" | "untriggered" | "triggered" => Ok(OrderStatus::Open),
+        "filled" => Ok(OrderStatus::Closed),
+        "cancelled" | "rejected" => Ok(OrderStatus::Canceled),
+        _ => Err("drb unknown order state".into()),
+    }
+}
 pub(super) fn order(v: Value) -> Result<Order, String> {
     crate::drb_linkage::Linkage::default().observe(&v)?;
     let id = identity(&v, "order_id")?;
     let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
     let side = side(&v)?;
-    let status = match text(&v, "order_state")? {
-        "open" | "untriggered" | "triggered" => OrderStatus::Open,
-        "filled" => OrderStatus::Closed,
-        "cancelled" | "rejected" => OrderStatus::Canceled,
-        _ => return Err("drb unknown order state".into()),
-    };
+    let status = order_status(text(&v, "order_state")?)?;
     let kind = order_kind(&v)?;
     let amount = unsigned(&v, "amount")?;
     let filled = unsigned(&v, "filled_amount")?;

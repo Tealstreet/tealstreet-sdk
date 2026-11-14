@@ -98,6 +98,10 @@ including terminal orders and zero-position tombstones. Changes are bounded and
 owned by that exact read; overflow refuses its snapshot without evicting evidence.
 Bearer, reconnect-gap and accepted-write fences still apply. Omitted position
 metadata may be refreshed by REST; a zero-size close retires earlier metadata.
+Only a census issued after that close may refresh omitted reopened metadata.
+Order cache eviction never overrides retained per-read causal floors or the
+store's cumulative fills and terminal state. Inherited causal floors are not
+exact observed timestamps and cannot prove ordering between REST and streams.
 Queued edits retain caller field presence and resolve omitted size/price from the
 current ordinary order immediately before dispatch. Placement-label exhaustion
 must not prevent cancellations, edits or account reads.

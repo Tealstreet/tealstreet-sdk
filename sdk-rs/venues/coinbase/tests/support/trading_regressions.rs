@@ -407,3 +407,183 @@ fn protective_decoder_publishes_trigger_and_execution_separately() {
         );
     }
 }
+
+#[test]
+fn review266_integer_native_price_matches_float_intent_for_ack_and_recovery() {
+    for recovery in [false, true] {
+        let mut e = engine();
+        let mut o = opts();
+        o.price = Some(66000.);
+        let write = place(&mut e, o);
+        let mut row = fixtures()["partial"]["order"].clone();
+        row["price"] = json!(66000);
+        if recovery {
+            e.handle(
+                1001.,
+                Event::HttpFailed {
+                    request: write.id,
+                    error: "synthetic lost ACK",
+                },
+            );
+            let read = requests(&prepared_now(&mut e))
+                .into_iter()
+                .find(|r| packet(r)["method"] == "private/get_order_state_by_label")
+                .unwrap();
+            reply(&mut e, &read, json!([row]));
+        } else {
+            assert!(done(&reply(
+                &mut e,
+                &write,
+                json!({"order":row,"trades":[]})
+            )));
+        }
+        assert!(e.store().order("USDC-94166").is_some());
+        assert_eq!(
+            requests(&fresh(&mut e, 2)).len(),
+            1,
+            "equivalent numeric prices release the fence"
+        );
+    }
+}
+
+#[test]
+fn review266_symbol_cancel_recovery_ignores_only_out_of_scope_uncertain_labels() {
+    for same_symbol in [false, true] {
+        let mut e = engine();
+        let mut markets = e.store().markets().to_vec();
+        let mut eth = markets[0].clone();
+        eth.id = "ETH_USDC-PERPETUAL".into();
+        eth.symbol = eth.id.clone();
+        eth.base = "ETH".into();
+        markets.push(eth);
+        e.store_mut().set_markets(markets);
+        let mut o = opts();
+        if !same_symbol {
+            o.symbol = "ETH_USDC-PERPETUAL".into();
+        }
+        let write = place(&mut e, o);
+        e.handle(
+            1001.,
+            Event::HttpFailed {
+                request: write.id,
+                error: "synthetic placement uncertainty",
+            },
+        );
+        prepared_now(&mut e);
+        let a = command(
+            &mut e,
+            Command::CancelSymbolOrders {
+                command: 2,
+                symbol: SYMBOL.into(),
+            },
+        );
+        let cancel = requests(&a)
+            .into_iter()
+            .find(|r| packet(r)["method"] == "private/cancel_all_by_instrument")
+            .unwrap();
+        e.handle(
+            1002.,
+            Event::HttpFailed {
+                request: cancel.id,
+                error: "synthetic cancellation uncertainty",
+            },
+        );
+        let read = requests(&prepared_now(&mut e))
+            .into_iter()
+            .find(|r| packet(r)["method"] == "private/get_open_orders_by_instrument")
+            .unwrap();
+        reply(&mut e, &read, json!([]));
+        let a = fresh(&mut e, 3);
+        assert_eq!(
+            requests(&a).len(),
+            usize::from(!same_symbol),
+            "only in-scope placement uncertainty blocks BTC"
+        );
+        if !same_symbol {
+            let mut eth = opts();
+            eth.symbol = "ETH_USDC-PERPETUAL".into();
+            eth.client_order_id = Some("fresh-eth".into());
+            let a = command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 4,
+                    orders: vec![eth],
+                },
+            );
+            assert!(
+                requests(&a).is_empty(),
+                "ETH retains its own placement uncertainty"
+            );
+        }
+    }
+}
+
+#[test]
+fn review266_triggered_protection_is_valid_in_bulk_cancel_readback() {
+    for kind in ["stop_limit", "take_limit"] {
+        let mut e = engine();
+        let a = command(
+            &mut e,
+            Command::CancelSymbolOrders {
+                command: 2,
+                symbol: SYMBOL.into(),
+            },
+        );
+        let write = requests(&a).pop().unwrap();
+        e.handle(
+            1001.,
+            Event::HttpFailed {
+                request: write.id,
+                error: "synthetic cancellation uncertainty",
+            },
+        );
+        let read = requests(&prepared_now(&mut e))
+            .into_iter()
+            .find(|r| packet(r)["method"] == "private/get_open_orders_by_instrument")
+            .unwrap();
+        let mut row = protective_row();
+        row["order_type"] = json!(kind);
+        row["order_state"] = json!("triggered");
+        row["price"] = json!(59000.);
+        reply(&mut e, &read, json!([row]));
+        assert_eq!(
+            e.store().order("USDC-94166").unwrap().status,
+            OrderStatus::Open
+        );
+        assert_eq!(requests(&fresh(&mut e, 3)).len(), 1);
+    }
+}
+
+#[test]
+fn review266_numeric_price_equivalence_does_not_accept_wrong_or_missing_prices() {
+    for price in [json!(65000), Value::Null, json!("66000")] {
+        let mut e = engine();
+        let mut o = opts();
+        o.price = Some(66000.);
+        let write = place(&mut e, o);
+        let mut row = fixtures()["partial"]["order"].clone();
+        row["price"] = price;
+        let a = reply(&mut e, &write, json!({"order":row,"trades":[]}));
+        assert!(!done(&a));
+        let read = requests(&a)
+            .into_iter()
+            .find(|r| packet(r)["method"] == "private/get_order_state_by_label")
+            .unwrap();
+        reply(&mut e, &read, json!([row]));
+        assert!(e.store().orders().is_empty());
+        assert!(requests(&fresh(&mut e, 2)).is_empty());
+    }
+}
+
+#[test]
+fn review266_shared_status_decoder_keeps_rejected_and_partial_filled_ack_refusals() {
+    for state in ["rejected", "filled"] {
+        let mut e = engine();
+        let write = place(&mut e, opts());
+        let mut row = fixtures()["partial"]["order"].clone();
+        row["order_state"] = json!(state);
+        let a = reply(&mut e, &write, json!({"order":row,"trades":[]}));
+        assert!(!done(&a));
+        assert!(e.store().orders().is_empty());
+    }
+}

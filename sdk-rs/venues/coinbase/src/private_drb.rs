@@ -93,6 +93,7 @@ struct PositionChange {
     row: Position,
     leverage: bool,
     liquidation: bool,
+    closed_since_read: bool,
 }
 enum Overlay {
     None,
@@ -576,11 +577,7 @@ impl Coinbase {
                         )
                     )
                 {
-                    self.drb_trading_auth_failed(
-                        cx,
-                        VenueError::new("drb HTTP authentication was refused")
-                            .kind(ErrorKind::AuthInvalid),
-                    );
+                    self.drb_trading_auth_failed(cx, error.clone());
                 }
                 if read.bearer_revision == self.private_drb.bearer_revision
                     && matches!(
@@ -710,7 +707,9 @@ impl Coinbase {
                             merged.remove(&id);
                             continue;
                         }
-                        if let Some(snapshot) = merged.get(&id) {
+                        if !change.closed_since_read
+                            && let Some(snapshot) = merged.get(&id)
+                        {
                             if !change.leverage {
                                 change.row.leverage = snapshot.leverage;
                             }
@@ -757,7 +756,18 @@ impl Coinbase {
                         .into_iter()
                         .map(|(o, version)| (o.id.clone(), (o, version)))
                         .collect();
-                    merged.extend(changes.rows);
+                    for (id, (live, live_version)) in changes.rows {
+                        // Socket arrival order is not HTTP/WS ordering proof.
+                        // Keep live evidence unless REST is provably newer and
+                        // preserves cumulative fills and terminal state.
+                        if merged.get(&id).is_some_and(|(snapshot, version)| {
+                            version.provably_newer(live_version)
+                                && crate::trading_drb::order_follows(&live, snapshot)
+                        }) {
+                            continue;
+                        }
+                        merged.insert(id, (live, live_version));
+                    }
                     orders = merged.into_values().collect();
                 }
                 for (o, version) in &orders {
@@ -789,7 +799,7 @@ impl Coinbase {
     fn drb_order_version(&mut self, o: &Order, mut version: wire::OrderVersion) {
         if let Some(previous) = self.private_drb.versions.get(&o.id) {
             // An omitted optional field must not erase the known causal floor.
-            version.causal = version.causal.or(previous.causal);
+            version.causal = version.causal.max(previous.causal);
         }
         if !self.private_drb.versions.contains_key(&o.id) {
             self.private_drb.versions_fifo.push_back(o.id.clone());
@@ -800,6 +810,33 @@ impl Coinbase {
                 self.private_drb.versions.remove(&id);
             }
         }
+    }
+    fn drb_stream_order_version(
+        &self,
+        id: &str,
+        incoming: wire::OrderVersion,
+    ) -> Option<wire::OrderVersion> {
+        let floors = self.private_drb.versions.get(id).into_iter().chain(
+            self.private_drb.pending.values().filter_map(|read| {
+                if read.bearer_revision != self.private_drb.bearer_revision
+                    || read.revision != self.private_drb.revisions[3]
+                {
+                    return None;
+                }
+                match &read.overlay {
+                    Overlay::Orders(changes) => changes.rows.get(id).map(|(_, version)| version),
+                    _ => None,
+                }
+            }),
+        );
+        let mut effective = incoming;
+        for previous in floors {
+            if !incoming.supersedes(*previous) {
+                return None;
+            }
+            effective.causal = effective.causal.max(previous.causal);
+        }
+        Some(effective)
     }
     fn drb_private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.private_drb.socket.is_some() || cx.now < self.private_drb.reconnect_at {
@@ -1027,6 +1064,7 @@ impl Coinbase {
                     }
                 }
                 Ok(PositionChange {
+                    closed_since_read: p.contracts == 0.,
                     row: p,
                     leverage: row.get("leverage").is_some(),
                     liquidation: row.get("estimated_liquidation_price").is_some(),
@@ -1060,14 +1098,12 @@ impl Coinbase {
         }
         self.trading_drb.linkage.merge(linkage);
         for (o, version) in orders {
-            if self
-                .private_drb
-                .versions
-                .get(&o.id)
-                .is_some_and(|previous| !version.supersedes(*previous))
-            {
+            if !crate::trading_drb::order_is_newer(cx, &o) {
                 continue;
             }
+            let Some(version) = self.drb_stream_order_version(&o.id, version) else {
+                continue;
+            };
             for read in self.private_drb.pending.values_mut() {
                 if read.bearer_revision == self.private_drb.bearer_revision
                     && read.revision == self.private_drb.revisions[3]
@@ -1089,15 +1125,14 @@ impl Coinbase {
                     && let Overlay::Positions(changes) = &mut read.overlay
                 {
                     let mut change = p.clone();
-                    if let Some(previous) = changes.rows.get(&p.row.id)
-                        && previous.row.contracts != 0.
-                        && p.row.contracts != 0.
-                    {
-                        // A zero row retires the old position's metadata. A
-                        // reopening omission must be filled by the census.
-
-                        change.leverage |= previous.leverage;
-                        change.liquidation |= previous.liquidation;
+                    if let Some(previous) = changes.rows.get(&p.row.id) {
+                        // A census issued before this close cannot establish
+                        // metadata for the new position incarnation.
+                        change.closed_since_read |= previous.closed_since_read;
+                        if previous.row.contracts != 0. && p.row.contracts != 0. {
+                            change.leverage |= previous.leverage;
+                            change.liquidation |= previous.liquidation;
+                        }
                     }
                     changes.insert(p.row.id.clone(), change);
                 }
