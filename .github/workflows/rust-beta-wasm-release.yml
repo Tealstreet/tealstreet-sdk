@@ -1,10 +1,6 @@
-# Build the Rust-only beta bundle's wasm families from one exact SDK commit and
-# publish them as an immutable GitHub Release that tealstreet-next pins file by
-# file (scripts/rust-beta-wasm.pin.json). It runs after each Rust SDK master push
-# run whose required coverage passed, and publishes when that commit's sdk-rs/
-# inputs are new, so tealstreet-next's pin workflow finds a release for each import. RUST_BETA_HOLD
-# (a repository variable holding the reason) stops every release while set.
-# Design: docs/plans/RUST_BETA_BUNDLE.md (Build and CI).
+# Publish immutable beta wasm families from an exact SDK master commit.
+# Required coverage starts the reusable release; workflow completion is a fallback.
+# Runbook: docs/plans/callers/beta-wasm-auto-release.md.
 name: Rust beta wasm release
 
 on:
@@ -27,8 +23,15 @@ on:
         type: boolean
         default: false
 
+  workflow_call:
+    inputs:
+      sdk_sha:
+        required: true
+        type: string
+
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: rust-beta-wasm-release
@@ -41,10 +44,11 @@ env:
 jobs:
   roster:
     name: Beta wasm roster
-    # Automatic runs follow a Rust SDK push run on master; the certified guard then
-    # requires its required coverage job, so non-blocking CPU noise cannot stop a release.
+    # The direct call and completion fallback both prove required coverage;
+    # independent CPU work never delays the release.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
@@ -59,7 +63,11 @@ jobs:
         env:
           SDK_SHA: ${{ inputs.sdk_sha || github.event.workflow_run.head_sha }}
           TAG: ${{ inputs.tag || '' }}
+          PUSH_SHA: ${{ github.sha }}
         run: |
+          if [ "${{ github.event_name }}" = push ]; then
+            [ "$SDK_SHA" = "$PUSH_SHA" ] || { echo "sdk_sha must match the master push"; exit 1; }
+          fi
           [ -n "$TAG" ] || TAG="rust-beta-wasm-${SDK_SHA:0:11}"
           [[ "$SDK_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sdk_sha must be a full commit SHA"; exit 1; }
           [[ "$TAG" =~ ^rust-beta-wasm-[0-9a-f]{11}$ ]] || { echo "tag must be rust-beta-wasm-<11 hex>"; exit 1; }
@@ -88,7 +96,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node sdk-rs/harness/beta-wasm-release-guard.mjs held
-          if [ "${{ inputs.skip_certification }}" = true ]; then
+          if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.skip_certification }}" = true ]; then
             echo "::warning::publishing ${{ steps.source.outputs.sdk_sha }} without Rust / required coverage (manual override)"
           else
             node sdk-rs/harness/beta-wasm-release-guard.mjs certified "$GITHUB_REPOSITORY" '${{ steps.source.outputs.sdk_sha }}'
@@ -102,7 +110,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SDK_SHA: ${{ steps.source.outputs.sdk_sha }}
         run: |
-          if [ "${{ github.event_name }}" = workflow_run ]; then
+          if [ "${{ github.event_name }}" != workflow_dispatch ]; then
             superseded=$(node sdk-rs/harness/beta-wasm-release-guard.mjs superseded "$GITHUB_REPOSITORY" "$SDK_SHA")
             if [ -n "$superseded" ]; then
               echo "superseded by $superseded"
