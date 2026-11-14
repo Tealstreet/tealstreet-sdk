@@ -406,6 +406,18 @@ fn callback_rules(
                 .outcome(safe_cex_engine::Outcome::NotSent),
         );
     }
+    // Explicit private callback intent must retain its refusal before
+    // unused-agent cleanup can normalize missing account metadata to public.
+    if public
+        && payload
+        && keyed
+        && options
+            .public_mode
+            .as_ref()
+            .is_some_and(|mode| mode.requested == Some(false))
+    {
+        payload_signing_rules_in_mode(venue, options, provider_ready, false)?;
+    }
     // TS beta admission validates disabled-family callbacks before custody.
     if !construction::bridge(venue, options).dispatch_signing
         && !remote_signing_policy(venue).enabled

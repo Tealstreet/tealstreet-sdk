@@ -199,3 +199,7 @@ Master integration retains trusted Hosted beta admission: TxFlow remains OUT of
 the hosted beta roster even for public accounts. Client testnet construction and
 device agent verification remain available without enabling preview or production.
 New shared signing families and request-handoff refusals keep their native rules.
+
+Explicit private PayloadSigner requests retain callback-configuration refusal
+first, then unsupported/notSent for an injected provider, even before an owner
+address is supplied. Explicit public/keyless accounts still discard unused custody.
