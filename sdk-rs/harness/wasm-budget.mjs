@@ -443,8 +443,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14094520418: web/Node/replay 2,114,517 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
   // #3225 private drb: CI 42367168155, job 128387823292, source 42ef057e1 measured 2,022,882 B.
-  // Its 2,033,664 B measured-plus-10-KiB floor is retained by the larger master cap retained here.
-  coinbase: 2_126_848,
+  // Its 2,033,664 B measured-plus-10-KiB floor is retained by the larger cap retained here.
+  // #3225 refresh e7e52c5d8381: local optimized web/Node 2,217,653 B; source tree after master c3eaaf96d355.
+  // Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz via build.sh --venue coinbase; +10 KiB rounded up.
+  // SHA256 65435bcf57fdb27fde70499f21fd2b0737157b730ec9693792cf08f9437f6c32; preserve all parent floors.
+  coinbase: 2_228_224,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).

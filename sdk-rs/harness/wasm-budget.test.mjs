@@ -3175,3 +3175,18 @@ test('#3225 private drb CI 42367168155 retains measured headroom and the exact b
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
+
+
+test('#3225 refreshed private DRB artifacts retain 10 KiB and both Coinbase family boundaries', () => {
+  const measured = 2_217_653;
+  const minimumCap = 2_228_224;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    assert.equal(venueFamily(venue), 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES.coinbase;
+    assert.ok(cap >= Math.max(minimumCap, 2_126_848));
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
