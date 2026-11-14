@@ -3099,3 +3099,22 @@ for (const [family, artifact, measured, minimumCap, aliases] of [
     }
   });
 }
+
+// Local build.sh --venue lighter at d28424d3b6bf51619760093b2004e8a357da1524.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132, required two -Oz passes; web/Node
+// SHA256 a39817bd77ca65696cbf3dc95cabbe15f8fd0cd9f17e0daece68173c0568fe82.
+for (const venue of ['lighter', 'lighter-robinhood']) {
+  test(`Lighter protective-reference preflight: ${venue} retains measured 10 KiB reserve`, () => {
+    const measured = 2_178_471;
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(minimumCap, 2_189_312);
+    assert.equal(venueFamily(venue), 'lighter');
+    assert.equal(cap, WASM_VENUE_OVERRIDES.lighter);
+    assert.ok(cap >= 2_170_880, 'retain all historical parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} leaves less than 10 KiB above ${measured}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
