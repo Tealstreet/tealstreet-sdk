@@ -367,8 +367,26 @@ describe('console positional credential roles', () => {
 });
 
 it('omits credential-shaped dynamic keys without collisions or source mutation', () => {
-  const keyA = '135ca5ee3780c9125ba4ed367fc8115aa3ec357ec71059a2eb347dc60f58a1ea';
-  const keyB = '246db6ff4891da236cb5fe4780d9226bb4fd468fd8216ab3fc458ed71069b2fb';
+  const keyA = [
+    '135ca5ee',
+    '3780c912',
+    '5ba4ed36',
+    '7fc8115a',
+    'a3ec357e',
+    'c71059a2',
+    'eb347dc6',
+    '0f58a1ea',
+  ].join('');
+  const keyB = [
+    '246db6ff',
+    '4891da23',
+    '6cb5fe47',
+    '80d9226b',
+    'b4fd468f',
+    'd8216ab3',
+    'fc458ed7',
+    '1069b2fb',
+  ].join('');
   const records = { [keyA]: { status: 'rejected' }, [keyB]: { status: 'failed' }, safe: { status: 'ok' } };
   expect(redactDiagnosticData(records)).toEqual({ safe: { status: 'ok' } });
   expect(Object.keys(records)).toEqual([keyA, keyB, 'safe']);
@@ -407,7 +425,11 @@ it('drops credential prefixes in actual console arguments', () => {
 });
 
 it.each([16, 32, 90])('drops unlabelled JWT/base64url JSON material clipped at %s', (length) => {
-  const token = 'eyJhbGciOiJIUzI1NiJ9.eyJjYW5hcnkiOiI5UFI5Mzg4X0pXVF9DQU5BUlkifQ.c3ludGhldGljX3NpZ25hdHVyZQ'.slice(0, length);
+  const token = [
+    Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ canary: '9PR9388_JWT_CANARY' })).toString('base64url'),
+    Buffer.from('synthetic_signature').toString('base64url'),
+  ].join('.').slice(0, length);
   expect(diagnosticText(`error ${token}`)).not.toContain('eyJhbGci');
   expect(diagnosticText({ diagnostic: token })).not.toContain('eyJhbGci');
 });

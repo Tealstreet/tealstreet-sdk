@@ -138,3 +138,7 @@ retention and final sending. Ordinary grouping and live input objects are preser
 Whole-copy omission is a refusal: final event/breadcrumb hooks return null, and
 alert capture drops the diagnostic before claiming any throttle bucket. Never
 project fields from the omission marker or fall back to uninspected raw input.
+
+Redaction fixtures construct public canary bytes from short pieces or explicit
+JSON/base64 encoding. Keep the original runtime bytes and assertions; historical
+scan exceptions are exact commit/file/rule/line records, never a test-path exemption.
