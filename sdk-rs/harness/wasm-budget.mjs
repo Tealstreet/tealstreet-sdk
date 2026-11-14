@@ -486,6 +486,24 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Retain historical floors; 10,879 B reserve; shares coinbase family.
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14094520418: web/Node/replay 2,114,517 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
+  // #3225 parent: CI 42367168155/job 128387823292 measured 2,022,882 B.
+  // Its 2,033,664 B floor is retained by the larger current master cap.
+  // #3226 at 70534e760247, CI merge 32c729814fe1: run 43581762045/job 132408167613.
+  // Optimized web/Node 2,314,538 B; SHA256
+  // 5c2d9ff5f7489b48ad64307a289aad14b80f40224689fac3bdc9999150b59bc1.
+  // Rust1.99.0, bindgen0.2.129, Binaryen132; build.sh --venue coinbase, two -Oz passes.
+  // DRB trading/provider session recipes and conservative recovery/linkage are newly linked.
+  // Current CI bytes + 10 KiB rounded up; retain all parent floors, shared with Spot.
+  // #3226 composed head 3527907c2249, CI merge 0e5d24c60dde: run 43588966237/job 132429829237.
+  // Artifact 14111067968: optimized web/Node/replay 2,314,622 B; SHA256
+  // 53f76f2a10d4b82a0d6a50013050d152cb618e9f7d5c29b69df64ae56c56e496.
+  // Same pinned toolchain/two -Oz profile; +10 KiB still rounds to this cap (10,882 B reserve).
+  // #3226 fix c548d1eb3319 + master b86a48664: composed head89f7496f69aca.
+  // CI43598275562/job132457674114, source1108664e5141: optimized web/Node2,344,277 B.
+  // SHA256864e305c0b2edc517397404b064cf2255d429d2041d02cd679264201f2ac2d05.
+  // Rust1.99.0, bindgen0.2.129, Binaryen132; same required two-Oz profile.
+  // Bounded per-read stream reconciliation and dispatch-time edit intent add code.
+  // Current CI bytes +10 KiB rounded up; 10,923 B reserve, all older floors retained.
   // #3225 private drb: CI 42367168155, job 128387823292, source 42ef057e1 measured 2,022,882 B.
   // Its 2,033,664 B measured-plus-10-KiB floor is retained by the larger cap retained here.
   // #3225 refresh e7e52c5d8381: local optimized web/Node 2,217,653 B; source tree after master c3eaaf96d355.
@@ -497,7 +515,21 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3225 merge ee6f72edcfdc with master829f80ec68cb: optimized web/Node 2,222,017 B.
   // build.sh --venue coinbase; Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz; measured + 10 KiB rounded up.
   // SHA256 4251aa2f7169b389159e3af3c6126df4c9f0e0572fc4597a13634ecccabc1a48; retain all parent floors.
-  coinbase: 2_232_320,
+  // #3226 + merged #3225: head7b87c02999ae, CI43603165570/job132472467519.
+  // Artifact14117401283: optimized web/Node/replay2,346,763 B; SHA256
+  // 4c1200b004b8fb86924bacdc68a0199e67a9710fa7664aae3f330124f1ac9c67.
+  // Rust1.99.0, bindgen0.2.129, Binaryen132, required two -Oz passes.
+  // Master causal-order versions now remain attached to per-read stream overlays.
+  // Current CI bytes +10 KiB rounded up; 10,485 B reserve, every parent floor retained.
+  // #3226 review fixes b4bedc2279 + master b991dbd548; clean merge f0660fb9387f.
+  // CI43610609451/job132495348457, artifact14120177731, sourceb29eaa51e93a;
+  // identical CI/merged tree40bfb8ec80e2c13f9ae0229229e5e2fa4de6aab6.
+  // Optimized web/Node/replay2,348,687 B; SHA256
+  // 9793c41c170e9ee0ce010699f0ba2d0e63a03f18aabdef2cfe293aff22a65f5d.
+  // Rust1.99.0, bindgen0.2.129, Binaryen132, required two -Oz passes.
+  // Read-scoped close/version guards retain causal floors across bounded cache eviction.
+  // Current CI bytes +10 KiB rounded up; 10,609 B reserve, every prior floor retained.
+  coinbase: 2_359_296,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).

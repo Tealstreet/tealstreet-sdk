@@ -67,7 +67,7 @@ const fn refusal(code: i64, kind: ErrorKind) -> Row {
         only: None,
     }
 }
-const CODES: CodeTable = CodeTable {
+pub(crate) const CODES: CodeTable = CodeTable {
     rows: &[
         refusal(-32700, ErrorKind::InvalidInput),
         refusal(-32600, ErrorKind::InvalidInput),
@@ -238,20 +238,6 @@ impl Transport {
         session: Option<&Session>,
         pending: P,
     ) -> Result<(RpcId, RequestId), String> {
-        self.http_with_signing(cx, context, method, params, session, None, pending)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn http_with_signing<P>(
-        &mut self,
-        cx: &mut Cx<'_, P>,
-        context: &Context,
-        method: &str,
-        params: Value,
-        session: Option<&Session>,
-        step: Option<Box<dyn safe_cex_engine::SignStep>>,
-        pending: P,
-    ) -> Result<(RpcId, RequestId), String> {
         let intent = method_intent(method)?;
         if method.starts_with("private/") && session.is_none() {
             return Err("drb HTTP private request requires an engine bearer session".into());
@@ -278,32 +264,50 @@ impl Transport {
             }
         }
         let (id, body) = self.prepare(Channel::Http, method, intent, params, cx.now)?;
-        let result = if let Some(step) = step {
-            cx.request_signed_managed(
-                context.clone(),
-                session,
-                Method::Post,
-                url,
-                Some(body),
-                step,
-                pending,
-            )
-        } else {
-            cx.request_managed_with_headers(
-                context.clone(),
-                session,
-                if chart_get { Method::Get } else { Method::Post },
-                url,
-                &[("Content-Type", "application/json")],
-                (!chart_get).then_some(body),
-                pending,
-            )
-        };
-        let request = match result {
+        let request = match cx.request_managed_with_headers(
+            context.clone(),
+            session,
+            if chart_get { Method::Get } else { Method::Post },
+            url,
+            &[("Content-Type", "application/json")],
+            (!chart_get).then_some(body),
+            pending,
+        ) {
             Ok(request) => request,
             Err((_, error)) => {
                 // Admission failed before physical release. Retire correlation;
                 // credit estimates remain conservative and no resend is queued.
+                self.in_flight.remove(&id);
+                return Err(error.to_string());
+            }
+        };
+        cx.request_timeout(request, REQUEST_TIMEOUT_MS);
+        Ok((id, request))
+    }
+
+    /// Provider-backed login retains a signed recipe inside the managed request;
+    /// attaching an unmanaged signing action after queuing would be too late.
+    pub(crate) fn http_auth<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        context: &Context,
+        params: Value,
+        pending: P,
+        step: impl FnOnce(RpcId) -> Box<dyn safe_cex_engine::SignStep>,
+    ) -> Result<(RpcId, RequestId), String> {
+        let (id, body) =
+            self.prepare(Channel::Http, "public/auth", Intent::Read, params, cx.now)?;
+        let request = match cx.request_signed_managed(
+            context.clone(),
+            None,
+            Method::Post,
+            format!("{HTTP_URL}/public/auth"),
+            Some(body),
+            step(id),
+            pending,
+        ) {
+            Ok(request) => request,
+            Err((_, error)) => {
                 self.in_flight.remove(&id);
                 return Err(error.to_string());
             }
@@ -330,12 +334,14 @@ impl Transport {
         Ok(id)
     }
 
-    pub(crate) fn websocket_signed<P>(
+    /// Provider-backed authentication is read-only and pinned to this socket.
+    /// Mutation methods cannot enter the generic signed-auth queue.
+    pub(crate) fn websocket_auth<P>(
         &mut self,
         cx: &mut Cx<'_, P>,
         socket: SocketId,
         params: Value,
-        step: Box<dyn safe_cex_engine::SignStep>,
+        step: impl FnOnce(RpcId) -> Box<dyn safe_cex_engine::SignStep>,
     ) -> Result<RpcId, String> {
         if socket == SocketId(0) {
             return Err("drb invalid socket".into());
@@ -347,7 +353,7 @@ impl Transport {
             params,
             cx.now,
         )?;
-        cx.send_signed(socket, body, step);
+        cx.send_signed(socket, body, step(id));
         Ok(id)
     }
 
@@ -541,7 +547,7 @@ impl Transport {
 // Closed semantic contract, independent of rate pools. New methods must be
 // classified here and pinned in the foundation authority table before use.
 // Authentication/heartbeat/subscription control is Read; account and trading writes are not.
-fn method_intent(method: &str) -> Result<Intent, String> {
+pub(crate) fn method_intent(method: &str) -> Result<Intent, String> {
     Ok(match method {
         "private/buy" | "private/sell" | "private/close_position" => Intent::Place,
         "private/cancel"

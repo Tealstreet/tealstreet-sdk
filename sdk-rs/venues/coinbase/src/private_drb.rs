@@ -3,14 +3,15 @@
 #[path = "private_drb_history.rs"]
 mod history;
 #[path = "private_drb_wire.rs"]
-mod wire;
+pub(crate) mod wire;
 use crate::{Coinbase, Pending, drb, drb_auth};
 use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
-    Context, Operation, Owner, Policy, RetryPolicy, Scope, Session, SessionBearer, SessionHeaders,
-    SessionPolicy,
+    Context, Egress, Operation, Owner, Policy, RetryPolicy, Scope, Session, SessionBearer,
+    SessionHeaders, SessionPolicy,
 };
 use safe_cex_engine::startup::Sections;
 use safe_cex_engine::{
@@ -64,7 +65,52 @@ impl Kind {
         }
     }
 }
+// Stream changes belong to the exact in-flight census. Preserve terminal
+// rows/tombstones rather than invalidating unrelated authoritative omissions.
+struct Changes<T> {
+    rows: BTreeMap<String, T>,
+    overflow: bool,
+}
+impl<T> Default for Changes<T> {
+    fn default() -> Self {
+        Self {
+            rows: BTreeMap::new(),
+            overflow: false,
+        }
+    }
+}
+impl<T> Changes<T> {
+    fn insert(&mut self, id: String, row: T) {
+        if self.rows.contains_key(&id) || self.rows.len() < MAX_ROWS {
+            self.rows.insert(id, row);
+        } else {
+            self.overflow = true;
+        }
+    }
+}
+#[derive(Clone)]
+struct PositionChange {
+    row: Position,
+    leverage: bool,
+    liquidation: bool,
+    closed_since_read: bool,
+}
+enum Overlay {
+    None,
+    Orders(Changes<(Order, wire::OrderVersion)>),
+    Positions(Changes<PositionChange>),
+}
+impl Overlay {
+    fn new(kind: &Kind) -> Self {
+        match kind {
+            Kind::Orders => Self::Orders(Changes::default()),
+            Kind::Positions => Self::Positions(Changes::default()),
+            _ => Self::None,
+        }
+    }
+}
 struct InFlight {
+    overlay: Overlay,
     orders_token: Option<safe_cex_engine::store::OrderSnapshotToken>,
     rpc: drb::RpcId,
     context: Context,
@@ -220,14 +266,14 @@ impl Coinbase {
         self.private_drb.enabled = true;
         self.private_drb.now = cx.now;
         if self.private_drb.bearer.is_none() {
+            let Ok((selection, _)) = self.signers.select(CredentialRole::SessionAuth) else {
+                warn(cx, "drb credentials unavailable");
+                return;
+            };
             match cx.open_session(SessionPolicy {
                 credential: None,
                 repeat_safe: false,
-                private_egress: self
-                    .signers
-                    .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
-                    .ok()
-                    .and_then(|(selection, _)| selection.session_egress()),
+                private_egress: selection.session_egress(),
             }) {
                 Ok(s) => self.private_drb.bearer = Some(s),
                 Err(e) => {
@@ -278,16 +324,17 @@ impl Coinbase {
         }
         let params = self
             .signers
-            .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+            .select(CredentialRole::SessionAuth)
+            .ok()
             .map(|(_, credentials)| credentials)
-            .map_err(|_| "drb credentials unavailable".to_owned())
+            .ok_or("drb credentials unavailable".to_owned())
             .and_then(|c| {
                 if c.identity().is_some() {
-                    Ok(self.private_drb.http.params_to_sign(cx.now))
+                    self.private_drb.http.pending_params(cx.now)
                 } else {
                     self.private_drb
                         .http
-                        .params(c, cx.now, |b| cx.fill_signing_entropy(b))
+                        .params_at(c, cx.now, cx.protocol_now(), |b| cx.fill_signing_entropy(b))
                 }
             });
         match params {
@@ -297,22 +344,31 @@ impl Coinbase {
     }
     fn drb_read(&mut self, cx: &mut Cx<'_, Pending>, kind: Kind, method: &str, params: Value) {
         self.private_drb.now = cx.now;
-        let mut read_policy = policy();
-        let step = if matches!(kind, Kind::Auth) {
-            self.signers
-                .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
-                .ok()
-                .and_then(|(selection, credentials)| {
-                    let identity = credentials.identity()?;
-                    read_policy.credential = Some(selection.authority(identity));
-                    credentials.drb_auth_step(drb::Channel::Http)
-                })
+        let authentication = if matches!(kind, Kind::Auth) {
+            match self.signers.select(CredentialRole::SessionAuth) {
+                Ok((selection, credentials)) => Some((
+                    selection,
+                    credentials.identity().cloned(),
+                    credentials.binding(),
+                )),
+                Err(_) => {
+                    self.drb_read_failed(cx, kind, VenueError::new("drb credentials unavailable"));
+                    return;
+                }
+            }
         } else {
             None
         };
         let issued = match &kind {
-            Kind::History(h) => cx.http_leg_context(h.owner.root(), read_policy),
-            _ => cx.http_live_context(Scope::Background, read_policy),
+            Kind::History(h) => cx.http_leg_context(h.owner.root(), policy()),
+            Kind::Auth => {
+                let mut policy = policy();
+                if let Some((selection, Some(identity), _)) = &authentication {
+                    policy.credential = Some(selection.authority(identity));
+                }
+                cx.http_live_context_with_egress(Scope::Background, policy, Egress::Primary)
+            }
+            _ => cx.http_live_context(Scope::Background, policy()),
         };
         let context = match issued {
             Ok(c) => c,
@@ -348,19 +404,25 @@ impl Coinbase {
             self.drb_http_session()
         }
         .cloned();
-        match self.drb.http_with_signing(
-            cx,
-            &context,
-            method,
-            params,
-            session.as_ref(),
-            step,
-            pending,
-        ) {
+        let issued = if let Some((_, Some(identity), binding)) = authentication {
+            self.drb.http_auth(cx, &context, params, pending, |rpc| {
+                Box::new(crate::sign::DrbAuth::new(
+                    identity,
+                    binding,
+                    drb::Channel::Http,
+                    rpc,
+                ))
+            })
+        } else {
+            self.drb
+                .http(cx, &context, method, params, session.as_ref(), pending)
+        };
+        match issued {
             Ok((rpc, _)) => {
                 self.private_drb.pending.insert(
                     ticket,
                     InFlight {
+                        overlay: Overlay::new(&kind),
                         orders_token,
                         rpc,
                         context,
@@ -468,6 +530,7 @@ impl Coinbase {
                             self.drb_start(cx);
                         }
                         self.drb_after_markets(cx);
+                        self.drb_trading_ready(cx);
                     }
                 } else if read.bearer_revision == self.private_drb.bearer_revision {
                     match read.kind {
@@ -475,8 +538,13 @@ impl Coinbase {
                         kind => {
                             let slot = kind.slot();
                             if read.revision == self.private_drb.revisions[slot]
-                                && let Err(e) =
-                                    self.drb_publish(cx, &kind, value, read.orders_token)
+                                && let Err(e) = self.drb_publish(
+                                    cx,
+                                    &kind,
+                                    value,
+                                    read.orders_token,
+                                    read.overlay,
+                                )
                             {
                                 warn(cx, e);
                             }
@@ -499,6 +567,18 @@ impl Coinbase {
                         response.status, failure.code
                     ),
                 );
+                if matches!(read.kind, Kind::Auth)
+                    && matches!(
+                        failure.verdict,
+                        safe_cex_engine::classify::Verdict::Refused(
+                            ErrorKind::AuthInvalid
+                                | ErrorKind::AuthExpired
+                                | ErrorKind::AuthPermission
+                        )
+                    )
+                {
+                    self.drb_trading_auth_failed(cx, error.clone());
+                }
                 if read.bearer_revision == self.private_drb.bearer_revision
                     && matches!(
                         error.kind,
@@ -577,6 +657,16 @@ impl Coinbase {
                 Some(failure) => rpc_read_error(&failure, Released::Transport, message),
                 None => VenueError::new(message).kind(kind),
             };
+            if matches!(read.kind, Kind::Auth)
+                && matches!(
+                    error.kind,
+                    Some(
+                        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission
+                    )
+                )
+            {
+                self.drb_trading_auth_failed(cx, error.clone());
+            }
             self.drb_read_failed(cx, read.kind, error);
             let _ = cx.finish_http_context(&read.context);
         }
@@ -587,6 +677,7 @@ impl Coinbase {
         kind: &Kind,
         value: Value,
         orders_token: Option<safe_cex_engine::store::OrderSnapshotToken>,
+        overlay: Overlay,
     ) -> Result<(), String> {
         match kind {
             Kind::Summary => {
@@ -595,7 +686,7 @@ impl Coinbase {
             }
             Kind::Positions => {
                 let mut ids = HashSet::new();
-                let positions = rows(value)?
+                let mut positions = rows(value)?
                     .into_iter()
                     .map(position)
                     .collect::<Result<Vec<_>, _>>()?;
@@ -604,6 +695,31 @@ impl Coinbase {
                         return Err("drb duplicate position identity".into());
                     }
                     self.drb_market(cx, &p.symbol)?;
+                }
+                if let Overlay::Positions(changes) = overlay {
+                    if changes.overflow {
+                        return Err("drb position snapshot change limit".into());
+                    }
+                    let mut merged: BTreeMap<_, _> =
+                        positions.into_iter().map(|p| (p.id.clone(), p)).collect();
+                    for (id, mut change) in changes.rows {
+                        if change.row.contracts == 0. {
+                            merged.remove(&id);
+                            continue;
+                        }
+                        if !change.closed_since_read
+                            && let Some(snapshot) = merged.get(&id)
+                        {
+                            if !change.leverage {
+                                change.row.leverage = snapshot.leverage;
+                            }
+                            if !change.liquidation {
+                                change.row.liquidation_price = snapshot.liquidation_price;
+                            }
+                        }
+                        merged.insert(id, change.row);
+                    }
+                    positions = merged.into_values().collect();
                 }
                 for p in &positions {
                     Self::drb_setting(cx, p);
@@ -618,9 +734,13 @@ impl Coinbase {
                     return Ok(());
                 }
                 let mut ids = HashSet::new();
-                let orders = rows(value)?
+                let mut linkage = crate::drb_linkage::Linkage::default();
+                let mut orders = rows(value)?
                     .into_iter()
-                    .map(wire::versioned_order)
+                    .map(|row| {
+                        linkage.observe(&row)?;
+                        wire::versioned_order(row)
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 for (o, _) in &orders {
                     if o.status != OrderStatus::Open || !ids.insert(o.id.clone()) {
@@ -628,9 +748,32 @@ impl Coinbase {
                     }
                     self.drb_market(cx, &o.symbol)?;
                 }
+                if let Overlay::Orders(changes) = overlay {
+                    if changes.overflow {
+                        return Err("drb order snapshot change limit".into());
+                    }
+                    let mut merged: BTreeMap<_, _> = orders
+                        .into_iter()
+                        .map(|(o, version)| (o.id.clone(), (o, version)))
+                        .collect();
+                    for (id, (live, live_version)) in changes.rows {
+                        // Socket arrival order is not HTTP/WS ordering proof.
+                        // Keep live evidence unless REST is provably newer and
+                        // preserves cumulative fills and terminal state.
+                        if merged.get(&id).is_some_and(|(snapshot, version)| {
+                            version.provably_newer(live_version)
+                                && crate::trading_drb::order_follows(&live, snapshot)
+                        }) {
+                            continue;
+                        }
+                        merged.insert(id, (live, live_version));
+                    }
+                    orders = merged.into_values().collect();
+                }
                 for (o, version) in &orders {
                     self.drb_order_version(o, *version);
                 }
+                self.trading_drb.linkage.merge(linkage);
                 cx.store.commit_orders_snapshot([token], |_| {
                     orders.into_iter().map(|(o, _)| o).collect()
                 });
@@ -656,7 +799,7 @@ impl Coinbase {
     fn drb_order_version(&mut self, o: &Order, mut version: wire::OrderVersion) {
         if let Some(previous) = self.private_drb.versions.get(&o.id) {
             // An omitted optional field must not erase the known causal floor.
-            version.causal = version.causal.or(previous.causal);
+            version.causal = version.causal.max(previous.causal);
         }
         if !self.private_drb.versions.contains_key(&o.id) {
             self.private_drb.versions_fifo.push_back(o.id.clone());
@@ -667,6 +810,33 @@ impl Coinbase {
                 self.private_drb.versions.remove(&id);
             }
         }
+    }
+    fn drb_stream_order_version(
+        &self,
+        id: &str,
+        incoming: wire::OrderVersion,
+    ) -> Option<wire::OrderVersion> {
+        let floors = self.private_drb.versions.get(id).into_iter().chain(
+            self.private_drb.pending.values().filter_map(|read| {
+                if read.bearer_revision != self.private_drb.bearer_revision
+                    || read.revision != self.private_drb.revisions[3]
+                {
+                    return None;
+                }
+                match &read.overlay {
+                    Overlay::Orders(changes) => changes.rows.get(id).map(|(_, version)| version),
+                    _ => None,
+                }
+            }),
+        );
+        let mut effective = incoming;
+        for previous in floors {
+            if !incoming.supersedes(*previous) {
+                return None;
+            }
+            effective.causal = effective.causal.max(previous.causal);
+        }
+        Some(effective)
     }
     fn drb_private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.private_drb.socket.is_some() || cx.now < self.private_drb.reconnect_at {
@@ -689,21 +859,7 @@ impl Coinbase {
             .private_drb
             .socket
             .ok_or("drb private socket unavailable")?;
-        let step = if matches!(kind, WsKind::Auth) {
-            self.signers
-                .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
-                .ok()
-                .and_then(|(_, credentials)| {
-                    credentials.drb_auth_step(drb::Channel::WebSocket(socket))
-                })
-        } else {
-            None
-        };
-        let rpc = if let Some(step) = step {
-            self.drb.websocket_signed(cx, socket, params, step)?
-        } else {
-            self.drb.websocket(cx, socket, method, params)?
-        };
+        let rpc = self.drb.websocket(cx, socket, method, params)?;
         self.private_drb.ws_pending.insert(
             rpc,
             WsRequest {
@@ -719,16 +875,41 @@ impl Coinbase {
             .ws
             .as_ref()
             .ok_or("drb private socket unavailable")?;
-        let (_, credentials) = self
+        let credentials = self
             .signers
-            .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
-            .map_err(|_| "drb credentials unavailable")?;
-        let params = if credentials.identity().is_some() {
-            session.params_to_sign(cx.now)
+            .select(CredentialRole::SessionAuth)
+            .ok()
+            .map(|(_, credentials)| credentials)
+            .ok_or("drb credentials unavailable")?;
+        if let Some(identity) = credentials.identity().cloned() {
+            let binding = credentials.binding();
+            let params = session.pending_params(cx.now)?;
+            let socket = self
+                .private_drb
+                .socket
+                .ok_or("drb private socket unavailable")?;
+            let rpc = self.drb.websocket_auth(cx, socket, params, |rpc| {
+                Box::new(crate::sign::DrbAuth::new(
+                    identity,
+                    binding,
+                    drb::Channel::WebSocket(socket),
+                    rpc,
+                ))
+            })?;
+            self.private_drb.ws_pending.insert(
+                rpc,
+                WsRequest {
+                    kind: WsKind::Auth,
+                    started: cx.now,
+                },
+            );
+            Ok(())
         } else {
-            session.params(credentials, cx.now, |b| cx.fill_signing_entropy(b))?
-        };
-        self.drb_ws_send(cx, WsKind::Auth, "public/auth", params)
+            let params = session.params_at(credentials, cx.now, cx.protocol_now(), |b| {
+                cx.fill_signing_entropy(b)
+            })?;
+            self.drb_ws_send(cx, WsKind::Auth, "public/auth", params)
+        }
     }
     pub(crate) fn drb_private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.private_drb.socket != Some(socket) {
@@ -858,10 +1039,14 @@ impl Coinbase {
         if changes.orders.len() + changes.positions.len() + changes.trades.len() > MAX_ROWS {
             return Err("drb change row limit".into());
         }
+        let mut linkage = crate::drb_linkage::Linkage::default();
         let orders = changes
             .orders
             .into_iter()
-            .map(wire::versioned_order)
+            .map(|row| {
+                linkage.observe(&row)?;
+                wire::versioned_order(row)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let positions = changes
             .positions
@@ -878,7 +1063,12 @@ impl Coinbase {
                         p.leverage = previous.leverage;
                     }
                 }
-                Ok(p)
+                Ok(PositionChange {
+                    closed_since_read: p.contracts == 0.,
+                    row: p,
+                    leverage: row.get("leverage").is_some(),
+                    liquidation: row.get("estimated_liquidation_price").is_some(),
+                })
             })
             .collect::<Result<Vec<_>, String>>()?;
         let trades = changes
@@ -886,11 +1076,17 @@ impl Coinbase {
             .iter()
             .map(wire::trade)
             .collect::<Result<Vec<_>, _>>()?;
+        let mut position_ids = HashSet::new();
+        for position in &positions {
+            if !position_ids.insert(&position.row.id) {
+                return Err("drb duplicate position identity".into());
+            }
+        }
         // Validate the whole event before publishing any component.
         for s in orders
             .iter()
             .map(|(o, _)| o.symbol.as_str())
-            .chain(positions.iter().map(|p| p.symbol.as_str()))
+            .chain(positions.iter().map(|p| p.row.symbol.as_str()))
         {
             self.drb_market(cx, s)?;
         }
@@ -900,20 +1096,21 @@ impl Coinbase {
                 trade["symbol"].as_str().ok_or("drb invalid trade symbol")?,
             )?;
         }
-        if !orders.is_empty() {
-            self.private_drb.revisions[3] += 1;
-        }
-        if !positions.is_empty() {
-            self.private_drb.revisions[2] += 1;
-        }
+        self.trading_drb.linkage.merge(linkage);
         for (o, version) in orders {
-            if self
-                .private_drb
-                .versions
-                .get(&o.id)
-                .is_some_and(|previous| !version.supersedes(*previous))
-            {
+            if !crate::trading_drb::order_is_newer(cx, &o) {
                 continue;
+            }
+            let Some(version) = self.drb_stream_order_version(&o.id, version) else {
+                continue;
+            };
+            for read in self.private_drb.pending.values_mut() {
+                if read.bearer_revision == self.private_drb.bearer_revision
+                    && read.revision == self.private_drb.revisions[3]
+                    && let Overlay::Orders(changes) = &mut read.overlay
+                {
+                    changes.insert(o.id.clone(), (o.clone(), version));
+                }
             }
             self.drb_order_version(&o, version);
             if cx.store.order(&o.id) == Some(&o) {
@@ -922,8 +1119,26 @@ impl Coinbase {
             cx.store.upsert_order(o);
         }
         for p in positions {
-            Self::drb_setting(cx, &p);
-            cx.store.upsert_position(p);
+            for read in self.private_drb.pending.values_mut() {
+                if read.bearer_revision == self.private_drb.bearer_revision
+                    && read.revision == self.private_drb.revisions[2]
+                    && let Overlay::Positions(changes) = &mut read.overlay
+                {
+                    let mut change = p.clone();
+                    if let Some(previous) = changes.rows.get(&p.row.id) {
+                        // A census issued before this close cannot establish
+                        // metadata for the new position incarnation.
+                        change.closed_since_read |= previous.closed_since_read;
+                        if previous.row.contracts != 0. && p.row.contracts != 0. {
+                            change.leverage |= previous.leverage;
+                            change.liquidation |= previous.liquidation;
+                        }
+                    }
+                    changes.insert(p.row.id.clone(), change);
+                }
+            }
+            Self::drb_setting(cx, &p.row);
+            cx.store.upsert_position(p.row);
         }
         for trade in trades {
             let id = trade["id"].as_str().unwrap().to_owned();

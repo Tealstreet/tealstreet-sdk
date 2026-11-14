@@ -3380,6 +3380,27 @@ for (const [venue, family, measured, minimumCap, sha256, parentFloor] of [
   });
 }
 
+// #3226 run 43581762045/job 132408167613, CI merge 32c729814fe1b342b7184ac06c871397a662dd74.
+// Optimized web/Node 2,314,538 B, SHA256
+// 5c2d9ff5f7489b48ad64307a289aad14b80f40224689fac3bdc9999150b59bc1.
+// Rust1.99.0, bindgen0.2.129, Binaryen132, two required -Oz passes.
+// Fresh composed head 3527907c2249, run 43588966237/job 132429829237/artifact 14111067968:
+// optimized web/Node/replay 2,314,622 B, same profile; the existing measured floor remains valid.
+test('#3226 DRB trading retains current measured reserve and both parent floors', () => {
+  const measured = 2_314_622;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_325_504);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_126_848, 'retain master and PR-parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: less than 10 KiB above current CI artifact`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
 // #3290 merge bbc40c3cd8ad, CI 43582722154/job 132414117890, family artifact 14109099497.
 // Source 2cf28d853f16058cb6802e0aec598c43f132cd78; web/Node/replay SHA ca71afa4470420325dfcd035152511607e2f288559cffb6fc25a0e32c66168c4.
 // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; required two -Oz passes.
@@ -3536,6 +3557,47 @@ for (const [venue, family, artifact, measured, minimumCap] of [
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
+
+
+// #3226 c548d1eb3 fix + master b86a48664; head89f7496f69aca.
+// CI43598275562/job132457674114, source1108664e5141: optimized web/Node2344277B.
+// SHA256864e305c0b2edc517397404b064cf2255d429d2041d02cd679264201f2ac2d05.
+// Rust1.99.0, bindgen0.2.129, Binaryen132, two required -Oz passes.
+test('#3226 per-identity census and queued intent keep current CI reserve', () => {
+  const measured = 2_344_277;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_355_200);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_325_504, 'retain all measured parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: less than 10 KiB above current CI module`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
+// #3226 master #3225 composition7b87c02999ae, CI43603165570/job132472467519.
+// Artifact14117401283: web/Node/replay2346763B, SHA256
+// 4c1200b004b8fb86924bacdc68a0199e67a9710fa7664aae3f330124f1ac9c67.
+// Rust1.99.0, bindgen0.2.129, Binaryen132 and two required -Oz passes.
+test('#3226 causal-order composition retains the current CI reserve', () => {
+  const measured = 2_346_763;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_357_248);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_355_200, 'retain all measured parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: less than 10 KiB above current CI module`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
 
 // #3273 run 43563376371, artifact 14101234552; source d420622af083 has merge 18f33911d's tree.
 // Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; equal web/Node/replay bytes.
@@ -3714,4 +3776,25 @@ test('#3273 exact-head CI TxFlow artifact retains measured reserve', () => {
   assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+// #3226 review fixes b4bedc2279 + master b991dbd548; clean merge f0660fb9387f.
+// CI43610609451/job132495348457, artifact14120177731, sourceb29eaa51e93a.
+// CI and merged branch share tree40bfb8ec80e2c13f9ae0229229e5e2fa4de6aab6.
+// Five optimized web/Node/replay copies SHA256
+// 9793c41c170e9ee0ce010699f0ba2d0e63a03f18aabdef2cfe293aff22a65f5d.
+test('#3226 reviewed reconciliation CI artifact retains 10 KiB for the Coinbase family', () => {
+  const measured = 2_348_687;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_359_296);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_357_248, 'retain every historical parent floor');
+    assert.ok(cap >= minimumCap, `coinbase: ${cap} leaves less than 10 KiB above ${measured}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
 });
