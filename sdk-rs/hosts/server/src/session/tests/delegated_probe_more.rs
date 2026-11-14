@@ -301,3 +301,40 @@ async fn verified_rebuild_retires_previous_output_generation() {
     assert_eq!(current["d"]["instanceId"], "verified-owner-B");
     session.close();
 }
+
+#[tokio::test]
+async fn bybit_admission_retains_classified_refusal_and_original_attempt_context() {
+    for (code, kind, transient) in [
+        (10003, "authInvalid", false),
+        (10010, "authPermission", false),
+        (10006, "rateLimited", true),
+    ] {
+        let f = fixture_with_auth(true).await;
+        f.code.store(code, Ordering::SeqCst);
+        let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+        let mut results = session.take_verified();
+        let init = payload(&mut session, Some("candidate"));
+        let attempt_id = init.sealed.as_ref().unwrap().attempt_id.clone();
+        session.init(init).await.unwrap();
+        let completed = tokio::time::timeout(Duration::from_secs(10), results.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let probe = completed.probe.as_ref().unwrap();
+        let refusal = probe.permit.as_ref().err().unwrap();
+        let fields = probe.diagnostic.as_ref().unwrap().fields(*refusal);
+        assert_eq!(fields["attempt_id"], attempt_id);
+        assert_eq!(fields["venue"], "bybit");
+        assert_eq!(fields["error_kind"], kind);
+        assert_eq!(fields["venue_code"], code);
+        assert_eq!(fields["transient"], transient);
+        session.verification_completed(completed).await.unwrap();
+        assert_eq!(
+            sent.try_recv().unwrap(),
+            envelope::with_instance_id(envelope::init_unverified("acct", transient), "candidate")
+        );
+        assert!(session.joined.is_empty());
+        assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+        session.close();
+    }
+}

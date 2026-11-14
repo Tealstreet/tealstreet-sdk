@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use zeroize::Zeroizing;
 
 mod construction;
+mod diagnostics;
 mod plaintext;
+pub(crate) use diagnostics::RefusalContext;
 pub(crate) mod probe;
 pub(crate) use construction::fingerprint;
 pub use construction::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};

@@ -348,7 +348,13 @@ async fn hosted_venues_use_real_delegated_construction_and_the_existing_probe() 
                     assert_eq!(result.is_ok(), accepted, "{venue}: {result:?}");
                     assert!(seen.lock().unwrap().signed_reads > 0);
                     if !accepted {
-                        assert!(matches!(result, Err(ProbeRefusal { transient: false })));
+                        assert!(matches!(
+                            result,
+                            Err(ProbeRefusal {
+                                transient: false,
+                                ..
+                            })
+                        ));
                     }
                 }
             }
@@ -498,7 +504,13 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                             assert_eq!(seen.refused, 0);
                         } else {
                             assert!(
-                                matches!(result, Err(ProbeRefusal { transient: false })),
+                                matches!(
+                                    result,
+                                    Err(ProbeRefusal {
+                                        transient: false,
+                                        ..
+                                    })
+                                ),
                                 "{venue}: {result:?}"
                             );
                             assert!(seen.refused > 0, "{venue}: fixture verified the signature");
@@ -513,7 +525,13 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                 }
                 let (result, seen) = check(venue, local(venue, "synthetic-other-material")).await;
                 assert!(
-                    matches!(result, Err(ProbeRefusal { transient: false })),
+                    matches!(
+                        result,
+                        Err(ProbeRefusal {
+                            transient: false,
+                            ..
+                        })
+                    ),
                     "{venue}: different delegated pair"
                 );
                 assert!(seen.lock().unwrap().refused > 0);
@@ -613,7 +631,13 @@ async fn admission_hmac_public_or_frame_fed_startup_cannot_prove_a_private_key()
                     prepared.options = options.to_string();
                     let (result, seen) = check(venue, prepared).await;
                     assert!(
-                        matches!(result, Err(ProbeRefusal { transient: false })),
+                        matches!(
+                            result,
+                            Err(ProbeRefusal {
+                                transient: false,
+                                ..
+                            })
+                        ),
                         "{venue}: {field} cannot satisfy private admission"
                     );
                     assert_eq!(seen.lock().unwrap().signed_reads, 0);
