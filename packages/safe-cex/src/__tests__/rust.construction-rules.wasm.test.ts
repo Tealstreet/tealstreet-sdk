@@ -80,7 +80,7 @@ it('Polymarket private accounts need a wallet private key', () =>
 it('Orderly private accounts need an application id', () =>
   startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
-it('native private construction checks callback provider availability before unsupported custody and I/O', async () => {
+it('native private TxFlow payload intent refuses unsupported custody before callback setup and I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
   expect(
     () =>
@@ -92,7 +92,7 @@ it('native private construction checks callback provider availability before uns
           payloadSigner: true,
         }),
       ),
-  ).toThrow('Delegated signing requires a configured callback provider');
+  ).toThrow('Rust txflow has no REST-only PayloadSigner lifecycle');
 });
 
 it.each([
@@ -263,9 +263,11 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'polymarket', 'lighter', 'l
     for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
       const options = {
         key: 'key',
+        applicationId: name === 'txflow' ? WALLET : undefined,
         secret,
         apiKeyIndex: '2',
         testnet: true,
+        publicDataOnly: false,
         payloadSigner: async () => {
           signatures++;
           return { signature: 'unexpected' };
@@ -304,7 +306,7 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'polymarket', 'lighter', 'l
 );
 
 it.each(['txflow'] as const)(
-  'compiled native %s distinguishes missing providers from unsupported payload custody',
+  'compiled native %s refuses payload custody independently of provider readiness',
   async (name) => {
     const { WasmEngine } = await loadNodeEngine();
     for (const providerReady of [false, true]) {
@@ -326,10 +328,8 @@ it.each(['txflow'] as const)(
         throw new Error('Expected a structured native construction refusal');
       }
       expect(JSON.parse(failure.venueError), `${name} providerReady=${providerReady}`).toMatchObject({
-        message: providerReady
-          ? `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`
-          : 'Delegated signing requires a configured callback provider',
-        kind: providerReady ? 'unsupported' : 'invalidInput',
+        message: 'Rust txflow has no REST-only PayloadSigner lifecycle',
+        kind: 'unsupported',
         outcome: 'notSent',
       });
     }

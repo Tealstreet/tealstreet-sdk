@@ -463,6 +463,8 @@ export interface RemoteSignerRequest {
       | 'grvt-address'
       | 'hyperliquid-l1'
       | 'hyperliquid-address'
+      | 'txflow-agent'
+      | 'txflow-address'
       // Lighter: `toSign` is a transaction or auth statement the device re-derives
       // the signed words from; the reply concatenates the 80-byte signatures.
       | 'lighter-tx'

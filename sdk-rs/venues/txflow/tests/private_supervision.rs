@@ -33,11 +33,11 @@ impl Rig {
         let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
             testnet: true,
             application_id: Some(WALLET.into()),
-            secret: Some(format!("0x{:064x}", 1)),
+            credentials: signer::identity(),
             ..Options::default()
         }));
         engine.set_public_feed_policy(policy).unwrap();
-        engine.start(NOW);
+        signer::start(&mut engine, NOW);
         let mut rig = Self {
             engine,
             now: NOW,

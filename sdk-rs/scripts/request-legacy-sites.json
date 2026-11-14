@@ -185,10 +185,7 @@
     "17292f7e8ba96b8ca495e3a6d66f3451c5c670f2658c3ccb7117b49878c06dd0": 1
   },
   "venues/txflow/src/trading.rs": {
-    "e60d4faaec87616724c424c27deebd0b50a9a0a5627364b78cebd550ffc19b6b": 1,
-    "5da66136fae2982361da17d1fe866e3dfd910ad30333a4eeee8a1e3fc8bd4899": 1,
-    "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
-    "604f28d91adfdb4cd0caac06047abd9569f9a6c248b698a784032256d7cf8047": 1
+    "e60d4faaec87616724c424c27deebd0b50a9a0a5627364b78cebd550ffc19b6b": 1
   },
   "venues/weex/src/history.rs": {
     "bbe154e63f6392afb4e62ef9d8cd214a20497c58bcffd3f4811ae22309ede175": 1,

@@ -1,4 +1,6 @@
 //! Original admission boundaries for the unsigned account-setting poll.
+#[path = "support/signer.rs"]
+mod signer;
 mod support;
 use safe_cex_engine::request_context::HttpAction;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Method, Notice, Response};
@@ -31,10 +33,10 @@ fn private_at_settings() -> Driver {
     let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some(WALLET.into()),
-        secret: Some(format!("0x{:064x}", 1)),
+        credentials: signer::identity(),
         ..Default::default()
     }));
-    e.start(START);
+    signer::start(&mut e, START);
     let metadata = e
         .drain_actions()
         .find_map(|a| match a {

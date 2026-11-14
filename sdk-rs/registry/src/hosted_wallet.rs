@@ -3,7 +3,12 @@
 //! Synchronous over the local provider, without the HMAC capture codec.
 use safe_cex_engine::signing::{Context, Identities, Operation, Provider, SignError, SignRequest};
 
-#[cfg(any(feature = "hyperliquid", feature = "lighter", feature = "paradex"))]
+#[cfg(any(
+    feature = "hyperliquid",
+    feature = "txflow",
+    feature = "lighter",
+    feature = "paradex"
+))]
 use safe_cex_engine::signing::{Algorithm, PayloadPart};
 
 #[cfg(feature = "grvt")]
@@ -33,6 +38,7 @@ pub struct Account {
 pub fn admitted(venue: &str) -> bool {
     (cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot"))
         || (cfg!(feature = "grvt") && venue == "grvt")
+        || (cfg!(feature = "txflow") && venue == "txflow")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
         || lighter(venue)
         || (cfg!(feature = "paradex") && venue == "paradex")
@@ -238,6 +244,12 @@ pub fn sign(
     if output_format.starts_with("grvt-") {
         return Err(SignError::Unsupported);
     }
+    if (venue == "txflow") != output_format.starts_with("txflow-") {
+        return Err(SignError::InvalidRequest);
+    }
+    if venue == "txflow" && !account.testnet {
+        return Err(SignError::InvalidRequest);
+    }
     let paradex_format = output_format.starts_with("paradex-");
     if paradex_format != (venue == "paradex") {
         return Err(SignError::InvalidRequest);
@@ -270,7 +282,7 @@ pub fn sign(
         key: signing.clone(),
     }];
     match output_format {
-        "hyperliquid-address" => {
+        "hyperliquid-address" | "txflow-address" => {
             let own = account.key.as_deref().ok_or(SignError::Unavailable)?;
             if !to_sign.eq_ignore_ascii_case(own) {
                 return Err(SignError::InvalidRequest);
@@ -285,6 +297,24 @@ pub fn sign(
                     mainnet: !account.testnet,
                     vault: account.vault.as_deref(),
                 },
+            )?;
+            operations.push(Operation::Sign {
+                algorithm: Algorithm::Secp256k1Digest,
+                key: signing,
+                payload: vec![PayloadPart::Bytes {
+                    bytes: digest.to_vec(),
+                }],
+            });
+        }
+        #[cfg(feature = "txflow")]
+        "txflow-agent" => {
+            let digest = safe_cex_venue_txflow::sign::statement::derive(
+                to_sign,
+                account
+                    .application_id
+                    .as_deref()
+                    .ok_or(SignError::Unavailable)?,
+                account.vault.as_deref(),
             )?;
             operations.push(Operation::Sign {
                 algorithm: Algorithm::Secp256k1Digest,

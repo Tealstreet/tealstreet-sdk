@@ -4,7 +4,7 @@ use crate::{ErrorKind, Outcome, Partial, VenueError};
 use std::collections::HashSet;
 
 pub(super) const MAX_ATTEMPTS: usize = 256;
-const ID_COUNT: usize = 4_096;
+pub(super) const ID_COUNT: usize = 4_096;
 const ID_BYTES: usize = 256 * 1024;
 const ID_FIELD: usize = 1_024;
 const TEXT_BYTES: usize = 64 * 1024;

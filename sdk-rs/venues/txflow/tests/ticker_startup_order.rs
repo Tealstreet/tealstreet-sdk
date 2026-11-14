@@ -1,4 +1,6 @@
 //! Accepted seed publication precedes private account startup.
+#[path = "support/signer.rs"]
+mod signer;
 mod support;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response};
 use safe_cex_venue_txflow::{Options, TxFlow};
@@ -26,10 +28,10 @@ fn accepted_ticker_seed_is_published_before_any_account_read() {
     let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some("0x0000000000000000000000000000000000000001".into()),
-        secret: Some(format!("0x{:064x}", 1)),
+        credentials: signer::identity(),
         ..Default::default()
     }));
-    e.start(1000.);
+    signer::start(&mut e, 1000.);
     let metadata = e
         .drain_actions()
         .find_map(|a| match a {

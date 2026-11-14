@@ -45,6 +45,7 @@ pub enum SetupMapping {
     ApexOmni,
     Lighter,
     Hyperliquid,
+    Txflow,
     Paradex,
 }
 
@@ -203,6 +204,24 @@ pub struct Resolved {
 }
 
 pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
+    resolve_with_pending_setup(venue, options, false)
+}
+
+/// Before a capsule is read, missing outer credentials are unknown, not absent.
+/// This can prove a capsule unused (explicit public intent or missing account
+/// metadata), but cannot establish private eligibility. After setup installs
+/// its actual identities, `resolve` makes the definitive decision from them.
+#[cfg(feature = "dispatch-signing")]
+pub fn public_regardless_of_local_setup(venue: &str, options: &EngineOptions) -> bool {
+    resolve_with_pending_setup(venue, options, true)
+        .map_or(options.public_data_only, |mode| mode.public_data_only)
+}
+
+fn resolve_with_pending_setup(
+    venue: &str,
+    options: &EngineOptions,
+    pending_local_setup: bool,
+) -> Option<Resolved> {
     let mode = options.public_mode.as_ref()?;
     let rule = venue_rule(venue);
     let identities = options
@@ -225,13 +244,15 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
         conditions.iter().all(|group| {
             group.iter().any(|input| match input {
                 Input::Key => {
-                    credential_present(&options.key, primary_policy.trim_credential)
+                    pending_local_setup
+                        || credential_present(&options.key, primary_policy.trim_credential)
                         || identities
                             .and_then(|s| s.primary.as_ref())
                             .is_some_and(|id| !id.credential.0.is_empty())
                 }
                 Input::Secret => {
-                    credential_present(&options.secret, primary_policy.trim_signing)
+                    pending_local_setup
+                        || credential_present(&options.secret, primary_policy.trim_signing)
                         || identities
                             .and_then(|s| s.primary.as_ref())
                             .is_some_and(|id| id.signing_opt().is_some_and(|key| !key.0.is_empty()))
@@ -244,6 +265,7 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
                 Input::SubkeyAddress => present(&options.subkey_address),
                 Input::ApiKeyIndex => mode.api_key_index_present,
                 Input::CanSign => can_sign,
+                Input::AsterLocalAuth if pending_local_setup => true,
                 Input::AsterLocalAuth => {
                     #[cfg(feature = "asterdex")]
                     {

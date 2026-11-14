@@ -1,3 +1,4 @@
+use account::signer;
 #[path = "support/account.rs"]
 mod account;
 #[path = "support/mod.rs"]
@@ -86,7 +87,7 @@ impl Rig {
             testnet: true,
             public_data_only: !private,
             application_id: private.then(|| account::WALLET.into()),
-            secret: private.then(|| format!("0x{:064x}", 1)),
+            credentials: if private { signer::identity() } else { None },
             ..Default::default()
         }));
         Self::connecting(engine, policy)
@@ -96,7 +97,7 @@ impl Rig {
 impl<V: Venue> Rig<V> {
     fn connecting(mut engine: Engine<V>, policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
         engine.set_public_feed_policy(policy).unwrap();
-        engine.start(account::NOW);
+        signer::start(&mut engine, account::NOW);
         let mut rig = Self {
             engine,
             now: account::NOW,
@@ -565,12 +566,12 @@ fn missing_private_address_rejects_setup_without_artificial_socket_or_account_wo
         public_data_only: false,
         application_id: None,
         vault: None,
-        secret: Some(format!("0x{:064x}", 1)),
+        credentials: signer::identity(),
         ..Default::default()
     };
     assert!(options.validate().is_err());
     let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(options));
-    engine.start(account::NOW);
+    signer::start(&mut engine, account::NOW);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(event))
@@ -906,7 +907,7 @@ fn real_proposal_capacity_refusal_frees_then_reconnects_and_refreshes_once() {
         inner: TxFlow::new(Options {
             testnet: true,
             application_id: Some(account::WALLET.into()),
-            secret: Some(format!("0x{:064x}", 1)),
+            credentials: signer::identity(),
             ..Default::default()
         }),
         inject: true,

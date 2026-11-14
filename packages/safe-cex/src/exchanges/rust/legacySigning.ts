@@ -428,7 +428,7 @@ export const signHostedWsAuth = async (
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
   if (outputFormat === 'coinbase-jwt' && request.exchangeName !== 'coinbase' && request.exchangeName !== 'coinbasespot') return { id: request.id, error: 'Unsupported WS auth output format' };
   if (outputFormat === 'coinbase-jwt') return { id: request.id, wsAuthSignature: await signCoinbaseJwt(host) };
-  if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
+  if (outputFormat === 'txflow-agent' || outputFormat === 'txflow-address' || outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
     || outputFormat === 'asterdex-address' || outputFormat === 'asterdex-hmac' || outputFormat === 'asterdex-wallet'
     || outputFormat === 'grvt-order' || outputFormat === 'grvt-address'
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')

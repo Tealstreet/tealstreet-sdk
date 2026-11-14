@@ -66,6 +66,8 @@ mod lighter_setup;
 pub use safe_cex_venue_lighter::registration as lighter_registration;
 #[cfg(feature = "paradex")]
 mod paradex_setup;
+#[cfg(feature = "txflow")]
+mod txflow_setup;
 #[cfg(any(feature = "phemex", feature = "okx"))]
 pub use construction::HelperCapabilities;
 pub use construction::{
@@ -277,6 +279,56 @@ fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
         .map_or(options.public_data_only, |mode| mode.public_data_only)
 }
 
+// Family setup and read-key validation retain their native refusal precedence.
+// The shared agent setup can discard raw material that public accounts never use.
+#[cfg(feature = "dispatch-signing")]
+fn public_custody_discard_allowed(venue: &str, options: &EngineOptions) -> bool {
+    construction::bridge(venue, options).dispatch_signing
+        && construction::read_credentials_policy(venue)
+            == construction::ReadCredentialsPolicy::Install
+        && matches!(
+            construction::signer_setup_mapping(venue),
+            Some(construction::SetupMapping::Hyperliquid | construction::SetupMapping::Txflow)
+        )
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn unused_public_custody(venue: &str, options: &EngineOptions) -> bool {
+    resolved_public_data_only(venue, options) && public_custody_discard_allowed(venue, options)
+}
+
+// A capsule carries credentials separately from the stripped outer options.
+// Only bypass it if it cannot affect public/private resolution. Otherwise the
+// family setup reads its facts first, and build_with_signer resolves the mode
+// from the installed identities before discarding any unused private custody.
+#[cfg(feature = "dispatch-signing")]
+fn unused_local_capsule(venue: &str, options: &EngineOptions) -> bool {
+    construction::public_regardless_of_local_setup(venue, options)
+        && public_custody_discard_allowed(venue, options)
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn empty_local_signer() -> (
+    safe_cex_engine::signing::Provider,
+    safe_cex_engine::signing::Identities,
+) {
+    (
+        std::sync::Arc::new(safe_cex_crypto::signer::LocalSigner::new()),
+        Default::default(),
+    )
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn discard_private_custody(options: &mut EngineOptions) {
+    for value in [&mut options.secret, &mut options.passphrase] {
+        safe_cex_crypto::secrets::erase(value);
+    }
+    if let Some(mut read) = options.read_credentials.take() {
+        read.erase_secrets();
+    }
+    options.signing = None;
+}
+
 /// The trusted host chooses admission; account JSON cannot change it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConstructionContext {
@@ -353,6 +405,18 @@ fn callback_rules(
             invalid("Delegated signing requires a configured callback provider")
                 .outcome(safe_cex_engine::Outcome::NotSent),
         );
+    }
+    // Explicit private callback intent must retain its refusal before
+    // unused-agent cleanup can normalize missing account metadata to public.
+    if public
+        && payload
+        && keyed
+        && options
+            .public_mode
+            .as_ref()
+            .is_some_and(|mode| mode.requested == Some(false))
+    {
+        payload_signing_rules_in_mode(venue, options, provider_ready, false)?;
     }
     // TS beta admission validates disabled-family callbacks before custody.
     if !construction::bridge(venue, options).dispatch_signing
@@ -676,6 +740,7 @@ pub fn supported(venue: &str) -> bool {
         "cryptocom" => true,
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => true,
+
         #[cfg(feature = "okx")]
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" => true,
         _ => false,
@@ -831,7 +896,15 @@ pub fn prepare_local_signer_for(
     ),
     VenueError,
 > {
+    if unused_public_custody(venue, options) {
+        discard_private_custody(options);
+        return Ok(empty_local_signer());
+    }
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "txflow")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Txflow) {
+        return txflow_setup::native(venue, options, signer_setup_policy_for(venue, options));
+    }
     #[cfg(feature = "coinbase")]
     if matches!(venue, "coinbase" | "coinbasespot") {
         return coinbase_setup::raw(options);
@@ -1236,6 +1309,10 @@ pub fn local_signer_from_capsule(
     ),
     VenueError,
 > {
+    if unused_local_capsule(venue, options) {
+        drop(zeroize::Zeroizing::new(input));
+        return Ok(empty_local_signer());
+    }
     #[cfg(feature = "coinbase")]
     if matches!(venue, "coinbase" | "coinbasespot") {
         return coinbase_setup::json(input, options);
@@ -1263,6 +1340,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    if unused_local_capsule(venue, options) {
+        drop(zeroize::Zeroizing::new(input));
+        return Ok(empty_local_signer());
+    }
     #[cfg(feature = "kraken")]
     if venue == "kraken" {
         return kraken_setup::json(input, construction::signer_setup_public_data_only(options));
@@ -1272,6 +1353,15 @@ pub fn local_signer_from_json_for_mode(
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
         drop(zeroize::Zeroizing::new(input));
         return Err(invalid("Invalid Paradex local signer setup"));
+    }
+    #[cfg(feature = "txflow")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Txflow) {
+        return txflow_setup::json(
+            venue,
+            input,
+            signer_setup_policy_for(venue, options),
+            options,
+        );
     }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
@@ -1454,6 +1544,7 @@ pub fn build_in_context<T: Visit>(
     let (options, signer) = {
         let mut options = options;
         let signer = if construction::bridge(venue, &options).dispatch_signing
+            && !unused_public_custody(venue, &options)
             && options.signing.is_none()
         {
             let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
@@ -1614,6 +1705,15 @@ pub fn build_with_signer_in_context<T: Visit>(
     private_custody_rules(context, venue, &options, signer.is_some())?;
     callback_rules(venue, &options, signer.is_some())?;
     retain_delegated_public_mode(venue, &mut options);
+    let mode = construction::resolve(venue, &options).filter(|mode| mode.public_data_only);
+    if resolved_public_data_only(venue, &options) {
+        options.account_startup = false;
+    }
+    #[cfg(feature = "dispatch-signing")]
+    if unused_public_custody(venue, &options) {
+        discard_private_custody(&mut options);
+        signer = None;
+    }
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));
@@ -1640,7 +1740,7 @@ pub fn build_with_signer_in_context<T: Visit>(
                 .map_err(|_| invalid("Invalid local signer setup"))?;
         }
     }
-    if let Some(mode) = construction::resolve(venue, &options) {
+    if let Some(mode) = mode.or_else(|| construction::resolve(venue, &options)) {
         if let Some(error) = mode.explicit_private_error {
             return Err(invalid(error));
         }
@@ -1909,26 +2009,29 @@ pub fn build_with_signer_in_context<T: Visit>(
         }
         #[cfg(feature = "txflow")]
         "txflow" => {
-            let mut options = safe_cex_venue_txflow::Options {
+            if options.secret.is_some()
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid("TxFlow signing material belongs in signer setup"));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("TxFlow requires its primary signing provider"));
+            }
+            let config = safe_cex_venue_txflow::Options {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key.take(),
-                secret: options.secret.take(),
+                credentials: identities.primary.clone(),
                 application_id: options.application_id.take(),
                 vault: options.vault.take(),
             };
-            options.validate().map_err(|error| {
-                use zeroize::Zeroize;
-                options.key.zeroize();
-                options.secret.zeroize();
-                invalid(&error)
-            })?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(safe_cex_venue_txflow::TxFlow::new(options), entropy)?,
-            )
+            config.validate().map_err(|error| invalid(&error))?;
+            let mut engine = Engine::new(safe_cex_venue_txflow::TxFlow::new(config), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "kraken")]
         "kraken" => {
