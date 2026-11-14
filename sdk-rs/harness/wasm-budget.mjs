@@ -298,7 +298,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101567436: web/Node/replay 2,278,309 B.
   // Verified optimized module maximum + 10 KiB rounded up; all historical floors retained.
-  binance: 2_288_640,
+  // #3290 lookup 11456fb4a3c2, CI 43579592827/job 132401623226, artifact 14107991476: 2,278,530 B.
+  // Optimized web/Node/replay maximum + 10 KiB rounded up; retain every historical floor.
+  binance: 2_289_664,
   // #3438 merged-head local build.sh --venue bingx: web/node 2,130,988 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101497823: web/Node/replay 2,137,074 B.
@@ -308,7 +310,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132.
   // #3290 merge 78d46f0574ef: CI 43569184535, family artifact 14104151569, web/Node/replay 2,142,207 B.
   // Verified current module maximum + 10 KiB rounded up; retain both parents' provenance/floors.
-  bingx: 2_152_448,
+  // #3290 lookup 11456fb4a3c2, CI 43579592827/job 132401623277, artifact 14107034718: 2,142,427 B.
+  // Optimized web/Node/replay maximum + 10 KiB rounded up; retain every historical floor.
+  bingx: 2_153_472,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   // #3426 run 43187677592, job 131079474589, artifact 13930235036, CI source b3c4cf6212e6.

@@ -3235,3 +3235,22 @@ test('#3290 merged BingX module retains the current measured reserve', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
+
+// #3290 lookup candidate 11456fb4a3c2, CI 43579592827; optimized web/Node/replay maximum.
+// CI source 2dd9066eb21ffb1d9902f6d3dc19a585b4f18748; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+// Binance job 132401623226; BingX job 132401623277. Retain all historical floors and boundaries.
+for (const [venue, measured, minimumCap, parentFloor, artifact, sha256] of [
+  ['binance', 2_278_530, 2_289_664, 2_288_640, 14107991476, 'ec6b62ed8987dd234703da1c20aae4b6ae401c54b6ab6b648ac72cd92f0e7a6b'],
+  ['bingx', 2_142_427, 2_153_472, 2_152_448, 14107034718, '3135a5a3ea736112947776cb213111ccb5c0c1b75d625339bf348cf8cf12b3d3'],
+]) {
+  test(`#3290 lookup CI: ${venue} artifact ${artifact} ${sha256} retains measured reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(venueFamily(venue), venue);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= parentFloor, `${venue}: ${cap} must retain parent floor ${parentFloor}`);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
