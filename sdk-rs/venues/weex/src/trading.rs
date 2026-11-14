@@ -15,8 +15,10 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::request_context::plan::Slot;
 use safe_cex_engine::request_context::{Context, Plan};
+use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, UNKNOWN_OUTCOME_TEXT, VenueError,
+    num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -40,6 +42,8 @@ struct Job {
     hedged: Option<bool>,
     /// An amend's symbol, once its cancel is proven and its replacement is issued.
     replacing: Option<String>,
+    journal: WritePlan,
+    next_element: usize,
 }
 impl Job {
     fn gone_note(&self, unknown: bool) -> Option<String> {
@@ -56,6 +60,7 @@ pub(crate) struct Request {
     plan: Plan,
     slot: Slot,
     context: Context,
+    elements: std::ops::Range<usize>,
 }
 struct ReplacementGuard {
     id: String,
@@ -102,6 +107,20 @@ enum Call {
     },
 }
 impl Call {
+    fn element_count(&self) -> usize {
+        match self {
+            Self::Place { orders, .. } => orders.len(),
+            _ => 1,
+        }
+    }
+    fn element_clients(&self) -> Vec<Option<String>> {
+        match self {
+            Self::Place { orders, .. } => {
+                orders.iter().map(|o| o.client_order_id.clone()).collect()
+            }
+            _ => vec![None],
+        }
+    }
     fn cancels(&self) -> bool {
         matches!(self, Self::Cancel { .. })
     }
@@ -493,7 +512,10 @@ impl WeexFutures {
             } else {
                 rounded(o.amount, m.precision.amount)?
             };
-            if m.limits.amount.max > 0.0 && amount > m.limits.amount.max {
+            if o.client_order_id.is_some()
+                && m.limits.amount.max > 0.0
+                && amount > m.limits.amount.max
+            {
                 return Err(
                     "WEEX order exceeds market maximum size; a caller ID cannot span orders".into(),
                 );
@@ -1139,6 +1161,17 @@ impl WeexFutures {
             return None;
         }
         let plan = entry.admit(cx, steps.len())?;
+        let journal = WritePlan::new(
+            steps
+                .iter()
+                .flat_map(|step| step.call.element_clients())
+                .enumerate()
+                .map(|(index, client_order_id)| Element {
+                    index,
+                    client_order_id,
+                })
+                .collect(),
+        );
         self.trading.jobs.insert(
             id,
             Job {
@@ -1149,6 +1182,8 @@ impl WeexFutures {
                 refresh,
                 hedged,
                 replacing: None,
+                journal,
+                next_element: 0,
             },
         );
         self.trade_next(cx, id);
@@ -1279,6 +1314,17 @@ impl WeexFutures {
             let recipe =
                 crate::dispatch_signing::Http::new(identity, step.method, path_query, step.body);
             let (url, _, body) = recipe.unsigned();
+            let count = step.call.element_count();
+            let elements = job.next_element..job.next_element + count;
+            job.next_element += count;
+            for index in elements.clone() {
+                let _ = job.journal.record(
+                    index,
+                    ElementResult::Unknown {
+                        error: Box::new(unknown(UNKNOWN_OUTCOME_TEXT)),
+                    },
+                );
+            }
             let pending = Pending {
                 task: Task::Trade(Request {
                     command,
@@ -1287,6 +1333,7 @@ impl WeexFutures {
                     plan,
                     slot,
                     context: context.clone(),
+                    elements,
                 }),
                 invalid: false,
                 skipped: Vec::new(),
@@ -1334,6 +1381,13 @@ impl WeexFutures {
             request.revision == self.account.order_revision(),
         );
         self.account.invalidate_orders();
+        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+            for index in request.elements.clone() {
+                let _ = job
+                    .journal
+                    .record(index, context::failed_element(error.clone()));
+            }
+        }
         if self
             .trading
             .jobs
@@ -1347,6 +1401,11 @@ impl WeexFutures {
             self.refresh_account(cx);
             return;
         }
+        let error = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .map_or_else(|| error.clone(), |job| job.journal.attach(error.clone()));
         let gone = self
             .trading
             .jobs
@@ -1384,7 +1443,8 @@ impl WeexFutures {
                 return;
             }
         };
-        let assessed = assessment.result;
+        let elements = context::element_results(&request.call, response, &assessment);
+        let mut assessed = assessment.result;
         let owned = request.revision == self.account.order_revision();
         // A fill frame can revoke ownership before the cumulative order frame
         // changes cached quantities. Never replace from that stale amount.
@@ -1427,9 +1487,49 @@ impl WeexFutures {
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
+        let mut unknown_indices = Vec::new();
+        for (index, result) in request.elements.clone().zip(elements) {
+            if matches!(result, ElementResult::Unknown { .. }) {
+                unknown_indices.push(index);
+            }
+            let _ = job.journal.record(index, result);
+        }
+        if !unknown_indices.is_empty()
+            && let Err(error) = &mut assessed
+        {
+            error.message = context::unknown_message(&error.message);
+            error.presents = true;
+            // The venue path already composed a batch-unknown summary over
+            // `error.message`. Replace the projected text on any outcome
+            // (the aggregate failure here can be `Rejected`), not only
+            // `Unknown`.
+            let _ = cx.override_plan_failure_message(&request.plan, &error.message);
+            cx.command_error(request.command, &error.message);
+            let placed = job
+                .journal
+                .outcomes()
+                .iter()
+                .map(|element| match &element.result {
+                    ElementResult::Placed { order_ids } => order_ids.len(),
+                    _ => 0,
+                })
+                .sum::<usize>();
+            let command = request.command;
+            cx.event(
+                Level::Warn,
+                "order.outcome_unknown",
+                UNKNOWN_OUTCOME_TEXT,
+                vec![
+                    ("command", command.into()),
+                    ("placedCount", (placed as f64).into()),
+                    ("elementIndices", json(&unknown_indices).into()),
+                ],
+            );
+        }
         match assessed {
             Ok(ids) => job.native_ids.extend(ids),
             Err(error) if !job.continue_on_error => {
+                let error = job.journal.attach(error);
                 let gone = job.gone_note(error.outcome == Some(Outcome::Unknown));
                 let _ = match &gone {
                     Some(gone) => cx.fail_plan_noted(&request.plan, error, gone),
@@ -1440,7 +1540,8 @@ impl WeexFutures {
             Err(_) => {}
         }
         if let Err(error) = cx.finish_plan_call(&request.plan, &request.slot, &request.context) {
-            let _ = cx.fail_plan(&request.plan, error.venue_error());
+            let error = job.journal.attach(error.venue_error());
+            let _ = cx.fail_plan(&request.plan, error);
             return;
         }
         self.trade_next(cx, request.command);
@@ -1453,6 +1554,18 @@ impl WeexFutures {
         self.trading
             .jobs
             .retain(|_, job| !owner.matches_plan(&job.plan));
+    }
+
+    pub(crate) fn trade_unproven_evidence(
+        &self,
+        request: &Request,
+        body: &str,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        request.unproven_evidence(body, evidence);
+        if let Some(job) = self.trading.jobs.get(&request.command) {
+            evidence.write_plan(&job.journal);
+        }
     }
 
     fn apply_trade_response(

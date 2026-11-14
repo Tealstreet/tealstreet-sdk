@@ -106,7 +106,7 @@ describe('trusted local signer setup', () => {
     expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
   });
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('kraken', { ...options(), localSigner: {} }, new DefaultStore()))
+    expect(() => new RustEngineExchange('txflow', { ...options(), localSigner: {} }, new DefaultStore()))
       .toThrow(/not supported/);
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {

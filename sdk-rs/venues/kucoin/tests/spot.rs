@@ -274,6 +274,76 @@ fn place(id: Option<&str>) -> safe_cex_engine::model::PlaceOrderOpts {
 }
 
 #[test]
+// TS packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts:450-457; base.ts:1113.
+fn after_failure_middle_spot_row_refusal_or_loss_stops_last_row() {
+    for lost in [false, true] {
+        let mut h = H::new(true);
+        h.command(Command::PlaceOrders {
+            command: 996,
+            orders: vec![
+                place(Some("first")),
+                place(Some("middle")),
+                place(Some("last")),
+            ],
+        });
+        let first = h.http("/hf/orders");
+        h.respond(
+            &first,
+            200,
+            r#"{"code":"200000","data":{"orderId":"first"}}"#,
+        );
+        let middle = h.http("/hf/orders");
+        if lost {
+            h.event(Event::HttpFailed {
+                request: middle.id,
+                error: "middle row response lost",
+            });
+        } else {
+            h.respond(
+                &middle,
+                400,
+                r#"{"code":"200004","msg":"balance insufficient"}"#,
+            );
+        }
+        let writes: Vec<_> = h
+            .requests
+            .iter()
+            .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+            .collect();
+        assert_eq!(
+            writes.len(),
+            2,
+            "last row never leaves after the middle failure"
+        );
+        assert!(h.done(996).is_err());
+        if lost {
+            const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+            let errors: Vec<_> = h
+                .failures
+                .iter()
+                .filter(|e| e.outcome == Some(safe_cex_engine::Outcome::Unknown))
+                .collect();
+            assert_eq!(
+                errors.len(),
+                1,
+                "one journal terminal reaches host telemetry"
+            );
+            assert!(
+                errors[0].message.contains(ENGINE_UNKNOWN_TEXT),
+                "{}",
+                errors[0].message
+            );
+            assert_eq!(errors[0].partial.as_ref().unwrap().order_ids, ["first"]);
+        }
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        );
+    }
+}
+
+#[test]
 fn a_spot_placement_timestamp_refusal_is_not_replayed() {
     let mut h = H::new(true);
     h.command(Command::PlaceOrders {
@@ -1657,8 +1727,8 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         request: request.id,
         error: "failed write transport",
     });
-    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed write transport")).unwrap();
-    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="failed write transport")).unwrap();
+    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="The outcome is unknown. Check Open Orders")).unwrap();
+    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="The outcome is unknown. Check Open Orders")).unwrap();
     assert!(
         error < done,
         "owner mapping must still exist when diagnostic arrives"
@@ -2764,4 +2834,182 @@ fn review_3259_spot_business_code_does_not_inherit_futures_rate_semantics() {
     assert_eq!(error.venue_code.as_deref(), Some("200002"));
     assert!(error.message.contains("suspended"));
     assert_eq!(h.requests.len(), sent);
+}
+
+#[test]
+fn postmerge_spot_server_error_warning_is_actionable() {
+    for transport in [false, true] {
+        let mut h = H::new(true);
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["order-1".into()],
+        });
+        let request = h.http("/hf/orders/");
+        let sent = h.requests.len();
+        h.actions.clear();
+        if transport {
+            h.event(Event::HttpFailed {
+                request: request.id,
+                error: "connection reset",
+            });
+        } else {
+            h.respond(&request, 200, r#"{"code":"500000","msg":"system error"}"#);
+        }
+        let error = h.failures.last().unwrap();
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(h.requests.len(), sent);
+        let warnings: Vec<_> = h
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandError { message, .. }) => Some(message.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            error.message.contains("unknown")
+                && error.message.contains("Check Open Orders")
+                && warnings[0].contains("Check Open Orders"),
+            "terminal={error:?}; warnings={warnings:?}"
+        );
+    }
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: kucoinspot | serial-placement-batch
+// TS packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts:426-448.
+fn parity_spot_batch_sends_below_minimum_zero_rounded_price_tail() {
+    let mut h = H::new(true);
+    let mut markets = h.e.store().markets().to_vec();
+    markets
+        .iter_mut()
+        .find(|m| m.symbol == "BTC-USDT")
+        .unwrap()
+        .limits
+        .amount
+        .min = 0.01;
+    h.e.store_mut().set_markets(markets);
+    let mut tail = place(Some("tail"));
+    tail.amount = 0.0012;
+    tail.price = Some(0.04);
+    h.command(Command::PlaceOrders {
+        command: 1105,
+        orders: vec![place(Some("first")), tail],
+    });
+    let first = h.http("/hf/orders");
+    h.respond(
+        &first,
+        200,
+        r#"{"code":"200000","data":{"orderId":"first"}}"#,
+    );
+    let last = h.http("/hf/orders");
+    let body: Value = serde_json::from_str(last.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["size"], "0.001");
+    assert_eq!(body["price"], "0");
+    h.respond(&last, 200, r#"{"code":"200000","data":{"orderId":"tail"}}"#);
+    assert_eq!(h.done(1105).unwrap(), json!(["first", "tail"]));
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+            .count(),
+        2
+    );
+}
+
+// Legacy one-payload path: packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts:426-445.
+fn assert_ts_oversized_write(amount: f64, maximum: f64, step: f64, expected: &str) {
+    let mut h = H::new(true);
+    let mut markets = h.e.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTC-USDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.min = step;
+    market.limits.amount.max = maximum;
+    h.e.store_mut().set_markets(markets);
+    let mut opts = place(None);
+    opts.client_order_id = None;
+    opts.amount = amount;
+    h.command(Command::PlaceOrders {
+        command: 1201,
+        orders: vec![opts],
+    });
+    let request = h.http("/hf/orders");
+    let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["size"], expected);
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+            .count(),
+        1
+    );
+    let actual_sum: f64 = h
+        .requests
+        .iter()
+        .filter(|r| r.method == Method::Post && r.url.ends_with("/hf/orders"))
+        .map(|r| {
+            let payload: Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+            payload["size"].as_str().unwrap().parse::<f64>().unwrap()
+        })
+        .sum();
+    assert_eq!(
+        actual_sum,
+        expected.parse::<f64>().unwrap(),
+        "one-payload TS sum"
+    );
+    h.respond(
+        &request,
+        400,
+        r#"{"code":"100001","msg":"size exceeds maxOrderQty"}"#,
+    );
+    let error = h
+        .failures
+        .last()
+        .expect("venue refusal is surfaced after HTTP");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(error.message.contains("size exceeds maxOrderQty"));
+    assert!(
+        h.done(1201)
+            .unwrap_err()
+            .contains("size exceeds maxOrderQty")
+    );
+    assert!(!h.actions.iter().any(
+        |a| matches!(a,Action::Http(r) if r.method==Method::Post && r.url.ends_with("/hf/orders"))
+    ));
+}
+
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_26_5_1() {
+    assert_ts_oversized_write(26.0, 5.0, 1.0, "26");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_11_5_1() {
+    assert_ts_oversized_write(11.0, 5.0, 1.0, "11");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_12_5_1() {
+    assert_ts_oversized_write(12.0, 5.0, 1.0, "12");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_10_5_1() {
+    assert_ts_oversized_write(10.0, 5.0, 1.0, "10");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_7_3_half_step() {
+    assert_ts_oversized_write(7.0, 3.0, 0.5, "7");
+}
+#[test]
+// KNOWN-ISSUE: TS sends above-max; venue refuses
+fn alloc_ts_oversized_fractional_thousandth_step() {
+    assert_ts_oversized_write(1.0005, 0.3, 0.001, "1.001");
+}
+#[test]
+fn alloc_ts_at_maximum_control() {
+    assert_ts_oversized_write(5.0, 5.0, 1.0, "5");
 }

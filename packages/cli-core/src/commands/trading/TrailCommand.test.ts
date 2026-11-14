@@ -25,7 +25,7 @@ function pos(p: Partial<Position> = {}): Position {
     contracts: 1,
     liquidationPrice: 0,
     ...p,
-  } as Position;
+  };
 }
 
 function makeExchange(positions: Position[] = [], name = 'bybit'): ExchangeLike {

@@ -26,7 +26,7 @@ Private GET reads in both markets recover once from the native `400002`
 timestamp refusal. They fetch public `/api/v1/timestamp` from their own REST
 origin, calibrate the engine's protocol clock at receipt, then sign the exact
 same path and query with the original selected identity. Normal startup adds no
-clock request. The probe has a five-second cap; it and the resend remain under
+clock request. The probe has a twenty-second cap; it and the resend remain under
 the original read root and caller deadline. Invalid time, expiry, transport
 failure, an HTTP failure on the resend, or a second timestamp refusal ends that
 attempt without reopening outer retries. Existing periodic
@@ -56,3 +56,35 @@ When a later ordinary cancel leg is unknown, its uncertainty text and diagnostic
 replace any earlier refusal in the terminal error. Ordinary Futures and Spot
 write warnings use the normalized write error before command completion, so both
 warning and terminal text direct ambiguous outcomes to Check Open Orders.
+
+Ordinary Futures cancel-family fallback requires HTTP 404 with explicit native
+`404` or `404000` not-found evidence. Native server errors, unlisted codes, and
+malformed replies cannot release a second DELETE. Unknown write warnings and
+terminals, including native `500000` and transport failures, direct callers to
+Check Open Orders while retaining native diagnostics. An exhausted cancellation
+confirmation read emits its warning after adding the same uncertainty guidance.
+
+## Futures order size
+
+Futures placement follows the legacy `kucoin.exchange.ts:881-925` formatter:
+normalize the native contract count and send one payload, including above-max
+sizes. The venue enforces the maximum and its refusal reaches the caller.
+Minimum-size and positive-quantity checks retain their existing behavior.
+Recording tests in `tests/trading/allocation.rs` pin the single payload, its
+size and sum, and the surfaced native refusal.
+
+## Hosted signing for Spot
+
+KuCoin Spot shares Futures' dispatch-time HMAC-SHA256 recipe: timestamp, method,
+path/query and exact body bytes, plus a separate passphrase MAC and optional
+broker MAC. RemoteSigner resolves the whole `kucoin-batch` atomically on the
+device, using the selected primary or secondary API-key slot. The origin keeps
+only public identity and opaque refs. Private WebSocket authentication uses the
+signed `POST /api/v1/bullet-private` request and the returned socket token.
+
+Private `PayloadSigner` is unsupported (`unsupported` / `notSent`): signing one request
+payload cannot produce the separate device-owned passphrase and broker MACs.
+There is no agent/API-wallet signing mode in this integration. See
+[`kucoinspot-hosted-signing.md`](../../../docs/plans/callers/kucoinspot-hosted-signing.md)
+for caller impact and deterministic parity coverage. Explicit public-only accounts
+ignore unused signing configuration and install no signing authority.

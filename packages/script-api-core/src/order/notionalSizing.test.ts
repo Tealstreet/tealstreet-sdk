@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { notionalToNativeSize } from './notionalSizing';
 
 const market = (overrides: Partial<Market>): Market =>
-  ({ symbol: 'X', contractSize: 1, isInverse: false, ...overrides }) as Market;
+  ({ id: 'X', symbol: 'X', base: '', quote: '', active: true, contractSize: 1, isInverse: false,
+    precision: { amount: 1, price: 1 }, limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } }, ...overrides });
 
 describe('notionalToNativeSize', () => {
   it('is notional / price on an ordinary 1:1 linear market', () => {

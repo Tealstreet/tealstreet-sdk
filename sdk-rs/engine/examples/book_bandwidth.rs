@@ -37,8 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut full = FrameWriter::new(Vec::new(), 250.);
     let mut delta = FrameWriter::new(Vec::new(), 250.);
     for (index, book) in books.iter().enumerate() {
-        book.write(index as u32, &mut full);
-        book.write_delta(&previous[index], index as u32, &mut delta);
+        safe_cex_engine::book_output::write(book, index as u32, &mut full);
+        safe_cex_engine::book_output::write_delta(book, &previous[index], index as u32, &mut delta);
     }
     let (full, delta) = (full.finish(), delta.finish());
     assert_eq!((full.len(), delta.len()), (96_064, 704));
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The baseline plus delta must equal full-after.bin on a consumer.
         let mut baseline = FrameWriter::new(Vec::new(), 0.);
         for (index, book) in previous.iter().enumerate() {
-            book.write(index as u32, &mut baseline);
+            safe_cex_engine::book_output::write(book, index as u32, &mut baseline);
         }
         std::fs::write(directory.join("baseline.bin"), baseline.finish())?;
         std::fs::write(directory.join("full-after.bin"), &full)?;

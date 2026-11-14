@@ -1,3 +1,4 @@
+import { captureStorageSession } from '../storage-context';
 // Listener-side state:accounts broadcaster. Watches ~/.tealstreet/config.json
 // and pushes the current accounts snapshot to every WS subscribed to the
 // 'accounts' topic.
@@ -49,11 +50,15 @@ export interface AccountsBroadcastHandle {
 }
 
 export function startAccountsBroadcast(server: ServerLike): AccountsBroadcastHandle {
+  const ownerSession = captureStorageSession();
+  let stopped = false;
+  const isCurrent = () => !stopped && ownerSession.isCurrent();
   let lastHash = accountsHash();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let watcher: FSWatcher | null = null;
 
   const broadcast = () => {
+    if (!isCurrent()) return;
     const hash = accountsHash();
     if (hash === lastHash) return;
     lastHash = hash;
@@ -64,8 +69,10 @@ export function startAccountsBroadcast(server: ServerLike): AccountsBroadcastHan
   };
 
   const onChange = () => {
+    if (!isCurrent()) return;
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      if (!isCurrent()) return;
       debounceTimer = null;
       try {
         broadcast();
@@ -93,6 +100,7 @@ export function startAccountsBroadcast(server: ServerLike): AccountsBroadcastHan
       }
     },
     stop() {
+      stopped = true;
       if (debounceTimer) {
         clearTimeout(debounceTimer);
         debounceTimer = null;

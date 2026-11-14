@@ -34,5 +34,7 @@
  *         safe-cex ExchangeName union for Binance COIN-M inverse support.
  * 1.3.3 — `api.constants.ExchangeName` gains `binanceoptions`, matching the
  *         safe-cex ExchangeName union for Binance European options.
+ * 1.4.0 — Add `ClosePositionOpts.percent`: partial native closes floor to
+ *         the venue step; 100% preserves the full native position size.
  */
-export const CORE_API_VERSION = '1.3.3';
+export const CORE_API_VERSION = '1.4.0';

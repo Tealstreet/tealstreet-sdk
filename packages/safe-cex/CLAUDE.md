@@ -1,17 +1,30 @@
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
+Hosted construction follows that full roster for public and private accounts.
+Bitrue admission is restored by SDK #3502; #3317 dropped a live venue without
+a product decision. Its existing signing and credential-placement checks remain.
+Polymarket, Weex, TxFlow and the canonical `orderly` name remain OUT;
+KodiakFi, Mode, What and WOOFi retain their admitted Orderly-family aliases.
+Polymarket's native signing layer also refuses delegated
+custody: its private user WebSocket needs the L2 API secret, not a signature. See
+`sdk-rs/venues/polymarket/README.md`; callback payloads must never export it.
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
 and test-only replay/reference implementations remain independent dependencies.
-Historical Rust-adapter fixtures mock only beta admission through
+Historical Rust-adapter fixtures mock both beta admission entry guards through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
+see `sdk-rs/venues/asterdex/README.md`),
+MEXC (RemoteSigner and REST-only PayloadSigner; see `sdk-rs/venues/mexc/README.md`),
+Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
+Bitget x3 (USDT, USDC, inverse), Bitrue, Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
+Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
-KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
+KuCoin futures and Spot (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md` and `docs/plans/callers/kucoinspot-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Refused `remoteSigner` accounts are told to
 turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
@@ -37,7 +50,244 @@ Core exchange integration library. See also exchange-specific `CLAUDE.md` files 
 For exchange migrations that add first-class opening trigger/conditional orders,
 read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 
+## DELEGATED handover
+
+`sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
+DELEGATED handover for a hosted-supported venue. Its standalone module needs no WASM, Node Buffer or
+browser base64 globals; the host supplies the usual secure random source for
+Noble. Call it only after the host's hosted-signing and server-origin eligibility check. It does
+not select signing modes, open sockets or change LOCAL/COSIGNED setup.
+Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
+context; the result contains only the attempt ID and padded-base64 encapsulation
+and ciphertext. Context fields preserve exact UTF-8 bytes and cannot contain
+the protocol's `|` separator. Optional passphrases preserve absence versus empty.
+The key-only registry mapping (currently Paradex) supplies `signingKey` in
+sealed credentials and `secret: ''`; the public input `key` and init key equal `subkeyAddress`, never
+the private scalar. The optional private field is not copied into the result or
+HPKE context. The receiver rejects scalar-in-init layouts, foreign credential
+layouts and empty CEX secrets; existing trusted setup validates actual material.
+HMAC callers omit `signingKey` and retain byte-identical envelopes.
+The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
+one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
+fixtures exercise the same production sender. The shared fixture lives with
+the server tests for receiver interoperability; Rust consumption depends on
+the server handover implementation landing.
+
+## DELEGATED order outbox
+
+`OutboxOptions`, every connection ticket, persisted intent and proof bind the
+authenticated `owner`, account label, actual `venue` and immutable `accountId`.
+Hosts must change `accountId` when account credentials, network or admission
+identity are replaced, and preserve it through socket reconnects. Storage keys
+and sequence checkpoints include this entire scope. A replacement mismatch
+retires the old ticket and refuses before handoff. Restore rejects an unbound
+or mismatched scope before any writes/compaction; it preserves the stored
+history for host reconciliation and never adopts it into the current account.
+Restore arms expiry only after all rows and final compaction succeed. Every
+failed open retires the partial instance and cancels its timers, including if
+scheduling itself fails; already queued callbacks cannot write after retirement.
+
+`enqueue(params, { intentId })` accepts a caller-owned canonical lowercase UUIDv7.
+Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a different
+canonical payload for the same ID throws `intentConflict`. Identical retries
+return the existing durable ID without another sequence, deadline or submission,
+including after restore. A failed original put refuses retries with
+`intentNotDurable`. Caller-key reservation updates only the last successfully
+committed snapshot, preserving its handoff state and evidence even if a newer
+receipt could not be persisted. A retry never makes that newer outcome durable,
+renews replay permission, or replaces a committed handoff with an in-memory
+queued label. Persisted no-handoff claims still pass the evidence constructors.
+Caller-key rows remain reserved through ordinary history
+compaction, within the existing total capacity of 1,056 records; exhaustion
+refuses new intents rather than forgetting a key. Hosts must preserve scoped
+storage and close a writer before replacing it.
+
+Saved accounts and exchange options accept optional `signingMode` using the
+existing account-worker wire values `local`, `cosigned`, and `delegated`.
+`accountToExchangeOptions` forwards the account mode and permits a validated
+override. Absence preserves existing signer selection; this metadata does not
+activate DELEGATED writes or replace admission. Unknown modes (including null)
+are refused as `invalidInput` / `notSent` during conversion and factory creation.
+
+Sam's 2026-11-11 policy allows activation with place and reduce-only close before
+the other venue actions exist. `activate(connection, { DELEGATED })` checks
+the host-owned feature flag, the captured box/router transport proofs, and only
+the advertised `delegatedActivationScopeV1` place/close capabilities. Discover
+box capabilities using `?exchangeName=<joined venue>` and retain its
+`delegatedVenueV1`; activation refuses a missing or mismatched venue. The neutral
+`DELEGATED` flag replaces `DELEGATED_BYBIT`, and `delegatedDisabled` replaces
+`delegatedBybitDisabled`. `requireDelegatedActivation` takes the connection venue
+as its third argument. `OutboxConnection.venue` is an `ExchangeName`; its trusted
+low-level connection still requires a remote-signing-supported venue. Amend, venue
+cancel, cancel-all and nuke are not activation prerequisites. A failed activation
+retires the old ticket, including deferred work, and throws a named reason.
+The existing low-level `connect` API still requires prior host admission.
+`enqueueAction(actionName, params)` permits place or a close with literal
+`reduceOnly: true` and visibly refuses every other string action before storage
+or a frame; it never chooses another signing mode. Supported string actions
+capture JSON parameters once before validation; fingerprints, persistence and
+handoff use those captured values. A close requires literal `reduceOnly: true`
+in the captured payload. Router queued-intent cancellation keeps its separate
+existing semantics. These admission helpers do not alter handoff, deadline,
+restore, evidence or replay rules below.
+
+`DelegatedOutbox` is an opt-in host-neutral module for admitted DELEGATED single-order
+submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
+`delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
+missing/false flags disable writes and receipts. Hosts inject scoped persistence,
+secure randomness, a monotonic clock with a stable epoch, deadline scheduling
+and an admitted socket connection. Close the outbox on logout; pass the captured connection ticket to flush and receive.
+Router outcomes may be renumbered per client socket, including stored replays.
+Receipt ordering is checked per intent within that ticket, so one intent's higher
+number cannot hide another's deferred replay. Replacement tickets reset receipt
+ordering and old tickets cannot update the replacement connection.
+The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations,
+coverage uncertainty and ledger failures answer unknown, never prove not sent.
+Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
+string coercion. Capability discovery still requires completed socket admission.
+Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
+an intent `sending` in memory; sending, acknowledged and unknown intents are never
+submitted again. At ten monotonic seconds from creation (including persistence
+and admission waits), a never-forwarded queued intent becomes `notSent`; an
+in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+those retained entries to unknown immediately while fencing later work and callbacks.
+Disconnect/replacement makes
+in-flight and acknowledged intents unknown immediately. The synchronous send
+adapter returns true only after socket handoff; only an explicit false guarantees
+neither handoff nor buffering for a later connection. A throw or any other non-true
+return supplies no such evidence: it becomes unknown immediately, loses its replay
+proof, and is never automatically submitted again, including after reconnect or restore.
+Queue cancellation after handoff remains unknown until a router
+receipt positively establishes non-forwarding. Legacy pending cancellations restore
+as unknown. Cancellation or expiry during a declined first send remains terminal
+and is published; a declined retry cannot erase a previous handoff.
+`notSent` is a branded state, constructed only by the exported
+`markDelegatedNotSent(intent, evidence)`. It requires positive evidence for the
+whole intent: a locally known never-attempted intent, a declined adapter handoff
+with no earlier possible handoff, or an admitted authoritative router refusal.
+A failed reconnect attempt cannot prove an earlier handoff did not occur.
+The private runtime brand is read only by the outbox; plain state writes cannot
+manufacture the result. JSON stores the evidence kind and its owner/account/venue/incarnation,
+intent ID, sequence and fingerprint binding. Restore validates that evidence and
+reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
+including their unsupported error outcome. No-evidence clock-epoch/deadline
+expiry of a restored queued record is also unknown rather than proof of no send.
+Restored ambiguous handoffs are unknown. Once enqueue persistence succeeds, temporary unavailability while
+preparing handoff retains that queued intent and its ID for retry. The NX router
+supplies durable deduplication and queue cancellation;
+see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
+signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
+
+The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
+records. The in-memory completed index refers to the same objects in the live
+intent map and credits only durably completed records. Retirement removes both
+entries through one private helper. Capacity accounting and compaction prune
+stale index entries before use, so a stale entry cannot release capacity or
+participate in sorting. Unknown work, including pending queue cancellation, is retained for 24
+hours from its UUIDv7 Unix creation time, using the injected Unix clock across
+reloads (clock rollback can extend retention). At expiry it remains `unknown`,
+gains `retentionExpired: true`, stops pending queue cancellation, and emits the
+normal `changed` notification. Hosts must surface this as expired, unresolved
+history and reconcile via ordinary orders/history; expiry proves nothing about
+the venue outcome. Only after that explicit expiry state is durable may it join
+the latest-32 completed history and retire. Expiry never enables resubmission or
+changes an unknown to `notSent`; a late positive router refusal can still prove
+non-forwarding. Storage failure keeps the row for a later flush retry.
+Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
+listed retired intent IDs in that scope and advance its durable sequence using
+the maximum of old/new values. Preserve all other records. `load` returns an
+`OutboxSnapshot` with sequence progress and records (record arrays require the
+same complete account binding). `put` preserves checkpoint metadata. Compaction failure
+keeps records until a later flush retries. Unrelated retirement failure never
+rejects enqueue or hides its durable intent ID after handoff. Close the old
+outbox before replacing it with a new writer for the same scope.
+
+## DELEGATED account actions
+
+`DelegatedOutbox.enqueueAction(action, options)` retains the separate typed
+action API, gated by the boolean `delegatedOrderActionsV1`, independently of
+`delegatedActivationScopeV1`. It adds the versioned `order.action` family for
+amend, venue cancel, cancel-all and nuke. Existing `enqueue` placement frames and
+`cancelQueued` semantics stay unchanged. Action writes/receipts require both
+`delegatedOrderActionsV1` (box) and `delegatedOrderActionLedgerV1` (router), as well
+as the existing two placement/ledger flags and completed DELEGATED admission.
+The action-specific fingerprint includes its version, kind, target IDs/symbols
+and update values in a distinct canonical domain. UUIDv7 intent IDs use the same
+router dedupe namespace across both families; never reuse one for another action.
+Both entry points accept optional `{intentId}` with a canonical caller UUIDv7.
+Identical retries are durable identity lookups: preserve sequence, canonical
+payload/fingerprint, deadline and handoff evidence, and never submit again.
+Different action/targets or placement family rejects `intentConflict`; a failed
+original put rejects an identity retry as `intentNotDurable`. A later state-put
+failure never erases the original identity's durability or authorizes replay.
+The additive
+`callerSuppliedIntentId: true` reservation survives completed-history retirement
+and restore under the same 1,056-record bound. `enqueueAction` shares placement's
+not-sent and replay evidence constructors; no direct not-sent assignment is
+permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
+action unknown; queue cancellation is explicit, never a venue cancel.
+
+Action outcomes are typed `applied`, proven `refused/notSent`, `unsupported`
+for a pre-dispatch schema rejection, or `unknown`.
+Applied results survive later uncertain queue-cancel replies. A proven refusal
+also survives later uncertainty, while its subsequent authoritative refused
+outcome may supply the refusal message after a negative ACK.
+A replayed positive receipt ACK cannot revoke that refusal or clear its bound
+evidence, including after disconnect, close and restore.
+Partial, interrupted and unproven results stay unknown and never become
+resendable. Nuke uses the existing box account operation: stop algos, cancel
+orders and close positions, awaiting all legs. Its queued work carries the
+original registration and rechecks it after load/store waits; retirement drops
+stale replies. Action persistence uses version-2 rows with the exact action and
+result, retaining atomic scoped checkpoints/retirement and all version-1 placement
+records. See `docs/plans/callers/delegated-action-frames.md` and the shared
+`delegated-actions-v1.json` fixture.
+
+The entire typed DELEGATED WS API is one version, v1. New operations extend v1
+additively, without per-operation versions; v2 is reserved for a major redesign.
+Unknown operations or fields must fail closed with a typed `unsupported` outcome,
+never silent omission or execution of the known subset. Unsupported outcomes
+remain terminal across restore without creating replay evidence. Storage row
+versions are independent of the wire version.
+
+The additive full-write vocabulary uses the same v1 action frames. Batch and
+protective placements, reduce-only close, settings, symbol/batch/account cancellation,
+close-only/stop-only nukes and native algo/EXEC operations additionally require
+`delegatedFullWriteActionsV1` and `delegatedFullWriteLedgerV1`, together with the
+four existing flags on the admitted ticket. Old four-action routers confer no
+expanded admission. Native dispatch/completion stays on the hosted account;
+there is no browser-sign or legacy-method fallback. Algo action receipts remain
+unknown and reconcile from account events, never an assumed applied result.
+Typed TWAP-state rows preserve optional `ownerGeneration` as a nonnegative safe
+integer alongside `ownerId`; it is included in the fingerprint, never synthesized.
+Native restoration still requires both tags to match its trusted binding.
+Accepted long-lived jobs keep their account scope; queued admission and EXEC
+continuations keep their captured registration/deadline fences. The complete
+closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
+LOCAL and COSIGNED method forwarding is unchanged.
+
+Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
+unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
+keeps the same job and schedule; never emulate amendment with automatic
+stop-and-replace.
+
+The hosted typed v1 action decoder rejects duplicate object keys recursively in
+placement orders, close orders, scheduling values and algo payloads before they
+can hide unknown or malformed fields. Binding/hash checks retain precedence;
+schema rejection returns typed `unsupported` before ACK or native work.
+
+Native account-wide cancellation requires the venue's `nukeAccountCancel`
+capability; it never falls back to an incomplete symbol census.
+
 ## Mirror CI invariants (don't "clean these up")
+
+Bitget TP/SL metadata is account/path-specific through `getExchangeMetadata`:
+`bitgetAccountMode: 'classic' | 'uta'` and `tpslOrderPath: 'entry' | 'position'`.
+Classic/unknown entries offer no selector while their preset default is
+UNPROVEN; supported UTA entries and position TP/SL offer Last and Mark. Inverse
+UTA has no native route and offers no selections. The conservative
+static list is empty for Bitget and both siblings. Web consumers must adopt the
+path-aware call; see `docs/plans/callers/bitget-tpsl-trigger-types.md`.
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean
 sliced install with **no dependency hoisting and no leaked DOM lib** (see
@@ -83,7 +333,9 @@ read-identity presence; managed routing uses explicit credential intent before
 credentials are materialised, while legacy requests retain header-based routing.
 KuCoin Futures/Spot also install their passphrase and optional configured broker
 key only in this capsule. One receipt binds Present plus the request, passphrase,
-and optional broker MACs; Hosted admission remains disabled for both names.
+and optional broker MACs. Both names admit RemoteSigner through device-owned
+`kucoin-batch` custody, including the secondary read slot; PayloadSigner remains
+refused because a request MAC cannot supply the separate passphrase/broker MACs.
 Lighter's trusted native/JSON mapping uses a typed API-index principal when a
 private Schnorr signing ref exists and the original key is not Nonblank.
 Original SetupFacts stay unchanged; the principal is never presentable. Validated
@@ -144,10 +396,17 @@ The same field policy declares primary required-for-private passphrases and
 required secondary passphrases with primary fallback for OKX and Bitget aliases
 and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
-explicit empty never inherits. Public mode bypasses only the primary requirement,
-while secondary validation stays active. Shared publicMode intent takes precedence
+explicit empty never inherits. Local signer setup in public mode bypasses only
+the primary requirement, while secondary validation stays active. Shared publicMode intent takes precedence
 over legacy publicDataOnly, including null/omitted requested. This declaration does
 not enable signing for an unmigrated family.
+
+Native public-mode parity uses trusted signer setup's normalized credential
+presence, including per-family Rust whitespace rules. Below SDK admission,
+Coinbase/Spot and TxFlow private payload intent without a native provider refuses with
+`invalidInput/notSent`; an installed provider reaches `unsupported/notSent`.
+Retained WASM fixtures must distinguish these cases rather than equating callback
+intent with provider availability.
 Normalization and required-material validation occur before opaque identities are installed, and SDK cached
 public/private intent uses the same effective presence before raw options are
 stripped. Whitespace follows Rust Unicode White_Space (NEL removed, BOM kept),
@@ -185,6 +444,10 @@ wire stays intact. Shared standalone Binance/Bybit and AsterDEX V1 (an explicit,
 setup-resolved `apiVersion: v1` only; never V3 wallet keys) request-shape interceptors,
 their codec/site tables and the capture utility are the TS retained for remote
 signing after TS venue classes are deleted; no TS venue/API factory is created.
+AsterDEX V3 native requests use closed `asterdex-wallet` statements instead;
+the device derives account-bound EIP-191/712 digests and the engine verifies the
+returned signature. `asterdex-address` proves wallets for nonce setup, and
+`asterdex-hmac` selects V1 primary/secondary custody. PayloadSigner is V1 REST only.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
 tokens are single use and fenced by raw deadlines, protocol expiry and clock
 revision; provider text and partial results are not returned on failure.
@@ -198,10 +461,49 @@ serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
 PayloadSigner remains refused because its legacy private lifecycle has no such
 mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
 signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
+Private WOO RemoteSigner setup refuses any configured secondary credentials with
+`unsupported` / `notSent` before native construction or callbacks: its HMAC wire
+cannot select the device's read-key slot. Remove the secondary credentials to
+use Hosted with the primary key, or use read keys in local browser mode.
+ApeX Omni admits RemoteSigner through `apexomni-batch`: device-held OmniKey
+contracts precede base64-text-key HMAC signing. Origins retain their API
+passphrase in Present-only provider custody; the secret and OmniKey stay on the
+device. Private PayloadSigner and secondary read keys refuse before I/O.
+ApeX HTTP POST captures sign sorted semantic form fields, decoding serialized
+form/multipart bodies while preserving transport bytes and existing zkLink signatures.
+See `docs/plans/callers/apexomni-hosted-signing.md` for the wire and parity contract.
+
+Crypto.com admits RemoteSigner and canonical HMAC PayloadSigner. Every signed
+REST envelope and `public/auth` uses provider custody; the hosted wire carries
+only `method + id + api_key + canonical params + nonce`. PayloadSigner keeps
+private REST reconciliation and writes but opens no private user socket.
+Crypto.com HTTP callback metadata follows its declared header policy in native
+dispatch and hosted capture; the HMAC remains in JSON `sig`. WS auth refuses
+callback result headers.
+Crypto.com Hosted secondary credentials refuse with `unsupported` / `notSent`;
+all native private POSTs retain primary selection. Subaccounts use their own
+API key/secret, with no separate wallet or cosigning protocol.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
+Effective public mode in delegated setup is resolved before custody checks,
+including keyless accounts with unused callbacks. It preserves raw mode-intent
+flags but ignores signing callbacks, credentials and setup metadata. It installs
+no provider or identity, advertises no algorithms, and cannot sign. Private-mode
+callback validation, primary/secondary selection and mode refusals remain strict.
+ApeX uses this shared early return for saved-key and keyless accounts explicitly
+requesting public mode. Captured public mode cannot be changed by later
+construction input; no separate ApeX public-mode guard is installed.
+
+SDK factories and the Rust constructor reject OUT venues before reading options.
+For admitted venues, construction snapshots outer signer fields and their methods
+together under one guard before mode resolution. Admission, asynchronous factories and signer setup
+share that immutable snapshot, preserving receivers without further caller reads.
+Its opaque construction token is stripped before generic options are retained.
+Throwing getters or Proxy traps refuse with a fixed, redacted `invalidInput` /
+`notSent` error before transport; caller errors are never retained.
+
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
 RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
@@ -237,6 +539,13 @@ binary lifecycle fixtures have separate evidence scopes. See phase 9 of
 merely because its name is registered in Rust.
 
 ## Exchange event listeners
+
+`utils/diagnosticRedaction.ts` makes detached diagnostic copies before console,
+log events, telemetry or retained diagnostic buffers receive them. It shares the
+HTTP diagnostic string policy; live command and market messages stay untouched.
+Its parity fixtures are pinned to the host diagnostic contract at `6fde9450cf`.
+Structured `ws-diagnostic` events use this same detached redaction boundary before
+emitter listeners and worker forwarding; live-result events retain their identity.
 
 `BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
 One throwing listener cannot starve later listeners for the same event; errors
@@ -389,6 +698,11 @@ preserve `unsupported`/`notSent` through startup and account validation.
 
 ## Rust engine capabilities
 
+Optional SDK helpers needed before engine startup are declared under
+`bridge.helpers` in `construction-rules.json`. The native generated construction
+record and synchronous SDK record share that declaration. Install and dispatch
+those helpers from their declared flags, never from a venue-name check.
+
 Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
@@ -500,6 +814,24 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+Owner fencing is optional and additive. Without `setWorkerOwner`, calls retain
+legacy bridge-wait and dispatch behavior, including calls queued before attachment.
+With the hook installed, forwarding captures the bridge subscription
+identity and the host owner binding at admission, before page-engine startup,
+and checks both again before dispatch. A removed or replaced bridge
+drops the pending call; an undispatched write rejects as `notSent`. Reattaching
+the same callback is a new subscription, even when the account name is reused.
+Hosts opting into fencing install
+`setWorkerOwner(() => ({ ownerId, generation }))`, reading the current login's
+authenticated principal (never an account label) and a monotonic, nonnegative
+safe-integer generation. Change the generation on retirement/replacement;
+return `undefined` after logout. An installed hook without a current owner fails
+closed; attaching the first listener cannot establish its earlier owner. An
+unchanged bound owner can bootstrap normally. Changing the provider itself also
+retires pending work.
+The direct source-order refresh and capability-adopted `fetchClosedPnl` use the
+same optional admission fence. Only the existing public candle read is permitted
+to retry across a replacement bridge.
 
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from
@@ -578,6 +910,14 @@ bridge-fixes plan; caller IDs alone do not establish complete attribution.
 Native rejections retain known partial-order results. SDK worker and outer CLI
 executor error boundaries copy an explicit allowlist of command fields, including IDs and
 partial counts, instead of flattening them or copying arbitrary error objects.
+Partial information with empty order IDs still exposes the attempted total and failed
+index when supplied, plus `partialOrderIds: []` and `partialOrderCount: 0`.
+That zero counts created IDs; applied cancellation effects remain in `elements`.
+Recorded `elements` retain each logical row's index, optional client order ID,
+placed IDs, applied effects with existing-target references, refusal or unknown
+detail through host errors and worker/CLI clones. Applied effects create no IDs;
+accepted partial IDs without row attribution remain unknown.
+Malformed arrays are discarded whole; nested errors copy only declared venue fields.
 Cancellation commands retain the caller's id, symbol and type alongside legacy
 ID dispatch; venue unknown-ID behavior is a separate native contract.
 
@@ -597,6 +937,25 @@ works for TS classes, native host errors and worker/hosted deserialization.
 Use it instead of class identity or text. Unknown/pending/network/malformed
 checks stay ordinary failures. The command error allowlist retains only validated
 approval fields; the old class export stays available without prototype repair.
+
+## Native reported closed-PnL output
+
+`fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
+`history_output`. All seven financial fields and both timestamps are required
+nullable values: unknown inputs and unknown/overflowed derived results stay null;
+measured zero stays zero. Missing close time never borrows opening time, and
+unknown close times sort last without dropping the row. Numeric strings remain
+accepted by the public contract for derived/reference producers. Consumers must
+propagate unknown through totals rather than coerce null to zero.
+Bybit inverse sizes, OKX contract conversion, fee signs,
+account labels and newest-close ordering are native output policy. The four TS
+closed-PnL mappers live only under test references. `fetchClosedPositions`
+remains the raw journal contract; it is never a fallback for reported PnL.
+The capability-installed method forwards whole to the worker when bridged,
+including after capability adoption; it never commands a mirror-local engine.
+The Bitunix/Blofin income helpers and Bybit inverse helpers also live only in
+`__tests__/reference`; their remaining callers are replay oracles and tests.
+The production venue-file inventory removes them with the runtime imports.
 
 ## Reported closed-PnL read failures
 
@@ -1056,9 +1415,16 @@ only defined on linear markets.
 `safe-cex/src/utils/nativePositionSize.ts` is the single definition;
 `script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
 Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
-use it. Its own comment records that the copies HAD drifted
-before they were merged. One function in the shared layer, adapters either
-side.
+use it. The helper returns `number | null`: coherent native evidence wins, absent
+native uses derived size, and conflicting/unavailable quantities remain unknown.
+No per-field freshness signal exists; close/reduce consumers refuse a conflict
+rather than selecting either value by magnitude. CrossTrade validates canonical
+quantities in both reconciliation passes. Unknown master/copier rows remain
+present and refuse automatic sizing; known-flat rows remain distinct. Matched
+reductions compare exposures projected from canonical native quantities, and
+lot-rounded reductions are capped at the known copier quantity. The missing-
+position pass also refuses unknown opposite-side rows, since an entry could
+reduce them. Market, LimitSlippage and Chase forward these validated amounts.
 
 ### 4. Break-even — NOT trustworthy, and the order paths are off it
 
@@ -1151,23 +1517,25 @@ deterministic request/response regressions; live startup and authentication
 additionally need network or credentialed probes. Do not replace that evidence
 with source-text grep.
 
-## `payloadSigner` (Bybit, Binance)
+## `payloadSigner`
 
-`ExchangeOptions.payloadSigner` replaces `secret` for callers that hold no
-secret and sign elsewhere. It receives the exact bytes the venue would HMAC
-and returns the value for the signature slot, plus headers to add to the same
-request. `utils/payloadSigner.ts` routes both modes through one function, so
-local signing and delegated signing share the same payload. Binance and Bybit
-skip the private websocket with this REST signer. No Rust venue consumes a
-payload signer; the engine's payload-signing actions and events are removed. `runsOnRustEngine` keeps
-Bybit- and Binance-family accounts with one on TS, whose signers honour it.
-Every other TS venue, including the hosted Coinbase/Orderly classes, ignores a
-payload signer while `canSign` counts it, so those accounts stay on the engine.
-A Rust account that would run privately with a payload signer refuses at
-startup, before any engine or transport work: an `ExchangeError` with
-`kind: 'unsupported'`, `outcome: 'notSent'`, which `validateAccount` reports
-with its kind. Lighter's payload-only accounts still start public. Tests: `src/__tests__/payload-signer.test.ts`,
-`src/__tests__/paradex.payload-signer.test.ts` and
+`ExchangeOptions.payloadSigner` signs elsewhere without giving the SDK a local
+secret. It receives the exact venue payload and returns the signature plus any
+permitted result headers. SDK factories select Rust, including Binance and Bybit;
+there is no TypeScript venue fallback. The shared delegated-provider companion
+consumes callbacks only for aliases enabled by `construction-rules.json`, keeps
+their declared REST-only private-feed policy, and strips callbacks and signing
+credentials from retained exchange options.
+
+Public-mode resolution happens before unused custody checks, using each family's
+normalized credential presence and explicit mode intent. Private callback setup
+requires a configured provider; missing configuration refuses with
+`invalidInput` / `notSent`. Unsupported private custody refuses with
+`unsupported` / `notSent` before transport. Below SDK admission, native
+Coinbase/Spot and TxFlow payload intent without a provider gets the former;
+an installed provider reaches the latter. Native intent flags alone are not a
+callback provider and do not enable an unmigrated family. See the shared
+construction and delegated-provider contracts above and
 `src/__tests__/audit-regressions/rust.payload-signer-refusal.test.ts`.
 
 ## Account data on shared public markets (`loadAccountMarketOverlay`)
@@ -1327,8 +1695,13 @@ Its test also requires each advertised route to select an existing backend; comm
 are not routes. Remove retired DNS names from both files together, or
 `engine.ts` can select an HTTP fallback the fleet cannot serve. WEEX remains
 HTTP-only (no HOW); adding its fleet route does not enable the venue or change
-that transport policy. Lighter's `testnet-api.lighter.xyz` does not resolve and
-is intentionally absent; do not introduce another dead backend to cover it.
+that transport policy. Lighter's `testnet-api.lighter.xyz` was documented as retired
+and previously excluded. The SDK inventory now includes every fixed REST base
+declared by the venue crates, including that testnet URL; the source-derived
+coverage test includes production, demo/testnet and auxiliary APIs. Configured
+HyroTrader endpoints are caller-owned rather than fixed venue bases. SDK coverage
+does not prove endpoint reachability: HAProxy config and the fleet rollout remain
+a human step, including resolving the retired Lighter endpoint before routing it.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned family (bybit when tunnelling), whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
@@ -1759,13 +2132,35 @@ The exchange emits `grafana-http-request` / `grafana-http-response` /
 `error` / `warning` events on `BaseExchange.emitter` — check your
 consuming app's CLAUDE.md for the capture playbook.
 
+Rust engine sockets also emit the opt-in `ws-diagnostic` event with a
+`WsDiagnosticEvent` object: `{ venue, channel, direction, message }`. Channels
+are public/private/business and directions are send/receive. This is generic
+across venues, including Hyro. The package exports `setWsDiagnosticsEnabled`,
+`isWsDiagnosticsEnabled` and the event type. The switch defaults off in each
+realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
+`ExchangeWorker` forwards `{ op: 'ws-diagnostic', data: [event] }`; consuming web
+controllers must handle that op and re-emit it before rendering Requests Log rows.
+
+Diagnostics run after socket I/O and validate both field names and values.
+Only closed protocol/status/error enums, bounded integers and success booleans
+survive. IDs, topics, scalar data, messages and other free-form strings become
+fixed placeholders, including nested/encoded echoes inside retained fields.
+Arrays retain at most 32 sanitized entries. Challenge/signature material,
+connection URLs/headers and binary contents are never included. Opaque,
+malformed, oversized and excessive-depth content is withheld. Heartbeats are
+omitted, output is capped and frames are sampled per socket. Disabling the
+switch drops queued entries too, even if it is re-enabled before their callbacks
+run. Queued socket diagnostics capture the cancellation generation and recheck
+it before each structured/legacy callback. Existing private grafana events remain
+available with the same sanitized frame text; do not display both as duplicate rows.
+
 ## Worker Position Refresh Bridge
 
 `BaseExchange.updatePositionsInWebworker()` emits the `updatePositions`
 worker op handled by `src/webworker/handlers/UpdatePositionsHandler.ts`.
 Account-wide refreshes (`symbols` omitted) must use
 `store.addOrUpdatePositionsFull(positions)`, including empty arrays, so
-positions omitted by the exchange are zeroed/cleared. Symbol-scoped refreshes
+positions omitted by the exchange are removed. Last reported per-ID leverage/margin/mode survives separately in the generated `positionSettings` map. Symbol-scoped refreshes
 remain partial and use `addOrUpdatePositions(positions)` when rows are
 returned. Do not replace this with a main-thread `fetchPositions()` + direct
 store write from the web app; the worker owns live exchange state and its
@@ -1947,3 +2342,39 @@ starts no metadata command. UI callers also validate their account market bindin
 Bybit native receive-window corrections emit bybit.clock.corrected with numeric
 offsetMs only. Hosts without an explicit clock-advice listener keep the normal
 info log; CLI listeners replace it with one clock-sync warning per session.
+
+## Position type ownership (P1)
+
+`src/generated/Position.ts` and its enum/Greeks dependencies are generated from
+`sdk-rs/safe-cex-types`; `src/types.ts` imports/re-exports them for the existing
+public API. Run `corepack yarn types:generate`, then
+`corepack yarn generate:script-types`; never edit generated declarations or the
+script bundle. The Position-only compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/position-contract.cjs`.
+
+Position notional is required `number | null`. Unknown native valuation survives
+JSON as null; numeric consumers must propagate unknown or refuse, including
+notional-based totals, ratios and sizing. Quantity remains independent and drives
+position presence. Shared helpers return null for incomplete valuations.
+
+The native engine owns Position display normalization and native sizing extras.
+Positions use SCXF section revision 2 with eleven numeric columns and required
+ID/symbol references; the host refuses older Position sections. Deploy matching
+native/WASM and SDK artifacts together. Other section revisions are unchanged.
+Live position snapshots are authoritative; omitted rows are removed rather than
+retained as fabricated empty positions. NX must land its corresponding consumer
+and artifact changes before this cutover. See `docs/plans/TYPE_OWNERSHIP_P1.md`.
+
+Position enum-word bits 24 and 25 declare the presence of native contracts and
+native PnL columns. A present non-finite native size is rejected, never treated
+as absent (which could select an unsafe base-unit fallback).
+
+## Generated Store contracts (P1)
+
+StoreData, StoreOptions, StoreDataLoaded, StoreUpdateIds, FetchedLeverage and
+DisplayedMargin come from `sdk-rs/safe-cex-types/src/store_model.rs`. The scoped
+generator emits their modules and the initial Store value; never hand-edit them.
+Other models and host-owned capabilities retain their owning modules. Regenerate
+with `corepack yarn types:generate`; the scoped compiler gate is
+`node --test sdk-rs/safe-cex-types/tests/store-contract.cjs`.
+Opaque legacy config members and userData are unknown and require narrowing.

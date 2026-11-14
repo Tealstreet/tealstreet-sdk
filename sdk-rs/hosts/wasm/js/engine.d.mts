@@ -50,6 +50,7 @@ export class WasmEngine implements WasmEngineLike {
   requiresExternalSigner(): boolean;
   /** JSON array of SignAlgorithm the JS provider can sign; omitted means unknown. */
   useExternalSigner(algorithmsJson?: string): void;
+  coinbaseSigningMetadata?(): string;
   hostedSigningClock(now: number): string;
   prepareHostedSigning(inputJson: string, now: number): string;
   localHostedSigning(id: number, now: number): string;

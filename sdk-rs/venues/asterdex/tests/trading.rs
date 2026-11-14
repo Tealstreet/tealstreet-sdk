@@ -10,8 +10,12 @@ use support::Options;
 struct Harness {
     engine: Engine<AsterDex>,
     requests: Vec<HttpRequest>,
+    sent_requests: usize,
+    sent_writes: usize,
+    writes: Vec<(Method, String)>,
     done: Vec<(u32, Result<String, String>)>,
     failures: Vec<(u32, safe_cex_engine::VenueError)>,
+    events: Vec<safe_cex_engine::log::LogEvent>,
 }
 impl Harness {
     fn new() -> Self {
@@ -57,14 +61,26 @@ impl Harness {
         Self {
             engine,
             requests: Vec::new(),
+            sent_requests: 0,
+            sent_writes: 0,
+            writes: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
+            events: Vec::new(),
         }
     }
     fn collect(&mut self) {
         for action in support::drain(&mut self.engine, 1700000000000.0).into_iter() {
             match action {
-                Action::Http(request) => self.requests.push(request),
+                Action::Http(request) => {
+                    self.sent_requests += 1;
+                    self.sent_writes += usize::from(request.method != Method::Get);
+                    if request.method != Method::Get {
+                        self.writes.push((request.method, request.url.clone()));
+                    }
+                    self.requests.push(request);
+                }
+                Action::Notice(Notice::Event(event)) => self.events.push(event),
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, Ok(result)))
                 }
@@ -342,7 +358,7 @@ fn trailing_and_v1_stp_fail_before_write() {
     assert!(h.result(2).is_err());
 }
 #[test]
-fn a_refused_order_fails_the_command_and_names_the_placed_one() {
+fn a_refused_order_returns_the_accepted_ids_like_legacy_ts() {
     let mut h = Harness::new();
     h.command(Command::PlaceOrders {
         command: 1,
@@ -355,9 +371,7 @@ fn a_refused_order_fails_the_command_and_names_the_placed_one() {
     h.reply(first, r#"{"code":-2010,"msg":"insufficient margin"}"#);
     let second = h.take(Method::Post);
     h.reply(second, r#"{"orderId":22542179}"#);
-    assert!(h.result(1).is_err());
-    let error = &h.failures.last().unwrap().1;
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
+    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
 }
 #[test]
 fn cancel_unknown_is_idempotent_and_does_not_replace_filled_status() {
@@ -592,7 +606,7 @@ fn malformed_ack_is_not_success_and_ambiguous_write_is_never_retried() {
 }
 
 #[test]
-fn a_locally_invalid_order_still_sends_the_valid_one_and_names_it() {
+fn a_locally_invalid_order_returns_the_valid_ids_like_legacy_ts() {
     let mut h = Harness::new();
     let mut invalid = limit();
     invalid["symbol"] = json!("UNKNOWN");
@@ -605,9 +619,7 @@ fn a_locally_invalid_order_still_sends_the_valid_one_and_names_it() {
     });
     let valid = h.take(Method::Post);
     h.reply(valid, r#"{"orderId":22542179}"#);
-    assert!(h.result(1).is_err());
-    let error = &h.failures.last().unwrap().1;
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
+    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
 }
 
 #[test]
@@ -1352,12 +1364,15 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                 let sweep = h.requests.remove(index);
                 h.reply_status(sweep, status, body);
                 let message = h.result(7).as_ref().expect_err(body);
+                let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
                 if status == 429 {
-                    let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
                     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-                    assert_eq!(
-                        error.message,
-                        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                }
+                if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+                    assert!(
+                        error
+                            .message
+                            .contains("The outcome is unknown. Check Open Orders")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");
@@ -1547,3 +1562,9 @@ fn engine_ambiguity_429_timestamp_cannot_resend() {
         );
     }
 }
+
+#[path = "support/legacy_parity.rs"]
+mod legacy_parity;
+
+#[path = "support/unknown_exception.rs"]
+mod unknown_exception;

@@ -1,3 +1,4 @@
+import { getStorageEpoch, assertStorageSession } from './storage-context';
 import type { ExchangeName, Market, OrderBook, Ticker } from '@tealstreet/safe-cex/src/types';
 import type {
   CoreAdapter,
@@ -64,9 +65,12 @@ export const createStandaloneHostBindings = (
   session: CLISession,
   platformAdapter?: CLIPlatformAdapter,
 ): HostBindings => {
+  const epoch = getStorageEpoch();
+  const checkSession = () => assertStorageSession(epoch);
   const orderbookCache = getScriptOrderbookCache(exchangeManager);
 
   const requireAdapter = (): CLIPlatformAdapter => {
+    checkSession();
     if (!platformAdapter) {
       throw new Error(
         'standalone CoreAdapter built without CLIPlatformAdapter — pass one before invoking print/runCommand',
@@ -76,37 +80,57 @@ export const createStandaloneHostBindings = (
   };
 
   return {
-    getExchange: (account): HostExchange | undefined =>
-      exchangeManager.getExchange(account) as unknown as HostExchange | undefined,
+    getExchange: (account): HostExchange | undefined => {
+      checkSession();
+      return exchangeManager.getExchange(account) as unknown as HostExchange | undefined;
+    },
     getStore: (account) => {
+      checkSession();
       const exchange = exchangeManager.getExchange(account);
       return exchange ? (storeOf(exchange) as never) : undefined;
     },
 
-    readActiveAccount: () => session.currentAccountName ?? '',
-    readActiveSymbol: () => session.currentSymbol,
-    readStreamingAccounts: () => exchangeManager.getConnectedAccountNames(),
-    readAllAccounts: (): readonly HostAccount[] =>
-      exchangeManager.getAll().map((running) => ({
+    readActiveAccount: () => {
+      checkSession();
+      return session.currentAccountName ?? '';
+    },
+    readActiveSymbol: () => {
+      checkSession();
+      return session.currentSymbol;
+    },
+    readStreamingAccounts: () => {
+      checkSession();
+      return exchangeManager.getConnectedAccountNames();
+    },
+    readAllAccounts: (): readonly HostAccount[] => {
+      checkSession();
+      return exchangeManager.getAll().map((running) => ({
         name: running.accountName,
         exchange: running.accountConfig.exchange.toLowerCase() as ExchangeName,
-      })),
+      }));
+    },
     readExchangeNameForAccount: (account): ExchangeName | undefined => {
+      checkSession();
       const running = account ? exchangeManager.get(account) : undefined;
       return running?.accountConfig?.exchange?.toLowerCase() as ExchangeName | undefined;
     },
 
     /** Subscription-backed cache around safe-cex's `listenOrderBook`. */
-    readOrderbook: (symbol, opts): Promise<OrderBook | undefined> => orderbookCache.get(symbol, opts),
+    readOrderbook: (symbol, opts): Promise<OrderBook | undefined> => {
+      checkSession();
+      return orderbookCache.get(symbol, opts);
+    },
     // `readHistoricalPosition` is deliberately absent: the CLI carries no
     // position history, which is why `getHistoricalPosition` stays out of the
     // CLI target surface.
 
     findMarket: (symbol, account): Market | undefined => {
+      checkSession();
       const exchange = exchangeManager.getExchange(account);
       return exchange ? storeOf(exchange).markets?.find((market) => market.symbol === symbol) : undefined;
     },
     findTicker: (symbol, account): Ticker | undefined => {
+      checkSession();
       const exchange = exchangeManager.getExchange(account);
       return exchange ? storeOf(exchange).tickers?.find((ticker) => ticker.symbol === symbol) : undefined;
     },
@@ -115,6 +139,7 @@ export const createStandaloneHostBindings = (
      *  `closePosition` that throws between legs still records the ids that DID
      *  go live — `rememberOrderLineage` needs them. */
     onWrite: ({ account, summary, ok, orderIds, error }) => {
+      checkSession();
       recordScriptWrite(account, summary, {
         ok,
         ...(orderIds ? { orderIds: [...orderIds] } : {}),
@@ -123,14 +148,17 @@ export const createStandaloneHostBindings = (
     },
 
     print: (text, kind) => {
+      checkSession();
       routePrint(requireAdapter(), text, kind);
     },
     runCommand: async (command, { account, symbol }): Promise<RunCommandResult> => {
+      checkSession();
       const platform = requireAdapter();
       const exchange = exchangeManager.getExchange(account) ?? null;
       const resolvedSymbol = symbol ?? session.currentSymbol;
       try {
         const result = await executeCommand(command, resolvedSymbol, account, exchange, platform);
+        checkSession();
         if (!result.handled) {
           // CLI-specific and documented in `apps/cli/CLAUDE.md`: an unhandled
           // verb is named back rather than reported as a generic failure.

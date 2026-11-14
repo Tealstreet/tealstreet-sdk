@@ -12,6 +12,7 @@ const families = Object.freeze({
   binanceoptions: 'binance',
   binancespot: 'binance',
   bingx: 'bingx',
+  bingxspot: 'bingx',
   bitget: 'bitget',
   bitgetinverse: 'bitget',
   bitgetusdc: 'bitget',

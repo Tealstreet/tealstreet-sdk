@@ -7,6 +7,8 @@ use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::{
     Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
 };
+#[path = "hosted_parity.rs"]
+mod hosted_parity;
 
 #[derive(Clone, Default)]
 pub struct Options {
@@ -133,6 +135,12 @@ impl Options {
         let (provider, identities) =
             LocalSigner::from_setup_with_policy(LocalSetup { primary, secondary }, policy)?;
         let installed = identities.clone();
+        let account = safe_cex_venues::hosted_wallet::Account {
+            testnet: self.testnet,
+            asterdex_v3: version == Version::V3,
+            asterdex_user_address: user.map(str::to_owned),
+            ..Default::default()
+        };
         let venue = AsterDex::new(VenueOptions {
             testnet: self.testnet,
             public_data_only: self.public_data_only,
@@ -148,6 +156,10 @@ impl Options {
             builder_fee_rate_maker: self.builder_fee_rate_maker,
             builder_fee_rate_taker: self.builder_fee_rate_taker,
         });
-        Ok((venue, std::sync::Arc::new(provider), installed))
+        Ok((
+            venue,
+            hosted_parity::wrap(std::sync::Arc::new(provider), installed.clone(), account),
+            installed,
+        ))
     }
 }

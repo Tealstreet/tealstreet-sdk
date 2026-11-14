@@ -45,13 +45,16 @@ const text = (value: unknown): string | undefined => {
   return trimmed === '' ? undefined : trimmed;
 };
 
+const isInfoRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 export const bybitInstrumentClass: VenueInstrumentClassFn = (market: Market): InstrumentClassResult => {
   const info = market.info;
-  if (!info || typeof info !== 'object') {
+  if (!isInfoRecord(info)) {
     return { kind: 'unknown', reason: 'bybit market carries no instruments-info payload' };
   }
 
-  const rawSymbolType = (info as { symbolType?: unknown }).symbolType;
+  const rawSymbolType = info.symbolType;
   // Absent and empty are different: an older cached market predating the field
   // cannot be read as crypto, while an empty string is Bybit positively saying
   // "no special type", which is how every crypto perp is published.
@@ -75,7 +78,7 @@ export const bybitInstrumentClass: VenueInstrumentClassFn = (market: Market): In
     kind: 'classified',
     assetClass,
     venueLabel,
-    underlyingTicker: text((info as { underlyingTicker?: unknown }).underlyingTicker),
-    marketRegion: text((info as { marketRegion?: unknown }).marketRegion),
+    underlyingTicker: text(info.underlyingTicker),
+    marketRegion: text(info.marketRegion),
   };
 };

@@ -26,7 +26,12 @@ describe('telemetry sink', () => {
     reportException(error, { tags: { exchange: 'bybit' } });
 
     expect(event).toHaveBeenCalledWith('hyperliquid.builder-fee-approved', { wallet: '0xabc', testnet: false });
-    expect(captureException).toHaveBeenCalledWith(error, { tags: { exchange: 'bybit' } });
+    expect(captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ name: error.name, message: error.message, stack: error.stack }),
+      { tags: { exchange: 'bybit' } },
+    );
+    expect(captureException.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(captureException.mock.calls[0][0]).not.toBe(error);
   });
 
   it('reports a main-thread exchange error through the sink, tagged with the exchange', () => {

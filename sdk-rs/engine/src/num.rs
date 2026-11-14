@@ -1,5 +1,10 @@
 //! Precision helpers for venue numbers.
 
+pub use safe_cex_position_math::{
+    NativeSizeInputs, NativeSizeMarket, calculate_position_account_leverage,
+    calculate_total_account_leverage, calculate_total_notional, native_position_size,
+};
+
 /// Venue metadata is untrusted; `f64::clamp` panics on unordered bounds.
 pub fn clamp_leverage(value: f64, min: f64, max: f64) -> Result<f64, &'static str> {
     if !value.is_finite() || value <= 0.0 {

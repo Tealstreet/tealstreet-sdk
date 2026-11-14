@@ -372,7 +372,23 @@ impl KrakenSpot {
             if job.effective || !job.ids.is_empty() {
                 error.outcome = Some(Outcome::Unknown);
             }
-            cx.fail(job.command, error);
+            let unknown = error.outcome == Some(Outcome::Unknown);
+            fail_job(cx, &job, error);
+            if unknown {
+                // Queued mutations were admitted before this uncertainty.
+                // Refuse them without replay; cancellation can still proceed.
+                self.trading.queue.retain(|queued| {
+                    if queued.cancel {
+                        return true;
+                    }
+                    fail_job(
+                        cx,
+                        queued,
+                        not_sent("Kraken Spot queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying"),
+                    );
+                    false
+                });
+            }
         }
         self.trade_next(cx);
     }
@@ -506,6 +522,10 @@ impl KrakenSpot {
     }
 }
 
+fn fail_job(cx: &mut Cx<'_, Pending>, job: &Job, error: VenueError) {
+    cx.fail(job.command, error);
+}
+
 /// Refused before any request was sent.
 pub(super) fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
@@ -530,13 +550,28 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         400..=499 => return rejected(error, ErrorKind::Rejected),
         _ => return error.outcome(Outcome::Unknown),
     }
-    let Some(code) = serde_json::from_str::<super::wire::Envelope<'_>>(body)
-        .ok()
-        .and_then(|e| e.error.first().map(|code| code.to_string()))
-    else {
+    let Ok(envelope) = serde_json::from_str::<super::wire::Envelope<'_>>(body) else {
         return error.outcome(Outcome::Unknown);
     };
-    let error = match code.as_str() {
+    let mut failures = envelope
+        .error
+        .iter()
+        .map(|code| native_write_failure(error.clone(), code));
+    let Some(first) = failures.next() else {
+        return error.outcome(Outcome::Unknown);
+    };
+    // Every code must prove refusal before a write may be retried or unfenced.
+    if first.outcome == Some(Outcome::Unknown) {
+        return first;
+    }
+    failures
+        .find(|failure| failure.outcome == Some(Outcome::Unknown))
+        .unwrap_or(first)
+}
+
+fn native_write_failure(error: VenueError, code: &str) -> VenueError {
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    let error = match code {
         "EAPI:Invalid key" | "EAPI:Invalid signature" | "EAPI:Invalid nonce" => {
             rejected(error, ErrorKind::AuthInvalid)
         }
@@ -546,7 +581,7 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         | "EService:Market in cancel_only mode"
         | "EService:Market in post_only mode" => rejected(error, ErrorKind::Rejected),
         "EAPI:Rate limit exceeded" | "EOrder:Rate limit exceeded" => {
-            rejected(error, ErrorKind::RateLimited)
+            error.kind(ErrorKind::RateLimited).outcome(Outcome::Unknown)
         }
         "EService:Unavailable"
         | "EService:Busy"
@@ -559,5 +594,5 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         }
         _ => error.outcome(Outcome::Unknown),
     };
-    error.venue_code(code)
+    error.venue_code(code.to_owned())
 }

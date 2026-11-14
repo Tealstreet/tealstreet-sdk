@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
 const {root,load}=require('../scripts/accounts-source.cjs');
 const m=load(path.join(root,'packages/safe-cex/src/exchangeMetadata.ts'));
 const roster=require('./fixtures/exchange-metadata-roster.json');
-assert.equal(roster.length,47);
+assert.equal(roster.length,48);
 assert.deepEqual(Object.keys(m.exchangeMetadata).sort(),roster);
 assert.equal(m.exchangeMetadata.bybit.prettyName,'Bybit');
 assert.equal(m.isExchangeSupportedOnMobile('bybit'),true);assert.equal(m.isExchangeSupportedOnMobile('unknown'),false);

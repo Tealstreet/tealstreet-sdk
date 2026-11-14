@@ -6,6 +6,7 @@ import { createExchange } from '@tealstreet/safe-cex/src/index';
 import { historyCompletenessOf } from '@tealstreet/safe-cex/src/historyCompleteness';
 import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 import { deriveRemoteSigningPolicy } from '@tealstreet/safe-cex/src/exchanges/rust/construction';
+import { remoteSignerAlgorithms } from '@tealstreet/safe-cex/src/exchanges/rust/remoteSignerProvider';
 
 import { supportedTools } from './tools';
 
@@ -13,7 +14,9 @@ export const createServer = async ({ exchange: name, options }: ServerConfig, ve
   const instantiate = async (): Promise<Exchange> => {
     const next = await createExchange(name, options);
     const delegated = deriveRemoteSigningPolicy(name);
-    if (next instanceof RustEngineExchange && options.payloadSigner && !(delegated?.enabled && delegated.payloadSupported)) {
+    const hmacProxySupported = delegated?.enabled && delegated.payloadSupported
+      && remoteSignerAlgorithms(name).includes('hmacSha256');
+    if (next instanceof RustEngineExchange && options.payloadSigner && !hmacProxySupported) {
       next.dispose();
       throw new Error('Rust MCP accounts require local credentials; EXCHANGE_SIGNER_HEADER is unsupported');
     }

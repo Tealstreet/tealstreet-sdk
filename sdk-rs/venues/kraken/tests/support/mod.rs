@@ -47,6 +47,28 @@ pub fn requests(e: &mut Engine<Kraken>) -> Vec<HttpRequest> {
 pub fn ready() -> (Engine<Kraken>, SocketId) {
     ready_with(options())
 }
+pub fn ready_provider() -> (Engine<Kraken>, SocketId) {
+    use safe_cex_engine::signing::{Identities, Identity, KeyRef};
+    let credential = KeyRef("provider.credential".into());
+    let signing = KeyRef("provider.signing".into());
+    let mut signer = safe_cex_crypto::signer::LocalSigner::new();
+    signer.insert(credential.clone(), b"replay-key".to_vec());
+    signer.insert(signing.clone(), b"replay-secret".to_vec());
+    let ids = Identities {
+        primary: Some(Identity::new(credential, Some(signing))),
+        secondary: None,
+    };
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kraken::with_signing(
+        Options::default(),
+        ids.clone(),
+    ));
+    engine
+        .set_signer(Some(std::sync::Arc::new(signer)))
+        .unwrap();
+    engine.set_identities(ids).unwrap();
+    let (engine, socket, _) = ready_engine(engine, false, META);
+    (engine, socket)
+}
 pub fn ready_with(options: Options) -> (Engine<Kraken>, SocketId) {
     let (e, socket, _) = ready_with_catalogue(options, META);
     (e, socket)
@@ -61,7 +83,18 @@ pub fn ready_with_catalogue(
     Vec<(safe_cex_engine::TimerId, f64)>,
 ) {
     let public_only = options.public_data_only;
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(options));
+    let e = safe_cex_engine::test_support::seeded_engine(Kraken::new(options));
+    ready_engine(e, public_only, meta)
+}
+fn ready_engine(
+    mut e: Engine<Kraken>,
+    public_only: bool,
+    meta: &str,
+) -> (
+    Engine<Kraken>,
+    SocketId,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+) {
     e.start(NOW);
     let mut private = None;
     let mut public = None;
@@ -160,19 +193,7 @@ pub trait Plain {
 }
 impl<V: safe_cex_engine::Venue> Plain for Engine<V> {
     fn drain_plain(&mut self) -> std::vec::IntoIter<Action> {
-        use safe_cex_engine::Notice;
-        self.drain_actions()
-            .map(|a| match a {
-                Action::Notice(Notice::CommandFailed { command, error }) => {
-                    Action::Notice(Notice::CommandFailed {
-                        command,
-                        error: error.clone(),
-                    })
-                }
-                a => a,
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
+        safe_cex_engine::test_support::prepared_now(self).into_iter()
     }
 }
 /// Drains the classified failures, dropping every other action.

@@ -7,7 +7,8 @@ use safe_cex_engine::request_context::{
     plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound},
 };
 
-/// Each ordered write has its native 20 s bound; 100001 permits one resend.
+/// The initial write has a native 20 s bound and one proven-refusal resend.
+/// Successors keep the bound with one attempt after an effective prefix.
 pub(super) const SERIAL: SerialCall = SerialCall {
     auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
     operation: Operation::Mutation,

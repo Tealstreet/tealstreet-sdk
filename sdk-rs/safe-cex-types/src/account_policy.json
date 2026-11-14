@@ -299,6 +299,19 @@
     "requiresCors": true,
     "defaultProxyRegion": "SG"
   },
+  "bingxspot": {
+    "prettyName": "BingX Spot",
+    "requiresNoSecret": false,
+    "requiresPassphrase": false,
+    "requiresApplicationId": false,
+    "requiresApiKeyIndex": false,
+    "requiresOmniKeySeed": false,
+    "supportsVault": false,
+    "supportsTestnet": false,
+    "enabled": false,
+    "requiresCors": true,
+    "defaultProxyRegion": "SG"
+  },
   "bitrue": {
     "prettyName": "Bitrue",
     "requiresNoSecret": false,

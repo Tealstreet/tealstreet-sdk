@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, expectedCheckpointPlan } from './tape.mjs';
-import { venueOf } from './venues.mjs';
+import { replayVenueOf } from './venues.mjs';
 import { COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
@@ -167,7 +167,7 @@ const compare = (label, a, b) => {
   }
 };
 
-const venue = venueOf(values.venue);
+const venue = replayVenueOf(values.venue);
 const isPrivate =
   tapeRecords.find((record) => record.type === 'config')?.private ??
   tapeRecords.find((record) => record.type === 'meta')?.private ??
@@ -190,9 +190,9 @@ if (!isPrivate && !values['correctness-only']) {
       for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
   };
   measure();
-  // One re-measure on this runner before Rust > 1.00x TS fails (Sam, 2026-11-07). Only the
+  // One re-measure on this runner before exceeding the venue CPU bound fails. Only the
   // final set is reported and retained, so recorded revalidation never re-measures.
-  const first = recorded ? undefined : performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  const first = recorded ? undefined : performanceVerdict(metricsOf('ts'), metricsOf('rust'), values.venue);
   if (first && cpuSlower(first.failures)) {
     const audited = { ts: structuredClone(results.ts[0]), rust: structuredClone(results.rust[0]) };
     remeasure = { first, firstDifferences: performanceRunDifferences(performanceResults, results, audited) };
@@ -441,7 +441,7 @@ const failures = [...differences];
 const warnings = [];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate && !values['correctness-only']) {
-  const measured = performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  const measured = performanceVerdict(metricsOf('ts'), metricsOf('rust'), values.venue);
   const verdict = remeasure ? remeasuredVerdict(remeasure.first, measured) : measured;
   failures.push(...verdict.failures);
   warnings.push(...verdict.warnings);
@@ -461,7 +461,9 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },
 }, null, 2) + '\n');
-if (!recorded) writeCpuAnnotations({ venue: values.venue, tape: values.tape, failures, warnings, remeasure: remeasure && { first: remeasure.first.failures } });
+if (!recorded) writeCpuAnnotations({ venue: values.venue, tape: values.tape, failures, warnings,
+  ...(!isPrivate && !values['correctness-only'] ? { samples: { ts: metricsOf('ts'), rust: metricsOf('rust') } } : {}),
+  remeasure: remeasure && { first: remeasure.first.failures } });
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);
   for (const failure of failures.slice(0, 40)) console.log(`  ${failure}`);

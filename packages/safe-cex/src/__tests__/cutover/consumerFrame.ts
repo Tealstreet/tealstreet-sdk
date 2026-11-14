@@ -8,7 +8,7 @@ const none = 0xffffffff;
 export function consumerFrame(
   data: Partial<StoreData>,
   delta?: number[],
-  events = false,
+  events: boolean | { fillId: string; fillSymbol: string } = false,
   marketSymbols: readonly string[] = data.markets?.map((market) => market.symbol) ?? ['BTCUSDT'],
   /** The venue's quantity-units code, written into market flag bits 8-11. */
   quantityUnits = 0,
@@ -21,13 +21,13 @@ export function consumerFrame(
     if (index < 0) index = strings.push(value) - 1;
     return index;
   };
-  const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
+  const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
   const marketIndex = (symbol: string) => {
     const index = marketSymbols.indexOf(symbol);
     if (index < 0) throw new Error(`Fixture market index missing for ${symbol}`);
     return index;
   };
-  const table = (kind: number, words: number[], columns: number[][], tail: number[] = []) => {
+  const table = (kind: number, words: number[], columns: number[][], tail: number[] = [], revision = 0) => {
     const size = align8(words.length * 4) + columns.reduce((n, col) => n + col.length * 8, 0);
     const bytes = new Uint8Array(align8(size + tail.length * 4));
     const view = new DataView(bytes.buffer);
@@ -39,7 +39,7 @@ export function consumerFrame(
         at += 8;
       }
     tail.forEach((word, i) => view.setUint32(at + i * 4, word, true));
-    sections.push({ kind, bytes });
+    sections.push({ kind, bytes, revision });
   };
   if (data.markets) {
     const rows = data.markets;
@@ -115,7 +115,9 @@ export function consumerFrame(
           ...products.map(({ index }) => index),
           ...products.map(({ market }) =>
             market.option
-              ? market.option.right === 'call' ? 2 : 3
+              ? market.option.right === 'call'
+                ? 2
+                : 3
               : ['FUTURE', 'CALL', 'PUT'].indexOf(market.info?.instrumentKind) + 1,
           ),
           ...products.flatMap(({ market }) => [
@@ -153,6 +155,8 @@ export function consumerFrame(
   if (delta) table(4, [], [delta]);
   if (data.orders) {
     const rows = data.orders;
+    const columns: (keyof Pick<Order, 'price' | 'amount' | 'filled' | 'remaining' | 'lastUpdate' | 'takeProfit' | 'stopLoss'>)[] =
+      ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
     const status = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
     const type = ['market', 'limit', 'conditional', 'stop_market', 'take_profit_market', 'trailing_stop_market'];
     const tif = [undefined, 'GoodTillCancel', 'ImmediateOrCancel', 'FillOrKill', 'PostOnly'];
@@ -166,7 +170,10 @@ export function consumerFrame(
       (row.close === undefined ? 0 : (8 | (row.close ? 4 : 0)) << 16) |
       (rejection.indexOf(row.extra?.rejectReason) << 20) |
       (tif.indexOf(row.timeInForce) << 24) |
-      (trigger.indexOf(row.triggerType ?? (row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType)) << 28);
+      (trigger.indexOf(
+        row.triggerType ?? (row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType),
+      ) <<
+        28);
     table(
       7,
       [
@@ -175,9 +182,18 @@ export function consumerFrame(
         ...rows.map((row) => marketIndex(row.symbol)),
         ...rows.map(enums),
       ],
-      ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss']
-        .map((field) => rows.map((row) => (row[field as keyof Order] as number) ?? NaN))
-        .concat([rows.map((row) => (row.extra?.remainingNative as number) ?? NaN)]),
+      columns.map((field) => rows.map((row) => row[field] ?? NaN))
+        .concat([
+          rows.map((row) => row.extra?.remainingNative ?? NaN),
+          rows.map((row) => row.extra?.filledInPlacementUnits ?? NaN),
+          rows.map((row) => row.extra?.remainingNotional ?? NaN),
+          rows.map((row) => row.extra?.conditionalOrderPrice ?? NaN),
+        ]),
+      [
+        ...rows.map((row) => trigger.indexOf(row.tpTriggerType) | (trigger.indexOf(row.slTriggerType) << 8)),
+        ...rows.map((row) => ref(row.symbol)),
+      ],
+      1,
     );
   }
   if (data.positions) {
@@ -185,7 +201,9 @@ export function consumerFrame(
     const enums = (row: Position) =>
       Number(row.side === 'short') |
       ([undefined, 'isolated', 'cross'].indexOf(row.marginType) << 8) |
-      ([undefined, 'hedged', 'oneway'].indexOf(row.positionMode) << 16);
+      ([undefined, 'hedged', 'oneway'].indexOf(row.positionMode) << 16) |
+      (Number(row.extra?.contractsNative !== undefined) << 24) |
+      (Number(row.extra?.unrealizedPnlNative !== undefined) << 25);
     table(
       8,
       [rows.length, ...rows.map((row) => marketIndex(row.symbol)), ...rows.map(enums)],
@@ -199,10 +217,16 @@ export function consumerFrame(
         'liquidationPrice',
         'marginSize',
         'lastUpdate',
-      ].map((field) => rows.map((row) => (row[field as keyof Position] as number) ?? NaN)),
-      rows.map((row) => ref(row.id)),
+      ]
+        .map((field) => rows.map((row) => (row[field as keyof Position] as number) ?? NaN))
+        .concat([
+          rows.map((row) => row.extra?.contractsNative ?? NaN),
+          rows.map((row) => row.extra?.unrealizedPnlNative ?? NaN),
+        ]),
+      [...rows.map((row) => ref(row.id)), ...rows.map((row) => ref(row.symbol))],
     );
   }
+  if (data.positions) sections[sections.length - 1].revision = 2;
   if (data.balance) {
     const balance = data.balance;
     const coins = Object.entries(balance.coins ?? {});
@@ -270,7 +294,18 @@ export function consumerFrame(
   if (events) {
     table(5, [0, 1, 1, 0], [[99, 2, 2, 101, 3, 3]]);
     table(6, [1, 0, ref('1m')], [[1_700_000_000, 100, 102, 99, 101, 5]]);
-    table(11, [1, ref('order-1'), 0, 0], [[100, 0.3]]);
+    const fill = typeof events === 'object'
+      ? events
+      : { fillId: 'order-1', fillSymbol: marketSymbols[0] ?? 'BTCUSDT' };
+    const fills = new Uint8Array(56);
+    const fillView = new DataView(fills.buffer);
+    [1, ref('order-1'), 0, 0].forEach((word, i) => fillView.setUint32(i * 4, word, true));
+    [100, 0.3].forEach((value, i) => fillView.setFloat64(16 + i * 8, value, true));
+    fillView.setUint32(32, ref(fill.fillSymbol), true);
+    fillView.setUint32(36, ref(fill.fillId), true);
+    fillView.setFloat64(40, NaN, true);
+    fillView.setFloat64(48, NaN, true);
+    sections.push({ kind: 11, revision: 2, bytes: fills });
   }
   const encoded = strings.map((s) => new TextEncoder().encode(s));
   const bytes = new Uint8Array(align8(4 + (strings.length + 1) * 4 + encoded.reduce((n, s) => n + s.length, 0)));
@@ -295,6 +330,7 @@ export function consumerFrame(
   let at = 16;
   for (const section of sections) {
     header.setUint16(at, section.kind, true);
+    header.setUint16(at + 2, section.revision ?? 0, true);
     header.setUint32(at + 4, section.bytes.length, true);
     new Uint8Array(buffer, at + 8, section.bytes.length).set(section.bytes);
     at += 8 + section.bytes.length;

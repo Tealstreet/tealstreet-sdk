@@ -159,6 +159,11 @@ already flattened.
 
 ## Cleanup is destructive — the suite flattens EVERY position on the account
 
+Controller close orders use the exact finite, positive `extra.contractsNative`
+value without deriving or rounding it. If unavailable, cleanup logs the reason
+and skips that close; the Paradex market-close step fails its precondition.
+Neither path falls back to base size or notional (mirrors NX #9405).
+
 `flattenPositions` → `closeAllPositionsViaController()` is **symbol-agnostic**: it
 closes every position on every registered account and asserts zero remain. It runs
 in `cleanup()` before each test, so **adding an exchange to the matrix is a
@@ -302,6 +307,9 @@ with the `Next` button; do not assume clicking `exchange-select-*` opens the
 credential form by itself. After clicking `Done`, assert that the account was
 persisted with a retrying check; credential validation can keep the button busy
 for several seconds before persistence.
+Scope account actions to their dialog: the IP-whitelist walkthrough also renders
+Next and Done earlier on the page. Resolve the picker's dialog from its exchange
+tile, and the credential form's dialog from its name input.
 The Tealstreet proxy checkbox is a conditional transport control. If a Cypress
 account has `tealstreetProxy` but the current add-account UI does not render the
 checkbox, continue with the form defaults and let credential validation prove the

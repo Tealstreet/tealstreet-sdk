@@ -1,0 +1,146 @@
+{
+  "orders": [
+    {
+      "id": "order-1",
+      "symbol": "BTC",
+      "side": "buy",
+      "type": "market",
+      "status": "closed",
+      "amount": 2.0,
+      "filled": 0.0,
+      "createdTime": 1.0
+    },
+    {
+      "id": "order-2",
+      "symbol": "BTC",
+      "side": "sell",
+      "type": "limit",
+      "status": "canceled",
+      "price": 0.0,
+      "averagePrice": 0.0,
+      "amount": 3.0,
+      "filled": 1.0,
+      "reduceOnly": false,
+      "positionSide": "both",
+      "createdTime": 2.0,
+      "updatedTime": 3.0,
+      "realizedPnl": 12.0,
+      "fees": 2.0,
+      "feeAsset": "USD",
+      "rebate": 0.5,
+      "rebateAsset": "USD"
+    }
+  ],
+  "trades": [
+    {
+      "symbol": "BTC",
+      "orderId": "order-1",
+      "price": 1.0,
+      "qty": 0.0,
+      "positionSide": "long",
+      "side": "buy",
+      "time": 1.0
+    },
+    {
+      "id": "execution-2",
+      "symbol": "BTC",
+      "orderId": "order-1",
+      "price": 2.0,
+      "qty": 3.0,
+      "quoteQty": 6.0,
+      "realizedPnl": 12.0,
+      "positionSide": "both",
+      "side": "sell",
+      "buyer": false,
+      "maker": false,
+      "commission": 0.0,
+      "commissionAsset": "USD",
+      "time": 2.0
+    }
+  ],
+  "closed": [
+    {
+      "provenance": "venue",
+      "symbol": "BTC",
+      "notional": 20.0,
+      "entryPrice": 10.0,
+      "exitPrice": 12.0,
+      "unrealizedPnl": 2.0,
+      "side": "long",
+      "fees": 0.0,
+      "time": 1.0,
+      "closedTime": 2.0,
+      "account": "fixture",
+      "contracts": 2.0,
+      "leverage": 1.0
+    },
+    {
+      "provenance": "derived",
+      "symbol": "BTC",
+      "notional": "20.00",
+      "entryPrice": "10.00",
+      "exitPrice": "12.00",
+      "unrealizedPnl": "2.00",
+      "side": "short",
+      "fees": "0.00",
+      "time": 3.0,
+      "closedTime": 4.0,
+      "account": "fixture",
+      "contracts": "2.00",
+      "leverage": "1.00"
+    },
+    {
+      "provenance": "venue",
+      "symbol": "BTC",
+      "notional": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "unrealizedPnl": null,
+      "side": "long",
+      "fees": null,
+      "time": null,
+      "closedTime": null,
+      "account": "fixture",
+      "contracts": null,
+      "leverage": null
+    }
+  ],
+  "income": [
+    {
+      "symbol": "BTC",
+      "incomeType": "RAW_PNL",
+      "income": 12.0,
+      "asset": "USD",
+      "timestamp": 1.0,
+      "tranId": "bill-1",
+      "category": "realized_pnl"
+    },
+    {
+      "symbol": "BTC",
+      "incomeType": "RAW_FEE",
+      "income": -2.0,
+      "asset": "USD",
+      "timestamp": 2.0,
+      "tranId": "bill-1",
+      "category": "commission"
+    },
+    {
+      "symbol": "BTC",
+      "incomeType": "RAW_FUNDING",
+      "income": -1.0,
+      "asset": "USD",
+      "timestamp": 3.0,
+      "tranId": "bill-1",
+      "category": "funding"
+    },
+    {
+      "symbol": "",
+      "incomeType": "RAW_TRANSFER",
+      "income": 0.0,
+      "asset": "USD",
+      "timestamp": 4.0,
+      "tranId": "bill-1",
+      "category": "transfer"
+    }
+  ]
+}

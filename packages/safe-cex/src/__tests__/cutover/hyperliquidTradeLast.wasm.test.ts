@@ -1,6 +1,6 @@
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>(), true);
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
 
 // @vitest-environment node

@@ -20,6 +20,10 @@ tickInterval?: number,
 /**
  * @ts-mutable
  */
+rustCommandTimeoutMs?: number, 
+/**
+ * @ts-mutable
+ */
 recvWindow?: number, 
 /**
  * @ts-mutable
@@ -80,4 +84,4 @@ type: "in-process",
 /**
  * @ts-mutable
  */
-source: PublicDataSource, }, key?: string, secret?: string, publicDataOnly: true, forceAllProxiesOff?: boolean, };
+source: PublicDataSource, }, key?: string, secret?: string, publicDataOnly: true, forceAllProxiesOff?: boolean, localSigner?: LocalSignerMetadata, hyperliquidFastBook?: boolean, callerReportsPlacementFailures?: boolean, workerMirror?: boolean, engine?: "rust", publicFeed?: RustPublicFeedPolicy, polymarket?: { marketSlugs?: Array<string>, apiKey?: string, apiSecret?: string, apiPassphrase?: string, signerType?: 0 | 1 | 2 | 3, funderAddress?: string, }, };

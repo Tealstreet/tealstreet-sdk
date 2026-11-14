@@ -3,6 +3,7 @@ mod account;
 mod history;
 mod identity;
 mod limits;
+pub mod registration;
 pub mod sign;
 mod trading;
 mod venue_state;
@@ -299,12 +300,7 @@ impl Lighter {
         }
     }
     fn host(&self) -> &'static str {
-        match (self.options.robinhood, self.options.testnet) {
-            (false, false) => "https://mainnet.zklighter.elliot.ai",
-            (false, true) => "https://testnet-api.lighter.xyz",
-            (true, false) => "https://api.rh.lighter.xyz",
-            (true, true) => "https://api.rh-testnet.lighter.xyz",
-        }
+        registration::Network::from_options(self.options.robinhood, self.options.testnet).origin()
     }
     fn chain_id(&self) -> u32 {
         sign::chain_id(self.options.robinhood, self.options.testnet)

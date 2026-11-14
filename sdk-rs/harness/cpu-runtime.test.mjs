@@ -420,3 +420,14 @@ test('selected directory descendants are admitted without admitting adjacent pre
     assert.throws(() => api.runtimeFingerprint(adjacent), /unselected immutable entry/);
   }
 });
+
+for (const badValue of ['', 24, null, false, undefined, [], {}]) {
+  test(`environment identity refuses and names invalid Node component ${JSON.stringify(badValue)}`, () => {
+    assert.throws(() => api.environmentIdentity({ ...environment,
+      nodeVersions: { ...environment.nodeVersions, ada: badValue } }), error => {
+      assert.equal(error.message, `CPU runtime: invalid Node versions: "ada"=${JSON.stringify(badValue)}`);
+      return true;
+    });
+    assert.deepEqual(api.environmentIdentity(environment), environment, 'valid control retains every identity field');
+  });
+}

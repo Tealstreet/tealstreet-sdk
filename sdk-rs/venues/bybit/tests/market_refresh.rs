@@ -31,7 +31,7 @@ fn page(symbols: &[&str], cursor: &str, label: &str) -> String {
 #[test]
 fn refreshed_market_quantity_caps_replace_both_native_split_bounds() {
     for (kind, quantities) in [
-        (OrderType::Market, vec![200.0, 200.0, 100.0]),
+        (OrderType::Market, vec![133.333, 133.333, 133.333, 100.0]),
         (OrderType::Limit, vec![500.0]),
     ] {
         let mut h = Harness::started(support::Options {
@@ -89,6 +89,16 @@ fn refreshed_market_quantity_caps_replace_both_native_split_bounds() {
             .iter()
             .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
             .collect();
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 499.999 of requested 500); kept for exact TS parity per Sam's decision
+        let expected_sum = if kind == OrderType::Market {
+            499.999
+        } else {
+            500.
+        };
+        assert_eq!(
+            safe_cex_engine::num::adjust(actual.iter().sum(), 0.001),
+            expected_sum
+        );
         assert_eq!(actual, quantities, "{kind:?}");
     }
 }

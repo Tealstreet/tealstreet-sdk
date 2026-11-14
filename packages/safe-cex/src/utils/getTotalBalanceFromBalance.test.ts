@@ -27,7 +27,7 @@ const createLinearMarket = (quote = 'USDT'): Market =>
     precision: { amount: 0.001, price: 0.01 },
     limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 100 } },
     isInverse: false,
-  }) as Market;
+  });
 
 const createInverseMarket = (base = 'BTC'): Market =>
   ({
@@ -39,7 +39,7 @@ const createInverseMarket = (base = 'BTC'): Market =>
     precision: { amount: 1, price: 0.5 },
     limits: { amount: { min: 1, max: 100000 }, leverage: { min: 1, max: 100 } },
     isInverse: true,
-  }) as Market;
+  });
 
 describe('getTotalBalanceFromBalance', () => {
   describe('basic functionality', () => {

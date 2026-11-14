@@ -599,7 +599,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"error":["EAPI:Rate limit exceeded"]}"#,
-            rejected(ErrorKind::RateLimited),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             "Kraken Spot: EAPI:Rate limit exceeded",
         ),
         (
@@ -1509,6 +1509,84 @@ fn spot_outcome(actions: &[Action]) -> Option<safe_cex_engine::Outcome> {
 }
 
 #[test]
+fn mixed_spot_errors_stay_unknown_without_signature_replay() {
+    use safe_cex_engine::Outcome;
+    for ambiguous in ["EService:Unavailable", "EGeneral:Internal error"] {
+        for refusal in ["EAPI:Invalid signature", "EOrder:Insufficient funds"] {
+            for codes in [[ambiguous, refusal], [refusal, ambiguous]] {
+                let (mut e, _, _) = ready(false);
+                let body = serde_json::json!({ "error": codes }).to_string();
+                let settled = add_order_answer(&mut e, 90, &body);
+                assert!(
+                    !settled
+                        .iter()
+                        .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder"))),
+                    "must not replay an ambiguous placement: {body}"
+                );
+                assert_eq!(spot_outcome(&settled), Some(Outcome::Unknown), "{body}");
+                e.handle(
+                    NOW,
+                    Event::Command(Command::PlaceOrders {
+                        command: 91,
+                        orders: vec![opts("limit", 99.)],
+                    }),
+                );
+                assert!(
+                    !requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")),
+                    "placement stays fenced: {body}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn native_spot_rate_limits_stay_unknown_until_reconciled() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for code in ["EAPI:Rate limit exceeded", "EOrder:Rate limit exceeded"] {
+        let (mut e, _, _) = ready(false);
+        let body = serde_json::json!({ "error": [code] }).to_string();
+        let settled = add_order_answer(&mut e, 90, &body);
+        let error = settled
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
+                _ => None,
+            })
+            .expect("placement failure");
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{code}");
+        assert_eq!(error.kind, Some(ErrorKind::RateLimited), "{code}");
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert!(
+            !settled
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder"))),
+            "must not replay a rate-limited placement: {code}"
+        );
+        let read = settled
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+                _ => None,
+            })
+            .expect("placement reconciliation");
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+        assert!(
+            !requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")),
+            "placement stays fenced: {code}"
+        );
+        reply(&mut e, &read, r#"{"error":[],"result":{"open":{}}}"#);
+        let _ = add_order_answer(&mut e, 92, r#"{"error":["EOrder:Insufficient funds"]}"#);
+    }
+}
+
+#[test]
 fn documented_spot_errors_refuse_and_leave_no_fence() {
     for code in [
         "ETrade:Invalid request",
@@ -1635,4 +1713,275 @@ fn a_symbol_cancel_never_sends_the_account_wide_cancel() {
         }),
     );
     assert!(!requests(&mut e).iter().any(|r| r.url.contains("CancelAll")));
+}
+
+fn queued_write_after_native_failure(case: &str, body: &str, unknown: bool) {
+    use safe_cex_engine::{Method, Outcome};
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 901,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let first = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("AddOrder"))
+        .unwrap();
+    let next = if case == "place" {
+        Command::PlaceOrders {
+            command: 902,
+            orders: vec![opts("limit", 98.)],
+        }
+    } else {
+        Command::AmendOrder {
+            command: 902,
+            id: "O-100".into(),
+            price: Some(98.),
+            amount: None,
+        }
+    };
+    e.handle(NOW, Event::Command(next));
+    let queued = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(!queued.iter().any(|a| matches!(a, Action::Http(r)
+        if r.url.ends_with("AddOrder") || r.url.ends_with("AmendOrder"))));
+    assert!(!queued.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 902, .. })
+    )));
+    reply(&mut e, &first, body);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 901,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .expect("first command completes");
+    assert_eq!(
+        error.outcome,
+        Some(if unknown {
+            Outcome::Unknown
+        } else {
+            Outcome::Rejected
+        })
+    );
+    let paths: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r)
+                if r.method == Method::Post
+                    && (r.url.ends_with("AddOrder") || r.url.ends_with("AmendOrder")) =>
+            {
+                Some(r.url.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    if unknown {
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 903,
+                orders: vec![opts("limit", 97.)],
+            }),
+        );
+        let blocked = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            blocked.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 903, error })
+                if error.outcome == Some(Outcome::NotSent) && error.message.contains("uncertain"))),
+            "fresh entry must demonstrate that the uncertainty fence is still held"
+        );
+        assert!(
+            !blocked
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
+        );
+        assert!(
+            paths.is_empty(),
+            "queued {case} bypassed uncertainty before any reconciliation response: {paths:?}"
+        );
+        assert!(actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command: 902, error })
+                if error.outcome == Some(Outcome::NotSent)
+                    && error.message.contains("Check Open Orders"))));
+        let read = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.ends_with("OpenOrders") => Some(request),
+                _ => None,
+            })
+            .expect("uncertain placement starts reconciliation");
+        reply(&mut e, read, OPEN);
+        assert!(
+            requests(&mut e).iter().all(|request| {
+                !request.url.ends_with("AddOrder") && !request.url.ends_with("AmendOrder")
+            }),
+            "reconciliation must not replay the refused queue"
+        );
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 904,
+                orders: vec![opts("limit", 96.)],
+            }),
+        );
+        assert!(
+            requests(&mut e)
+                .iter()
+                .any(|request| request.url.ends_with("AddOrder")),
+            "a fresh explicit retry is allowed after reconciliation"
+        );
+    } else {
+        assert_eq!(paths.len(), 1, "definitive refusal may advance the queue");
+    }
+}
+
+#[test]
+fn api_rate_failure_refuses_already_queued_place() {
+    queued_write_after_native_failure("place", r#"{"error":["EAPI:Rate limit exceeded"]}"#, true);
+}
+#[test]
+fn order_rate_failure_refuses_already_queued_amend() {
+    queued_write_after_native_failure("amend", r#"{"error":["EOrder:Rate limit exceeded"]}"#, true);
+}
+#[test]
+fn mixed_service_signature_failure_refuses_already_queued_place() {
+    queued_write_after_native_failure(
+        "place",
+        r#"{"error":["EService:Unavailable","EAPI:Invalid signature"]}"#,
+        true,
+    );
+}
+#[test]
+fn mixed_signature_internal_failure_refuses_already_queued_amend() {
+    queued_write_after_native_failure(
+        "amend",
+        r#"{"error":["EAPI:Invalid signature","EGeneral:Internal error"]}"#,
+        true,
+    );
+}
+#[test]
+fn definitive_refusal_advances_queued_place() {
+    queued_write_after_native_failure("place", r#"{"error":["EOrder:Insufficient funds"]}"#, false);
+}
+#[test]
+fn definitive_refusal_advances_queued_amend() {
+    queued_write_after_native_failure("amend", r#"{"error":["EOrder:Insufficient funds"]}"#, false);
+}
+
+#[test]
+fn unknown_or_partial_write_refuses_queued_mutations_but_keeps_cancels() {
+    use safe_cex_engine::Outcome;
+    for partial in [false, true] {
+        let (mut e, _, _) = ready(false);
+        let orders = if partial {
+            vec![opts("limit", 99.), opts("limit", 98.)]
+        } else {
+            vec![opts("limit", 99.)]
+        };
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 901,
+                orders,
+            }),
+        );
+        let mut first = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("AddOrder"))
+            .unwrap();
+        for command in [
+            Command::PlaceOrders {
+                command: 902,
+                orders: vec![opts("limit", 97.)],
+            },
+            Command::AmendOrder {
+                command: 903,
+                id: "O-100".into(),
+                price: Some(96.),
+                amount: None,
+            },
+            Command::CancelOrders {
+                command: 904,
+                ids: vec!["O-CANCEL".into()],
+            },
+        ] {
+            e.handle(NOW, Event::Command(command));
+        }
+        let queued = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(!queued.iter().any(|a| matches!(a, Action::Http(_))));
+        if partial {
+            reply(
+                &mut e,
+                &first,
+                r#"{"error":[],"result":{"txid":["accepted-entry"]}}"#,
+            );
+            first = requests(&mut e)
+                .into_iter()
+                .find(|r| r.url.ends_with("AddOrder"))
+                .unwrap();
+        }
+        reply(
+            &mut e,
+            &first,
+            if partial {
+                r#"{"error":["EOrder:Insufficient funds"]}"#
+            } else {
+                r#"{"error":["EAPI:Rate limit exceeded"]}"#
+            },
+        );
+        let settled = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let failed = settled
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 901,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("the original command settles");
+        assert_eq!(failed.outcome, Some(Outcome::Unknown));
+        if partial {
+            assert_eq!(
+                failed.partial.as_ref().unwrap().order_ids,
+                ["accepted-entry"]
+            );
+        }
+        for expected in [902, 903] {
+            assert!(settled.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command, error })
+                    if *command == expected && error.outcome == Some(Outcome::NotSent))));
+        }
+        let writes: Vec<_> = settled
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r)
+                    if r.url.ends_with("AddOrder")
+                        || r.url.ends_with("AmendOrder")
+                        || r.url.ends_with("CancelOrder") =>
+                {
+                    Some(r)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].url.ends_with("CancelOrder"));
+        reply(&mut e, writes[0], r#"{"error":[],"result":{"count":1}}"#);
+        let after_cancel = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            after_cancel
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 904, .. })))
+        );
+        assert!(!after_cancel.iter().any(|a| matches!(a, Action::Http(r)
+            if r.url.ends_with("AddOrder") || r.url.ends_with("AmendOrder"))));
+    }
 }

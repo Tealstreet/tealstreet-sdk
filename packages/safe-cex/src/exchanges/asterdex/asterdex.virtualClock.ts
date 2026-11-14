@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
 import { withPublicCorsProxy } from '../../transport/registry';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 
 dayjs.extend(utc);
 
@@ -108,7 +109,7 @@ class AsterDEXVirtualClock {
     // Always apply the offset, even if small. This ensures signatures use
     // Aster's clock in WebWorkers as well as browser windows.
     const offset = this.server.diff(this.client, 'milliseconds');
-    console.log(`[AsterDEX] Time sync: Server time offset is ${offset}ms`);
+    diagnosticConsole.log(`[AsterDEX] Time sync: Server time offset is ${offset}ms`);
   };
 
   /**

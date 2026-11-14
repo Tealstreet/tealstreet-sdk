@@ -1,7 +1,17 @@
+import type { Candle, ExchangeName, Timeframe } from '../types';
+import type {
+  CandleCacheBackend,
+  CandleCacheBackendReadMode,
+  CandleCacheExchangeFetchRequest,
+  CandleCacheFetchRequest,
+  CandleCacheOptions,
+  CandleCacheRangeLookup,
+  CandleCacheSparseChunk,
+} from './types';
+
 import uniqBy from 'lodash/uniqBy';
 
 import { getExchangeMetadata } from '../exchangeMetadata';
-import type { Candle, ExchangeName, Timeframe } from '../types';
 import { timeframeToSeconds } from '../types';
 import {
   calendarPeriodForInterval,
@@ -11,15 +21,6 @@ import {
   nextChartCandleStartTime,
 } from '../utils/calendarCandles';
 import { normalizeEpochToSeconds } from '../utils/normalizeEpochToSeconds';
-import type {
-  CandleCacheBackendReadMode,
-  CandleCacheExchangeFetchRequest,
-  CandleCacheFetchRequest,
-  CandleCacheOptions,
-  CandleCacheRangeLookup,
-  CandleCacheSparseChunk,
-} from './types';
-import type { CandleCacheBackend } from './types';
 
 export const cleanCandles = <TCandle extends { timestamp: number }>(candles: TCandle[]): TCandle[] =>
   uniqBy(candles, (candle) => candle.timestamp).sort((a, b) => a.timestamp - b.timestamp);
@@ -78,7 +79,7 @@ export const fetchOHLCVWithExchange = async (
     from: request.fromMs,
     to: request.toMs,
     limit: request.limit,
-  } as const;
+  };
   const shouldUseWorker = useWorker ?? getExchangeMetadata(exchange.name).fetchOHLCVInWorker;
 
   if (shouldUseWorker) {
@@ -91,12 +92,7 @@ export const fetchOHLCVWithExchange = async (
 export const createExchangeCandleFetcher = (
   request: Pick<CandleCacheExchangeFetchRequest, 'exchange' | 'symbol' | 'useWorker'>,
 ) => {
-  return (opts: {
-    interval: Timeframe;
-    from?: number;
-    to?: number;
-    limit?: number;
-  }) =>
+  return (opts: { interval: Timeframe; from?: number; to?: number; limit?: number }) =>
     fetchOHLCVWithExchange({
       ...request,
       interval: opts.interval,
@@ -484,9 +480,9 @@ export class CandleCache {
         intervalSeconds,
       });
       return new Map(
-        chunkKeys.flatMap((chunkKey) => {
+        chunkKeys.flatMap<[number, CandleCacheSparseChunk]>((chunkKey) => {
           const chunk = allChunks.get(chunkKey);
-          return chunk ? [[chunkKey, chunk] as const] : [];
+          return chunk ? [[chunkKey, chunk]] : [];
         }),
       );
     }

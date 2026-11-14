@@ -234,6 +234,62 @@ fn documented_partial_snapshot_is_sorted_and_authoritative() {
 }
 
 #[test]
+fn partial_depth_stream_first_reordered_and_escaped_envelopes_agree() {
+    let data = r#"{"s":"BTCUSDT","u":390497879,"b":[["7400","2"]],"a":[["7401","3"]]}"#;
+    for text in [
+        format!(r#"{{"stream":"btcusdt@depth20@100ms","data":{data}}}"#),
+        format!(r#"{{"data":{data},"stream":"btcusdt@depth20@100ms"}}"#),
+        format!(r#"{{"str\u0065am":"btcusdt@depth20@100ms","data":{data},"id":null,"e":null}}"#),
+    ] {
+        let mut h = Harness::ready();
+        h.subscribe();
+        h.message(DOCUMENTED_DEPTH);
+        h.message(&text);
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().bids(),
+            [(7400.0, 2.0)],
+            "{text}"
+        );
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().asks(),
+            [(7401.0, 3.0)],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn partial_depth_validates_whole_envelope_before_changing_the_book() {
+    let data = r#"{"s":"BTCUSDT","u":390497879,"b":[["7400","2"]],"a":[["7401","3"]]}"#;
+    for suffix in [
+        r#","id":1}"#,
+        r#","id":"1"}"#,
+        r#","e":3}"#,
+        r#","stream":"btcusdt@depth20@100ms"}"#,
+        r#","data":null}"#,
+        r#","id":null,"id":null}"#,
+        r#","other":[}"#,
+        "} trailing",
+    ] {
+        let text = format!(r#"{{"stream":"btcusdt@depth20@100ms","data":{data}{suffix}"#);
+        let mut h = Harness::ready();
+        h.subscribe();
+        h.message(DOCUMENTED_DEPTH);
+        h.message(&text);
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().best_bid(),
+            Some(7405.43),
+            "{text}"
+        );
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().best_ask(),
+            Some(7405.96),
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn malformed_crossed_zero_numeric_and_diff_frames_preserve_good_snapshot() {
     let mut h = Harness::ready();
     h.subscribe();

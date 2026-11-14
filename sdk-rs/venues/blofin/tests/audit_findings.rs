@@ -235,7 +235,7 @@ fn cancelling_one_leg_of_a_sized_bracket_amends_it_away() {
     assert!(!h.pending.iter().any(|r| r.url.contains("cancel-tpsl")));
 }
 
-/// Ruled: if the read-back does not show the kept leg, cancel and re-place put it back.
+/// The existing sibling fallback remains active when native read-back fails.
 #[test]
 fn an_amend_whose_read_back_lacks_the_kept_leg_falls_back() {
     let mut h = Harness::new();
@@ -254,6 +254,7 @@ fn an_amend_whose_read_back_lacks_the_kept_leg_falls_back() {
 }
 
 /// A refused amend falls back to cancel then re-place at the surviving leg's size.
+
 #[test]
 fn a_refused_amend_falls_back_to_cancel_and_re_place() {
     let mut h = Harness::new();

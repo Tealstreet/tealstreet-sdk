@@ -4,8 +4,8 @@ import { EngineHost, nativeTransport } from './host.mjs';
 import { HttpPreparationError, prepareFetch } from './managed-http.mjs';
 
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-const token = 'p1:7:18446744073709551615:1';
-const permit = 'r1:7:18446744073709551615:1:1';
+const token = 'p2:1:7:18446744073709551615:1';
+const permit = 'r2:1:7:18446744073709551615:1:1';
 const packet = { request: 7, method: 'POST', url: 'https://venue.test/read', headers: [], timeoutMs: 1000, body: '{}' };
 const prepare = { op: 'managedHttp', phase: 'prepare', preparation: token, intent: 'public', packet };
 const bind = { op: 'managedHttp', phase: 'bind', preparation: token, permit, packet };
@@ -58,6 +58,66 @@ test('pacing wait retains resource, consumes no send, rechecks readiness at fina
   assert.equal(sends, 0);
   assert.deepEqual(r.events.at(-1), ['failed', token, 'timedOut']);
   r.host.dispose();
+});
+
+test('a dispatch admission wait retains its original algo owner', async () => {
+  for (const changed of [false, true]) {
+    let owner = 7, resume, sends = 0;
+    const r = rig(() => ({ bind: () => ({
+      ready: () => true,
+      admitDispatch(callback) { return new Promise((resolve) => { resume = () => { callback(); resolve(); }; }); },
+      dispatch() { sends++; return new Promise(() => {}); },
+    }) }));
+    Object.assign(r.host.engine, {
+      algoStart() {}, algoStartOwned() {}, algoRunning: () => true, algoDeadline: () => undefined,
+    });
+    r.host.algoStart('acct', { ownerId: 'A', generation: 7 }, () => owner === 7);
+    r.host.execute(prepare);
+    await tick();
+    assert.equal(typeof resume, 'function');
+    assert.equal(sends, 0);
+    if (changed) owner = 8;
+    resume();
+    await tick();
+    assert.equal(sends, changed ? 0 : 1);
+    assert.equal(r.events.filter(([kind]) => kind === 'claim').length, changed ? 0 : 1);
+    assert.equal(r.host.dead, changed);
+    if (changed) assert.equal(r.host.managedHttp.resources.size, 0);
+    r.host.dispose();
+  }
+});
+
+test('replacement hosts never route retired preparation or pacing work into the new owner', async () => {
+  for (const phase of ['prepare', 'wake']) {
+    let finishA, wakeA, sendsA = 0, sendsB = 0, cancelled = 0;
+    const preparedA = { bind: () => ({ ready: () => true, dispatch() { sendsA++; return new Promise(() => {}); } }), cancel() { cancelled++; } };
+    const a = rig(phase === 'prepare' ? () => new Promise((resolve) => { finishA = resolve; }) : () => preparedA);
+    if (phase === 'wake') a.wait(450);
+    a.host.execute(prepare);
+    await tick();
+    if (phase === 'wake') wakeA = [...a.timers.values()][0].fn;
+    a.host.dispose();
+    const oldEvents = a.events.length;
+
+    // Even equal token strings from separate module namespaces stay host-local.
+    const b = rig(() => ({ bind: () => ({ ready: () => true, dispatch() { sendsB++; return new Promise(() => {}); } }) }));
+    assert.notEqual(a.host.engine, b.host.engine);
+    b.host.execute(prepare);
+    await tick();
+    assert.equal(sendsB, 1, 'correct-owner dispatch control');
+    const currentEvents = b.events.length;
+    if (phase === 'prepare') finishA(preparedA);
+    else { a.at(450); wakeA(); }
+    await tick();
+    assert.equal(sendsA, 0);
+    assert.equal(sendsB, 1);
+    assert.equal(a.events.length, oldEvents);
+    assert.equal(b.events.length, currentEvents);
+    assert.equal(cancelled, 1);
+    assert.equal(a.host.managedHttp.resources.size, 0);
+    assert.equal(b.host.managedHttp.resources.size, 1);
+    b.host.dispose();
+  }
 });
 
 test('an always-unready provider settles once without a reprepare microtask loop', async () => {
@@ -159,8 +219,8 @@ test('default fetch validates before handoff and invokes fetch synchronously exa
 });
 
 test('a nonce-stale final Claim sends nothing and drains cancel before fresh preparation', async () => {
-  const repairedToken = 'p1:7:18446744073709551615:2';
-  const repairedPermit = 'r1:7:18446744073709551615:2:2';
+  const repairedToken = 'p2:1:7:18446744073709551615:2';
+  const repairedPermit = 'r2:1:7:18446744073709551615:2:2';
   const repairedPrepare = { ...prepare, preparation: repairedToken };
   const repairedBind = { ...bind, preparation: repairedToken, permit: repairedPermit };
   const events = [];

@@ -99,6 +99,7 @@ export const PUBLIC_PROXY_READ_HOSTS: Partial<Record<ExchangeName, readonly stri
   apexomni: ['omni.apex.exchange', 'testnet.omni.apex.exchange'],
   backpack: ['api.backpack.exchange'],
   bingx: ['open-api.bingx.com'],
+  bingxspot: ['open-api.bingx.com'],
   bitget: ['api.bitget.com'],
   bitgetinverse: ['api.bitget.com'],
   bitgetusdc: ['api.bitget.com'],

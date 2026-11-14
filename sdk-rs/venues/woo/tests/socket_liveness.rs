@@ -5,6 +5,115 @@ type LivenessEngine = Engine<safe_cex_venue_woo::Woo>;
 const REJECTED: &str = r#"{"event":"auth","success":false,"message":"bad key"}"#;
 const ACCEPTED: &str = r#"{"event":"auth","success":true}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
+
+#[test]
+fn rejected_login_keeps_only_vendor_code_status_and_closed_reason() {
+    let (mut engine, socket, now, _) = started();
+    engine.handle(now + 1.0, Event::WsMessage {
+        socket,
+        text: r#"{"event":"auth","success":false,"code":-1002,"status":401,"error":"IP not allowed for key","message":"invalid secret"}"#,
+    });
+    let event = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("classified auth notice");
+    assert!(event.message.contains("WOO code -1002"), "{event:?}");
+    assert!(!event.message.contains("Tealstreet IP"));
+    assert!(event.fields.iter().any(|(name, value)| *name == "venueCode"
+        && *value == safe_cex_engine::log::Value::from("-1002")));
+    assert!(event.message.contains("status 401"));
+    assert!(event.message.contains("unauthorized: invalid key"));
+    let diagnostic = format!("{event:?}");
+    assert!(!diagnostic.contains("IP not allowed"));
+    assert!(!diagnostic.contains("invalid secret"));
+}
+
+#[test]
+fn rejected_login_diagnostics_are_bounded_and_do_not_dump_auth_frames() {
+    for error in [
+        serde_json::json!("permission denied"),
+        serde_json::json!({"apikey": "key", "secret": "secret"}),
+        serde_json::json!(format!("signature {}", "abcdef0123456789".repeat(4))),
+        serde_json::json!("!".repeat(2048)),
+    ] {
+        let (mut engine, socket, now, _) = started();
+        let frame =
+            serde_json::json!({"event":"auth", "success":false, "code":"-1002", "error":error,
+            "params":{"apikey":"must-never-be-logged", "sign":"must-never-be-logged"}})
+            .to_string();
+        engine.handle(
+            now + 1.0,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        let event = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("error-only refusal is still an auth notice");
+        let debug = format!("{event:?}");
+        assert!(!debug.contains("must-never-be-logged"));
+        assert!(!debug.contains(&"abcdef0123456789".repeat(4)));
+        assert!(event.message.contains("WOO code -1002"));
+        assert!(!event.message.contains("Tealstreet IP"));
+        assert!(!debug.contains("permission denied"));
+        for (_, value) in event.fields {
+            if let safe_cex_engine::log::Value::Str(text) = value {
+                assert!(text.len() <= 512);
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_or_missing_auth_code_never_infers_an_ip_refusal_from_vendor_text() {
+    for code in [
+        serde_json::json!(-9999),
+        serde_json::Value::Null,
+        serde_json::json!({"key": "private-marker"}),
+    ] {
+        let (mut engine, socket, now, _) = started();
+        let frame = serde_json::json!({"event":"auth", "success":false, "code":code,
+            "message":"IP not whitelisted private-marker", "error":"private-marker"})
+        .to_string();
+        engine.handle(
+            now + 1.0,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        let event = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("auth refusal");
+        assert!(event.message.ends_with("unclassified auth refusal"));
+        assert!(!event.message.contains("Tealstreet IP"));
+        assert!(!format!("{event:?}").contains("private-marker"));
+    }
+}
 // Private startup begins at markets, so its socket may connect before tickers.
 fn seed_tickers(e: &mut LivenessEngine) -> Vec<Action> {
     let mut actions = support::prepared_seed_actions(e, 10.);

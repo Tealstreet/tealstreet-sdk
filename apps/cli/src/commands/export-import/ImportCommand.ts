@@ -1,15 +1,17 @@
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
-import { homedir } from 'os';
-import { join } from 'path';
+import { getStoragePath } from '../../storage-context';
+
 import { BaseCommand, CommandCategory } from '@tealstreet/cli-core';
 // NewCommandResult is the BaseCommand-aligned shape; the public `CommandResult`
 // export from `@tealstreet/cli-core` still points at the legacy result type and
 // is incompatible with `BaseCommand.execute`. Tracked as cross-package drift.
+// NewCommandResult is the BaseCommand-aligned shape; the public `CommandResult`
+// export from `@tealstreet/cli-core` still points at the legacy result type and
+// is incompatible with `BaseCommand.execute`. Tracked as cross-package drift.
 import type { CommandContext, NewCommandResult as CommandResult } from '@tealstreet/cli-core';
-import { BRAND } from '../../brand';
 
-const DEFAULT_PATH = join(homedir(), BRAND.configDirName, 'cli-export.json');
+const DEFAULT_PATH = () => getStoragePath('cli-export.json');
 
 interface ImportPayload {
   version?: number;
@@ -41,7 +43,7 @@ export class ImportCommand extends BaseCommand {
       return this.error('import: preprocess store unavailable');
     }
     const target = this.getArg(ctx, 1);
-    const path = target ? resolve(target) : DEFAULT_PATH;
+    const path = target ? resolve(target) : DEFAULT_PATH();
     if (!existsSync(path)) {
       return this.error(`File not found: ${path}`);
     }
@@ -51,7 +53,7 @@ export class ImportCommand extends BaseCommand {
       const raw = readFileSync(path, 'utf-8');
       payload = JSON.parse(raw) as ImportPayload;
     } catch (e) {
-      return this.error(`Failed to parse ${path}: ${(e as Error).message}`);
+      return this.error(`Failed to parse ${path}: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     if (payload.version !== undefined && payload.version !== 1) {

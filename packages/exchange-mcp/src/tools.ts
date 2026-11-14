@@ -14,7 +14,11 @@ import { z } from 'zod';
 import { prepareCliAmendPrice, prepareCliOrder } from '@tealstreet/cli-core/src/order/prepareCliOrder';
 import { copyHistoryCompleteness } from '@tealstreet/safe-cex/src/historyCompleteness';
 import { CAPABILITY_METHODS } from '@tealstreet/safe-cex/src/exchanges/base';
-import { roundOrderSizeToNearest } from '@tealstreet/script-api-core/src/order/orderPricing';
+import { createCoreAdapter } from '@tealstreet/script-api-core/src/adapter/createCoreAdapter';
+import {
+  assertCloseLikeOrderAmount,
+  roundOrderSizeToNearest,
+} from '@tealstreet/script-api-core/src/order/orderPricing';
 
 type Shape = z.ZodRawShape;
 
@@ -25,6 +29,8 @@ export type Tool<S extends Shape = Shape> = {
   method: keyof Exchange | 'fetchBalance';
   /** Listed only when the server runs with options on. */
   requiresOptions?: true;
+  /** Additional native capabilities required by a synthesized tool. */
+  requiredCapabilities?: readonly (keyof ExchangeCapabilities)[];
   input: S;
   run: (exchange: Exchange, args: z.infer<z.ZodObject<S>>) => Promise<unknown>;
 };
@@ -70,10 +76,12 @@ const openOrders = async (exchange: Exchange, ids: string[]): Promise<Order[]> =
 };
 
 /** The amend size rule, refusing a size that rounds to nothing rather than amending to zero. */
-const prepareAmendAmount = (exchange: Exchange, symbol: string, amount: number): number => {
+const prepareAmendAmount = (exchange: Exchange, order: Order, amount: number): number => {
+  const { symbol } = order;
   const market = exchange.store.markets.find((m) => m.symbol === symbol);
   if (!market) throw new Error(`Market not found for ${symbol}`);
-  const rounded = roundOrderSizeToNearest(amount, market);
+  assertCloseLikeOrderAmount(amount, order, market, exchange.name);
+  const rounded = roundOrderSizeToNearest(amount, market, exchange.name);
   if (!Number.isFinite(rounded) || rounded <= 0) {
     throw new Error(`amount ${amount} rounds to ${rounded} for '${symbol}' — below the venue lot size`);
   }
@@ -288,6 +296,34 @@ export const tools: Tool[] = [
     run: async (exchange, args) => exchange.placeOrder(await prepare(exchange, args)),
   }),
   tool({
+    name: 'close_position',
+    description:
+      'Close positions with reduce-only market orders. Omit amount and percent for a full close. Partial percentages floor to the native lot step and refuse if zero. Explicit amounts are native contracts.',
+    method: 'placeOrder',
+    requiredCapabilities: ['positions'],
+    input: {
+      symbol,
+      side: z.enum(PositionSide).optional().describe('Position side; omit to close both hedge legs'),
+      percent: z.number().positive().max(100).optional(),
+      amount: z.number().positive().optional(),
+    },
+    run: async (exchange, args) => {
+      const positions = await exchange.fetchPositions();
+      const store = { ...exchange.store, markets: exchange.store.markets, positions };
+      const account = 'mcp';
+      const adapter = createCoreAdapter({
+        getExchange: () => exchange,
+        getStore: () => store,
+        readActiveAccount: () => account,
+        readActiveSymbol: () => args.symbol,
+        readStreamingAccounts: () => [account],
+        readAllAccounts: () => [{ name: account, exchange: exchange.name }],
+        readOrderbook: () => undefined,
+      });
+      return adapter.closePosition(args, account);
+    },
+  }),
+  tool({
     name: 'amend_order',
     description: 'Change the price or the size of one open order. Returns the order ids after the change.',
     method: 'updateOrder',
@@ -302,7 +338,7 @@ export const tools: Tool[] = [
       const update =
         price !== undefined
           ? { price: prepareCliAmendPrice(exchange as unknown as ExchangeLike, order.symbol, price) }
-          : { amount: prepareAmendAmount(exchange, order.symbol, amount!) };
+          : { amount: prepareAmendAmount(exchange, order, amount!) };
       return exchange.updateOrder({ order, update });
     },
   }),
@@ -368,6 +404,7 @@ export const supportedTools = (exchange: Exchange, { options = false }: { option
   const { capabilities } = exchange;
   return tools.filter((t) => {
     if (t.requiresOptions && !options) return false;
+    if (t.requiredCapabilities?.some((capability) => !capabilities[capability])) return false;
     if (typeof (exchange as unknown as Record<string, unknown>)[t.method] !== 'function') return false;
     const capability = capabilityOf.get(t.method);
     return capability === undefined || capabilities[capability];

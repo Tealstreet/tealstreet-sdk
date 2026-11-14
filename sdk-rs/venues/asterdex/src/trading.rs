@@ -15,6 +15,7 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -27,6 +28,7 @@ pub struct Request {
     /// A write's plan and its slot; the STP read's caller root instead.
     plan: Option<(Plan, Slot)>,
     pub(crate) root: Option<Context>,
+    write: Option<usize>,
 }
 
 impl Request {
@@ -64,6 +66,45 @@ impl Request {
             } => Intent::Amend,
             Call::Cancel { .. } | Call::CancelSymbol(_) => Intent::Cancel,
             _ => Intent::Setting,
+        }
+    }
+}
+
+pub(crate) const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub(crate) fn write_failure_text(error: &VenueError) -> String {
+    if error.outcome == Some(Outcome::Unknown) {
+        // Projection retains uncertainty context without its presentation marker.
+        if error.message.contains(ENGINE_UNKNOWN_TEXT) {
+            error.message.clone()
+        } else if error.presents || error.message.contains("Check Open Orders") {
+            format!("{}: {ENGINE_UNKNOWN_TEXT}", error.message)
+        } else {
+            ENGINE_UNKNOWN_TEXT.to_owned()
+        }
+    } else {
+        error.message.clone()
+    }
+}
+
+fn failed_element(mut error: VenueError) -> ElementResult {
+    if error
+        .partial
+        .as_ref()
+        .is_some_and(|p| !p.order_ids.is_empty())
+    {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    match error.outcome {
+        Some(Outcome::NotSent | Outcome::Rejected) => ElementResult::NotSent {
+            error: Some(Box::new(error)),
+        },
+        _ => {
+            error.outcome = Some(Outcome::Unknown);
+            error.message = write_failure_text(&error);
+            ElementResult::Unknown {
+                error: Box::new(error),
+            }
         }
     }
 }
@@ -274,12 +315,12 @@ struct Job {
     restore: Option<Planned>,
     restoring: bool,
     steps: VecDeque<Planned>,
+    journal: Option<WritePlan>,
+    next_element: usize,
     ids: Vec<String>,
     successes: usize,
     error: Option<VenueError>,
     continue_on_error: bool,
-    /// Every order was asked for: one refused fails the command, naming what was placed.
-    fails_on_refusal: bool,
     /// The cancel-all sweep was refused: orders may rest whatever the row cancels did.
     sweep_failed: bool,
     result: Option<String>,
@@ -289,6 +330,12 @@ struct Job {
     replacing_order: Option<String>,
 }
 impl Job {
+    fn failure(&self, error: VenueError) -> VenueError {
+        match &self.journal {
+            Some(journal) => journal.attach(error),
+            None => error,
+        }
+    }
     /// What a failed replacement cost, once its cancel has landed.
     fn gone_text(&self, unknown: bool) -> Option<String> {
         if let Some((symbol, side, kind)) = &self.replacing_stop {
@@ -492,6 +539,33 @@ struct StpResponse {
 }
 
 impl AsterDex {
+    pub(crate) fn trade_unproven_evidence(
+        &self,
+        pending: &Pending,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        let Pending::Signed(signed) = pending else {
+            return;
+        };
+        let Pending::Trade(request) = &signed.pending else {
+            return;
+        };
+        if let Some(journal) = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.journal.as_ref())
+        {
+            evidence.write_plan(journal);
+        }
+    }
+
+    pub(crate) fn discard_trade_owner(&mut self, owner: safe_cex_engine::request_context::Owner) {
+        self.trading
+            .jobs
+            .retain(|_, job| !job.plan.as_ref().is_some_and(|plan| plan.owner() == owner));
+    }
+
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let prune_on_refusal = matches!(&command, Command::CancelSymbolOrders { .. });
         let (id, job) = match command {
@@ -684,6 +758,7 @@ impl AsterDex {
             call: Call::StpRead,
             plan: None,
             root: Some(root),
+            write: None,
         });
         self.signed(
             cx,
@@ -707,11 +782,21 @@ impl AsterDex {
                 (VenueError::new(error).kind(ErrorKind::InvalidInput), prune_on_refusal)
             })
             .and_then(|mut job| {
+                job.journal = Some(WritePlan::new(job
+                    .steps
+                    .iter()
+                    .chain(job.restore.iter())
+                    .enumerate()
+                    .map(|(index, step)| Element {
+                        index,
+                        client_order_id: step.query.value("newClientOrderId").map(str::to_owned),
+                    })
+                    .collect()));
                 // Validate the shared auth shape before reserving any split step.
                 if let Some(step) = job.steps.front()
                     && let Err((error, kind)) = self.check_signing(step.call.role())
                 {
-                    return Err((VenueError::new(error).kind(kind), prune_on_refusal));
+                    return Err((job.failure(VenueError::new(error).kind(kind)), prune_on_refusal));
                 }
                 job.reserved_places = job
                     .steps
@@ -779,7 +864,7 @@ impl AsterDex {
         // Nothing signs before a fresh clock: the entry parks until it settles.
         if !self.clock_fresh(cx.now) {
             if let Err(error) = cx.park_preflight(&preflight) {
-                let _ = cx.fail_preflight(&preflight, error.venue_error());
+                let _ = cx.fail_preflight(&preflight, job.failure(error.venue_error()));
                 return;
             }
             self.trading.parked.push((preflight, id, job));
@@ -837,7 +922,7 @@ impl AsterDex {
         }
         let Some(credential) = credential else {
             let error = not_sent("Missing required Aster credentials").kind(ErrorKind::AuthInvalid);
-            let _ = cx.fail_preflight(preflight, error);
+            let _ = cx.fail_preflight(preflight, job.failure(error));
             return;
         };
         let policy = SerialPolicy {
@@ -851,7 +936,7 @@ impl AsterDex {
                 job.slot = Some(slot);
             }
             Err(error) => {
-                let _ = cx.fail_preflight(preflight, error.venue_error());
+                let _ = cx.fail_preflight(preflight, job.failure(error.venue_error()));
                 return;
             }
         }
@@ -880,7 +965,9 @@ impl AsterDex {
         } else {
             job.steps.pop_front()
         };
-        let plan = job.plan.clone().expect("an admitted job holds its plan");
+        let Some(plan) = job.plan.clone() else {
+            return;
+        };
         if let Some(step) = next {
             let Some(slot) = job.slot.take() else {
                 return;
@@ -894,6 +981,14 @@ impl AsterDex {
                     "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
                 );
                 let _ = cx.present_plan_failure(&plan, words);
+            }
+            let write = job.next_element;
+            job.next_element += 1;
+            if let Some(journal) = &mut job.journal {
+                let _ = journal.record(
+                    write,
+                    failed_element(VenueError::new(ENGINE_UNKNOWN_TEXT).outcome(Outcome::Unknown)),
+                );
             }
             let path = self.path(step.endpoint);
             // The request layer consumes the pending request and reports any
@@ -910,23 +1005,34 @@ impl AsterDex {
                     call: step.call,
                     plan: Some((plan, slot)),
                     root: None,
+                    write: Some(write),
                 }),
             );
             return;
         }
-        let job = self.trading.jobs.remove(&id).expect("present");
-        let _ = match job.error {
+        let Some(mut job) = self.trading.jobs.remove(&id) else {
+            return;
+        };
+        let _ = match job.error.take() {
             Some(mut error)
                 if !job.continue_on_error
-                    || job.fails_on_refusal
                     || job.sweep_failed
-                    || job.successes == 0 =>
+                    || job.successes == 0
+                    || error.outcome == Some(Outcome::Unknown) =>
             {
                 // A later rejection after a step took effect cannot mean nothing happened.
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = None;
                 }
-                cx.fail_plan(&plan, error)
+                if error.outcome == Some(Outcome::Unknown) {
+                    cx.event(
+                        safe_cex_engine::Level::Warn,
+                        "write.unknown",
+                        ENGINE_UNKNOWN_TEXT,
+                        vec![("command", id.into()), ("outcome", "unknown".into())],
+                    );
+                }
+                cx.fail_plan(&plan, job.failure(error))
             }
             _ => cx.done_plan(
                 &plan,
@@ -941,7 +1047,7 @@ impl AsterDex {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        response: Result<Response<'_>, &str>,
+        response: Result<Response<'_>, VenueError>,
         leg: Option<&Context>,
         reported: bool,
     ) {
@@ -950,12 +1056,24 @@ impl AsterDex {
         let plan = request.plan.clone();
         let call = &request.call;
         let was_place = matches!(call, Call::Place { .. });
+        let was_cancel = matches!(call, Call::Cancel { .. });
         let was_sweep = matches!(call, Call::CancelSymbol(_));
         let cancelled = match &request.call {
             Call::Cancel { id, .. } => vec![id.clone()],
             _ => vec![],
         };
-        let transport = response.is_err();
+        let transport_error = response.as_ref().err().cloned();
+        let transport = transport_error.is_some();
+        let applied = match &request.call {
+            Call::Cancel { id, .. } => Some((AppliedEffect::Cancel, Some(id.clone()), None)),
+            Call::CancelSymbol(symbol) => Some((AppliedEffect::Cancel, None, Some(symbol.clone()))),
+            Call::Leverage(symbol, _) | Call::Margin(symbol, _) => {
+                Some((AppliedEffect::Settings, None, Some(symbol.clone())))
+            }
+            Call::Mode(_) | Call::StpWrite => Some((AppliedEffect::Settings, None, None)),
+            _ => None,
+        };
+        let mut cancel_applied = false;
         // A gateway failure is unproven whatever body it carries.
         let unproven = response
             .as_ref()
@@ -963,7 +1081,7 @@ impl AsterDex {
         let status_429 = response.as_ref().is_ok_and(|r| r.status == 429);
         let outcome = match response {
             Ok(ref response) => venue_error(response).map_or(Ok(response.body), Err),
-            Err(error) => Err((0, error.to_owned())),
+            Err(error) => Err((0, error.message)),
         };
         let outcome = match outcome {
             Err((-2011, ref message))
@@ -1078,6 +1196,7 @@ impl AsterDex {
                         .chain(self.account.terminal.get(&id).map(|(_, order)| order))
                         .any(|order| order.status == OrderStatus::Closed || order.filled > before)
                 });
+                cancel_applied = true;
                 self.trading.acknowledged.remove(&id);
                 self.mark_order_canceled(cx, &id);
                 if filled_during_cancel {
@@ -1139,15 +1258,20 @@ impl AsterDex {
             };
             return;
         }
-        // A status-only refusal takes its kind and outcome from the table's status rows.
-        let mut status_error = None;
+        // Keep the engine's classified kind and outcome in the logical journal.
+        let mut classified_error = None;
         let protective = was_place
             && self
                 .trading
                 .jobs
                 .get(&command)
                 .is_some_and(|job| job.replacing_stop.is_some());
-        if let Some(leg) = leg.filter(|_| !reported) {
+        if let Some(leg) = leg.filter(|_| {
+            !reported
+                && !transport_error
+                    .as_ref()
+                    .is_some_and(|e| e.outcome == Some(Outcome::NotSent))
+        }) {
             let _ = match &outcome {
                 _ if replied
                     && !(was_place && placed.is_none())
@@ -1192,9 +1316,7 @@ impl AsterDex {
                     };
                     match cx.classify_write(leg, table, native, told) {
                         Ok(fact) => {
-                            if native.is_none() {
-                                status_error = Some(fact.error().clone());
-                            }
+                            classified_error = Some(fact.error().clone());
                             cx.http_write_fact(
                                 leg,
                                 WriteFact::Failed {
@@ -1273,25 +1395,36 @@ impl AsterDex {
             if was_place {
                 job.reserved_places = job.reserved_places.saturating_sub(1);
             }
-            match outcome {
+            let mut element_error = None;
+            match &outcome {
+                Ok(()) if was_cancel && job.replacing_order.is_some() => {
+                    // TS cancels first, then runs its continuing placement batch.
+                    job.continue_on_error = true;
+                }
                 Ok(()) => job.successes += 1,
                 Err((code, message)) => {
                     cx.command_error(command, message.clone());
-                    let mut error = status_error.unwrap_or_else(|| failure(code, message.clone()));
-                    // An earlier leg that may have executed keeps the command unknown.
-                    if unproven
-                        || job
-                            .error
-                            .as_ref()
-                            .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
-                    {
+                    let mut error = transport_error
+                        .or(classified_error)
+                        .unwrap_or_else(|| failure(*code, message.clone()));
+                    if unproven || transport && error.outcome != Some(Outcome::NotSent) {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let guarded = was_place && job.gone_text(true).is_some();
                     if guarded && rate_limited
                         || protective
-                            && protective_failure(code, message.clone()).outcome
+                            && !transport
+                            && protective_failure(*code, message.clone()).outcome
                                 == Some(Outcome::Unknown)
+                    {
+                        error.outcome = Some(Outcome::Unknown);
+                    }
+                    element_error = Some(error.clone());
+                    // Earlier ambiguity belongs to the aggregate, not this row.
+                    if job
+                        .error
+                        .as_ref()
+                        .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
@@ -1303,7 +1436,7 @@ impl AsterDex {
                         error.presents = true;
                         // A status-only refusal already carries the gone text it was classified with.
                         let detail = if rate_limited {
-                            &message
+                            message
                         } else {
                             &error.message
                         };
@@ -1311,6 +1444,29 @@ impl AsterDex {
                     }
                     job.error = Some(error);
                 }
+            }
+            if let (Some(index), Some(journal)) = (request.write, &mut job.journal) {
+                let result = if outcome.is_ok() || cancel_applied {
+                    if let Some(id) = &placed {
+                        ElementResult::Placed {
+                            order_ids: vec![id.clone()],
+                        }
+                    } else if let Some((effect, target_order_id, position_key)) = applied {
+                        ElementResult::Applied {
+                            effect,
+                            target_order_id,
+                            position_key,
+                        }
+                    } else {
+                        failed_element(VenueError::new("Aster write acceptance is unproven"))
+                    }
+                } else {
+                    failed_element(
+                        element_error
+                            .unwrap_or_else(|| VenueError::new("Aster write outcome is unknown")),
+                    )
+                };
+                let _ = journal.record(index, result);
             }
             if let Some(id) = placed {
                 job.ids.push(id);
@@ -1556,7 +1712,6 @@ impl AsterDex {
         };
         let mut job = Job {
             continue_on_error: true,
-            fails_on_refusal: true,
             ..Job::default()
         };
         for opts in orders {
@@ -1602,11 +1757,13 @@ impl AsterDex {
                 .iter()
                 .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
                 .count();
-            let max = self
-                .market_rules
-                .get(&opts.symbol)
-                .and_then(|r| r.max_algo_orders)
-                .unwrap_or(0) as usize;
+            let max = usize::try_from(
+                self.market_rules
+                    .get(&opts.symbol)
+                    .and_then(|r| r.max_algo_orders)
+                    .unwrap_or(0),
+            )
+            .unwrap_or(usize::MAX);
             let existing = cx
                 .store
                 .orders()

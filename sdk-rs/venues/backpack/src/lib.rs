@@ -795,15 +795,6 @@ impl Venue for Backpack {
     fn guard_order_mutations(&self) -> bool {
         true
     }
-    fn http_release_veto(
-        &self,
-        store: &safe_cex_engine::Store,
-        pending: &Pending,
-        release: &safe_cex_engine::request_context::HttpRelease,
-    ) -> Result<(), safe_cex_engine::VenueError> {
-        self.trade_release_veto(store, pending, release)
-    }
-
     type Pending = Pending;
     fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
         use safe_cex_engine::startup::Sections as S;
@@ -1153,7 +1144,7 @@ impl Venue for Backpack {
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
         if let Pending::Trade(request) = pending {
-            request.unproven_evidence(response, evidence);
+            self.trade_unproven_evidence(request, response, evidence);
         }
     }
     fn on_http_failed(

@@ -120,7 +120,8 @@ export const parseLatestMarketPointer = (raw: string | null): LatestMarketPointe
   if (!isFiniteNumber(parsed.marketCount)) return null;
   if (typeof parsed.contentHash !== 'string' || parsed.contentHash.length === 0) return null;
 
-  return parsed as LatestMarketPointer;
+  return { ...parsed, schemaVersion: MARKET_CACHE_SCHEMA_VERSION, bucket: parsed.bucket,
+    refreshedAt: parsed.refreshedAt, marketCount: parsed.marketCount, contentHash: parsed.contentHash };
 };
 
 export const latestPointerMatchesSnapshot = (

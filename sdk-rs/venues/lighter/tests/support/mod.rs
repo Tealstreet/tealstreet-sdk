@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_lighter::Lighter;
+pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 pub const NOW: f64 = 1_700_000_000_000.0;
 pub const META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250}]}"#;
 pub const ACCOUNT: &str = r#"{"code":200,"accounts":[{"index":718895,"collateral":"1000","total_asset_value":"1000","available_balance":"900","positions":[{"market_id":1,"position":"2","sign":1,"avg_entry_price":"100","unrealized_pnl":"0","realized_pnl":"3","initial_margin_fraction":1000,"margin_mode":0,"liquidation_price":"50"}]}]}"#;

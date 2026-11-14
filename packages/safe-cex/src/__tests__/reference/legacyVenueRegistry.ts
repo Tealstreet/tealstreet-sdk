@@ -60,6 +60,9 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
       (m) => m.BingxExchange,
     ),
 
+  // Native-only characterization; the real registry and beta gates still refuse.
+  bingxspot: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
+
   // Bitget
   bitget: () =>
     import(/* webpackChunkName: "exchange-bitget" */ './bitget/bitget.exchange').then(

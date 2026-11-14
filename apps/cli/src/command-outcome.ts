@@ -1,4 +1,5 @@
 import type { ExecuteResult } from '../../../packages/cli-core/src/commands/CommandExecutor';
+import { captureStorageSession } from './storage-context';
 
 import { deserializeCommandError, serializeCommandError } from '../../../packages/safe-cex/src/commandOutcome';
 
@@ -13,12 +14,17 @@ export const commandResultError = (result: Pick<ExecuteResult, 'error' | 'errorD
 
 /** Never repeat a write which may already exist or has known accepted members. */
 export const runCommandWithRetries = async (run: () => Promise<void>, retries: number): Promise<void> => {
-  if (!Number.isInteger(retries) || retries < 0 || retries > 10) throw new RangeError('Retry count must be from 0 to 10');
+  const ownerSession = captureStorageSession();
+  if (!Number.isInteger(retries) || retries < 0 || retries > 10)
+    throw new RangeError('Retry count must be from 0 to 10');
   for (let attempt = 0; ; attempt++) {
+    ownerSession.assertCurrent();
     try {
       await run();
+      ownerSession.assertCurrent();
       return;
     } catch (failure) {
+      ownerSession.assertCurrent();
       const details = serializeCommandError(failure);
       if (details.outcome === 'unknown' || details.partialOrderIds?.length || details.partialOrderCount) throw failure;
       if (attempt >= retries) {

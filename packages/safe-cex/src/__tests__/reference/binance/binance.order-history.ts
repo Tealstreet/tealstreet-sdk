@@ -54,7 +54,7 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const mapBinanceHistoricalOrder = (row: Record<string, any>): HistoricalOrder | null => {
+export const mapBinanceHistoricalOrder = (row: Record<string, unknown>): HistoricalOrder | null => {
   const id = String(row.orderId ?? '');
   const symbol = String(row.symbol ?? '');
   const createdTime = Number(row.time ?? 0);

@@ -1,7 +1,6 @@
 //! Where a host's sockets and requests go: the network, or a recording.
 use crate::routing::{ProxyTokenProvider, RoutingPlan, RoutingState, authenticate_relay};
 use crate::{Events, HostEvent};
-use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, SocketId};
 #[cfg(feature = "nonce-drain")]
 use std::future::Future;
@@ -19,7 +18,35 @@ use tokio_tungstenite::tungstenite::{
 };
 
 mod http;
+mod websocket;
 pub use http::{BoundHttp, HttpPrepareError, HttpPrepareFuture, PreparedHttp};
+
+/// Run admission unlocked, then revalidate the socket and commit around start_send.
+/// Refused handoffs stay NotSent; accepted frames never enter an async staging queue.
+/// Uncertain send/flush failures report HttpFailed after release commit.
+pub trait WebSocketWriter: Send + Sync {
+    fn try_write(
+        &self,
+        request: safe_cex_engine::RequestId,
+        claim: &mut dyn FnMut(&mut dyn safe_cex_engine::WebSocketHandoff),
+    ) -> Result<(), WebSocketWriteError>;
+
+    /// Revoke this connection's typed handoff when its host closes it.
+    fn retire(&self);
+}
+
+#[derive(Debug)]
+pub enum WebSocketWriteError {
+    NotReady,
+    Send(String),
+}
+
+/// Control traffic retains its existing queue. Mutation-capable transports
+/// additionally supply a connection-owned physical writer; the default is None.
+pub struct SocketConnection {
+    pub outgoing: mpsc::UnboundedSender<String>,
+    pub writer: Option<Arc<dyn WebSocketWriter>>,
+}
 
 #[cfg(feature = "nonce-drain")]
 pub struct Drained {
@@ -121,6 +148,23 @@ pub trait Transport {
             mpsc::unbounded_channel().0
         } else {
             self.connect_context(socket, url, headers, channel, context, events)
+        }
+    }
+    /// Opt in only when this connection enforces WebSocketWriter's final claim.
+    #[allow(clippy::too_many_arguments)]
+    fn connect_socket(
+        &self,
+        binary: bool,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<safe_cex_engine::SocketChannel>,
+        context: Option<safe_cex_engine::SocketContext>,
+        events: Events,
+    ) -> SocketConnection {
+        SocketConnection {
+            outgoing: self.connect_encoding(binary, socket, url, headers, channel, context, events),
+            writer: None,
         }
     }
     /// Run a request, reporting its start, body chunks and end on `events`.
@@ -483,6 +527,20 @@ impl Transport for NetworkTransport {
         context: Option<safe_cex_engine::SocketContext>,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        self.connect_socket(binary, socket, url, headers, channel, context, events)
+            .outgoing
+    }
+
+    fn connect_socket(
+        &self,
+        binary: bool,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<safe_cex_engine::SocketChannel>,
+        context: Option<safe_cex_engine::SocketContext>,
+        events: Events,
+    ) -> SocketConnection {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
         let routing = self.routing.clone();
         let guard = self.io_guard.clone();
@@ -499,7 +557,11 @@ impl Transport for NetworkTransport {
         } else {
             (None, headers)
         };
+        let writer = websocket::NetworkWriter::new(socket, events.clone(), guard.clone());
+        let driver_writer = writer.clone();
         tokio::spawn(async move {
+            let writer = driver_writer;
+            let _driver = writer.driver();
             let canceled = events.clone();
             let operation = async move {
                 if !io_allowed(&guard) {
@@ -552,56 +614,54 @@ impl Transport for NetworkTransport {
                     let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await;
                     return;
                 }
-                let _ = events.send(HostEvent::WsOpened(socket));
+                writer.opened(ws);
                 for message in queued {
                     if !io_allowed(&guard) {
                         let _ = events.send(HostEvent::WsClosed(socket, 4100));
                         return;
                     }
                     if !matches!(
-                        tokio::time::timeout(
-                            Duration::from_secs(5),
-                            ws.send(Message::text(message))
-                        )
-                        .await,
+                        tokio::time::timeout(Duration::from_secs(5), writer.send(message)).await,
                         Ok(Ok(()))
                     ) {
                         let _ = events.send(HostEvent::WsClosed(socket, 1006));
                         return;
                     }
                 }
+                writer.enable_writes();
+                let _ = events.send(HostEvent::WsOpened(socket));
                 let opened_at = std::time::Instant::now();
                 let (code, reason) = loop {
                     tokio::select! {
-                        message = ws.next() => match message {
-                            Some(Ok(Message::Text(text))) => {
+                        message = writer.next() => match message {
+                            Ok(Some(Message::Text(text))) => {
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                             }
-                            Some(Ok(Message::Binary(bytes))) if binary => {
+                            Ok(Some(Message::Binary(bytes))) if binary => {
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
                                 let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
                             }
-                            Some(Ok(Message::Binary(bytes))) => {
+                            Ok(Some(Message::Binary(bytes))) => {
                                 let Ok(text) = decode_message(&bytes) else { break (1007, "undecodable binary frame".to_owned()) };
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text));
                             }
-                            Some(Ok(Message::Ping(_))) => {
+                            Ok(Some(Message::Ping(_))) => {
                                 if !io_allowed(&guard) { break (4100, "account IO authority expired".to_owned()); }
-                                if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break (1006, "pong send failed".to_owned()); }
+                                if !matches!(tokio::time::timeout(Duration::from_secs(5), writer.flush()).await, Ok(Ok(()))) { break (1006, "pong send failed".to_owned()); }
                             }
-                            Some(Ok(Message::Close(frame))) => break frame.map_or((1005, String::new()), |frame| (u16::from(frame.code), frame.reason.to_string())),
-                            Some(Ok(_)) => {}
-                            Some(Err(error)) => break (1006, error.to_string()),
-                            None => break (1006, "stream ended".to_owned()),
+                            Ok(Some(Message::Close(frame))) => break frame.map_or((1005, String::new()), |frame| (u16::from(frame.code), frame.reason.to_string())),
+                            Ok(Some(_)) => {}
+                            Err(error) => break (1006, error.to_string()),
+                            Ok(None) => break (1006, "stream ended".to_owned()),
                         },
                         text = pending.recv() => match text {
                             Some(text) => {
                                 if !io_allowed(&guard) { break (4100, "account IO authority expired".to_owned()); }
-                                if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break (1006, "send failed".to_owned()); }
+                                if !matches!(tokio::time::timeout(Duration::from_secs(5), writer.send(text)).await, Ok(Ok(()))) { break (1006, "send failed".to_owned()); }
                             }
-                            None => { if io_allowed(&guard) { let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await; } return; }
+                            None => { if io_allowed(&guard) { let _ = tokio::time::timeout(Duration::from_secs(5), writer.close()).await; } return; }
                         },
                     }
                 };
@@ -622,7 +682,10 @@ impl Transport for NetworkTransport {
                 _ = operation => {},
             }
         });
-        outgoing
+        SocketConnection {
+            outgoing,
+            writer: Some(Arc::new(writer)),
+        }
     }
 
     fn prepare_http(
@@ -669,6 +732,7 @@ impl Transport for NetworkTransport {
 #[cfg(test)]
 mod security_tests {
     use super::*;
+    use futures_util::{SinkExt, StreamExt};
     use std::io::Write;
 
     #[tokio::test]

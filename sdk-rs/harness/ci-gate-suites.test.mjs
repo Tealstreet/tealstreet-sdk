@@ -8,10 +8,10 @@ import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 const copy = (suite) => structuredClone(expectedGateCases(suite));
 
 test('suite registry preserves every primary, alias, profile and network replay', () => {
-  const exceptional = { binance: 11, bybit: 11, okx: 8, orderly: 11, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3, hyperliquid: 3 };
+  const exceptional = { binance: 11, bybit: 11, okx: 8, orderly: 11, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3, hyperliquid: 3, bingx: 4 };
   assert.equal(GATE_SUITES.length, 31);
   // Retired venues remove only their own replay cases.
-  assert.equal(GATE_SUITES.reduce((total, suite) => total + expectedGateCases(suite).length, 0), 107);
+  assert.equal(GATE_SUITES.reduce((total, suite) => total + expectedGateCases(suite).length, 0), 109);
   for (const suite of GATE_SUITES) {
     const cases = expectedGateCases(suite);
     assert.equal(cases.length, exceptional[suite] ?? 2, suite);

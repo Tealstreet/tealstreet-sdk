@@ -9,6 +9,9 @@ mod support;
 use safe_cex_venue_kucoin::Kucoin;
 use support::credentials::Options;
 
+#[path = "trading/allocation.rs"]
+mod allocation;
+
 struct Harness {
     engine: Engine<Kucoin>,
     actions: Vec<Action>,
@@ -472,7 +475,7 @@ fn late_batch_format_failure_sends_no_writes() {
     let mut h = Harness::new();
     let mut second = order();
     second.client_order_id = None;
-    second.amount = 2000.0;
+    second.amount = 0.1; // Rounds to zero; above-max sizes are sent for TS parity.
     place(&mut h, vec![order(), second]);
     h.metadata(false, "CROSS");
     assert!(!h.has("/api/v1/orders"));
@@ -1323,7 +1326,7 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             r#"{"code":"200000","data":{}}"#,
             unknown,
-            "Missing KuCoin order id",
+            "KuCoin write outcome is unknown. Check Open Orders",
         ),
     ] {
         let mut h = Harness::new();
@@ -1423,7 +1426,7 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
         assert_eq!(
             h.done(1).as_ref().unwrap_err(),
             if outcome.1 == Some(Outcome::Unknown) {
-                "Invalid KuCoin response (HTTP 0)"
+                "KuCoin write outcome is unknown. Check Open Orders"
             } else {
                 "KuCoin API Error 100001: Unknown order (HTTP 400)"
             }
@@ -3344,4 +3347,107 @@ fn review_3259_futures_warning_is_normalized_before_the_terminal() {
         assert_eq!(message, &failure(&h).message);
         assert!(writes(&h).is_empty());
     }
+}
+
+#[test]
+fn postmerge_internal_error_does_not_grant_cancel_fallback() {
+    for body in [
+        r#"{"code":"500000","msg":"system error"}"#,
+        r#"{"code":"future-error","msg":"unlisted error"}"#,
+        r#"{"code":"200000"}"#,
+        "invalid JSON",
+    ] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["a".into()],
+        });
+        let request = h.take("/api/v1/orders/a");
+        h.response(&request, 404, body);
+        let extra = writes(&h);
+        if !extra.is_empty() {
+            let fallback = h.take("/api/v1/stopOrders/a");
+            h.response(
+                &fallback,
+                200,
+                r#"{"code":"200000","data":{"cancelledOrderIds":["a"]}}"#,
+            );
+        }
+        h.pace();
+        let terminal = h.done(1);
+        assert!(
+            extra.is_empty(),
+            "extra physical writes: {extra:?}; terminal after successful fallback: {terminal:?}"
+        );
+        assert_eq!(failure(&h).outcome, Some(Outcome::Unknown));
+    }
+}
+
+#[test]
+fn postmerge_two_cancel_unknown_native_message_stays_actionable() {
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["a".into(), "b".into()],
+    });
+    for (id, body) in [
+        ("a", r#"{"code":"500000","msg":"system error"}"#),
+        ("b", r#"{"code":"429000","msg":"rate limit"}"#),
+    ] {
+        let request = h.take(&format!("/api/v1/orders/{id}"));
+        h.response(&request, 200, body);
+        h.pace();
+    }
+    assert!(writes(&h).is_empty());
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("500000"));
+    assert_eq!(error.venue_message.as_deref(), Some("system error"));
+    assert!(
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        "{error:?}"
+    );
+}
+#[test]
+fn postmerge_accepted_cancel_proof_warning_explains_uncertainty() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    amend_stop(&mut h, "old", 120.0);
+    h.metadata(false, "CROSS");
+    let cancel = h.take("/api/v1/orders/old");
+    h.response(
+        &cancel,
+        200,
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.actions
+        .retain(|a| !matches!(a, Action::Notice(Notice::CommandError { .. })));
+    for attempt in 0..3 {
+        let proof = h.take("/api/v1/orders/old");
+        assert_eq!(proof.method, Method::Get);
+        h.response(&proof, 400, r#"{"code":"400100","msg":"proof refused"}"#);
+        if attempt < 2 {
+            h.advance(100.);
+        }
+    }
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(writes(&h).is_empty());
+    let warnings: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandError { message, .. }) => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(!warnings.is_empty());
+    assert!(
+        warnings
+            .iter()
+            .all(|text| text.contains("unknown") && text.contains("Check Open Orders")),
+        "{warnings:?}"
+    );
 }

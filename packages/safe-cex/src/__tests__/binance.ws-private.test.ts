@@ -74,9 +74,9 @@ describe('Binance private websocket position refresh', () => {
       contracts: 0.25,
       notional: 15125,
       unrealizedPnl: 125,
-      leverage: 0,
-      liquidationPrice: 0,
-      marginType: MarginType.Cross,
+      leverage: Number.NaN,
+      liquidationPrice: null,
+      marginType: undefined,
       positionMode: PositionMode.OneWay,
       info: { s: 'BTCUSDT', ps: 'BOTH', pa: '0.25', ep: '60000', up: '125' },
     });

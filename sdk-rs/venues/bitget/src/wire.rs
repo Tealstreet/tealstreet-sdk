@@ -450,6 +450,24 @@ pub struct AccountRow<'a> {
 
 #[derive(Deserialize, Default)]
 pub struct OrderRow<'a> {
+    #[serde(
+        default,
+        rename = "tpOrderType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
+    pub tp_order_type: Cow<'a, str>,
+    #[serde(
+        default,
+        rename = "slOrderType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
+    pub sl_order_type: Cow<'a, str>,
+    #[serde(default, rename = "tpLimitPrice")]
+    pub tp_limit_price: Number,
+    #[serde(default, rename = "slLimitPrice")]
+    pub sl_limit_price: Number,
     #[serde(default, rename = "executePrice")]
     pub execute_price: ExecutionPrice,
     #[serde(
@@ -585,6 +603,22 @@ pub struct OrderRow<'a> {
         deserialize_with = "nullable_text"
     )]
     pub sl_trigger_by: Cow<'a, str>,
+    #[serde(
+        default,
+        rename = "presetStopSurplusTriggerType",
+        alias = "presetStopSurplusType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
+    pub preset_tp_trigger_type: Cow<'a, str>,
+    #[serde(
+        default,
+        rename = "presetStopLossTriggerType",
+        alias = "presetStopLossType",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
+    pub preset_sl_trigger_type: Cow<'a, str>,
     #[serde(default, rename = "size")]
     pub size: Number,
     #[serde(default, rename = "sz")]

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// These tests isolate terminal/file formatting; profile routing has real-FS tests.
+vi.mock('./storage-context', () => ({
+  getStorageDir: () => '/tmp/cli-logger-test',
+  onStorageOwnerChange: () => () => {},
+}));
+
 const fileLines: string[] = [];
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();

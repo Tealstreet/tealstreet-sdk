@@ -101,6 +101,7 @@ export const currentTriggerDepth = (): number => firingDepth;
  * the same moment is not something a user asked for by arming two conditions.
  */
 let fireChain: Promise<void> = Promise.resolve();
+let generation = 0;
 
 export class TriggerDepthExceededError extends Error {
   constructor(depth: number) {
@@ -110,6 +111,7 @@ export class TriggerDepthExceededError extends Error {
 }
 
 export const armTrigger = (opts: ArmTriggerOptions): ArmedTrigger => {
+  const armedGeneration = generation;
   const depth = opts.depth ?? 0;
   if (depth >= MAX_CHAIN_DEPTH) throw new TriggerDepthExceededError(depth);
 
@@ -141,6 +143,7 @@ export const armTrigger = (opts: ArmTriggerOptions): ArmedTrigger => {
   // A self-rescheduling timeout, never `setInterval` (root CLAUDE.md). An
   // overlapping tick here would fire the same command twice.
   const tick = async () => {
+    if (armedGeneration !== generation) return;
     timers.delete(trigger.id);
     if (trigger.status !== 'armed') return;
 
@@ -171,12 +174,15 @@ export const armTrigger = (opts: ArmTriggerOptions): ArmedTrigger => {
     timers.delete(trigger.id);
 
     const queued = fireChain.then(async () => {
+      if (armedGeneration !== generation) return;
       const previousDepth = firingDepth;
       firingDepth = depth + 1;
       try {
         await opts.run(opts.action);
+        if (armedGeneration !== generation) return;
         opts.onSettled?.(trigger);
       } catch (err) {
+        if (armedGeneration !== generation) return;
         // Never silent: a trigger fires while the user is looking elsewhere,
         // so a failure that printed nothing would read as "it never fired".
         trigger.status = 'failed';
@@ -185,7 +191,7 @@ export const armTrigger = (opts: ArmTriggerOptions): ArmedTrigger => {
       } finally {
         // Restored, not zeroed. Zeroing is only correct for the outermost
         // fire, and assuming that is what let a concurrent one clobber it.
-        firingDepth = previousDepth;
+        if (armedGeneration === generation) firingDepth = previousDepth;
       }
     });
     // A failing trigger must not poison the chain for the next one.
@@ -224,6 +230,7 @@ export const cancelTrigger = (id: string): boolean => {
 
 /** Test seam, and the teardown a host should call before exiting. */
 export const clearTriggers = (): void => {
+  generation++;
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
   triggers.clear();

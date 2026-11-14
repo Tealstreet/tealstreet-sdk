@@ -437,16 +437,15 @@ const HyrotraderMetadata: ExchangeMetadata = {
   refImage: '/static/exchanges/logos/HYROTRADER/full-white.svg',
   enabled: false,
   enabledInDev: true,
-  // Keep preview/prod dark until the private REST/WS path has either Hyro HTTPS
-  // origins or a Tealstreet relay. Local dev can still test the simulator
-  // directly over plain HTTP.
-  enableInPreview: false,
+  // Hyro now fronts the production simulator at a TLS hostname with Tealstreet
+  // browser CORS, so preview can run direct while production stays explicitly dark.
+  enableInPreview: true,
   forbidCors: false,
   enforceWsTunnel: false,
   supportsTunnel: false,
   privateProxyIps: [],
   privateProxyRegions: {},
-  latencyDomain: 'hyrotrader-simulator',
+  latencyDomain: 'sim-tealstreet.hyro.site',
 };
 
 const BybitSpotMetadata: ExchangeMetadata = {
@@ -920,7 +919,9 @@ const BitgetMetadata: ExchangeMetadata = {
   // a value nothing consumed. Contrast bitunix,
   // which initialises `useFallbackUrl` from the flag, and lighter, whose
   // routing is `wsRouteCandidates` — the flag is real for both.
-  supportedTPSLTriggerTypes: [OrderStopTriggerType.MarkPrice],
+  // Classic entry presets have no documented selector or proven default.
+  // Account/path-aware callers use getExchangeMetadata for selectable TP/SL.
+  supportedTPSLTriggerTypes: [],
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   latencyDomain: 'api.bitget.com',
   features: {
@@ -1086,6 +1087,36 @@ const BingxMetadata: ExchangeMetadata = {
     positions: true,
     balance: true,
   },
+};
+
+// Native/fixture-only. SDK admission follows live-key transport smoke validation.
+const BingxSpotMetadata: ExchangeMetadata = {
+  ...defaultMetaData,
+  exchangeName: 'bingxspot',
+  prettyName: 'BingX Spot',
+  logo: BingxMetadata.logo,
+  lightLogo: BingxMetadata.lightLogo,
+  darkLogo: BingxMetadata.darkLogo,
+  refLink: BingxMetadata.refLink,
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
+  hasEmptyPositions: true,
+  positionModes: [PositionMode.OneWay],
+  marginTypes: [MarginType.Isolated],
+  hideMarginTypeSelector: true,
+  hidePositionModeSelector: true,
+  leverageSliderDisabled: true,
+  supportsPartialStops: false,
+  supportsInfinityStops: false,
+  supportsMaxCrossLeverage: false,
+  doesNotSupportOpenInterest: true,
+  requiresCors: true,
+  supportsTunnel: true,
+  enforceWsTunnel: true,
+  latencyDomain: 'open-api-ws.bingx.com',
+  candleApiCountLimit: 1440,
+  features: { kline: true, orderbook: true, orders: true, balance: true, positions: false },
 };
 
 const BitrueMetadata: ExchangeMetadata = {
@@ -2257,6 +2288,7 @@ export const exchangeMetadata: {
   grvt: GrvtMetadata,
   phemex: PhemexMetadata,
   bingx: BingxMetadata,
+  bingxspot: BingxSpotMetadata,
   bitrue: BitrueMetadata,
   blofin: BlofinMetadata,
   lighter: LighterMetadata,
@@ -2301,6 +2333,19 @@ export const getExchangeMetadata = (exchange: ExchangeName, opts: Record<string,
   const metadata = exchangeMetadata[exchange];
   if (!metadata) {
     throw unknownExchangeMetadata(exchange);
+  }
+  if (['bitget', 'bitgetusdc', 'bitgetinverse'].includes(exchange)) {
+    // The native inverse engine has no UTA route.
+    if (exchange === 'bitgetinverse' && opts.bitgetAccountMode === 'uta') return metadata;
+    const path = opts.tpslOrderPath ?? 'entry';
+    if (path === 'position' || (path === 'entry' && opts.bitgetAccountMode === 'uta')) {
+      return {
+        ...metadata,
+        supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
+        defaultTPTriggerType: OrderStopTriggerType.MarkPrice,
+        defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
+      };
+    }
   }
   return metadata;
 };

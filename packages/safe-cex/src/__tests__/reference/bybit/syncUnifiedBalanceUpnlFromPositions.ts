@@ -1,6 +1,6 @@
 import type { Balance, Position } from '../../../types';
 
-import { positionUpnlInQuote } from '../../../exchanges/bybit/bybit.inverse';
+import { positionUpnlInQuote } from './bybit.inverse';
 
 export const syncUnifiedBalanceUpnlFromPositions = (
   balance: Balance | undefined,

@@ -54,6 +54,12 @@ Version is resolved in `resolveAsterDEXApiVersion()` using this order:
 
 ### V3 (Wallet / Agent Model)
 
+Rust RemoteSigner supports V1 and V3 without an origin private key. V3 hosted
+version resolution uses public main-wallet/API-wallet addresses. The device
+derives each digest from a closed account-bound statement; nonce address setup
+and secondary read agents retain device custody. V1 PayloadSigner is REST-only;
+V3 requires RemoteSigner. See `sdk-rs/venues/asterdex/README.md` for the protocol.
+
 - Header: `X-MBX-APIKEY`
 - Standard signed params include `recvWindow`, `timestamp`, plus:
   - `user`

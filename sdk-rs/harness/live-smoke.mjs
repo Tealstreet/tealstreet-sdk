@@ -3,6 +3,7 @@
 // the environment or one JSON object on stdin (--credentials-stdin).
 import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -16,18 +17,22 @@ import { liveSmokeCredentialSets, liveSmokeProfile } from './live-smoke-venues.m
 import { createPrivateRecorder } from './live-smoke-tape.mjs';
 import { venueMarketRules } from './live-smoke-rules.mjs';
 
+const BigNumber = createRequire(import.meta.url)('bignumber.js');
 const REQUIRED = Object.values(LOADED_FLAG).reduce((mask, bit) => mask | bit, 0);
 const positive = (value) => Number.isFinite(value) && value > 0;
 class SmokeFailure extends Error {}
 const fail = (code) => { throw new SmokeFailure(code); };
-const snap = (value) => Number(value.toPrecision(14));
-// Snap only float noise (a few ULPs of the step count) to the nearest multiple:
-// a fixed 1e-10 is below one ULP past ~1e6 steps, and a wider band moves real fractions.
-const units = (value, step, ceil = false) => {
-  const count = value / step, nearest = Math.round(count);
-  const whole = Math.abs(count - nearest) <= 16 * Number.EPSILON * Math.max(1, Math.abs(count)) ? nearest :
-    ceil ? Math.ceil(count) : Math.floor(count);
-  return snap(whole * step);
+// Decimal integer division preserves direction without a float noise band.
+// Express notional targets in per-unit terms without a rounded division;
+// numeric cleanup must preserve the exact selected multiple.
+const units = (value, step, ceil = false, perUnit = 1) => {
+  const target = new BigNumber(value), increment = new BigNumber(step).times(perUnit);
+  let whole = target.dividedToIntegerBy(increment);
+  if (ceil && !target.mod(increment).isZero()) whole = whole.plus(1);
+  const selected = whole.times(step);
+  const rounded = Number(selected.toPrecision(14));
+  if (!Number.isFinite(rounded) || !selected.eq(rounded)) fail('unrepresentable-market-step');
+  return rounded;
 };
 
 export function accountSnapshot(buffer) {
@@ -75,20 +80,23 @@ export function smokeOrder(market, book, rules = {}, postOnly = true) {
   if (![tick, step, minAmount].every(positive) || !positive(maxAmount) || maxAmount < minAmount) fail('unknown-market-limits');
   const bid = book?.bids?.[0], ask = book?.asks?.[0];
   if (!positive(bid) || !positive(ask) || bid >= ask) fail('invalid-book');
-  const floor = Math.max(positive(market.minPrice) ? market.minPrice : tick, (rules.lowerMultiplier ?? 0) * (book.mark ?? ask));
-  const price = units(Math.max(bid * 0.9, floor + tick * 2), tick);
-  const amendPrice = units(Math.max(bid * 0.89, floor + tick), tick);
-  if (!positive(price) || !positive(amendPrice) || price >= bid * 0.98 || amendPrice >= price || amendPrice < floor) fail('no-resting-price');
+  const floor = BigNumber.maximum(positive(market.minPrice) ? market.minPrice : tick,
+    new BigNumber(rules.lowerMultiplier ?? 0).times(book.mark ?? ask));
+  const price = units(BigNumber.maximum(new BigNumber(bid).times(0.9), floor.plus(new BigNumber(tick).times(2))), tick);
+  const amendPrice = units(BigNumber.maximum(new BigNumber(bid).times(0.89), floor.plus(tick)), tick);
+  if (!positive(price) || !positive(amendPrice) || price >= bid * 0.98 || amendPrice >= price || floor.gt(amendPrice)) fail('no-resting-price');
   const quoteQuantity = rules.quoteQuantity ?? Boolean(market.flags & MARKET_FLAG.INVERSE);
   const scale = rules.notionalPerAmount ?? (quoteQuantity && positive(market.contractSize) ? market.contractSize : 1);
   if (!positive(scale)) fail('unknown-placement-units');
-  const perUnit = quoteQuantity ? scale : amendPrice * scale;
+  const perUnit = new BigNumber(scale).times(quoteQuantity ? 1 : amendPrice);
   const minimumNotional = rules.minNotional ?? 0;
   if (!Number.isFinite(minimumNotional) || minimumNotional < 0) fail('unknown-minimum-notional');
-  const amount = units(Math.max(minAmount, minimumNotional / perUnit), step, true);
+  const amount = units(BigNumber.maximum(new BigNumber(minAmount).times(perUnit), minimumNotional), step, true, perUnit);
   if (!positive(amount) || amount > maxAmount) fail('minimum-exceeds-market-limit');
   const notional = amount * scale * (quoteQuantity ? 1 : Math.max(price, amendPrice));
-  if (!positive(notional) || notional > LIVE_SMOKE_MAX_NOTIONAL) fail('notional-cap-exceeded');
+  if (!positive(notional) || notional > LIVE_SMOKE_MAX_NOTIONAL ||
+      (rules.maximumNotional !== undefined && (!positive(rules.maximumNotional) || notional > rules.maximumNotional)))
+    fail('notional-cap-exceeded');
   return { symbol: market.symbol, type: 'limit', side: 'buy', amount, price, amendPrice,
     ...(postOnly ? { timeInForce: 'PostOnly' } : {}) };
 }

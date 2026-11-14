@@ -50,6 +50,25 @@ describe('types cache is content-keyed', () => {
 });
 
 describe('validateScript', () => {
+  it('requires scripts to handle unknown liquidation from the generated Position contract', () => {
+    const unsafe = validateScript(wrap(`
+      const positions = await api.getPositions();
+      for (const position of positions) {
+        const price: number = position.liquidationPrice;
+        void price;
+      }
+    `), options);
+    expect(unsafe.valid).toBe(false);
+    expect(unsafe.errors.some(error => error.code === 2322)).toBe(true);
+    const safe = validateScript(wrap(`
+      const positions = await api.getPositions();
+      for (const position of positions) {
+        if (position.liquidationPrice !== null) api.io.return(position.liquidationPrice * 2);
+      }
+    `), options);
+    expect(safe.errors).toEqual([]);
+  });
+
   it('accepts a script written against the real API surface', () => {
     const result = validateScript(
       wrap('  const b = await api.getBalance();\n  api.io.return(b?.total ?? 0);'),

@@ -1,7 +1,7 @@
 // The REST prefixes the proxy fleet forwards (`path_beg /api/exchange_proxy/https://…` in
 // terraform/private-exchange-proxy/haproxy-sg-running.cfg, which infra/tofu/proxy-fleet installs
 // on every proxy). Any other target is refused there; proxyFleetAllowlist.test.ts keeps this equal.
-// Only active routes belong here: retired DNS names and commented ACLs cannot carry fallback traffic.
+// Engine REST coverage is derived from the venue crates; fleet config and rollout must accompany additions.
 export const PROXY_FLEET_REST_PREFIXES: readonly string[] = [
   'https://advanced-trade-ws-user.coinbase.com/',
   'https://advanced-trade-ws.coinbase.com/',
@@ -43,6 +43,7 @@ export const PROXY_FLEET_REST_PREFIXES: readonly string[] = [
   'https://demo-fapi.binance.com/',
   'https://demo-futures.kraken.com/',
   'https://demo-trading-openapi.blofin.com/',
+  'https://drb.coinbase.com/api/v2/',
   'https://dstream.binance.com/',
   'https://eapi.binance.com/',
   'https://edge.grvt.io/',
@@ -70,10 +71,12 @@ export const PROXY_FLEET_REST_PREFIXES: readonly string[] = [
   'https://papi.binance.com/',
   'https://pro.apex.exchange/',
   'https://quote.omni.apex.exchange/',
+  'https://rpc.txflow-testnet.xyz/',
   'https://stream-demo.bybit.com/',
   'https://stream.binance.com/',
   'https://stream.bybit.com/',
   'https://testnet-api-evm.orderly.org/',
+  'https://testnet-api.lighter.xyz/',
   'https://testnet-api.phemex.com/',
   'https://testnet.binance.vision/',
   'https://testnet.binancefuture.com/',

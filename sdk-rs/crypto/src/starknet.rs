@@ -144,6 +144,29 @@ pub fn derive_from_ethereum(key: &str, chain: &str) -> Result<Zeroizing<[u8; 32]
     Ok(Zeroizing::new(private.to_be_bytes::<32>()))
 }
 
+/// Strict fixed-width Stark ECDSA verification. Invalid field encodings, points,
+/// scalar ranges and signatures return false without reducing the wire values.
+#[cfg(feature = "admission")]
+pub fn verify(message: &[u8], public_key: &[u8], signature: &[u8]) -> bool {
+    fn felt(bytes: &[u8]) -> Option<Felt> {
+        let bytes: &[u8; 32] = bytes.try_into().ok()?;
+        let value = Felt::from_bytes_be(bytes);
+        (value.to_bytes_be() == *bytes).then_some(value)
+    }
+    if !is_public_key(public_key) || signature.len() != 64 {
+        return false;
+    }
+    let (Some(message), Some(public), Some(r), Some(s)) = (
+        felt(message),
+        felt(public_key),
+        felt(&signature[..32]),
+        felt(&signature[32..]),
+    ) else {
+        return false;
+    };
+    starknet_crypto::verify(&public, &message, &r, &s).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

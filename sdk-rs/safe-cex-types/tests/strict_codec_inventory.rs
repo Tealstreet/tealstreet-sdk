@@ -41,6 +41,12 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [
         "src/lib.rs",
+        "src/execution.rs",
+        "src/position.rs",
+        "src/market_data.rs",
+        "src/history.rs",
+        "src/options.rs",
+        "src/order.rs",
         "src/store_model.rs",
         "src/extra_model.rs",
         "src/accounts.rs",

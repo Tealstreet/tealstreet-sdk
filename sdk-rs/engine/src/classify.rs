@@ -340,7 +340,7 @@ pub fn error(
             NativeCode::None => {}
         }
         if !native.message.is_empty() {
-            error.venue_message = Some(native.message.to_owned());
+            error.venue_message = Some(native.message.into());
         }
     }
     if let (Some(ErrorKind::RateLimited), Released::Response(response)) = (error.kind, released)

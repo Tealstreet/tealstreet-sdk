@@ -13,9 +13,9 @@ const market = (overrides: Partial<Market> = {}): Market =>
     quote: 'USDT',
     active: true,
     precision: { price: 0.1, amount: 0.001 },
-    limits: {},
+    limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
     ...overrides,
-  }) as Market;
+  }) satisfies Market;
 
 describe('hydrateMarketStore', () => {
   it('hydrates markets and marks markets loaded on a live safe-cex store', () => {

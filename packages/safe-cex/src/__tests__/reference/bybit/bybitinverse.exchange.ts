@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../../store/store.interface';
@@ -57,7 +58,7 @@ import { BaseExchange } from '../../../exchanges/base';
 import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './bybit.api';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange, type BybitIncomeContext } from './bybit.income';
-import { mapBybitClosedPnl } from '../../../exchanges/bybit/bybit.closed-pnl';
+import { mapBybitClosedPnl } from './bybit.closed-pnl';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
 import {
   BYBIT_RATE_LIMIT_TABLE as BYBITINVERSE_RATE_LIMIT_TABLE,
@@ -1073,7 +1074,7 @@ export class BybitInverseExchange extends BaseExchange {
         } while (cursor && page < MAX_CLOSED_PNL_PAGES);
       }
 
-      return entries.sort((a, b) => b.closedTime - a.closedTime);
+      return entries.sort(compareClosedPnlTimes);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.retMsg || err?.message);
       return [];

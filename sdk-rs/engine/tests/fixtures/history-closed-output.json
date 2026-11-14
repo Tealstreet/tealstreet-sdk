@@ -1,0 +1,70 @@
+{
+  "bybit": [
+    {
+      "provenance": "venue",
+      "symbol": "BTCUSD",
+      "notional": 1000.0,
+      "contracts": 0.01,
+      "entryPrice": 95000.0,
+      "exitPrice": 100000.0,
+      "unrealizedPnl": 0.0004,
+      "side": "long",
+      "fees": 3.0000000000000004e-05,
+      "time": 1700000000000.0,
+      "closedTime": 1700000001000.0,
+      "account": "fixture-account",
+      "leverage": 10.0
+    }
+  ],
+  "okx": [
+    {
+      "provenance": "venue",
+      "symbol": "BTCUSDT",
+      "notional": 820.0,
+      "contracts": 0.02,
+      "entryPrice": 40000.0,
+      "exitPrice": 41000.0,
+      "unrealizedPnl": 1.5,
+      "side": "long",
+      "fees": 0.1,
+      "time": 1709000000000.0,
+      "closedTime": 1709500000000.0,
+      "account": "fixture-account",
+      "leverage": 10.0
+    }
+  ],
+  "blofin": [
+    {
+      "provenance": "venue",
+      "symbol": "BTCUSDT",
+      "notional": 61000.0,
+      "contracts": 1.0,
+      "entryPrice": 60000.0,
+      "exitPrice": 61000.0,
+      "unrealizedPnl": 10.0,
+      "side": "long",
+      "fees": 0.1,
+      "time": 1700000000000.0,
+      "closedTime": 1700000001000.0,
+      "account": "fixture-account",
+      "leverage": null
+    }
+  ],
+  "bitunix": [
+    {
+      "provenance": "venue",
+      "symbol": "BTCUSDT",
+      "notional": 30500.0,
+      "contracts": 0.5,
+      "entryPrice": 60000.0,
+      "exitPrice": 61000.0,
+      "unrealizedPnl": 498.8,
+      "side": "long",
+      "fees": 1.2,
+      "time": 1700000000000.0,
+      "closedTime": 1700000001000.0,
+      "account": "fixture-account",
+      "leverage": 10.0
+    }
+  ]
+}

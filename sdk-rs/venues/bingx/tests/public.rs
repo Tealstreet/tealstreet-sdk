@@ -128,6 +128,66 @@ fn full_depth_replaces_previous_snapshot_and_watchdog_reconnects() {
     );
     assert!(drain(&mut e, 8.).any(|a| matches!(a,Action::WsSend{text,..} if text=="Pong")));
 }
+
+#[test]
+fn depth_envelope_paths_keep_sorted_snapshots_and_reject_partial_frames() {
+    let data = r#"{"bids":[{"price":"89","volume":"2"},{"price":90,"volume":1},{"price":88,"volume":0}],"asks":[{"price":92,"volume":3},{"price":"91","volume":"4"}]}"#;
+    for frame in [
+        format!(r#"{{"dataType":"market.depth.BTC-USDT.step0.level100","data":{data}}}"#),
+        format!(r#"{{"data":{data},"dataType":"market.depth.BTC-USDT.step0.level100"}}"#),
+        format!(r#"{{"data\u0054ype":"market.depth.BTC-USDT.step0.level100","data":{data}}}"#),
+    ] {
+        let (mut engine, socket) = seeded_with_socket();
+        engine.handle(
+            4.,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        engine.handle(5., Event::WsOpened { socket });
+        drain(&mut engine, 5.).for_each(drop);
+        engine.handle(
+            6.,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        assert_eq!(
+            engine.book("BTCUSDT").unwrap().bids(),
+            [(90., 1.), (89., 2.)]
+        );
+        assert_eq!(
+            engine.book("BTCUSDT").unwrap().asks(),
+            [(91., 4.), (92., 3.)]
+        );
+
+        for invalid in [
+            r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[{"price":99,"volume":5}],"asks":[{"price":true,"volume":1}]}}"#,
+            r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[],"asks":[]},"data":null}"#,
+            r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[],"asks":[]}} trailing"#,
+            r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[],"asks":[]},"ping":1}"#,
+        ] {
+            engine.handle(
+                7.,
+                Event::WsMessage {
+                    socket,
+                    text: invalid,
+                },
+            );
+            assert_eq!(
+                engine.book("BTCUSDT").unwrap().bids(),
+                [(90., 1.), (89., 2.)]
+            );
+            assert_eq!(
+                engine.book("BTCUSDT").unwrap().asks(),
+                [(91., 4.), (92., 3.)]
+            );
+        }
+        engine.handle(8., Event::WsMessage { socket, text: r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[],"asks":[]}}"# });
+        assert!(engine.book("BTCUSDT").unwrap().is_empty());
+    }
+}
 #[test]
 fn error_envelope_after_streamed_array_does_not_publish_markets() {
     let mut e = support::engine(Options::default());

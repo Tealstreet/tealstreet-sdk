@@ -58,7 +58,10 @@ fn dispatched_write_transport_loss_is_unknown() {
         },
     );
     let error = failure(&mut engine, 992);
-    assert_eq!(error.message, "response lost");
+    assert_eq!(
+        error.message,
+        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: response lost. The outcome is unknown. Check Open Orders"
+    );
     assert_eq!(error.kind, Some(ErrorKind::Network));
     assert_eq!(error.outcome, Some(Outcome::Unknown));
 }
