@@ -8,7 +8,12 @@ use serde_json::{Value, json};
 mod account_support;
 use account_support::{Plain, failures};
 const NOW: f64 = 1_800_000_000_000.0;
+// Ordinary controls model an explicitly confirmed base-size market.
+// Missing metadata is exercised separately and must never imply this value.
 fn engine() -> Engine<TxFlow> {
+    engine_with_margin_mode(Some(json!(false)))
+}
+fn engine_with_margin_mode(mode: Option<Value>) -> Engine<TxFlow> {
     let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some("0x0000000000000000000000000000000000000001".into()),
@@ -26,7 +31,11 @@ fn engine() -> Engine<TxFlow> {
             }
         })
         .unwrap();
-    let body = json!({"success":true,"code":0,"data":{"universe":[{"index":1,"name":"BTC-USDC","baseCurrency":"BTC","quoteCurrency":"USDC","currencyType":"usdc","delisted":false,"haltTrading":false,"basePrecision":0.001,"priceTick":0.1,"maxLeverage":50,"maxLimitOrderSize":100,"maxMarketOrderSize":50}]}}).to_string();
+    let mut body = json!({"success":true,"code":0,"data":{"universe":[{"index":1,"name":"BTC-USDC","baseCurrency":"BTC","quoteCurrency":"USDC","currencyType":"usdc","delisted":false,"haltTrading":false,"basePrecision":0.001,"priceTick":0.1,"maxLeverage":50,"maxLimitOrderSize":100,"maxMarketOrderSize":50}]}});
+    if let Some(mode) = mode {
+        body["data"]["universe"][0]["useNotionalMargin"] = mode;
+    }
+    let body = body.to_string();
     e.handle(
         NOW,
         Event::HttpResponse {
@@ -131,6 +140,136 @@ fn ack(e: &mut Engine<TxFlow>, r: &HttpRequest, status: u16, body: &str) {
             },
         },
     );
+}
+fn resting_order(e: &mut Engine<TxFlow>) {
+    e.store_mut().upsert_order(Order {
+        id: "99".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "BTC-USDC".into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        price: 50000.0,
+        amount: 0.01,
+        filled: 0.0,
+        remaining: 0.01,
+        reduce_only: false,
+        close: None,
+        client_order_id: Some("original".into()),
+        time_in_force: None,
+        last_update: NOW,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: Some(OrderExtra {
+            take_profit_known: true,
+            stop_loss_known: true,
+            ..Default::default()
+        }),
+    });
+}
+fn assert_no_sizing_write(actions: &[Action], command: u32) {
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+    )));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.outcome == Some(Outcome::NotSent) && error.message.contains("notional-margin"))));
+}
+fn refused_placements(mode: Option<Value>) {
+    for order in [
+        limit("margin-mode"),
+        opts(
+            json!({"symbol":"BTC-USDC","type":"market","side":"buy","amount":0.01,"clientOrderId":"margin-mode"}),
+        ),
+    ] {
+        let mut e = engine_with_margin_mode(mode.clone());
+        assert_eq!(e.store().markets().len(), 1);
+        place(&mut e, 701, vec![order]);
+        assert_no_sizing_write(&e.drain_actions().collect::<Vec<_>>(), 701);
+    }
+}
+#[test]
+fn missing_notional_margin_mode_keeps_public_market_but_refuses_placement() {
+    refused_placements(None);
+}
+#[test]
+fn null_notional_margin_mode_keeps_public_market_but_refuses_placement() {
+    refused_placements(Some(Value::Null));
+}
+#[test]
+fn notional_margin_true_refuses_placement_before_any_signing_or_http() {
+    refused_placements(Some(json!(true)));
+}
+fn refused_amendments(mode: Option<Value>) {
+    for amount in [None, Some(0.02)] {
+        let mut e = engine_with_margin_mode(mode.clone());
+        resting_order(&mut e);
+        e.handle(
+            NOW,
+            Event::Command(Command::AmendOrder {
+                command: 704,
+                id: "99".into(),
+                price: Some(50001.0),
+                amount,
+            }),
+        );
+        assert_no_sizing_write(&e.drain_actions().collect::<Vec<_>>(), 704);
+    }
+}
+#[test]
+fn missing_margin_mode_refuses_size_and_price_only_amendments() {
+    refused_amendments(None);
+}
+#[test]
+fn null_margin_mode_refuses_size_and_price_only_amendments() {
+    refused_amendments(Some(Value::Null));
+}
+#[test]
+fn notional_margin_true_refuses_size_and_price_only_amendments() {
+    refused_amendments(Some(json!(true)));
+}
+#[test]
+fn unknown_and_notional_margin_modes_still_allow_cancelling_native_ids() {
+    for mode in [None, Some(Value::Null), Some(json!(true))] {
+        let mut e = engine_with_margin_mode(mode);
+        resting_order(&mut e);
+        e.handle(
+            NOW,
+            Event::Command(Command::CancelOrders {
+                command: 707,
+                ids: vec!["99".into()],
+            }),
+        );
+        let body: Value = serde_json::from_str(write(&mut e).body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["action"]["type"], "cancel");
+        assert_eq!(body["action"]["cancels"][0]["o"], 99);
+    }
+}
+#[test]
+fn explicit_false_margin_mode_retains_placement_and_amendment() {
+    let mut e = engine();
+    place(&mut e, 705, vec![limit("base-size-control")]);
+    assert!(
+        write(&mut e)
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("base-size-control")
+    );
+    let mut e = engine();
+    resting_order(&mut e);
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 706,
+            id: "99".into(),
+            price: Some(50001.0),
+            amount: Some(0.02),
+        }),
+    );
+    let body: Value = serde_json::from_str(write(&mut e).body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["action"]["type"], "modify2");
+    assert_eq!(body["action"]["order"]["s"], "0.02");
 }
 #[test]
 fn every_order_without_a_caller_id_gets_a_distinct_native_cloid() {
@@ -604,31 +743,7 @@ fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
 #[test]
 fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protection() {
     let mut e = engine();
-    e.store_mut().upsert_order(Order {
-        id: "99".into(),
-        parent_id: None,
-        status: OrderStatus::Open,
-        symbol: "BTC-USDC".into(),
-        kind: OrderType::Limit,
-        side: OrderSide::Buy,
-        price: 50000.0,
-        amount: 0.01,
-        filled: 0.0,
-        remaining: 0.01,
-        reduce_only: false,
-        close: None,
-        client_order_id: Some("original".into()),
-        time_in_force: None,
-        last_update: NOW,
-        trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: Some(OrderExtra {
-            take_profit_known: true,
-            stop_loss_known: true,
-            ..Default::default()
-        }),
-    });
+    resting_order(&mut e);
     place(&mut e, 7, vec![limit("blocking")]);
     let r = write(&mut e);
     e.handle(

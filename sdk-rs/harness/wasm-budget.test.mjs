@@ -3902,3 +3902,19 @@ test('#3226 reviewed reconciliation CI artifact retains 10 KiB for the Coinbase 
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
+
+// #3520 run43648572739/job132612114429, artifact14135771071: all five module copies match.
+// Source5de35a110cf1 has eecfabbc5d6e's tree; Rust1.99/bindgen0.2.129/Binaryen132 required twice-Oz.
+test('#3520 TxFlow margin-mode guard retains measured 10 KiB reserve', () => {
+  const measured = 2_167_082;
+  const required = 2_178_048;
+  const parentFloor = 2_177_024;
+  const sha256 = '4a3fd2ef9c8134095b97d1db4897701e5d0ee1aeb161cc86681a3e339a5b5f01';
+  assert.match(sha256, /^[0-9a-f]{64}$/);
+  assert.equal(required, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= Math.max(parentFloor, required));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
