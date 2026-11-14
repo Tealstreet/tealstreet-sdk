@@ -418,3 +418,32 @@ test('ruled workflow budget: every producer-binding job retains twelve extra min
     if (job === 'cpu-final') assert.equal(Number(timeout[1]), 5, 'status-only job timeout stays unchanged');
   }
 });
+
+// Runs 43273706928 / 43281701341 completed the CPU comparison and uploaded a
+// REJECTED result. They are not oracle refusals: the planner must retain the
+// CPU verdict instead of demanding the unrelated NOT-CERTIFIED log line.
+for (const message of [
+  'Bitget paired steady: complete tip rejected (Rust/TS=1.015369697275649, q=1.015635664168369); anchor cannot rescue it',
+  'Bitget paired steady: complete tip rejected (Rust/TS=1.0203509277368097, q=1.0032975848618229); anchor cannot rescue it',
+  'Bitget paired steady: complete anchor rejected (Rust/TS=1.01, q=1.05)',
+]) test(`failed paired CPU upload preserves its verdict: ${message}`, async () => {
+  const { authenticatedBitgetPairedBundle } = await import('./cpu-ci.mjs');
+  const x = fixture([() => {}]);
+  const upstream = x.context.reader;
+  const run = await upstream.getRun(), job = (await upstream.listJobs())[0];
+  const meta = (await upstream.listArtifacts())[0];
+  const originalLog = (await upstream.getLog(job.id)).toString();
+  job.name = 'Rust / Bitget counterbalanced steady CPU'; job.conclusion = 'failure';
+  job.steps[1] = completed('Public counterbalanced Bitget steady CPU', 5, 15, 'failure');
+  job.steps[2].name = 'Retain counterbalanced Bitget steady evidence';
+  meta.name = 'bitget-paired-steady';
+  const log = Buffer.from(originalLog.replaceAll('strict-replay-bitget', meta.name) + `${at(10)} ${message}\n`);
+  x.context.checkoutSha = checkout;
+  x.context.reader = { ...upstream, listJobs: async () => [job], listArtifacts: async () => [meta], getLog: async () => log };
+  const result = await authenticatedBitgetPairedBundle(x.context);
+  assert.equal(result.receipt.kind, 'cpu');
+  assert.equal(result.receipt.message, message);
+  assert.equal(result.receipt.jobId, job.id);
+  assert.equal(result.receipt.measuredCheckoutSha, checkout);
+  assert.equal(run.id, result.receipt.runId);
+});

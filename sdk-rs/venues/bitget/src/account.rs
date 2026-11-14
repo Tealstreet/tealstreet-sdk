@@ -9,7 +9,10 @@ use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::fresh_positions;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::*;
+use safe_cex_engine::model::{
+    Balance, CancelOrderRef, CoinBalance, MarginType, Order, OrderExtra, OrderSide, OrderStatus,
+    OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce,
+};
 use safe_cex_engine::request_context::{Credential, Scope};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor};
@@ -3474,6 +3477,22 @@ impl BitgetFutures {
                     } else {
                         StopTriggerType::MarkPrice
                     });
+                    let (kind, limit) = if kind == OrderType::StopLoss {
+                        (raw.sl_order_type.as_ref(), raw.sl_limit_price.0)
+                    } else {
+                        (raw.tp_order_type.as_ref(), raw.tp_limit_price.0)
+                    };
+                    let execution = match kind {
+                        "market" => Some(0.0),
+                        "limit" => limit.filter(|price| price.is_finite() && *price > 0.0),
+                        _ => None,
+                    };
+                    if let Some(execution) = execution {
+                        order
+                            .extra
+                            .get_or_insert_with(OrderExtra::default)
+                            .conditional_order_price = Some(execution);
+                    }
                     orders.push(order);
                 }
             }
@@ -3495,6 +3514,32 @@ impl BitgetFutures {
                     child.side = base.side.opposite();
                     child.kind = kind;
                     child.price = price;
+                    let reference = if self.account.uta {
+                        Some(
+                            if match kind {
+                                OrderType::StopLoss => raw.sl_trigger_by == "mark",
+                                _ => raw.tp_trigger_by == "mark",
+                            } {
+                                StopTriggerType::MarkPrice
+                            } else {
+                                StopTriggerType::LastPrice
+                            },
+                        )
+                    } else {
+                        match match kind {
+                            OrderType::StopLoss => raw.preset_sl_trigger_type.as_ref(),
+                            _ => raw.preset_tp_trigger_type.as_ref(),
+                        } {
+                            "fill_price" => Some(StopTriggerType::LastPrice),
+                            "mark_price" => Some(StopTriggerType::MarkPrice),
+                            _ => None,
+                        }
+                    };
+                    let extra = child.extra.get_or_insert_with(OrderExtra::default);
+                    match kind {
+                        OrderType::StopLoss => extra.sl_trigger_type = reference,
+                        _ => extra.tp_trigger_type = reference,
+                    }
                     orders.push(child);
                 }
             }
@@ -3564,8 +3609,8 @@ fn execution_price(row: &OrderRow<'_>, classic: bool) -> Option<f64> {
             if classic
                 && row.order_type == "market"
                 && matches!(
-                    row.plan_type.as_ref(),
-                    "pos_loss" | "pos_profit" | "loss_plan" | "profit_plan"
+                    plan_type(&row.plan_type),
+                    Some("pos_loss" | "pos_profit" | "loss_plan" | "profit_plan")
                 ) =>
         {
             Some(0.0)

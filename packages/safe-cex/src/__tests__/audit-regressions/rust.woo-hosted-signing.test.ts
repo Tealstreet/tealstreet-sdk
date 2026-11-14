@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
+import { assertBetaAccount, assertBetaVenue } from '../../exchanges/rust/betaVenues';
 import { deriveBridgeConstruction, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from '../../exchanges/rust/legacySigning';
@@ -55,8 +55,9 @@ it('admits Woo RemoteSigner through its declaration, while an undeclared venue s
   expect(deriveRemoteSigningPolicy('woo')?.enabled).toBe(true);
   expect(deriveBridgeConstruction('woo', {} as ExchangeOptions).dispatchSigning).toBe(true);
   expect(() => assertBetaAccount('woo', { key: 'fixture-public', secret: '', remoteSigner })).not.toThrow();
-  expect(deriveRemoteSigningPolicy('kraken')?.enabled).not.toBe(true);
-  expect(() => assertBetaAccount('kraken', { key: 'fixture-public', secret: '', remoteSigner })).toThrow();
+  expect(() => assertBetaVenue('mode')).not.toThrow();
+  expect(deriveRemoteSigningPolicy('mode')).toBeUndefined();
+  expect(() => assertBetaAccount('mode', { key: 'fixture-public', secret: '', remoteSigner })).toThrow(/isn't available on the Hosted Server/);
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
@@ -66,8 +67,7 @@ it.each([
   { secondary_secret: 'fixture-read-material' },
   { secondary_passphrase: 'fixture-read-passphrase' },
   { localSigner: { secondary: {} } },
-  { secondary_key: 'fixture-read', publicDataOnly: true },
-])('refuses WOO secondary RemoteSigner setup before native construction or callbacks: %j', (secondary) => {
+])('refuses private WOO secondary RemoteSigner setup before native construction or callbacks: %j', (secondary) => {
   const remoteSigner = { sign: vi.fn(), isAvailable: vi.fn(() => true), onAvailabilityChange: vi.fn(() => () => {}) };
   const Constructor = vi.fn();
   let setup: DelegatedSignerSetup | undefined;

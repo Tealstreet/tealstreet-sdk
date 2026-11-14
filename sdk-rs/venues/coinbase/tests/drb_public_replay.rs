@@ -282,6 +282,70 @@ fn latest_candles_accept_fractional_host_clock() {
 }
 
 #[test]
+fn latest_candles_use_corrected_protocol_utc_after_suspend() {
+    assert_corrected_candle_bounds(7_200_000., None);
+}
+
+#[test]
+fn latest_candles_explicit_end_uses_corrected_protocol_utc() {
+    assert_corrected_candle_bounds(7_200_000., Some(0.));
+}
+
+#[test]
+fn corrected_candle_bounds_clamp_future_ends_and_preserve_historical_ends() {
+    for correction in [-7_200_000., 7_200_000.] {
+        for end_offset in [None, Some(60_000.), Some(-60_000.)] {
+            assert_corrected_candle_bounds(correction, end_offset);
+        }
+    }
+}
+
+fn assert_corrected_candle_bounds(correction: f64, end_offset: Option<f64>) {
+    let mut s = Replay::ready();
+    s.now += 0.5;
+    assert!(s.engine.sync_host_time(s.now, s.now));
+    let utc = s.now + correction;
+    assert!(s.engine.sync_host_time(s.now, utc));
+    let explicit_end = end_offset.map(|offset| utc.floor() + offset);
+    let expected_end = utc.floor() + end_offset.unwrap_or_default().min(0.);
+    s.command(Command::FetchCandles {
+        command: 91,
+        symbol: SYMBOL.into(),
+        interval: Interval::M1,
+        limit: Some(10),
+        from_ms: None,
+        to_ms: explicit_end,
+    });
+    assert_eq!(
+        safe_cex_engine::test_support::dispatch_now(&s.engine),
+        s.now,
+        "scheduling stays on raw time"
+    );
+    assert_eq!(s.requests.len(), 1, "one candle read: {:?}", s.requests);
+    let request = s.requests.pop().unwrap();
+    assert_eq!(request.method, safe_cex_engine::Method::Get);
+    let query = request.url.split_once('?').unwrap().1;
+    for (name, expected) in [
+        ("end_timestamp", expected_end),
+        ("start_timestamp", expected_end - 600_000.),
+    ] {
+        let value = query
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=')?;
+                (key == name).then_some(value)
+            })
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert_eq!(
+            value, expected as u64,
+            "{name}: correction={correction}, end={explicit_end:?}"
+        );
+    }
+}
+
+#[test]
 fn initially_missing_tickers_recover_from_summary_or_stream() {
     for malformed in [false, true] {
         for stream in [false, true] {

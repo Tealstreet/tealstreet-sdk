@@ -69,6 +69,7 @@ export interface Store {
   get ordersRisk(): Record<string, OrderRiskProfile[]>;
 
   get positions(): StoreData['positions'];
+  get positionSettings(): StoreData['positionSettings'];
 
   get displayedPositions(): StoreData['displayedPositions'];
 

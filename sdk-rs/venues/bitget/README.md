@@ -30,6 +30,11 @@ the old socket and invalidates older HTTP generations. REST snapshots preserve
 newer WebSocket state, terminal orders and recently opened orders. Failed reads
 never commit empty account state.
 
+Classic and UTA normal orders use the legacy TS allocation: round the requested amount,
+repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
+remainder. Per-lot rounding can change the submitted total. Batch chunks retain
+their 50-row limit and the existing partial-failure reporting.
+
 UTA fills use the dedicated execution channel. UTA account topics cover multiple
 products, so orders are filtered by category and positions by margin coin and
 known market. Combined standalone TP/SL strategies use separate leg identities
@@ -41,16 +46,44 @@ which resolve to their shared native strategy ID.
 
 Trading uses sequenced jobs for orders, brackets, conditional stops and account
 settings. Native amendments send a fresh `newClientOid`; cancellation retains
-the original native `loss_plan` or `pos_loss` identity. Ambiguous writes are
-never retried. History reads page executions, orders, income and public trades
+the original native `loss_plan` or `pos_loss` identity. Ambiguous writes halt the remaining writes of that action and are
+never retried. This is the recorded stop-after-UNKNOWN parity exception
+(Sean/daxx, 2026-11-08): legacy TS can continue after an unproven acknowledgement.
+Venue-authored terminal write failures retain acknowledged IDs and name the
+unconfirmed request with
+`The outcome is unknown. Check Open Orders`; the companion
+`order.outcome_unknown` event reports the command, acknowledged count and
+unconfirmed request. Engine-sealed failures retain the engine's canonical text. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.
+
+After a placement refusal, dispatch follows the legacy TS path: Classic
+`failureList` rows and HTTP failures stop later batches and standalone TP/SL;
+UTA normal and strategy refusals stop subsequent writes. Classic batch HTTP-200
+business refusals without a `failureList` continue to later batches and TP/SL,
+while Rust retains the refusal and acknowledged partial identities in its terminal
+error (`kind=rejected`, with no outcome after partial success). Legacy TS resolves
+with the collected IDs instead. This terminal-classification parity exception is
+pending Sam's decision; the current pins deliberately retain the Rust result.
+Native amend rejection still releases its cancel/replace fallback. A rejected
+UTA protective replacement still attempts the original stop once; a refused
+restore ends the sequence. Zero-rounded anonymous rows remain omitted before
+dispatch. These rules add no whole-plan sizing gate or tail rebalancing.
+
+Classic entry presets expose no documented trigger selector; their default is
+UNPROVEN without a DEMO capture. Explicit selections refuse before send, and
+preset children retain only their returned `fill_price` / `mark_price` reference.
+UTA entries and Classic/UTA position TP/SL honor Last and Mark; Index refuses.
+See [trigger choices and UI integration](../../../../docs/plans/callers/bitget-tpsl-trigger-types.md).
 
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
 
 Classic TPSL rows explicitly marked `orderType=market` with an absent or blank
 `executePrice` retain market execution in REST, WebSocket and version-2 source
-frames. Native TPSL amendments send `executePrice="0"`, the documented market
+frames. This includes the documented `psl`, `ptp`, `sl` and `tp`
+[WebSocket plan aliases](https://bitgetlimited.github.io/apidoc/en/mix/#websocket-plantype),
+normalized to their position-level or sized TPSL kind. Native TPSL amendments
+send `executePrice="0"`, the documented market
 form, while preserving the order identity, quantity and trigger reference.
 Unknown or malformed execution evidence stays refused; it never borrows a live
 price. Version-1 frames still lack this evidence and require re-placing the stop.

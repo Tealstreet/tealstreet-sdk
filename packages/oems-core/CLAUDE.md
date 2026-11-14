@@ -234,6 +234,15 @@ fabricate one.
 consumer may send back. Everything else in the context is for READING, and
 widening an address is a security change, not a convenience.
 
+`OemsPositionRef.liquidationPrice` is nullable. Bounding preserves unknown as
+null and converts nonpositive or non-finite thresholds to null; the prompt
+describes this as unknown, never zero or proof that liquidation is impossible.
+
+`OemsPositionRef.notional` and `OemsOrderRef.nativeRemaining` also preserve
+unknown as null through browser bounding, JSON and route re-bounding. Known
+zeroes stay zero. An amount amend needs a known native remaining size to derive
+the engine's total amount; a price-only amend does not.
+
 `positionMode` rides every position for the same class of reason: in `hedged`
 mode `(account, symbol)` addresses two positions, and a reduce that omits the
 side is ambiguous rather than merely imprecise. `isSpot`, `isInverse` and
@@ -294,7 +303,9 @@ Consequences that look like bugs and are not:
   ones, and the preview cannot know that.
 - **Every `amount` is in the venue's own units** — what `market.amountStep`
   is quoted in, what `createMarketOrder` expects, and why the context carries
-  `nativeContracts` / `nativeRemaining` alongside the base figures. The schema
+  `nativeContracts` / `nativeRemaining` alongside the base figures. Unknown
+  position native quantity stays null through context bounding and serialization;
+  both close/reduce resolution and the plain-linear fast path refuse it. The schema
   says so to the model; a plan that sizes off `contracts` on an OKX-style
   market is off by a hundredfold.
 - **`minAmount` / `maxAmount` are checked only when `contractSize === 1`.**

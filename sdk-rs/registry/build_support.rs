@@ -22,6 +22,10 @@ enum Input {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Rule {
+    beta_admitted: Option<bool>,
+    // Hosted admission is read by the host, not emitted into LOCAL construction.
+    #[serde(default, rename = "delegated")]
+    _delegated: Option<DelegatedPolicy>,
     can_sign: Option<Vec<Vec<Input>>>,
     private_eligible: Option<Vec<Vec<Input>>>,
     explicit_private_error: Option<String>,
@@ -34,6 +38,13 @@ struct Rule {
     /// Family-specific trusted setup mapping, declared rather than name-matched.
     #[serde(default)]
     setup_mapping: Option<SetupMapping>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DelegatedPolicy {
+    #[serde(default, rename = "enabled")]
+    _enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,6 +223,14 @@ struct BridgeRule {
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
     read_credentials: ReadCredentialsPolicy,
+    helpers: Option<HelperCapabilities>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HelperCapabilities {
+    resolve_leverage_context: Option<bool>,
+    fetch_algo_orders: Option<bool>,
 }
 
 /// What trusted setup does with a family's read key; absent installs it.
@@ -265,8 +284,20 @@ fn rule(value: &Rule) -> String {
         None => "None".into(),
     };
     let bridge = &value.bridge;
+    let helpers = if cfg!(any(feature = "phemex", feature = "okx")) {
+        let value = match &bridge.helpers {
+            None => "None".to_owned(),
+            Some(helpers) => format!(
+                "Some(HelperCapabilities {{ resolve_leverage_context: {:?}, fetch_algo_orders: {:?} }})",
+                helpers.resolve_leverage_context, helpers.fetch_algo_orders
+            ),
+        };
+        format!(", helpers: {value}")
+    } else {
+        String::new()
+    };
     let bridge = format!(
-        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?} }}",
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?}{helpers} }}",
         bridge.spot,
         bridge.demo,
         bridge.primary_credentials_only,
@@ -322,7 +353,16 @@ fn rule(value: &Rule) -> String {
                 "Some(&[{}])",
                 names
                     .iter()
-                    .map(|name| format!("{name:?}"))
+                    .map(|name| {
+                        // Broker metadata belongs only to the compiled MEXC family.
+                        if matches!(value.setup_mapping.as_ref(), Some(SetupMapping::Mexc))
+                            && name == "source"
+                        {
+                            format!("#[cfg(feature = \"mexc\")] {name:?}")
+                        } else {
+                            format!("{name:?}")
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(",")
             )
@@ -345,7 +385,8 @@ fn rule(value: &Rule) -> String {
         |mapping| format!("Some(SetupMapping::{mapping:?})"),
     );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
+        "Rule {{ beta_admitted: {}, can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
+        value.beta_admitted.unwrap_or(true),
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )

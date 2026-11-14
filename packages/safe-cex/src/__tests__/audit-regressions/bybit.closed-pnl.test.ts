@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapBybitClosedPnl } from '../../exchanges/bybit/bybit.closed-pnl';
+import { mapBybitClosedPnl } from '../reference/bybit/bybit.closed-pnl';
 import { PositionSide } from '../../types';
 
 /**

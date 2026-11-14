@@ -207,7 +207,9 @@ fn bybit_ticks_on_later_batch_item_reject_before_any_read_write_or_mutation() {
 }
 
 #[test]
-fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
+fn split_quantities_match_legacy_ts_and_report_partial_acceptance() {
+    // TS: packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts:1073-1082.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 40.999 of requested 41); kept for exact TS parity per Sam's decision
     let (mut e, _) = ready();
     requests(&mut e);
     place(
@@ -216,7 +218,7 @@ fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
         r#"[{"symbol":"BTCUSDC","type":"market","side":"buy","amount":41}]"#,
     );
     let r = requests(&mut e).pop().unwrap();
-    assert_eq!(body(&r)["order_quantity"], 20.0);
+    assert_eq!(body(&r)["order_quantity"], 13.333);
     reply(
         &mut e,
         &r,
@@ -224,7 +226,7 @@ fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
         r#"{"success":true,"data":{"order_id":41}}"#,
     );
     let r = requests(&mut e).pop().unwrap();
-    assert_eq!(body(&r)["order_quantity"], 20.0);
+    assert_eq!(body(&r)["order_quantity"], 13.333);
     e.handle(
         2000.0,
         Event::HttpFailed {
@@ -1241,7 +1243,11 @@ fn lost_place_cancel_and_amend_preserve_optimistic_state_and_reconcile_without_r
             !out.iter()
                 .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
         );
-        assert!(done(out, 71).is_err());
+        let error = done(out, 71).unwrap_err().to_ascii_lowercase();
+        assert!(
+            error.contains("unknown") && error.contains("check open orders"),
+            "{error}"
+        );
     }
 }
 
@@ -1744,6 +1750,356 @@ fn outcome(out: Vec<Action>, id: u32) -> Option<Option<safe_cex_engine::Outcome>
         }
         _ => None,
     })
+}
+
+// These replies follow physical dispatch, even when their body claims refusal.
+const AMBIGUOUS_WRITES: &[(u16, &str)] = &[
+    (429, "{}"),
+    (429, r#"{"success":false,"code":-1001,"message":"refused"}"#),
+    (
+        200,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    ),
+    (
+        400,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    ),
+    (408, r#"{"success":false,"code":-1103,"message":"refused"}"#),
+    (500, r#"{"success":false,"code":-1001,"message":"refused"}"#),
+    (502, "bad gateway"),
+    (503, r#"{"success":false,"code":-1103,"message":"refused"}"#),
+    (504, "gateway timeout"),
+];
+
+#[test]
+fn aggregation_normalizes_transport_and_native_unknown_warnings() {
+    use safe_cex_engine::{ErrorKind, Method, Outcome};
+    let refused = Some((400, r#"{"success":false,"code":-1103,"message":"refused"}"#));
+    let rate = Some((
+        429,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    ));
+    let native = [-1000, -1011, -1012]
+        .map(|code| format!(r#"{{"success":false,"code":{code},"message":"native uncertainty"}}"#));
+    for (first_reply, second_reply) in [
+        (refused, None),
+        (None, refused),
+        (None, rate),
+        (rate, None),
+        (Some((200, native[0].as_str())), rate),
+        (Some((200, native[1].as_str())), rate),
+        (Some((200, native[2].as_str())), rate),
+    ] {
+        let (mut e, _) = ready();
+        requests(&mut e);
+        e.handle(
+            2000.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 91,
+                symbol: "BTCUSDC".into(),
+            }),
+        );
+        for (reply_shape, path) in [
+            (first_reply, "/v1/orders?"),
+            (second_reply, "/v1/algo/orders?"),
+        ] {
+            let writes: Vec<_> = requests(&mut e)
+                .into_iter()
+                .filter(|r| r.method != Method::Get)
+                .collect();
+            assert_eq!(
+                writes.len(),
+                1,
+                "exactly one independent cancellation: {writes:?}"
+            );
+            let request = &writes[0];
+            assert_eq!(request.method, Method::Delete);
+            assert!(request.url.contains(path));
+            if let Some((status, body)) = reply_shape {
+                reply(&mut e, request, status, body);
+            } else {
+                e.handle(
+                    2000.,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "fixture connection reset",
+                    },
+                );
+            }
+        }
+        let out = actions(&mut e);
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+            "no resend or put-back: {out:?}"
+        );
+        let errors: Vec<_> = out
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1);
+        let error = errors[0];
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        let text = error.legacy_text().to_ascii_lowercase();
+        assert!(
+            text.contains("unknown") && text.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(
+            !text.contains("refused") && !text.contains("connection reset"),
+            "{text}"
+        );
+        if first_reply.is_none() || first_reply == refused {
+            assert_eq!(error.kind, Some(ErrorKind::Network));
+            assert_eq!(
+                error.venue_message.as_deref(),
+                Some("fixture connection reset")
+            );
+        } else if first_reply == rate {
+            assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+            assert_eq!(error.venue_code.as_deref(), Some("-1003"));
+            assert_eq!(
+                error.venue_message.as_deref(),
+                Some("Orderly HTTP 429: rate limit")
+            );
+        } else if let Some((_, body)) = first_reply {
+            assert!(
+                error
+                    .venue_message
+                    .as_deref()
+                    .unwrap()
+                    .contains("native uncertainty")
+            );
+            let body: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(error.venue_code, Some(body["code"].to_string()));
+        }
+    }
+}
+
+#[test]
+fn aggregation_keeps_unknown_warning_for_mixed_family_cancellation() {
+    use safe_cex_engine::{Method, Outcome};
+    let refused = (400, r#"{"success":false,"code":-1103,"message":"refused"}"#);
+    let rate_limited = [(
+        429,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    )];
+    for ambiguous_first in [false, true] {
+        for &(status, body) in rate_limited.iter().chain(AMBIGUOUS_WRITES) {
+            let (mut e, _) = ready();
+            requests(&mut e);
+            e.handle(
+                2000.,
+                Event::Command(Command::CancelSymbolOrders {
+                    command: 91,
+                    symbol: "BTCUSDC".into(),
+                }),
+            );
+            let first = requests(&mut e)
+                .into_iter()
+                .find(|r| r.method == Method::Delete)
+                .unwrap();
+            assert!(first.url.contains("/v1/orders?"));
+            let (first_status, first_body) = if ambiguous_first {
+                (status, body)
+            } else {
+                refused
+            };
+            reply(&mut e, &first, first_status, first_body);
+            let between = actions(&mut e);
+            let writes: Vec<_> = between
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Http(r) if r.method != Method::Get => Some(r),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                writes.len(),
+                1,
+                "only the independent algo cancellation follows: {between:?}"
+            );
+            assert_eq!(writes[0].method, Method::Delete);
+            assert!(writes[0].url.contains("/v1/algo/orders?"));
+            let (last_status, last_body) = if ambiguous_first {
+                refused
+            } else {
+                (status, body)
+            };
+            reply(&mut e, writes[0], last_status, last_body);
+            let out = actions(&mut e);
+            assert!(
+                !out.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+                "no resend or put-back: {out:?}"
+            );
+            let errors: Vec<_> = out
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1);
+            let error = errors[0];
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            let text = error.legacy_text().to_ascii_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "first ambiguous={ambiguous_first}, response={status}: {error:?}"
+            );
+            assert!(!text.contains("refused"), "{text}");
+            if matches!(status, 200 | 400) {
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+                assert_eq!(error.venue_code.as_deref(), Some("-1003"));
+            }
+        }
+    }
+
+    // Two definitive failures still report the first refusal as before.
+    let (mut e, _) = ready();
+    requests(&mut e);
+    e.handle(
+        2000.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 91,
+            symbol: "BTCUSDC".into(),
+        }),
+    );
+    for message in ["first refused", "second refused"] {
+        let r = requests(&mut e)
+            .into_iter()
+            .find(|r| r.method == Method::Delete)
+            .unwrap();
+        reply(
+            &mut e,
+            &r,
+            400,
+            &format!(r#"{{"success":false,"code":-1103,"message":"{message}"}}"#),
+        );
+    }
+    let out = actions(&mut e);
+    assert_eq!(outcome(out.clone(), 91), Some(Some(Outcome::Rejected)));
+    assert!(done(out, 91).unwrap_err().contains("first refused"));
+}
+
+fn assert_dispatched_unknown(
+    e: &mut Driver,
+    request: &safe_cex_engine::HttpRequest,
+    status: u16,
+    body: &str,
+) {
+    use safe_cex_engine::{Method, Outcome};
+    assert_ne!(
+        request.method,
+        Method::Get,
+        "must physically dispatch a write"
+    );
+    reply(e, request, status, body);
+    let out = actions(e);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+        "no resend or put-back: {out:?}"
+    );
+    let errors: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "{status} {body}: {out:?}");
+    let error = errors[0];
+    assert_eq!(
+        error.outcome,
+        Some(Outcome::Unknown),
+        "{status} {body}: {error:?}"
+    );
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("refused") && !text.contains("no stop"),
+        "{text}"
+    );
+}
+
+#[test]
+fn dispatched_ambiguous_ordinary_writes_are_unknown_without_resend() {
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for operation in ["create", "amend", "cancel", "leverage", "margin"] {
+            let (mut e, _) = ready();
+            requests(&mut e);
+            let command = match operation {
+                "create" => Command::PlaceOrders { command: 91, orders: serde_json::from_str(r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#).unwrap() },
+                "amend" => Command::AmendOrder { command: 91, id: "9007199254740993".into(), price: Some(50001.), amount: None },
+                "cancel" => Command::CancelOrders { command: 91, ids: vec!["9007199254740993".into()] },
+                "leverage" => Command::SetLeverage { command: 91, symbol: "BTCUSDC".into(), leverage: 20., side: None },
+                "margin" => Command::SetMarginType { command: 91, symbol: "BTCUSDC".into(), isolated: true },
+                _ => unreachable!(),
+            };
+            e.handle(2000., Event::Command(command));
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1, "{operation}: {writes:?}");
+            assert_dispatched_unknown(&mut e, &writes[0], status, body);
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguous_protective_writes_are_unknown_without_put_back() {
+    use safe_cex_engine::Method;
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for leg in ["create", "cancel", "amend-cancel", "replacement"] {
+            let (mut e, socket) =
+                ready_with(ORDER, if leg == "create" { "[]" } else { ALGO }, POSITIONS);
+            requests(&mut e);
+            if leg == "cancel" {
+                e.handle(
+                    2000.,
+                    Event::Command(Command::CancelOrders {
+                        command: 91,
+                        ids: vec!["101".into(), "102".into()],
+                    }),
+                );
+            } else {
+                place(
+                    &mut e,
+                    91,
+                    r#"[{"symbol":"BTCUSDC","type":"stop_market","side":"sell","amount":1,"price":48000}]"#,
+                );
+            }
+            let mut writes = requests(&mut e);
+            assert_eq!(writes.len(), 1, "{leg}: {writes:?}");
+            if leg == "replacement" {
+                assert_eq!(writes[0].method, Method::Delete);
+                reply(
+                    &mut e,
+                    &writes[0],
+                    200,
+                    r#"{"success":true,"data":{"status":"CANCEL_SENT"}}"#,
+                );
+                assert!(!requests(&mut e).iter().any(|r| r.method != Method::Get));
+                ws(
+                    &mut e,
+                    socket,
+                    r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"CANCELLED","seq":5}}"#,
+                );
+                writes = requests(&mut e)
+                    .into_iter()
+                    .filter(|r| r.method != Method::Get)
+                    .collect();
+                assert_eq!(writes.len(), 1);
+            }
+            assert_dispatched_unknown(&mut e, &writes[0], status, body);
+        }
+    }
 }
 
 #[test]

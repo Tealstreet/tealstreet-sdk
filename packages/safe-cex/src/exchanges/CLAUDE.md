@@ -233,6 +233,33 @@ venues that do not publish one of those values use `0`; consumers must treat
 that value as "zero or unavailable," not proof that the upstream value is
 genuinely zero.
 
+Worker-frame decode recovery permits one snapshot RPC at a time. The first
+request is immediate; repeated rejected frames are gated by monotonic time with
+exponential equal jitter (250–500 ms initially, capped at 15–30 seconds).
+Repeated rejections coalesce behind one cooldown timer, including rejections
+received during an in-flight RPC; there is no independent polling loop.
+Accepted data repairs only its rejected book symbol or candle symbol/interval.
+The gate resets once every unresolved stream is repaired; unrelated traffic,
+including a healthy stream in the snapshot RPC response, cannot reset it.
+Unidentifiable stream failures retain cooldown until the mirror is reset.
+A recovered stream also fences any older in-flight snapshot from applying.
+
+Direct `listenOrderBook` / `listenOHLCV`, `PublicDataSource`, and the matching
+`*Webworker` listeners accept an optional third rejection callback. Native frame
+rejections reuse the existing frame readers and recovery-scope identity helper;
+in-process public-data providers carry the observer and release it on disposal,
+including when a synchronous source callback disposes the provider during registration.
+Observer-enabled provider subscriptions establish liveness before calling the
+source. Disposal immediately fences both data and rejection callbacks, including
+callbacks before the source returns; the late handle is released exactly once.
+The signal names the requested stream/symbol (and candle interval) and carries the original error. A rejected book batch invalidates all
+book baselines; known failure identities notify only matching subscribers.
+Unknown identities notify the affected stream kind broadly, and unreadable
+envelopes notify both kinds. Rejection-observer
+exceptions are isolated, and unsubscribe/dispose removes the rejection listener.
+If a native rejection observer disposes the exchange, frame processing stops
+before sibling data or frame forwarding is delivered.
+
 ### Common Startup Sequence
 
 Most exchange `start()` implementations follow this shape:
@@ -270,6 +297,10 @@ this.log(`Order rejected: ${err}`, LogSeverity.Error);
   `Info`.
 - The default `Info` is what `console.log`s show in app logs and what the
   emitter forwards to subscribers.
+
+`ExchangeEmitter` makes diagnostic copies for `log`, `error`, `warning`,
+`engine-event`, `exec-log` and all `grafana-*` events before listener delivery.
+Live command/result and market events retain their original payloads and identity.
 
 ### Pre-flight validation throws must emit first
 
