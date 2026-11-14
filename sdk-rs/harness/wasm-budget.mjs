@@ -800,6 +800,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SHA256 5fb03b431f7078b66798009c986ba6596c2318f53d9b9aad6b42ea30e6cbdec7.
   // #3314 serial placement source 1c2a4f8232c4: optimized web/Node 2,149,614 B, same pinned profile.
   // SHA256 1116e8b87828ad20a34dd72178a0341a745239e06da4d23430028f08f1facf50; +10 KiB rounded up.
+  // #3314 merge ebeb0b38c973: web/Node 2,149,614 B; standard pinned profile, floor unchanged.
+  // SHA256 3202ae232b063f33298378e52424c590ec9e6c5be1b7657738e4cf138b5512dd.
   txflow: 2_160_640,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
@@ -852,6 +854,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // build.sh --venue weex; Rust1.99.0, bindgen0.2.129, Binaryen132 twice -Oz; +10 KiB rounded to KiB.
   // #3314 merge f19209120d28: optimized web/Node 2,028,106 B, same pinned profile; floor unchanged.
   // SHA256 e1b634371ee73283337879de3082d97b0d05ae33e5b6c09e0cf43c58631879f2.
+  // #3314 merge ebeb0b38c973: web/Node 2,028,106 B; standard pinned profile, floor unchanged.
+  // SHA256 4cdf8b75e6c090e1a7cab534f820769475f08a4812f10421d176d45f61423ee3.
   weex: 2_038_784,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
