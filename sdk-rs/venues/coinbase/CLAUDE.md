@@ -66,8 +66,12 @@ No live credentials or private requests are needed.
 ## Provider JWT custody
 
 Registry/SDK construction uses `Coinbase::with_signing`; only public JWT bindings
-and opaque references reach the venue. Private REST and both private subscription
-frames sign at dispatch. Raw `Coinbase::new` remains the local compatibility API.
+and opaque references reach the venue. Advanced Trade private REST and both
+private subscription frames sign at dispatch. DRB HTTP and WebSocket logins use
+the same provider for fresh CDP JWTs, bound to the exact channel and RPC ID.
+Bearer requests keep the primary egress granted by that SessionAuth selection,
+including when a separate read key is configured. Raw `Coinbase::new` remains
+the local compatibility API.
 Hosted RemoteSigner sends canonical `coinbase-jws` bytes; PayloadSigner is REST
 only and cannot authenticate a private socket. Pre-dispatch signing refusal
 uses `trading_unsent`, preserving NotSent rather than transport-loss Unknown.

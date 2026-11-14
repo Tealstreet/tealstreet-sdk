@@ -187,7 +187,9 @@ fn trade_row(id: &str, seq: u64) -> Value {
 }
 impl Rig {
     fn ready() -> Self {
-        let mut r = Self::new(false);
+        Self::ready_with(Self::new(false))
+    }
+    fn ready_with(mut r: Self) -> Self {
         r.select_intx();
         let auth = r.request();
         r.rpc(auth,json!({"access_token":"fixture-http-token","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
@@ -311,6 +313,9 @@ impl Rig {
         self.collect();
     }
 }
+
+#[path = "drb_provider.rs"]
+mod provider_tests;
 #[test]
 fn startup_publishes_private_state_and_never_calls_retired_intx_reads() {
     let r = Rig::ready();

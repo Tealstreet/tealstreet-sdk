@@ -162,10 +162,19 @@ mutation methods or mutation authority. Trading migration belongs to S3;
 `drb_ensure_http(cx)` starts/refreshes authentication without consuming a
 trading command's retained root. Trading integrations resume their own waiters
 after the HTTP auth success branch and drain them on definitive auth refusal.
+Provider-backed accounts retain only public CDP bindings and opaque signer
+references. HTTP and WebSocket logins prepare fresh JWTs at dispatch through
+the installed provider, with the RPC ID and physical channel fixed before the
+signing wait. Retiring a socket drops its pending authentication result. Both
+the login and subsequent bearer reads use primary account egress even when a
+separate read key serves legacy account discovery. JWT claims use protocol UTC;
+session expiry and invalidation retain scheduling time.
 The old account/trading integration fixtures now run as internal unit fixtures
 with an explicit test-only legacy selector, preserving their shared Spot/CFM
 regression oracles. This selector is absent from production and public Options;
-the new private tests exercise the production drb startup route.
+the new private tests exercise the production drb startup route. Provider graph
+parity, route authority and delayed socket replacement controls are in
+`tests/support/drb_provider.rs`.
 
 Offline protocol fixtures follow the [technical migration guide](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/derivatives/technical),
 [OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json),

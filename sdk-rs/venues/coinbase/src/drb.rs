@@ -285,6 +285,37 @@ impl Transport {
         Ok((id, request))
     }
 
+    /// Provider-backed login retains a signed recipe inside the managed request;
+    /// attaching an unmanaged signing action after queuing would be too late.
+    pub(crate) fn http_auth<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        context: &Context,
+        params: Value,
+        pending: P,
+        step: impl FnOnce(RpcId) -> Box<dyn safe_cex_engine::SignStep>,
+    ) -> Result<(RpcId, RequestId), String> {
+        let (id, body) =
+            self.prepare(Channel::Http, "public/auth", Intent::Read, params, cx.now)?;
+        let request = match cx.request_signed_managed(
+            context.clone(),
+            None,
+            Method::Post,
+            format!("{HTTP_URL}/public/auth"),
+            Some(body),
+            step(id),
+            pending,
+        ) {
+            Ok(request) => request,
+            Err((_, error)) => {
+                self.in_flight.remove(&id);
+                return Err(error.to_string());
+            }
+        };
+        cx.request_timeout(request, REQUEST_TIMEOUT_MS);
+        Ok((id, request))
+    }
+
     /// Caller must gate private methods on its Session and use the main WS host.
     pub fn websocket<P>(
         &mut self,
@@ -300,6 +331,29 @@ impl Transport {
         let (id, body) =
             self.prepare(Channel::WebSocket(socket), method, intent, params, cx.now)?;
         cx.send(socket, body);
+        Ok(id)
+    }
+
+    /// Provider-backed authentication is read-only and pinned to this socket.
+    /// Mutation methods cannot enter the generic signed-auth queue.
+    pub(crate) fn websocket_auth<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        socket: SocketId,
+        params: Value,
+        step: impl FnOnce(RpcId) -> Box<dyn safe_cex_engine::SignStep>,
+    ) -> Result<RpcId, String> {
+        if socket == SocketId(0) {
+            return Err("drb invalid socket".into());
+        }
+        let (id, body) = self.prepare(
+            Channel::WebSocket(socket),
+            "public/auth",
+            Intent::Read,
+            params,
+            cx.now,
+        )?;
+        cx.send_signed(socket, body, step(id));
         Ok(id)
     }
 
