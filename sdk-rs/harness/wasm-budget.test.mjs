@@ -4,6 +4,20 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3266 merge 2d0fdf629b84: equal optimized web/Node artifacts, build.sh --venue mexc.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
+// Module SHA256 e8939820ec914ac233aafc4ef82692d2fda4478800a10f85a7597073810af27f.
+test('#3266 clock-safety composition retains the measured MEXC 10 KiB reserve', () => {
+  const measured = 1_960_367;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.mexc;
+  assert.equal(minimumCap, 1_971_200);
+  assert.ok(cap >= minimumCap, `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'mexc'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
+});
+
 // #3317 run 43457064180 checks integration source 05d55b30c6f7, not just the PR tree.
 // Family job 131994663823 and replay job 131994664428 independently refused these bytes.
 // Current run 43461440513: family 132020005385 and replay 132020005877 agree;
