@@ -15,6 +15,19 @@ and test-only replay/reference implementations remain independent dependencies.
 Historical Rust-adapter fixtures mock both beta admission entry guards through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
+Resolved public-only delegated accounts discard unused callback and private setup
+configuration before validating custody. Native registry construction retains family setup, read-key validation and
+refusal precedence before discarding unused custody. TxFlow and Hyperliquid public
+agent setup ignore unused private material; declared ValidateOnly and PublicRead
+credentials retain their separate policies.
+The WASM host derives `requiresExternalSigner` from nonempty submitted external
+refs and the provider retained after registry construction. Refs may be owned by
+the venue rather than `Engine::identities()`. Discarded public providers require
+no callback; private and retained PublicRead providers still require one. WEEX's
+native/actual-WASM retained-ref controls use trusted client refs without callback
+intent; its closed callback and Hosted beta policies remain separate refusals. TxFlow's
+landed dispatch/RemoteSigner declarations retain explicit no-PayloadSigner and
+no-beta assertions; the unmigrated provider-metadata refusal remains on Polymarket.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
 see `sdk-rs/venues/asterdex/README.md`),

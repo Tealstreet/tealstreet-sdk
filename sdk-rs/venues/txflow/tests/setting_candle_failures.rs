@@ -1,4 +1,6 @@
 //! Account-setting progression and candle failure custody in one genuine engine.
+#[path = "support/signer.rs"]
+mod signer;
 mod support;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{Error, HttpAction};
@@ -32,10 +34,10 @@ fn pending_pair() -> Driver {
     let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some("0x0000000000000000000000000000000000000001".into()),
-        secret: Some(format!("0x{:064x}", 1)),
+        credentials: signer::identity(),
         ..Default::default()
     }));
-    engine.start(1000.);
+    signer::start(&mut engine, 1000.);
     let metadata = engine
         .drain_actions()
         .find_map(|action| match action {

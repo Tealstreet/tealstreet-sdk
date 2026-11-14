@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#[path = "signer.rs"]
+pub mod signer;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_txflow::{Options, TxFlow};
 pub const NOW: f64 = 1_700_000_000_000.0;
@@ -30,7 +32,7 @@ pub fn reply_at(e: &mut Engine<TxFlow>, r: &HttpRequest, now: f64, status: u16, 
     );
 }
 pub fn requests(e: &mut Engine<TxFlow>) -> Vec<HttpRequest> {
-    safe_cex_engine::test_support::prepared_actions(e, NOW)
+    signer::prepared_actions(e, NOW)
         .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
@@ -59,13 +61,13 @@ pub fn bootstrap_with_meta(
     let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some(wallet.into()),
-        secret: Some(format!("0x{:064x}", 1)),
+        credentials: signer::identity(),
         ..Options::default()
     }));
-    e.start(NOW);
+    signer::start(&mut e, NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, meta);
-    let mut actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let mut actions = signer::prepared_actions(&mut e, NOW);
     let index = actions
         .iter()
         .position(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetCtx"))
@@ -78,7 +80,7 @@ pub fn bootstrap_with_meta(
         &r,
         r#"{"success":true,"code":0,"data":{"instrumentId":1,"lastPrice":"100","markPx":"100","oraclePx":"100"}}"#,
     );
-    actions.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
+    actions.extend(signer::prepared_actions(&mut e, NOW));
     let timer = actions
         .iter()
         .find_map(|a| match a {
@@ -87,10 +89,7 @@ pub fn bootstrap_with_meta(
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    actions.extend(safe_cex_engine::test_support::prepared_actions(
-        &mut e,
-        NOW + 25.0,
-    ));
+    actions.extend(signer::prepared_actions(&mut e, NOW + 25.0));
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -160,7 +159,8 @@ pub trait Plain {
 impl<V: safe_cex_engine::Venue> Plain for safe_cex_engine::Engine<V> {
     fn drain_plain(&mut self) -> std::vec::IntoIter<safe_cex_engine::Action> {
         use safe_cex_engine::{Action, Notice};
-        self.drain_actions()
+        signer::prepared_actions(self, safe_cex_engine::test_support::dispatch_now(self))
+            .into_iter()
             .map(|a| match a {
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     Action::Notice(Notice::CommandFailed {

@@ -1,5 +1,24 @@
 # TxFlow Rust port
 
+## Current agent integration (2026-11-08)
+
+The following historical port notes are retained as evidence. Current work is
+`feat/txflow-agent-key-signing`, targeting mirror master after the NX type/UI
+migration. Mainnet, preview, production and `BETA_VENUES` remain disabled.
+TxFlow has no venue-issued API key. Browser-generated agent keys are approved
+by the owner wallet; `applicationId` is the owner, `key` the agent address and
+`secret` the browser provider's scalar. The SDK adds no persistence. Default
+HL application credentials use browser storage; optional sync encrypts locally.
+Hosted construction strips the scalar and requests allowlisted device signing.
+
+Live disposable-wallet validation and exact endpoint references are in
+[the TxFlow README](../../packages/safe-cex/src/exchanges/txflow/README.md).
+Native code now consumes provider identities, checks approval before each
+command and reconciles executed placements through bounded pending-identity
+receipts. Advanced order flags stay disabled. Historical statements below
+about unmeasured private writes and raw-secret construction are superseded.
+
+
 Branch: `feat/rust-txflow`, based on `origin/feat/rust-rewrite` at
 `7da56dc8a552c595c6844c512ef1de54ff24225b`. Follow `VENUE_PORT_BRIEF.md`.
 Mainnet, preview and production availability remain disabled. Do not stash,

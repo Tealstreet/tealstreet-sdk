@@ -916,12 +916,13 @@ export class RustEngineExchange extends BaseExchange {
     // A setup refusal surfaces at start(), where callers route its message.
     let aster: ReturnType<typeof mapAsterDEXSignerSetup> | undefined;
     let setupError: ExchangeError | undefined;
-    const hyperliquid = deriveSignerSetupMapping(exchangeName) === 'hyperliquid';
-    const hyperliquidAccount = options.key;
-    let hyperliquidSetup: ExchangeOptions | undefined;
-    if (bridgeConstruction.dispatchSigning && !delegated && hyperliquid) {
+    const agentMapping = deriveSignerSetupMapping(exchangeName);
+    const agentWallet = agentMapping === 'hyperliquid' || agentMapping === 'txflow';
+    const agentAccount = options.key;
+    let agentSetup: ExchangeOptions | undefined;
+    if (bridgeConstruction.dispatchSigning && !delegated && agentWallet) {
       try {
-        hyperliquidSetup = mapHyperliquidSignerSetup(options);
+        agentSetup = mapHyperliquidSignerSetup(options, exchangeMetadata[agentMapping].prettyName);
       } catch (error) {
         if (!(error instanceof ExchangeError)) throw error;
         setupError = error;
@@ -963,7 +964,7 @@ export class RustEngineExchange extends BaseExchange {
                   options.omniKeySeed || undefined,
                 )
               : new LocalSignerSetup(
-                  hyperliquidSetup ??
+                  agentSetup ??
                     paradexSetup ??
                     (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
                   deriveSignerSetupPolicy(exchangeName),
@@ -974,8 +975,8 @@ export class RustEngineExchange extends BaseExchange {
           exchangeName,
           options,
           undefined,
-          hyperliquid
-            ? { key: Boolean(hyperliquidAccount), secret: signerSetup.credentialPresence.secret }
+          agentWallet
+            ? { key: Boolean(agentAccount), secret: signerSetup.credentialPresence.secret }
             : signerSetup.credentialPresence,
         )
       : undefined;
@@ -993,7 +994,7 @@ export class RustEngineExchange extends BaseExchange {
     options = withoutDelegatedSigningSnapshot(options);
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
-    if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };
+    if (agentWallet && (signerSetup || setupError)) options = { ...options, key: agentAccount };
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647) {
       signerSetup?.dispose();
