@@ -1204,6 +1204,12 @@ impl<T: ?Sized> SetupExecutionBounds for T {}
 /// Hosts enforce cancellation/timeout independently of the signing future settling.
 pub trait Signer: ProviderBounds {
     fn sign(&self, request: SignRequest) -> SignFuture;
+    /// Trusted native setup, before sharing this provider. Unsupported providers
+    /// refuse; there is no unprotected fallback and no material export API.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn protect(self: Arc<Self>) -> Result<ProtectedProvider, SignError> {
+        Err(SignError::Unsupported)
+    }
     /// True only when sign_ready always completes inline (normal local provider).
     fn immediate(&self) -> bool {
         false
@@ -1221,8 +1227,10 @@ pub trait Signer: ProviderBounds {
     fn owned_public_address_capability(&self) -> Capability {
         Capability::Unsupported
     }
-    /// Dormant owned work; refuse anything except one own-ref Secp256k1 PublicAddress
-    /// with an empty receipt/context. Pure local derivation may happen here;
+    /// Dormant owned work: one own-ref Secp256k1 PublicAddress, or a declared
+    /// PublicKey for a provider supporting key setup, with empty receipt/context.
+    /// Refuse signing, presentation, multiple operations and undeclared keys.
+    /// Pure local public-value derivation may happen here;
     /// asynchronous emission starts only through the retained execution's start.
     fn create_public_address_setup(
         &self,
@@ -1244,6 +1252,12 @@ pub trait Signer: ProviderBounds {
     }
 }
 pub type Provider = Arc<dyn Signer>;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "signing_protected.rs"]
+mod protected;
+#[cfg(not(target_arch = "wasm32"))]
+pub use protected::{ProtectedProvider, ProtectedSigner};
 
 /// What a provider declares it can sign for one ref; anything but
 /// `Supported` fails command admission closed.

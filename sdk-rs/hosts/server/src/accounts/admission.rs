@@ -142,7 +142,7 @@ impl Registry {
             permit.check(user, init)?;
             let mut config = self.engine_config.clone();
             config.trusted_signer_state = None;
-            let (plan, options, provider, mode) = match (candidate, link.as_ref()) {
+            let (plan, options, provider, mode, resident) = match (candidate, link.as_ref()) {
                 (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
                     let prepared = prepare_delegated(init, candidate.pair())
                         .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::SignerSetup))?;
@@ -152,6 +152,7 @@ impl Registry {
                         prepared.options,
                         prepared.resident.provider(),
                         "hosted_delegated",
+                        Some(prepared.resident),
                     )
                 }
                 (None, Some(link))
@@ -166,6 +167,7 @@ impl Registry {
                         prepared.options,
                         remote.provider,
                         "hosted_cosign",
+                        None,
                     )
                 }
                 _ => return Err(ProbeRefusal::INVALID),
@@ -191,6 +193,9 @@ impl Registry {
             permit.check(user, init)?;
             let placed = self.threads.place(move |placement| {
                 tokio::task::spawn_local(async move {
+                    // The queued proof owns its erasure authority through native
+                    // probe cleanup. Engine provider handles alone cannot retain it.
+                    let _resident = resident;
                     let _active = active;
                     let _placement = placement;
                     let live = Arc::new(AtomicBool::new(true));
