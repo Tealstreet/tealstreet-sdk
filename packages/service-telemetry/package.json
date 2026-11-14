@@ -6,7 +6,7 @@
   "main": "src/init.ts",
   "types": "src/init.ts",
   "scripts": {
-    "build": "echo \"Source-only via tsconfig path aliases — no build.\"",
+    "build": "echo \"Source-only via tsconfig path aliases \u2014 no build.\"",
     "clean": "rimraf ./coverage ./tsconfig.tsbuildinfo",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/service-telemetry.eslintcache",
     "test": "vitest run",
@@ -15,7 +15,8 @@
     "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@sentry/bun": "^11.1.0"
+    "@sentry/bun": "^11.1.0",
+    "@tealstreet/http-over-websocket": "*"
   },
   "devDependencies": {
     "@tealstreet/prettierrc": "*",

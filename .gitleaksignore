@@ -146,3 +146,9 @@ c231996640e10820a0e8d777b51eb0c52e12789d:packages/safe-cex/src/__tests__/audit-r
 
 # Synthetic Crypto.com WS replay HMAC, independently recomputed from literal test inputs; PR #3298.
 e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-regressions/rust.cryptocom-hosted-signing.test.ts:generic-api-key:175
+
+# Public synthetic dynamic-key/JWT canaries in #3512; current tests assemble identical bytes.
+# Exact historical commit/path/rule/line only; future changes remain scanned.
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:370
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:371
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:jwt:410
