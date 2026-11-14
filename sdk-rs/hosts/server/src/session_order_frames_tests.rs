@@ -460,7 +460,9 @@ async fn unsupported_init_preserves_live_delegated_receipts_and_pending_completi
             .await
             .unwrap();
 
-            let mut refused = init("bitrue");
+            // #3502 restores Bitrue admission; Weex remains outside the beta roster.
+            // Keep this init unsupported so the live registration and receipts survive.
+            let mut refused = init("weex");
             refused.instance_id = Some("refused".into());
             session.init(refused).await.unwrap();
             let reply = tokio::time::timeout(Duration::from_secs(2), async {

@@ -94,7 +94,15 @@ Protective edits retain native closing authority and use a final managed-Claim
 veto with a genuine <=5 s Mark/Last receipt. Proven standalone stop-market edits
 use native cancelReplace; explicit partial refusal permits one exact put-back.
 Ambiguous replies and guarded rate limits are Unknown, with no resend or restore.
-Frame-fed protective price edits refuse `reference stale` until the engine maps
-genuine source receipt clocks; frame arrival never refreshes a reference.
+A missing or stale requested receipt triggers one unsigned Daily (Last) or
+Premium (Mark) preflight read, bounded to 20 s with no retry, before destructive
+admission. The target row retains its actual receipt time and is usable only
+after the whole envelope succeeds, within the unchanged 5 s freshness limit.
+Frame-fed edits use this same path; frame arrival never refreshes a reference.
+A failed, sparse, wrong-source or delayed read leaves the original open. Final
+Claims, re-signs and restores still use the same pure veto. Only the veto is
+I/O-free; re-signs and restores retain their existing server-time reads and writes.
 See [protective edits](../../../../docs/plans/callers/bingx-protective-edits.md)
 for the native classes, proof requirements and frame-state version contract.
+The genuine <=5 s per-source proof is intentionally stricter than legacy TS,
+which optionally checked Store Mark without a receipt-age gate.

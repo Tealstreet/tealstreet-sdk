@@ -44,6 +44,7 @@ pub enum Pending {
     Identity(safe_cex_engine::selected_read::AdmittedRead),
     Account(account::Request),
     Trade(trading::Request),
+    ProtectiveReference(Box<trading::ReferenceRead>),
     History(history::Request),
     Markets {
         rows: Vec<Market>,
@@ -682,6 +683,10 @@ impl Bingx {
                 self.history.on_failed(cx, request, error);
                 return;
             }
+            Pending::ProtectiveReference(read) => {
+                read.reject(cx, error);
+                return;
+            }
             Pending::Trade(request) => {
                 self.trading
                     .on_failed(cx, self.credentials.as_ref(), request, error);
@@ -1079,6 +1084,7 @@ impl Venue for Bingx {
             }
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
+            Pending::ProtectiveReference(read) => read.item(cx, item),
             Pending::History(request) => self.history.on_item(cx, request, item),
             Pending::Markets { rows, skipped } => {
                 if rows.len() == rows.capacity() {
@@ -1215,6 +1221,15 @@ impl Venue for Bingx {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Clock(probe) = pending {
             self.clock_response(cx, probe, response);
+            return;
+        }
+        if let Pending::ProtectiveReference(read) = pending {
+            self.trading.reference_response(
+                cx,
+                self.credentials.as_ref(),
+                *read,
+                success(response),
+            );
             return;
         }
         if sign::timestamp::refused(response.body) {
@@ -1450,6 +1465,17 @@ impl Venue for Bingx {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::ProtectiveReference(read) = pending {
+            self.note_ban(cx, &response);
+            read.reject(
+                cx,
+                &success(response).err().unwrap_or_else(|| {
+                    "public reference response did not contain the expected list".into()
+                }),
+            );
+            self.ban_wait_ms = None;
+            return;
+        }
         if sign::timestamp::refused(response.body) {
             self.resync_clock(cx);
         }
