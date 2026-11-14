@@ -1,5 +1,6 @@
 import type { ChaserCompleteEvent } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderOptions';
 import { getActiveChasers } from '../../../packages/cli-core/src/commands/trading/ChaseCommand';
+import { getStorageEpoch, isStorageSessionCurrent } from './storage-context';
 
 /** A chase lives in this process, which exits now: its order stays with nothing managing it. */
 export function chaseAbandonedByExit(): string | undefined {
@@ -23,15 +24,23 @@ export function watchOneShotChases(exchange: {
     off: (event: string, handler: (...args: unknown[]) => void) => void;
   };
 }): () => Promise<OneShotChaseProblem | undefined> {
+  const ownerEpoch = getStorageEpoch();
   const completed: ChaserCompleteEvent[] = [];
-  const onComplete = (event: unknown) => completed.push(event as ChaserCompleteEvent);
+  const onComplete = (event: unknown) => {
+    if (isStorageSessionCurrent(ownerEpoch)) completed.push(event as ChaserCompleteEvent);
+  };
   exchange.emitter.on('chaser:complete', onComplete);
   return async () => {
     const deadline = Date.now() + FIRST_PLACEMENT_WAIT_MS;
-    while (getActiveChasers().some((chase) => chase.everTrackedOrderIds.size === 0) && Date.now() < deadline) {
+    while (
+      isStorageSessionCurrent(ownerEpoch) &&
+      getActiveChasers().some((chase) => chase.everTrackedOrderIds.size === 0) &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => setTimeout(resolve, FIRST_PLACEMENT_POLL_MS));
     }
     exchange.emitter.off('chaser:complete', onComplete);
+    if (!isStorageSessionCurrent(ownerEpoch)) return undefined;
     const failed = completed.filter((chase) => !chase.placed && chase.filled === 0);
     if (failed.length > 0) {
       return {

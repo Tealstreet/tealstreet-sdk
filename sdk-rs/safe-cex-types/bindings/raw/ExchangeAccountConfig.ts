@@ -24,6 +24,11 @@ apiKey: string,
 apiSecret: string, 
 /**
  * @ts-mutable
+ * Account-worker mode; absent keeps existing signing selection.
+ */
+signingMode?: "local" | "cosigned" | "delegated", 
+/**
+ * @ts-mutable
  */
 passphrase?: string, 
 /**
@@ -94,6 +99,11 @@ grvtSignerAddress?: string,
  * @ts-mutable
  */
 grvtTradingAccountId?: string, 
+/**
+ * Hosted CDP key algorithm; local custody infers it from key material.
+ * @ts-mutable
+ */
+coinbaseJwtAlgorithm?: "es256" | "edDsa", 
 /**
  * @ts-mutable
  */

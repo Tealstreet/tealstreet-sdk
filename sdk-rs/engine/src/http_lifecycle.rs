@@ -8,6 +8,12 @@ use crate::request_context::{
     SessionPlacement,
 };
 
+#[path = "websocket_write.rs"]
+mod websocket_write;
+pub use websocket_write::{
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
+};
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "http_read_budget_tests.rs"]
 mod read_budget_tests;
@@ -130,7 +136,14 @@ enum ClaimAdmission<'a> {
     NonceUnscheduled(&'a mut dyn FnMut(&HttpRelease) -> Result<(), Error>),
 }
 
+#[cfg(feature = "dispatch-nonce")]
+struct ClaimObservation<'a> {
+    signing_release: &'a mut Option<crate::SigningRelease>,
+    nonce_stale: &'a mut bool,
+}
+
 pub(super) struct Managed {
+    pub(super) websocket: Option<SocketId>,
     lifecycle: Lifecycle,
     original: HttpRequest,
     pub(super) timer: TimerId,
@@ -357,7 +370,15 @@ impl Managed {
         &self,
         registry: &request_context_registry::ContextRegistry,
         now: f64,
+        provider_floor: u64,
     ) -> Result<(), Error> {
+        if self
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| !recipe.provider_current(provider_floor))
+        {
+            return Err(Error::Revoked);
+        }
         self.validate(registry, now)?;
         registry.egress_live(self.lifecycle.context())
     }
@@ -369,7 +390,6 @@ impl Managed {
         }
     }
 
-    #[cfg(feature = "http-plans")]
     pub(super) fn released_delivery(&self, delivery: &request_context_registry::Delivery) -> bool {
         self.delivery() == *delivery
             && self.lifecycle.release().is_some()
@@ -391,9 +411,13 @@ impl Managed {
         time: ReleaseTime,
         pacing: &mut crate::request_context::SendPacing,
         mut admission: ClaimAdmission<'_>,
-        signing_release: &mut Option<crate::SigningRelease>,
-        nonce_stale: &mut bool,
+        observation: ClaimObservation<'_>,
+        handoff: &mut crate::request_context::ClaimHandoff<'_>,
     ) -> Result<Claim, Error> {
+        let ClaimObservation {
+            signing_release,
+            nonce_stale,
+        } = observation;
         let nonce = self
             .recipe
             .as_ref()
@@ -426,17 +450,33 @@ impl Managed {
                             Err(reason) => Err(reason),
                             Ok((observation, ready, release)) => {
                                 *signing_release = Some(observation);
-                                let committed = nonce.commit_release(|| {
-                                    self.lifecycle.commit_claim(ready, pacing);
+                                let mut ready = Some(ready);
+                                let mut result = Err(Error::Revoked);
+                                handoff(&mut |send| {
+                                    let Some(ready) = ready.take() else {
+                                        return false;
+                                    };
+                                    let mut refused = false;
+                                    let committed = nonce.commit_release(|| {
+                                        if !send() {
+                                            refused = true;
+                                            return false;
+                                        }
+                                        self.lifecycle.commit_claim(ready, pacing);
+                                        true
+                                    });
+                                    result = match committed {
+                                        Ok(true) => Ok(Claim::Released(release)),
+                                        Ok(false) if refused => Err(Error::Revoked),
+                                        Ok(false) => {
+                                            *nonce_stale = true;
+                                            Err(Error::Stale)
+                                        }
+                                        Err(_) => Err(Error::State),
+                                    };
+                                    result.is_ok()
                                 });
-                                match committed {
-                                    Ok(true) => Ok(Claim::Released(release)),
-                                    Ok(false) => {
-                                        *nonce_stale = true;
-                                        Err(Error::Stale)
-                                    }
-                                    Err(_) => Err(Error::State),
-                                }
+                                result
                             }
                         }
                     }
@@ -444,17 +484,23 @@ impl Managed {
                 }
             }
             (true, None) | (false, Some(_)) => Err(Error::State),
-            (false, None) => self.lifecycle.claim(permit, time, pacing, &mut |release| {
-                *signing_release =
-                    Some(crate::SigningRelease::new(release.signature, release.time)?);
-                match &mut admission {
-                    ClaimAdmission::Mutable(admit) => admit(release),
-                    ClaimAdmission::NonceUnscheduled(admit) => {
-                        admit(release)?;
-                        Ok(crate::request_context::Admission::Unscheduled)
+            (false, None) => self.lifecycle.claim_with_handoff(
+                permit,
+                time,
+                pacing,
+                &mut |release| {
+                    *signing_release =
+                        Some(crate::SigningRelease::new(release.signature, release.time)?);
+                    match &mut admission {
+                        ClaimAdmission::Mutable(admit) => admit(release),
+                        ClaimAdmission::NonceUnscheduled(admit) => {
+                            admit(release)?;
+                            Ok(crate::request_context::Admission::Unscheduled)
+                        }
                     }
-                }
-            }),
+                },
+                handoff,
+            ),
         }
     }
 }
@@ -669,7 +715,7 @@ impl<P> Cx<'_, P> {
         // After admission, so a refused binding fails an owning Plan like any
         // other issue refusal.
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-        let forbids_recipe = self.io.core.request_contexts.session_call(context.owner())
+        let forbids_recipe = self.io.core.request_contexts.session_call(&context)
             && !matches!(&recipe, ManagedRecipe::Unsigned(_));
         #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
         let forbids_recipe = false;
@@ -713,11 +759,26 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "session-bearer"))]
         let refusal = bearer.is_some().then_some(SESSION_BEARER_DISABLED);
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let complete = self
+            .io
+            .core
+            .request_contexts
+            .session_plan_call(&context)
+            .is_some();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         let refusal = refusal.or_else(|| {
             if forbids_recipe {
-                Some("Keyless Session serial calls cannot sign")
+                Some(if complete {
+                    "Session Plan Session calls cannot sign"
+                } else {
+                    "Keyless Session serial calls cannot sign"
+                })
             } else if wire.is_err() {
-                Some("Keyless serial resend changed its request")
+                Some(if complete {
+                    "Session Plan resend changed its request"
+                } else {
+                    "Keyless serial resend changed its request"
+                })
             } else if self
                 .io
                 .core
@@ -726,7 +787,11 @@ impl<P> Cx<'_, P> {
                 .is_some()
                 && resolved.is_err()
             {
-                Some("Keyless serial call requires its admitted Session")
+                Some(if complete {
+                    "Session Plan call requires its admitted Session"
+                } else {
+                    "Keyless serial call requires its admitted Session"
+                })
             } else {
                 None
             }
@@ -753,7 +818,7 @@ impl<P> Cx<'_, P> {
             self.io
                 .core
                 .request_contexts
-                .commit_keyless_wire(keyless_owner, fingerprint);
+                .commit_keyless_wire(keyless_owner, leg, fingerprint);
         }
         #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
@@ -810,7 +875,7 @@ impl<P> Cx<'_, P> {
             },
         };
         #[cfg(feature = "serial-plans")]
-        if let Some((seeded, _)) = registry.serial_session_seed(context)
+        if let Some((seeded, _)) = registry.plan_session_seed(context)
             && generation != Some(seeded)
         {
             return Err(Error::Revoked);
@@ -1122,7 +1187,7 @@ impl crate::engine::CoreCx<'_> {
             .io
             .core
             .request_contexts
-            .serial_session_seed(&context)
+            .plan_session_seed(&context)
             .map(|(_, floor)| floor);
         let managed_bearer = bearer.and_then(Bearer::new);
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
@@ -1153,6 +1218,7 @@ impl crate::engine::CoreCx<'_> {
         self.io.core.managed_http.insert(
             request,
             Managed {
+                websocket: None,
                 lifecycle,
                 original: http.clone(),
                 timer,
@@ -1651,6 +1717,9 @@ impl<V: Venue> Engine<V> {
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
+        if !self.http_preparation_pending(token) {
+            return;
+        }
         self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
@@ -1661,7 +1730,11 @@ impl<V: Venue> Engine<V> {
             return;
         }
         let prepared_result = managed
-            .validate_send(&self.io.core.request_contexts, now)
+            .validate_send(
+                &self.io.core.request_contexts,
+                now,
+                self.io.core.signing.provider_floor(),
+            )
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -1720,7 +1793,14 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 }
-                let bind = crate::engine::IoCore::http_bind(token, permit, request);
+                let bind = crate::engine::IoCore::http_bind(
+                    token,
+                    permit,
+                    request,
+                    managed
+                        .websocket
+                        .map(|_| self.io.core.websocket_write_issuer),
+                );
                 // Const-folded: an undeclared venue compiles the domain hold out.
                 #[cfg(feature = "release-domains")]
                 let bind = if V::http_release_domain().is_some() {
@@ -1747,7 +1827,8 @@ impl<V: Venue> Engine<V> {
     fn resume_prepared_signing(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         let readiness = match self.io.core.prepare_http_signing(now, token, prepared) {
             Ok(readiness) => readiness,
-            Err((reason, error)) => {
+            Err(failure) => {
+                let (reason, error) = *failure;
                 self.http_preparation_failed(now, token, reason, error);
                 return;
             }
@@ -1847,7 +1928,8 @@ impl<V: Venue> Engine<V> {
         let permit = match self.io.core.complete_http_signing(now, &mut completion) {
             Ok(Some(ready)) => ready,
             Ok(None) => return,
-            Err((reason, error)) => {
+            Err(failure) => {
+                let (reason, error) = *failure;
                 let token = completion
                     .preparation
                     .expect("a failed completion has a preparation");
@@ -1933,6 +2015,15 @@ impl<V: Venue> Engine<V> {
         mut error: VenueError,
     ) {
         self.assert_live();
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&token.attempt().request)
+            .is_some_and(|managed| managed.lifecycle.preparation() == token)
+        {
+            return;
+        }
         self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
@@ -2136,8 +2227,49 @@ impl<V: Venue> Engine<V> {
 
     /// The host checks its bound resource, calls this, and immediately invokes
     /// its transport API on Released, with no intervening await or actor hop.
-    pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
+    pub fn claim_http(&mut self, now: f64, mut permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
+        let issuer = permit.take_websocket_issuer();
+        if issuer != 0 && issuer != self.io.core.websocket_write_issuer {
+            return Err(Error::Revoked);
+        }
+        if let Some(managed) = self
+            .io
+            .core
+            .managed_http
+            .get(&permit.attempt().request)
+            .filter(|managed| managed.websocket.is_some())
+        {
+            if !managed.lifecycle.is_current_permit(permit) {
+                return Err(Error::Revoked);
+            }
+            let preparation = managed.lifecycle.preparation();
+            self.http_preparation_failed(
+                now,
+                preparation,
+                Error::Revoked,
+                VenueError::new("WebSocket writes require a physical socket handoff"),
+            );
+            return Err(Error::Revoked);
+        }
+        self.claim_http_with_handoff(now, permit, &mut |commit| commit(&mut || true))
+    }
+
+    fn claim_http_with_handoff(
+        &mut self,
+        now: f64,
+        permit: Permit,
+        handoff: &mut crate::request_context::ClaimHandoff<'_>,
+    ) -> Result<Claim, Error> {
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&permit.attempt().request)
+            .is_some_and(|managed| managed.lifecycle.is_current_permit(permit))
+        {
+            return Err(Error::Revoked);
+        }
         #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
@@ -2176,7 +2308,11 @@ impl<V: Venue> Engine<V> {
             );
             return Err(Error::Revoked);
         }
-        if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
+        if let Err(error) = managed.validate_send(
+            &self.io.core.request_contexts,
+            now,
+            self.io.core.signing.provider_floor(),
+        ) {
             self.http_preparation_failed(
                 now,
                 preparation,
@@ -2282,8 +2418,11 @@ impl<V: Venue> Engine<V> {
                         check_release(&self.venue, &pending.value, release)?;
                         admit(&mut self.venue, &mut pending.value, release)
                     }),
-                    &mut signing_release,
-                    &mut nonce_stale,
+                    ClaimObservation {
+                        signing_release: &mut signing_release,
+                        nonce_stale: &mut nonce_stale,
+                    },
+                    handoff,
                 ),
                 super::HttpRelease::NonceUnscheduled(admit) => managed.claim(
                     permit,
@@ -2293,15 +2432,18 @@ impl<V: Venue> Engine<V> {
                         check_release(&self.venue, &pending.value, release)?;
                         admit(&self.venue, &pending.value, release)
                     }),
-                    &mut signing_release,
-                    &mut nonce_stale,
+                    ClaimObservation {
+                        signing_release: &mut signing_release,
+                        nonce_stale: &mut nonce_stale,
+                    },
+                    handoff,
                 ),
             }
         } else if managed.has_nonce_state() {
             nonce_capability_failure = true;
             Err(Error::State)
         } else {
-            managed.lifecycle.claim(
+            managed.lifecycle.claim_with_handoff(
                 permit,
                 time,
                 &mut self.io.core.http_pacing,
@@ -2320,11 +2462,12 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 },
+                handoff,
             )
         };
         #[cfg(not(feature = "dispatch-nonce"))]
         let result = {
-            managed.lifecycle.claim(
+            managed.lifecycle.claim_with_handoff(
                 permit,
                 time,
                 &mut self.io.core.http_pacing,
@@ -2343,6 +2486,7 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 },
+                handoff,
             )
         };
         if let Ok(Claim::Released(release)) = result {
@@ -2472,7 +2616,8 @@ impl<V: Venue> Engine<V> {
     }
 
     fn reprepare_http(&mut self, now: f64, token: Preparation) {
-        if let Err((reason, error)) = self.io.core.reprepare_http(now, token) {
+        if let Err(failure) = self.io.core.reprepare_http(now, token) {
+            let (reason, error) = *failure;
             self.http_preparation_failed(now, token, reason, error);
         }
     }
@@ -2746,8 +2891,18 @@ impl<V: Venue> Engine<V> {
                     },
                 );
                 if recorded.is_ok() {
-                    self.venue
-                        .observe_unproven_http_response(now, &pending.value, response);
+                    if self.io.core.unknown_outcome_telemetry.is_some() {
+                        self.io
+                            .core
+                            .request_contexts
+                            .remember_engine_unknown(&delivery, Some(response.status));
+                    }
+                    self.venue.observe_unproven_http_response(
+                        now,
+                        self.io.core.protocol_clock.at(now),
+                        &pending.value,
+                        response,
+                    );
                     #[cfg(feature = "http-plans")]
                     let plan = self
                         .io
@@ -2946,7 +3101,7 @@ impl crate::engine::IoCore {
         &mut self,
         now: f64,
         completion: &mut HttpSigningCompletion,
-    ) -> Result<Option<Permit>, (Error, VenueError)> {
+    ) -> Result<Option<Permit>, Box<(Error, VenueError)>> {
         #[cfg(feature = "dispatch-nonce")]
         let pending = completion.pending.as_mut().expect("unconsumed completion");
         #[cfg(not(feature = "dispatch-nonce"))]
@@ -2962,18 +3117,20 @@ impl crate::engine::IoCore {
         };
         let token = managed.lifecycle.preparation();
         completion.preparation = Some(token);
-        if let Err(reason) = managed.validate_send(&self.request_contexts, now) {
+        if let Err(reason) =
+            managed.validate_send(&self.request_contexts, now, self.signing.provider_floor())
+        {
             if let Some(action) = completion.outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
-            return Err((
+            return Err(Box::new((
                 reason,
                 if reason == Error::TimedOut {
                     crate::signing::SignError::TimedOut.venue_error()
                 } else {
                     VenueError::new("HTTP signing result is no longer valid")
                 },
-            ));
+            )));
         }
         if let Some(error) = completion.error {
             let reason = if error == crate::signing::SignError::TimedOut {
@@ -2981,17 +3138,17 @@ impl crate::engine::IoCore {
             } else {
                 Error::State
             };
-            return Err((reason, error.venue_error()));
+            return Err(Box::new((reason, error.venue_error())));
         }
         if completion.stale {
             #[cfg(feature = "dispatch-nonce")]
             if completion.nonce_stale {
                 if pending.nonce_repairs >= crate::signing_dispatch::MAX_NONCE_REPREPARES {
-                    return Err((
+                    return Err(Box::new((
                         Error::State,
                         VenueError::new("Signing nonce repair budget exhausted")
                             .kind(ErrorKind::Internal),
-                    ));
+                    )));
                 }
                 pending.nonce_repairs += 1;
             }
@@ -3014,10 +3171,10 @@ impl crate::engine::IoCore {
                 if let Some(action) = completion.outbound.as_mut() {
                     crate::signing_dispatch::wipe(action);
                 }
-                Err((
+                Err(Box::new((
                     result.err().unwrap_or(Error::Invalid),
                     VenueError::new("HTTP signing result is no longer valid"),
-                ))
+                )))
             }
         }
     }
@@ -3046,21 +3203,44 @@ impl crate::engine::IoCore {
             member.permit = Some(permit);
             return None;
         }
-        Some(Self::http_bind(token, permit, packet))
+        Some(Self::http_bind(
+            token,
+            permit,
+            packet,
+            managed.websocket.map(|_| self.websocket_write_issuer),
+        ))
     }
 
     #[inline(never)]
-    fn http_bind(token: Preparation, permit: Permit, packet: HttpRequest) -> Action {
-        Action::ManagedHttp(Box::new(HttpAction::Bind {
+    fn http_bind(
+        token: Preparation,
+        permit: Permit,
+        packet: HttpRequest,
+        websocket_issuer: Option<u64>,
+    ) -> Action {
+        let permit = match websocket_issuer {
+            Some(issuer) => permit.with_websocket_issuer(issuer),
+            None => permit,
+        };
+        let action = Box::new(HttpAction::Bind {
             preparation: token,
             permit,
             request: packet,
-        }))
+        });
+        if websocket_issuer.is_some() {
+            websocket_write::outbound(action)
+        } else {
+            Action::ManagedHttp(action)
+        }
     }
 
     // Return refusals to the generic caller before it delivers any venue hook.
     #[inline(never)]
-    fn reprepare_http(&mut self, now: f64, token: Preparation) -> Result<(), (Error, VenueError)> {
+    fn reprepare_http(
+        &mut self,
+        now: f64,
+        token: Preparation,
+    ) -> Result<(), Box<(Error, VenueError)>> {
         let request = token.attempt().request;
         let Some(managed) = self.managed_http.get_mut(&request) else {
             return Ok(());
@@ -3071,8 +3251,13 @@ impl crate::engine::IoCore {
         // However it leaves, a re-prepared call is no longer parked.
         #[cfg(feature = "session-bearer")]
         self.bearer_parked.retain(|(_, parked)| *parked != request);
-        if let Err(error) = managed.validate_send(&self.request_contexts, now) {
-            return Err((error, VenueError::new("HTTP preparation window expired")));
+        if let Err(error) =
+            managed.validate_send(&self.request_contexts, now, self.signing.provider_floor())
+        {
+            return Err(Box::new((
+                error,
+                VenueError::new("HTTP preparation window expired"),
+            )));
         }
         #[cfg(feature = "http-mutation-barriers")]
         if managed
@@ -3080,10 +3265,10 @@ impl crate::engine::IoCore {
             .as_ref()
             .is_some_and(|member| member.announced && !member.bound)
         {
-            return Err((
+            return Err(Box::new((
                 Error::State,
                 VenueError::new("HTTP group binding failed before claim"),
-            ));
+            )));
         }
         if managed.waiting_route.take().is_some() {
             self.actions.push(Action::SetTimer {
@@ -3094,17 +3279,17 @@ impl crate::engine::IoCore {
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
         if managed.signing_attempt.is_some() && !self.signing.available_id() {
-            return Err((
+            return Err(Box::new((
                 Error::Capacity,
                 VenueError::new("HTTP signing identity capacity exhausted"),
-            ));
+            )));
         }
         let next = managed.lifecycle.reprepare();
         if let Err(error) = next {
-            return Err((
+            return Err(Box::new((
                 error,
                 VenueError::new("HTTP request cannot be prepared again"),
-            ));
+            )));
         }
         #[cfg(feature = "http-mutation-barriers")]
         if let Some(member) = &mut managed.group {
@@ -3130,14 +3315,18 @@ impl crate::engine::IoCore {
         }
         let mut http = managed.original.clone();
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
-        self.actions
-            .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
-                #[cfg(target_arch = "wasm32")]
-                request_class: managed.lifecycle.request_class() as u8,
-                preparation: managed.lifecycle.preparation(),
-                intent: managed.intent,
-                request: http,
-            })));
+        let action = Box::new(HttpAction::Prepare {
+            #[cfg(target_arch = "wasm32")]
+            request_class: managed.lifecycle.request_class() as u8,
+            preparation: managed.lifecycle.preparation(),
+            intent: managed.intent,
+            request: http,
+        });
+        self.actions.push(if managed.websocket.is_some() {
+            websocket_write::outbound(action)
+        } else {
+            Action::ManagedHttp(action)
+        });
         Ok(())
     }
 
@@ -3147,7 +3336,7 @@ impl crate::engine::IoCore {
         now: f64,
         token: Preparation,
         prepared: Prepared,
-    ) -> Result<SigningReadiness, (Error, VenueError)> {
+    ) -> Result<SigningReadiness, Box<(Error, VenueError)>> {
         let request = token.attempt().request;
         let Some(managed) = self.managed_http.get_mut(&request) else {
             return Ok(SigningReadiness::Waiting);
@@ -3156,7 +3345,10 @@ impl crate::engine::IoCore {
             return Ok(SigningReadiness::Waiting);
         }
         if let Err(error) = managed.validate(&self.request_contexts, now) {
-            return Err((error, VenueError::new("HTTP signing window expired")));
+            return Err(Box::new((
+                error,
+                VenueError::new("HTTP signing window expired"),
+            )));
         }
         if prepared.expires_at.is_some_and(|at| now >= at) {
             return Ok(SigningReadiness::Reprepare);
@@ -3166,7 +3358,10 @@ impl crate::engine::IoCore {
             .check(managed.lifecycle.context().pacing(), now)
         {
             Err(error) => {
-                return Err((error, VenueError::new("Invalid HTTP signing pacing")));
+                return Err(Box::new((
+                    error,
+                    VenueError::new("Invalid HTTP signing pacing"),
+                )));
             }
             Ok(Some(at)) => {
                 managed.waiting_route = Some(prepared);
@@ -3205,7 +3400,10 @@ impl crate::engine::IoCore {
         managed.lifecycle.begin_signing().and_then(|_| {
             self.signing
                 .activate_managed(attempt, managed.lifecycle.deadline())
-                .map_err(|_| Error::State)
+                .map_err(|error| match error {
+                    crate::signing::SignError::Refused => Error::Revoked,
+                    _ => Error::State,
+                })
         })?;
         if was_waiting {
             self.actions.push(Action::SetTimer {
@@ -3293,6 +3491,8 @@ mod tests {
     include!("request_context_keyless_serial_tests.rs");
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     include!("request_context_serial_call_auth_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_session_plan_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
     #[cfg(feature = "sign-meta")]
@@ -3415,6 +3615,39 @@ mod tests {
 
     #[derive(Debug)]
     struct Pending(Context);
+
+    include!("websocket_write_tests.rs");
+
+    #[test]
+    fn read_only_context_cannot_construct_a_websocket_write() {
+        let mut engine = crate::test_support::seeded_engine(Probe::default());
+        engine.start(0.);
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let socket =
+            cx.connect(SocketSpec::new("wss://venue.test/orders").channel(SocketChannel::Business));
+        cx.io.core.actions.clear();
+        let context = cx
+            .http_context(
+                Scope::Command(71),
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            cx.websocket_write(context, socket, "order".into()),
+            Err(Error::Invalid)
+        ));
+        assert!(cx.io.core.actions.is_empty());
+    }
     #[derive(Clone, Copy, Debug)]
     enum EffectFact {
         Missing,
@@ -3519,6 +3752,7 @@ mod tests {
         fn observe_unproven_http_response(
             &mut self,
             now: f64,
+            _: f64,
             _: &Pending,
             response: Response<'_>,
         ) {
@@ -4334,13 +4568,7 @@ mod tests {
             .get_mut(&token.attempt().request)
             .unwrap();
         assert!(deadline < managed.lifecycle.deadline());
-        managed.lifecycle = Lifecycle::with_deadline(
-            managed.lifecycle.context().clone(),
-            token.attempt(),
-            0.,
-            deadline,
-        )
-        .unwrap();
+        managed.lifecycle.narrow_test_window(0., deadline);
         assert_eq!(managed.lifecycle.preparation(), token);
     }
 

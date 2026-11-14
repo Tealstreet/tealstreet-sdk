@@ -46,7 +46,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       return nextConfig;
     }
 
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
+    // TODO: Audit whether HOW proxy re-serialization can break this signature.
     const params = config.params ? decodeURIComponent(qs.stringify(config.params)) : null;
     const data = config.data ? JSON.stringify(config.data) : null;
 

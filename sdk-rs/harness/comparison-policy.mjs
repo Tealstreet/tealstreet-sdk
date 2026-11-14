@@ -1,6 +1,14 @@
 // Comparisons are on by default. Every exclusion must name the exact venue,
 // field and reason here; missing legacy opt-in flags never disable a field.
 export const COMPARISON_EXCLUSIONS = Object.freeze({});
+
+// Account settings outlive exposure rows in the Store.
+export const captureTsSettings = (store) => {
+  const byId = new Map(Object.values(store.positionSettings).map((setting) => [setting.id, setting]));
+  for (const position of store.positions) byId.set(position.id, position);
+  return [...new Map([...byId.values()].filter((p) => p.leverage > 0)
+    .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()];
+};
 export const comparesField = (venue, field) => {
   const exclusions = COMPARISON_EXCLUSIONS[venue] ?? {};
   if (!Object.hasOwn(exclusions, field)) return true;
@@ -28,14 +36,15 @@ export const captureTsFill = (fill) => ({
   timestamp: fill.timestamp ?? null,
 });
 
-// Raw native evidence: an order id must never stand in for execution identity.
+// Revision 2 carries the public event ID, which falls back to the order ID.
+// Only a distinct event ID proves native execution identity.
 export const captureRustFill = (rows, i) => ({
   market: rows.market[i],
   side: rows.side[i],
   amount: rows.rows[i * 2 + 1],
   price: rows.rows[i * 2],
   id: rows.orderId(i),
-  executionId: rows.fillId?.(i),
+  executionId: rows.fillId?.(i) === rows.orderId(i) ? undefined : rows.fillId?.(i),
   fee: Number.isFinite(rows.fee?.[i]) ? rows.fee[i] : undefined,
 });
 
@@ -130,7 +139,11 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
     leverage: p.leverage ?? null,
     unrealizedPnl: p.unrealizedPnl ?? null,
     realizedPnl: finiteOrNull(p.realizedPnl),
-    liquidationPrice: p.liquidationPrice ?? null,
+    // P1 maps legacy unknown thresholds to null at the public edge.
+    // Keep Rust values unchanged so malformed producer output remains visible.
+    liquidationPrice: impl === 'ts'
+      && (finiteOrNull(p.liquidationPrice) === null || Number(p.liquidationPrice) <= 0)
+      ? null : p.liquidationPrice ?? null,
     marginType: p.marginType ?? null,
     positionMode: p.positionMode ?? null,
     marginSize: Number.isFinite(p.marginSize) ? p.marginSize : null,

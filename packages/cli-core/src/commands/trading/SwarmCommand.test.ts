@@ -35,7 +35,7 @@ function bal(p: Partial<Balance> = {}): Balance {
     free: p.free ?? 1000,
     total: p.total ?? 1000,
     upnl: p.upnl ?? 0,
-  } as Balance;
+  };
 }
 
 function makeExchange(opts: { positions?: Position[]; balance?: Balance } = {}): ExchangeLike {
@@ -102,6 +102,42 @@ function placedOrders(ex: ExchangeLike) {
   return (ex.placeOrder as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
 }
 
+describe('MEXC native swarm quantities', () => {
+  const exchange = () => {
+    const ex = makeExchange();
+    ex.name = 'mexc';
+    ex.store.markets = [
+      {
+        symbol: 'DOGEUSDT',
+        id: 'DOGE_USDT',
+        base: 'DOGE',
+        quote: 'USDT',
+        contractSize: 100,
+        precision: { amount: 100, price: 0.00001 },
+        limits: { amount: { min: 100, max: 44500000 }, leverage: { min: 1, max: 300 } },
+      },
+    ];
+    ex.store.positions = [pos({ symbol: 'DOGEUSDT', contracts: 13000 })];
+    ex.store.tickers = [{ symbol: 'DOGEUSDT', last: 0.1 } as never];
+    return ex;
+  };
+  it('splits 130 into two native 65-contract reductions', async () => {
+    const ex = exchange();
+    const result = await new SwarmCommand().execute(
+      ctx(['swarm', 'sell', '$1300', 'into', '2', 'reduce'], ex, 'DOGEUSDT'),
+    );
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex).map((order) => order.amount)).toEqual([65, 65]);
+  });
+  it('refuses an off-step total before distribution can round it away', async () => {
+    const ex = exchange();
+    await expect(
+      new SwarmCommand().execute(ctx(['swarm', 'sell', '$1304', 'into', '2', 'reduce'], ex, 'DOGEUSDT')),
+    ).rejects.toThrow(/lot step/);
+    expect(ex.placeOrder).not.toHaveBeenCalled();
+  });
+});
+
 class DeterministicSwarm extends SwarmCommand {
   // Cycle through fixed weights so size distribution is testable.
   private weights: number[];
@@ -167,7 +203,7 @@ describe('SwarmCommand — argument parsing', () => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(['swarm', 'buy', '$100', 'into', '5', 'frizzle'], ex));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/unexpected token/);
+    expect(r.error).toMatch(/unknown argument/i);
   });
 });
 

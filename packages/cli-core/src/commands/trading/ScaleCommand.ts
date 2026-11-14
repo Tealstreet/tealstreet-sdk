@@ -21,6 +21,7 @@ interface ParsedScaleCommand {
   allowTaker: boolean;
   reduceOnly: boolean;
   symbol?: string;
+  unexpectedArgument?: string;
 }
 
 /**
@@ -48,9 +49,7 @@ export class ScaleCommand extends TradingBaseCommand {
   private parseCommand(input: string): ParsedScaleCommand | string {
     const sizeRe = String.raw`(?:\$\d+(?:\.\d+)?|\d+(?:\.\d+)?\$|\d+(?:\.\d+)?%(?:bal|pos)?)`;
     const priceRe = String.raw`(?:[-+]?[\d.]+%?|\d+%?)`;
-    const core = new RegExp(
-      String.raw`^scale (?:buy|sell) ${sizeRe} into \d+ from ${priceRe} to ${priceRe}( .*)?$`,
-    );
+    const core = new RegExp(String.raw`^scale (?:buy|sell) ${sizeRe} into \d+ from ${priceRe} to ${priceRe}( .*)?$`);
     const match = core.exec(input);
     if (!match) {
       return `Invalid syntax "${input}"`;
@@ -83,13 +82,7 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const symbol = tokens.shift();
-    if (symbol && (SUPPORTED_MODIFIERS.includes(symbol) || RESERVED_MODIFIERS.includes(symbol))) {
-      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
-    }
-    if (tokens.length > 0) {
-      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
-    }
-    return { allowTaker, reduceOnly, ...(symbol ? { symbol } : {}) };
+    return { allowTaker, reduceOnly, symbol, unexpectedArgument: tokens[0] };
   }
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
@@ -103,6 +96,15 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    this.assertUnambiguousOrderModifiers(
+      ctx,
+      -1,
+      SUPPORTED_MODIFIERS,
+      { into: 1, from: 1, to: 1 },
+      args.indexOf('to') + 1,
+    );
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     const commandStr = args.join(' ');
     const parsedCommand = this.parseCommand(commandStr);
     if (typeof parsedCommand === 'string') {
@@ -117,10 +119,14 @@ export class ScaleCommand extends TradingBaseCommand {
       // such as BTCUSDX into BTCUSDT.
       if (!resolvedSymbol || resolvedSymbol.toUpperCase() !== parsedCommand.symbol.toUpperCase()) {
         return this.error(
-          `Unknown symbol "${parsedCommand.symbol}". Use a valid market symbol, or omit it to trade the focused symbol (${ctx.symbol}).`,
+          `${this.unknownOrderArgument(parsedCommand.symbol)} Unknown symbol "${parsedCommand.symbol}". Use a valid market symbol, or omit it to trade the focused symbol (${ctx.symbol}).`,
         );
       }
       targetSymbol = resolvedSymbol;
+    }
+
+    if (parsedCommand.unexpectedArgument) {
+      return this.error(this.unknownOrderArgument(parsedCommand.unexpectedArgument));
     }
 
     const { allowTaker, reduceOnly } = parsedCommand;
@@ -135,24 +141,6 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const orderSide = args[1] === 'buy' ? OrderSide.Buy : OrderSide.Sell;
-    // Match the buy/sell vs close convention from Phase 0 decision 1:
-    // entries (non-reduce) take % of balance, exits (reduce) take % of
-    // position. Without `allowPercentage=true` the regex-vs-parser
-    // layer mismatch surfaced as confusing throws — see the test
-    // `regex accepts percent-size, parser used to reject it`.
-    let totalSize: number;
-    try {
-      totalSize = this.parseSizeAndConvertIfUsd(
-        exchange,
-        targetSymbol,
-        args[2],
-        true,
-        reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
-        reduceOnly ? 'position' : 'balance',
-      );
-    } catch (e) {
-      return this.error((e as Error).message);
-    }
     const ordersCount = parseInt(args[4], 10);
 
     const currentPrice = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol)?.last;
@@ -165,53 +153,64 @@ export class ScaleCommand extends TradingBaseCommand {
     const priceUpper = Math.max(parseFloat(from), parseFloat(to));
     const priceLower = Math.min(parseFloat(to), parseFloat(from));
     const priceIncrement = subtract(priceUpper, priceLower) / subtract(ordersCount, 1);
-    const orderSize = totalSize / ordersCount;
 
+    // Split the request before lot rounding. Dollar/balance shares convert at
+    // each rung's price; position/inverse shares split in native contracts.
+    // Floor each share so rounding cannot inflate the allocation.
     const orders = [];
-    for (let i = 0; i < ordersCount; i++) {
-      const price = priceLower + i * priceIncrement;
-      orders.push({
-        size: orderSize,
-        price: String(price),
-        side: orderSide,
-        reduceOnly: reduceOnly,
-      });
+    try {
+      for (let i = 0; i < ordersCount; i++) {
+        const price = priceLower + i * priceIncrement;
+        const size = this.parseSizeAndConvertIfUsd(
+          exchange,
+          targetSymbol,
+          args[2],
+          true,
+          reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
+          reduceOnly ? 'position' : 'balance',
+          price,
+          1 / ordersCount,
+          true,
+        );
+        orders.push({
+          size,
+          price: String(price),
+          side: orderSide,
+          reduceOnly: reduceOnly,
+        });
+      }
+    } catch (e) {
+      return this.error((e as Error).message);
     }
 
-    // Fatfinger gate — applies per-leg, not per-total. A scale command
-    // that adds up to MORE than the limit but where each leg is
-    // smaller is allowed (the cap protects against single fat-finger
-    // entries, not aggregate exposure).
-    // Budget is aggregate — the whole ladder's notional, charged once
-    // AFTER the orders place (checked before so we fail closed early).
+    const preparedOrders = prepareCliOrders(
+      exchange,
+      orders.map((order) => ({
+        side: order.side,
+        symbol: targetSymbol,
+        price: parseFloat(order.price),
+        type: OrderType.Limit,
+        amount: order.size,
+        ...(!allowTaker ? { timeInForce: OrderTimeInForce.PostOnly } : {}),
+        reduceOnly: order.reduceOnly,
+      })),
+    );
+
+    // Check each prepared rung at its own rounded price before the batch write.
+    // Retain the combined notional and charge it only after acceptance.
     let budgetNotional = 0;
     if (!reduceOnly) {
       try {
-        for (const order of orders) {
-          this.enforceFatfinger(ctx, targetSymbol, order.size);
+        for (const order of preparedOrders) {
+          this.enforceFatfinger(ctx, order.symbol, order.amount);
+          budgetNotional += this.checkBudget(ctx, exchange, order.symbol, order.amount, order.price, budgetNotional);
         }
-        const totalAmount = orders.reduce((sum, o) => sum + Math.abs(o.size), 0);
-        budgetNotional = this.checkBudget(ctx, exchange, targetSymbol, totalAmount);
       } catch (e) {
         return this.error((e as Error).message);
       }
     }
 
-    const orderIds =
-      (await exchange.placeOrders(
-        prepareCliOrders(
-          exchange,
-          orders.map((order) => ({
-            side: order.side,
-            symbol: targetSymbol,
-            price: parseFloat(order.price),
-            type: OrderType.Limit,
-            amount: order.size,
-            ...(!allowTaker ? { timeInForce: OrderTimeInForce.PostOnly } : {}),
-            reduceOnly: order.reduceOnly,
-          })),
-        ),
-      )) ?? [];
+    const orderIds = (await exchange.placeOrders(preparedOrders)) ?? [];
 
     if (budgetNotional > 0) ctx.preprocessStore?.addBudgetSpent(budgetNotional);
     this.printSuccess(ctx, `Created orders ${orderIds.join(',')}`);

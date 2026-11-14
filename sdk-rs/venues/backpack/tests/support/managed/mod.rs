@@ -33,7 +33,10 @@ impl Driver {
         options.identity = identities.primary.clone();
         let mut inner = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
         inner
-            .set_signer(Some(std::sync::Arc::new(provider)))
+            .set_signer(Some(std::sync::Arc::new(super::hosted_parity::Parity {
+                local: provider,
+                ids: identities.clone(),
+            })))
             .unwrap();
         inner.set_identities(identities).unwrap();
         Self { inner, now: 1000.0 }
@@ -65,6 +68,13 @@ pub fn ready() -> (Driver, SocketId) {
 pub fn ready_orders(orders: &str) -> (Driver, SocketId) {
     let (inner, socket) = super::ready_orders(orders);
     (Driver { inner, now: 1000.0 }, socket)
+}
+pub fn ready_catalogue(
+    markets: &str,
+    orders: &str,
+) -> (Driver, SocketId, Vec<(safe_cex_engine::TimerId, f64)>) {
+    let (inner, socket, _, timers) = super::ready_catalogue(markets, POSITIONS, orders);
+    (Driver { inner, now: 1000.0 }, socket, timers)
 }
 pub fn actions(engine: &mut Driver) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(&mut engine.inner, engine.now)

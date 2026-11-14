@@ -15,6 +15,15 @@ const MAX_ACKNOWLEDGEMENTS: usize = 4096;
 pub enum Reason {
     OwnerReleased,
     LeaseExpired,
+    WaitingForKey,
+}
+
+/// Admission recovery only: key availability never acknowledges a restored job.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum DelegatedKeyStatus {
+    WaitingForKey,
+    KeyAvailable,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -40,6 +49,15 @@ impl Marker {
         Some(marker)
     }
     fn notice(&self, account: &str, display: &str) -> String {
+        if self.reason == Reason::WaitingForKey {
+            return envelope::algo_notice(
+                account,
+                &format!(
+                    "The previous server ({display}) lost its memory-only delegated key (waiting for your key). Only client-retained TWAP schedules can be restored, paused. Check Open Orders before explicitly resuming TWAPs or starting new chases; resting orders may still fill."
+                ),
+                None,
+            );
+        }
         envelope::algo_notice(
             account,
             &format!(
@@ -198,6 +216,40 @@ impl Notices {
         });
         Ok(())
     }
+    /// Status for the requesting connection. Reuses the recorded interruption,
+    /// without consuming its notice or weakening its per-job restore fence.
+    pub(crate) fn delegated_status(
+        &self,
+        user: &str,
+        account: &str,
+        out: &Out,
+        status: DelegatedKeyStatus,
+    ) -> bool {
+        let mut entries = self.users.lock().unwrap();
+        prune(&mut entries);
+        if matches!(status, DelegatedKeyStatus::WaitingForKey)
+            && entries
+                .get(user)
+                .and_then(|user| user.marker.as_ref())
+                .is_none()
+        {
+            return false;
+        }
+        let message = match status {
+            DelegatedKeyStatus::WaitingForKey => "waiting for your key",
+            DelegatedKeyStatus::KeyAvailable => "your key is available",
+        };
+        out.send(envelope::msg(
+            account,
+            "delegated:status",
+            serde_json::json!({
+                "status": status,
+                "reason": Reason::WaitingForKey,
+                "message": message,
+            }),
+        ))
+    }
+
     pub fn deliver(&self, user: &str, account: &str, out: &Out) -> bool {
         let mut entries = self.users.lock().unwrap();
         prune(&mut entries);
@@ -223,6 +275,27 @@ impl Notices {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delegated_restart_reason_reuses_the_bounded_interruption_marker() {
+        let raw = serde_json::json!({
+            "reason": "waiting-for-key", "fromBox": "01", "at": 1000
+        })
+        .to_string();
+        let marker = Marker::parse(&raw, 1000).expect("typed restart reason");
+        assert_eq!(
+            serde_json::to_value(&marker).unwrap()["reason"],
+            "waiting-for-key"
+        );
+        assert!(Marker::parse(&raw.replace("1000", "6001"), 1000).is_none());
+        let notice: serde_json::Value = serde_json::from_str(&marker.notice("acct", "01")).unwrap();
+        assert!(
+            notice["d"]["data"][0]
+                .as_str()
+                .unwrap()
+                .contains("waiting for your key")
+        );
+    }
     #[tokio::test(start_paused = true)]
     async fn acknowledgements_are_job_account_user_and_epoch_scoped_with_bounded_marker_lifetime() {
         let notices = Arc::new(Notices::default());

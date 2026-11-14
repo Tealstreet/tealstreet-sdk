@@ -20,6 +20,7 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
+        delegated_order_frames_from_env()?;
         let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
         let number = |name: &str, default: usize| -> Result<usize, String> {
             var(name).map_or(Ok(default), |value| {
@@ -76,6 +77,24 @@ impl Config {
     }
 }
 
+/// Startup-only deployment control. Changing it uses the same image and the
+/// existing drain/restart path; it does not change a live process's environment.
+pub(crate) fn delegated_order_frames_from_env() -> Result<bool, String> {
+    parse_delegated_order_frames(
+        std::env::var("TEALSTREET_DELEGATED_ORDER_FRAMES")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn parse_delegated_order_frames(value: Option<&str>) -> Result<bool, String> {
+    match value {
+        None | Some("" | "0") => Ok(false),
+        Some("1") => Ok(true),
+        Some(_) => Err("TEALSTREET_DELEGATED_ORDER_FRAMES must be 0 or 1".into()),
+    }
+}
+
 fn release_label(value: Option<String>) -> Option<String> {
     let trimmed = value.as_deref()?.trim();
     (!trimmed.is_empty()
@@ -87,7 +106,26 @@ fn release_label(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::release_label;
+    use super::{parse_delegated_order_frames, release_label};
+
+    #[test]
+    fn order_frame_runtime_control_is_default_off_and_strict() {
+        for (value, expected) in [
+            (None, Ok(false)),
+            (Some(""), Ok(false)),
+            (Some("0"), Ok(false)),
+            (Some("1"), Ok(true)),
+            (
+                Some("invalid"),
+                Err("TEALSTREET_DELEGATED_ORDER_FRAMES must be 0 or 1".into()),
+            ),
+        ] {
+            assert_eq!(parse_delegated_order_frames(value), expected, "{value:?}");
+        }
+        for value in ["true", "false", "on", "off", " 1", "1 ", "2"] {
+            assert!(parse_delegated_order_frames(Some(value)).is_err());
+        }
+    }
 
     #[test]
     fn release_uses_the_image_revision_without_placeholder_strings() {

@@ -49,6 +49,10 @@ pub mod uuid;
 #[cfg(feature = "zklink")]
 pub mod zklink;
 
+// Keep existing production declarations in place when adding admission helpers.
+#[cfg(feature = "admission")]
+pub mod admission;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,4 +64,17 @@ mod tests {
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
         );
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "admission")))]
+mod admission_feature_boundary {
+    //! Existing venue closures leave the shared `admission` helpers disabled.
+    //!
+    //! ```compile_fail
+    //! use safe_cex_crypto::admission::Statement;
+    //! ```
+    //!
+    //! ```compile_fail
+    //! use safe_cex_crypto::starknet::verify;
+    //! ```
 }

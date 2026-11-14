@@ -2,7 +2,7 @@ import type { Market } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
-import { mapOkxClosedPosition } from '../../exchanges/okx/okx.closed-pnl';
+import { mapOkxClosedPosition } from '../reference/okx/okx.closed-pnl';
 import { PositionSide } from '../../types';
 
 /** Row shape captured live from `/api/v5/account/positions-history` (sheet row 13). */
@@ -24,7 +24,9 @@ const row = (over: Record<string, any> = {}) => ({
   ...over,
 });
 
-const market = { symbol: 'DOGEUSDT', id: 'DOGE-USDT-SWAP' } as unknown as Market;
+const market: Market = { symbol: 'DOGEUSDT', id: 'DOGE-USDT-SWAP', base: 'DOGE', quote: 'USDT', active: true,
+  precision: { amount: 1, price: 0.00001 },
+  limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } } };
 const contractsToBase = (contracts: number) => contracts * 1000;
 
 describe('okx closed-position mapping', () => {

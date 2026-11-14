@@ -394,3 +394,56 @@ fn engine_ambiguity_429_schedule_refusal_stays_unknown() {
         failed(&actions, 7, Outcome::Unknown);
     }
 }
+
+#[test]
+fn dispatched_ambiguity_schedule_cancel_never_retries_or_claims_refusal() {
+    let refusal = r#"{"status":"err","response":"Cannot set scheduled cancel time until enough volume traded"}"#;
+    for (status, body) in [
+        (429, "{}"),
+        (429, refusal),
+        (408, refusal),
+        (500, refusal),
+        (503, refusal),
+    ] {
+        for extra in ["", ",\"time\":1800000030000"] {
+            let mut e = engine();
+            let request = write(command(&mut e, 7, extra, NOW));
+            let actions = reply(&mut e, &request, status, body, NOW + 1.0);
+            failed(&actions, 7, Outcome::Unknown);
+            let error = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(
+                error.message.to_lowercase().contains("unknown"),
+                "{error:?}"
+            );
+            assert!(error.message.contains("Check Open Orders"), "{error:?}");
+            assert!(!error.message.contains("refused"), "{error:?}");
+            assert!(!error.message.contains("rejected"), "{error:?}");
+            assert_eq!(error.protection, None);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                "no retry or reconciliation: {actions:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn documented_schedule_volume_refusal_on_http_200_remains_rejected() {
+    let mut e = engine();
+    let request = write(command(&mut e, 7, ",\"time\":1800000030000", NOW));
+    let actions = reply(
+        &mut e,
+        &request,
+        200,
+        r#"{"status":"err","response":"Cannot set scheduled cancel time until enough volume traded"}"#,
+        NOW + 1.0,
+    );
+    failed(&actions, 7, Outcome::Rejected);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}

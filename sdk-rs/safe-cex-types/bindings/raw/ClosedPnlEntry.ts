@@ -13,19 +13,19 @@ symbol: string,
 /**
  * @ts-mutable
  */
-notional: string | number, 
+notional: string | number | null, 
 /**
  * @ts-mutable
  */
-entryPrice: string | number, 
+entryPrice: string | number | null, 
 /**
  * @ts-mutable
  */
-exitPrice: string | number, 
+exitPrice: string | number | null, 
 /**
  * @ts-mutable
  */
-unrealizedPnl: string | number, 
+unrealizedPnl: string | number | null, 
 /**
  * @ts-mutable
  */
@@ -33,15 +33,15 @@ side: string,
 /**
  * @ts-mutable
  */
-fees: string | number, 
+fees: string | number | null, 
 /**
  * @ts-mutable
  */
-time: number, 
+time: number | null, 
 /**
  * @ts-mutable
  */
-closedTime: number, 
+closedTime: number | null, 
 /**
  * @ts-mutable
  */
@@ -49,8 +49,8 @@ account: string,
 /**
  * @ts-mutable
  */
-contracts: string | number, 
+contracts: string | number | null, 
 /**
  * @ts-mutable
  */
-leverage: number | string, };
+leverage: number | string | null, };

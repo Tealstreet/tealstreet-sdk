@@ -48,7 +48,7 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const mapBitunixHistoricalOrder = (row: Record<string, any>): HistoricalOrder | null => {
+export const mapBitunixHistoricalOrder = (row: Record<string, unknown>): HistoricalOrder | null => {
   const id = String(row.orderId ?? '');
   const symbol = String(row.symbol ?? '');
   const createdTime = parseInt(String(row.ctime ?? '0'), 10);

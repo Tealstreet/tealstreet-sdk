@@ -30,8 +30,17 @@ jobs:
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - run: corepack yarn -s node --test .github/tests/*.test.cjs
       - run: corepack yarn check:licenses
+      - name: Check script types have not drifted
+        run: corepack yarn check:script-types
+      - name: Install pinned Rust toolchain for generated type contracts
+        working-directory: sdk-rs
+        run: rustup show
       - run: corepack yarn typecheck
       - run: corepack yarn lint
+      - name: Install pinned Bun for standalone CLI tests
+        run: |
+          corepack yarn -s global add bun@1.4.3
+          corepack yarn -s global bin >> "$GITHUB_PATH"
       - run: corepack yarn test
 
 

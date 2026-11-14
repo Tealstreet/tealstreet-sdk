@@ -89,7 +89,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     const timestamp = virtualClock.getCurrentTimeMs();
 
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
+    // TODO: Audit whether HOW proxy re-serialization can break this signature.
     if (config.method !== 'post') {
       const data = unsignedPayload(config.data || config.params);
       data.timestamp = timestamp;

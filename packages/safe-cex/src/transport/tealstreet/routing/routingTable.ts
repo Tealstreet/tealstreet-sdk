@@ -36,6 +36,7 @@ const RELAY_UPSTREAM = {
   coinbasePrivate: 'wss://advanced-trade-ws-user.coinbase.com/',
   // ApeX's login refuses an IP-bound key from a browser (live, 2026-11-02).
   apexPrivate: 'wss://quote.omni.apex.exchange/realtime_private?v=2',
+  wooPrivate: 'wss://wss.woox.io/v2/ws/private/stream/',
 } as const;
 const relay = (upstream: string): string => buildRelayUrl('jp', upstream);
 
@@ -53,6 +54,7 @@ export const BROWSER_WS_HOSTS = {
   blofin: relay(RELAY_UPSTREAM.blofinPrivate),
   coinbase: relay(RELAY_UPSTREAM.coinbasePrivate),
   apexPrivate: relay(RELAY_UPSTREAM.apexPrivate),
+  wooPrivate: relay(RELAY_UPSTREAM.wooPrivate),
   bitgetPrivate: relay(RELAY_UPSTREAM.bitgetPrivate),
   bitgetPrivateUta: relay(RELAY_UPSTREAM.bitgetPrivateUta),
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
@@ -189,6 +191,7 @@ const buildRoutingTable = (WS: WsHosts): RoutingTable => {
     coinbase: coinbaseWs,
     coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
     apexomni: { private: { kind: 'mainnetProxyConditional', host: WS.apexPrivate } },
+    woo: { private: { kind: 'mainnetProxyConditional', host: WS.wooPrivate } },
     bitget: bitgetWs,
     bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
     bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange

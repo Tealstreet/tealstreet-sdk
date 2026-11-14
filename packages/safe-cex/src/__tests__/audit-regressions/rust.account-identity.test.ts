@@ -69,7 +69,6 @@ const unsupportedAliases: ExchangeName[] = [
   'bitrue',
   'bitunix',
   'blofin',
-  'breakoutprop',
   'hyrotrader',
   'hyperliquid',
   'hyperliquidspot',
@@ -204,8 +203,8 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
 
 it('retains remaining historical identity cases and covers the beta alias subset', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
-  // Two retired brokers leave the remaining identity and beta coverage intact.
-  expect(new Set(inventory).size).toBe(48);
+  // Retired venues leave the remaining identity and beta coverage intact.
+  expect(new Set(inventory).size).toBe(47);
   expect(inventory.filter((name) => RUST_VENUES.has(name)).sort()).toEqual([...RUST_VENUES].sort());
   expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(31);
 });

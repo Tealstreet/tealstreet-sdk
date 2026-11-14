@@ -128,6 +128,25 @@ test('harness files that only gate or measure a release leave the fingerprint al
   }
 });
 
+test('replay gate edits leave the fingerprint alone while fingerprint-definition edits still move it', () => {
+  const root = tree();
+  const gate = join(root, 'sdk-rs/harness/gate.mjs');
+  const definition = join(root, 'sdk-rs/harness/beta-wasm-inputs.mjs');
+  writeFileSync(gate, '// initial replay verdict');
+  writeFileSync(definition, '// initial fingerprint definition');
+  const before = betaWasmInputs(root, TOOLCHAIN);
+  writeFileSync(gate, '// changed replay verdict');
+  assert.deepEqual(betaWasmInputs(root, TOOLCHAIN), before);
+  const inputs = betaWasmInputPaths(root);
+  assert.ok(!inputs.includes('sdk-rs/harness/gate.mjs'));
+  assert.ok(inputs.includes('sdk-rs/harness/beta-wasm-inputs.mjs'));
+  writeFileSync(join(root, 'sdk-rs/harness/gate-helper.mjs'), '// still a build input');
+  const helper = betaWasmInputs(root, TOOLCHAIN);
+  assert.notEqual(helper.fingerprint, before.fingerprint, 'the exclusion matches only gate.mjs');
+  writeFileSync(definition, '// changed fingerprint definition');
+  assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, helper.fingerprint);
+});
+
 const REPO = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const read = (rel) => readFileSync(join(REPO, rel), 'utf8');
 
@@ -168,6 +187,12 @@ const exportFiles = (entry) => typeof entry === 'string' ? [entry] : Object.valu
 const HOST_ROOTS = [...new Set(exportFiles(JSON.parse(read('sdk-rs/hosts/wasm/package.json')).exports)
   .filter((path) => path.startsWith('./js/') && path.endsWith('.mjs'))
   .map((path) => `sdk-rs/hosts/wasm/${path.slice(2)}`))];
+
+test('the replay gate is unreachable from build, loader and shipped host imports', () => {
+  const reached = importGraph([...BUILD_ROOTS, ...HOST_ROOTS]);
+  assert.ok(reached.has('sdk-rs/hosts/wasm/js/managed-http.mjs'), 'transitive host dependencies are followed');
+  assert.ok(!reached.has('sdk-rs/harness/gate.mjs'), 'replay verdicts never shape a built or shipped module');
+});
 
 test('the build roots are the scripts the release actually runs', () => {
   assert.match(read('sdk-rs/harness/build.sh'), /import\('\.\/hosts\/wasm\/js\/venues\.mjs'\)/);

@@ -81,3 +81,38 @@ test('two dispatches on the same night cannot file a sustained regression', asyn
 test('nonconsecutive nights cannot file a sustained regression', async () => {
   assert.equal((await issueWrites(['2026-11-04T09:17:00Z', '2026-11-07T09:17:00Z'])).length, 0);
 });
+
+test('nightly evaluation paginates until two distinct nightly dates or exhausted history', async (t) => {
+  const manual = Array.from({ length: 49 }, (_, index) => run(100 + index, {
+    triggering_actor: { login: 'sam' }, created_at: '2026-11-07T10:00:00Z',
+  }));
+  const sameNight = Array.from({ length: 50 }, (_, index) => run(200 + index, { created_at: '2026-11-07T09:17:00Z' }));
+  for (const { name, pages, expectedWrites } of [
+    { name: 'manual runs push the previous nightly onto page two', pages: [[...manual, run(7)], [run(6)]], expectedWrites: 1 },
+    { name: 'multiple runs on one night do not stop pagination', pages: [sameNight, [run(6)]], expectedWrites: 1 },
+    { name: 'history ends without a second eligible night', pages: [[...manual, run(7)], []], expectedWrites: 0 },
+  ]) await t.test(name, async () => {
+    const saved = globalThis.fetch, requestedPages = [], writes = [], jobRuns = [];
+    globalThis.fetch = async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.includes('/actions/workflows/')) {
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        requestedPages.push(page);
+        assert.equal(parsed.searchParams.get('per_page'), '50');
+        assert.ok(page <= pages.length, 'stop once two nightly dates are found or history is exhausted');
+        return Response.json({ workflow_runs: pages[page - 1] });
+      }
+      if (url.includes('/jobs?')) { jobRuns.push(url); return Response.json({ jobs: [gate('bybit', 'failure')] }); }
+      if (url.includes('/issues?')) return Response.json([]);
+      if (url.endsWith('/issues') && init.method === 'POST') { writes.push(JSON.parse(init.body)); return Response.json({ number: 1 }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    try {
+      await evaluate({ token: 'fixture-token', repository: 'fixture/repo', log: () => {} });
+      assert.deepEqual(requestedPages, [1, 2]);
+      assert.equal(writes.length, expectedWrites);
+      assert.equal(jobRuns.length, expectedWrites ? 2 : 0);
+      if (expectedWrites) assert.match(writes[0].body, /actions\/runs\/6/);
+    } finally { globalThis.fetch = saved; }
+  });
+});

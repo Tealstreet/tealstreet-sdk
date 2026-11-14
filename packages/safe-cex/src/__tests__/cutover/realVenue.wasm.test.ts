@@ -85,32 +85,8 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         for (const symbol of input.publicBookSymbols)
           worker.handlePayload({ op: 'subscribeOrderBook', data: { symbol, subId: `cutover-${symbol}` } });
       }
-      let framesBeforeReplay = frames.length;
-      if (input.polling && name === 'breakoutprop') {
-        // DXtrade market reads require a documented test login even in public
-        // mode. Observe a natural post-startup HTTP poll, never invent a WS.
-        expect(await startup).toBe(true);
-        expect(input.breakoutQuotes.length).toBeGreaterThan(1);
-        const startupPolls = input.publicPollResponses.length;
-        expect(startupPolls).toBeGreaterThan(0);
-        const startupQuotes = worker.store.tickers.map(({ symbol, bid, ask }) => ({ symbol, bid, ask }));
-        framesBeforeReplay = frames.length;
-        await vi.waitFor(
-          () => {
-            expect(input!.publicPollResponses.length).toBeGreaterThan(startupPolls);
-            expect(worker!.store.tickers.map(({ symbol, bid, ask }) => ({ symbol, bid, ask }))).toEqual(
-              input!.publicPollResponses.at(-1)!.quotes,
-            );
-            expect(worker!.store.tickers.map(({ symbol, bid, ask }) => ({ symbol, bid, ask }))).not.toEqual(
-              startupQuotes,
-            );
-          },
-          { timeout: 7000, interval: 25 },
-        );
-        // Natural polling may skip intermediate fixture timestamps. The exact
-        // changed quote response must still be one of the recorded inputs.
-        expect(input.breakoutQuotes).toContainEqual(input.publicPollResponses.at(-1)!.quotes);
-      } else if (input.polling) {
+      const framesBeforeReplay = frames.length;
+      if (input.polling) {
         // A REST-only venue (Binance Options) loads its tickers over HTTP at startup.
         expect(await startup).toBe(true);
       } else {
@@ -130,10 +106,6 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       if (input.polling) {
         expect(input.connectedSocketUrls).toEqual([]);
         expect(input.replayedSocketUrls.size).toBe(0);
-      }
-      if (input.polling && name === 'breakoutprop') {
-        expect(input.requests.some((request) => request.endsWith('/login'))).toBe(true);
-        expect(input.requests.filter((request) => request.endsWith('/marketdata')).length).toBeGreaterThan(1);
       }
       for (const url of input.connectedSocketUrls) expect(new URL(url).protocol).toBe('wss:');
       for (const url of input.canonicalConnectedSocketUrls)

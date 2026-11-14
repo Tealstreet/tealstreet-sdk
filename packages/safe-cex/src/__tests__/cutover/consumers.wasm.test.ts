@@ -1,6 +1,6 @@
 import type { ExchangeLike } from '@tealstreet/cli-core/src/types';
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ActiveTWAP, ExchangeName, StoreData } from '../../types';
+import type { ActiveTWAP, ExchangeName, ExchangeOptions, StoreData } from '../../types';
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -205,15 +205,18 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function consumer(name: ExchangeName) {
-  const options = {
-    engine: 'rust' as const,
-    // DXtrade requires a session even for public reads. Keep its production
-    // credential guard while the independent frame producer remains offline.
-    key: name === 'breakoutprop' ? 'replay-key' : '',
-    secret: name === 'breakoutprop' ? 'replay-secret' : '',
+function consumerOptions(name: ExchangeName): ExchangeOptions {
+  return {
+    engine: 'rust',
+    key: '',
+    secret: '',
     publicDataOnly: true,
+    ...(name === 'hyrotrader' ? { extra: { hyrotraderMode: 'demo' } } : {}),
   };
+}
+
+async function consumer(name: ExchangeName) {
+  const options = consumerOptions(name);
   const main = new BaseExchange(name, options, new DefaultStore());
   exchanges.push(main);
   const messages: Array<{ op: string; data: any }> = [];
@@ -247,7 +250,7 @@ async function consumer(name: ExchangeName) {
 describe.each(venues)('%s consumer conformance', (name) => {
   it('honors explicit Rust selection in the public SDK factory', async () => {
     const store = new DefaultStore();
-    const exchange = await createExchange(name, { engine: 'rust', publicDataOnly: true, key: '', secret: '' }, store);
+    const exchange = await createExchange(name, consumerOptions(name), store);
     exchanges.push(exchange);
     expect(exchange).toBeInstanceOf(RustEngineExchange);
     expect(exchange.store).toBe(store);

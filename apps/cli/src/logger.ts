@@ -1,6 +1,6 @@
+import { getStorageDir, onStorageOwnerChange } from './storage-context';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as readline from 'readline';
 import { stableHash } from '@tealstreet/utils/src/stableHash';
 
@@ -8,24 +8,17 @@ import { G, terminalText } from './console-glyphs';
 import { describeCause, terminalErrorText } from './error-cause';
 import { classifyLog, isOperational } from './log-classify';
 import { setStatus } from './status-line';
-import { BRAND } from './brand';
 
-const LOG_DIR = path.join(os.homedir(), BRAND.configDirName);
-const LOG_FILE = path.join(LOG_DIR, 'cli.log');
+const LOG_DIR = () => getStorageDir();
+const LOG_FILE = () => path.join(LOG_DIR(), 'cli.log');
 
-// Ensure log directory exists
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+function initializeLog(): void {
+  if (!fs.existsSync(LOG_DIR())) fs.mkdirSync(LOG_DIR(), { recursive: true, mode: 0o700 });
+  // Append: another CLI process for this owner may still be using this log.
+  fs.appendFileSync(LOG_FILE(), `\n[${new Date().toISOString()}] CLI session started\n`, { mode: 0o600 });
 }
-
-// Clear log file on startup
-fs.writeFileSync(LOG_FILE, '');
-
-// Write startup marker
-const startTime = new Date().toISOString();
-fs.appendFileSync(LOG_FILE, `\n${'='.repeat(60)}\n`);
-fs.appendFileSync(LOG_FILE, `[${startTime}] CLI session started\n`);
-fs.appendFileSync(LOG_FILE, `${'='.repeat(60)}\n\n`);
+initializeLog();
+onStorageOwnerChange(initializeLog);
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -176,7 +169,7 @@ function writeLog(level: LogLevel, message: string, data?: unknown): void {
   }
 
   // Use appendFileSync for immediate flush (so tail -f works)
-  fs.appendFileSync(LOG_FILE, logLine + '\n');
+  fs.appendFileSync(LOG_FILE(), logLine + '\n');
 }
 
 export const logger = {
@@ -198,12 +191,12 @@ export const logger = {
 
   /** Get the log file path for tailing */
   getLogPath(): string {
-    return LOG_FILE;
+    return LOG_FILE();
   },
 
   /** Clear the log file */
   clear(): void {
-    fs.truncateSync(LOG_FILE, 0);
+    fs.truncateSync(LOG_FILE(), 0);
   },
 };
 
@@ -271,7 +264,7 @@ export function writeAbovePrompt(writeFn: () => void): void {
   // Redraw prompt + current line buffer + cursor. `_refreshLine` is what
   // readline runs on every keystroke; Bun implements it for Node compat. Fall
   // back to prompt(true) (buffer reappears on next keypress) if ever absent.
-  const refresh = (rl as unknown as { _refreshLine?: () => void })._refreshLine;
+  const refresh = '_refreshLine' in rl ? rl._refreshLine : undefined;
   if (typeof refresh === 'function') {
     refresh.call(rl);
   } else {

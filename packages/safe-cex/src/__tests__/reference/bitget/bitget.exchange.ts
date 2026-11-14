@@ -1895,7 +1895,7 @@ export class BitgetExchange extends BaseExchange {
   // for a flat symbol. The old code then threw before any order POST — and
   // because the throw was raw (not via emitAndLogError), it produced no toast
   // and no log, so orders silently never reached the exchange. bitget is the
-  // only adapter that gates every order on this resolution (woo/bitmex don't).
+  // only adapter that gates every order on this resolution (woo doesn't).
   private async resolveSymbolPositioning(
     symbol: string,
   ): Promise<{ positionMode?: PositionMode; marginType?: MarginType }> {

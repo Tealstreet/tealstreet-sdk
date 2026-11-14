@@ -95,6 +95,9 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
      projections. A recorded Unknown stays Unknown after accepted sibling effects,
      even if an older result wrapper calls it a refusal or known partial. Venues
      never pick the command outcome or demote it after an effect.
+   When Unknown includes a terminal rate limit, earlier refusal text/evidence
+   cannot erase its cooldown: the projected kind is `rateLimited`, with the
+   longest terminal delay (including the default for a missing Retry-After).
 10. **Reads never claim money effects.** `ReadFailure` carries a kind, native
     evidence and retry facts, and no `Outcome`.
     - Native retry facts (`RefusedResend`, a rate-limit delay) are separate from

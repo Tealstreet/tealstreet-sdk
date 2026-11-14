@@ -671,6 +671,11 @@ async fn user_admin_action(app: Arc<App>, request: UserDrainRequest, action: &st
 }
 
 pub fn capabilities_json() -> serde_json::Value {
+    capabilities_json_for(None)
+}
+
+/// Hosts select the joined account's venue; this grants no account admission.
+pub fn capabilities_json_for(venue: Option<&str>) -> serde_json::Value {
     json!({
         "service": "exchange-server",
         "version": 1,
@@ -679,7 +684,12 @@ pub fn capabilities_json() -> serde_json::Value {
             "edgePath": "/account",
             "rawPath": "/",
             "auth": "Tealstreet proxy JWT in the proxyToken query parameter",
-            "privateSigning": "browser-delegated remote signer; private keys never enter exchange-server",
+            "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
+            "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
+            "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedFullWriteActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedActivationScopeV1": crate::order_contract::action_capabilities(venue),
+            "delegatedVenueV1": venue,
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,
@@ -690,8 +700,14 @@ pub fn capabilities_json() -> serde_json::Value {
     })
 }
 
-async fn capabilities() -> Response {
-    cors(axum::Json(capabilities_json()).into_response())
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilitiesQuery {
+    exchange_name: Option<String>,
+}
+
+async fn capabilities(Query(query): Query<CapabilitiesQuery>) -> Response {
+    cors(axum::Json(capabilities_json_for(query.exchange_name.as_deref())).into_response())
 }
 
 #[derive(Deserialize)]
@@ -886,7 +902,7 @@ async fn send(
 /// What the page was already sent goes first (a break-glass stop notice), then the move.
 async fn move_away(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    outgoing: &mut tokio::sync::mpsc::Receiver<String>,
+    outgoing: &mut crate::out::Receiver,
     moved: Close,
 ) {
     while let Ok(text) = outgoing.try_recv() {
@@ -927,14 +943,19 @@ async fn serve(
     drop(pending_socket);
     let mut loaded = session.take_loaded();
     let mut dropped = session.take_dropped();
+    let mut verified = session.take_verified();
     session.open().await;
     let taken_over = session.taken_over();
     let mut closing = app.closing.subscribe();
     let mut drain = app.registry.watch_drain();
     let mut algos_ended = app.registry.watch_algos_ended();
     let close_at = expires.map(|expires_at_ms| {
-        let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()));
-        tokio::time::Instant::now() + remaining + TOKEN_GRACE
+        let remaining = Duration::from_millis(
+            expires_at_ms
+                .saturating_add(TOKEN_GRACE.as_millis() as u64)
+                .saturating_sub(now_ms()),
+        );
+        tokio::time::Instant::now() + remaining
     });
     let expiry = async {
         match close_at {
@@ -971,7 +992,7 @@ async fn serve(
                 break;
             }
             _ = &mut expiry => {
-                send(&mut sink, close(1008, "Tealstreet proxy token expired")).await;
+                send(&mut sink, close(1008, crate::auth::TOKEN_EXPIRED)).await;
                 break;
             }
             Ok(()) = drain.changed() => if let Some(moved) = session.drain_close() {
@@ -989,6 +1010,16 @@ async fn serve(
             }
             Some((name, client)) = loaded.recv() => session.account_loaded(&name, client).await,
             Some((name, client)) = dropped.recv() => session.client_dropped(&name, client).await,
+            Some(completed) = verified.recv() => {
+                if let Err(refusal) = session.verification_completed(completed).await {
+                    if refusal == Close::Moved {
+                        move_away(&mut sink, &mut outgoing, refusal).await;
+                    } else {
+                        send(&mut sink, close(refusal.code(), refusal.reason())).await;
+                    }
+                    break;
+                }
+            },
             text = outgoing.recv() => match text {
                 Some(text) => if !send(&mut sink, Message::Text(text.into())).await { break },
                 None => break,
@@ -1013,6 +1044,7 @@ async fn serve(
                 }
             }
             _ = keepalive.tick() => {
+                session.expire_handovers();
                 if last_seen.elapsed() > idle {
                     Log::warn(&idle_dropped(session.socket, user.as_deref()));
                     break;
@@ -1604,6 +1636,8 @@ mod tests {
                         op: op.into(),
                         data: data.into(),
                         origin: "test".into(),
+                        twap_owner: account.twap_owner.snapshot(),
+                        action: None,
                     };
                     account.algos.as_ref().unwrap().send(input).unwrap();
                 };

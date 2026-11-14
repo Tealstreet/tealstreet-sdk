@@ -525,6 +525,32 @@ fn ping_is_periodic_despite_public_pushes_and_watchdog_recovers() {
     );
 }
 #[test]
+fn context_rows_resolve_named_coins_and_ignore_noncanonical_indexes() {
+    let (mut e, node, _) = ready();
+    message(
+        &mut e,
+        node,
+        3000.0,
+        r#"{"channel":"allAssetCtxs","data":{"ctxs":[{"coin":"BTC","ctx":{"markPx":"65010"}},{"coin":"01","ctx":{"markPx":"1"}},{"coin":"+1","ctx":{"markPx":"2"}}]}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-USDC").unwrap().mark, 65010.0);
+    message(
+        &mut e,
+        node,
+        3001.0,
+        r#"{"channel":"activeAssetCtx","data":{"coin":"btc-usdc","ctx":{"markPx":"65020"}}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-USDC").unwrap().mark, 65020.0);
+    message(
+        &mut e,
+        node,
+        3002.0,
+        r#"{"channel":"allAssetCtxs","data":{"ctxs":[{"coin":"1","ctx":{"markPx":"65030"}}]}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-USDC").unwrap().mark, 65030.0);
+}
+
+#[test]
 fn nullable_market_context_does_not_drop_valid_fields() {
     let (mut e, node, _) = ready();
     message(

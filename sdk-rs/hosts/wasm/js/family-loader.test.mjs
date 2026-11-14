@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { familyLoader } from './family-loader.mjs';
+import { ExchangeError } from './host.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const fakeFamilies = () => {
@@ -40,10 +41,27 @@ test('a failed initialization rejects its waiters and lets the next load retry',
   assert.deepEqual(imports, ['paradex', 'paradex']);
 });
 
-test('unknown venues reject before importing any engine', async () => {
+test('unknown venues reject typed before importing any engine', async () => {
   const { imports, load } = fakeFamilies();
-  await assert.rejects(load('bitmex'), /unsupported Rust venue: bitmex/);
+  for (const venue of ['bitmex', 'bitmextestnet']) {
+    await assert.rejects(load(venue), (error) => error instanceof ExchangeError
+      && error.kind === 'unsupported' && error.outcome === 'notSent'
+      && error.message === `unsupported Rust venue: ${venue}`);
+  }
   assert.deepEqual(imports, []);
+});
+
+test('a retired venue beside a live one fails alone', async () => {
+  const { imports, inits, load } = fakeFamilies();
+  const settled = Promise.allSettled([load('bitmex'), load('binance')]);
+  await new Promise(setImmediate);
+  inits[0].resolve();
+  const results = await settled;
+  assert.equal(results[0].status, 'rejected');
+  assert.equal(results[0].reason.kind, 'unsupported');
+  assert.equal(results[1].status, 'fulfilled');
+  assert.equal(results[1].value.family, 'binance');
+  assert.deepEqual(imports, ['binance']);
 });
 
 test('every family is a Cargo feature, a web import and a host venue name', () => {

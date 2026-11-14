@@ -467,3 +467,68 @@ fn prepared_actions(
     }
     output
 }
+
+pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub const ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+
+pub fn assert_unknown_pin(
+    h: &mut Harness,
+    command: u32,
+    placed: &[&str],
+    unknown: usize,
+    count: usize,
+) {
+    assert_unknown_pin_with_text(h, command, placed, unknown, count, ENGINE_UNKNOWN_TEXT);
+}
+
+pub fn assert_unknown_pin_with_text(
+    h: &mut Harness,
+    command: u32,
+    placed: &[&str],
+    unknown: usize,
+    count: usize,
+    expected_text: &str,
+) {
+    use safe_cex_engine::write_plan::ElementResult;
+    h.advance(1_201.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "unknown released a suffix/fallback/retry"
+    );
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            Notice::CommandFailed { command: id, error } if *id == command => Some(error),
+            _ => None,
+        })
+        .expect("unknown telemetry event");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(error.message.contains(expected_text), "{error:?}");
+    let elements = error.elements.as_ref().expect("unknown journal");
+    assert_eq!(elements.len(), count);
+    assert!(matches!(
+        &elements[unknown].result,
+        ElementResult::Unknown { .. }
+    ));
+    let ids: Vec<_> = elements
+        .iter()
+        .flat_map(|row| match &row.result {
+            ElementResult::Placed { order_ids } => order_ids.iter().map(String::as_str).collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(ids, placed);
+    for row in elements.iter().skip(unknown + 1) {
+        if !matches!(
+            row.result,
+            ElementResult::Placed { .. } | ElementResult::Unknown { .. }
+        ) {
+            assert!(matches!(row.result, ElementResult::NotSent { .. }));
+        }
+    }
+    assert!(h.unknown.contains(&command));
+}

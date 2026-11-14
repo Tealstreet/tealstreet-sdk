@@ -83,6 +83,7 @@ interface ExchangeConfig {
 }
 
 const tradeEn = require('../../src/locales/en/trade.json').trade;
+const { testAccountName } = require('../config/accountNames.js');
 
 const getAccount = () => {
   const accountEnv = Cypress.env('account');
@@ -475,31 +476,22 @@ const clickOrdersTab = (tabTestId: string) => {
   cy.get(`[data-testid=${tabTestId}]`).click({ force: true });
 };
 
-// Close every open position across every account by placing opposite-side
-// market reduceOnly orders directly via the controller. Same code path the
-// "Close All Positions" UI button uses (closeAllPositions → createMarketOrder),
-// but bypasses the popconfirm + Yes-click race that the UI introduces.
-// `store.positions[].contracts` is in BASE units, but placeOrder expects the
-// venue's NATIVE size — on contract-denominated venues formatCreateOrder does
-// adjust(amount, precision.amount) against a lot size in contracts. Passing base
-// straight through made okx's 0.0001 BTC (= 0.01 contracts, lotSz 0.01) adjust to
-// 0: "Order amount must be finite and positive after adjustment", so the position
-// could never be flattened and blocked the suite permanently. blofin has the same
-// shape and only survived because oversizing is clamped by reduceOnly.
-// Mirrors apps/web/src/utils/position/getPositionNativeSize.ts — keep in sync.
-const nativeCloseSize = (exch: any, symbol: string, side: string, contracts: number): number => {
-  const pos = exch?.store?.displayedPositions?.find((p: any) => p.symbol === symbol && p.side === side);
-  const market = pos?.market ?? exch?.store?.marketsBySymbol?.[symbol];
-  const fromExtra = Math.abs(Number(pos?.extra?.contractsNative || 0));
-  const base = Math.abs(pos?.contracts ?? contracts);
-  if (!market) return fromExtra || base;
+type NativeClosePosition = {
+  symbol: string;
+  side: string;
+  extra?: { contractsNative?: unknown };
+};
 
-  const contractSize = market.contractSize || 1;
-  // Inverse sizes come off notional; fall back to base so a missing live
-  // position can't silently resolve to 0 and skip the close.
-  const fromPosition = market.isInverse ? Math.abs(pos?.notional || 0) / contractSize || base : base / contractSize;
-
-  return adjust(Math.max(fromExtra, fromPosition), market.precision.amount);
+// Close orders require the exact native placement size. Base units, notional and
+// market precision cannot establish an unknown native size (NX #9405).
+const nativeCloseSize = (
+  exch: { store?: { displayedPositions?: readonly NativeClosePosition[] } },
+  symbol: string,
+  side: string,
+): number | undefined => {
+  const native = exch.store?.displayedPositions?.find((p) => p.symbol === symbol && p.side === side)?.extra
+    ?.contractsNative;
+  return typeof native === 'number' && Number.isFinite(native) && native > 0 ? native : undefined;
 };
 
 const recoverHostedSymbolPositionsForE2E = () => {
@@ -819,9 +811,11 @@ const closeAllPositionsViaController = () => {
             const exch = typeof exchanges.get === 'function' ? exchanges.get(acct) : (exchanges as any)[acct];
             if (!exch || typeof exch.placeOrder !== 'function') return;
 
-            const amount = nativeCloseSize(exch, symbol, side, contracts);
-            if (!(amount > 0)) {
-              logs.push(`[flatten] ${acct}:${symbol} skipped — size ${contracts} adjusts to ${amount}, cannot reduce`);
+            const amount = nativeCloseSize(exch, symbol, side);
+            if (amount === undefined) {
+              logs.push(
+                `[flatten] ${acct}:${symbol} skipped — exact native size is unknown or invalid; no close order sent`,
+              );
               return;
             }
             if (amount !== contracts) {
@@ -1949,9 +1943,11 @@ const closePositionWithMarketOrderForE2E = (positionSide: PositionSide) => {
       throw new Error(`Paradex e2e market close failed: no ${positionSide} ${symbol} position found`);
     }
 
-    const amount = nativeCloseSize(exch, symbol, position.side, position.contracts);
-    if (!(amount > 0)) {
-      throw new Error(`Paradex e2e market close failed: position size ${position.contracts} adjusted to ${amount}`);
+    const amount = nativeCloseSize(exch, symbol, position.side);
+    if (amount === undefined) {
+      throw new Error(
+        `Paradex e2e market close failed: exact native size is unknown or invalid for ${positionSide} ${symbol}; no close order sent`,
+      );
     }
 
     const side = positionSide === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy;
@@ -2295,12 +2291,11 @@ const getAddAccountInput = (field: string, options: Partial<Cypress.Timeoutable>
 };
 
 const selectExchangeInAddAccountFlow = (exchange: string) => {
-  cy.get(`[data-testid=exchange-select-${exchange}]`, { timeout: 10000 }).scrollIntoView().should('be.visible').click();
+  const selector = `[data-testid=exchange-select-${exchange}]`;
+  cy.get(selector, { timeout: 10000 }).scrollIntoView().should('be.visible').click();
 
-  cy.get('body').then(($body) => {
-    if ($body.find('[data-testid=add-account-name-input]:visible').length > 0) return;
-    cy.contains('button', tradeEn['next']).should('be.enabled').click();
-  });
+  // The whitelist walkthrough also has Next; use the selected tile's dialog.
+  cy.get(selector).closest('[role="dialog"]').contains('button', tradeEn['next']).should('be.enabled').click();
 };
 
 const enableTealstreetProxyIfRendered = () => {
@@ -2875,15 +2870,18 @@ describe(
           cy.get('button[title="Account"]').first().click();
           cy.wait(300);
           cy.contains('.ant-dropdown-menu-item, [role=menuitem]', /^Api Keys$/i).click();
-          cy.contains('button', 'Add Account').should('be.visible').click();
+          cy.get('[role="dialog"]:visible').contains('button', 'Add Account').should('be.visible').click();
 
           selectExchangeInAddAccountFlow('paradex');
 
-          getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type('e2e-bad-key');
+          getAddAccountInput('name', { timeout: 10000 })
+            .should('be.visible')
+            .clear()
+            .type(testAccountName(account.exchange, 'badkey'));
           getAddAccountInput('api-key').clear().type(corruptKey(account.apiKey));
           getAddAccountInput('subkey-address').clear().type(account.subkeyAddress);
           getAddAccountInput('paradex-address').clear().type(account.paradexAddress);
-          cy.contains('button', tradeEn['done']).click();
+          getAddAccountInput('name').closest('[role="dialog"]').contains('button', tradeEn['done']).click();
 
           cy.window({ log: false, timeout: 15000 })
             .should((win) => {
@@ -2906,6 +2904,7 @@ describe(
 
         const badAccount = {
           ...account,
+          name: testAccountName(account.exchange, 'badkey'),
           apiKey: corruptKey(account.apiKey),
           apiSecret: corruptKey(account.apiSecret),
         };
@@ -3160,6 +3159,8 @@ describe(
         const account = getAccount();
         const metaData = getAccMetadata();
         const exchange = account.exchange;
+        const goodAccountName = testAccountName(exchange, 'goodkey');
+        const badAccountName = testAccountName(exchange, 'form-badkey');
 
         const isHyperliquid = exchange === 'hyperliquid' || exchange === 'hyperliquidspot';
         if (isHyperliquid) {
@@ -3189,21 +3190,19 @@ describe(
         // AccountsSettings renders a hardcoded "Add Account"; the old
         // "Add new key" label is gone and its trade.add-new-key string is
         // now unreferenced.
-        cy.contains('button', 'Add Account').should('be.visible').click();
+        cy.get('[role="dialog"]:visible').contains('button', 'Add Account').should('be.visible').click();
 
-        // Step 1 — Exchange selection. The current flow selects a tile first
-        // and advances with Next; the helper also tolerates older auto-advance
-        // builds when this spec targets an already-deployed lane.
+        // Step 1 — Select a tile, then advance with Next in the account dialog.
         selectExchangeInAddAccountFlow(exchange);
 
         // For Hyperliquid, default UI shows auto setup wizard — switch to manual form
         if (isHyperliquid) {
-          cy.contains('button', tradeEn['manual-setup']).click();
+          cy.get('[role="dialog"]:visible').contains('button', tradeEn['manual-setup']).click();
           getAddAccountInput('name', { timeout: 5000 }).should('be.visible');
         }
 
         // Step 2 — Fill form fields via stable add-account test ids.
-        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type('e2e-good-key');
+        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type(goodAccountName);
         fillPrimaryCredentialFields(account);
 
         // Check "Use Tealstreet IPs" if the exchange requires CORS proxy
@@ -3214,18 +3213,18 @@ describe(
         }
 
         // Submit the form
-        cy.contains('button', tradeEn['done']).click();
+        getAddAccountInput('name').closest('[role="dialog"]').contains('button', tradeEn['done']).click();
 
         // Assert: account appears in localStorage. Credential validation can
         // stay in-flight for several seconds after Done is clicked.
         cy.window({ log: false, timeout: 30000 }).should((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          const goodAccount = accounts.find((a: any) => a.name === 'e2e-good-key');
+          const goodAccount = accounts.find((a: any) => a.name === goodAccountName);
           expect(goodAccount, 'Good account should be saved to localStorage').to.not.be.undefined;
         });
         cy.window({ log: false }).then((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          const goodAccount = accounts.find((a: any) => a.name === 'e2e-good-key');
+          const goodAccount = accounts.find((a: any) => a.name === goodAccountName);
           expect(goodAccount.exchange, 'Account exchange should match').to.eq(exchange);
           cy.task('log', `[add-api-key] Good account saved: ${goodAccount.name} (${goodAccount.exchange})`);
         });
@@ -3241,19 +3240,19 @@ describe(
         // AccountsSettings renders a hardcoded "Add Account"; the old
         // "Add new key" label is gone and its trade.add-new-key string is
         // now unreferenced.
-        cy.contains('button', 'Add Account').should('be.visible').click();
+        cy.get('[role="dialog"]:visible').contains('button', 'Add Account').should('be.visible').click();
 
         // Step 1 — Exchange selection.
         selectExchangeInAddAccountFlow(exchange);
 
         // For Hyperliquid, switch to manual form again
         if (isHyperliquid) {
-          cy.contains('button', tradeEn['manual-setup']).click();
+          cy.get('[role="dialog"]:visible').contains('button', tradeEn['manual-setup']).click();
           getAddAccountInput('name', { timeout: 5000 }).should('be.visible');
         }
 
         // Step 2 — Fill form with corrupted credentials
-        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type('e2e-bad-key');
+        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type(badAccountName);
         fillPrimaryCredentialFields(account, { corrupt: true });
         if (metaData.requiresCors) {
           // forced-checked, nothing to do
@@ -3265,7 +3264,7 @@ describe(
           if (isAuthFailureText(err.message)) return false;
           return true;
         });
-        cy.contains('button', tradeEn['done']).click();
+        getAddAccountInput('name').closest('[role="dialog"]').contains('button', tradeEn['done']).click();
 
         // The form now pre-validates credentials against the exchange before
         // saving (see useAccountForm.ts `handleFinish` → `validateAccount`).
@@ -3298,10 +3297,10 @@ describe(
         // auth errors when the active account has bad creds".
         cy.window({ log: false }).then((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          if (!accounts.find((a: any) => a.name === 'e2e-bad-key')) {
+          if (!accounts.find((a: any) => a.name === badAccountName)) {
             accounts.push({
               ...account,
-              name: 'e2e-bad-key',
+              name: badAccountName,
               apiKey: corruptKey(account.apiKey),
               apiSecret: corruptKey(account.apiSecret),
               ...(metaData.requiresPassphrase && account.passphrase
@@ -3314,7 +3313,7 @@ describe(
             });
             win.localStorage.setItem('accounts', JSON.stringify(accounts));
           }
-          const badAccount = accounts.find((a: any) => a.name === 'e2e-bad-key');
+          const badAccount = accounts.find((a: any) => a.name === badAccountName);
           expect(badAccount, 'Bad account should be in localStorage').to.not.be.undefined;
           cy.task(
             'log',
@@ -3326,7 +3325,7 @@ describe(
 
         cy.window({ log: false }).then((win) => {
           const settings = JSON.parse(win.localStorage.getItem('lastSettings') || '{}');
-          settings.trade = { ...settings.trade, activeAccount: 'e2e-bad-key' };
+          settings.trade = { ...settings.trade, activeAccount: badAccountName };
           win.localStorage.setItem('lastSettings', JSON.stringify(settings));
         });
 
@@ -3443,7 +3442,7 @@ describe(
 
         cy.window({ log: false }).then((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          const cleaned = accounts.filter((a: any) => a.name !== 'e2e-good-key' && a.name !== 'e2e-bad-key');
+          const cleaned = accounts.filter((a: any) => a.name !== goodAccountName && a.name !== badAccountName);
           win.localStorage.setItem('accounts', JSON.stringify(cleaned));
 
           const settings = JSON.parse(win.localStorage.getItem('lastSettings') || '{}');

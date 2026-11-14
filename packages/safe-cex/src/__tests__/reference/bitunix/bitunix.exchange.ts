@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../../store/store.interface';
@@ -55,7 +56,8 @@ import { BaseExchange } from '../../../exchanges/base';
 import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './bitunix.api';
 import { mapBitunixPositionHistory } from '../../../journal/bitunix.position-adapter';
-import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from '../../../exchanges/bitunix/bitunix.income';
+import { mapBitunixTradeToIncomeRecords } from './bitunix.income';
+import { mapBitunixClosedPosition } from './bitunix.closed-pnl';
 import { mapBitunixHistoricalOrder } from './bitunix.order-history';
 import {
   ENDPOINTS,
@@ -1130,7 +1132,7 @@ export class BitunixExchange extends BaseExchange {
     return rows
       .map((row) => mapBitunixClosedPosition(row, opts.accountName || ''))
       .filter((entry): entry is ClosedPnlEntry => entry !== null)
-      .sort((a, b) => b.closedTime - a.closedTime);
+      .sort(compareClosedPnlTimes);
   };
 
   /**

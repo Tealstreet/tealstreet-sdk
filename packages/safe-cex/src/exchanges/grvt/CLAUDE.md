@@ -526,6 +526,10 @@ trailing-junk values must not reach (or change) the chaser's remaining size.
 
 ### Builder Fee Integration (`grvt.exchange.ts:304-351`, `grvt.builder.ts`)
 
+The authorization check refuses empty requested addresses and malformed result
+collections or rows, including malformed rows after a matching builder. Only an
+absent full `results` field permits selecting the lite `r` collection.
+
 If the user has authorized the Tealstreet builder:
 
 1. `getBuilderInfo()` checks `_builderAuthorized` cache (fetched during startup)

@@ -268,3 +268,7 @@ unchanged. Close diagnostics retain only route/port, phase, initiator and lifeti
 buckets. An abnormal native close is unknown, not proof of a server close.
 HOW's existing timers record maximum lateness only when delivered while hidden;
 no new polling timer or keepalive protocol is introduced.
+
+Node/Bun WebSocket upgrade refusals with HTTP 401/403 use the same visible auth
+error reporting and Bad auth state as `rpc.auth` failures. Other transport
+failures stay informational; opaque browser errors do not imply an auth refusal.

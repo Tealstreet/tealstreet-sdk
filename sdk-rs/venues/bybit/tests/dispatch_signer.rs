@@ -712,6 +712,8 @@ fn static_ws_serialization_uses_primary_and_preserves_hyro_correlation_and_strin
 
 #[test]
 fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence_in_both_orders() {
+    // TS catches definite provider refusal: reference/bybit/bybitspot.exchange.ts:844-856.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Spot per-request provider/transport catches
     for provider_first in [true, false] {
         let (mut h, gate) = ready(Variant::Spot);
         gate.mode.store(4, Ordering::SeqCst);

@@ -1,0 +1,19 @@
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "symbols": [
+      {
+        "symbol": "BTC-USDT",
+        "minQty": 0.0001826,
+        "maxQty": 18.2663756,
+        "minNotional": 5,
+        "maxNotional": 500000,
+        "maxMarketNotional": 500000,
+        "status": 1,
+        "tickSize": 0.01,
+        "stepSize": 1e-05
+      }
+    ]
+  }
+}

@@ -319,6 +319,321 @@ struct WireTriggerDetails {
 fn body(r: &HttpRequest) -> Create {
     serde_json::from_str(r.body.as_deref().unwrap()).unwrap()
 }
+#[test]
+fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
+    // TS reference: packages/safe-cex/src/__tests__/reference/grvt/grvt.exchange.ts:1415,1556.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    for (amount, maximum, step, expected) in [
+        (26., 5., 1., "26"),
+        (11., 5., 1., "11"),
+        (12., 5., 1., "12"),
+        (10., 5., 1., "10"),
+        (7., 3., 0.5, "7"),
+        (1.0005, 0.3, 0.001, "1.001"),
+    ] {
+        let mut e = boot();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.min = step;
+            market.limits.amount.max = maximum;
+        });
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 91,
+                orders: vec![PlaceOrderOpts {
+                    amount,
+                    client_order_id: None,
+                    ..opts()
+                }],
+            },
+        );
+        assert!(
+            done(&actions, 91).is_none(),
+            "pre-HTTP refusal for {amount}/{maximum}/{step}"
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Http(_)))
+                .count(),
+            1
+        );
+        let request = http(actions, "create_order");
+        let order = body(&request).o;
+        assert_eq!(order.l.len(), 1);
+        assert_eq!(order.l[0].s, expected);
+        let sum: f64 = order
+            .l
+            .iter()
+            .map(|leg| leg.s.parse::<f64>().unwrap())
+            .sum();
+        assert_eq!(sum, expected.parse::<f64>().unwrap());
+        let actions = reply(
+            &mut e,
+            &request,
+            400,
+            r#"{"c":1001,"m":"venue maximum exceeded"}"#,
+        );
+        let error = done(&actions, 91).unwrap().unwrap_err();
+        assert!(error.contains("venue maximum exceeded"), "{error}");
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}
+fn above_max_unknown_trace(prefix: bool) -> (Vec<Action>, String, Option<String>) {
+    // TS grvt.exchange.ts:1415,1557-1569 sends one leg; base.ts:1111-1114 stops on refusal.
+    // PARITY-EXCEPTION: stop-after-Unknown, SPLIT_PLAN_INVARIANT.md exception 1.
+    let mut e = boot();
+    e.store_mut().update_markets(|market| {
+        market.precision.amount = 1.;
+        market.limits.amount.min = 1.;
+        market.limits.amount.max = 5.;
+    });
+    let mut orders = Vec::new();
+    if prefix {
+        orders.push(PlaceOrderOpts {
+            client_order_id: Some("123456789".into()),
+            ..opts()
+        });
+    }
+    orders.extend([
+        PlaceOrderOpts {
+            amount: 26.,
+            client_order_id: None,
+            ..opts()
+        },
+        opts(),
+    ]);
+    let mut request = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 991,
+                orders,
+            },
+        ),
+        "create_order",
+    );
+    let accepted = if prefix {
+        let id = body(&request).o.m.co;
+        request = http(
+            reply(&mut e, &request, 200, r#"{"r":{"oi":"0x1235"}}"#),
+            "create_order",
+        );
+        Some(id)
+    } else {
+        None
+    };
+    let wire = body(&request).o;
+    assert_eq!(wire.l.len(), 1);
+    assert_eq!(wire.l[0].s, "26");
+    let client = wire.m.co;
+    let actions = reply(&mut e, &request, 200, r#"{"r":{}}"#);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order") || r.url.ends_with("cancel_order"))), "Unknown stops the suffix and never retries/puts back");
+    (actions, client, accepted)
+}
+
+fn above_max_failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
+    let failures = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 991,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    failures[0]
+}
+
+#[test]
+fn above_max_unknown_create_uses_canonical_guidance_and_retains_diagnostic() {
+    let (actions, client, _) = above_max_unknown_trace(false);
+    let error = above_max_failure(&actions);
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    let diagnostic = error.venue_message.as_deref().expect("native diagnostic");
+    assert!(diagnostic.contains("GRVT create response has no identity"));
+    assert!(diagnostic.contains(&format!(
+        "reconcile GRVT client order ID {client} before retrying"
+    )));
+}
+
+#[test]
+fn above_max_unknown_create_has_indexed_unknown_and_unissued_outcomes() {
+    let (actions, client, _) = above_max_unknown_trace(false);
+    let error = serde_json::to_value(above_max_failure(&actions)).unwrap();
+    let rows = &error["elements"];
+    assert_eq!(rows.as_array().expect("indexed journal").len(), 2);
+    assert_eq!(rows[0]["index"], 0);
+    assert_eq!(rows[0]["clientOrderId"], client);
+    assert_eq!(rows[0]["status"], "unknown");
+    assert_eq!(
+        rows[0]["error"]["message"],
+        "The outcome is unknown. Check Open Orders"
+    );
+    assert_eq!(rows[1]["index"], 1);
+    assert_eq!(rows[1]["status"], "notSent");
+    assert!(rows[1].get("error").is_none());
+}
+
+#[test]
+fn above_max_unknown_create_emits_one_attributed_event() {
+    let (actions, client, _) = above_max_unknown_trace(false);
+    above_max_failure(&actions);
+    let events = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 1, "one venue-decoded Unknown event");
+    assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        events[0].message,
+        "The outcome is unknown. Check Open Orders"
+    );
+    assert!(events[0].fields.contains(&("command", 991_u32.into())));
+    assert!(events[0].fields.contains(&("elementIndex", "0".into())));
+    assert!(events[0].fields.contains(&("clientOrderId", client.into())));
+}
+
+#[test]
+fn above_max_unknown_create_preserves_acknowledged_prefix() {
+    let (actions, _, accepted) = above_max_unknown_trace(true);
+    let accepted = accepted.unwrap();
+    let error = above_max_failure(&actions);
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    let partial = error.partial.as_ref().expect("accepted prefix IDs");
+    assert_eq!(partial.order_ids, std::slice::from_ref(&accepted));
+    assert_eq!(partial.total, Some(3));
+    assert_eq!(partial.failed_index, Some(1));
+    let rows = serde_json::to_value(error.elements.as_ref().unwrap()).unwrap();
+    assert_eq!(rows[0]["status"], "placed");
+    assert_eq!(rows[0]["orderIds"], serde_json::json!([accepted]));
+    assert_eq!(rows[1]["status"], "unknown");
+    assert_eq!(rows[2]["status"], "notSent");
+}
+
+#[test]
+fn above_max_definite_refusal_stops_like_ts_without_unknown_telemetry() {
+    // TS grvt.exchange.ts:1608-1612 throws; base.ts:1111-1114 stops mapSeries.
+    let mut e = boot();
+    e.store_mut().update_markets(|market| {
+        market.precision.amount = 1.;
+        market.limits.amount.max = 5.;
+    });
+    let request = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 992,
+                orders: vec![
+                    PlaceOrderOpts {
+                        amount: 26.,
+                        client_order_id: None,
+                        ..opts()
+                    },
+                    opts(),
+                ],
+            },
+        ),
+        "create_order",
+    );
+    assert_eq!(body(&request).o.l[0].s, "26");
+    let actions = reply(
+        &mut e,
+        &request,
+        400,
+        r#"{"c":1001,"m":"venue maximum exceeded"}"#,
+    );
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 992,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(error.message.contains("venue maximum exceeded"));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order") || r.url.ends_with("cancel_order"))));
+}
+
+#[test]
+fn above_max_caller_id_refuses_the_whole_batch_before_any_write() {
+    // TS grvt.exchange.ts:1351 calls the legacy base exchange's rounded maximum guard first (:1211-1225).
+    for valid_prefix in [false, true] {
+        let mut e = boot();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = 1.;
+            market.limits.amount.min = 1.;
+            market.limits.amount.max = 5.;
+        });
+        let mut orders = Vec::new();
+        if valid_prefix {
+            orders.push(PlaceOrderOpts {
+                client_order_id: Some("123456789".into()),
+                ..opts()
+            });
+        }
+        orders.push(PlaceOrderOpts {
+            amount: 26.,
+            ..opts()
+        });
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 93,
+                orders,
+            },
+        );
+        let error = done(&actions, 93).unwrap().unwrap_err();
+        assert!(error.contains("outside market limits"), "{error}");
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "caller-ID maximum preflight must precede every HTTP request"
+        );
+    }
+}
+#[test]
+fn above_max_amendment_still_refuses_before_cancel() {
+    // TS replacement preflight: packages/safe-cex/src/__tests__/reference/grvt/grvt.exchange.ts:2007.
+    let mut e = boot();
+    seed(&mut e);
+    e.store_mut()
+        .update_markets(|market| market.limits.amount.max = 0.5);
+    let get = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 92,
+                id: "42".into(),
+                price: Some(110.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    let actions = reply(&mut e, &get, 200, OPEN);
+    let error = done(&actions, 92).unwrap().unwrap_err();
+    assert!(error.contains("outside market limits"), "{error}");
+    assert!(!actions.iter().any(
+        |a| matches!(a, Action::Http(r) if r.url.ends_with("cancel_order") || r.url.ends_with("create_order"))
+    ));
+}
 fn seed(e: &mut Engine<Grvt>) {
     e.store_mut().upsert_order(Order {
         id: "42".into(),
@@ -738,6 +1053,17 @@ fn bracket_failure_reports_partial_progress_and_never_sends_next_child() {
         None,
         "the entry was already created"
     );
+    let report = failure(&actions);
+    let partial = report.partial.as_ref().expect("accepted bracket parent");
+    assert_eq!(partial.order_ids, std::slice::from_ref(&entry_id));
+    assert_eq!(partial.total, Some(3));
+    assert_eq!(partial.failed_index, Some(1));
+    let rows = serde_json::to_value(report.elements.as_ref().unwrap()).unwrap();
+    assert_eq!(rows[0]["status"], "placed");
+    assert_eq!(rows[1]["status"], "notSent");
+    assert_eq!(rows[1]["error"]["outcome"], "rejected");
+    assert_eq!(rows[2]["status"], "notSent");
+    assert!(rows[2].get("error").is_none());
     let error = done(&actions, 5).unwrap().unwrap_err();
     assert!(error.contains(&format!("already created GRVT order IDs: {entry_id}")));
     assert!(
@@ -767,11 +1093,15 @@ fn uncertain_write_is_not_retried_and_exposes_reconciliation_identity() {
         },
     );
     let actions: Vec<_> = drain(&mut e).collect();
+    assert_eq!(
+        failure(&actions).message,
+        "The outcome is unknown. Check Open Orders"
+    );
     assert!(
-        done(&actions, 6)
-            .unwrap()
-            .as_ref()
-            .unwrap_err()
+        failure(&actions)
+            .venue_message
+            .as_deref()
+            .expect("transport diagnostic")
             .contains("9223372036854775807")
     );
     assert!(
@@ -1779,7 +2109,14 @@ fn gateway_failure_on_create_keeps_reconcile_advice() {
         "create_order",
     );
     let actions = reply(&mut e, &r, 502, "<html>bad gateway</html>");
-    let error = done(&actions, 47).unwrap().unwrap_err();
+    assert_eq!(
+        failure(&actions).message,
+        "The outcome is unknown. Check Open Orders"
+    );
+    let error = failure(&actions)
+        .venue_message
+        .as_deref()
+        .expect("gateway diagnostic");
     assert!(
         error.contains("reconcile GRVT client order ID 9223372036854775807"),
         "{error}"

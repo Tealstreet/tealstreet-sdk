@@ -7,7 +7,8 @@
  * declarations must stay in sync with the script-API surface the CLI
  * ships. v1 (Phase 6) reads the surface from
  * `./script-types-bundle.ts`, a committed artifact emitted by
- * `yarn generate:types` at the repo root. A drift test
+ * NX’s `yarn generate:types` or the mirror’s `corepack yarn generate:script-types`
+ * at the repo root. A drift test
  * (`script-types-bundle.test.ts`) re-runs the generators in-memory
  * and fails CI if the on-disk bundle goes stale.
  *

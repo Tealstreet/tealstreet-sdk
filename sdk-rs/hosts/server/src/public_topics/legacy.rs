@@ -224,10 +224,6 @@ mod tests {
                 assert!(topics(venue, control).is_empty(), "{venue} {control}");
             }
         }
-        assert!(
-            topics("breakoutprop", "{}").is_empty(),
-            "REST-only venue has no upstream socket topics"
-        );
     }
 }
 

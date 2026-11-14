@@ -5,8 +5,8 @@ function load(path,name) {
  return new Function(stripTypeScriptTypes(fs.readFileSync(root+'/'+path,'utf8').replace(/export /g,''))+'\nreturn '+name+';')();
 }
 const cursor = load('packages/safe-cex/src/utils/oldestCursorId.ts','oldestCursorId');
-const sizing = load('packages/script-api-core/src/order/positionSizing.ts','nativePositionSize');
-const encode = x => Number.isNaN(x)?'NaN':Object.is(x,-0)?'-0':String(x);
+const sizing = load('packages/safe-cex/src/utils/nativePositionSize.ts','nativePositionSize');
+const encode = x => x === null ? null : Number.isNaN(x)?'NaN':Object.is(x,-0)?'-0':String(x);
 const decode = x => x === null ? undefined : Number(x);
 let cases=[];
 const pages = [[],['001','2'],['9007199254740993','9007199254740992'],['9'.repeat(400),'1'.repeat(399)],[' 123 ','\ufeff122\ufeff','\u0085121\u0085'],['-1','1.0','١',''],[null,true,{},['12'],[[11]],[null],12],['100','99','98'],['0','00'],['1e3',1000],['9'.repeat(1000),'8'.repeat(1000)]];

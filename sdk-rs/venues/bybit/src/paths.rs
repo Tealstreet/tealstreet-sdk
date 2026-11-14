@@ -113,6 +113,17 @@ pub struct Paths {
 
 impl Paths {
     pub fn for_options(options: &Options) -> Self {
+        if options.variant.is_hyro() {
+            let endpoints = options.endpoints.as_ref();
+            return Self {
+                rest: endpoints.map_or_else(String::new, |e| e.rest.trim_end_matches('/').into()),
+                public_ws: endpoints.map_or_else(String::new, |e| e.public_ws.clone()),
+                private_ws: endpoints.map_or_else(String::new, |e| e.private_ws.clone()),
+                category: "linear",
+                book_depth: 1000,
+                batch_orders: false,
+            };
+        }
         let category = match options.variant {
             Variant::Inverse => "inverse",
             Variant::Spot => "spot",
@@ -131,22 +142,14 @@ impl Paths {
         } else {
             format!("wss://stream{network}.bybit.com/v5/private")
         };
-        let mut paths = Self {
+        Self {
             rest,
             public_ws,
             private_ws,
             category,
             book_depth: if options.variant.is_spot() { 200 } else { 1000 },
-            batch_orders: !options.variant.is_spot() && !options.variant.is_hyro(),
-        };
-        if options.variant.is_hyro() {
-            let endpoints = options.endpoints.as_ref();
-            paths.rest =
-                endpoints.map_or_else(String::new, |e| e.rest.trim_end_matches('/').into());
-            paths.public_ws = endpoints.map_or_else(String::new, |e| e.public_ws.clone());
-            paths.private_ws = endpoints.map_or_else(String::new, |e| e.private_ws.clone());
+            batch_orders: !options.variant.is_spot(),
         }
-        paths
     }
 }
 

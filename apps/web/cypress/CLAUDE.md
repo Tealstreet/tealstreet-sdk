@@ -20,6 +20,22 @@ End-to-end tests for the Tealstreet trading platform — exercises real exchange
 - **Local fast iteration and CI both use exchange-server mode, but not the same endpoint.** The Mac mini loop intentionally keeps `apps/web/.env.local` pointed at `NEXT_PUBLIC_EXCHANGE_SERVER_URL=ws://localhost:23456` and runs `yarn workspace @tealstreet/exchange-server dev` locally. GitHub e2e sets `CYPRESS_useExchangeServer=true` and relies on the deployed app's hosted default, `wss://connect.tealstreet.io/account`; do not change the mini env to hosted just to mirror CI unless explicitly validating the hosted path.
 - **Failures**: Cypress writes screenshots and videos to `cypress/screenshots/` and `cypress/videos/` (gitignored)
 
+## Hosted test account identity
+
+Hosted accounts are shared by authenticated user and account name, not exchange.
+The parallel matrix shares one test login. The primary account stays
+`e2e-<exchange>`; `config/accountNames.js` assigns stable credential variants
+(`e2e-okx-badkey`, `e2e-okx-goodkey`, `e2e-okx-form-badkey`). Do not restore
+the global `test`, `e2e-good-key` or `e2e-bad-key` names: another job's different venue/key then
+hits the server's multi-client refusal before private data can load.
+
+Keep names stable across runs and attempts to reuse hosted accounts/journals.
+The bad-key probe and the form's additional corrupted fields use different
+names; the form's saved-account lookup, activation and cleanup use
+those same names. Server protection, keys, routing and financial assertions stay
+unchanged. Hermetic identity regressions run through the existing mirror CI
+Node-test step: `node --test .github/tests/e2e-account-names.test.cjs`.
+
 ## Order-form invariant: price before size
 
 **Always call `setBuyPrice`/`setSellPrice` before `setOrderSize` on any
@@ -142,6 +158,11 @@ between readback and amend when the underlying short-lived test position has
 already flattened.
 
 ## Cleanup is destructive — the suite flattens EVERY position on the account
+
+Controller close orders use the exact finite, positive `extra.contractsNative`
+value without deriving or rounding it. If unavailable, cleanup logs the reason
+and skips that close; the Paradex market-close step fails its precondition.
+Neither path falls back to base size or notional (mirrors NX #9405).
 
 `flattenPositions` → `closeAllPositionsViaController()` is **symbol-agnostic**: it
 closes every position on every registered account and asserts zero remain. It runs
@@ -286,6 +307,9 @@ with the `Next` button; do not assume clicking `exchange-select-*` opens the
 credential form by itself. After clicking `Done`, assert that the account was
 persisted with a retrying check; credential validation can keep the button busy
 for several seconds before persistence.
+Scope account actions to their dialog: the IP-whitelist walkthrough also renders
+Next and Done earlier on the page. Resolve the picker's dialog from its exchange
+tile, and the credential form's dialog from its name input.
 The Tealstreet proxy checkbox is a conditional transport control. If a Cypress
 account has `tealstreetProxy` but the current add-account UI does not render the
 checkbox, continue with the form defaults and let credential validation prove the

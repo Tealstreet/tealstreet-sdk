@@ -8,7 +8,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateBitgetOracleRefusalArtifact, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
+import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateBitgetPairedFailureArtifact, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
 import { readArtifactZip } from './cpu-artifacts.mjs';
 import { verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
@@ -20,7 +20,7 @@ import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
-import { pairedSteadyAssessment, readBitgetSteadyCertificate, assessBitgetPairedSteady, bitgetAnchorAuthority, bitgetSteadyWarning } from './bitget-paired-steady.mjs';
+import { pairedSteadyAssessment, readBitgetSteadyCertificate, assessBitgetPairedSteady, bitgetAnchorAuthority, bitgetSteadyWarning, revalidateBitgetCpuRejection } from './bitget-paired-steady.mjs';
 import { readBitgetOracleRefusal, isBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
 
 import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory, familyCpuAssessment, familyCpuMiss } from './cpu-family-identity.mjs';
@@ -54,7 +54,7 @@ export function classifyInitialCase(evidence, declarations, paired, family, refu
     insist(!identityAssessment.errors.length, identityAssessment.errors.join('\n'));
     return { decision: 'first', assessment: identityAssessment, unchanged: true };
   }
-  // A CPU-only miss (Rust > 1.00x TS after the in-job re-measure) refuses only this suite's CPU gate.
+  // A CPU-only miss above its venue bound after the in-job re-measure refuses only this suite's CPU gate.
   const split = splitCpuErrors(evidence, assessment.errors, paired);
   insist(split.deferred.length && !split.kept.length, assessment.errors.join('\n'));
   return { decision: 'cpu-refused', assessment };
@@ -260,7 +260,7 @@ async function loadBitgetPaired(context) {
     const directory = resolve(context.env.RUNNER_TEMP, 'authenticated-bitget-paired');
     artifactEntriesToDirectory(bundle.entries, directory);
     const authority = await selectBitgetPair({ reader: context.reader, runId: context.runId, root: context.root });
-    if (bundle.job.conclusion === 'failure') {
+    if (bundle.job.conclusion === 'failure' && bundle.receipt.kind === 'oracle') {
       const result = jsonMember(bundle.entries, 'steady-assessment.json');
       insist(['tip', 'anchor'].includes(result.oracle?.witness), 'unknown refusal witness');
       const selected = result.oracle.witness === 'anchor' ? bitgetAnchorAuthority(authority) : authority;
@@ -283,13 +283,13 @@ async function loadBitgetPaired(context) {
       }
       return { refusal, bundle };
     }
-    const certificate = await readBitgetSteadyCertificate({ authority, manifest: manifest(),
+    const readOptions = { authority, manifest: manifest(),
       readEvidence: async (name, selected) => {
         const evidence = readBitgetPairedEvidence(resolve(directory, name, 'records'));
         for (const [index, cohort] of evidence.cohorts.entries()) {
           const key = sha256(`bitget-paired:${name}:${index + 1}`);
           insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
-          authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
+          authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes, failureReceipt: bundle.receipt,
             execution: { runId: selected.runId, jobId: selected.jobId, runnerId: selected.runnerId,
               attempt: 1, measuredCheckoutSha: context.checkoutSha,
               startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
@@ -297,7 +297,15 @@ async function loadBitgetPaired(context) {
           revalidateRecordedEvidence(cohort.evidence, { root: context.root });
         }
         return evidence;
-      } });
+      } };
+    if (bundle.job.conclusion === 'failure') {
+      insist(bundle.receipt.kind === 'cpu', 'unknown paired failure');
+      // Preserve a complete CPU rejection as the suite's verdict, never as an
+      // oracle parsing error. Raw reports/markers are revalidated before this.
+      throw await revalidateBitgetCpuRejection({ ...readOptions,
+        message: bundle.receipt.message, record: jsonMember(bundle.entries, 'steady-assessment.json') });
+    }
+    const certificate = await readBitgetSteadyCertificate(readOptions);
     insist(certificate.steadyAccepted, 'tip or cumulative anchor steady regression');
     return { certificate, bundle };
   })();
@@ -311,7 +319,7 @@ export async function authenticatedBitgetPairedBundle(context) {
     jobName, stepName, context.checkoutSha);
   const bundle = await artifact(context, context.runId, 'bitget-paired-steady');
   const logBytes = await context.reader.getLog(job.id);
-  const receipt = authenticateBitgetOracleRefusalArtifact({ artifact: bundle.meta, artifactBytes: bundle.bytes,
+  const receipt = authenticateBitgetPairedFailureArtifact({ artifact: bundle.meta, artifactBytes: bundle.bytes,
     run, job, logBytes, expectedCheckoutSha: context.checkoutSha });
   context.bindings?.push({ artifact: bundle.meta, job });
   return { ...bundle, receipt, job, logBytes };
@@ -594,7 +602,7 @@ export async function evidenceEndCheck(context) {
   }
 }
 
-/** One refused suite fails only its own CPU gate; overall certification stays false. */
+/** Keep every suite's disposition; overall certification stays false if any is refused. */
 export async function certifySuites(suites, certifyOne) {
   const certificates = {}, results = { certified: true, suites: {}, reasons: {} };
   for (const suite of suites) {
@@ -610,15 +618,16 @@ export async function certifySuites(suites, certifyOne) {
   return { results, certificates };
 }
 
-async function certifyAll(context, destination) {
-  const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, async (suite) => {
-    return certifySuite(context, suite, resolve(destination, suite));
-  });
+export async function certifyAll(context, destination,
+  certifyOne = suite => certifySuite(context, suite, resolve(destination, suite))) {
+  const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, certifyOne);
   await evidenceEndCheck(context);
   const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, ...outcome };
   write(resolve(destination, 'results.json'), results);
   if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `results=${JSON.stringify(results)}\n`, { flag: 'a' });
-  for (const reason of Object.values(outcome.reasons)) console.log(`::error::${reason.replaceAll('\n', ' | ')}`);
+  for (const [suite, reason] of Object.entries(outcome.reasons))
+    console.log(`::error title=CPU certification ${suite}::${reason.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+  insist(outcome.certified, `not certified for suites: ${Object.keys(outcome.reasons).join(', ')}`);
   return certificates;
 }
 

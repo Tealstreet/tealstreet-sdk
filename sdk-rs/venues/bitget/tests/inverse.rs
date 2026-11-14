@@ -567,3 +567,68 @@ fn inverse_keeps_legacy_max_trade_num_until_market_cap_units_are_proven() {
         2000.0
     );
 }
+
+#[test]
+fn explicit_inverse_trailing_size_does_not_require_position_notional() {
+    for notional in [1000.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = ready();
+        h.engine.store_mut().update_positions(|position| {
+            if position.symbol == "BTCUSD" {
+                position.notional = notional;
+            }
+        });
+        h.requests.clear();
+        h.command(Command::PlaceOrders {
+            command: 93,
+            orders: vec![
+                serde_json::from_value(json!({
+                    "symbol":"BTCUSD", "type":"trailing_stop_market", "side":"sell",
+                    "amount":5, "price":39000
+                }))
+                .unwrap(),
+            ],
+        });
+        let request = h.take("/place-plan-order");
+        let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload["planType"], "track_plan");
+        assert_eq!(payload["size"], "5");
+    }
+}
+
+#[test]
+fn unknown_notional_refuses_inverse_sized_stops_before_http() {
+    for value in [1000.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = ready();
+        h.engine.store_mut().update_positions(|p| {
+            if p.symbol == "BTCUSD" {
+                p.notional = value;
+            }
+        });
+        h.requests.clear();
+        h.command(Command::PlaceOrders {
+            command: 92,
+            orders: vec![
+                serde_json::from_value(json!({
+                    "symbol":"BTCUSD","type":"stop_market","side":"sell","amount":5,"price":48000
+                }))
+                .unwrap(),
+            ],
+        });
+        if value.is_finite() {
+            let request = h.take("/place-tpsl-order");
+            let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["size"], "5");
+        } else {
+            assert!(
+                h.requests.is_empty(),
+                "unknown capacity must not choose a partial or full stop: {:?}",
+                h.requests
+            );
+            assert!(
+                h.done
+                    .iter()
+                    .any(|(id, result)| *id == 92 && result.is_err())
+            );
+        }
+    }
+}

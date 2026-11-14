@@ -4,10 +4,10 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
 const root=path.resolve(__dirname,'../../..');
 function ast(relative){const file=path.join(root,relative);return ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);}
-const source=ast('packages/safe-cex/src/exchanges/kucoin/kucoinspot.exchange.ts');
+const source=ast('packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts');
 const member=source.statements.find(ts.isClassDeclaration).members.find(m=>m.name?.getText(source)==='validateAccount');
 if(!member?.initializer)throw Error('actual validateAccount missing');
-const tables=ast('packages/safe-cex/src/exchanges/kucoin/kucoinspot.types.ts');
+const tables=ast('packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.types.ts');
 const endpoints=tables.statements.filter(ts.isVariableStatement).flatMap(n=>n.declarationList.declarations).find(n=>n.name.getText(tables)==='KUCOIN_SPOT_ENDPOINTS');
 if(!endpoints?.initializer)throw Error('actual endpoints missing');
 let expression=member.initializer.getText(source);

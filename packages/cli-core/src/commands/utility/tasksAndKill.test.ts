@@ -26,14 +26,14 @@ const MARKET: Market = {
   active: true,
   precision: { amount: 0.001, price: 0.01 },
   limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 100 } },
-} as Market;
+} satisfies Market;
 
 const ETH_MARKET: Market = {
   ...MARKET,
   id: 'ETHUSDT',
   symbol: 'ETHUSDT',
   base: 'ETH',
-} as Market;
+};
 
 function makeExchange(): Exchange {
   const tickers = [
@@ -118,7 +118,7 @@ function spawnTwap(symbol = 'BTCUSDT', side: OrderSide = OrderSide.Buy): TwapIns
   const worker = { postMessage: vi.fn() } as unknown as Worker;
   const inst = new TwapInstance(exchange, worker, {
     accountName: 'a',
-    activeMarket: { ...MARKET, symbol } as Market,
+    activeMarket: { ...MARKET, symbol },
     size: 1.0,
     duration: 10,
     ordersCount: 5,

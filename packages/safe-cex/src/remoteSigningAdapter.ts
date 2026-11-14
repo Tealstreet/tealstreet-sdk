@@ -1,8 +1,9 @@
 import type { AxiosAdapter, AxiosResponse } from 'axios';
-import type { ExchangeName, RemoteSigner, RemoteSignerRequest } from './types';
+import type { ExchangeName, RemoteSigner, RemoteSignerRequest, RemoteSignerResponse } from './types';
 
 import axios, { AxiosHeaders, InternalAxiosRequestConfig } from 'axios';
 import { nanoid } from 'nanoid';
+import { diagnosticConsole } from './utils/diagnosticRedaction';
 
 import { tryParseJson } from './utils/tryParseJson';
 import { markRestSigned } from './utils/venueRestDiagnostics';
@@ -82,6 +83,15 @@ const serializeHeaders = (headers: InternalAxiosRequestConfig['headers']): Recor
   }
   return result;
 };
+
+const isSigningRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const isSignedConfig = (value: unknown): value is NonNullable<RemoteSignerResponse['config']> =>
+  isSigningRecord(value) && isSigningRecord(value.headers)
+  && Object.values(value.headers).every((entry) => typeof entry === 'string')
+  && (value.url === undefined || typeof value.url === 'string')
+  && (value.params === undefined || isSigningRecord(value.params));
 
 // Hands back the config it came in with: axios-retry and venue retries replay that
 // config, and one carrying the default adapters skips the re-sign and resends the
@@ -171,12 +181,16 @@ export const createRemoteSigningAdapter = (
     if (response.error) {
       throw new Error(`Remote signing failed: ${response.error}`);
     }
+    const signed = response.config;
+    if (!isSignedConfig(signed)) {
+      throw new Error('Remote signing failed: Invalid signed request config');
+    }
 
     // Merge signed config from client.
     // IMPORTANT: Use the browser's response values directly — don't fall back to config originals.
     // The signing interceptor may have intentionally modified or deleted fields (e.g. baking params
     // into the URL then deleting config.params). Falling back would undo that and break the signature.
-    const signedHeaders = new AxiosHeaders(response.config!.headers);
+    const signedHeaders = new AxiosHeaders(signed.headers);
 
     // ...with ONE exception: the Tealstreet proxy credential.
     //
@@ -213,7 +227,7 @@ export const createRemoteSigningAdapter = (
 
     for (const name of ['Authorization', 'Tealstreet-Authorization']) {
       if (usable(signedHeaders.get(name))) continue;
-      const ours = new AxiosHeaders(config.headers as never).get(name);
+      const ours = new AxiosHeaders(config.headers).get(name);
       if (usable(ours)) signedHeaders.set(name, ours);
       else signedHeaders.delete(name);
     }
@@ -221,14 +235,14 @@ export const createRemoteSigningAdapter = (
     const signedConfig: InternalAxiosRequestConfig = {
       ...config,
       headers: signedHeaders,
-      ...(response.config!.url ? { url: response.config!.url } : {}),
-      params: response.config!.params,
-      data: response.config!.data,
+      ...(signed.url ? { url: signed.url } : {}),
+      params: signed.params,
+      data: signed.data,
     };
 
     // Integrity check: warn if the signed URL has params baked in but params object is also set
     if (signedConfig.url?.includes('?') && signedConfig.params && Object.keys(signedConfig.params).length > 0) {
-      console.warn(
+      diagnosticConsole.warn(
         `[remoteSigningAdapter] ${exchangeName}: URL has query params AND params object set — possible double-serialization`,
         { url: signedConfig.url, params: signedConfig.params },
       );

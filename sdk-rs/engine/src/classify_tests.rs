@@ -1253,3 +1253,47 @@ fn batch_code_less_rows_preserve_the_tables_unlisted_verdict() {
         assert_eq!(error.partial.unwrap().order_ids, ["accepted"]);
     }
 }
+
+#[test]
+fn known_partial_evidence_is_reported_without_reclassifying_physical_failure() {
+    use crate::request_context::WriteResult;
+    use crate::write_plan::{Element, ElementResult, WritePlan};
+    let mut plan = WritePlan::new(
+        (0..3)
+            .map(|index| Element {
+                index,
+                client_order_id: None,
+            })
+            .collect(),
+    );
+    let WriteResult::KnownPartial(error) = project(
+        &[
+            BatchItem::Accepted("accepted-native"),
+            BatchItem::Native(int(-1111)),
+        ],
+        2,
+    ) else {
+        panic!("classifier must supply native KnownPartial evidence");
+    };
+    for index in 0..2 {
+        plan.record(
+            index,
+            ElementResult::Unknown {
+                error: Box::new(error.clone().outcome(Outcome::Unknown)),
+            },
+        )
+        .unwrap();
+    }
+    let mut terminal = plan.attach(error.clone());
+    let rows = terminal.elements.take().unwrap();
+    assert_eq!(terminal, error);
+    let partial = terminal.partial.unwrap();
+    assert_eq!(partial.order_ids, ["accepted-native"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+    assert!(
+        rows[..2]
+            .iter()
+            .all(|row| matches!(row.result, ElementResult::Unknown { .. }))
+    );
+    assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+}

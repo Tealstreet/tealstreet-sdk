@@ -1,4 +1,5 @@
 import { Market, StoreData, Ticker, Writable } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { buildOrdersRiskMaps, calculateOrdersRisk, OrdersRiskMaps } from '../../utils/risk';
 import { BasePostprocessor } from './BasePostprocessor';
 
@@ -33,8 +34,8 @@ export class OrdersRiskProfilePostprocessor extends BasePostprocessor {
         maps,
       );
     } catch (e) {
-      console.trace();
-      console.error(e);
+      diagnosticConsole.trace();
+      diagnosticConsole.error(e);
       (store.ordersRisk as Writable<typeof store.ordersRisk>) = {};
     }
   }

@@ -105,6 +105,30 @@ describe('RelayWebSocket', () => {
     await new Promise<void>((resolve) => tunnel.server.close(() => resolve()));
   });
 
+  it('uses native control pings with a real Node ws peer and never adds relay RPC to application traffic', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const socket = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/private'));
+    const { events } = collect(socket);
+    try {
+      await waitFor(() => events.includes('open'));
+      const peer = [...tunnel.server.clients][0];
+      let pings = 0;
+      peer.on('ping', () => pings++);
+      for (let i = 1; i <= 3; i++) {
+        const ping = new Promise<void>((resolve) => peer.once('ping', () => resolve()));
+        await vi.advanceTimersByTimeAsync(15_000);
+        await ping;
+        expect(pings).toBe(i);
+        expect(socket.readyState).toBe(socket.OPEN);
+      }
+      expect(tunnel.seen.map((text) => JSON.parse(text).type)).toEqual(['rpc.auth', 'rpc.relay']);
+    } finally {
+      socket.close();
+      await waitFor(() => events.includes('close'));
+      vi.useRealTimers();
+    }
+  });
+
   it('opens only after the relay handshake, flushes queued sends, and hides tunnel chatter', async () => {
     const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/private'));
     const { events, messages } = collect(ws);

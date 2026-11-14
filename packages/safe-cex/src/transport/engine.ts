@@ -1,4 +1,4 @@
-import type { DisposableAxiosAdapter } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import type { DisposableAxiosAdapter, PreparedTunnelRequest } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import type {
   AccountReconnectDiagnostics,
   ConnectionCloseDiagnostic,
@@ -35,7 +35,7 @@ import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/b
 import { SECONDARY_READ_KEYS_ENABLED } from '../secondaryReadKeys';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { sharedBinanceCatalogue } from './binanceCatalogue';
-import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
+import { observeBybitPublicRateLimit } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HttpTiming, httpTimingKind, httpTimingStage, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
@@ -115,6 +115,16 @@ const aliasHeaders = (headers: AxiosHeaders, aliases: Record<string, string>): v
   }
 };
 
+// Authorization can assign unnormalized scalars directly. Axios omits disabled
+// values; fetch stringifies each remaining value, including arrays without spaces.
+const wireHeaders = (headers: AxiosHeaders): Record<string, string> => Object.fromEntries(
+  Object.entries(headers.toJSON()).map(([name, value]): [string, string] =>
+    [name, String(value)]),
+);
+
+const isTunnelPreparation = (value: unknown): value is DisposableAxiosAdapter['prepare'] =>
+  typeof value === 'function';
+
 const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   binance: 'X-MBX-APIKEY',
   binancepm: 'X-MBX-APIKEY',
@@ -142,6 +152,7 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   mexc: 'ApiKey',
   bitunix: 'api-key',
   bingx: 'X-BX-APIKEY',
+  bingxspot: 'X-BX-APIKEY',
   bitrue: 'X-CH-APIKEY',
   weex: 'ACCESS-KEY',
   blofin: 'ACCESS-KEY',
@@ -396,7 +407,9 @@ const isPublicBinanceRead = (exchange: ExchangeName, request: Request, credentia
 
 /** The account's tunnel setting under the venue's default: BingX tunnels unless switched off. */
 const tunnelFlagOn = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
-  exchange === 'bingx' ? options.tealstreetTunnel !== false : Boolean(options.tealstreetTunnel);
+  exchange === 'bingx' || exchange === 'bingxspot'
+    ? options.tealstreetTunnel !== false
+    : Boolean(options.tealstreetTunnel);
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
@@ -404,7 +417,7 @@ const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =
     ? !options.publicDataOnly && !options.payloadSigner
     : ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
       ? !options.publicDataOnly
-      : exchange === 'bingx'
+      : exchange === 'bingx' || exchange === 'bingxspot'
         ? !options.publicDataOnly && tunnelFlagOn(exchange, options)
         : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && tunnelFlagOn(exchange, options);
 
@@ -635,7 +648,11 @@ const httpTransport = (
       requestClass: kind, budgetMs: deadlineMs, elapsedMs: Math.max(0, Date.now() - started),
     });
     const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
-    let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
+    type Preparation =
+      | { kind: 'cached'; response: HttpResponse }
+      | { kind: 'tunnel'; adapter: NonNullable<typeof tunnelAdapter>; resource?: PreparedTunnelRequest }
+      | { kind: 'direct'; resource?: PreparedHttp };
+    let preparation: Preparation | undefined;
     let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
     let catalogueRead: CatalogueRead | undefined;
     let physicalRequest = false;
@@ -669,10 +686,11 @@ const httpTransport = (
           /* Continue releasing the preparation. */
         }
       }
-      if (prepared && !preparedReleased) {
+      const resource = preparation?.kind === 'cached' ? undefined : preparation?.resource;
+      if (resource && !preparedReleased) {
         preparedReleased = true;
         try {
-          prepared.cancel?.();
+          resource.cancel?.();
         } catch {
           /* Cleanup cannot strand this request. */
         }
@@ -773,7 +791,7 @@ const httpTransport = (
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
       const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(tunnelAdapter));
       const hostHeaders = AxiosHeaders.from(venueHeaders(exchange, options));
-      const config = {
+      const config: InternalAxiosRequestConfig & { requestClass: typeof kind } = {
         method: request.method,
         requestClass: kind,
         url: target,
@@ -782,7 +800,7 @@ const httpTransport = (
         data: request.body,
         timeout: remaining(),
         signal,
-      } as InternalAxiosRequestConfig;
+      };
       aliasHeaders(config.headers, aliases);
       const before = AxiosHeaders.from(config.headers.toJSON());
       if (route.proxied && route.authorize)
@@ -872,39 +890,65 @@ const httpTransport = (
       const leaseFresh = () =>
         catalogueRead?.leaseExpiresAt === undefined ||
         (Date.now() >= catalogueRead.leaseStartedAt! && Date.now() < catalogueRead.leaseExpiresAt);
-      const how = tunnelAdapter as Partial<DisposableAxiosAdapter> | undefined;
-      if (!cached && tunnelAdapter) {
-        const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
-        if (prepareTunnel)
-          prepared = await waitForPrepared(
-            withProxyTokenProvider(proxyTokenProvider, () => prepareTunnel.call(tunnelAdapter, config)),
-          );
-        else if (intent !== undefined) throw new HttpPreparationError('unsupported');
-      } else if (!cached && intent !== undefined) {
-        if (!transport.prepareHttp) throw new HttpPreparationError('unsupported');
-        prepared = await waitForPrepared(
-          Promise.resolve(
-            transport.prepareHttp({
-              ...request,
-              intent,
-              route: 'direct',
-              url: target,
-              headers: config.headers.toJSON() as Record<string, string>,
-              timeoutMs: remaining(),
-              signal,
-            }),
-          ),
-        );
+      let prepared: Preparation;
+      if (cached) {
+        prepared = { kind: 'cached', response: cached };
+      } else if (tunnelAdapter) {
+        const candidate: unknown = Reflect.get(tunnelAdapter, intent === undefined ? 'prepareLegacy' : 'prepare');
+        const prepareTunnel = isTunnelPreparation(candidate) ? candidate : undefined;
+        prepared = {
+          kind: 'tunnel',
+          adapter: tunnelAdapter,
+          resource: prepareTunnel
+            ? await waitForPrepared(
+                withProxyTokenProvider(proxyTokenProvider, () => prepareTunnel.call(tunnelAdapter, config)),
+              )
+            : undefined,
+        };
+        if (!prepareTunnel && intent !== undefined) throw new HttpPreparationError('unsupported');
+      } else {
+        const prepareDirect = transport.prepareHttp;
+        if (intent !== undefined && !prepareDirect) throw new HttpPreparationError('unsupported');
+        prepared = {
+          kind: 'direct',
+          resource: intent !== undefined && prepareDirect
+            ? await waitForPrepared(
+                Promise.resolve(
+                  prepareDirect.call(transport, {
+                    ...request,
+                    intent,
+                    route: 'direct',
+                    url: target,
+                    headers: wireHeaders(config.headers),
+                    timeoutMs: remaining(),
+                    signal,
+                  }),
+                ),
+              )
+            : undefined,
+        };
       }
+      preparation = prepared;
       signal.throwIfAborted();
-      const budgetGeneration =
-        !cached && infoBudget && request.method === 'POST' && original.pathname === '/info'
-          ? await untilAborted(
-              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal, request.readClass)),
-              signal,
-            )
-          : undefined;
-      if (!cached && intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
+      type Admission = {
+        budget: HyperliquidInfoBudget;
+        read: NonNullable<typeof infoRead>;
+        generation: Awaited<ReturnType<HyperliquidInfoBudget['wait']>>;
+      };
+      let pendingAdmission: Admission | undefined;
+      if (!cached && infoBudget && request.method === 'POST' && original.pathname === '/info') {
+        const budget = infoBudget;
+        const read = infoRead;
+        if (!read) throw new HttpPreparationError('invalid');
+        const generation = await untilAborted(
+          read.wait(() => budget.wait(original.origin, request.body, started + deadlineMs, signal, request.readClass)),
+          signal,
+        );
+        pendingAdmission = { budget, read, generation };
+      }
+      const admission = pendingAdmission;
+      const resource = prepared.kind === 'cached' ? undefined : prepared.resource;
+      if (!cached && intent !== undefined && (!resource || typeof resource.bind !== 'function'))
         throw new HttpPreparationError('invalid');
       const validateBound = <T extends { ready(): boolean; dispatch(): unknown; cancel?(): void }>(
         inner: T | undefined,
@@ -918,7 +962,7 @@ const httpTransport = (
         return inner;
       };
       return {
-        ...(tunnelAdapter ? {} : { expiresAt: (prepared as PreparedHttp | undefined)?.expiresAt }),
+        ...(tunnelAdapter ? {} : { expiresAt: prepared.kind === 'direct' ? prepared.resource?.expiresAt : undefined }),
         cancel,
         bind(packet) {
           beforeRelease(() => {
@@ -972,39 +1016,28 @@ const httpTransport = (
             ...packet,
             ...(intent === undefined ? {} : { route: 'direct' as const }),
             url,
-            headers: headers.toJSON() as Record<string, string>,
+            headers: wireHeaders(headers),
             timeoutMs: remaining(),
             signal,
           };
           if (intent === undefined) delete network.timeoutMs;
           let send: () => Promise<HttpResponse>;
           let ready: () => boolean;
-          if (cached) {
+          if (prepared.kind === 'cached') {
             ready = cacheFresh;
             send = () => {
               if (!cacheFresh()) throw timeoutError();
-              return Promise.resolve(cached);
+              return Promise.resolve(prepared.response);
             };
-          } else if (tunnelAdapter) {
-            const tunnel = prepared as Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
-            const inner = beforeRelease(() => validateBound(tunnel?.bind(finalConfig)));
+          } else if (prepared.kind === 'tunnel') {
+            const inner = beforeRelease(() => validateBound(prepared.resource?.bind(finalConfig)));
             ready = inner ? () => inner.ready() : () => true;
             send = () => {
               const response = inner
                 ? inner.dispatch()
-                : withProxyTokenProvider(proxyTokenProvider, () => tunnelAdapter(finalConfig));
+                : withProxyTokenProvider(proxyTokenProvider, () => prepared.adapter(finalConfig));
               return untilAborted(response, signal).then((value) => {
                 if (typeof value.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
-                if (onBybitPublicRateLimit && (intent === undefined || intent === 'public')) {
-                  const notice = bybitPublicRateLimitNotice(packet, value.data, value.headers);
-                  if (notice) {
-                    try {
-                      onBybitPublicRateLimit(notice);
-                    } catch {
-                      /* Telemetry cannot fail the request. */
-                    }
-                  }
-                }
                 return {
                   status: value.status,
                   headers: responseHeaders(value.headers),
@@ -1013,7 +1046,7 @@ const httpTransport = (
               });
             };
           } else {
-            const inner = beforeRelease(() => validateBound((prepared as PreparedHttp | undefined)?.bind(network)));
+            const inner = beforeRelease(() => validateBound(prepared.resource?.bind(network)));
             ready = inner ? () => inner.ready() : () => true;
             send = inner ? () => inner.dispatch() : () => transport.request(network);
           }
@@ -1022,17 +1055,17 @@ const httpTransport = (
           let sent = false;
           let admitting = false;
           let admitted = false;
-          const admitDispatch = async <T>(handoff: () => T): Promise<Awaited<T>> => {
+          const admitDispatch = admission ? async <T>(handoff: () => T): Promise<Awaited<T>> => {
             beforeRelease(() => {
               if (sent || admitting) throw new HttpPreparationError('invalid');
             });
             admitting = true;
             try {
               const result = await untilAborted(
-                infoRead!.wait(() =>
-                  infoBudget!.admitDispatch(
+                admission.read.wait(() =>
+                  admission.budget.admitDispatch(
                     original.origin,
-                    budgetGeneration!,
+                    admission.generation,
                     started + deadlineMs,
                     signal,
                     () => {
@@ -1056,9 +1089,9 @@ const httpTransport = (
             } finally {
               admitting = false;
             }
-          };
+          } : undefined;
           return {
-            ...(budgetGeneration === undefined ? {} : { admitDispatch }),
+            ...(admitDispatch ? { admitDispatch } : {}),
             ready() {
               return beforeRelease(() => {
                 if (!leaseFresh()) throw new HttpPreparationError('stale');
@@ -1066,7 +1099,7 @@ const httpTransport = (
               });
             },
             dispatch() {
-              if (budgetGeneration !== undefined && !admitted) return admitDispatch(() => this.dispatch());
+              if (admitDispatch && !admitted) return admitDispatch(() => this.dispatch());
               beforeRelease(() => {
                 if (sent) throw new HttpPreparationError('invalid');
                 if (!leaseFresh()) throw new HttpPreparationError('stale');
@@ -1124,7 +1157,7 @@ const httpTransport = (
                     }
                     return catalogueRead && !cached ? untilAborted(catalogueRead.complete(value), signal) : value;
                   })
-                  .then(wrap)
+                  .then((value) => wrap(observeBybitPublicRateLimit(packet, value, onBybitPublicRateLimit)))
                   .catch((error) => {
                     const report = (): never => {
                       // No answer through the relay, and nobody called it off: the relay is down.
@@ -1158,7 +1191,7 @@ const httpTransport = (
         );
       }
       // The relay never prepared it, and nobody called it off: the relay is down.
-      if (tunnelAdapter && !prepared && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
+      if (tunnelAdapter && (preparation?.kind === 'cached' || !preparation?.resource) && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
         proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
       if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw timeoutError();
       throw error;
@@ -1335,7 +1368,7 @@ export const createEngineTransport = (
     '',
     undefined,
     undefined,
-    undefined,
+    onBybitPublicRateLimit,
     infoFacts,
   );
   const publicCorsProxy = provider.publicCorsProxy();
@@ -1349,7 +1382,7 @@ export const createEngineTransport = (
         publicCorsProxy,
         undefined,
         undefined,
-        undefined,
+        onBybitPublicRateLimit,
         infoFacts,
       )
     : undefined;

@@ -15,6 +15,9 @@ use safe_cex_engine::model::{
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 
+#[path = "chaser/two_owner_deferral.rs"]
+mod two_owner_deferral;
+
 type Responder = Box<dyn FnMut(&Command) -> Result<String, VenueError>>;
 
 /// Which commands go into a dead link.
@@ -2081,6 +2084,26 @@ async fn keep_order_stops_without_cancelling() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn keep_order_retains_legacy_cancellation_of_late_placement() {
+    // TS c78bed93d ChaserOrderManager.ts:307-322 cancels late IDs even after removeKeepOrder.
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        port.place_answer_ms.set(2_000);
+        let (factory, _) = start(&port, BUY_ONE);
+        settle(10).await;
+        let book = factory.book();
+        let id = book.active_chasers()[0].id.clone();
+        book.remove_keep_order(&id);
+        settle(2_500).await;
+        assert_eq!(port.placements().len(), 1);
+        assert_eq!(port.cancels(), ["o1"]);
+        assert_eq!(port.completes().len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_vanished_order_needs_two_order_frames_to_stop_the_chase() {
     local(async {
         let port = FakePort::new("bybit");
@@ -2351,6 +2374,29 @@ async fn a_reduce_only_chase_ends_when_its_position_is_gone() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn unknown_notional_does_not_hide_a_confirmed_flat_reduce_position() {
+    local(async {
+        let port = FakePort::new("kraken");
+        port.accept_placements();
+        port.store.borrow_mut().positions.push(Position {
+            id: "p".into(), symbol: "BTCUSDT".into(), side: PositionSide::Short,
+            entry_price: 100.0, notional: f64::NAN, leverage: 1.0,
+            margin_type: None, position_mode: None, unrealized_pnl: 0.0,
+            realized_pnl: None, contracts: 1.0, liquidation_price: f64::NAN,
+            margin_size: None, last_update: None,
+        });
+        let (factory, _cx) = start(&port, r#"{"symbol":"BTCUSDT","size":1,"side":"buy","maxAttempts":10,"delay":0,"reduceOnly":true}"#);
+        settle(1100).await;
+        assert!(!factory.book().active_chasers().is_empty());
+        port.store.borrow_mut().positions[0].contracts = 0.0;
+        port.update_order("o1", |_| {});
+        settle(100).await;
+        assert_eq!(port.completes().len(), 1);
+        assert_eq!(port.completes()[0]["stopReason"], "Completed");
+    }).await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn fill_events_complete_a_hyperliquid_chase() {
     local(async {
         let port = FakePort::new("hyperliquid");
@@ -2572,6 +2618,14 @@ async fn a_lost_placement_found_open_is_adopted() {
             vec!["o7".to_string()]
         );
         assert!(port.completes().is_empty());
+        let chase_id = factory.book().active_chasers()[0].id.clone();
+        assert!(
+            !factory
+                .book()
+                .progress(&chase_id)
+                .unwrap()
+                .order_may_be_open
+        );
     })
     .await;
 }
@@ -2581,7 +2635,12 @@ async fn a_lost_placement_never_found_stops_after_the_lookups() {
     local(async {
         let port = FakePort::new("hyperliquid");
         lose_placements(&port, r#"{"found":false,"definitive":false}"#);
-        let _chase = start(&port, BUY_ONE);
+        let (factory, _) = start(&port, BUY_ONE);
+        settle(10).await;
+        let id = factory.book().active_chasers()[0].id.clone();
+        let progress = factory.book().progress(&id).unwrap();
+        assert!(progress.order_may_be_open);
+        assert!(!progress.ended);
         settle(20_000).await;
         assert_eq!(port.placements().len(), 1);
         assert_eq!(lookups(&port), 4);
@@ -2589,6 +2648,8 @@ async fn a_lost_placement_never_found_stops_after_the_lookups() {
             port.completes()[0]["stopReason"],
             UNCONFIRMED_ORDER_STOP_REASON
         );
+        let progress = factory.book().progress(&id).unwrap();
+        assert!(progress.order_may_be_open && progress.ended);
     })
     .await;
 }

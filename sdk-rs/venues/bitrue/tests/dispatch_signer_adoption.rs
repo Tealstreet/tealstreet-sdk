@@ -1122,7 +1122,7 @@ impl Signer for AlterProvider {
 }
 #[test]
 fn bracket_provider_refusal_and_invalid_atomic_results_release_nothing() {
-    for alter in 0..6 {
+    for alter in [0, 1, 2, 4, 5] {
         let mut h = fixture(options());
         h.engine
             .set_signer(Some(Arc::new(AlterProvider {
@@ -1163,6 +1163,48 @@ fn bracket_provider_refusal_and_invalid_atomic_results_release_nothing() {
             100.
         );
     }
+}
+
+#[test]
+fn callback_headers_cannot_replace_native_authentication() {
+    let mut h = fixture(options());
+    h.engine
+        .set_signer(Some(Arc::new(AlterProvider {
+            inner: h.provider.clone(),
+            alter: 3,
+        })))
+        .unwrap();
+    let request = bracket(&mut h);
+    assert_ne!(header(&request, "X-CH-SIGN"), "injected");
+    assert_eq!(header(&request, "X-CH-SIGN").len(), 64);
+}
+
+#[test]
+fn rest_only_signing_keeps_account_reads_without_listen_key_or_private_socket() {
+    let mut h = fixture(options());
+    h.engine
+        .set_private_feed_policy(safe_cex_engine::signing_policy::PrivateFeedPolicy::RestOnly)
+        .unwrap();
+    let request = catalogue(&mut h);
+    let startup = response(&mut h, NOW, &request, 200, CONTRACT);
+    assert!(
+        !startup
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("listenKey")))
+    );
+    assert!(!startup.iter().any(|a| matches!(
+        a,
+        Action::WsConnect {
+            channel: Some(safe_cex_engine::SocketChannel::Private),
+            ..
+        }
+    )));
+    take_http(&startup, Method::Get, "/fapi/v2/account");
+    take_http(
+        &startup,
+        Method::Get,
+        "/fapi/v2/openOrders?contractName=E-BTC-USDT",
+    );
 }
 
 struct ParkedProvider(Arc<RecordingSigner>);

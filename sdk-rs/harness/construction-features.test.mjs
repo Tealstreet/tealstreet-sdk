@@ -21,7 +21,7 @@ const setupFeatures = {
 };
 
 // Wallet families answer remote requests through the slim hosted-wallet export.
-const walletDevices = new Set(['hyperliquid', 'lighter', 'paradex', 'grvt']);
+const walletDevices = new Set(['hyperliquid', 'lighter', 'paradex', 'grvt', 'asterdex']);
 const remoteFeature = (rule, family) => walletDevices.has(rule.setupMapping ?? family) ? 'hosted-wallet' : 'hosted-signing';
 
 function requiredFeatures(rule, family) {
@@ -105,4 +105,12 @@ test('feature guard follows transitive local features, without borrowing combine
     'dispatch-signing': [], 'hosted-signing': [], 'sign-meta': [], bare: [] };
   checkFeatures(graph, 'wallet', { setupMapping: 'asterdex' });
   assert.throws(() => checkFeatures(graph, 'bare', { bridge: { dispatchSigning: true } }), /dispatch-signing/);
+});
+
+test('KuCoin Spot admits remote batch custody with its own isolated signing codec', () => {
+  const rule = rules.venues.kucoinspot;
+  assert.equal(rule.remoteSigning?.enabled, true);
+  assert.equal(rule.remoteSigning?.payloadSupported, false);
+  assert.deepEqual(rule.remoteSigning, rules.venues.kucoin.remoteSigning);
+  checkFeatures(features, 'kucoinspot', rule);
 });

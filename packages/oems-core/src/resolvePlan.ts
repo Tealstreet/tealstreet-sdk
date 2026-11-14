@@ -3,6 +3,39 @@ import type { OemsIntent, OemsIntentKind, OemsOrderScope, OemsPlan, OemsPosition
 import type { OemsWriteMethod } from './surface';
 
 import { roundCloseSize, roundToStep } from '@tealstreet/script-api-core/src/order/rounding';
+import {
+  assertCloseLikeOrderAmount,
+  venueUsesBaseAmountRails,
+} from '@tealstreet/script-api-core/src/order/orderPricing';
+import { sameNativeAmount } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
+
+const nativeAmountProblem = (
+  context: OemsContext,
+  market: OemsMarketRef,
+  amount: number,
+  order: Pick<OemsOrderRef, 'type'> & { reduceOnly?: boolean },
+): string | undefined => {
+  const exchangeName = context.accounts.find((account) => account.name === market.account)?.exchange;
+  try {
+    // Context amountStep is already native; the shared MEXC guard accepts base rails.
+    // Missing/invalid context fields stay unusable rather than becoming zero or one.
+    assertCloseLikeOrderAmount(
+      amount,
+      order as Parameters<typeof assertCloseLikeOrderAmount>[1],
+      {
+        symbol: market.symbol,
+        contractSize: market.contractSize,
+        isInverse: market.isInverse,
+        precision: { amount: market.amountStep * market.contractSize },
+        limits: { amount: { max: market.maxAmount } },
+      },
+      exchangeName,
+    );
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return undefined;
+};
 
 /**
  * The deterministic half.
@@ -306,6 +339,7 @@ const limitsComparable = (market: OemsMarketRef): boolean => (market.contractSiz
  * never open or flip.
  */
 const sizeClose = (
+  context: OemsContext,
   position: OemsPositionRef,
   fraction: number,
   market: OemsMarketRef | undefined,
@@ -313,9 +347,11 @@ const sizeClose = (
    *  still rounded, still clamped to the position, and still held to
    *  `minAmount` — an override changes the number, never the checks. */
   overrideAmount?: number,
-): { amount: number } | { reason: string } => {
+): { amount: number; full: number } | { reason: string } => {
   if (!market) return { reason: noMarket(position.symbol, position.account) };
 
+  if (position.nativeContracts === null || !Number.isFinite(position.nativeContracts))
+    return { reason: `native size is unknown for ${position.symbol} on ${position.account}; refresh the position` };
   const full = Math.abs(position.nativeContracts);
   if (!(full > 0)) {
     return { reason: `the ${position.symbol} position on ${position.account} has no size to close` };
@@ -328,13 +364,25 @@ const sizeClose = (
 
   // `roundCloseSize` falls back to the raw size rather than returning zero, and
   // `full` is already positive, so the result cannot be zero here.
+  const problem = nativeAmountProblem(context, market, requested, { type: 'market', reduceOnly: true });
+  if (problem) return { reason: problem };
   const rounded = Math.min(roundCloseSize(requested, market.amountStep), full);
+  if (
+    context.accounts.some(
+      (account) => account.name === position.account && venueUsesBaseAmountRails(account.exchange),
+    ) &&
+    !sameNativeAmount(requested, rounded)
+  ) {
+    return {
+      reason: `MEXC close requested ${requested} native contracts but would send ${rounded}; request the available quantity explicitly`,
+    };
+  }
   if (limitsComparable(market) && market.minAmount > 0 && rounded < market.minAmount) {
     return {
       reason: `${trim(rounded)} ${position.symbol} is below the ${trim(market.minAmount)} minimum on ${position.account}`,
     };
   }
-  return { amount: rounded };
+  return { amount: rounded, full };
 };
 
 /** A close is the opposite side of the position it reduces. */
@@ -406,6 +454,7 @@ const resolveReduce = (
       continue;
     }
     const sized = sizeClose(
+      context,
       position,
       step.percent / 100,
       lookups.marketFor(position.account, position.symbol),
@@ -424,9 +473,9 @@ const resolveReduce = (
         // the number no longer matches.
         edit?.amount !== undefined
           ? `Reduce ${position.symbol} ${position.side} on ${position.account} by ` +
-              `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))}`
+              `${trim(sized.amount)} of ${trim(sized.full)}`
           : `Reduce ${position.symbol} ${position.side} on ${position.account} by ` +
-              `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))} (${step.percent}%)`,
+              `${trim(sized.amount)} of ${trim(sized.full)} (${step.percent}%)`,
       ),
     );
   }
@@ -495,6 +544,10 @@ const resolveClose = (
       );
       continue;
     }
+    if (position.nativeContracts === null || !Number.isFinite(position.nativeContracts)) {
+      out.reasons.push(`native size is unknown for ${position.symbol} on ${position.account}; refresh the position`);
+      continue;
+    }
     if (edit?.amount === undefined && fastPathFits) {
       out.commands.push({
         method: 'closePosition',
@@ -518,7 +571,7 @@ const resolveClose = (
       continue;
     }
 
-    const sized = sizeClose(position, 1, market, edit?.amount);
+    const sized = sizeClose(context, position, 1, market, edit?.amount);
     if ('reason' in sized) {
       out.reasons.push(sized.reason);
       continue;
@@ -647,6 +700,14 @@ const resolvePlace = (
     return out;
   }
 
+  const amountProblem = nativeAmountProblem(context, market, step.amount, {
+    type: step.orderType,
+    reduceOnly: step.reduceOnly,
+  });
+  if (amountProblem) {
+    out.reasons.push(amountProblem);
+    return out;
+  }
   const amount = roundToStep(step.amount, market.amountStep);
   if (!(amount > 0)) {
     out.reasons.push(`${trim(step.amount)} ${step.symbol} rounds to zero at this market's lot step`);
@@ -796,6 +857,11 @@ const resolveStop = (
     }
   }
 
+  const amountProblem = nativeAmountProblem(context, market, step.amount, { type: 'stop_market', reduceOnly: true });
+  if (amountProblem) {
+    out.reasons.push(amountProblem);
+    return out;
+  }
   const amount = roundToStep(step.amount, market.amountStep);
   if (!(amount > 0)) {
     out.reasons.push(`${trim(step.amount)} ${step.symbol} rounds to zero at this market's lot step`);
@@ -854,15 +920,35 @@ const resolveAmend = (
 
   // Round to NEAREST for an amend even where placement rounds down: truncating
   // a resting order's size is a change the user did not ask for.
+  const amountProblem = hasAmount ? nativeAmountProblem(context, market, step.amount as number, order) : undefined;
+  if (amountProblem) {
+    out.reasons.push(amountProblem);
+    return out;
+  }
   const value = hasPrice
     ? roundToStep(step.price as number, market.priceStep)
     : roundToStep(step.amount as number, market.amountStep);
-  // The plan's amount is what should rest (nativeRemaining's unit); the engine's is the total.
-  const nativeFilled = order.remaining > 0 ? (order.filled * order.nativeRemaining) / order.remaining : 0;
-  const update = hasPrice ? { price: value } : { amount: roundToStep(value + nativeFilled, market.amountStep) };
   if (!(value > 0)) {
     out.reasons.push(`the amended ${hasPrice ? 'price' : 'amount'} rounds to zero`);
     return out;
+  }
+
+  let update: { price: number } | { amount: number };
+  if (hasPrice) {
+    update = { price: value };
+  } else {
+    if (order.nativeRemaining === null) {
+      out.reasons.push('cannot amend amount: native remaining size is unknown');
+      return out;
+    }
+    // The plan's amount is what should rest (nativeRemaining's unit); the engine's is the total.
+    const nativeFilled = order.remaining > 0 ? (order.filled * order.nativeRemaining) / order.remaining : 0;
+    const totalProblem = nativeAmountProblem(context, market, value + nativeFilled, order);
+    if (totalProblem) {
+      out.reasons.push(totalProblem);
+      return out;
+    }
+    update = { amount: roundToStep(value + nativeFilled, market.amountStep) };
   }
 
   out.commands.push({

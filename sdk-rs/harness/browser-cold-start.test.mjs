@@ -43,7 +43,7 @@ function samplesFor(assets) {
 
 test('requires the complete authoritative web asset set with same-run provenance', (t) => {
   const { directory, assets } = fixture(t);
-  assert.equal(assets.length, 29);
+  assert.equal(assets.length, 28);
   for (const key of Object.keys(expected))
     assert.throws(() => readBrowserInputs(directory, { ...expected, [key]: 'wrong' }), new RegExp(key));
   const path = join(directory, 'manifest-families.json');
@@ -64,11 +64,11 @@ test('rejects corrupted and missing bytes before starting a browser', (t) => {
   assert.throws(() => archiveBrowserAssets({ env: {}, layout: 'combined', destination: directory }), /requires CI/);
 });
 
-test('measurement requires all 87 fresh-worker samples, not a partial successful table', (t) => {
+test('measurement requires all 84 fresh-worker samples, not a partial successful table', (t) => {
   const { assets } = fixture(t);
   const rows = samplesFor(assets);
   validateMeasurements(assets, rows);
-  assert.equal(measurementTable(assets, rows).split('\n').length, 32);
+  assert.equal(measurementTable(assets, rows).split('\n').length, 31);
   assert.throws(() => measurementTable(assets, rows.slice(1)), /Incomplete browser sample set/);
   const duplicate = structuredClone(rows);
   duplicate[0].sample = 1;
@@ -112,6 +112,9 @@ test('loopback server serves exact public allowlist with WASM MIME and no-store'
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(hash(Buffer.from(await response.arrayBuffer())), assets[0].files['_bg.wasm'].sha256);
   assert.equal((await fetch(origin + '/sdk-rs/hosts/wasm/js/engine.web.mjs')).headers.get('content-type'), 'text/javascript');
+  // venues.mjs statically imports host.mjs; every host module must be served or the engine import 404s.
+  for (const name of ['host.mjs', 'venues.mjs', 'family-loader.mjs'])
+    assert.equal((await fetch(origin + `/sdk-rs/hosts/wasm/js/${name}`)).status, 200, name);
   for (const path of ['/.env', '/package.json', '/sdk-rs/Cargo.toml', '/%2e%2e/%2e%2e/etc/passwd'])
     assert.equal((await fetch(origin + path)).status, 404);
   assert.equal((await fetch(origin + path, { method: 'POST' })).status, 404);

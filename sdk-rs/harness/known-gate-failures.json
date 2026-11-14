@@ -6,8 +6,7 @@
     "ciHead": "c7e9d242a9cbc656e881c212b66b0a9c8a3f5b13",
     "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39419024015",
     "localPrivateReports": [
-      "/tmp/gate-honesty-hyperliquid-priority-private.json",
-      "/tmp/gate-honesty-breakoutprop-priority-private.json"
+      "/tmp/gate-honesty-hyperliquid-priority-private.json"
     ],
     "earlierPerformanceRun": 39417011625,
     "note": "Initial declarations from 104 completed CI cases plus two corrected private cases; complete 107-case certification and independent review required before merge. Earlier Hyro steady CPU miss retained, never rerun-to-green selection.",
@@ -4015,45 +4014,6 @@
             "checkpoint 9 account.orders[5].status",
             "checkpoint 9 account.orders[6].status",
             "checkpoint 9 account.orders[7].status"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "breakoutprop",
-      "tapeSha256": "514407bb2031e25574211694eb05b40a26933fc48fb5288fc5c8234f49fc96d3",
-      "tape": "sdk-rs/harness/tapes/breakoutprop-private.jsonl",
-      "diagnostics": [
-        {
-          "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
-          "keys": [
-            "account orders[0].clientOrderId",
-            "checkpoint 0 account.orders[0].clientOrderId",
-            "checkpoint 1 account.orders[0].clientOrderId",
-            "checkpoint 2 account.orders[0].clientOrderId",
-            "checkpoint 3 account.orders[0].clientOrderId",
-            "checkpoint 4 account.orders[0].clientOrderId",
-            "checkpoint 5 account.orders[0].clientOrderId",
-            "checkpoint 6 account.orders[0].clientOrderId",
-            "checkpoint 7 account.orders[0].clientOrderId",
-            "checkpoint 8 account.orders[0].clientOrderId",
-            "checkpoint 9 account.orders[0].clientOrderId"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "breakoutprop",
-      "tapeSha256": "79f7a16af940e98abbdcab307a45a7e4e9d6b67246c30d1832bf660c94ad0e06",
-      "tape": "sdk-rs/harness/fixtures/breakoutprop-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Raw book seed/depth differs at this boundary; final tape-derived book corrections do not erase interim differences.",
-          "keys": [
-            "checkpoint 0 books.BTCUSD",
-            "checkpoint 0 books.ETHUSD",
-            "checkpoint 1 books.BTCUSD",
-            "checkpoint 1 books.ETHUSD"
           ]
         }
       ]
@@ -48417,11 +48377,10 @@
           ]
         },
         {
-          "divergence": "Per-symbol leverage/margin settings or readiness differs between implementations.",
+          "divergence": "TS retains last-reported leverage 10 while Rust has confirmed 20. At checkpoint 14 exposure is empty: the retained PositionSettings still reports 10 until the later refresh. Only leverage differs; symbol, margin type and settings cardinality must agree.",
           "keys": [
             "checkpoint 13 account.settings[0].leverage",
-            "checkpoint 14 account.settings.length",
-            "checkpoint 14 account.settings[0]"
+            "checkpoint 14 account.settings[0].leverage"
           ]
         },
         {

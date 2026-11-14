@@ -46,7 +46,65 @@ fn mapped_orders_keep_trigger_provenance_and_never_emit_cumulative_fills() {
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
 }
 #[test]
-fn executions_dedup_by_native_fill_id_across_snapshot_and_reconnect() {
+fn startup_fill_history_does_not_precede_the_first_live_execution() {
+    let (mut e, socket) = ready();
+    let history = r#"{"fill_id":"old-fill","order_id":"older","instrument":"PF_XBTUSD","qty":0.1,"price":90,"buy":true}"#;
+    let live = r#"{"fill_id":"fill-1","order_id":"100","instrument":"PF_XBTUSD","qty":0.5,"price":90,"buy":true}"#;
+    message(
+        &mut e,
+        socket,
+        NOW + 25.,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{history}]}}"#),
+    );
+    assert_eq!(
+        e.take_frame(NOW + 25.).map_or(0, fill_count),
+        0,
+        "startup history is not a live fill event"
+    );
+    message(
+        &mut e,
+        socket,
+        NOW + 100.,
+        &format!(r#"{{"feed":"fills","fills":[{live}]}}"#),
+    );
+    assert_eq!(e.take_frame(NOW + 100.).map_or(0, fill_count), 1);
+    message(
+        &mut e,
+        socket,
+        NOW + 110.,
+        &format!(r#"{{"feed":"fills","fills":[{live}]}}"#),
+    );
+    assert_eq!(e.take_frame(NOW + 110.).map_or(0, fill_count), 0);
+    let (next, _) = fresh_private(&mut e, socket);
+    message(
+        &mut e,
+        next,
+        NOW + 1001.,
+        r#"{"event":"challenge","message":"history-reconnect"}"#,
+    );
+    for feed in ["fills", "open_orders", "open_positions"] {
+        message(
+            &mut e,
+            next,
+            NOW + 1002.,
+            &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+        );
+    }
+    message(
+        &mut e,
+        next,
+        NOW + 1003.,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{history},{live}]}}"#),
+    );
+    assert_eq!(
+        e.take_frame(NOW + 1003.).map_or(0, fill_count),
+        0,
+        "startup history and emitted executions stay quiet on reconnect"
+    );
+}
+
+#[test]
+fn only_emitted_execution_ids_deduplicate_live_replays_and_reconnects() {
     let (mut e, socket) = ready();
     let fill = r#"{"fill_id":"exec-1","order_id":"order-1","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":false}"#;
     message(
@@ -65,7 +123,11 @@ fn executions_dedup_by_native_fill_id_across_snapshot_and_reconnect() {
             fill.replace("exec-1", "exec-2")
         ),
     );
-    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
+    assert_eq!(
+        e.take_frame(NOW).map_or(0, fill_count),
+        2,
+        "startup history cannot suppress an execution's first live delivery"
+    );
     message(
         &mut e,
         socket,
@@ -104,6 +166,133 @@ fn executions_dedup_by_native_fill_id_across_snapshot_and_reconnect() {
         e.take_frame(NOW + 1003.0).map_or(0, fill_count),
         0,
         "recent execution replay after a fresh challenge must stay deduplicated"
+    );
+}
+
+fn execution(id: &str, time: Option<f64>, instrument: &str) -> serde_json::Value {
+    serde_json::json!({
+        "fill_id": id, "order_id": "order-1", "instrument": instrument,
+        "qty": 0.5, "price": 100, "buy": true, "time": time
+    })
+}
+
+fn execution_message(
+    e: &mut Engine<Kraken>,
+    socket: SocketId,
+    now: f64,
+    feed: &str,
+    fills: &[serde_json::Value],
+) -> u32 {
+    message(
+        e,
+        socket,
+        now,
+        &serde_json::json!({"feed": feed, "fills": fills}).to_string(),
+    );
+    e.take_frame(now).map_or(0, fill_count)
+}
+
+#[test]
+fn startup_snapshot_history_does_not_poison_live_execution_ids() {
+    let (mut e, socket) = ready();
+    let history = execution("history", Some(NOW - 1.), "PF_XBTUSD");
+    let unstamped = execution("unstamped", None, "PF_XBTUSD");
+    let current = execution("current", Some(NOW + 1.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 10.,
+            "fills_snapshot",
+            &[history.clone(), unstamped.clone(), current.clone()]
+        ),
+        0
+    );
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 11.,
+            "fills",
+            &[history, unstamped, current]
+        ),
+        3,
+        "startup history is separate from emitted execution IDs"
+    );
+}
+
+#[test]
+fn snapshot_recovery_uses_identity_and_accepts_unordered_same_time_rows() {
+    let (mut e, socket) = ready();
+    assert_eq!(
+        execution_message(&mut e, socket, NOW, "fills_snapshot", &[]),
+        0
+    );
+    let emitted = execution("emitted", Some(NOW + 10.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 20.,
+            "fills",
+            std::slice::from_ref(&emitted)
+        ),
+        1
+    );
+    let older = execution("older", Some(NOW + 9.), "PF_XBTUSD");
+    let equal = execution("equal", Some(NOW + 10.), "PF_XBTUSD");
+    let newest = execution("newest", Some(NOW + 30.), "PF_XBTUSD");
+    let middle = execution("middle", Some(NOW + 25.), "PF_XBTUSD");
+    let same_time = execution("same-time", Some(NOW + 30.), "PF_XBTUSD");
+    let fills = [emitted, older, equal, newest, middle, same_time];
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 40., "fills_snapshot", &fills),
+        5,
+        "all unseen identities emit, independent of timestamps or history order"
+    );
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 41., "fills_snapshot", &fills),
+        0
+    );
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 42., "fills", &fills),
+        0
+    );
+}
+
+#[test]
+fn unmapped_snapshot_execution_does_not_poison_emitted_ids() {
+    let (mut e, socket) = ready();
+    let unmapped = execution("unmapped", Some(NOW + 1_000.), "UNKNOWN");
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 2_000., "fills_snapshot", &[unmapped]),
+        0
+    );
+    let recoverable = execution("recoverable", Some(NOW + 20.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 2_001.,
+            "fills_snapshot",
+            &[recoverable]
+        ),
+        1
+    );
+    let mapped = execution("unmapped", Some(NOW + 1_000.), "PF_XBTUSD");
+    assert_eq!(
+        execution_message(
+            &mut e,
+            socket,
+            NOW + 2_002.,
+            "fills",
+            std::slice::from_ref(&mapped)
+        ),
+        1
+    );
+    assert_eq!(
+        execution_message(&mut e, socket, NOW + 2_003., "fills", &[mapped]),
+        0
     );
 }
 #[test]
@@ -254,9 +443,10 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 1);
-    assert!(sent[0].contains("challenge"));
-    assert!(!sent[0].contains("signed_challenge"));
+    assert_eq!(sent.len(), 2);
+    assert!(sent[0].contains(r#""feed":"heartbeat""#));
+    assert!(sent[1].contains("challenge"));
+    assert!(!sent[1].contains("signed_challenge"));
     message(
         &mut e,
         s,
@@ -283,9 +473,8 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 4);
-    assert!(sent[3].contains(r#""feed":"heartbeat""#));
-    for msg in &sent[..3] {
+    assert_eq!(sent.len(), 3);
+    for msg in &sent {
         assert!(msg.contains("fresh"));
         assert!(msg.contains("signed_challenge"));
         assert!(!msg.contains("account_balances"));
@@ -645,6 +834,7 @@ fn empty_positions_are_absent_and_default_settings_remain_available() {
 #[test]
 fn execution_remaining_updates_orders_without_counting_cumulative_progress_twice() {
     let (mut e, s) = ready();
+    message(&mut e, s, NOW, r#"{"feed":"fills_snapshot","fills":[]}"#);
     snapshot(&mut e, s);
     let execution = r#"{"feed":"fills","fills":[{"fill_id":"f1","order_id":"order-1","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":false,"remaining_order_qty":1,"time":1700000000001}]}"#;
     message(&mut e, s, NOW + 1.0, execution);
@@ -674,6 +864,15 @@ fn execution_remaining_updates_orders_without_counting_cumulative_progress_twice
     message(&mut e, s, NOW + 4.0, &delayed);
     assert_eq!(e.store().orders()[0].filled, 1.0);
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
+    let delayed_snapshot = delayed
+        .replace("\"feed\":\"fills\"", "\"feed\":\"fills_snapshot\"")
+        .replace("f2", "f3");
+    message(&mut e, s, NOW + 5.0, &delayed_snapshot);
+    let order = &e.store().orders()[0];
+    assert_eq!((order.filled, order.remaining), (1.0, 1.0));
+    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 1);
+    message(&mut e, s, NOW + 6.0, &delayed_snapshot);
+    assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
 }
 #[test]
 fn cumulative_order_before_execution_does_not_double_count_and_final_remaining_closes() {
@@ -1713,4 +1912,140 @@ fn refused_with(status: u16, refusal: &str) {
     }
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert!(failures[0].message.contains("authenticationError"));
+}
+
+#[test]
+fn missing_liquidation_is_unknown_for_rest_flex_and_single_collateral() {
+    for account in [
+        r#"{"result":"success","accounts":{"flex":{"type":"multiCollateralMarginAccount","portfolioValue":1000,"availableMargin":800,"initialMargin":150,"maintenanceMargin":50}}}"#,
+        r#"{"result":"success","accounts":{"fi_xbtusd":{"type":"marginAccount","auxiliary":{"pv":1000,"af":800},"triggerEstimates":{"lt":80}}}}"#,
+    ] {
+        let (mut e, socket) = ready();
+        let reqs = poll(&mut e, socket);
+        let accounts = reqs.iter().find(|r| r.url.contains("/accounts")).unwrap();
+        reply(&mut e, accounts, 200, account);
+        let positions = reqs
+            .iter()
+            .find(|r| r.url.contains("/openpositions"))
+            .unwrap();
+        reply(
+            &mut e,
+            positions,
+            200,
+            r#"{"result":"success","openPositions":[{"symbol":"PF_XBTUSD","side":"long","size":2,"price":100}]}"#,
+        );
+        let p = e.store().position("PF_XBTUSD:long").unwrap();
+        assert!(
+            p.liquidation_price.is_nan(),
+            "unknown must not become zero: {p:?}"
+        );
+        assert!(serde_json::to_value(p).unwrap()["liquidationPrice"].is_null());
+    }
+}
+
+#[test]
+fn websocket_unknown_liquidation_does_not_discard_or_zero_the_position() {
+    // Reported zero is an unavailable threshold, not a usable liquidation price.
+    // Nonpositive numbers and numeric strings must also clear a prior value.
+    for feed in ["open_positions", "open_positions_snapshot"] {
+        for field in [
+            "",
+            r#","liquidation_threshold":null"#,
+            r#","liquidation_threshold":"""#,
+            r#","liquidation_threshold":"N/A""#,
+            r#","liquidation_threshold":"NaN""#,
+            r#","liquidation_threshold":"Infinity""#,
+            r#","liquidation_threshold":0"#,
+            r#","liquidation_threshold":"0""#,
+            r#","liquidation_threshold":-0.0"#,
+            r#","liquidation_threshold":-1"#,
+            r#","liquidation_threshold":"-1""#,
+            r#","liquidation_threshold":true"#,
+            r#","liquidation_threshold":false"#,
+            r#","liquidation_threshold":{}"#,
+            r#","liquidation_threshold":[]"#,
+            r#","liquidation_threshold":{"unusable":[true,{"nested":"value"}]}"#,
+            r#","liquidation_threshold":[{"nested":[1,2,3]},false]"#,
+        ] {
+            let (mut e, socket) = ready();
+            message(&mut e, socket, NOW, POSITION);
+            message(
+                &mut e,
+                socket,
+                NOW + 1.0,
+                &format!(
+                    r#"{{"feed":"{feed}","positions":[{{"instrument":"PF_XBTUSD","balance":3,"entry_price":100,"mark_price":120{field}}}]}}"#
+                ),
+            );
+            let p = e.store().position("PF_XBTUSD:long").unwrap();
+            assert_eq!(
+                p.contracts, 3.0,
+                "a bad optional price must not discard its row: {field}"
+            );
+            assert!(p.liquidation_price.is_nan(), "{feed} {field}: {p:?}");
+            assert!(serde_json::to_value(p).unwrap()["liquidationPrice"].is_null());
+        }
+    }
+}
+
+#[test]
+fn websocket_positive_liquidation_prices_remain_usable() {
+    for (raw, expected) in [("67.8", 67.8), (r#""67.8""#, 67.8)] {
+        let (mut e, socket) = ready();
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(
+                r#"{{"feed":"open_positions","positions":[{{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":120,"liquidation_threshold":{raw}}}]}}"#
+            ),
+        );
+        assert_eq!(e.store().positions()[0].liquidation_price, expected);
+    }
+}
+
+fn frame_liquidation_prices(frame: &[u8]) -> Vec<f64> {
+    let mut at = 16;
+    while at + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let length = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 8 {
+            let count = u32::from_le_bytes(frame[at + 8..at + 12].try_into().unwrap()) as usize;
+            let column = (at + 12 + count * 8 + 7) & !7;
+            return (0..count)
+                .map(|i| {
+                    let start = column + 6 * count * 8 + i * 8;
+                    f64::from_le_bytes(frame[start..start + 8].try_into().unwrap())
+                })
+                .collect();
+        }
+        at += 8 + length;
+    }
+    panic!("positions section missing");
+}
+
+#[test]
+fn unknown_liquidation_survives_the_native_frame_column() {
+    for field in [
+        "",
+        r#","liquidation_threshold":0"#,
+        r#","liquidation_threshold":-2"#,
+    ] {
+        let (mut e, socket) = ready();
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(
+                r#"{{"feed":"open_positions","positions":[{{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":120{field}}}]}}"#
+            ),
+        );
+        let frame = e.take_frame(NOW).unwrap();
+        let prices = frame_liquidation_prices(frame);
+        assert_eq!(prices.len(), 1);
+        assert!(
+            prices[0].is_nan(),
+            "unusable threshold must be unknown in the wire column: {field}"
+        );
+    }
 }

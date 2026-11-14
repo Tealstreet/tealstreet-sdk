@@ -1821,7 +1821,8 @@ fn unmatched_pending_rows_are_unknown_without_an_accepted_parent() {
 }
 
 #[test]
-fn native_terminal_cancel_diagnostic_is_not_amendment_proof() {
+fn native_terminal_perp_cancel_completes_or_replaces_once() {
+    // TS hyperliquid.exchange.ts:4227-4233,4411-4416 continues after a terminal perp cancel.
     for amend in [false, true] {
         for reply in [
             r#"{"status":"err","response":"Order was never placed, already canceled, or filled. asset=0"}"#,
@@ -1842,21 +1843,36 @@ fn native_terminal_cancel_diagnostic_is_not_amendment_proof() {
             respond(&mut e, NOW + 1., &cancel, 200, reply);
             let a: Vec<_> = e.drain_actions().collect();
             let result = results(&a, OWNER);
-            assert_eq!(result.len(), 1);
             if amend {
-                assert!(
-                    result[0]
-                        .as_ref()
-                        .unwrap_err()
-                        .message
-                        .contains("already canceled")
-                );
-                assert!(e.store().order("9").is_some());
+                assert!(result.is_empty());
+                assert!(e.store().order("9").is_none());
+                let replacement = native_release_at(&mut e, NOW + 334., &a);
+                let wire: Value =
+                    serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+                assert_eq!(wire["action"]["type"], "order");
+                assert_eq!(wire["action"]["grouping"], "na");
+                let orders = wire["action"]["orders"].as_array().unwrap();
+                assert_eq!(orders.len(), 1);
+                assert_eq!(orders[0]["a"], 0);
+                assert_eq!(orders[0]["b"], true);
+                assert_eq!(orders[0]["p"], "85");
+                assert_eq!(orders[0]["s"], "1");
+                assert_eq!(orders[0]["r"], false);
+                assert_eq!(orders[0]["t"], json!({"limit":{"tif":"Gtc"}}));
+                let client = orders[0]["c"].as_str().unwrap();
+                assert_eq!(client.len(), 34);
+                assert!(client.starts_with("0x"));
+                respond(&mut e, NOW + 335., &replacement, 200, ACCEPT);
+                let done: Vec<_> = e.drain_actions().collect();
+                let expected = format!(r#"{{"orderIds":["900"],"clientOrderId":"{client}"}}"#);
+                assert_eq!(results(&done, OWNER), vec![Ok(expected)]);
+                assert_eq!(e.store().order("900").unwrap().price, 85.);
+                no_trade(&done);
             } else {
                 assert_eq!(result, vec![Ok("[]".into())]);
                 assert!(e.store().order("9").is_none());
+                no_trade(&a);
             }
-            no_trade(&a);
         }
     }
 }

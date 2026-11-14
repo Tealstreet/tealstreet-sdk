@@ -8,6 +8,7 @@ import { PUBLIC_CORS_HOSTS, PUBLIC_PROXY_READ_HOSTS, readsViaPublicProxy } from 
 const PUBLIC_CORS_CONFIG = resolve(__dirname, '../../../../../terraform/exchange-proxy-haproxy-tokyo.cfg');
 const VENUES = resolve(__dirname, '../../../../../sdk-rs/venues');
 const CRATE: Record<string, string> = {
+  bingxspot: 'bingx',
   bitgetinverse: 'bitget',
   bitgetusdc: 'bitget',
   bybitinverse: 'bybit',

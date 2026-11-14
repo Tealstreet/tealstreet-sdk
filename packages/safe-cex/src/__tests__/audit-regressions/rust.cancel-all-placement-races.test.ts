@@ -153,7 +153,7 @@ describe('Rust cancel-all placement scopes', () => {
     expect(command.mock.calls[1][0]).toMatchObject({ op: 'cancelSymbolOrders', symbol: order().symbol });
   });
 
-  it.each(['woo', 'grvt', 'polymarket', 'breakoutprop'] as const)('preserves %s global cancel-all override', async (name) => {
+  it.each(['woo', 'grvt', 'polymarket'] as const)('preserves %s global cancel-all override', async (name) => {
     const { exchange, command } = setup(name);
     await exchange.cancelAllOrders();
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'cancelSymbolOrders', symbol: '' });

@@ -227,14 +227,118 @@ struct NativeQuantity {
     quantity: String,
 }
 
+fn assert_attached_children_preserve_ts_whole_intent(variant: Variant) {
+    for (amount, entry, entry_total) in [
+        (11.0, vec![3.0, 3.0, 3.0, 1.0], 10.0),
+        (7.0, vec![3.0, 3.0, 2.0], 8.0),
+        (2.0, vec![2.0], 2.0),
+    ] {
+        let mut h = ready(variant);
+        let mut intent = order(variant, r#""stopLoss":90,"takeProfit":110"#);
+        intent.amount = amount;
+        place(&mut h, vec![intent]);
+        let mut lots = std::collections::BTreeMap::<String, Vec<f64>>::new();
+        let mut next_id = 1;
+        while !h.requests.is_empty() {
+            let request = h.requests.remove(0);
+            let rows = if let Some(batch) = param(&request.url, "batchOrders") {
+                serde_json::from_str::<Vec<NativeQuantity>>(&batch).unwrap()
+            } else {
+                vec![NativeQuantity {
+                    kind: param(&request.url, "type").unwrap(),
+                    quantity: param(&request.url, "quantity").unwrap(),
+                }]
+            };
+            let count = rows.len();
+            for row in rows {
+                let kind = match row.kind.as_str() {
+                    "LIMIT" => "LIMIT",
+                    "STOP_LOSS" | "STOP_MARKET" => "SL",
+                    "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" => "TP",
+                    other => panic!("unexpected native type {other}"),
+                };
+                if variant == Variant::CoinM && kind != "LIMIT" {
+                    assert!(request.url.contains("/dapi/v1/algoOrder"));
+                    assert_eq!(param(&request.url, "reduceOnly").as_deref(), Some("true"));
+                }
+                lots.entry(kind.into())
+                    .or_default()
+                    .push(row.quantity.parse().unwrap());
+            }
+            let ids: Vec<_> = (next_id..next_id + count)
+                .map(|id| {
+                    if request.url.contains("/algoOrder") {
+                        format!(r#"{{"algoId":{id}}}"#)
+                    } else {
+                        format!(r#"{{"orderId":{id}}}"#)
+                    }
+                })
+                .collect();
+            next_id += count;
+            let body = if request.url.contains("batchOrders") {
+                format!("[{}]", ids.join(","))
+            } else {
+                ids[0].clone()
+            };
+            h.reply(request.id, 200, "", &body);
+        }
+        assert_eq!(lots["LIMIT"], entry, "{variant:?} amount={amount}");
+        assert_eq!(lots["SL"], [amount], "{variant:?} amount={amount} SL");
+        assert_eq!(lots["TP"], [amount], "{variant:?} amount={amount} TP");
+        assert_eq!(lots["LIMIT"].iter().sum::<f64>(), entry_total);
+        assert_eq!(lots["SL"].iter().sum::<f64>(), amount);
+        assert_eq!(lots["TP"].iter().sum::<f64>(), amount);
+        assert!(h.result(77).unwrap().is_ok());
+    }
+}
+
 #[test]
-fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
+fn spot_attached_children_preserve_ts_whole_intent() {
+    assert_attached_children_preserve_ts_whole_intent(Variant::Spot);
+}
+
+#[test]
+fn coinm_attached_children_preserve_ts_whole_intent() {
+    assert_attached_children_preserve_ts_whole_intent(Variant::CoinM);
+}
+
+#[test]
+fn standalone_stops_keep_ts_primary_lot_allocation() {
+    for variant in [Variant::Spot, Variant::CoinM] {
+        let mut h = ready(variant);
+        let mut intent = order(variant, r#""reduceOnly":true"#);
+        intent.kind = safe_cex_engine::model::OrderType::StopLoss;
+        intent.amount = 11.0;
+        place(&mut h, vec![intent]);
+        let mut lots = Vec::new();
+        while !h.requests.is_empty() {
+            let request = h.requests.remove(0);
+            lots.push(param(&request.url, "quantity").unwrap());
+            h.reply(request.id, 200, "", r#"{"orderId":1,"algoId":1}"#);
+        }
+        assert_eq!(lots, ["3", "3", "3", "1"], "{variant:?}");
+        assert_eq!(
+            lots.iter()
+                .map(|lot| lot.parse::<f64>().unwrap())
+                .sum::<f64>(),
+            10.0
+        );
+        assert!(h.result(77).unwrap().is_ok());
+    }
+}
+
+#[test]
+// TS: reference/binance/binancespot.exchange.ts:535-547,550-571 and
+// binanceinverse.exchange.ts:871-924. Entry emits 3,3,3,1; each attached child stays 11.
+// KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
+fn spot_and_inverse_splits_keep_ts_entry_and_whole_brackets() {
     for variant in [Variant::Spot, Variant::CoinM] {
         let mut h = ready(variant);
         let mut o = order(variant, r#""stopLoss":90,"takeProfit":110"#);
         o.amount = 11.0;
         place(&mut h, vec![o]);
         let mut totals = std::collections::BTreeMap::<String, f64>::new();
+        let mut lots = std::collections::BTreeMap::<String, Vec<String>>::new();
         let mut native_orders = 0;
         while let Some(r) = h.requests.pop() {
             let rows = if let Some(batch) = param(&r.url, "batchOrders") {
@@ -248,7 +352,11 @@ fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
             let count = rows.len();
             for row in rows {
                 let qty = row.quantity.parse::<f64>().unwrap();
-                assert!(qty > 0.0 && qty <= 5.0, "{variant:?} {qty}");
+                assert!(qty > 0.0, "{variant:?} {qty}");
+                if row.kind == "LIMIT" {
+                    assert!(qty <= 5.0, "{variant:?} {qty}");
+                }
+                lots.entry(row.kind.clone()).or_default().push(row.quantity);
                 *totals.entry(row.kind).or_default() += qty;
                 native_orders += 1;
             }
@@ -265,12 +373,17 @@ fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
             };
             h.reply(r.id, 200, "", &body);
         }
-        assert_eq!(native_orders, 9, "{variant:?}");
+        assert_eq!(native_orders, 6, "{variant:?}");
         assert_eq!(totals.len(), 3, "{variant:?}");
-        assert!(
-            totals.values().all(|total| *total == 11.0),
-            "{variant:?} {totals:?}"
-        );
+        for (kind, sequence) in &lots {
+            let (expected, total) = if kind == "LIMIT" {
+                (&["3", "3", "3", "1"][..], 10.0)
+            } else {
+                (&["11"][..], 11.0)
+            };
+            assert_eq!(sequence, expected, "{variant:?} {kind}");
+            assert_eq!(totals[kind], total, "{variant:?} {kind}");
+        }
         assert!(h.result(77).unwrap().is_ok());
     }
 }
@@ -591,6 +704,7 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
         o.take_profit = Some(110.0);
         place(&mut h, vec![o]);
         let mut ids = std::collections::HashSet::new();
+        let mut lots = std::collections::BTreeMap::<String, Vec<String>>::new();
         let mut writes = 0;
         while let Some(request) = h.requests.first() {
             let request_id = request.id;
@@ -620,6 +734,17 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
                 assert!(ids.insert(receipt.identity.clone()));
             }
             let request = h.requests.remove(0);
+            let rows = if let Some(batch) = param(&request.url, "batchOrders") {
+                serde_json::from_str::<Vec<NativeQuantity>>(&batch).unwrap()
+            } else {
+                vec![NativeQuantity {
+                    kind: param(&request.url, "type").unwrap(),
+                    quantity: param(&request.url, "quantity").unwrap(),
+                }]
+            };
+            for row in rows {
+                lots.entry(row.kind).or_default().push(row.quantity);
+            }
             writes += 1;
             let response = if request.url.contains("batchOrders") {
                 r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#
@@ -642,10 +767,26 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
         }
         assert_eq!(
             ids.len(),
-            6,
+            5, // TS splits the entry into 3,3,2; each attached SL/TP stays 7.
             "every split entry and SL/TP has its actual identity"
         );
         assert!(writes > 0);
+        assert_eq!(lots.len(), 3);
+        for (kind, sequence) in &lots {
+            let (expected, total) = if kind == "LIMIT" {
+                (&["3", "3", "2"][..], 8.0)
+            } else {
+                (&["7"][..], 7.0)
+            };
+            assert_eq!(sequence, expected);
+            assert_eq!(
+                sequence
+                    .iter()
+                    .map(|value| value.parse::<f64>().unwrap())
+                    .sum::<f64>(),
+                total
+            );
+        }
         assert!(h.result(77).unwrap().is_ok());
     }
 }

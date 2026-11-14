@@ -300,6 +300,7 @@ pub enum Provider {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RoutingInputs {
+    pub application_id: Option<String>,
     pub tealstreet_proxy: Option<bool>,
     pub tealstreet_tunnel: Option<bool>,
     pub tealstreet_ws_route: Option<bool>,
@@ -416,7 +417,11 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://api.testnet.paradex.trade/v1",
         ),
         "phemex" => pick("https://api.phemex.com", "https://testnet-api.phemex.com"),
+        "woo" => pick("https://api.woox.io", "https://api.staging.woox.io"),
         "bitunix" => "https://fapi.bitunix.com",
+        "kucoin" if !testnet => "https://api-futures.kucoin.com",
+        "backpack" if !testnet => "https://api.backpack.exchange",
+        "grvt" => pick("https://trades.grvt.io", "https://trades.testnet.grvt.io"),
         _ => return Err(RoutingError::NoBaseUrl(name.into())),
     })
 }
@@ -604,6 +609,31 @@ fn resolve_exchange_routing(
     } else {
         spec.rest_pool.as_str()
     };
+    let mut ws_options = o.clone();
+    if name == "woo" && o.tealstreet_tunnel == Some(true) {
+        ws_options.tealstreet_proxy = Some(true);
+    }
+    let mut private = resolve_ws(spec.ws.private.as_ref(), &ws_options, how_egress);
+    if name == "woo"
+        && let Some(host) = &private.host
+    {
+        let invalid = || RoutingError::InvalidTable("WOO private relay upstream is missing".into());
+        let mut relay = reqwest::Url::parse(host).map_err(|_| invalid())?;
+        let upstream = relay
+            .query_pairs()
+            .find(|(key, _)| key == "ts-relay")
+            .map(|(_, value)| value.into_owned())
+            .ok_or_else(invalid)?;
+        relay.set_query(None);
+        relay.query_pairs_mut().append_pair(
+            "ts-relay",
+            &format!(
+                "{upstream}{}",
+                o.application_id.as_deref().unwrap_or("undefined")
+            ),
+        );
+        private.host = Some(relay.to_string());
+    }
     Ok(Resolved {
         rest_proxy_host: if o.tealstreet_proxy.unwrap_or(false) {
             table().hosts.private_proxy[pool].clone()
@@ -612,7 +642,7 @@ fn resolve_exchange_routing(
         },
         how_egress,
         public: resolve_ws(spec.ws.public.as_ref(), o, how_egress),
-        private: resolve_ws(spec.ws.private.as_ref(), o, how_egress),
+        private,
         business: resolve_ws(spec.ws.business.as_ref(), o, how_egress),
         private_uta: spec
             .ws
@@ -645,7 +675,7 @@ fn venue_headers(name: &str, o: &RoutingInputs) -> BTreeMap<String, String> {
 }
 
 fn proxy_authorization_header(name: &str) -> &'static str {
-    if matches!(name, "grvt" | "mexc" | "paradex" | "breakoutprop") {
+    if matches!(name, "grvt" | "mexc" | "paradex") {
         "Tealstreet-Authorization"
     } else {
         "Authorization"
@@ -658,7 +688,7 @@ fn uses_tunnel(name: &str, o: &RoutingInputs) -> bool {
     match name {
         "paradex" => !public && !o.payload_signer,
         "hyperliquid" | "hyperliquidspot" | "kucoin" | "kucoinspot" => !public,
-        "bingx" => !public && o.tealstreet_tunnel != Some(false),
+        "bingx" | "bingxspot" => !public && o.tealstreet_tunnel != Some(false),
         "weex" | "grvt" | "blofin" | "mexc" => false,
         _ => o.tealstreet_tunnel.unwrap_or(false),
     }
@@ -989,12 +1019,15 @@ mod tests {
             !urls.iter().any(|u| u.starts_with(TABLE_TUNNEL)),
             "{urls:?}"
         );
-        // 14 strategy hosts and 6 fallbacks, each a relay under the tunnel.
+        // 15 strategy hosts and 6 fallbacks, each a relay under the tunnel.
         let relayed = urls
             .iter()
             .filter(|u| u.starts_with(&format!("{to}?ts-relay=")))
             .count();
-        assert_eq!(relayed, 20);
+        assert_eq!(relayed, 21);
+        assert!(urls.contains(&format!(
+            "{to}?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2F"
+        )));
         // Other services on the tunnel's host keep their own paths.
         assert_eq!(
             urls.iter()

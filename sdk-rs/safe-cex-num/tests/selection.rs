@@ -43,7 +43,7 @@ fn selection_typescript_differential() {
             );
         } else {
             let p = NativeSizeInputs {
-                contracts: number(&c["contracts"]).unwrap_or(f64::NAN),
+                contracts: number(&c["contracts"]),
                 notional: number(&c["notional"]),
                 contracts_native: number(&c["native"]),
             };
@@ -52,13 +52,10 @@ fn selection_typescript_differential() {
                 is_inverse: c["inverse"].as_bool(),
             };
             let actual = native_position_size(&p, &m);
-            let expected = number(&c["expected"]).unwrap();
-            assert!(
-                if expected.is_nan() {
-                    actual.is_nan()
-                } else {
-                    actual.to_bits() == expected.to_bits()
-                },
+            let expected = number(&c["expected"]);
+            assert_eq!(
+                actual.map(f64::to_bits),
+                expected.map(f64::to_bits),
                 "{c}: actual {actual:?}"
             );
         }

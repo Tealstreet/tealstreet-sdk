@@ -10,6 +10,11 @@ export const TWAP_RESTORE_SCHEDULE_GRACE_MS = 60_000;
  * Why a `twap:state` row must not run, or undefined when it may. A row comes
  * from one tab's sessionStorage, which a reopened tab can bring back long after
  * the TWAP stopped running. Mirrors the exchange server's `validate::restored`.
+ *
+ * Known issue (accepted 2026-11-09, "if it's hard, not worth it"): the native
+ * owner/generation gate is not mirrored here, and browser and server owner
+ * generations differ, so a LOCAL <-> COSIGNED mode switch refuses saved TWAPs.
+ * Fix direction: one owner-derived generation shared by browser and server.
  */
 export const twapRestoreRefusal = (
   options: TwapOptions | undefined,

@@ -18,7 +18,6 @@ pub(crate) fn infinity(venue: &str) -> bool {
             | "mexc"
             | "phemex"
             | "bingx"
-            | "breakoutprop"
             | "blofin"
             | "okx"
             | "okxdemo"
@@ -73,7 +72,7 @@ pub(crate) fn clamp(venue: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     #[test]
     fn order_policy_flags_match_the_typescript_metadata_including_inheritance() {
         let source = include_str!("../../../../packages/safe-cex/src/exchangeMetadata.ts");
@@ -123,13 +122,27 @@ mod tests {
             .split("};")
             .next()
             .unwrap();
-        let mut count = 0;
+        let types = include_str!("../../../../packages/safe-cex/src/types.ts");
+        let names = types
+            .split_once("export type ExchangeName =")
+            .expect("ExchangeName declaration")
+            .1
+            .split_once(';')
+            .expect("ExchangeName terminator")
+            .0;
+        let expected: HashSet<_> = names
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("| '")?.strip_suffix('\''))
+            .collect();
+        assert!(expected.contains("bingxspot"));
+        let mut extracted = HashSet::new();
         for line in map.lines() {
             let Some((venue, name)) = line.trim().split_once(": ") else {
                 continue;
             };
             let venue = venue.trim_matches(['\'', '"']);
             let name = name.trim_end_matches(',');
+            assert!(extracted.insert(venue), "duplicate metadata entry {venue}");
             assert_eq!(
                 infinity(venue),
                 flag(&blocks, name, "supportsInfinityStops"),
@@ -145,12 +158,20 @@ mod tests {
                 flag(&blocks, name, "autoDownSizeReduceOrders"),
                 "{venue} clamp"
             );
-            count += 1;
         }
-        // Two retired broker metadata entries were deleted; every remaining entry is checked.
         assert_eq!(
-            count, 48,
+            extracted, expected,
             "metadata extraction must not silently skip source"
         );
+    }
+
+    #[test]
+    fn bingx_spot_uses_default_order_policies_instead_of_perpetual_overrides() {
+        assert!(!infinity("bingxspot"));
+        assert!(!trailing("bingxspot"));
+        assert!(!clamp("bingxspot"));
+        assert!(infinity("bingx"));
+        assert!(trailing("bingx"));
+        assert!(!clamp("bingx"));
     }
 }

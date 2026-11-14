@@ -574,7 +574,7 @@ impl Bitrue {
         self.account.tick = Some(cx.set_poll_timer(2_000.0));
     }
     fn acquire_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.listen_pending {
+        if !cx.private_feed_policy().streaming() || self.account.listen_pending {
             return;
         }
         self.account.listen_pending = true;

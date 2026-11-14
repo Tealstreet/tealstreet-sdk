@@ -1,3 +1,10 @@
+import {
+  getStorageEpoch,
+  assertStorageSession,
+  onStorageOwnerChange,
+  runInStorageSession,
+  captureStorageSession,
+} from './storage-context';
 // Keeps this CLI's aliases in step with the server, so an alias defined in a
 // browser (or another machine) resolves here too — which is what makes a
 // webhook body's alias work on whichever listener runs it
@@ -25,9 +32,10 @@ let periodicTimer: ReturnType<typeof setTimeout> | undefined;
 let changeTimer: ReturnType<typeof setTimeout> | undefined;
 let inFlight: Promise<boolean> | null = null;
 let lastAttemptAt = 0;
+let ownerSession: ReturnType<typeof captureStorageSession> | null = null;
 
 const unref = (timer: ReturnType<typeof setTimeout>) => {
-  (timer as { unref?: () => void }).unref?.();
+  timer.unref?.();
   return timer;
 };
 
@@ -48,7 +56,7 @@ async function call(changes: AliasChange[], since: number): Promise<AliasSyncRes
     }
     return (await response.json()) as AliasSyncResponse;
   } catch (err) {
-    logger.warn(`alias sync: ${(err as Error).message}`);
+    logger.warn(`alias sync: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -60,23 +68,35 @@ export function syncAliasesNow(): Promise<boolean> {
   if (inFlight) return inFlight;
   const owner = getAuthState().userId;
   if (!owner) return Promise.resolve(false);
-  inFlight = syncAliases({
-    owner,
-    loadState: () => current.getAliasSyncState(),
-    saveState: (state) => current.setAliasSyncState(state),
-    getLocalAliases: () => current.getAliases(),
-    applyRemote: (entries) => current.applyRemoteAliases(entries),
-    call,
-    report: reportToUser,
-  })
+  const epoch = getStorageEpoch();
+  const pending = runInStorageSession(() =>
+    syncAliases({
+      owner,
+      loadState: () => current.getAliasSyncState(),
+      saveState: (state) => {
+        assertStorageSession(epoch);
+        current.setAliasSyncState(state);
+      },
+      getLocalAliases: () => current.getAliases(),
+      applyRemote: (entries) => {
+        assertStorageSession(epoch);
+        current.applyRemoteAliases(entries);
+      },
+      call,
+      report: reportToUser,
+    }),
+  )
     .then((ok) => {
+      assertStorageSession(epoch);
       lastAttemptAt = Date.now();
       return ok;
     })
+    .catch(() => false)
     .finally(() => {
-      inFlight = null;
+      if (inFlight === pending) inFlight = null;
     });
-  return inFlight;
+  inFlight = pending;
+  return pending;
 }
 
 /** Before a webhook runs, so an alias defined elsewhere moments ago resolves here. */
@@ -86,12 +106,15 @@ export async function syncAliasesIfStale(): Promise<void> {
 }
 
 function schedulePeriodic(): void {
+  const session = ownerSession;
+  if (!session?.isCurrent()) return;
   periodicTimer = unref(
     setTimeout(async () => {
+      if (ownerSession !== session || !session.isCurrent()) return;
       try {
-        await syncAliasesNow();
+        await session.run(syncAliasesNow);
       } finally {
-        if (store) schedulePeriodic();
+        if (store && ownerSession === session && session.isCurrent()) schedulePeriodic();
       }
     }, PERIODIC_MS),
   );
@@ -112,11 +135,18 @@ function reportToUser(report: AliasSyncReport): void {
 
 export function startAliasSync(preprocessStore: FilePreprocessStore, notify: (message: string) => void): void {
   if (store) return;
+  const session = captureStorageSession();
+  ownerSession = session;
   store = preprocessStore;
   warn = notify;
   preprocessStore.setAliasChangeListener(() => {
+    if (ownerSession !== session || !session.isCurrent()) return;
     if (changeTimer) clearTimeout(changeTimer);
-    changeTimer = unref(setTimeout(() => void syncAliasesNow(), AFTER_CHANGE_MS));
+    changeTimer = unref(
+      setTimeout(() => {
+        if (ownerSession === session && session.isCurrent()) void session.run(syncAliasesNow);
+      }, AFTER_CHANGE_MS),
+    );
   });
   void syncAliasesNow();
   schedulePeriodic();
@@ -125,6 +155,16 @@ export function startAliasSync(preprocessStore: FilePreprocessStore, notify: (me
 export function stopAliasSync(): void {
   store?.setAliasChangeListener(null);
   store = null;
+  ownerSession = null;
   if (periodicTimer) clearTimeout(periodicTimer);
   if (changeTimer) clearTimeout(changeTimer);
 }
+
+onStorageOwnerChange(() => {
+  const currentStore = store;
+  const notify = warn;
+  stopAliasSync();
+  inFlight = null;
+  lastAttemptAt = 0;
+  if (currentStore) startAliasSync(currentStore, notify);
+});

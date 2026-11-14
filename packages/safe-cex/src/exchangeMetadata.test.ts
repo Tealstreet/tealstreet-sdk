@@ -235,15 +235,19 @@ describe('exchangeMetadata', () => {
       expect(coinbaseSpot.enableInPreview).toBe(true);
     });
 
-    it('should keep HyroTrader dev-only until the private relay or HTTPS path is ready', () => {
-      // Plain HTTP simulator private REST/WS works for local dev, but preview
-      // and prod need Hyro HTTPS/WSS private endpoints or a Tealstreet relay.
+    it('should keep HyroTrader preview-enabled without production rollout', () => {
+      // Hyro fronts the simulator at a TLS hostname with browser CORS for
+      // Tealstreet, so preview beta validation can run direct. Keep production
+      // dark until the beta is explicitly approved.
       const hyrotrader = exchangeMetadata.hyrotrader;
 
       expect(hyrotrader.exchangeName).toBe('hyrotrader');
       expect(hyrotrader.enabled).toBe(false);
       expect(hyrotrader.enabledInDev).toBe(true);
-      expect(hyrotrader.enableInPreview).toBe(false);
+      expect(hyrotrader.enableInPreview).toBe(true);
+      expect(hyrotrader.forbidCors).toBe(false);
+      expect(hyrotrader.enforceWsTunnel).toBe(false);
+      expect(hyrotrader.supportsTunnel).toBe(false);
     });
 
     it('should keep Robinhood Lighter enabled for preview without production rollout', () => {
@@ -355,7 +359,6 @@ describe('exchangeMetadata', () => {
         'bitrue',
         'bitunix',
         'blofin',
-        'breakoutprop',
         'bybit',
         'bybitdemo',
         'hyrotrader',

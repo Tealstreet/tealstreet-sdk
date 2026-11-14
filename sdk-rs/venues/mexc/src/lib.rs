@@ -34,6 +34,7 @@ pub struct Options {
     pub public_data_only: bool,
     pub identities: safe_cex_engine::signing::Identities,
     pub read_credentials_valid: Option<bool>,
+    pub signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
 }
 
 pub enum Pending {

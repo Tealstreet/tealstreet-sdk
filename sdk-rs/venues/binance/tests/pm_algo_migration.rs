@@ -423,7 +423,7 @@ fn unknown_algo_cancel_is_not_terminal_proof_even_for_a_cancel_only_command() {
         assert_unknown_no_create(&h, "unknown cancel");
         assert_eq!(
             h.result(7).unwrap().as_ref().unwrap_err(),
-            "Binance algo cancellation could not be confirmed; check Open Orders before re-placing"
+            "Binance algo cancellation could not be confirmed; check Open Orders before re-placing. The outcome is unknown. Check Open Orders"
         );
         assert_eq!(h.engine.store().order("stop"), Some(&row));
         assert!(!h.has_request("/papi/v1/um/algo/algoOrder"));

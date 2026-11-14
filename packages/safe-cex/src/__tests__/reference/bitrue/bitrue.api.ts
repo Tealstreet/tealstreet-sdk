@@ -83,7 +83,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         : typeof nextConfig.data === 'string'
           ? nextConfig.data
           : JSON.stringify(nextConfig.data);
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
+    // TODO: Audit whether HOW proxy re-serialization can break this signature.
     const path = basePath + (nextConfig.params ? '?' + qs.stringify(nextConfig.params) : '');
     const timestamp = virtualClock.getCurrentTimeMs();
 

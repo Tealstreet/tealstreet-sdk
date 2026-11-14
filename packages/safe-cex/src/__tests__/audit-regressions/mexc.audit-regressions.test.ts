@@ -156,9 +156,10 @@ describe('MEXC futures audit regressions', () => {
       },
     });
     expect(sendLogs).toHaveLength(1);
-    expect(sendLogs[0]).toContain('"apiKey":"[redacted]"');
-    expect(sendLogs[0]).toContain('"signature":"[redacted]"');
+    expect(sendLogs[0]).toContain('"apiKey":"[REDACTED]"');
+    expect(sendLogs[0]).toContain('"signature":"[REDACTED]"');
     expect(sendLogs[0]).not.toContain('"apiKey":"key"');
+    expect(sendLogs[0]).not.toContain(sentLogin.param.signature);
   });
 
   it('normalizes market precision and contract-size sizing', () => {

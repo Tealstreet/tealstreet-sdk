@@ -5,7 +5,7 @@ use safe_cex_engine::store::Store;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default)]
-pub struct References([Option<(f64, f64)>; 2]);
+pub struct References([Option<(f64, f64)>; 2], [Option<f64>; 2]);
 impl References {
     fn slot(source: StopTriggerType) -> Option<usize> {
         match source {
@@ -16,9 +16,24 @@ impl References {
     }
     fn observe(&mut self, source: StopTriggerType, value: f64, now: f64) {
         if let Some(slot) = Self::slot(source) {
-            self.0[slot] =
-                (value.is_finite() && value > 0.0 && now.is_finite()).then_some((value, now));
+            if !now.is_finite() {
+                self.0[slot] = None;
+                return;
+            }
+            if self.1[slot].is_some_and(|seen| now < seen) {
+                return;
+            }
+            self.1[slot] = Some(now);
+            self.0[slot] = (value.is_finite() && value > 0.0).then_some((value, now));
         }
+    }
+    pub(super) fn received_after(&self, source: StopTriggerType, at: f64) -> bool {
+        Self::slot(source)
+            .and_then(|slot| self.1[slot])
+            .is_some_and(|seen| seen > at)
+    }
+    pub(super) fn invalidate(&mut self) {
+        self.0 = [None; 2];
     }
     fn get(&self, source: StopTriggerType, now: f64) -> Option<f64> {
         let (value, at) = self.0[Self::slot(source)?]?;
@@ -134,6 +149,31 @@ pub(super) struct Guard {
     pub closing: bool,
 }
 impl Guard {
+    // Admission may obtain missing proof once; the final Claim never does I/O.
+    pub(super) fn needs_reference(
+        &self,
+        store: &Store,
+        references: &HashMap<String, References>,
+        now: f64,
+    ) -> bool {
+        self.trigger.is_some()
+            && self.source.is_some_and(|source| {
+                !references
+                    .get(&self.order.symbol)
+                    .and_then(|r| r.get(source, now))
+                    .is_some_and(|value| {
+                        store.ticker(&self.order.symbol).is_some_and(|t| {
+                            value
+                                == match source {
+                                    StopTriggerType::LastPrice => t.last,
+                                    StopTriggerType::MarkPrice => t.mark,
+                                    StopTriggerType::IndexPrice => t.index,
+                                }
+                        })
+                    })
+            })
+    }
+
     pub(super) fn check(
         &self,
         store: &Store,
@@ -256,7 +296,7 @@ impl Job {
     pub(super) fn unknown_words(&self) -> Option<String> {
         self.guard.as_ref().map(|guard| {
             format!(
-                "Your {} {} outcome is unknown; check Open Orders before re-placing protection",
+                "{UNKNOWN_WORDS}. Your {} {} was not confirmed; check protection before re-placing it",
                 guard.order.symbol,
                 if self.restoring {
                     "original stop put-back"

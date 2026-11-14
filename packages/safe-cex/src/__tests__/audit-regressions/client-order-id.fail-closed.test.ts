@@ -20,7 +20,6 @@ import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { BlofinExchange } from '../reference/blofin/blofin.exchange';
-import { BreakoutpropExchange } from '../reference/breakoutprop/breakoutprop.exchange';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
@@ -111,7 +110,6 @@ const HYPERLIQUID_CLOID = '0x0123456789abcdef0123456789abcdef';
 
 const NOT_HONORING: Array<[string, ExchangeCtor]> = [
   ['asterdex', AsterDEXExchange],
-  ['breakoutprop', BreakoutpropExchange],
   // hyperliquid and hyperliquidspot moved to HONORING_EVERY_SHAPE when every
   // placement started carrying a cloid (feat(hyperliquid): cloid on every order).
   ['hyrotrader', HyrotraderExchange],

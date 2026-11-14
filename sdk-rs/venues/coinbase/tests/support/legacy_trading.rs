@@ -2,10 +2,38 @@
 //! Production INTX startup is covered by private_drb; this unit fixture alone
 //! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.
 use crate::{Coinbase, Options};
+#[path = "hosted_parity.rs"]
+mod hosted_parity;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::model::*;
+use safe_cex_engine::signing::{
+    Algorithm, Capability, KeyRef, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
+};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use serde::Deserialize;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+struct DeferredSigner {
+    local: Provider,
+    deferred: Arc<AtomicBool>,
+}
+impl Signer for DeferredSigner {
+    fn immediate(&self) -> bool {
+        !self.deferred.load(Ordering::Relaxed)
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        (!self.deferred.load(Ordering::Relaxed)).then(|| self.local.sign_ready(request).unwrap())
+    }
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(std::future::pending())
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.local.can_sign(key, algorithm)
+    }
+}
 
 const SPOT: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1"}]}"#;
 const INTX: &str = r#"{"products":[{"product_id":"BTC-PERP-INTX","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USDC","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"PERPETUAL","contract_root_unit":"BTC","contract_size":"1"}}]}"#;
@@ -23,6 +51,7 @@ struct Session {
     /// Commands completed with `outcome: Unknown`.
     unknown: Vec<u32>,
     outcomes: Vec<(u32, Option<safe_cex_engine::Outcome>)>,
+    failures: std::collections::HashMap<u32, safe_cex_engine::VenueError>,
     e: Engine<Coinbase>,
     timers: Vec<(f64, TimerId)>,
     now: f64,
@@ -38,6 +67,8 @@ struct Session {
     key_permission_failures: u32,
     deactivated: bool,
     warnings: Vec<String>,
+    signing: Vec<safe_cex_engine::RequestId>,
+    events: Vec<safe_cex_engine::LogEvent>,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -54,7 +85,10 @@ impl Session {
     fn with_options(kind: &'static str, options: Options) -> Self {
         let mut venue = Coinbase::new(options).unwrap();
         venue.account.legacy_protocol_fixture = true;
-        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+        let e = safe_cex_engine::test_support::seeded_engine(venue);
+        Self::with_engine(kind, e)
+    }
+    fn with_engine(kind: &'static str, mut e: Engine<Coinbase>) -> Self {
         e.start(1000.0);
         Self {
             details: std::collections::HashMap::new(),
@@ -66,6 +100,7 @@ impl Session {
             results: vec![],
             unknown: vec![],
             outcomes: vec![],
+            failures: std::collections::HashMap::new(),
             kind,
             open_orders: String::new(),
             requests: vec![],
@@ -76,6 +111,8 @@ impl Session {
             key_permission_failures: 0,
             deactivated: false,
             warnings: vec![],
+            signing: vec![],
+            events: vec![],
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -93,12 +130,14 @@ impl Session {
     }
     fn collect(&mut self) -> Vec<HttpRequest> {
         let mut requests = vec![];
-        for a in self.e.drain_actions().collect::<Vec<_>>() {
+        let now = safe_cex_engine::test_support::dispatch_now(&self.e);
+        for a in safe_cex_engine::test_support::prepared_actions(&mut self.e, now) {
             match a {
                 Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => {
                     self.results.push((command, Ok(result)))
                 }
                 Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
+                    self.failures.insert(command, error.clone());
                     if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
                         self.unknown.push(command);
                     }
@@ -106,16 +145,18 @@ impl Session {
                     self.results.push((command, Err(error.message)))
                 }
                 Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
-                Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
-                    level: safe_cex_engine::Level::Warn,
-                    message,
-                    ..
-                })) => self.warnings.push(message.to_string()),
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                    if event.level == safe_cex_engine::Level::Warn {
+                        self.warnings.push(event.message.clone());
+                    }
+                    self.events.push(event);
+                }
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     self.requests.push(r.clone());
                     requests.push(r)
                 }
+                Action::Sign { attempt, .. } => self.signing.push(attempt),
                 Action::SetTimer { timer, at_ms } => self.timers.push((at_ms, timer)),
                 Action::ClearTimer { timer } => self.timers.retain(|(_, t)| *t != timer),
                 Action::WsConnect { socket, url, .. } if url.contains("ws-user") => {
@@ -241,6 +282,349 @@ impl Session {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum AdvancedWrite {
+    Create,
+    StopCreate,
+    Amend,
+    Cancel,
+    StopCancel,
+}
+const ADVANCED_WRITES: [AdvancedWrite; 5] = [
+    AdvancedWrite::Create,
+    AdvancedWrite::StopCreate,
+    AdvancedWrite::Amend,
+    AdvancedWrite::Cancel,
+    AdvancedWrite::StopCancel,
+];
+fn advanced_write(operation: AdvancedWrite) -> (Session, HttpRequest) {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let path = match operation {
+        AdvancedWrite::Create | AdvancedWrite::StopCreate => {
+            let kind = if matches!(operation, AdvancedWrite::StopCreate) {
+                OrderType::StopLoss
+            } else {
+                OrderType::Limit
+            };
+            s.command(Command::PlaceOrders {
+                command: 501,
+                orders: vec![opts("BTC-USD", kind, OrderSide::Buy, 1.0)],
+            });
+            "/api/v3/brokerage/orders"
+        }
+        AdvancedWrite::Amend | AdvancedWrite::Cancel | AdvancedWrite::StopCancel => {
+            s.seed("old", "BTC-USD", "1", "100");
+            if matches!(operation, AdvancedWrite::StopCancel) {
+                let mut orders = s.e.store().orders().to_vec();
+                orders[0].kind = OrderType::StopLoss;
+                s.e.store_mut().set_orders(orders);
+            }
+            if matches!(operation, AdvancedWrite::Amend) {
+                s.command(Command::AmendOrder {
+                    command: 501,
+                    id: "old".into(),
+                    price: Some(101.0),
+                    amount: None,
+                });
+                "/api/v3/brokerage/orders/edit"
+            } else {
+                s.command(Command::CancelOrders {
+                    command: 501,
+                    ids: vec!["old".into()],
+                });
+                "/api/v3/brokerage/orders/batch_cancel"
+            }
+        }
+    };
+    let request = s.write();
+    assert_eq!(request.method, safe_cex_engine::Method::Post);
+    assert_eq!(request.url, format!("https://api.coinbase.com{path}"));
+    (s, request)
+}
+
+fn advanced_unknown(
+    operation: AdvancedWrite,
+    status: u16,
+    body: &str,
+    kind: safe_cex_engine::ErrorKind,
+) {
+    use safe_cex_engine::Outcome;
+    let (mut s, request) = advanced_write(operation);
+    let before = serde_json::to_value(s.e.store().orders()).unwrap();
+    s.reply(request, status, body);
+    let message = s.done(501).unwrap_err();
+    let failure = &s.failures[&501];
+    assert_eq!(
+        failure.outcome,
+        Some(Outcome::Unknown),
+        "{operation:?}, HTTP {status}"
+    );
+    assert_eq!(failure.kind, Some(kind), "{operation:?}, HTTP {status}");
+    if let Some(code) = [
+        "RESOURCE_EXHAUSTED",
+        "rate_limit_exceeded",
+        "resource_exhausted",
+    ]
+    .into_iter()
+    .find(|code| body.contains(code))
+    {
+        assert_eq!(failure.venue_code.as_deref(), Some(code));
+    }
+    assert!(
+        message.to_ascii_lowercase().contains("unknown"),
+        "{message}"
+    );
+    assert!(message.contains("Check Open Orders"), "{message}");
+    assert_eq!(serde_json::to_value(s.e.store().orders()).unwrap(), before);
+    let until = s.now + 35_000.;
+    for _ in 0..1_000 {
+        for request in s.collect() {
+            assert_eq!(request.method, safe_cex_engine::Method::Get);
+            s.answer(request);
+        }
+        if s.now >= until {
+            break;
+        }
+        s.fire();
+    }
+    assert!(
+        s.now >= until,
+        "{operation:?}, HTTP {status}: timers must progress"
+    );
+    assert_eq!(
+        s.requests
+            .iter()
+            .filter(|r| r.method == safe_cex_engine::Method::Post)
+            .count(),
+        1,
+        "{operation:?}: no write retry, re-sign, replacement or fallback"
+    );
+}
+
+#[test]
+fn advanced_released_http_failures_stay_unknown_for_ordinary_and_protective_writes() {
+    use safe_cex_engine::ErrorKind;
+    for operation in ADVANCED_WRITES {
+        for (status, kind) in [
+            (429, ErrorKind::RateLimited),
+            (408, ErrorKind::Timeout),
+            (500, ErrorKind::VenueUnavailable),
+            (503, ErrorKind::VenueUnavailable),
+        ] {
+            // Even native refusal words cannot turn these statuses into proof.
+            advanced_unknown(
+                operation,
+                status,
+                r#"{"error":"INVALID_ARGUMENT","message":"fixture refusal"}"#,
+                kind,
+            );
+        }
+    }
+}
+
+#[test]
+fn advanced_native_rate_codes_do_not_prove_refusal_at_any_http_status() {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    // Detach on timeout: joining a stalled worker would hang the test again.
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(advanced_native_rate_code_matrix);
+        let _ = sender.send(result);
+    });
+    match receiver.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(error) => {
+            panic!("Coinbase native rate-code matrix did not complete within 30s: {error}")
+        }
+    }
+}
+
+fn advanced_native_rate_code_matrix() {
+    use safe_cex_engine::ErrorKind;
+    let mut cases = 0;
+    for operation in ADVANCED_WRITES {
+        for status in [200, 400, 401, 403, 408, 429, 503] {
+            for code in [
+                "RESOURCE_EXHAUSTED",
+                "rate_limit_exceeded",
+                "resource_exhausted",
+            ] {
+                let body = format!(r#"{{"error":"{code}","message":"fixture rate limit"}}"#);
+                // HTTP 5xx remains VenueUnavailable regardless of the native code.
+                let kind = match status {
+                    408 => ErrorKind::Timeout,
+                    503 => ErrorKind::VenueUnavailable,
+                    _ => ErrorKind::RateLimited,
+                };
+                advanced_unknown(operation, status, &body, kind);
+                cases += 1;
+            }
+        }
+    }
+    assert_eq!(cases, 105, "all operations, HTTP statuses and rate codes");
+}
+
+#[test]
+fn advanced_endpoint_rate_errors_and_generic_error_arrays_stay_unknown() {
+    use safe_cex_engine::ErrorKind;
+    for operation in ADVANCED_WRITES {
+        for code in ["RESOURCE_EXHAUSTED", "rate_limit_exceeded"] {
+            let body = match operation {
+                AdvancedWrite::Create | AdvancedWrite::StopCreate => {
+                    format!(r#"{{"success":false,"error_response":{{"error":"{code}"}}}}"#)
+                }
+                AdvancedWrite::Amend => {
+                    format!(r#"{{"success":false,"errors":[{{"edit_failure_reason":"{code}"}}]}}"#)
+                }
+                AdvancedWrite::Cancel | AdvancedWrite::StopCancel => format!(
+                    r#"{{"results":[{{"order_id":"old","success":false,"failure_reason":"{code}"}}]}}"#
+                ),
+            };
+            advanced_unknown(operation, 200, &body, ErrorKind::RateLimited);
+        }
+        advanced_unknown(
+            operation,
+            400,
+            r#"{"errors":[{"id":"resource_exhausted","message":"fixture rate limit"}]}"#,
+            ErrorKind::RateLimited,
+        );
+    }
+}
+
+#[test]
+fn advanced_genuine_http_refusals_remain_rejected() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for operation in ADVANCED_WRITES {
+        for (status, kind) in [
+            (400, ErrorKind::Rejected),
+            (401, ErrorKind::AuthInvalid),
+            (403, ErrorKind::AuthPermission),
+        ] {
+            let (mut s, request) = advanced_write(operation);
+            s.reply(
+                request,
+                status,
+                r#"{"error":"INVALID_ARGUMENT","message":"fixture refusal"}"#,
+            );
+            assert!(s.done(501).unwrap_err().contains("fixture refusal"));
+            assert_eq!(s.failures[&501].outcome, Some(Outcome::Rejected));
+            assert_eq!(s.failures[&501].kind, Some(kind));
+        }
+    }
+}
+
+#[test]
+fn advanced_native_rate_placement_retains_reconciliation_reservation() {
+    for (status, body) in [
+        (429, r#"{"error":"RESOURCE_EXHAUSTED"}"#),
+        (
+            200,
+            r#"{"success":false,"error_response":{"error":"rate_limit_exceeded"}}"#,
+        ),
+    ] {
+        let (mut s, request) = advanced_write(AdvancedWrite::Create);
+        s.reply(request, status, body);
+        assert!(s.done(501).is_err());
+        assert!(s.cancel_symbol(502).unwrap_err().contains("unresolved"));
+        s.advance(31_000.);
+        assert!(s.cancel_symbol(503).is_ok());
+    }
+}
+
+#[test]
+fn advanced_mixed_cancel_keeps_confirmed_sibling_and_unknown_rate_result() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.seed("old", "BTC-USD", "1", "100");
+    let mut other = s.e.store().order("old").unwrap().clone();
+    other.id = "other".into();
+    s.e.store_mut().upsert_order(other);
+    s.command(Command::CancelOrders {
+        command: 501,
+        ids: vec!["old".into(), "other".into()],
+    });
+    let request = s.write();
+    s.reply(request, 200, r#"{"results":[{"order_id":"old","success":true},{"order_id":"other","success":false,"failure_reason":"RESOURCE_EXHAUSTED"}]}"#);
+    assert!(s.done(501).unwrap_err().contains("Check Open Orders"));
+    assert_eq!(s.failures[&501].outcome, Some(Outcome::Unknown));
+    assert_eq!(s.failures[&501].kind, Some(ErrorKind::RateLimited));
+    assert_eq!(
+        s.e.store().order("old").unwrap().status,
+        OrderStatus::Canceling
+    );
+    assert_eq!(
+        s.e.store().order("other").unwrap().status,
+        OrderStatus::Open
+    );
+    s.advance(35_000.);
+    assert_eq!(
+        s.requests
+            .iter()
+            .filter(|r| r.method == safe_cex_engine::Method::Post)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn advanced_rate_words_in_messages_and_unused_errors_do_not_override_proof() {
+    use safe_cex_engine::Outcome;
+    let (mut s, request) = advanced_write(AdvancedWrite::Create);
+    s.reply(request, 200, r#"{"success":true,"success_response":{"order_id":"accepted"},"error_response":{"error":"RESOURCE_EXHAUSTED"}}"#);
+    assert!(s.done(501).is_ok());
+    assert!(s.e.store().order("accepted").is_some());
+
+    let (mut s, request) = advanced_write(AdvancedWrite::Create);
+    s.reply(request, 200, r#"{"success":false,"error_response":{"error":"INSUFFICIENT_FUND","message":"RESOURCE_EXHAUSTED is only message text"}}"#);
+    assert!(s.done(501).is_err());
+    assert_eq!(s.failures[&501].outcome, Some(Outcome::Rejected));
+}
+
+#[test]
+fn advanced_unsupported_settings_and_protective_amend_are_not_sent() {
+    use safe_cex_engine::Outcome;
+    for command in [
+        Command::SetLeverage {
+            command: 501,
+            symbol: "BTC-USD".into(),
+            leverage: 2.,
+            side: None,
+        },
+        Command::SetMarginType {
+            command: 501,
+            symbol: "BTC-USD".into(),
+            isolated: true,
+        },
+        Command::SetPositionMode {
+            command: 501,
+            hedged: true,
+            symbol: None,
+        },
+        Command::AmendOrder {
+            command: 501,
+            id: "old".into(),
+            price: Some(101.),
+            amount: None,
+        },
+    ] {
+        let mut s = Session::new("DEFAULT", true).ready();
+        s.seed("old", "BTC-USD", "1", "100");
+        let mut orders = s.e.store().orders().to_vec();
+        orders[0].kind = OrderType::StopLoss;
+        s.e.store_mut().set_orders(orders);
+        let settings = s.e.store().setting("BTC-USD");
+        s.command(command);
+        assert!(s.done(501).is_err());
+        assert_eq!(s.failures[&501].outcome, Some(Outcome::NotSent));
+        assert_eq!(s.e.store().setting("BTC-USD"), settings);
+        assert!(
+            !s.requests
+                .iter()
+                .any(|r| r.method == safe_cex_engine::Method::Post)
+        );
+    }
+}
+
 fn opts(symbol: &str, kind: OrderType, side: OrderSide, amount: f64) -> PlaceOrderOpts {
     PlaceOrderOpts {
         symbol: symbol.into(),
@@ -361,6 +745,264 @@ struct StopWire {
 }
 fn create_wire(request: &HttpRequest) -> CreateWire {
     serde_json::from_str(request.body.as_ref().unwrap()).unwrap()
+}
+
+#[test]
+fn legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal() {
+    // TS reference: packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1659,1772.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    for (amount, maximum, step, expected) in [
+        (26., 5., 1., "26"),
+        (11., 5., 1., "11"),
+        (12., 5., 1., "12"),
+        (10., 5., 1., "10"),
+        (7., 3., 0.5, "7"),
+        (1.0005, 0.3, 0.001, "1.001"),
+    ] {
+        let mut s = Session::new("DEFAULT", false).ready();
+        s.e.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.min = step;
+            market.limits.amount.max = maximum;
+        });
+        s.command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("BTC-USD", OrderType::Limit, OrderSide::Buy, amount)],
+        });
+        let mut request = None;
+        for _ in 0..100 {
+            for r in s.collect() {
+                if r.method == safe_cex_engine::Method::Post {
+                    assert!(request.is_none(), "multiple placement payloads");
+                    request = Some(r);
+                } else {
+                    s.answer(r);
+                }
+            }
+            assert!(
+                s.results.iter().all(|(id, _)| *id != 91),
+                "pre-HTTP refusal for {amount}/{maximum}/{step}: {:?}",
+                s.results
+            );
+            if request.is_some() {
+                break;
+            }
+            s.fire();
+        }
+        let request = request.expect("one placement payload");
+        assert!(request.url.ends_with("/orders"));
+        let config = create_wire(&request).order_configuration;
+        assert!(config.market_market_ioc.is_none());
+        assert!(config.stop_limit_stop_limit_gtc.is_none());
+        let sizes = [config.limit_limit_gtc.unwrap().base_size];
+        assert_eq!(sizes, [expected]);
+        let sum: f64 = sizes.iter().map(|s| s.parse::<f64>().unwrap()).sum();
+        assert_eq!(sum, expected.parse::<f64>().unwrap());
+        s.reply(
+            request,
+            400,
+            r#"{"error":"INVALID_ARGUMENT","message":"venue maximum exceeded"}"#,
+        );
+        assert!(s.done(91).unwrap_err().contains("venue maximum exceeded"));
+        assert_eq!(
+            s.failures[&91].outcome,
+            Some(safe_cex_engine::Outcome::Rejected)
+        );
+        s.advance(35_000.);
+        assert_eq!(
+            s.requests
+                .iter()
+                .filter(|r| r.method == safe_cex_engine::Method::Post)
+                .count(),
+            1
+        );
+    }
+}
+
+fn above_max_partial_batch(status: u16, body: &str, unknown: bool) {
+    use safe_cex_engine::Outcome;
+    use safe_cex_engine::write_plan::ElementResult;
+    // TS serial stop: exchanges/base.ts:1111-1114; Coinbase native refusal: reference/coinbase/coinbase.exchange.ts:1614-1639.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses.
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.e.store_mut().update_markets(|market| {
+        market.precision.amount = 1.;
+        market.limits.amount.min = 1.;
+        market.limits.amount.max = 5.;
+    });
+    let orders = [1., 26., 1.]
+        .into_iter()
+        .enumerate()
+        .map(|(index, amount)| {
+            let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, amount);
+            order.client_order_id = Some(format!("prefix-row-{index}"));
+            order
+        })
+        .collect();
+    s.command(Command::PlaceOrders {
+        command: 93,
+        orders,
+    });
+    let first = s.write();
+    assert_eq!(
+        create_wire(&first)
+            .order_configuration
+            .limit_limit_gtc
+            .unwrap()
+            .base_size,
+        "1"
+    );
+    s.reply(
+        first,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"accepted-prefix"}}"#,
+    );
+    let second = s.write();
+    assert_eq!(
+        create_wire(&second)
+            .order_configuration
+            .limit_limit_gtc
+            .unwrap()
+            .base_size,
+        "26"
+    );
+    assert_eq!(create_wire(&second).client_order_id, "prefix-row-1");
+    s.reply(second, status, body);
+    let message = s.done(93).unwrap_err();
+    assert!(s.e.store().order("accepted-prefix").is_some());
+    let failure = &s.failures[&93];
+    let partial = failure
+        .partial
+        .as_ref()
+        .expect("acknowledged prefix survives terminal failure");
+    assert_eq!(partial.order_ids, ["accepted-prefix"]);
+    assert_eq!(partial.total, Some(3));
+    assert_eq!(partial.failed_index, Some(1));
+    let rows = failure.elements.as_ref().expect("indexed venue outcomes");
+    assert_eq!(rows.len(), 3);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        assert_eq!(
+            row.element.client_order_id,
+            Some(format!("prefix-row-{index}"))
+        );
+    }
+    assert_eq!(
+        rows[0].result,
+        ElementResult::Placed {
+            order_ids: vec!["accepted-prefix".into()]
+        }
+    );
+    assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+    let telemetry: Vec<_> = s
+        .events
+        .iter()
+        .filter(|event| event.code == "order.outcome_unknown")
+        .collect();
+    if unknown {
+        assert_eq!(failure.outcome, Some(Outcome::Unknown));
+        assert_eq!(message, "The outcome is unknown. Check Open Orders");
+        let ElementResult::Unknown { error } = &rows[1].result else {
+            panic!("uncertain row must remain Unknown")
+        };
+        assert_eq!(error.message, message);
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.venue_code.as_deref(), Some("RESOURCE_EXHAUSTED"));
+        assert_eq!(telemetry.len(), 1);
+        assert_eq!(telemetry[0].message, message);
+        assert_eq!(telemetry[0].level, safe_cex_engine::Level::Warn);
+        assert!(telemetry[0].fields.contains(&("command", 93_u32.into())));
+        assert!(
+            telemetry[0]
+                .fields
+                .contains(&("elementIndex", 1_u32.into()))
+        );
+        assert!(
+            telemetry[0]
+                .fields
+                .contains(&("clientOrderId", "prefix-row-1".into()))
+        );
+        assert!(telemetry[0].fields.contains(&("placedCount", 1_u32.into())));
+    } else {
+        assert_eq!(
+            failure.outcome, None,
+            "accepted effects preclude whole-command rejection"
+        );
+        assert!(message.contains("venue maximum exceeded"), "{message}");
+        let ElementResult::NotSent { error: Some(error) } = &rows[1].result else {
+            panic!("venue refusal must be reported notSent")
+        };
+        assert_eq!(error.outcome, Some(Outcome::Rejected));
+        assert_eq!(error.message, message);
+        assert!(telemetry.is_empty());
+    }
+    s.advance(35_000.);
+    let writes: Vec<_> = s
+        .requests
+        .iter()
+        .filter(|request| request.method == safe_cex_engine::Method::Post)
+        .collect();
+    assert_eq!(
+        writes.len(),
+        2,
+        "TS stops at refusal/uncertainty; no suffix or resend"
+    );
+    assert_eq!(
+        writes
+            .iter()
+            .map(|request| create_wire(request).client_order_id)
+            .collect::<Vec<_>>(),
+        ["prefix-row-0", "prefix-row-1"]
+    );
+}
+
+#[test]
+fn above_max_batch_keeps_accepted_prefix_when_next_row_is_refused() {
+    for (status, body) in [
+        (
+            400,
+            r#"{"error":"INVALID_ARGUMENT","message":"venue maximum exceeded"}"#,
+        ),
+        (
+            200,
+            r#"{"success":false,"error_response":{"new_order_failure_reason":"venue maximum exceeded"}}"#,
+        ),
+    ] {
+        above_max_partial_batch(status, body, false);
+    }
+}
+
+#[test]
+fn above_max_batch_keeps_prefix_and_publishes_unknown_row_without_sending_suffix() {
+    above_max_partial_batch(
+        200,
+        r#"{"success":false,"failure_reason":"RESOURCE_EXHAUSTED"}"#,
+        true,
+    );
+}
+
+#[test]
+fn above_max_amendments_still_refuse_before_any_write() {
+    // TS native edit bound: packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1573.
+    for (kind, symbol) in [("DEFAULT", "BTC-USD"), ("INTX", "BTC-PERP-INTX")] {
+        let mut s = Session::new(kind, false).ready();
+        s.seed("old", symbol, "1", "100");
+        s.e.store_mut()
+            .update_markets(|market| market.limits.amount.max = 5.);
+        s.command(Command::AmendOrder {
+            command: 92,
+            id: "old".into(),
+            price: None,
+            amount: Some(26.),
+        });
+        assert!(s.done(92).unwrap_err().contains("outside market limits"));
+        assert!(
+            !s.requests
+                .iter()
+                .any(|r| r.method == safe_cex_engine::Method::Post)
+        );
+        assert_eq!(s.e.store().order("old").unwrap().status, OrderStatus::Open);
+    }
 }
 
 #[test]
@@ -631,7 +1273,17 @@ fn missing_create_id_is_ambiguous_and_never_retried_or_followed_by_second_order(
     });
     let r = s.write();
     s.reply(r, 200, r#"{"success":true}"#);
-    assert!(s.done(4).unwrap_err().contains("order ID"));
+    assert_eq!(
+        s.done(4).unwrap_err(),
+        "The outcome is unknown. Check Open Orders"
+    );
+    assert!(
+        s.failures[&4]
+            .venue_message
+            .as_deref()
+            .unwrap()
+            .contains("order ID")
+    );
     assert_eq!(s.unknown, [4]);
 }
 
@@ -651,9 +1303,13 @@ fn transport_failure_never_resends_a_write() {
         },
     );
     let error = s.done(5).unwrap_err();
+    assert_eq!(error, "The outcome is unknown. Check Open Orders");
     assert!(
-        error.starts_with("Coinbase write outcome requires reconciliation"),
-        "{error}"
+        s.failures[&5]
+            .venue_message
+            .as_deref()
+            .unwrap()
+            .starts_with("Coinbase write outcome requires reconciliation")
     );
     assert_eq!(s.unknown, [5]);
 }
@@ -1675,14 +2331,176 @@ fn definite_http_rejection_releases_reservation_and_keeps_coinbase_message() {
     assert!(s.cancel_symbol(302).is_ok());
 }
 
+fn deferred_session(kind: &'static str, spot: bool) -> (Session, Arc<AtomicBool>) {
+    let mut e = hosted_parity::engine(Options {
+        key: ["organizations", "test", "apiKeys", "test"].join("/"),
+        secret: STANDARD.encode([7; 32]),
+        spot_only: spot,
+        ..Default::default()
+    });
+    let deferred = Arc::new(AtomicBool::new(false));
+    e.set_signer(Some(Arc::new(DeferredSigner {
+        local: e.signer().unwrap(),
+        deferred: deferred.clone(),
+    })))
+    .unwrap();
+    let mut s = Session::with_engine(kind, e).ready();
+    for request in s.collect() {
+        s.answer(request);
+    }
+    (s, deferred)
+}
+
+fn refuse_placement(
+    s: &mut Session,
+    deferred: &AtomicBool,
+    order: PlaceOrderOpts,
+    error: SignError,
+) {
+    deferred.store(true, Ordering::Relaxed);
+    s.command(Command::PlaceOrders {
+        command: 600,
+        orders: vec![order],
+    });
+    for _ in 0..100 {
+        for request in s.collect() {
+            assert_eq!(request.method, safe_cex_engine::Method::Get);
+            s.answer(request);
+        }
+        if let Some(attempt) = s.signing.pop() {
+            deferred.store(false, Ordering::Relaxed);
+            s.e.handle(
+                s.now,
+                Event::Signed {
+                    attempt,
+                    result: Err(error),
+                },
+            );
+            assert!(s.done(600).is_err());
+            assert_eq!(
+                s.failures[&600].outcome,
+                Some(safe_cex_engine::Outcome::NotSent)
+            );
+            assert!(
+                !s.requests
+                    .iter()
+                    .any(|r| r.method == safe_cex_engine::Method::Post)
+            );
+            return;
+        }
+        s.fire();
+    }
+    panic!("placement never reached deferred signing");
+}
+
+#[test]
+fn deferred_signing_failure_releases_client_id_for_retry() {
+    for error in [
+        SignError::Refused,
+        SignError::Unavailable,
+        SignError::TimedOut,
+        SignError::InvalidResult,
+    ] {
+        let (mut s, deferred) = deferred_session("DEFAULT", true);
+        let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+        order.client_order_id = Some("refused-client".into());
+        refuse_placement(&mut s, &deferred, order.clone(), error);
+        let request = s.place(601, order);
+        assert_eq!(create_wire(&request).client_order_id, "refused-client");
+        s.reply(
+            request,
+            200,
+            r#"{"success":true,"success_response":{"order_id":"retry"}}"#,
+        );
+        assert!(s.done(601).is_ok());
+    }
+}
+
+#[test]
+fn deferred_signing_failure_does_not_block_cancel_all() {
+    let (mut s, deferred) = deferred_session("DEFAULT", true);
+    refuse_placement(
+        &mut s,
+        &deferred,
+        opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0),
+        SignError::Refused,
+    );
+    assert!(s.cancel_symbol(601).is_ok());
+}
+
+#[test]
+fn deferred_signing_failure_releases_reduce_only_capacity() {
+    let (mut s, deferred) = deferred_session("INTX", false);
+    let mut order = opts("BTC-PERP-INTX", OrderType::Market, OrderSide::Sell, 2.0);
+    order.reduce_only = Some(true);
+    refuse_placement(&mut s, &deferred, order.clone(), SignError::Refused);
+    let request = s.place(601, order);
+    assert_eq!(
+        create_wire(&request)
+            .order_configuration
+            .market_market_ioc
+            .unwrap()
+            .base_size,
+        "2"
+    );
+}
+
+#[test]
+fn unsent_duplicate_client_does_not_release_an_older_unknown_placement() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+    order.client_order_id = Some("unknown-client".into());
+    let request = s.place(600, order.clone());
+    s.e.handle(
+        s.now,
+        Event::HttpFailed {
+            request: request.id,
+            error: "response lost",
+        },
+    );
+    assert!(s.done(600).is_err());
+    assert_eq!(
+        s.failures[&600].outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    s.advance(20_000.);
+    s.command(Command::PlaceOrders {
+        command: 601,
+        orders: vec![order],
+    });
+    assert!(s.done(601).is_err());
+    assert_eq!(
+        s.failures[&601].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(s.cancel_symbol(602).unwrap_err().contains("unresolved"));
+    s.advance(11_000.);
+    assert!(
+        s.cancel_symbol(603).is_ok(),
+        "a refused sibling must not restart Unknown reconciliation"
+    );
+    assert_eq!(
+        s.requests
+            .iter()
+            .filter(|r| r.method == safe_cex_engine::Method::Post)
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn ambiguous_placement_blocks_cancel_symbol_until_bounded_reconciliation() {
     let mut s = Session::new("DEFAULT", true).ready();
     let r = s.place(303, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
     s.reply(r, 503, r#"{"error":"UNAVAILABLE","message":"try again"}"#);
     let error = s.done(303).unwrap_err();
-    assert!(error.contains("requires reconciliation"), "{error}");
-    assert!(error.contains("try again"), "{error}");
+    assert_eq!(error, "The outcome is unknown. Check Open Orders");
+    let diagnostic = s.failures[&303].venue_message.as_deref().unwrap();
+    assert!(
+        diagnostic.contains("requires reconciliation"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("try again"), "{diagnostic}");
     assert!(s.cancel_symbol(304).unwrap_err().contains("unresolved"));
     s.advance(31_000.0);
     assert!(s.cancel_symbol(305).is_ok());
@@ -2003,7 +2821,7 @@ fn saved_read_only_key_signs_reads_while_writes_keep_the_trading_key() {
             "{}",
             read.url
         );
-        assert_eq!(read.route, None);
+        assert_eq!(read.route, Some(safe_cex_engine::RequestRoute::Secondary));
     }
 }
 

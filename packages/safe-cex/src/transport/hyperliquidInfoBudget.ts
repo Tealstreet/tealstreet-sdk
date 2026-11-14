@@ -1,4 +1,5 @@
 import { HttpPreparationError } from '@tealstreet/safe-cex-wasm/host';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 
 // Leave 200 of the documented 1,200 weight/minute for exchange actions and other clients.
 const MS_PER_WEIGHT = 60;
@@ -39,7 +40,7 @@ export function warnHyperliquidInfoBudgetUnavailable(): void {
   if (warned) return;
   warned = true;
   try {
-    console.warn('Hyperliquid /info budget storage is unavailable');
+    diagnosticConsole.warn('Hyperliquid /info budget storage is unavailable');
   } catch {
     /* Diagnostics cannot interrupt a venue read. */
   }

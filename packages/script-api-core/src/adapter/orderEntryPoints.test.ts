@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -35,16 +36,53 @@ const REPO_ROOT = path.resolve(__dirname, '../../../..');
 // package.json, not the directory: the mirror's CI can leave a generated apps/web/ behind.
 const HAS_WEB_APP = existsSync(path.join(REPO_ROOT, 'apps/web/package.json'));
 
-/** A call, not a declaration. `placeOrder?: (…) => …` in an interface and
- *  `readonly placeOrder` on a type both lack the `(` straight after.
- *
- *  Known limits, stated rather than implied: this is textual, so it does not
- *  see `const { placeOrder } = exchange`, `const fn = exchange.placeOrder`, or
- *  `exchange['placeOrder']()`. None appears in this repo and all three are a
- *  strange way to write it, but a determined bypass is possible. The guard
- *  raises the cost of adding an order path BY ACCIDENT, which is how every one
- *  of the six this epic found got there. */
-const PLACES_AN_ORDER = /\.placeOrders?[!?]?\s*\(/;
+/** Direct calls retain the textual guard. Captured sends require a const binding
+ * from an order method, invoked with its original receiver and an order argument.
+ * Destructuring, computed properties and indirect alias chains remain out of scope. */
+const placesAnOrder = (source: string): boolean => {
+  if (/\.placeOrders?[!?]?\s*\(/.test(source)) return true;
+  if (!/\.call\s*\(/.test(source)) return false;
+
+  const fileName = 'order-entry.ts';
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const host = ts.createCompilerHost({});
+  host.getSourceFile = (name) => (name === fileName ? file : undefined);
+  const program = ts.createProgram([fileName], { noLib: true, noResolve: true }, host);
+  const checker = program.getTypeChecker();
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'call' &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.arguments.length >= 2
+    ) {
+      const binding = checker.getSymbolAtLocation(node.expression.expression)?.valueDeclaration;
+      if (
+        binding &&
+        ts.isVariableDeclaration(binding) &&
+        ts.isVariableDeclarationList(binding.parent) &&
+        (binding.parent.flags & ts.NodeFlags.Const) !== 0 &&
+        binding.initializer &&
+        ts.isPropertyAccessExpression(binding.initializer) &&
+        /^(placeOrder|placeOrders)$/.test(binding.initializer.name.text)
+      ) {
+        const receiver = binding.initializer.expression;
+        const invokedReceiver = node.arguments[0];
+        // Sibling visits must never erase an earlier order send.
+        found ||=
+          ts.isIdentifier(receiver) &&
+          ts.isIdentifier(invokedReceiver) &&
+          receiver.text === invokedReceiver.text &&
+          checker.getSymbolAtLocation(receiver) === checker.getSymbolAtLocation(invokedReceiver);
+      }
+    }
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+};
 
 /**
  * Comments are stripped before matching, because a file that only MENTIONS
@@ -97,7 +135,10 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
 
   // The CLI. Each of these prepares its payload with `prepareCliOrder`,
   // which is NOT listed — it rounds and validates, it does not send.
-  'packages/cli-core/src/commands/trading/BaseBuySellCommand.ts': 'buy / sell',
+  // At b861253bb3 (#3449), buy/sell still send in BaseBuySellCommand.submitOrders.
+  // d0e3206005e changed that send to captured placeOrder.call(exchange, order);
+  // the detector must recognize the call, and this real sender must stay listed.
+  'packages/cli-core/src/commands/trading/BaseBuySellCommand.ts': 'buy / sell through submitOrders',
   'packages/cli-core/src/commands/trading/CloseCommand.ts': 'close',
   'packages/cli-core/src/commands/trading/ScaleCommand.ts': 'scale',
   'packages/cli-core/src/commands/trading/StopCommand.ts': 'stop',
@@ -124,7 +165,8 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
   'packages/safe-cex/src/webworker/chaserOrder/ChaserOrderManager.ts': 'a chaser replacement',
   'apps/cli/src/cross-trade-daemon.ts': 'the CLI half of the cross-trade copier',
   'scripts/keys/lib/audit-runtime.ts': 'the `yarn keys` live audit',
-  'apps/web/src/components/customScripts/sandbox/escapeAttempts.ts': 'the sandbox escape corpus — attempts, never executed',
+  'apps/web/src/components/customScripts/sandbox/escapeAttempts.ts':
+    'the sandbox escape corpus — attempts, never executed',
 });
 
 /**
@@ -150,11 +192,20 @@ const trackedFiles = (): readonly string[] =>
     .filter((file) => !file.startsWith('v2/'));
 
 describe('the set of order entry points is closed', () => {
+  it('recognizes the listed CLI buy/sell sender without the web host', () => {
+    const file = 'packages/cli-core/src/commands/trading/BaseBuySellCommand.ts';
+    expect(file in ENTRY_POINTS).toBe(true);
+    expect(
+      placesAnOrder(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))),
+      `${file} is listed but no longer places an order`,
+    ).toBe(true);
+  });
+
   // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('nothing outside the known set sends an order', () => {
     const offenders = trackedFiles()
       .filter((file) => !isVenueImplementation(file) && !isTest(file) && !(file in ENTRY_POINTS))
-      .filter((file) => PLACES_AN_ORDER.test(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))))
+      .filter((file) => placesAnOrder(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))))
       .sort();
 
     expect(
@@ -167,18 +218,22 @@ describe('the set of order entry points is closed', () => {
   }, 30_000);
 
   // Walks the source tree; under CI load this outruns vitest's 5s default.
-  it.skipIf(!HAS_WEB_APP)('every listed entry point still exists and still places an order', () => {
-    // A stale entry is a hole: it lets a file be deleted and a different one
-    // added under the same path without the guard noticing.
-    const tracked = new Set(trackedFiles());
-    for (const file of Object.keys(ENTRY_POINTS)) {
-      expect(tracked, `${file} is listed but no longer tracked`).toContain(file);
-      expect(
-        PLACES_AN_ORDER.test(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))),
-        `${file} is listed but no longer places an order — remove it`,
-      ).toBe(true);
-    }
-  }, 30_000);
+  it.skipIf(!HAS_WEB_APP)(
+    'every listed entry point still exists and still places an order',
+    () => {
+      // A stale entry is a hole: it lets a file be deleted and a different one
+      // added under the same path without the guard noticing.
+      const tracked = new Set(trackedFiles());
+      for (const file of Object.keys(ENTRY_POINTS)) {
+        expect(tracked, `${file} is listed but no longer tracked`).toContain(file);
+        expect(
+          placesAnOrder(withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'))),
+          `${file} is listed but no longer places an order — remove it`,
+        ).toBe(true);
+      }
+    },
+    30_000,
+  );
 
   it('test references are excluded while production sources stay in scope', () => {
     expect(isTest('packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts')).toBe(true);
@@ -186,12 +241,70 @@ describe('the set of order entry points is closed', () => {
     expect(isTest('packages/script-api-core/src/proxy/InProcessProxy.ts')).toBe(false);
   });
 
+  it('rejects a no-op named placeOrder while recognizing a real captured send', () => {
+    expect(placesAnOrder('const placeOrder = async () => [] as string[]; await placeOrder.call(exchange);')).toBe(
+      false,
+    );
+    expect(placesAnOrder('const placeOrder = exchange.placeOrder; await placeOrder.call(exchange, order);')).toBe(true);
+  });
+
+  it.each([
+    [
+      'different identifier receiver',
+      'const send = exchange.placeOrder;',
+      'send.call(exchange, order)',
+      'send.call(other, order)',
+    ],
+    [
+      'property receiver',
+      'const send = exchange.placeOrder; const nested = ctx.exchange.placeOrder;',
+      'send.call(exchange, order)',
+      'nested.call(ctx.exchange, order)',
+    ],
+  ])('preserves a real send among rejected siblings: %s', (_name, declarations, realSend, rejectedSend) => {
+    for (const calls of [
+      [realSend, rejectedSend],
+      [rejectedSend, realSend],
+    ]) {
+      const source = `${declarations} await Promise.all([${calls.join(', ')}]);`;
+      expect(placesAnOrder(source), source).toBe(true);
+    }
+  });
+
+  it('requires the captured method, matching receiver, payload and lexical binding', () => {
+    for (const source of [
+      'const placeOrder = async () => []; await placeOrder.call(exchange, order);',
+      'const send = exchange.cancelOrder; await send.call(exchange, order);',
+      'const send = exchange.placeOrder; await send.call(otherExchange, order);',
+      'const send = exchange.placeOrder; await send.call(exchange);',
+      'const send = exchange.placeOrder;',
+      'let send = exchange.placeOrder; send = async () => []; await send.call(exchange, order);',
+      'const send = exchange.placeOrder; { const send = async () => []; await send.call(exchange, order); }',
+      'const exchange = original; const send = exchange.placeOrder; { const exchange = other; await send.call(exchange, order); }',
+    ]) {
+      expect(placesAnOrder(source), source).toBe(false);
+    }
+    const file = 'packages/cli-core/src/commands/trading/BaseBuySellCommand.ts';
+    const source = withoutComments(readFileSync(path.join(REPO_ROOT, file), 'utf8'));
+    expect(placesAnOrder(source.replace('placeOrder.call(exchange, order)', 'Promise.resolve([])'))).toBe(false);
+    expect(
+      placesAnOrder(
+        source
+          .replace('const placeOrder = exchange.placeOrder;', 'const placeOrder = async () => [] as string[];')
+          .replace('placeOrder.call(exchange, order)', 'placeOrder.call(exchange)'),
+      ),
+    ).toBe(false);
+  });
+
   it('the detector matches a call and ignores a declaration or a mention', () => {
-    expect(PLACES_AN_ORDER.test(withoutComments('// calls exchange.placeOrder() on retry'))).toBe(false);
-    expect(PLACES_AN_ORDER.test(withoutComments('/** wraps `exchange.placeOrders()` */'))).toBe(false);
-    expect(PLACES_AN_ORDER.test('await exchange.placeOrder!(order)')).toBe(true);
-    expect(PLACES_AN_ORDER.test('await exchange.placeOrders(orders)')).toBe(true);
-    expect(PLACES_AN_ORDER.test('readonly placeOrder?: (opts: PlaceOrderOpts) => Promise<string[]>;')).toBe(false);
-    expect(PLACES_AN_ORDER.test('if (!exchange.placeOrder) return;')).toBe(false);
+    expect(placesAnOrder(withoutComments('// calls exchange.placeOrder() on retry'))).toBe(false);
+    expect(placesAnOrder(withoutComments('/** wraps `exchange.placeOrders()` */'))).toBe(false);
+    expect(placesAnOrder('await exchange.placeOrder!(order)')).toBe(true);
+    expect(placesAnOrder('await exchange.placeOrders(orders)')).toBe(true);
+    expect(placesAnOrder('await placeOrder.call(exchange, order)')).toBe(false);
+    expect(placesAnOrder('const send = exchange.placeOrders; await send.call(exchange, orders);')).toBe(true);
+    expect(placesAnOrder('const placeOrder = exchange.placeOrder;')).toBe(false);
+    expect(placesAnOrder('readonly placeOrder?: (opts: PlaceOrderOpts) => Promise<string[]>;')).toBe(false);
+    expect(placesAnOrder('if (!exchange.placeOrder) return;')).toBe(false);
   });
 });

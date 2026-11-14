@@ -138,6 +138,7 @@ pub(crate) struct Pending {
     pub outbound: Action,
     unsigned: Action,
     step: Box<dyn SignStep>,
+    // The original issuance survives retries, including a provider replacement.
     sequence: u64,
     plain: bool,
     pub managed: bool,
@@ -159,6 +160,9 @@ pub(crate) struct Pending {
     pub(crate) nonce_repairs: u8,
 }
 impl Pending {
+    pub(crate) fn provider_current(&self, provider_floor: u64) -> bool {
+        self.sequence >= provider_floor
+    }
     #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
     pub(crate) fn nonce_identity_current(&self, identities: &crate::signing::Identities) -> bool {
         self.nonce_claim.as_ref().is_none_or(|claim| {
@@ -210,6 +214,8 @@ impl Pending {
 }
 #[derive(Default)]
 pub(crate) struct Dispatch {
+    provider_floor: u64,
+    provider_changed: bool,
     pending: crate::IdMap<RequestId, Pending>,
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: crate::IdMap<RequestId, Pending>,
@@ -228,6 +234,28 @@ pub(crate) enum Completion {
     Failed(Pending, SignError),
 }
 impl Dispatch {
+    pub fn replace_provider(&mut self) {
+        // Signing IDs never rewind; retries retain the original issuance.
+        // This frontier fences earlier provider work without per-request allocation.
+        self.provider_floor = self.next.next_unissued();
+        self.provider_changed = true;
+    }
+    pub(crate) fn provider_floor(&self) -> u64 {
+        self.provider_floor
+    }
+    pub fn take_revoked(&mut self) -> Vec<RequestId> {
+        if !std::mem::take(&mut self.provider_changed) {
+            return Vec::new();
+        }
+        let mut revoked: Vec<_> = self
+            .pending
+            .iter()
+            .filter(|(_, p)| !p.plain && !p.provider_current(self.provider_floor))
+            .map(|(id, _)| *id)
+            .collect();
+        revoked.sort_unstable_by_key(|id| id.0);
+        revoked
+    }
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty() && self.outbound.is_empty()
@@ -300,11 +328,17 @@ impl Dispatch {
         self.next_work() == Some(id)
     }
     pub fn take_plain(&mut self) -> Option<Action> {
-        let (id, p) = self.head()?;
-        if !p.plain {
-            return None;
+        loop {
+            let (id, p) = self.head()?;
+            if !p.plain {
+                return None;
+            }
+            let mut pending = self.pending.remove(&id)?;
+            if pending.provider_current(self.provider_floor) {
+                return Some(pending.outbound);
+            }
+            wipe(&mut pending.outbound);
         }
-        self.pending.remove(&id).map(|p| p.outbound)
     }
     pub fn ready(&mut self, id: RequestId, pending: Pending) {
         self.outbound.insert(id, pending);
@@ -320,6 +354,10 @@ impl Dispatch {
             wipe(&mut action);
             return None;
         };
+        if !pending.provider_current(self.provider_floor) {
+            wipe(&mut action);
+            return Some(Completion::Failed(pending, SignError::Refused));
+        }
         if !now.is_finite() || now >= pending.deadline {
             wipe(&mut action);
             return Some(Completion::Failed(pending, SignError::TimedOut));
@@ -486,6 +524,9 @@ impl Dispatch {
         deadline: f64,
     ) -> Result<(), SignError> {
         let p = self.pending.get(&id).ok_or(SignError::Unavailable)?;
+        if !p.provider_current(self.provider_floor) {
+            return Err(SignError::Refused);
+        }
         if !p.managed || p.route_ready || !deadline.is_finite() || deadline <= p.staged_at {
             return Err(SignError::InvalidRequest);
         }
@@ -503,14 +544,17 @@ impl Dispatch {
     /// A prepared task's HTTP request and absolute deadline.
     #[cfg(feature = "sign-meta")]
     pub(crate) fn prepared_task(&self, id: RequestId) -> Option<(RequestId, f64)> {
-        let pending = self.pending.get(&id).filter(|p| p.prepared_at.is_some())?;
+        let pending = self
+            .pending
+            .get(&id)
+            .filter(|p| p.provider_current(self.provider_floor) && p.prepared_at.is_some())?;
         Some((pending.request_id()?, pending.deadline))
     }
 
     pub fn signature_pending(&self, id: RequestId) -> bool {
         self.pending
             .get(&id)
-            .is_some_and(|p| p.prepared_at.is_some())
+            .is_some_and(|p| p.provider_current(self.provider_floor) && p.prepared_at.is_some())
     }
     pub fn is_managed(&self, id: RequestId) -> bool {
         self.pending.get(&id).is_some_and(|p| p.managed)
@@ -554,6 +598,9 @@ impl Dispatch {
         identities: &crate::signing::Identities,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
+        if !p.provider_current(self.provider_floor) {
+            return Err(SignError::Refused);
+        }
         #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
         if !p.nonce_identity_current(identities) {
             return Err(SignError::InvalidRequest);
@@ -745,6 +792,9 @@ impl Dispatch {
             return None;
         }
         let mut p = self.pending.remove(&id)?;
+        if !p.provider_current(self.provider_floor) {
+            return Some(Completion::Failed(p, SignError::Refused));
+        }
         if !now.is_finite() || now >= p.deadline {
             return Some(Completion::Failed(p, SignError::TimedOut));
         }
@@ -856,12 +906,12 @@ pub(crate) fn wipe(action: &mut Action) {
         Action::Http(http) => wipe_http(http),
         // A Bind may carry the Session Bearer, the engine's one token copy, or
         // a release domain's held signed request.
-        #[cfg(any(feature = "session-bearer", feature = "release-domains"))]
-        Action::ManagedHttp(managed) => {
-            if let crate::request_context::HttpAction::Bind { request, .. } = &mut **managed {
-                wipe_http(request);
-            }
-        }
+        Action::ManagedHttp(managed) => match managed.as_mut() {
+            crate::request_context::HttpAction::Prepare { request, .. }
+            | crate::request_context::HttpAction::Bind { request, .. } => wipe_http(request),
+            _ => {}
+        },
+        Action::SignedOutbound { outbound, .. } => wipe(outbound),
         Action::WsSend { text, .. } => text.zeroize(),
         Action::WsConnect { url, headers, .. } => {
             url.zeroize();

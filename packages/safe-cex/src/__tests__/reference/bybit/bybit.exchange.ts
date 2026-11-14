@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
@@ -18,8 +19,8 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { BaseExchange } from '../../../exchanges/base';
-import { mapBybitClosedPnl } from '../../../exchanges/bybit/bybit.closed-pnl';
-import { isBybitInverseSymbol, positionUpnlInQuote } from '../../../exchanges/bybit/bybit.inverse';
+import { mapBybitClosedPnl } from './bybit.closed-pnl';
+import { isBybitInverseSymbol, positionUpnlInQuote } from './bybit.inverse';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
 import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
 import {
@@ -1979,7 +1980,7 @@ export class BybitExchange extends BaseExchange {
         } while (cursor && page < MAX_CLOSED_PNL_PAGES);
       }
 
-      return entries.sort((a, b) => b.closedTime - a.closedTime);
+      return entries.sort(compareClosedPnlTimes);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.retMsg || err?.message);
       return [];

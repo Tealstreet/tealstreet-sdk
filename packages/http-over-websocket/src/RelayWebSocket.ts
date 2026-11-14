@@ -35,6 +35,22 @@ export { buildRelayUrl, isRelayUrl, parseRelayUrl, RELAY_QUERY_PARAM } from './t
 
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 const MAX_QUEUED_SENDS = 100;
+const NATIVE_PING_INTERVAL_MS = 15_000;
+const NATIVE_SILENCE_MS = 45_000;
+
+type NativePingSocket = WebSocket & {
+  ping(): void;
+  on(event: 'pong', listener: () => void): void;
+  off(event: 'pong', listener: () => void): void;
+};
+
+function hasNativePing(socket: WebSocket): socket is NativePingSocket {
+  return (
+    'ping' in socket && typeof socket.ping === 'function' &&
+    'on' in socket && typeof socket.on === 'function' &&
+    'off' in socket && typeof socket.off === 'function'
+  );
+}
 
 // Import ws for Node.js/Bun: Bun's native WebSocket lacks ALPNProtocols, which
 // the tunnel needs to force HTTP/1.1. Same pattern as HOWWebSocket.
@@ -100,6 +116,8 @@ export class RelayWebSocket extends EventTarget {
   private authSent = false;
   private closeDispatched = false;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
+  private keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+  private lastReceivedAt = 0;
   // Whether the tunnel socket itself opened, and whether our caller closed it: a socket
   // that closes before opening, unprompted, counts against the tunnel lane.
   private innerOpened = false;
@@ -154,6 +172,7 @@ export class RelayWebSocket extends EventTarget {
     this.closedByCaller = true;
     this.diagnostics.closed('local');
     this.clearHandshakeTimer();
+    this.stopKeepalive();
     try {
       if (code === undefined) this.inner.close();
       else this.inner.close(code, reason);
@@ -179,6 +198,8 @@ export class RelayWebSocket extends EventTarget {
   };
 
   private onInnerMessage = (event: Event) => {
+    if (!this.checkKeepalive()) return;
+    this.lastReceivedAt = Date.now();
     const data = (event as MessageEvent).data;
     if (this.readyState === RelayWebSocket.OPEN) {
       this.dispatchMessage(data);
@@ -237,6 +258,7 @@ export class RelayWebSocket extends EventTarget {
     this.clearHandshakeTimer();
     this.readyState = RelayWebSocket.OPEN;
     this.diagnostics.established();
+    this.startKeepalive();
     const event = new Event('open');
     this.onopen?.(event);
     this.dispatchEvent(event);
@@ -246,9 +268,10 @@ export class RelayWebSocket extends EventTarget {
   private fail(message: string) {
     if (this.readyState === RelayWebSocket.CLOSED) return;
     this.diagnostics.closed('local');
-    this.dispatchError(message);
     this.readyState = RelayWebSocket.CLOSING;
     this.clearHandshakeTimer();
+    this.stopKeepalive();
+    this.dispatchError(message);
     try {
       this.inner.close();
     } catch {
@@ -263,6 +286,7 @@ export class RelayWebSocket extends EventTarget {
     if (this.closeDispatched) return;
     this.closeDispatched = true;
     this.clearHandshakeTimer();
+    this.stopKeepalive();
     if (!this.innerOpened && !this.closedByCaller) noteTunnelDialFailed(this.tunnelUrl);
     this.readyState = RelayWebSocket.CLOSED;
     this.inner.removeEventListener('open', this.onInnerOpen);
@@ -290,5 +314,41 @@ export class RelayWebSocket extends EventTarget {
   private clearHandshakeTimer() {
     if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
     this.handshakeTimer = undefined;
+  }
+
+  private readonly onNativePong = () => {
+    if (this.checkKeepalive()) this.lastReceivedAt = Date.now();
+  };
+
+  private checkKeepalive(): boolean {
+    if (this.keepaliveTimer !== undefined && Date.now() - this.lastReceivedAt >= NATIVE_SILENCE_MS) {
+      this.fail('relay connection silent');
+      return false;
+    }
+    return true;
+  }
+
+  private startKeepalive() {
+    const socket = this.inner;
+    if (!hasNativePing(socket)) return;
+    const ping = socket.ping.bind(socket);
+    this.lastReceivedAt = Date.now();
+    socket.on('pong', this.onNativePong);
+    this.keepaliveTimer = setInterval(() => {
+      if (this.readyState !== RelayWebSocket.OPEN) return;
+      if (!this.checkKeepalive()) return;
+      // Relay mode is a verbatim venue pipe: RPC pings would reach the exchange.
+      try {
+        ping();
+      } catch {
+        this.fail('relay heartbeat failed');
+      }
+    }, NATIVE_PING_INTERVAL_MS);
+  }
+
+  private stopKeepalive() {
+    clearInterval(this.keepaliveTimer);
+    this.keepaliveTimer = undefined;
+    if (hasNativePing(this.inner)) this.inner.off('pong', this.onNativePong);
   }
 }

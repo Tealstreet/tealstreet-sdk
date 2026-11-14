@@ -22,7 +22,7 @@ use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use wire::*;
 
 pub const REST_URL: &str = "https://rpc.txflow-testnet.xyz";
@@ -113,7 +113,10 @@ pub struct TxFlow {
     pub(crate) trading: trading::Trading,
     pub(crate) assets: HashMap<String, u32>,
     pub(crate) coins: HashMap<String, String>,
-    pub(crate) instruments: HashMap<u32, Instrument>,
+    // Ordered: per-frame ticker and context lookups avoid SipHash on venue IDs.
+    pub(crate) instruments: BTreeMap<u32, Instrument>,
+    /// Every instrument's decimal index still resolves to its own name in `coins`.
+    numeric_coins_exact: bool,
     historical_assets: HashMap<String, Option<u32>>,
     historical_coins: HashMap<String, String>,
     node: Connection,
@@ -139,6 +142,7 @@ impl TxFlow {
             assets: Default::default(),
             coins: Default::default(),
             instruments: Default::default(),
+            numeric_coins_exact: false,
             historical_assets: Default::default(),
             historical_coins: Default::default(),
             node: Default::default(),
@@ -427,6 +431,47 @@ impl TxFlow {
             }
         }
     }
+    /// The instrument's cached ticker row, when it still names this instrument.
+    fn cached_ticker(cx: &Cx<'_, Pending>, instrument: &Instrument) -> Option<u32> {
+        instrument.ticker_index.filter(|index| {
+            cx.store
+                .tickers()
+                .get(*index as usize)
+                .is_some_and(|ticker| ticker.symbol == instrument.name)
+        })
+    }
+    /// A canonical decimal coin names an instrument by index, exactly as `coins` does.
+    fn numeric_instrument<'a>(
+        instruments: &'a BTreeMap<u32, Instrument>,
+        exact: bool,
+        coin: &str,
+    ) -> Option<&'a Instrument> {
+        let canonical = !coin.is_empty()
+            && coin.bytes().all(|b| b.is_ascii_digit())
+            && (coin.len() == 1 || !coin.starts_with('0'));
+        if !exact || !canonical {
+            return None;
+        }
+        instruments.get(&coin.parse().ok()?)
+    }
+    fn context_row(&mut self, cx: &mut Cx<'_, Pending>, row: ContextFrame<'_>) {
+        let mask = Self::context_mask(&row.ctx);
+        if let Some(instrument) =
+            Self::numeric_instrument(&self.instruments, self.numeric_coins_exact, &row.coin)
+        {
+            let symbol = instrument.name.as_str();
+            if let Some(index) = Self::cached_ticker(cx, instrument) {
+                cx.store
+                    .update_ticker_at(index, |t| Self::context_update(t, row.ctx));
+            } else {
+                Self::context(cx, symbol, row.ctx);
+            }
+            self.live_tickers.record(cx.store, symbol, mask);
+        } else if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
+            Self::context(cx, &symbol, row.ctx);
+            self.live_tickers.record(cx.store, &symbol, mask);
+        }
+    }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
         let Ok(frame) = PublicFrame::decode(text) else {
             return false;
@@ -443,30 +488,15 @@ impl TxFlow {
         match frame {
             PublicFrame::Contexts(rows) => {
                 for row in rows.ctxs {
-                    if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
-                        let mask = Self::context_mask(&row.ctx);
-                        Self::context(cx, &symbol, row.ctx);
-                        self.live_tickers.record(cx.store, &symbol, mask);
-                    }
+                    self.context_row(cx, row);
                 }
             }
-            PublicFrame::Context(row) => {
-                if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
-                    let mask = Self::context_mask(&row.ctx);
-                    Self::context(cx, &symbol, row.ctx);
-                    self.live_tickers.record(cx.store, &symbol, mask);
-                }
-            }
+            PublicFrame::Context(row) => self.context_row(cx, row),
             PublicFrame::Ticker(row) => {
                 if let Some(instrument) = self.instruments.get(&row.instrument_id) {
                     let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
-                    if let Some(index) = instrument.ticker_index.filter(|index| {
-                        cx.store
-                            .tickers()
-                            .get(*index as usize)
-                            .is_some_and(|ticker| ticker.symbol == symbol)
-                    }) {
+                    if let Some(index) = Self::cached_ticker(cx, instrument) {
                         cx.store.update_ticker_at(index, |ticker| {
                             Self::ticker_update(ticker, row, false)
                         });
@@ -865,7 +895,7 @@ impl Venue for TxFlow {
                 let mut markets = Vec::new();
                 let mut assets = HashMap::new();
                 let mut coins = HashMap::new();
-                let mut instruments = HashMap::new();
+                let mut instruments = BTreeMap::new();
                 let mut ticker_queue = VecDeque::new();
                 for row in rows {
                     if let Some(market) = row.market() {
@@ -910,6 +940,9 @@ impl Venue for TxFlow {
                 for (_, context) in self.ticker_contexts.drain() {
                     let _ = cx.finish_http_context(&context);
                 }
+                self.numeric_coins_exact = instruments
+                    .iter()
+                    .all(|(index, row)| coins.get(&index.to_string()) == Some(&row.name));
                 self.assets = assets;
                 self.coins = coins;
                 self.instruments = instruments;

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { releasedHttpActions } from './managed-http-fixture.mjs';
 const { WasmEngine } = createRequire(import.meta.url)('../pkg/node/safe_cex_wasm.js');
 const decode = (value) => value ? JSON.parse(value) : [];
 const seeded = (seed) => (length) => Uint8Array.from({ length }, () => seed++ & 255);
@@ -26,8 +27,8 @@ function released(engine, wire, now = 1000) {
     assert.ok(action.op !== 'sign', 'Entropy fixture requires a local signer');
     if (action.op !== 'managedHttp') { result.push(action); continue; }
     if (action.phase === 'prepare') {
-      const preparation = tokenFields(action.preparation, 'p1', 3);
-      assert.equal(preparation[0], String(action.packet.request));
+      const preparation = tokenFields(action.preparation, 'p2', 4);
+      assert.equal(preparation[1], String(action.packet.request));
       assert.ok(engine.httpPreparationPending(action.preparation));
       assert.ok(!resources.has(action.preparation), 'Prepared resource cannot be replaced');
       const resource = String(++next);
@@ -37,11 +38,11 @@ function released(engine, wire, now = 1000) {
       const resource = resources.get(action.preparation);
       assert.ok(resource, 'Binding requires the exact prepared resource');
       assert.equal(resource.request, action.packet.request);
-      const preparation = tokenFields(action.preparation, 'p1', 3);
-      const permit = tokenFields(action.permit, 'r1', 4);
-      assert.deepEqual(permit.slice(0, 2), preparation.slice(0, 2));
-      assert.equal(permit[0], String(action.packet.request));
-      assert.equal(permit[2], resource.resource);
+      const preparation = tokenFields(action.preparation, 'p2', 4);
+      const permit = tokenFields(action.permit, 'r2', 5);
+      assert.deepEqual(permit.slice(0, 3), preparation.slice(0, 3));
+      assert.equal(permit[1], String(action.packet.request));
+      assert.equal(permit[3], resource.resource);
       resources.delete(action.preparation);
       const claim = JSON.parse(engine.httpClaim(action.permit, now));
       assert.ok(claim.status === 'released' || claim.status === 'denied', 'Paced/parked entropy routes are unsupported');
@@ -60,6 +61,8 @@ function tokenFields(value, prefix, count) {
   const parts = value.split(':');
   assert.equal(parts.shift(), prefix);
   assert.equal(parts.length, count);
+  assert.notEqual(parts[0], '0', 'Issuer must be nonzero');
+  if (prefix === 'r2') assert.notEqual(parts[4], '0', 'Permit sequence must be nonzero');
   for (const part of parts) {
     assert.match(part, /^(?:0|[1-9][0-9]*)$/);
     assert.ok(part.length < 20 || (part.length === 20 && part <= '18446744073709551615'));
@@ -167,9 +170,9 @@ test('raw WASM setters reject missing and non-callable providers before startup'
 });
 
 test('raw entropy fixture rejects mismatched attempt/resource tokens before claiming', () => {
-  const preparation = 'p1:7:9007199254740993:1';
+  const preparation = 'p2:1:7:9007199254740993:1';
   const packet = { request: 7, method: 'POST', url: 'https://venue.invalid/order', headers: [] };
-  for (const permit of ['r1:7:9007199254740992:1:1', 'r1:7:9007199254740993:2:1', 'r1:07:9007199254740993:1:1']) {
+  for (const permit of ['r2:1:7:9007199254740992:1:1', 'r2:1:7:9007199254740993:2:1', 'r2:1:07:9007199254740993:1:1']) {
     let claims = 0;
     const engine = {
       httpPreparationPending: () => true,
@@ -183,18 +186,61 @@ test('raw entropy fixture rejects mismatched attempt/resource tokens before clai
 });
 
 test('raw entropy fixture exposes the exact final packet only after a successful claim', () => {
-  const preparation = 'p1:7:9007199254740993:1';
+  const preparation = 'p2:1:7:9007199254740993:1';
   const packet = { request: 7, method: 'POST', url: 'https://venue.invalid/order?signature=final', headers: [['key', 'fixture']] };
   for (const status of ['released', 'denied']) {
     const events = [];
     const engine = {
       httpPreparationPending: () => true,
-      httpPrepared: () => JSON.stringify([{ op: 'managedHttp', phase: 'bind', preparation, permit: 'r1:7:9007199254740993:1:1', packet }]),
+      httpPrepared: () => JSON.stringify([{ op: 'managedHttp', phase: 'bind', preparation, permit: 'r2:1:7:9007199254740993:1:1', packet }]),
       httpClaim() { events.push('claim'); return JSON.stringify({ status }); },
       prepareDispatch() { events.push('drain'); return ''; },
     };
     const actions = released(engine, JSON.stringify([{ op: 'managedHttp', phase: 'prepare', preparation, packet: { ...packet, url: 'https://venue.invalid/order', headers: [] } }]));
     assert.deepEqual(events, ['claim', 'drain']);
     assert.deepEqual(actions, status === 'released' ? [{ ...packet, op: 'http' }] : []);
+  }
+});
+
+test('managed fixtures match issuer, attempt and prepared resource before claiming', () => {
+  const preparation = 'p2:18446744073709551615:7:9007199254740993:17';
+  const permit = 'r2:18446744073709551615:7:9007199254740993:1:23';
+  const packet = { request: 7, method: 'POST', url: 'https://venue.invalid/order', headers: [] };
+  for (const drain of [released, releasedHttpActions]) {
+    const exercise = (prepared, bound, status) => {
+      const claims = [];
+      const engine = {
+        httpPreparationPending: () => true,
+        httpPrepared(token, resource) {
+          assert.equal(token, prepared);
+          assert.equal(resource, '1');
+          return JSON.stringify([{ op: 'managedHttp', phase: 'bind', preparation: prepared, permit: bound, packet }]);
+        },
+        httpClaim(token) { claims.push(token); return JSON.stringify({ status }); },
+        prepareDispatch: () => '',
+      };
+      const run = () => drain(engine, JSON.stringify([{ op: 'managedHttp', phase: 'prepare', preparation: prepared, packet }]), 1000);
+      return { claims, run };
+    };
+    for (const status of ['released', 'denied']) {
+      const control = exercise(preparation, permit, status);
+      assert.deepEqual(control.run(), status === 'released' ? [{ ...packet, op: 'http' }] : []);
+      assert.deepEqual(control.claims, [permit]);
+    }
+    for (const [prepared, bound] of [
+      [preparation, permit.replace('18446744073709551615', '18446744073709551614')],
+      [preparation, permit.replace(':7:', ':8:')],
+      [preparation, permit.replace('9007199254740993', '9007199254740992')],
+      [preparation, permit.replace(':1:', ':2:')],
+      [preparation, permit.replace(':23', ':0')],
+      [preparation, permit.replace(':7:', ':07:')],
+      [preparation, permit.replace('18446744073709551615', '18446744073709551616')],
+      [preparation.replace('18446744073709551615', '0'), permit.replace('18446744073709551615', '0')],
+      ['p1:7:9007199254740993:17', 'r1:7:9007199254740993:17:23'],
+    ]) {
+      const rejected = exercise(prepared, bound, 'released');
+      assert.throws(rejected.run);
+      assert.deepEqual(rejected.claims, []);
+    }
   }
 });
