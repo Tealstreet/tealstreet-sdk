@@ -4,6 +4,33 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3266 merge 2d0fdf629b84: equal optimized web/Node artifacts, build.sh --venue mexc.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
+// Module SHA256 e8939820ec914ac233aafc4ef82692d2fda4478800a10f85a7597073810af27f.
+test('#3266 clock-safety composition retains the measured MEXC 10 KiB reserve', () => {
+  const measured = 1_960_367;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.mexc;
+  assert.equal(minimumCap, 1_971_200);
+  assert.ok(cap >= minimumCap, `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'mexc'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
+});
+
+// #3266 merge 2d0fdf629b84: equal optimized web/Node artifacts, build.sh --venue polymarket.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
+test('#3266 clock-safety composition retains the measured Polymarket 10 KiB reserve', () => {
+  const measured = 1_665_253;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.polymarket;
+  assert.equal(minimumCap, 1_676_288);
+  assert.ok(cap >= minimumCap, `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'polymarket'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'polymarket'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'polymarket'), /exceeds/);
+});
+
 // #3513 run 43622387718, artifact 14125280270; source 0a27110da82221143bc3f51377130ae5f98c22ea.
 // sdk-rs tree d1ae9a6dfa82f578465f85541feb6ae013823bc5 equals reviewed b5231048d4.
 // Optimized web/Node SHA256 bd2760d7eaa57e7ef051fa344dc7ff5cb7b23b4791bbd0a971b550087b0b6c41.
