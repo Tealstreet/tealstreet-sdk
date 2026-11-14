@@ -24,6 +24,9 @@ starknet-crypto.workspace = true
 franklin-crypto = { workspace = true, optional = true }
 zeroize.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.191"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom_03.workspace = true
 getrandom_04.workspace = true
