@@ -431,6 +431,7 @@ fn explicit_stp_rejects_the_whole_batch_before_any_io() {
 #[test]
 fn unsupported_shared_commands_complete_with_error_without_io() {
     use safe_cex_engine::model::{CancelOrderRef, StpMode};
+    // Supported leverage reads are covered in leverage_context.rs.
     for unsupported in [
         Command::CancelOrdersWithSymbols {
             command: 1,
@@ -449,10 +450,6 @@ fn unsupported_shared_commands_complete_with_error_without_io() {
             symbol: "BTCUSDT".into(),
             limit: Some(100),
         },
-        Command::FetchLeverage {
-            command: 1,
-            symbol: "BTCUSDT".into(),
-        },
     ] {
         let mut e = engine();
         let actions = command(&mut e, unsupported);
@@ -467,32 +464,374 @@ fn unsupported_shared_commands_complete_with_error_without_io() {
 }
 
 #[test]
-fn split_orders_are_sequential_exact_and_unique() {
+fn split_orders_are_sequential_legacy_sized_and_unique() {
+    assert_legacy_equal_lots(
+        2.123,
+        1.,
+        0.001,
+        &["0.667", "0.667", "0.667", "0.123"],
+        2.124,
+    );
+}
+
+fn assert_legacy_equal_lots(amount: f64, max: f64, step: f64, expected: &[&str], sum: f64) {
+    // packages/safe-cex/src/__tests__/reference/phemex/phemex.exchange.ts:1372-1384.
     let mut e = engine();
-    let mut o = opts("");
-    o.amount = 2.123;
-    let a = command(
+    let mut markets = e.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.min = step;
+    market.limits.amount.max = max;
+    e.store_mut().set_markets(markets);
+    let mut order = opts("");
+    order.amount = amount;
+    let mut actions = command(
         &mut e,
         Command::PlaceOrders {
-            command: 1,
-            orders: vec![o],
+            command: 92,
+            orders: vec![order],
         },
     );
-    let mut r = writes(&a).pop().unwrap();
-    let mut ids = Vec::new();
-    for (i, qty) in ["1", "1", "0.123"].iter().enumerate() {
-        assert_eq!(p(&r, "orderQtyRq").as_deref(), Some(*qty));
-        let id = p(&r, "clOrdID").unwrap();
-        assert!(id.starts_with("Tealstreet_"));
-        assert!(!ids.contains(&id));
-        ids.push(id);
-        let a = respond(&mut e, &r, ack(&r, &format!("real-{i}")));
-        if i < 2 {
-            assert_eq!(writes(&a).len(), 1);
-            r = writes(&a).pop().unwrap();
+    let mut quantities = Vec::new();
+    let mut client_ids = Vec::new();
+    let mut native_ids = Vec::new();
+    for index in 0..expected.len() {
+        let sent = writes(&actions);
+        assert_eq!(sent.len(), 1, "only the next lot may be dispatched");
+        let request = &sent[0];
+        assert!(request.url.contains("/g-orders/create?"));
+        quantities.push(p(request, "orderQtyRq").unwrap());
+        let client_id = p(request, "clOrdID").unwrap();
+        assert!(client_id.starts_with("Tealstreet_"));
+        assert!(!client_ids.contains(&client_id));
+        client_ids.push(client_id);
+        let native_id = format!("native-{index}");
+        actions = respond(&mut e, request, ack(request, &native_id));
+        native_ids.push(native_id);
+    }
+    assert_eq!(quantities, expected);
+    let total: f64 = quantities.iter().map(|q| q.parse::<f64>().unwrap()).sum();
+    assert_eq!(safe_cex_engine::num::adjust(total, step), sum);
+    assert!(
+        writes(&actions).is_empty(),
+        "no extra lot after the TS sequence"
+    );
+    assert_eq!(
+        done(&actions).unwrap(),
+        serde_json::to_string(&native_ids).unwrap()
+    );
+}
+
+#[test]
+fn legacy_equal_lots_26_step_1() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
+    assert_legacy_equal_lots(26., 5., 1., &["4", "4", "4", "4", "4", "4", "1"], 25.);
+}
+
+#[test]
+fn legacy_equal_lots_11_step_1() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
+    assert_legacy_equal_lots(11., 5., 1., &["3", "3", "3", "1"], 10.);
+}
+
+#[test]
+fn legacy_equal_lots_12_step_1() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
+    assert_legacy_equal_lots(12., 5., 1., &["3", "3", "3", "2"], 11.);
+}
+
+#[test]
+fn legacy_equal_lots_10_exact_multiple() {
+    assert_legacy_equal_lots(10., 5., 1., &["5", "5"], 10.);
+}
+
+#[test]
+fn legacy_equal_lots_7_half_step() {
+    assert_legacy_equal_lots(7., 3., 0.5, &["2", "2", "2", "1"], 7.);
+}
+
+#[test]
+fn legacy_equal_lots_normalize_to_thousandth_step() {
+    assert_legacy_equal_lots(
+        1.0005,
+        0.3,
+        0.001,
+        &["0.225", "0.225", "0.225", "0.225", "0.101"],
+        1.001,
+    );
+}
+
+#[test]
+fn split_native_unknown_reports_first_middle_and_last_lots() {
+    for index in [0, 1, 3] {
+        assert_split_unknown(index, json!({"code":10500,"msg":"internal","data":null}));
+    }
+}
+
+#[test]
+fn split_malformed_ack_reports_unknown_with_same_contract() {
+    assert_split_unknown(1, json!({"code":0,"data":null}));
+}
+
+#[test]
+fn split_definite_first_refusal_continues_all_ts_lots() {
+    assert_split_refusals(&[0]);
+}
+
+#[test]
+fn split_definite_middle_refusal_continues_all_ts_lots() {
+    assert_split_refusals(&[1]);
+}
+
+#[test]
+fn split_multiple_and_all_refusals_keep_each_native_row() {
+    assert_split_refusals(&[0, 2]);
+    assert_split_refusals(&[3]);
+    assert_split_refusals(&[0, 1, 2, 3]);
+}
+
+fn assert_split_refusals(refused: &[usize]) {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut e = engine();
+    let mut order = opts("");
+    order.amount = 2.123;
+    let mut actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 94,
+            orders: vec![order],
+        },
+    );
+    let mut accepted = Vec::new();
+    let mut clients = Vec::new();
+    let mut quantities = Vec::new();
+    for (index, quantity) in ["0.667", "0.667", "0.667", "0.123"].iter().enumerate() {
+        let sent = writes(&actions);
+        assert_eq!(
+            sent.len(),
+            1,
+            "TS continues after a definite refusal at lot {index}"
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
+        let request = &sent[0];
+        assert_eq!(p(request, "orderQtyRq").as_deref(), Some(*quantity));
+        quantities.push(quantity.parse::<f64>().unwrap());
+        let client = p(request, "clOrdID").unwrap();
+        assert!(!clients.contains(&client));
+        clients.push(client);
+        actions = if refused.contains(&index) {
+            respond(
+                &mut e,
+                request,
+                json!({"code":11001,"msg":format!("refused-{index}"),"data":null}),
+            )
         } else {
-            assert_eq!(done(&a).unwrap(), "[\"real-0\",\"real-1\",\"real-2\"]");
+            let id = format!("accepted-{index}");
+            accepted.push(id.clone());
+            respond(&mut e, request, ack(request, &id))
+        };
+    }
+    assert_eq!(
+        safe_cex_engine::num::adjust(quantities.iter().sum(), 0.001),
+        2.124
+    );
+    assert!(writes(&actions).is_empty());
+    let error = failure(&actions);
+    assert_eq!(
+        error.outcome,
+        if accepted.is_empty() {
+            Some(safe_cex_engine::Outcome::Rejected)
+        } else {
+            None
         }
+    );
+    assert_eq!(
+        error.message,
+        format!("Phemex 11001 refused-{}", refused.last().unwrap())
+    );
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.as_slice())
+            .unwrap_or_default(),
+        accepted
+    );
+    let rows = error.elements.as_ref().expect("complete placement journal");
+    assert_eq!(rows.len(), 4);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        assert_eq!(row.element.client_order_id.as_ref(), Some(&clients[index]));
+        if refused.contains(&index) {
+            assert!(
+                matches!(&row.result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected) && error.message == format!("Phemex 11001 refused-{index}"))
+            );
+        } else {
+            assert!(
+                matches!(&row.result, ElementResult::Placed { order_ids } if order_ids == &[format!("accepted-{index}")])
+            );
+        }
+    }
+    assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+}
+
+#[test]
+fn split_definite_refusal_then_unknown_still_stops_suffix() {
+    use safe_cex_engine::write_plan::ElementResult;
+    let mut e = engine();
+    let mut order = opts("");
+    order.amount = 2.123;
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 95,
+            orders: vec![order],
+        },
+    );
+    let first = writes(&actions).remove(0);
+    let actions = respond(
+        &mut e,
+        &first,
+        json!({"code":11001,"msg":"refused","data":null}),
+    );
+    let second = writes(&actions).remove(0);
+    let actions = respond(
+        &mut e,
+        &second,
+        json!({"code":10500,"msg":"internal","data":null}),
+    );
+    assert!(writes(&actions).is_empty());
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    let rows = error.elements.as_ref().unwrap();
+    assert!(matches!(
+        rows[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(matches!(rows[1].result, ElementResult::Unknown { .. }));
+    assert!(
+        rows[2..]
+            .iter()
+            .all(|row| row.result == ElementResult::NotSent { error: None })
+    );
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")).count(), 1);
+}
+
+fn assert_split_unknown(unknown: usize, body: Value) {
+    use safe_cex_engine::write_plan::ElementResult;
+    const GUIDANCE: &str = "The outcome is unknown. Check Open Orders";
+    let mut e = engine();
+    let mut order = opts("");
+    order.amount = 2.123;
+    let mut actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 93,
+            orders: vec![order],
+        },
+    );
+    let mut client_ids = Vec::new();
+    let mut accepted = Vec::new();
+    for (index, quantity) in ["0.667", "0.667", "0.667", "0.123"]
+        .iter()
+        .enumerate()
+        .take(unknown + 1)
+    {
+        let sent = writes(&actions);
+        assert_eq!(sent.len(), 1);
+        let request = &sent[0];
+        assert!(request.url.contains("/g-orders/create?"));
+        assert_eq!(p(request, "orderQtyRq").as_deref(), Some(*quantity));
+        let client_id = p(request, "clOrdID").unwrap();
+        assert!(!client_ids.contains(&client_id));
+        client_ids.push(client_id);
+        if index == unknown {
+            actions = respond(&mut e, request, body.clone());
+        } else {
+            let id = format!("accepted-{index}");
+            actions = respond(&mut e, request, ack(request, &id));
+            accepted.push(id);
+        }
+    }
+    assert!(writes(&actions).is_empty(), "no suffix after Unknown");
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.message, GUIDANCE);
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.as_slice())
+            .unwrap_or_default(),
+        accepted
+    );
+    let rows = error.elements.as_ref().expect("indexed placement outcomes");
+    assert_eq!(rows.len(), 4);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        assert!(
+            row.element
+                .client_order_id
+                .as_ref()
+                .is_some_and(|id| id.starts_with("Tealstreet_"))
+        );
+        if index <= unknown {
+            assert_eq!(
+                row.element.client_order_id.as_ref(),
+                Some(&client_ids[index])
+            );
+        }
+        if index < unknown {
+            assert!(
+                matches!(&row.result, ElementResult::Placed { order_ids } if order_ids == &[accepted[index].clone()])
+            );
+        } else if index == unknown {
+            assert!(
+                matches!(&row.result, ElementResult::Unknown { error } if error.message == GUIDANCE && error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+            );
+        } else {
+            assert_eq!(row.result, ElementResult::NotSent { error: None });
+        }
+    }
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandError { command: 93, message }) if message == GUIDANCE)).count(), 1);
+    let events: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(events[0].message, GUIDANCE);
+    assert!(
+        events[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    );
+    assert!(
+        events[0].fields.iter().any(
+            |(key, value)| *key == "command" && *value == safe_cex_engine::log::Value::Num(93.)
+        )
+    );
+    for (timer, at_ms) in actions.iter().filter_map(|a| match a {
+        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+        _ => None,
+    }) {
+        e.handle(at_ms, Event::TimerFired { timer });
+        let later: Vec<_> = e.drain_actions().collect();
+        assert!(
+            writes(&later).is_empty(),
+            "no timer may resume an uncertain split"
+        );
     }
 }
 

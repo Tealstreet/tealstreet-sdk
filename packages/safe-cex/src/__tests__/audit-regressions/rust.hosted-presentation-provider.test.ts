@@ -90,17 +90,26 @@ describe('shared hosted provider presentation', () => {
   });
 
   it.each(['okx', 'bitget'] as const)('%s aliases only absent secondary passphrases, including a primary-material-only setup', async (exchangeName) => {
-    for (const key of [identity.publicCredential, '']) {
-      for (const absent of [undefined, null]) {
-        const s = setup(exchangeName, { key, secondary_key: 'read-public', secondary_passphrase: absent as unknown as string });
-        if (s.ids.primary) expect(s.ids.secondary?.passphrase).toBe(s.ids.primary.passphrase);
-        const result = await s.capsule.signer(ownedRequest(s.ids, 'secondary'), context());
-        expect(result.values[0]).toEqual(Array.from(Buffer.from('read-public')));
-        expect(result.values[2]).toEqual(Array.from(Buffer.from('fixture-presentation')));
-      }
+    for (const absent of [undefined, null]) {
+      const s = setup(exchangeName, { key: identity.publicCredential, secondary_key: 'read-public', secondary_passphrase: absent as unknown as string });
+      if (s.ids.primary) expect(s.ids.secondary?.passphrase).toBe(s.ids.primary.passphrase);
+      const result = await s.capsule.signer(ownedRequest(s.ids, 'secondary'), context());
+      expect(result.values[0]).toEqual(Array.from(Buffer.from('read-public')));
+      expect(result.values[2]).toEqual(Array.from(Buffer.from('fixture-presentation')));
     }
+    // Without a primary key the account is effectively public, exactly as with an explicit flag.
+    const keyless = setup(exchangeName, { key: '', secondary_key: 'read-public' });
+    expect(keyless.ids).toEqual({});
+    await expect(keyless.capsule.signer(request(), context())).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+    expect(keyless.callback).not.toHaveBeenCalled();
+    keyless.capsule.dispose();
     expect(() => setup(exchangeName, { secondary_key: 'read-public', secondary_passphrase: '' })).toThrow(/passphrase/);
-    expect(() => setup(exchangeName, { publicDataOnly: true, secondary_key: 'read-public', secondary_passphrase: '' })).toThrow(/passphrase/);
+    const publicOnly = setup(exchangeName, { publicDataOnly: true, secondary_key: 'read-public', secondary_passphrase: '' });
+    expect(publicOnly.ids).toEqual({});
+    await expect(publicOnly.capsule.signer(request(), context()))
+      .rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+    expect(publicOnly.callback).not.toHaveBeenCalled();
+    publicOnly.capsule.dispose();
     const own = setup(exchangeName, { secondary_key: 'read-public', secondary_passphrase: 'own-read-presentation' });
     expect(own.ids.secondary?.passphrase).not.toBe(own.ids.primary?.passphrase);
     expect((await own.capsule.signer(ownedRequest(own.ids, 'secondary'), context())).values[2])

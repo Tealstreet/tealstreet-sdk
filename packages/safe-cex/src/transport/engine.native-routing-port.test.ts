@@ -57,6 +57,7 @@ const BASE_URLS: Partial<Record<ExchangeName, string>> = {
   hyperliquidspot: 'https://api.hyperliquid.xyz',
   blofin: 'https://openapi.blofin.com',
   bingx: 'https://open-api.bingx.com',
+  bingxspot: 'https://open-api.bingx.com',
   lighter: 'https://mainnet.zklighter.elliot.ai',
   'lighter-robinhood': 'https://mainnet.zklighter.elliot.ai',
   paradex: 'https://api.prod.paradex.trade',
@@ -64,6 +65,7 @@ const BASE_URLS: Partial<Record<ExchangeName, string>> = {
   bitunix: 'https://fapi.bitunix.com',
   asterdex: 'https://fapi.asterdex.com',
   grvt: 'https://trades.grvt.io',
+  woo: 'https://api.woox.io',
 };
 
 /** Saved-account transport preferences, as the hosted init payload carries them. */
@@ -91,6 +93,7 @@ const OPTIONS: Array<Partial<ExchangeOptions>> = [
 ];
 
 const transportOptions = (options: Partial<ExchangeOptions>) => ({
+  applicationId: options.applicationId,
   tealstreetProxy: options.tealstreetProxy,
   tealstreetTunnel: options.tealstreetTunnel,
   tealstreetWsRoute: options.tealstreetWsRoute,
@@ -148,7 +151,11 @@ const buildPlans = () => {
         apiSecret: '',
         ...preferences,
       } as ExchangeAccountConfig);
-      const options = { ...accountToExchangeOptions(account), transport: tealstreetTransport };
+      const options = {
+        ...accountToExchangeOptions(account),
+        ...(exchange === 'woo' ? { applicationId: 'application-123' } : {}),
+        transport: tealstreetTransport,
+      };
       cases.push({
         exchange,
         baseURL,

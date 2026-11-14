@@ -1,3 +1,4 @@
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../../store/store.interface';
@@ -60,7 +61,7 @@ import { AccountMarketOverlay, BaseExchange, CallableMethodsInWorker } from '../
 import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { parseAccountEquity } from './okx.account-equity';
 import { createAPI } from './okx.api';
-import { mapOkxClosedPosition } from '../../../exchanges/okx/okx.closed-pnl';
+import { mapOkxClosedPosition } from './okx.closed-pnl';
 import { mapOkxBillToIncomeRecords, OKX_BILL_TYPE_BY_INCOME_TYPE } from './okx.income';
 import { mapOkxHistoricalOrder } from './okx.order-history';
 import {
@@ -1387,7 +1388,7 @@ export class OKXExchange extends BaseExchange {
         );
       }
 
-      return entries.sort((a, b) => b.closedTime - a.closedTime);
+      return entries.sort(compareClosedPnlTimes);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return [];

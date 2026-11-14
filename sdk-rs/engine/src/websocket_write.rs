@@ -11,10 +11,40 @@ pub(super) fn outbound(packet: Box<HttpAction>) -> Action {
     }
 }
 
+pub use crate::request_context::WebSocketCommit;
+
+fn fresh_issuer() -> Option<u64> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        value.checked_add(1)
+    })
+    .ok()
+}
+
+/// Physical handoff after admission. Revalidate the connection, then call
+/// `commit` with a callback that attempts the frame exactly once. No venue
+/// callback runs inside `commit`; false handoff leaves the attempt NotSent.
+pub trait WebSocketHandoff {
+    fn send(&mut self, socket: SocketId, text: String, commit: &mut WebSocketCommit<'_>) -> bool;
+}
+
+impl<F> WebSocketHandoff for F
+where
+    F: FnMut(SocketId, String, &mut WebSocketCommit<'_>) -> bool,
+{
+    fn send(&mut self, socket: SocketId, text: String, commit: &mut WebSocketCommit<'_>) -> bool {
+        self(socket, text, commit)
+    }
+}
+
 /// Opaque bound mutation. A host checks readiness, then consumes this with
 /// `Engine::claim_websocket_write` immediately before its socket send.
 #[derive(Debug)]
-pub struct WebSocketWriteBinding(Box<HttpAction>);
+pub struct WebSocketWriteBinding {
+    packet: Box<HttpAction>,
+    issuer: u64,
+}
 
 impl WebSocketWriteBinding {
     /// Decode the engine's reserved outbound envelope. Decoding grants no send
@@ -27,13 +57,17 @@ impl WebSocketWriteBinding {
         else {
             return None;
         };
-        let Action::ManagedHttp(packet) = *outbound else {
+        let Action::ManagedHttp(mut packet) = *outbound else {
             return None;
         };
-        matches!(packet.as_ref(), HttpAction::Bind { .. }).then_some(Self(packet))
+        let HttpAction::Bind { permit, .. } = packet.as_mut() else {
+            return None;
+        };
+        let issuer = permit.take_websocket_issuer();
+        Some(Self { packet, issuer })
     }
     pub fn preparation(&self) -> Preparation {
-        let HttpAction::Bind { preparation, .. } = self.0.as_ref() else {
+        let HttpAction::Bind { preparation, .. } = self.packet.as_ref() else {
             unreachable!()
         };
         *preparation
@@ -285,16 +319,25 @@ impl<V: Venue> Engine<V> {
     /// Register a host which claims each typed Bind immediately before its
     /// synchronous socket send. This capability grants no mutation authority.
     pub fn enable_websocket_write_host(&mut self) {
+        if self.io.core.websocket_write_issuer == 0 {
+            let Some(issuer) = fresh_issuer() else {
+                return;
+            };
+            self.io.core.websocket_write_issuer = issuer;
+        }
         self.io.core.websocket_write_host = true;
     }
 
     /// The bound socket, for checking host readiness before consuming admission.
     pub fn websocket_write_socket(&self, binding: &WebSocketWriteBinding) -> Option<SocketId> {
+        if binding.issuer == 0 || binding.issuer != self.io.core.websocket_write_issuer {
+            return None;
+        }
         let HttpAction::Bind {
             preparation,
             permit,
             request,
-        } = binding.0.as_ref()
+        } = binding.packet.as_ref()
         else {
             return None;
         };
@@ -310,17 +353,18 @@ impl<V: Venue> Engine<V> {
             .flatten()
     }
 
-    /// Final single-use mutation claim, immediately before physical socket send.
+    /// Reserve admission, then commit only through the synchronous physical handoff.
     pub fn claim_websocket_write(
         &mut self,
         now: f64,
         binding: WebSocketWriteBinding,
-    ) -> Result<(SocketId, String), Error> {
+        handoff: &mut dyn WebSocketHandoff,
+    ) -> Result<(), Error> {
         self.assert_live();
         let socket = match self.websocket_write_socket(&binding) {
             Some(socket) => socket,
             None => {
-                crate::signing_dispatch::wipe(&mut Action::ManagedHttp(binding.0));
+                crate::signing_dispatch::wipe(&mut Action::ManagedHttp(binding.packet));
                 return Err(Error::Revoked);
             }
         };
@@ -328,22 +372,26 @@ impl<V: Venue> Engine<V> {
             preparation,
             permit,
             mut request,
-        } = *binding.0
+        } = *binding.packet
         else {
             unreachable!()
         };
-        if !matches!(self.io.core.sockets.role_of(socket), Some(1 | 2)) {
+        if !matches!(self.io.core.sockets.role_of(socket), Some(1 | 2))
+            || !self.io.core.sockets.is_open(socket)
+        {
             self.http_preparation_failed(
                 now,
                 preparation,
                 Error::Revoked,
-                VenueError::new("WebSocket write connection is no longer live"),
+                VenueError::new("WebSocket write connection is not open; no frame sent"),
             );
             crate::signing_dispatch::wipe(&mut Action::Http(request));
             return Err(Error::Revoked);
         }
-        let result = match self.claim_http(now, permit) {
-            Ok(Claim::Released(_)) => return Ok((socket, request.body.take().unwrap_or_default())),
+        let result = match self.claim_http_with_handoff(now, permit, &mut |commit| {
+            handoff.send(socket, request.body.take().unwrap_or_default(), commit)
+        }) {
+            Ok(Claim::Released(_)) => return Ok(()),
             Ok(Claim::WaitUntil(_)) => {
                 self.http_preparation_failed(
                     now,

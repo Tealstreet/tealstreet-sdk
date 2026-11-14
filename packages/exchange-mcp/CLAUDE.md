@@ -53,7 +53,8 @@ surfaces on the first call. Failed native startup is retried with a fresh accoun
 concurrent calls share the replacement startup. Keep shutdown reading
 `instance.exchange` at call time, since destructuring would retain the failed
 account. Rust accounts admit `EXCHANGE_SIGNER_HEADER` only for aliases whose
-shared construction policy enables PayloadSigner. Their trusted setup installs
+shared construction policy enables PayloadSigner and whose provider supports
+HMAC-SHA256. Coinbase JWS signers cannot use this proxy. Their trusted setup installs
 the existing JS callback as the injected provider and retains REST-only private
 feeds; generic options contain neither callback nor raw credentials. Other Rust
 families still reject it before issuing requests. Provider callbacks remain
@@ -64,9 +65,7 @@ Rust; Binance's REST seed alone would freeze its quote tools. The protocol test
 replays actual recorded Binance socket traffic and requires changed tool quotes.
 Historical MCP WASM fixtures explicitly mock beta admission to retain their
 protocol assertions for OUT reference venues; production admits no TS adapter.
-Keep native REST timers active as well as sockets:
-BreakoutProp has no stream and its tools depend on periodic reconciliation.
-A real native protocol regression requires changed quotes after its REST poll.
+Keep native REST timers active as well as sockets for periodic reconciliation.
 History UTC mapping preserves the SDK's non-enumerable incompleteness marker.
 For known partial history, tool text JSON is `{ requestId, rows, completeness:
 { incomplete: true } }`, using the owning JSON-RPC request ID. Unflagged

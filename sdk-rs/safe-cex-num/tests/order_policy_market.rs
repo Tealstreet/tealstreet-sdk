@@ -162,7 +162,7 @@ fn market_order_policy_matches_native_source_values() {
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
     // 48 current venue records plus 14 prototype/unknown witnesses, for two predicates.
-    // The two retired brokers are excluded; every remaining source row is compared.
+    // Retired venues are excluded; every remaining source row is compared.
     // 12*8*2*2*5*2 + (48+14)*2 + 6 + 6*7*7*2+24 + 6*2*2*2*11*5 + 8 + 3.
     assert_eq!(rows.len(), 7233, "ORDER market source cardinality");
     let mut compared = [0; 12];

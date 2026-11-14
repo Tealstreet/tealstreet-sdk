@@ -15,14 +15,16 @@ use tokio::sync::Notify;
 
 use crate::{
     ChaserProgress, ChaserRequest, OrderKind, OrderSide, SliceFailure, TickerQuote, TwapBook,
-    TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest,
+    TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest, TwapOwner,
 };
 
 /// The account's chaser runtime, as TWAP slices use it.
 pub trait TwapChasers {
-    /// An `Err` is the refusal the client sees as an error log.
+    /// An `Err` refuses child admission before dispatch and is logged to the client.
     fn start_with_id(&self, cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String>;
     fn progress(&self, chaser_id: &str) -> Option<ChaserProgress>;
+    /// Stop further writes after an uncertain TWAP outcome; current and late orders stay.
+    fn halt(&self, cx: &AlgoCx, chaser_id: &str);
     /// Stop the chaser and cancel its open order.
     fn remove(&self, cx: &AlgoCx, chaser_id: &str);
 }
@@ -45,7 +47,10 @@ pub const TWAP_OPS: &[&str] = &[
 #[derive(Clone)]
 pub struct TwapFactory {
     inner: Rc<Inner>,
+    captured_owner: Option<TwapOwner>,
 }
+
+type OwnerProvider = Rc<dyn Fn() -> TwapOwner>;
 
 struct Inner {
     /// The account's context, never a socket's.
@@ -59,15 +64,60 @@ struct Inner {
     /// Slice placements awaiting their answer: each may yet land.
     placing: Cell<usize>,
     placed: Notify,
+    owner_provider: RefCell<Option<OwnerProvider>>,
+}
+
+fn start_owner_change_error(dispatched: bool) -> VenueError {
+    if dispatched {
+        VenueError::new("TWAP start outcome is unknown: authenticated connection binding changed after slice dispatch")
+            .outcome(Outcome::Unknown)
+    } else {
+        VenueError::new(
+            "TWAP start cancelled-for-owner-change: authenticated connection binding changed",
+        )
+        .outcome(Outcome::NotSent)
+    }
 }
 
 impl TwapFactory {
-    /// `account_name` is the account's `accountName`; TWAPs naming another are refused.
+    /// New TWAPs only; persisted restores require [`Self::with_owner`].
     pub fn new(account_name: &str, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
+        Self::from_book(TwapBook::new(account_name), account_cx, chasers)
+    }
+
+    /// The host supplies its authenticated owner/session, independently of restore data.
+    pub fn with_owner(
+        account_name: &str,
+        owner: TwapOwner,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+    ) -> Self {
+        Self::from_book(
+            TwapBook::with_owner(account_name, owner),
+            account_cx,
+            chasers,
+        )
+    }
+
+    /// Interim WASM compatibility for hosts not yet supplying an authenticated owner.
+    pub fn with_legacy_restore(
+        account_name: &str,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+    ) -> Self {
+        Self::from_book(
+            TwapBook::with_legacy_restore(account_name),
+            account_cx,
+            chasers,
+        )
+    }
+
+    fn from_book(book: TwapBook, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
         Self {
+            captured_owner: None,
             inner: Rc::new(Inner {
                 cx: account_cx,
-                book: RefCell::new(TwapBook::new(account_name)),
+                book: RefCell::new(book),
                 chasers,
                 env: RefCell::new(CxEnv::seeded()),
                 rescheduled: Notify::new(),
@@ -75,8 +125,47 @@ impl TwapFactory {
                 client_ids: ClientIdMinter::default(),
                 placing: Cell::new(0),
                 placed: Notify::new(),
+                owner_provider: RefCell::new(None),
             }),
         }
+    }
+
+    /// A shared host supplies its current authenticated binding, independent of queued data.
+    pub fn guard_owner(self, owner: OwnerProvider) -> Self {
+        self.inner.owner_provider.replace(Some(owner));
+        self
+    }
+
+    /// Carry the current binding through a typed caller's deferred work.
+    pub fn capture_owner(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            captured_owner: self
+                .captured_owner
+                .clone()
+                .or_else(|| self.inner.owner_snapshot()),
+        }
+    }
+
+    fn owner_is_current(&self) -> bool {
+        self.captured_owner
+            .as_ref()
+            .is_none_or(|owner| self.inner.owner_snapshot().as_ref() == Some(owner))
+    }
+
+    /// Preserve identity-based label remapping with the host's trusted generation.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new_with_owner(
+        account_name: &str,
+        account_cx: AlgoCx,
+        chasers: Rc<dyn TwapChasers>,
+        owner: TwapOwner,
+    ) -> Self {
+        Self::from_book(
+            TwapBook::new_with_owner(account_name, owner),
+            account_cx,
+            chasers,
+        )
     }
 
     /// Stop every TWAP (`twap:stop` each) and send the final state; nothing is
@@ -111,29 +200,51 @@ impl TwapFactory {
 
     /// Start a TWAP for a typed caller such as the exec `twap` command, with
     /// the same validation and effects as `twap:start`. Returns the new id.
-    pub fn start(&self, options: TwapOptions) -> Result<String, String> {
+    pub fn start(&self, options: TwapOptions) -> Result<String, VenueError> {
+        if !self.owner_is_current() {
+            return Err(start_owner_change_error(false));
+        }
         let cx = &self.inner.cx;
-        let (started, effects) = {
+        Inner::refresh_owner(&self.inner, cx);
+        if self
+            .captured_owner
+            .as_ref()
+            .is_some_and(|owner| self.inner.book.borrow().owner.as_ref() != Some(owner))
+        {
+            return Err(start_owner_change_error(false));
+        }
+        let owner = self.inner.book.borrow().owner.clone();
+        let (started, effects, chaser_dispatched) = {
             let mut env = self.inner.env.borrow_mut();
             env.now = cx.now_ms();
             let view = CxView {
                 cx,
                 chasers: &*self.inner.chasers,
                 client_ids: &self.inner.client_ids,
+                chaser_dispatched: Cell::new(false),
             };
-            self.inner
+            let (started, effects) = self
+                .inner
                 .book
                 .borrow_mut()
-                .start(options, &mut *env, &view)
+                .start(options, &mut *env, &view);
+            (started, effects, view.chaser_dispatched.get())
         };
-        Inner::run(&self.inner, cx, effects);
+        let dispatched = Inner::run(&self.inner, cx, effects) || chaser_dispatched;
+        Inner::refresh_owner(&self.inner, cx);
+        if started.is_ok() && self.inner.book.borrow().owner != owner {
+            return Err(start_owner_change_error(dispatched));
+        }
         Inner::ensure_driver(&self.inner, cx);
-        started
+        started.map_err(|message| VenueError::new(message).outcome(Outcome::NotSent))
     }
 
     /// `twap:stop` for a typed caller; false when no running TWAP has `id`.
     /// Its chase slices keep their own lifecycle in the chaser book, as in TS.
     pub fn stop(&self, id: &str) -> bool {
+        if !self.owner_is_current() {
+            return false;
+        }
         let (found, effects) = self.inner.book.borrow_mut().stop(id);
         Inner::run(&self.inner, &self.inner.cx, effects);
         self.inner.rescheduled.notify_one();
@@ -142,6 +253,10 @@ impl TwapFactory {
 
     /// The store's `activeTWAPs` for `account_name`.
     pub fn active_twaps(&self, account_name: &str) -> Vec<Value> {
+        if !self.owner_is_current() {
+            return Vec::new();
+        }
+        Inner::refresh_owner(&self.inner, &self.inner.cx);
         self.inner.book.borrow().active_twaps(account_name)
     }
 
@@ -163,6 +278,7 @@ impl AlgoFactory for TwapFactory {
     /// `_op_cx` is the sending socket's; TWAPs run on the account's context.
     fn handle(&self, op: &str, data: &str, _op_cx: &AlgoCx) -> Result<(), String> {
         let cx = &self.inner.cx;
+        Inner::refresh_owner(&self.inner, cx);
         let data: Value = serde_json::from_str(data).map_err(|error| format!("{op}: {error}"))?;
         let effects = {
             let mut env = self.inner.env.borrow_mut();
@@ -171,6 +287,7 @@ impl AlgoFactory for TwapFactory {
                 cx,
                 chasers: &*self.inner.chasers,
                 client_ids: &self.inner.client_ids,
+                chaser_dispatched: Cell::new(false),
             };
             self.inner
                 .book
@@ -184,6 +301,44 @@ impl AlgoFactory for TwapFactory {
 }
 
 impl Inner {
+    fn owner_snapshot(&self) -> Option<TwapOwner> {
+        self.owner_provider.borrow().as_ref().map(|owner| owner())
+    }
+
+    fn refresh_owner(inner: &Rc<Self>, cx: &AlgoCx) -> bool {
+        let Some(owner) = inner.owner_snapshot() else {
+            return false;
+        };
+        let had_rows = inner.book.borrow().ids().next().is_some();
+        if !inner.book.borrow_mut().rebind_owner(Some(owner)) {
+            return false;
+        }
+        if had_rows {
+            report(
+                cx,
+                "TWAPs stopped: authenticated connection binding changed",
+            );
+        }
+        cx.port.emit("twap:stateUpdate", "{}".into());
+        inner.rescheduled.notify_one();
+        true
+    }
+
+    fn remainder_settled(
+        inner: &Rc<Self>,
+        cx: &AlgoCx,
+        twap_id: &str,
+        index: usize,
+        outcome: Result<Vec<String>, VenueError>,
+    ) {
+        let effects = inner
+            .book
+            .borrow_mut()
+            .remainder_settled(twap_id, index, outcome);
+        Self::run(inner, cx, effects);
+        inner.rescheduled.notify_one();
+    }
+
     fn ensure_driver(inner: &Rc<Self>, cx: &AlgoCx) {
         if inner.driver_started.replace(true) {
             inner.rescheduled.notify_one();
@@ -213,6 +368,9 @@ impl Inner {
 
     /// The timer for `due_at` fired, so the book sees at least that time.
     fn wake(inner: &Rc<Self>, cx: &AlgoCx, due_at: f64) {
+        if Self::refresh_owner(inner, cx) {
+            return;
+        }
         let effects = {
             let mut env = inner.env.borrow_mut();
             env.now = cx.now_ms().max(due_at);
@@ -220,21 +378,50 @@ impl Inner {
                 cx,
                 chasers: &*inner.chasers,
                 client_ids: &inner.client_ids,
+                chaser_dispatched: Cell::new(false),
             };
             inner.book.borrow_mut().wake(&mut *env, &view)
         };
         Self::run(inner, cx, effects);
     }
 
-    fn run(inner: &Rc<Self>, cx: &AlgoCx, effects: Vec<TwapEffect>) {
+    fn run(inner: &Rc<Self>, cx: &AlgoCx, effects: Vec<TwapEffect>) -> bool {
+        let mut dispatched = false;
         for effect in effects {
+            if Self::refresh_owner(inner, cx) {
+                return dispatched;
+            }
             match effect {
+                TwapEffect::Outcome { twap_id, error } => {
+                    let elements = error.elements.as_deref().map(|elements| &elements[..]);
+                    let unknown = elements.map_or(
+                        0,
+                        |rows: &[safe_cex_engine::write_plan::ElementOutcome]| {
+                            rows.iter()
+                                .filter(|row| {
+                                    matches!(
+                                        row.result,
+                                        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+                                    )
+                                })
+                                .count()
+                        },
+                    );
+                    cx.port.emit(
+                        "twap:outcome",
+                        json!({ "id": twap_id, "error": error }).to_string(),
+                    );
+                    cx.port.emit("telemetry", json!({ "kind": "twap.unknown_outcome", "twapId": twap_id, "outcome": "unknown", "unknown": unknown, "error": error }).to_string());
+                }
+                TwapEffect::HaltChaser { chaser_id } => inner.chasers.halt(cx, &chaser_id),
                 TwapEffect::PlaceOrder {
                     twap_id,
                     settle_token,
+                    element_index,
                     request,
                 } => {
-                    Self::place(inner, cx, twap_id, settle_token, &request);
+                    dispatched |=
+                        Self::place(inner, cx, twap_id, settle_token, element_index, &request);
                 }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
                 TwapEffect::Log { message } => report(cx, &message),
@@ -244,6 +431,7 @@ impl Inner {
                 TwapEffect::Diagnostic { message } => eprintln!("[TWAP] {message}"),
             }
         }
+        dispatched
     }
 
     fn place(
@@ -251,36 +439,42 @@ impl Inner {
         cx: &AlgoCx,
         twap_id: String,
         settle_token: Option<u64>,
+        element_index: usize,
         request: &TwapOrderRequest,
-    ) {
+    ) -> bool {
         let command = match place_command(cx, request) {
             Ok(command) => command,
             Err(message) => {
-                let failure = SliceFailure {
-                    message,
-                    nothing_placed: true,
-                };
+                let failure = VenueError::new(message).outcome(Outcome::NotSent);
                 match settle_token {
                     Some(token) => Self::settled(inner, cx, &twap_id, token, Err(failure)),
-                    None => report_remainder(cx, &request.symbol, &failure.message),
+                    None => {
+                        Self::remainder_settled(inner, cx, &twap_id, element_index, Err(failure))
+                    }
                 }
-                return;
+                return false;
             }
         };
+        let owner = inner.owner_snapshot();
         let future = cx.port.command(command);
         inner.placing.set(inner.placing.get() + 1);
         let (inner, task_cx) = (inner.clone(), cx.clone());
-        let symbol = request.symbol.clone();
         cx.spawn(async move {
             let outcome = placement_outcome(future.await);
             inner.placing.set(inner.placing.get() - 1);
             inner.placed.notify_waiters();
+            if owner != inner.owner_snapshot() {
+                Self::refresh_owner(&inner, &task_cx);
+                return;
+            }
             match (settle_token, outcome) {
                 (Some(token), outcome) => Self::settled(&inner, &task_cx, &twap_id, token, outcome),
-                (None, Err(failure)) => report_remainder(&task_cx, &symbol, &failure.message),
-                (None, Ok(_)) => {}
+                (None, outcome) => {
+                    Self::remainder_settled(&inner, &task_cx, &twap_id, element_index, outcome)
+                }
             }
         });
+        true
     }
 
     fn settled(
@@ -303,24 +497,14 @@ impl Inner {
     }
 }
 
-/// A slice placement's ids, or its failure. Ids that cannot be read and unknown
-/// outcomes say the order may be live. Only a whole refusal proves nothing was
-/// placed; an unclassified error or a partial one does not.
+/// Preserve fully known refusals and their native partial-placement facts.
+/// Unreadable identities or unresolved outcomes remain execution uncertainty.
 pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, SliceFailure> {
     match result {
-        Ok(result) => serde_json::from_str::<Vec<String>>(&result).map_err(|_| SliceFailure {
-            message: format!("order ids unknown, the order may be live (result {result})"),
-            nothing_placed: false,
-        }),
-        Err(error) if error.outcome == Some(Outcome::Unknown) => Err(SliceFailure {
-            message: format!("outcome unknown, the order may be live: {}", error.message),
-            nothing_placed: false,
-        }),
-        Err(error) => Err(SliceFailure {
-            nothing_placed: matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-                && error.partial.is_none(),
-            message: error.message,
-        }),
+        Ok(result) => serde_json::from_str::<Vec<String>>(&result)
+            .map_err(|_| crate::unknown_outcome(VenueError::new("unreadable order identities"))),
+        Err(error) if crate::known_refusal(&error) => Err(error),
+        Err(error) => Err(crate::unknown_outcome(error)),
     }
 }
 
@@ -351,6 +535,7 @@ struct CxView<'a> {
     cx: &'a AlgoCx,
     chasers: &'a dyn TwapChasers,
     client_ids: &'a ClientIdMinter,
+    chaser_dispatched: Cell<bool>,
 }
 
 impl TwapMarketView for CxView<'_> {
@@ -372,7 +557,9 @@ impl TwapMarketView for CxView<'_> {
     }
 
     fn start_chaser(&self, request: &ChaserRequest) -> Result<(), String> {
-        self.chasers.start_with_id(self.cx, request)
+        self.chasers.start_with_id(self.cx, request)?;
+        self.chaser_dispatched.set(true);
+        Ok(())
     }
 
     fn amount_step(&self, symbol: &str) -> Option<f64> {
@@ -440,6 +627,10 @@ impl TwapEnv for CxEnv {
 /// The account's chaser book, shared with the `chaser:*` ops: pass
 /// `ChaserFactory::book()` and register that same `ChaserFactory`.
 impl TwapChasers for Rc<ChaserBook> {
+    fn halt(&self, _cx: &AlgoCx, id: &str) {
+        ChaserBook::halt_keep_order(self, id);
+    }
+
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
         // TS slices pass no origin, account or terminate rule, and the chaser
         // ignores `delay`.
@@ -473,14 +664,6 @@ impl TwapChasers for Rc<ChaserBook> {
     fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
         ChaserBook::remove(self, chaser_id);
     }
-}
-
-/// A chase slice's market remainder failed; the TWAP goes on without it.
-fn report_remainder(cx: &AlgoCx, symbol: &str, message: &str) {
-    report(
-        cx,
-        &format!("TWAP {symbol} slice remainder failed: {message}"),
-    );
 }
 
 /// A TWAP error the user must see: the `error` op is what the web toasts.

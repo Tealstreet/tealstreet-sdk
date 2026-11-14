@@ -23,10 +23,24 @@ Orders support limits, market orders, capped market IOC limits, conditional and
 bracket orders, native amendments, and per-market cross leverage. Fixed cross
 margin and one-way mode requests complete without a write; isolated/hedged mode
 requests reject. Failed or ambiguous writes are never automatically replayed.
-Independent placement operations continue after a failure, preserving accepted
-IDs in the result and reporting failed client identities at Error level. Failed
-entries skip their attached children; a rejected TP/SL child reports an Error
-without losing the accepted entry. Leverage requests carry a JSON integer.
+HTTP 429, 408, and 5xx after dispatch explicitly report an unknown outcome and
+ask the caller to Check Open Orders. Native refusal text on these responses is
+diagnostic evidence only and cannot authorize a protective put-back.
+Transport loss and unusable write acknowledgements carry the same warning before
+aggregation, while preserving the original diagnostic separately.
+Joined failures retain the first uncertain leg's structured diagnostics and
+classification alongside the public messages from every failed leg.
+Serial placement entries continue after a definite refusal, preserving accepted
+IDs and reporting failed client identities at Error level. A failed native batch
+stops remaining placement dispatch and fails the command, retaining accepted IDs
+in the failure's partial outcome. Refused entries skip their attached children;
+a refused TP skips its SL, while the next independent entry can still be sent.
+An Unknown placement halts all remaining writes for that action, the approved
+stop-after-UNKNOWN parity exception. Its failure includes
+"The outcome is unknown. Check Open Orders", accepted IDs and uncertain placements.
+The `order.outcome_unknown` event records the existing outcome journal and
+withheld writes; native diagnostics remain separate. No uncertain write is
+replayed. Leverage requests carry a JSON integer.
 After an amendment, another amendment requires coherent native order evidence;
 an old replica response cannot restore the previous signed price, size or trigger.
 

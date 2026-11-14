@@ -212,6 +212,96 @@ fn json_rows(body: Option<&str>, batch: bool) -> Result<Vec<Params>, SignError> 
 
 pub type Params = BTreeMap<String, String>;
 
+/// Private subscription: the same Ed25519 graph as REST, with its 5s window.
+/// The engine owns socket lifetime, clock revision, expiry and cancellation.
+pub struct WsAuth {
+    identity: Identity,
+    socket: safe_cex_engine::SocketId,
+    timestamp: String,
+}
+impl WsAuth {
+    pub fn new(identity: Identity, socket: safe_cex_engine::SocketId) -> Self {
+        Self {
+            identity,
+            socket,
+            timestamp: String::new(),
+        }
+    }
+    pub fn unsigned(&self) -> String {
+        r#"{"method":"SUBSCRIBE","params":["account.orderUpdate","account.positionUpdate"]}"#.into()
+    }
+    fn matches(&self, action: &Action) -> bool {
+        matches!(action, Action::WsSend { socket, text } if *socket == self.socket && *text == self.unsigned())
+    }
+}
+impl SignStep for WsAuth {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        if !self.matches(action) {
+            return Err(SignError::InvalidRequest);
+        }
+        let stamp = dispatch.stamp_ms();
+        self.timestamp = safe_cex_engine::num::format(stamp);
+        Ok(SignRequest {
+            receipt: SignReceipt {
+                stamp_ms: Some(stamp),
+                ..Default::default()
+            },
+            context: Context {
+                venue: "backpack".into(),
+                method: "WS".into(),
+                host: "ws.backpack.exchange".into(),
+                path: "SUBSCRIBE".into(),
+            },
+            operations: vec![
+                Operation::Present {
+                    key: self.identity.credential.clone(),
+                },
+                Operation::Sign {
+                    algorithm: Algorithm::Ed25519,
+                    key: self.identity.signing_ref()?.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: payload("subscribe", &[Params::new()], stamp, 5000).into_bytes(),
+                    }],
+                },
+            ],
+        })
+    }
+    fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        if !self.matches(action) || result.values.len() != 2 || result.values[1].len() != 64 {
+            return Err(SignError::InvalidResult);
+        }
+        let key = std::str::from_utf8(&result.values[0]).map_err(|_| SignError::InvalidResult)?;
+        if key.is_empty() || key.contains(['\r', '\n', '\0']) {
+            return Err(SignError::InvalidResult);
+        }
+        #[derive(serde::Serialize)]
+        struct Subscribe<'a> {
+            method: &'static str,
+            params: [&'static str; 2],
+            signature: [&'a str; 4],
+        }
+        let signature = STANDARD.encode(&result.values[1]);
+        let text = serde_json::to_string(&Subscribe {
+            method: "SUBSCRIBE",
+            params: ["account.orderUpdate", "account.positionUpdate"],
+            signature: [key, &signature, &self.timestamp, "5000"],
+        })
+        .map_err(|_| SignError::InvalidResult)?;
+        let Action::WsSend { text: out, .. } = action else {
+            return Err(SignError::InvalidRequest);
+        };
+        *out = text;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
 pub fn query(params: &Params) -> String {
     params
         .iter()

@@ -82,7 +82,8 @@ describe('Rust-only beta construction', () => {
     expect(getRegisteredExchangeNames()).toEqual(expected);
     // Robinhood now uses the same beta runtime as Lighter.
     expect(new Set(BETA_VENUES).size).toBe(43);
-    expect(out).toEqual(expect.arrayContaining(['bitrue', 'polymarket']));
+    expect(out).toContain('bitrue');
+    expect(out).toContain('polymarket');
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
     for (const name of BETA_VENUES) {
@@ -197,7 +198,7 @@ describe('Rust-only beta construction', () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
     // Hyperliquid's, Lighter's and Paradex's structured remote signing is pinned in
     // their rust.*-remote-signing.wasm.test.ts.
-    const localOnly = ['kraken', 'krakenspot', 'apexomni', 'cryptocom', 'asterdex'] as const;
+    const localOnly = ['krakenspot'] as const;
     // #2262 enables Bitunix through the shared policy, without a beta override.
     const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
       ? localOnly

@@ -19,6 +19,12 @@ are captured independently from the requested edit. Missing fields, group links,
 attached/split shapes and unsupported native classes refuse before cancellation.
 The capture is pruned with the current accepted order census.
 
+Source capture and put-back proof accept the documented hyphenated native
+stop-loss/take-profit types alongside their existing numeric/underscore forms.
+The native time-in-force names `immediate-or-cancel`, `good-till-time` and
+`post-only` retain exactly the corresponding numeric values 0, 1 and 2.
+Unknown types or time-in-force values remain unproven.
+
 Only a genuine accepted MARK field grants a local receipt. REST rows retain their
 actual item receipt until successful envelope completion; sparse rows and
 index-substituted marks do not refresh it. A rounded SL/TP trigger must remain on
@@ -35,6 +41,12 @@ Empty, foreign, filled, duplicated or unproven results withhold the replacement.
 The edit alone declares the read credential needed by this managed continuation.
 The accepted cancel write fact is not rewritten when a later proof read fails.
 
+Terminal cancellation includes only the reason-qualified cancellations listed
+in the [native order enum](https://github.com/elliottech/lighter-python/blob/38a34672e7cb43c67d807ece25f125fda2dfdecf/lighter/models/order.py#L69-L85),
+alongside `canceled`/`cancelled`; an arbitrary cancellation prefix is insufficient.
+These spellings do not relax original identity, zero fills, standalone lineage,
+kind, trigger, position or release checks and do not enable grouped edits.
+
 A definitive replacement refusal permits one put-back of the captured ORIGINAL
 size and native parameters, with the original absolute expiry. A fresh generated
 client index identifies the put-back; no native identity reuse is assumed. It
@@ -50,6 +62,11 @@ put-back does not get even the normal single fresh-nonce retry. Unknown reads
 retain explicit “check Open Orders” wording; the engine continues to own the
 original write fact and aggregate command outcome. Unguarded classifications
 and their existing controls are unchanged.
+
+After an ordinary single write's permitted nonce-21104 retry, a native
+23000/23100 response presents its unknown/Open Orders guidance instead of the
+earlier nonce refusal. The journal still projects the outcome and retains the
+write evidence; presentation cannot authorize another resend or put-back.
 
 VENUE_STATE remains the same 11-byte version 1 (account index and tier). Native
 provenance and mark receipts are not exported as fake frame-local evidence.

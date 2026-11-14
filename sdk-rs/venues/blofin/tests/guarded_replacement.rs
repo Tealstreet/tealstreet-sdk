@@ -142,6 +142,45 @@ fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
 
 const RATE_LIMITED: &str = r#"{"code":"429","msg":"Too Many Requests"}"#;
 
+#[test]
+fn documented_http400_replacement_refusal_puts_the_original_back_once() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond_status(
+        replacement,
+        400,
+        r#"{"code":"102014","msg":"trigger refused","data":[]}"#,
+    );
+    let restore = h.take("batch-orders");
+    assert_eq!(body(&restore)[0]["size"], "6");
+    assert_eq!(body(&restore)[0]["slTriggerPrice"], "55000");
+    h.respond(
+        restore,
+        r#"{"code":"0","data":[{"orderId":"13","code":"0"}]}"#,
+    );
+    assert_eq!(failure(&h).unwrap().protection, Some(Protection::Restored));
+    assert!(writes(&h).is_empty());
+}
+
+#[test]
+fn unproven_http400_replacement_never_claims_unprotected_or_puts_back() {
+    for response in [
+        r#"{"code":"103013","msg":"internal failure","data":[]}"#,
+        r#"{"code":"","msg":"internal failure","data":[]}"#,
+        r#"{"code":"999999","msg":"internal failure","data":[]}"#,
+        "Bad Request",
+    ] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        edit_stop(&mut h, 56000.0);
+        let replacement = to_replacement(&mut h);
+        h.respond_status(replacement, 400, response);
+        assert_unknown_stop(&h);
+    }
+}
+
 /// A 429 may have placed the order, so it is unknown, never Unprotected.
 fn assert_unknown_stop(h: &Harness) {
     let error = failure(h).expect("the edit did not finish");
@@ -419,4 +458,204 @@ fn engine_ambiguity_bare_429_replacement_stays_unknown_in_journal() {
     let replacement = to_replacement(&mut h);
     h.respond_status(replacement, 429, "{}");
     assert_unknown_stop(&h);
+}
+
+#[test]
+fn dispatched_ambiguity_protective_cancel_and_replacement_never_restore() {
+    for (status, response) in [
+        (429, "{}"),
+        (429, REFUSED),
+        (200, RATE_LIMITED),
+        (408, REFUSED),
+        (500, REFUSED),
+        (503, REFUSED),
+    ] {
+        for replacement in [false, true] {
+            let mut h = Harness::new();
+            partly_filled(&mut h);
+            edit_stop(&mut h, 56000.0);
+            let request = if replacement {
+                to_replacement(&mut h)
+            } else {
+                h.collect();
+                h.take("cancel-batch-orders")
+            };
+            h.respond_status(request, status, response);
+            let error = failure(&h).expect("one terminal failure");
+            assert_eq!(
+                error.outcome,
+                Some(Outcome::Unknown),
+                "{status}: {response}"
+            );
+            assert_eq!(error.protection, None);
+            assert!(
+                error.message.to_lowercase().contains("unknown"),
+                "{error:?}"
+            );
+            assert!(error.message.contains("Check Open Orders"), "{error:?}");
+            assert!(!error.message.contains("refused"), "{error:?}");
+            assert!(!error.message.contains("position has no stop"), "{error:?}");
+            assert!(writes(&h).is_empty(), "no resend, replacement or put-back");
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguity_native_rate_row_cannot_authorize_put_back() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond(replacement, r#"{"code":"1","msg":"All operations failed","data":[{"orderId":"0","code":"429","msg":"Too Many Requests"}]}"#);
+    assert!(
+        writes(&h).is_empty(),
+        "a native rate row must never release a put-back"
+    );
+    assert_unknown_stop(&h);
+    let error = failure(&h).unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("429"));
+    assert_eq!(error.venue_message.as_deref(), Some("Too Many Requests"));
+}
+
+#[test]
+fn unknown_native_replacement_rows_never_authorize_put_back() {
+    for (code, message) in [
+        ("103013", "internal failure"),
+        ("150003", "clientId already exist"),
+        ("987654", "unlisted failure"),
+    ] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        edit_stop(&mut h, 56000.0);
+        let replacement = to_replacement(&mut h);
+        let response = serde_json::json!({
+            "code": "1", "msg": "All operations failed",
+            "data": [{"orderId": "0", "code": code, "msg": message}],
+        });
+        h.respond(replacement, &response.to_string());
+        assert!(
+            writes(&h).is_empty(),
+            "{code}: never put back an unknown replacement"
+        );
+        assert_unknown_stop(&h);
+        let error = failure(&h).unwrap();
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert_eq!(error.venue_message.as_deref(), Some(message));
+    }
+}
+
+fn assert_unproven_replacement_never_puts_back(row: serde_json::Value) {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    let response = serde_json::json!({
+        "code": "1", "msg": "All operations failed", "data": [row],
+    });
+    h.respond(replacement, &response.to_string());
+    assert!(
+        writes(&h).is_empty(),
+        "unproven replacement must never authorize put-back"
+    );
+    assert_unknown_stop(&h);
+}
+
+#[test]
+fn missing_replacement_row_code_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "msg": "internal failure",
+    }));
+}
+
+#[test]
+fn contradictory_success_row_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "code": "0", "msg": "Order placed",
+    }));
+}
+
+#[test]
+fn wire_none_placed_row_never_authorizes_put_back() {
+    assert_unproven_replacement_never_puts_back(serde_json::json!({
+        "orderId": "0", "code": "none-placed", "msg": "unlisted wire failure",
+    }));
+}
+
+#[test]
+fn wire_none_placed_envelope_never_authorizes_put_back() {
+    let mut h = Harness::new();
+    partly_filled(&mut h);
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    h.respond(
+        replacement,
+        r#"{"code":"none-placed","msg":"unlisted wire failure","data":[]}"#,
+    );
+    assert!(writes(&h).is_empty(), "wire text cannot prove a refusal");
+    assert_unknown_stop(&h);
+}
+
+#[test]
+fn partially_accepted_split_replacement_never_puts_back_the_old_remainder() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let instruments = INSTRUMENT
+        .replace("\"minSize\":\"0.1\"", "\"minSize\":\"1\"")
+        .replace("\"lotSize\":\"0.1\"", "\"lotSize\":\"1\"")
+        .replace("\"maxLimitSize\":\"1000\"", "\"maxLimitSize\":\"20\"")
+        .replace("\"maxMarketSize\":\"500\"", "\"maxMarketSize\":\"5\"");
+    let mut h = Harness::with_instruments(&instruments);
+    partly_filled(&mut h);
+    h.requests.clear();
+    edit_stop(&mut h, 56000.0);
+    let replacement = to_replacement(&mut h);
+    let rows = body(&replacement);
+    // TS:2199-2220 rounds (6 - 1) / 2 to 3 and appends remainder 1.
+    assert_eq!(rows.as_array().unwrap().len(), 3);
+    assert_eq!(rows[0]["size"], "3");
+    assert_eq!(rows[1]["size"], "3");
+    assert_eq!(rows[2]["size"], "1");
+    h.respond(replacement, r#"{"code":"2","data":[{"orderId":"100","code":"0"},{"orderId":"0","code":"103003","msg":"refused"},{"orderId":"0","code":"103003","msg":"refused"}]}"#);
+    let error = failure(&h).expect("partial replacement");
+    let outcomes = error.elements.as_ref().expect("all replacement effects");
+    assert_eq!(outcomes.len(), 7);
+    assert!(
+        outcomes[4..]
+            .iter()
+            .all(|row| matches!(row.result, ElementResult::NotSent { error: None }))
+    );
+    assert_eq!(
+        outcomes[0].result,
+        ElementResult::Applied {
+            effect: AppliedEffect::Cancel,
+            target_order_id: Some("12".into()),
+            position_key: None,
+        }
+    );
+    assert_eq!(
+        outcomes[1].result,
+        ElementResult::Placed {
+            order_ids: vec!["100".into()]
+        }
+    );
+    assert!(
+        matches!(&outcomes[2].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        matches!(&outcomes[3].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert_eq!(
+        error.partial.as_ref().expect("accepted lot").order_ids,
+        ["100"]
+    );
+    assert_eq!(error.protection, None);
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        2,
+        "one cancel and one replacement; no put-back"
+    );
+    assert!(writes(&h).is_empty());
 }

@@ -119,3 +119,8 @@ pub fn policy(venue: &str) -> Option<Policy> {
             }),
     })
 }
+
+/// The same parsed policy used by hosted remote-account construction.
+pub fn supports_remote_signing(venue: &str) -> bool {
+    policy(venue).is_some_and(|policy| policy.enabled)
+}

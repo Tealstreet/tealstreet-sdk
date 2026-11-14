@@ -10,6 +10,10 @@ relay gate off. Its data is `src/routing/table.json`, generated from the TS tabl
 by `packages/safe-cex/src/transport/engine.native-routing-port.test.ts`
 (`UPDATE_NATIVE_ROUTING_PORT=1`), which also writes the TS plans that
 `tests/routing_port.rs` holds it to. Secondary read keys are not routed natively yet.
+WOO routing inputs also carry the public `applicationId`, retaining its private
+stream suffix when using the fleet relay. Hosted WOO resolves the venue
+mainnet/staging REST origins before startup and passes that application ID from
+account init into the routing plan. Signing admission remains registry-owned.
 The deployment can replace the Tealstreet hosts: `PROXY_PRIVATE_URL` sets every
 whitelisted private pool and `PROXY_PUBLIC_URL` the public CORS proxy (https), and
 `PROXY_TUNNEL_URL` every tunnel egress and the table routes under it (wss). Each
@@ -78,6 +82,15 @@ that stay direct. Protocol recovery hints prefer a declared fallback; stable
 feed identities isolate sockets that share a role and URL. Other decoded venue
 messages reset the silent streak. The native TLS WebSocket upgrade uses
 HTTP/1.1; Tealstreet upgrade and REST headers come from the resolved policy.
+
+Typed WebSocket writes reserve the writer and check socket readiness before
+claiming. Release hooks and IO-authority callbacks run outside the socket-state
+mutex. The synchronous handoff then checks the same socket epoch and readiness
+again. Retirement, replacement or lost authority during admission aborts the
+reservation as `NotSent`. Pacing, nonce release floors and write fences advance
+only with the physical handoff; signing-release observers run afterward with the
+socket mutex unlocked. Claims are never replayed. Callback panics propagate,
+while writer retirement and driver cleanup tolerate poisoned socket state.
 
 Paradex signs through its trusted local Stark provider: `build` consumes the
 account key in trusted setup and seals the provider's public key. There is no

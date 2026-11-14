@@ -32,7 +32,8 @@ pub use socket_health::{
     SOCKET_STALE_MS, SocketDiagnostics, SocketHealth, SocketStats, SocketSummary,
 };
 pub use transport::{
-    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PreparedHttp, Transport,
+    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PreparedHttp,
+    SocketConnection, Transport, WebSocketWriteError, WebSocketWriter,
 };
 #[cfg(feature = "nonce-drain")]
 pub use transport::{DrainFuture, Drained};
@@ -130,6 +131,7 @@ pub struct Host<V: Venue, T: Transport> {
     events: Events,
     inbox: mpsc::UnboundedReceiver<HostEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
+    socket_writers: HashMap<SocketId, std::sync::Arc<dyn WebSocketWriter>>,
     socket_health: socket_health::SocketTracker,
     legacy_interest_observer: Option<InterestObserver>,
     timers: HashMap<TimerId, AbortHandle>,
@@ -199,6 +201,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             events,
             inbox,
             sockets: HashMap::new(),
+            socket_writers: HashMap::new(),
             socket_health: Default::default(),
             legacy_interest_observer: None,
             timers: HashMap::new(),
@@ -430,6 +433,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.inbox.close();
         self.managed_http.clear();
         self.signing_tasks.clear();
+        for (_, writer) in self.socket_writers.drain() {
+            writer.retire();
+        }
         self.sockets.clear();
         if let Some(observer) = &self.legacy_interest_observer {
             observer.observe(InterestObservation::Dropped);
@@ -490,6 +496,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 )
             }
             HostEvent::WsClosed(socket, code) => {
+                if let Some(writer) = self.socket_writers.remove(&socket) {
+                    writer.retire();
+                }
                 self.sockets.remove(&socket);
                 if let Some(observer) = &self.legacy_interest_observer {
                     observer.observe(InterestObservation::TransportClosed { socket });
@@ -498,6 +507,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 engine.handle(now, Event::WsClosed { socket, code })
             }
             HostEvent::WsRouteExhausted(socket) => {
+                if let Some(writer) = self.socket_writers.remove(&socket) {
+                    writer.retire();
+                }
                 self.sockets.remove(&socket);
                 if let Some(observer) = &self.legacy_interest_observer {
                     observer.observe(InterestObservation::TransportClosed { socket });
@@ -571,7 +583,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 } => {
                     self.socket_health
                         .connecting(socket, channel.clone(), public_topics);
-                    let outgoing = self.transport.connect_encoding(
+                    let connection = self.transport.connect_socket(
                         binary,
                         socket,
                         url,
@@ -580,7 +592,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
                         context,
                         self.events.clone(),
                     );
-                    self.sockets.insert(socket, outgoing);
+                    if let Some(writer) = connection.writer {
+                        self.socket_writers.insert(socket, writer);
+                    }
+                    self.sockets.insert(socket, connection.outgoing);
                 }
                 Action::WsSend { socket, text } => {
                     if let Some(outgoing) = self.sockets.get(&socket) {
@@ -598,6 +613,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 }
                 // Dropping the sender closes the socket.
                 Action::WsClose { socket } => {
+                    if let Some(writer) = self.socket_writers.remove(&socket) {
+                        writer.retire();
+                    }
                     self.sockets.remove(&socket);
                     if let Some(observer) = &self.legacy_interest_observer {
                         observer.observe(InterestObservation::TransportClosed { socket });

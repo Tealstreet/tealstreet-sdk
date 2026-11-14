@@ -283,6 +283,47 @@ const SIGNATURE: &str = r#"{"code":-1022,"msg":"Signature for this request is no
 const TIMESTAMP: &str =
     r#"{"code":-1021,"msg":"Timestamp for this request was outside of the recvWindow."}"#;
 
+fn ambiguous_http_response_never_resends(body: &str) {
+    for status in [429, 408, 500, 503] {
+        for (command_of, method, path) in [
+            (place as fn() -> Command, Method::Post, "/order"),
+            (cancel as fn() -> Command, Method::Delete, "/order"),
+            (leverage as fn() -> Command, Method::Post, "/leverage"),
+        ] {
+            let mut e = engine();
+            let sent = command(&mut e, command_of());
+            managed(&sent, 1);
+            let first = write(&sent, method, path).clone();
+            // drain() answers any clock resync through the real engine, so a
+            // timestamp retry is counted at physical release, after resync.
+            let after = answer(&mut e, &first, status, body);
+            let extra_writes = after
+                .requests
+                .iter()
+                .filter(|request| request.method != Method::Get)
+                .count();
+            assert_eq!(
+                1 + extra_writes,
+                1,
+                "HTTP {status} {method:?} {path} {body}: one physical write; released {:?}",
+                after.released
+            );
+            let error = terminal(&after).expect("one terminal").unwrap_err();
+            assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+        }
+    }
+}
+
+#[test]
+fn ambiguous_http_timestamp_response_never_resends_a_released_write() {
+    ambiguous_http_response_never_resends(TIMESTAMP);
+}
+
+#[test]
+fn ambiguous_http_signature_response_never_resends_a_released_write() {
+    ambiguous_http_response_never_resends(SIGNATURE);
+}
+
 #[test]
 fn a_placement_is_one_managed_plan_leg_with_its_native_result() {
     let mut e = engine();
@@ -376,6 +417,43 @@ fn a_timestamp_rejection_resyncs_then_resends_each_write_method_once() {
         assert!(failed.requests.is_empty(), "only one resend");
         let error = terminal(&failed).expect("one terminal").unwrap_err();
         assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
+    }
+}
+
+#[test]
+fn v3_clock_recovery_resigns_code_and_standard_requests_then_preserves_unknown_on_loss() {
+    for (command_of, method, path) in [
+        (place as fn() -> Command, Method::Post, "/order"),
+        (cancel as fn() -> Command, Method::Delete, "/order"),
+        (leverage as fn() -> Command, Method::Post, "/leverage"),
+    ] {
+        let mut engine = support::engine(Options::v3_wallet());
+        engine.store_mut().set_markets(vec![market()]);
+        engine.store_mut().set_orders(vec![open("777")]);
+        let sent = command(&mut engine, command_of());
+        let first = write(&sent, method, path).clone();
+        let resent = answer(&mut engine, &first, 400, TIMESTAMP);
+        managed(&resent, 1);
+        let second = write(&resent, method, path).clone();
+        assert_ne!(query(&first.url, "nonce"), query(&second.url, "nonce"));
+        assert_ne!(signature(&first.url), signature(&second.url));
+        if method == Method::Post && path == "/order" {
+            assert!(stamp(&first.url).is_none());
+            assert!(stamp(&second.url).is_none());
+        } else {
+            assert_ne!(stamp(&first.url), stamp(&second.url));
+        }
+        let failed = lost(&mut engine, &second);
+        assert_eq!(
+            terminal(&failed).unwrap().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(
+            failed
+                .requests
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
     }
 }
 

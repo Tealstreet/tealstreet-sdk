@@ -23,7 +23,7 @@ impl GroupPermit {
         &self.members
     }
     pub fn to_wire(&self) -> String {
-        let mut text = String::from("g1");
+        let mut text = String::from("g2");
         for member in &self.members {
             text.push(';');
             text.push_str(&member.to_wire());
@@ -31,11 +31,11 @@ impl GroupPermit {
         text
     }
     pub fn from_wire(text: &str) -> Result<Self, Error> {
-        if text.len() > 2 + 256 * 83 {
+        if text.len() > 2 + 256 * (super::MAX_HOST_TOKEN_BYTES + 1) {
             return Err(Error::Invalid);
         }
         let mut parts = text.split(';');
-        if parts.next() != Some("g1") {
+        if parts.next() != Some("g2") {
             return Err(Error::Invalid);
         }
         let mut members = Vec::new();
@@ -89,7 +89,8 @@ mod tests {
         let members: Vec<_> = (0..256)
             .map(|offset| {
                 Permit::from_wire(&format!(
-                    "r1:{}:{}:{}:{}",
+                    "r2:{}:{}:{}:{}:{}",
+                    u64::MAX,
                     crate::resource_ids::MAX_RESOURCE_ID - offset,
                     u64::MAX,
                     u64::MAX,
@@ -100,24 +101,26 @@ mod tests {
             .collect();
         let group = GroupPermit::new(members).unwrap();
         let wire = group.to_wire();
-        assert!(wire.len() <= 2 + 256 * 83);
+        assert!(wire.len() <= 2 + 256 * (super::super::MAX_HOST_TOKEN_BYTES + 1));
         assert_eq!(GroupPermit::from_wire(&wire), Ok(group));
     }
     #[test]
     fn duplicate_requests_cannot_alias_a_second_member() {
         assert_eq!(
-            GroupPermit::from_wire("g1;r1:1:2:3:4;r1:1:5:6:7"),
+            GroupPermit::from_wire("g2;r2:1:1:2:3:4;r2:2:1:5:6:7"),
             Err(Error::Duplicate)
         );
     }
     #[test]
     fn malformed_and_noncanonical_group_tokens_are_refused() {
         for text in [
-            "g1",
-            "g1;r1:1:2:3:4",
-            "g1;r1:1:2:3:4;r1:2:2:3:4;",
-            "g1;r1:01:2:3:4;r1:2:2:3:4",
-            "g1;r1:1:2:3:4;r1:2:2:3:4 junk",
+            "g1;r1:1:2:3:4;r1:2:2:3:4",
+            "g2;r2:1:1:2:3:4",
+            "g2;r2:1:1:2:3:4;r2:2:2:2:3:4;",
+            "g2;r2:01:1:2:3:4;r2:2:2:2:3:4",
+            "g2;r2:1:1:2:3:4;r2:2:2:2:3:4 junk",
+            "g3;r2:1:1:2:3:4;r2:2:2:2:3:4",
+            "g2",
             "g2;r1:1:2:3:4;r1:2:2:3:4",
         ] {
             assert!(GroupPermit::from_wire(text).is_err());
@@ -125,9 +128,9 @@ mod tests {
     }
     #[test]
     fn more_than_256_members_is_capacity_refused() {
-        let mut wire = String::from("g1");
+        let mut wire = String::from("g2");
         for id in 1..=257 {
-            wire.push_str(&format!(";r1:{id}:1:0:1"));
+            wire.push_str(&format!(";r2:1:{id}:1:0:1"));
         }
         assert_eq!(GroupPermit::from_wire(&wire), Err(Error::Capacity));
     }

@@ -213,6 +213,7 @@ async fn run_nuke(
         safe_cex_exchange_server::accounts::PlacedSymbols::default(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         Default::default(),
+        Arc::new(safe_cex_exchange_server::twap_owner::Binding::new("u")),
         inbox_rx,
     ));
     // Let the feed take its join snapshot so the store holds the order and position.
@@ -221,6 +222,7 @@ async fn run_nuke(
         .send(AlgoInput::Nuke {
             mode,
             request_id: "r-nuke".into(),
+            action: None,
         })
         .unwrap();
     if stall {

@@ -5,6 +5,8 @@ sidebar_position: 6
 
 # Safety
 
+Whitelist, fat-finger limits, simulation mode and budgets belong to the signed-in user. Review the new user’s settings after switching; session budget spend resets. See [user profiles and migration](../operations/config-files.md#login-logout-and-migration).
+
 Guards designed to keep an off-script command from doing damage.
 All of these are state that lives in the CLI, not the exchange.
 
@@ -100,8 +102,19 @@ and is blocked once `spent + order > cap`. **Reduce-only / `close` /
 limitation:_ `twap` / `chase` task-spawners are not yet budget-counted
 (their slices fire in a worker outside the command's state).
 
+For `buy` / `sell`, limit and `best` orders charge the submitted amount at
+the tick-rounded order price; market orders use the last price. Native
+contract sizes are included, and inverse contracts use their USD face value.
+`scale` checks and charges the sum of its prepared rungs, each valued at its
+own tick-rounded submitted price. An above-cap ladder places nothing and
+consumes no budget; accepted ladders charge that same preflight total.
+A multi-symbol command validates every leg and checks their combined budget
+before sending any order. Only accepted legs consume budget. If a later venue
+write fails, earlier accepted IDs and the native failure details are retained
+so `retry` cannot repeat the whole placement.
+
 Persisted to `~/.tealstreet/budget.json`. Source: `BudgetCommand.ts`,
-`TradingBaseCommand.ts:enforceBudget`.
+`TradingBaseCommand.ts:checkBudget`.
 
 ---
 
@@ -207,6 +220,11 @@ close BTCUSDT            # OK
 cancel                   # OK
 nuke                     # OK
 ```
+
+Multi-symbol `buy` / `sell` recheck health before each exposure-increasing
+send. If health degrades during an earlier write, later sends stop. Accepted
+order IDs and budget charges remain recorded, and automatic whole-command
+retry is refused even when an accepted write returned no order IDs.
 
 Risk-**reducing** actions (`close`, `cancel`, `nuke`, and any
 `reduce`-only order) stay allowed so a degraded connection can never trap

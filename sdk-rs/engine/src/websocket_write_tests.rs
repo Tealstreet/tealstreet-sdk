@@ -1,5 +1,12 @@
 use crate::ControlFrame;
 fn websocket_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
+    let (mut engine, context, socket) = websocket_connecting_fixture(signed);
+    engine.handle(0., Event::WsOpened { socket });
+    engine.drain_actions().for_each(drop);
+    (engine, context, socket)
+}
+
+fn websocket_connecting_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
     let mut engine = crate::test_support::seeded_engine(Probe::default());
     engine.enable_websocket_write_host();
     engine.start(0.);
@@ -29,6 +36,23 @@ fn websocket_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
     cx.io.core.request_contexts.dispatch = None;
     engine.drain_actions().for_each(drop);
     (engine, context, socket)
+}
+
+#[test]
+fn websocket_write_claim_before_handshake_is_not_sent() {
+    let (mut engine, context, socket) = websocket_connecting_fixture(false);
+    let request = queue_websocket_write(&mut engine, &context, socket, false);
+    let binding = engine
+        .drain_actions()
+        .find_map(WebSocketWriteBinding::from_action)
+        .expect("bound write on a connecting socket");
+    assert!(engine.claim_websocket_write(0., binding, &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")).is_err());
+    assert!(engine.venue.releases.is_empty());
+    assert!(engine.http_release(request).is_none());
+    assert_eq!(engine.venue.failures.len(), 1);
+    assert_eq!(engine.venue.failures[0].1, Some(crate::Outcome::NotSent));
+    engine.handle(1., Event::WsOpened { socket });
+    assert!(websocket_frames(&drain_websocket_actions(&mut engine)).is_empty());
 }
 
 fn queue_websocket_write(
@@ -82,10 +106,12 @@ fn release_websocket_actions(
                 ..
             } => {
                 let binding = WebSocketWriteBinding::from_action(action).expect("typed binding");
-                engine
-                    .claim_websocket_write(now, binding)
-                    .ok()
-                    .map(|(socket, text)| Action::WsSend { socket, text })
+                let mut frame = None;
+                let _ = engine.claim_websocket_write(now, binding, &mut |socket, text, commit: &mut crate::WebSocketCommit<'_>| {
+                    let mut text = Some(text);
+                    commit(&mut || { frame = Some(Action::WsSend {socket, text:text.take().expect("one handoff")}); true })
+                });
+                frame
             }
             action => Some(action),
         })
@@ -183,6 +209,102 @@ fn websocket_write_refuses_a_context_from_another_engine() {
         Err(Error::Revoked)
     ));
     assert!(cx.io.core.actions.is_empty());
+}
+
+fn assert_websocket_binding_rejects_previous_engine(signed_write: bool) {
+    fn queue(
+        engine: &mut Engine<Probe>,
+        context: &Context,
+        socket: SocketId,
+        text: &str,
+        signed_write: bool,
+    ) -> (RequestId, WebSocketWriteBinding) {
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let write = cx
+            .websocket_write(context.clone(), socket, text.into())
+            .unwrap();
+        let request = cx
+            .send_websocket_write(
+                write,
+                signed_write.then(|| Box::new(WsRecipe) as Box<dyn crate::SignStep>),
+                Pending(context.clone()),
+            )
+            .unwrap();
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = if signed_write {
+            let (attempt, work) = work(&actions);
+            signed(engine, 1., attempt, work)
+        } else {
+            actions
+        };
+        let binding = actions
+            .into_iter()
+            .find_map(WebSocketWriteBinding::from_action)
+            .expect("deferred final handoff");
+        (request, binding)
+    }
+
+    let (mut a, context_a, socket_a) = websocket_fixture(signed_write);
+    let (request_a, binding_a) = queue(&mut a, &context_a, socket_a, "A-order", signed_write);
+    drop(a);
+    let (mut b, context_b, socket_b) = websocket_fixture(signed_write);
+    let (request_b, binding_b) = queue(&mut b, &context_b, socket_b, "B-order", signed_write);
+    assert!(!context_a.same_issuer(&context_b));
+    assert_eq!(context_a.owner(), context_b.owner());
+    assert_eq!(socket_a, socket_b);
+    assert_eq!(request_a, request_b);
+    assert_eq!(
+        binding_a.preparation().attempt(),
+        binding_b.preparation().attempt()
+    );
+    assert_ne!(binding_a.preparation(), binding_b.preparation());
+    assert_eq!(b.websocket_write_socket(&binding_b), Some(socket_b));
+    let foreign_socket = b.websocket_write_socket(&binding_a);
+    let mut frames = Vec::new();
+    let mut handoff = |socket: SocketId, text: String, commit: &mut crate::WebSocketCommit<'_>| {
+        commit(&mut || {
+            frames.push((socket, text.clone()));
+            true
+        })
+    };
+    assert_eq!(
+        b.claim_websocket_write(2., binding_a, &mut handoff),
+        Err(Error::Revoked),
+        "a deferred A frame cannot borrow B's repeated counters"
+    );
+    assert_eq!(foreign_socket, None);
+    assert!(b.venue.releases.is_empty(), "foreign work never admits");
+    assert!(b.venue.failures.is_empty(), "B's pending work stays live");
+    assert!(b.http_release(request_b).is_none());
+    assert_eq!(b.websocket_write_socket(&binding_b), Some(socket_b));
+    assert_eq!(
+        b.claim_websocket_write(2., binding_b, &mut handoff),
+        Ok(())
+    );
+    assert_eq!(
+        frames,
+        vec![(
+            socket_b,
+            if signed_write { "signed auth" } else { "B-order" }.into()
+        )],
+        "only B's current binding reaches the physical handoff"
+    );
+    assert_eq!(b.venue.releases.len(), 1);
+    assert!(b.http_release(request_b).is_some());
+}
+
+#[test]
+fn websocket_write_binding_rejects_previous_engine_with_repeated_counters() {
+    assert_websocket_binding_rejects_previous_engine(false);
+}
+
+#[test]
+fn websocket_write_signed_binding_rejects_previous_engine_with_repeated_counters() {
+    assert_websocket_binding_rejects_previous_engine(true);
 }
 
 #[test]
@@ -496,7 +618,7 @@ fn websocket_write_cannot_borrow_a_read_only_http_permit() {
     .unwrap();
     assert_eq!(engine.websocket_write_socket(&binding), None);
     assert_eq!(
-        engine.claim_websocket_write(0., binding),
+        engine.claim_websocket_write(0., binding, &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")),
         Err(Error::Revoked)
     );
     assert!(engine.venue.releases.is_empty());
@@ -581,4 +703,22 @@ fn websocket_write_signing_recipe_cannot_replace_the_authorized_socket() {
     );
     assert!(engine.venue.releases.is_empty());
     assert_eq!(engine.venue.failures.len(), 1);
+}
+
+
+#[test]
+fn websocket_write_cannot_commit_through_http_claim() {
+    let (mut engine, context, socket)=websocket_fixture(false);
+    let request=queue_websocket_write(&mut engine,&context,socket,false);
+    let permit=engine.drain_actions().find_map(|action| match action {
+        Action::SignedOutbound {attempt:RequestId(0),outbound} => match *outbound {
+            Action::ManagedHttp(packet) => match *packet { HttpAction::Bind {permit,..}=>Some(permit), _=>None },
+            _=>None,
+        },
+        _=>None,
+    }).expect("bound socket permit");
+    assert_eq!(engine.claim_http(0.,permit),Err(Error::Revoked));
+    assert!(engine.http_release(request).is_none());
+    assert!(engine.venue.releases.is_empty());
+    assert_eq!(engine.venue.failures[0].1,Some(crate::Outcome::NotSent));
 }

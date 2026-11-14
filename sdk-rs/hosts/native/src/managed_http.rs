@@ -62,30 +62,54 @@ impl<V: Venue, T: Transport> Host<V, T> {
         &mut self,
         binding: safe_cex_engine::WebSocketWriteBinding,
     ) {
+        let Some(socket) = self.engine.websocket_write_socket(&binding) else {
+            return;
+        };
         let preparation = binding.preparation();
         let request = preparation.attempt().request;
-        let now = (self.clock)();
-        let ready = self
-            .engine
-            .websocket_write_socket(&binding)
-            .is_some_and(|socket| self.sockets.contains_key(&socket));
-        if !ready {
+        let writer = self
+            .sockets
+            .get(&socket)
+            .and_then(|_| self.socket_writers.get(&socket).cloned());
+        let Some(writer) = writer else {
             self.engine.http_preparation_failed(
-                now,
+                (self.clock)(),
                 preparation,
                 safe_cex_engine::request_context::Error::Revoked,
                 VenueError::new("WebSocket write transport is unavailable"),
             );
             return;
-        }
-        if let Ok((socket, text)) = self.engine.claim_websocket_write(now, binding)
-            && self.sockets[&socket].send(text).is_err()
-        {
+        };
+        let mut binding = Some(binding);
+        let mut released = false;
+        let result = writer.try_write(request, &mut |handoff| {
+            let Some(binding) = binding.take() else {
+                return;
+            };
+            released = self
+                .engine
+                .claim_websocket_write((self.clock)(), binding, handoff)
+                .is_ok();
+        });
+        if binding.is_some() {
+            self.engine.http_preparation_failed(
+                (self.clock)(),
+                preparation,
+                Error::Revoked,
+                VenueError::new("WebSocket writer is not ready; no frame sent"),
+            );
+        } else if released && let Err(error) = result {
+            let message = match error {
+                WebSocketWriteError::NotReady => {
+                    "WebSocket writer refused the claimed frame".into()
+                }
+                WebSocketWriteError::Send(message) => message,
+            };
             self.engine.handle(
-                now,
+                (self.clock)(),
                 Event::HttpFailed {
                     request,
-                    error: "WebSocket write transport refused the frame",
+                    error: &message,
                 },
             );
         }

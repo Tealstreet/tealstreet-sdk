@@ -32,6 +32,88 @@ test('minimum resting order is aligned and covers notional at its lower amended 
   assert.ok((order.amount - market.precisionAmount) * order.amendPrice < 50);
 });
 
+test('fine ticks on high prices keep the floor-bound order and amendment one tick apart', () => {
+  // 57000.97 / 0.01 is 5700096.9999999 in binary; a fixed epsilon rounded it to 57000.96.
+  const order = smokeOrder({ ...market, precisionPrice: 0.01 }, { bids: [60000], asks: [60001] },
+    { minNotional: 5, lowerMultiplier: 0.95, notionalKnown: true });
+  assert.equal(order.price, 57000.97);
+  assert.equal(order.amendPrice, 57000.96);
+});
+
+test('a real fraction of a step still rounds in the requested direction', () => {
+  const lot = { ...market, precisionPrice: 1e-8, minAmount: 1e-8, precisionAmount: 1e-8, maxAmount: 1e6 };
+  // Floor: 0.09999999995 sits 0.005 of a tick below 0.1, so the order price is 0.09999999.
+  const below = smokeOrder(lot, { bids: [0.09999999995 / 0.9], asks: [0.2] }, { minNotional: 0, notionalKnown: true });
+  assert.equal(below.price, 0.09999999);
+  // Ceil: a 0.10000000005 minimum quantity, 0.005 of a lot above 0.1, rounds up to 0.10000001.
+  const above = smokeOrder({ ...lot, minAmount: 0.10000000005 }, { bids: [1], asks: [2] }, { minNotional: 0, notionalKnown: true });
+  assert.equal(above.amount, 0.10000001);
+});
+
+test('unresolvable price ticks refuse before live sizing', () => {
+  // The old result was 9.0000000000002, over four ticks above the floor target.
+  assert.throws(() => smokeOrder({ ...market, precisionPrice: 1e-14 },
+    { bids: [10.00000000000017], asks: [10.1] }, { minNotional: 0, notionalKnown: true }),
+  /unrepresentable-market-step/);
+});
+
+test('unresolvable amount steps refuse before live sizing', () => {
+  // The old result was 9.0000000000001, over five lots below the minimum.
+  assert.throws(() => smokeOrder({ ...market, precisionPrice: 0.01,
+    precisionAmount: 1e-14, minAmount: 9.000000000000151 },
+  { bids: [1], asks: [1.1] }, { minNotional: 0, notionalKnown: true }),
+  /unrepresentable-market-step/);
+});
+
+test('decimal normalization cannot silently move an order across ticks', () => {
+  // The old noise band was under half a tick, but 14-digit rounding
+  // still moved the selected multiple by several ticks.
+  assert.throws(() => smokeOrder({ ...market, precisionPrice: 1e-14 },
+    { bids: [1.500000000000175], asks: [1.6] }, { minNotional: 0, notionalKnown: true }),
+  /unrepresentable-market-step/);
+});
+
+for (const [kind, flags] of [['linear', 0], ['spot', MARKET_FLAG.SPOT], ['inverse', MARKET_FLAG.INVERSE]]) {
+  test(`${kind} representable fractional ticks floor despite lying within the old noise band`, () => {
+    const order = smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | flags, precisionPrice: 1e-15 },
+      { bids: [0.11111111111111099], asks: [0.2] }, { minNotional: 0, notionalKnown: true });
+    assert.equal(order.price, 0.099999999999999);
+    assert.equal(order.amendPrice, 0.098888888888888);
+  });
+
+  test(`${kind} representable fractional lots ceil despite lying within the old noise band`, () => {
+    const order = smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | flags,
+      precisionAmount: 1e-15, minAmount: 0.0999999999999981 },
+    { bids: [1], asks: [1.1] }, { minNotional: 0, notionalKnown: true });
+    assert.equal(order.amount, 0.099999999999999);
+  });
+
+  test(`${kind} minimum notional above a whole lot still ceils to the next lot`, () => {
+    const order = smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | flags,
+      precisionPrice: 0.01, precisionAmount: 1, minAmount: 1, contractSize: 0.1 },
+    { bids: [1], asks: [1.1] }, { minNotional: flags & MARKET_FLAG.INVERSE ? 0.10000000000000002 : 0.8900000000000001,
+      notionalKnown: true });
+    assert.equal(order.amount, 2);
+  });
+
+  test(`${kind} fractional ticks below the noise band cannot round a floor upward`, () => {
+    // The exact target is 3.0000000000026907; rounding to 3.0000000000027
+    // crosses a real tick even though the shift fits the old noise band.
+    assert.throws(() => smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | flags, precisionPrice: 3e-14 },
+      { bids: [3.333333333336323], asks: [3.4] }, { minNotional: 0, notionalKnown: true }),
+    /unrepresentable-market-step/);
+  });
+
+  test(`${kind} decimal cleanup cannot move an aligned minimum off-grid or below its minimum`, () => {
+    // At scale 1e14 the minimum is divisible by 3; the old result
+    // 3.0000000000002 has remainder 2 and is below that minimum.
+    assert.throws(() => smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | flags,
+      precisionAmount: 3e-14, minAmount: 3.00000000000021 },
+    { bids: [1], asks: [1.1] }, { minNotional: 0, notionalKnown: true }),
+    /unrepresentable-market-step/);
+  });
+}
+
 test('inverse minimum notional uses quote contracts', () => {
   assert.equal(smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.INVERSE,
     precisionAmount: 1, minAmount: 1, contractSize: 10 }, book, { minNotional: 21, notionalKnown: true }).amount, 3);

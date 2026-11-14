@@ -87,6 +87,32 @@ fn level_edits(h: &Harness) -> usize {
         .count()
 }
 
+#[test]
+fn ambiguous_http_signature_response_never_resends_a_released_setting_write() {
+    for status in [429, 408, 500, 503] {
+        let mut h = Harness::new();
+        h.command(leverage(8));
+        assert_eq!(level_edits(&h), 1, "one physically released setting write");
+        let first = h.take(Method::Post, "/fapi/v2/level_edit");
+        h.reply_status(
+            first,
+            status,
+            r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#,
+        );
+        assert_eq!(
+            1 + level_edits(&h),
+            1,
+            "HTTP {status}/-1022 must leave exactly one physical setting write"
+        );
+        assert_eq!(terminals(&h, 8), 1, "one terminal");
+        assert_eq!(
+            failure(&h, 8).expect("ambiguous write fails").outcome,
+            Some(Outcome::Unknown),
+            "HTTP {status}: reconcile instead of resending"
+        );
+    }
+}
+
 /// Control 7: A parked command whose caller wait expires never writes: at its wake
 /// the expiry is its one NotSent terminal.
 #[test]

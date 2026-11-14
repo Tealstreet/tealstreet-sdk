@@ -27,6 +27,7 @@ import { createAPI as createKucoinAPI } from '../__tests__/reference/kucoin/kuco
 import { createKucoinSpotAPI } from '../__tests__/reference/kucoin/kucoinspot.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
+import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { SignedPublicProxyRefusal } from './publicProxyGuard';
 import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
@@ -102,6 +103,51 @@ const browserHeaders = {
   'sec-fetch-dest': 'empty',
 };
 
+describe('WOO private IP-bound routing', () => {
+  it.each([{ tealstreetProxy: true }, { tealstreetTunnel: true }])('relays private traffic with %j', (flags) => {
+    const opts = options({ ...flags, applicationId: 'application-123' });
+    const route = resolveExchangeRouting('woo', opts);
+    expect(route.wsPublic).toEqual({ tunnelled: false });
+    expect(route.wsPrivate.tunnelled).toBe(true);
+    expect(new URL(route.wsPrivate.host!).searchParams.get('ts-relay')).toBe(
+      'wss://wss.woox.io/v2/ws/private/stream/application-123',
+    );
+    const plan = resolveEngineRoutingPlan('woo', opts, 'https://api.woox.io');
+    expect(plan.ws.private.host).toBe(route.wsPrivate.host);
+    expect(plan.ws.private.fallback).toBeUndefined();
+  });
+
+  it('leaves unproxied and staging sockets direct', () => {
+    for (const flags of [{}, { tealstreetProxy: true, testnet: true }]) {
+      expect(resolveExchangeRouting('woo', options(flags)).wsPrivate).toEqual({ tunnelled: false });
+    }
+  });
+
+  it('opens the real relay adapter without a direct private fallback', async () => {
+    mocks.relay.mockImplementation(function () {
+      return { addEventListener: vi.fn(), send: vi.fn(), close: vi.fn() };
+    });
+    const raw = makeRaw();
+    const routed = createEngineTransport(
+      'woo',
+      options({ tealstreetProxy: true, applicationId: 'application-123' }),
+      raw,
+    );
+    const socket = routed.connect('wss://wss.woox.io/v2/ws/private/stream/application-123', {
+      channel: 'private',
+      onOpen: vi.fn(),
+      onMessage: vi.fn(),
+      onClose: vi.fn(),
+    });
+    await vi.waitFor(() => expect(mocks.relay).toHaveBeenCalledOnce());
+    expect(new URL(mocks.relay.mock.calls[0][0]).searchParams.get('ts-relay')).toBe(
+      'wss://wss.woox.io/v2/ws/private/stream/application-123',
+    );
+    expect(raw.connect).not.toHaveBeenCalled();
+    socket.close();
+  });
+});
+
 beforeEach(() => {
   mocks.nodeRuntime.mockReturnValue(true);
   mocks.token.mockResolvedValue('proxy-jwt');
@@ -134,7 +180,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     try {
       const reply = await routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1', headers: {} });
       expect(new TextDecoder().decode(reply.body as Uint8Array)).toBe(body);
-      expect(report).toHaveBeenCalledExactlyOnceWith({ egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
+      expect(report).toHaveBeenCalledExactlyOnceWith({ retCode: 10006, egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
       expect(mocks.adapter).toHaveBeenCalledTimes(1);
       report.mockImplementation(() => { throw new Error('listener'); });
       await expect(routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?symbol=ETHUSDT&interval=1', headers: {} })).resolves.toMatchObject({ status: 200 });
@@ -517,31 +563,6 @@ describe('engine HTTP routing at the raw transport boundary', () => {
       url: `${PRIVATE_PROXY_JP}/https://api.mexc.com/api/v1/private/order/list/open_orders`,
       headers: { Authorization: 'venue-session', 'Tealstreet-Authorization': 'Bearer proxy-jwt' },
     });
-  });
-
-  it.each([
-    ['direct', false, false],
-    ['proxy', true, false],
-    ['HOW', true, true],
-  ] as const)('preserves Breakout DXAPI session authorization through %s routing', async (_label, tealstreetProxy, tealstreetTunnel) => {
-    const raw = makeRaw();
-    const url = 'https://breakout.prosp.devexperts.com/dxsca-web/accounts/default%3A00002/portfolio';
-    const input = { method: 'GET', url, headers: { Authorization: 'DXAPI documented-session' } };
-    const opts = options({ tealstreetProxy, tealstreetTunnel });
-    const routed = createEngineTransport('breakoutprop', opts, raw);
-    try {
-      await routed.request(input);
-      const delivered = tealstreetTunnel ? mocks.adapter.mock.lastCall![0] : raw.request.mock.lastCall![0];
-      const headers = tealstreetTunnel ? delivered.headers.toJSON() : delivered.headers;
-      expect(headers.Authorization).toBe('DXAPI documented-session');
-      expect(headers['Tealstreet-Authorization']).toBe(tealstreetProxy && !tealstreetTunnel ? 'Bearer proxy-jwt' : undefined);
-      expect(headers['Coinbase-Authorization']).toBeUndefined();
-      const plan = resolveEngineRoutingPlan('breakoutprop', opts, 'https://breakout.prosp.devexperts.com');
-      expect(plan.http.authorizationHeader).toBe('Tealstreet-Authorization');
-      expect(plan.http.authorize).toBe(tealstreetProxy && !tealstreetTunnel);
-      expect(plan.http.mode).toBe(tealstreetTunnel ? 'how' : 'direct');
-      if (tealstreetTunnel) expect(raw.request).not.toHaveBeenCalled();
-    } finally { routed.dispose!(); }
   });
 
   it('fails closed if a tunnel adapter returns parsed JSON', async () => {
@@ -1927,6 +1948,133 @@ describe('managed engine HTTP preparation', () => {
     return { raw: { ...raw, prepareHttp }, cancel, dispatch, ready, bind, prepareHttp };
   };
   const packet = () => ({ ...request(), request: 77, headers: {}, intent: 'primary' as const });
+
+  const authorizedHeaderCases: Array<{ label: string; value: unknown; expected?: string }> = [
+    { label: 'number', value: 42, expected: '42' },
+    { label: 'zero', value: 0, expected: '0' },
+    { label: 'negative number', value: -0.125, expected: '-0.125' },
+    { label: 'boolean true', value: true, expected: 'true' },
+    { label: 'boolean false', value: false },
+    { label: 'string', value: 'exact+%2F,=value', expected: 'exact+%2F,=value' },
+    { label: 'string array', value: ['first+%2F', 'second=value'], expected: 'first+%2F,second=value' },
+    { label: 'null', value: null },
+    { label: 'undefined', value: undefined },
+  ];
+  const headerWire = (headers: Record<string, string> | undefined) => JSON.stringify(
+    Object.entries(headers ?? {}).map(([name, value]) => [name, String(value)]),
+  );
+
+  it.each(authorizedHeaderCases)('matches master wire bytes for an authorize-added $label header', async ({ value, expected }) => {
+    const probe = managedRaw();
+    const provider = {
+      ...directTransport,
+      rest: ({ config }: Parameters<typeof directTransport.rest>[0]) => ({
+        baseURL: `https://proxy.invalid/${config.baseURL}`,
+        proxied: true,
+        authorize: async (config: InternalAxiosRequestConfig) => {
+          config.headers['x-Host-Begin'] = 'before';
+          Reflect.set(config.headers, 'X-TrAnSpOrT-Value', value);
+          config.headers['x-Host-End'] = 'after';
+        },
+      }),
+    };
+    const routed = createEngineTransport('bybit', options({ transport: provider }), probe.raw);
+    const original = { ...packet(), headers: { 'x-MiXeD-Signature': 'signed+%2F', 'X-Before': 'original' } };
+    const expectedEntries: Array<[string, string]> = [
+      ['x-MiXeD-Signature', 'signed+%2F'], ['X-Before', 'original'], ['x-Host-Begin', 'before'],
+    ];
+    if (expected !== undefined) expectedEntries.push(['X-TrAnSpOrT-Value', expected]);
+    expectedEntries.push(['x-Host-End', 'after']);
+    try {
+      if (!routed.prepareHttp) throw new Error('Managed preparation unavailable');
+      const prepared = await routed.prepareHttp(original);
+      expect(headerWire(probe.prepareHttp.mock.lastCall?.[0].headers)).toBe(JSON.stringify(expectedEntries));
+      expect(probe.dispatch).not.toHaveBeenCalled();
+      const bound = prepared.bind(original);
+      const final = probe.bind.mock.lastCall?.[0];
+      expect(headerWire(final?.headers)).toBe(JSON.stringify(expectedEntries));
+      expect(final?.body).toBe(original.body);
+      expect(final?.url).toBe(`https://proxy.invalid/${original.url}`);
+      expect(bound.ready()).toBe(true);
+      expect(probe.dispatch).not.toHaveBeenCalled();
+      await bound.dispatch();
+      expect(probe.dispatch).toHaveBeenCalledOnce();
+      expect(() => bound.dispatch()).toThrow();
+      expect(probe.raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('preserves Axios scalar and omitted headers without changing signed text', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
+    const headers: Record<string, string> = { 'X-Venue-Signature': 'exact+%2F', 'X-Scalar': 'text' };
+    Reflect.set(headers, 'X-Number', 42);
+    Reflect.set(headers, 'X-False', false);
+    Reflect.set(headers, 'X-Null', null);
+    Reflect.set(headers, 'X-Undefined', undefined);
+    try {
+      await routed.request({ ...request(), headers });
+      const sent = raw.request.mock.lastCall?.[0];
+      expect(sent?.headers).toEqual({
+        'X-Venue-Signature': 'exact+%2F', 'X-Scalar': 'text', 'X-Number': '42',
+      });
+      expect(raw.request).toHaveBeenCalledTimes(1);
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('retains the existing array-header refusal before a physical send', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
+    const headers: Record<string, string> = {};
+    Reflect.set(headers, 'X-Array', ['first', 'second']);
+    try {
+      await expect(routed.request({ ...request(), headers }))
+        .rejects.toMatchObject({ code: 'HTTP_PREPARATION_INVALID' });
+      expect(raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('refuses a non-callable tunnel preparation hook without a legacy send', async () => {
+    const raw = makeRaw();
+    Reflect.set(mocks.adapter, 'prepare', 'not-callable');
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), raw);
+    try {
+      if (!routed.prepareHttp) throw new Error('Managed preparation unavailable');
+      await expect(routed.prepareHttp(packet()))
+        .rejects.toMatchObject({ code: 'HTTP_PREPARATION_UNSUPPORTED' });
+      expect(mocks.adapter).not.toHaveBeenCalled();
+      expect(raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+      Reflect.deleteProperty(mocks.adapter, 'prepare');
+    }
+  });
+
+  it('refuses missing quota-read state before admission without sending or retaining preparation', async () => {
+    const probe = managedRaw();
+    const begin = HyperliquidStartupFacts.prototype.begin;
+    Reflect.set(HyperliquidStartupFacts.prototype, 'begin', () => undefined);
+    const routed = createEngineTransport('hyperliquid', options({ transport: directTransport }), probe.raw);
+    try {
+      if (!routed.prepareHttp) throw new Error('Managed preparation unavailable');
+      await expect(routed.prepareHttp({
+        ...packet(), method: 'POST', url: 'https://api.hyperliquid.xyz/info',
+        body: '{"type":"clearinghouseState","user":"fixture"}',
+      })).rejects.toMatchObject({ code: 'HTTP_PREPARATION_INVALID' });
+      expect(probe.cancel).toHaveBeenCalledOnce();
+      expect(probe.dispatch).not.toHaveBeenCalled();
+      expect(probe.raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+      Reflect.set(HyperliquidStartupFacts.prototype, 'begin', begin);
+    }
+  });
 
   it('finishes proxy authorization before readiness and binds the exact signed packet without I/O', async () => {
     const probe = managedRaw();

@@ -1,5 +1,8 @@
 # BreakoutProp protective edits
 
+Historical record: this venue was retired from the SDK on 2026-11-07.
+The implementation paths and validation commands below describe the former adapter.
+
 Proven standalone STOP and closing LIMIT/TP edits use DXtrade's native modify:
 GET `/accounts/{accountCode}/orders`, then PUT the complete single-order request
 with the returned strong ETag in `If-Match`. The inspection must establish a

@@ -462,22 +462,22 @@ fn mexc_provider_injection_requires_its_installed_provider() {
     }
 }
 
-// WOO remains a provider-injection refusal control after KuCoin adoption.
-#[cfg(feature = "woo")]
+// Private Orderly injection stays closed until its managed write migration.
+#[cfg(feature = "orderly")]
 #[test]
-fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_woo() {
+fn orderly_private_provider_injection_stays_closed() {
     struct NeverConstruct;
     impl safe_cex_venues::Visit for NeverConstruct {
         type Output = ();
         fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {
-            panic!("unmigrated provider admission must fail before visiting an engine");
+            panic!("hosted admission must fail before visiting an engine");
         }
     }
     let (provider, identities) = local_signer_from_json(
         r#"{"primary":{"key":"primary-key","secret":"primary-secret"}}"#.into(),
     )
     .unwrap();
-    for venue in ["woo"] {
+    for venue in ["orderly"] {
         for (refs, supplied_provider) in [(true, false), (false, true), (true, true)] {
             let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
             options.signing = refs.then(|| identities.clone());
@@ -488,16 +488,13 @@ fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_woo() {
                 supplied_provider.then(|| provider.clone()),
                 NeverConstruct,
             )
-            .expect_err("a feature gate must not silently migrate a venue");
+            .expect_err("trusted injection must not enable hosted admission");
             assert_eq!(
                 error.message,
-                "Injected signing is not supported for this venue yet"
+                "Orderly injected private signing admission is closed"
             );
-            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-            assert!(
-                error.outcome.is_none(),
-                "construction has no command outcome"
-            );
+            assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
         }
     }
 }

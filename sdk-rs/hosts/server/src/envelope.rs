@@ -2,12 +2,20 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// Non-secret account fields the browser sends; there is never an API secret.
+/// Account settings and an optional encrypted handover; no plaintext API secret.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitPayload {
     pub account_name: String,
     pub exchange_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_mode: Option<String>,
+    /// Consumed on this connection; never included in serialized settings.
+    #[serde(default, skip_serializing)]
+    pub sealed: Option<crate::delegated::Sealed>,
+    /// Reply provenance only; never an engine option or account fingerprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     #[serde(default, deserialize_with = "key")]
     pub key: String,
     #[serde(default, deserialize_with = "text")]
@@ -27,6 +35,8 @@ pub struct InitPayload {
     pub orderly_exchange_id: Option<String>,
     #[serde(default, deserialize_with = "text")]
     pub grvt_trading_account_id: Option<String>,
+    #[serde(default, deserialize_with = "text")]
+    pub grvt_signer_address: Option<String>,
     pub tealstreet_proxy: Option<bool>,
     pub tealstreet_tunnel: Option<bool>,
     pub tealstreet_ws_route: Option<bool>,
@@ -93,9 +103,26 @@ pub struct AccountMsg {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplySettings {
+    pub account_name: String,
+    /// Missing bindings deserialize so the handler can visibly refuse them.
+    pub instance_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(tag = "t", content = "d", rename_all = "kebab-case")]
 pub enum Inbound {
+    #[serde(rename = "order.submit")]
+    OrderSubmit(crate::order_contract::OrderSubmit),
+    #[serde(rename = "order.action")]
+    OrderAction(crate::order_actions::WireRequest),
+    #[serde(rename = "order.actionCancelQueued")]
+    OrderActionCancelQueued(crate::order_actions::CancelQueued),
+    #[serde(rename = "order.cancelQueued")]
+    OrderCancelQueued(crate::order_contract::CancelQueued),
     Init(Box<InitPayload>),
+    ApplySettings(ApplySettings),
     Msg(AccountMsg),
     SignRes(Value),
     Dispose {
@@ -121,11 +148,94 @@ fn envelope(t: &str, d: Value) -> String {
     format!(r#"{{"t":"{t}","d":{d}}}"#)
 }
 
+pub(crate) fn account_name(text: &str) -> Option<String> {
+    let frame: Value = serde_json::from_str(text).ok()?;
+    frame["d"]["accountName"].as_str().map(str::to_owned)
+}
+
+pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
+    let Ok(mut frame) = serde_json::from_str::<Value>(&text) else {
+        return text;
+    };
+    let kind = match frame["t"].as_str() {
+        Some("msg") => "msg",
+        Some("sign-req") => "sign-req",
+        Some("order.ack") => "order.ack",
+        Some("order.outcome") => "order.outcome",
+        Some("order.actionAck") => "order.actionAck",
+        Some("order.actionOutcome") => "order.actionOutcome",
+        _ => return text,
+    };
+    let Some(data) = frame["d"].as_object_mut() else {
+        return text;
+    };
+    data.insert("instanceId".into(), instance_id.into());
+    envelope(kind, frame["d"].take())
+}
+
+pub(crate) fn with_account_label(text: String, label: &str) -> String {
+    let Ok(mut frame) = serde_json::from_str::<Value>(&text) else {
+        return text;
+    };
+    let kind = match frame["t"].as_str() {
+        Some("msg") => "msg",
+        Some("sign-req") => "sign-req",
+        _ => return text,
+    };
+    let Some(data) = frame["d"].as_object_mut() else {
+        return text;
+    };
+    if data.get("accountName").and_then(Value::as_str) == Some(label) {
+        return text;
+    }
+    match data.get("op").and_then(Value::as_str) {
+        Some("store") => {
+            if let Some(rows) = data
+                .get_mut("data")
+                .and_then(|data| data.get_mut("activeTWAPs"))
+                .and_then(Value::as_array_mut)
+            {
+                for row in rows {
+                    if let Some(row) = row.as_object_mut() {
+                        row.insert("accountName".into(), label.into());
+                    }
+                }
+            }
+        }
+        Some("twap:stateUpdate") => {
+            if let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut) {
+                for row in rows.values_mut() {
+                    for field in ["options", "state"] {
+                        if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
+                            fields.insert("accountName".into(), label.into());
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    data.insert("accountName".into(), label.into());
+    envelope(kind, frame["d"].take())
+}
+
 pub fn msg(account_name: &str, op: &str, data: Value) -> String {
     envelope(
         "msg",
         json!({"op": op, "accountName": account_name, "data": data}),
     )
+}
+
+pub fn order_frame(kind: &str, account_name: &str, mut data: Value) -> String {
+    data["accountName"] = account_name.into();
+    envelope(kind, data)
+}
+
+pub fn delegated_key(account_name: &str, offer: &crate::delegated::KeyOffer) -> String {
+    let mut data = serde_json::to_value(offer).expect("public offer serializes");
+    data["op"] = "delegated-key".into();
+    data["accountName"] = account_name.into();
+    envelope("msg", data)
 }
 
 pub fn frame(account_name: &str, seq: u64, snapshot: bool, scxf: &[u8]) -> String {
@@ -202,6 +312,46 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
             "accountName": account_name,
             "data": [message, {"forceToast": true, "initRefused": true}],
         }),
+    )
+}
+
+pub fn init_unverified(account_name: &str, transient: bool) -> String {
+    envelope(
+        "msg",
+        json!({"op":"error", "accountName":account_name,
+            "data":["Could not verify your key; account not attached",
+                {"forceToast":true, "initRefused":true, "kind":"unverified", "transient":transient}]}),
+    )
+}
+
+/// A supported venue without a possession proof never takes a legacy admission path.
+pub fn init_proof_unavailable(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Key verification is not available for this venue; account not attached",
+            {"forceToast": true, "initRefused": true, "kind": "proof-unavailable",
+             "transient": false, "outcome": "notSent"}
+        ]),
+    )
+}
+
+/// Retired or unavailable venues refuse before routing, signing or engine work.
+pub fn init_unsupported(account_name: &str, venue: &str) -> String {
+    let error = safe_cex_venues::unsupported_venue(venue);
+    msg(
+        account_name,
+        "error",
+        json!([
+            error.message,
+            {
+                "forceToast": true,
+                "initRefused": true,
+                "kind": error.kind,
+                "outcome": error.outcome
+            }
+        ]),
     )
 }
 

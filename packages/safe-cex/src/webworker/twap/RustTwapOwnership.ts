@@ -1,13 +1,17 @@
 import type { Exchange } from '../../exchanges/base';
 import type { TwapOptions } from './TwapOptions';
+import type { TwapOwner } from './TwapOwner';
 import type { TwapState } from './TwapState';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 
 import { inFlightSlicePlaced } from './inFlightSlice';
 import { acquireTwapLock, acquireTwapLockWithin, TWAP_RESTORE_LOCK_WAIT_MS, twapLockName } from './twapLock';
+import { captureTwapOwner } from './TwapOwner';
 import { twapRestoreRefusal } from './twapRestoreRefusal';
 import { TwapStatus } from './TwapStatus';
 
-type Row = { options: TwapOptions; state: TwapState };
+type Row = { options: TwapOptions; state: TwapState; ownerId?: string; ownerGeneration?: number };
+type PendingRow = Row & { ownerSession: TwapOwner | null | undefined };
 type PersistedTwap = Row & { id: string };
 
 /**
@@ -20,7 +24,7 @@ export class RustTwapOwnership {
   /** The algos' last persisted rows. */
   private rows: Record<string, Row> = {};
   /** Restored rows waiting for their lock and slice reconcile; the algos do not have them yet. */
-  private readonly pending = new Map<string, Row>();
+  private readonly pending = new Map<string, PendingRow>();
   private readonly locks = new Map<string, () => void>();
   /** Started TWAPs whose lock was asked for (taken, being taken, or refused). */
   private readonly lockAsked = new Set<string>();
@@ -30,16 +34,19 @@ export class RustTwapOwnership {
     private readonly exchange: Exchange,
     private readonly send: (op: string, data: unknown) => void,
     private readonly post: (rows: Record<string, Row>) => void,
+    private readonly getOwner?: () => TwapOwner | null,
   ) {}
 
   /** One `twap:*` op for the algos. An op naming a restore still waiting applies to it here. */
-  handle(op: string, data: unknown) {
-    if (op === 'twap:state') return this.restore(data);
+  handle(op: string, data: unknown, ownerSession = captureTwapOwner(this.getOwner)) {
+    if (this.finished) return;
+    if (op === 'twap:state') return this.restore(data, ownerSession);
     const row = typeof data === 'string' ? this.pending.get(data) : undefined;
     if (!row) return this.send(op, data);
     // A restored row awaiting its lock: resume waits for the lock.
     if (op === 'twap:stop') this.pending.delete(data as string);
-    else if (op === 'twap:pause' && row.state.status === TwapStatus.Running) row.state = { ...row.state, status: TwapStatus.Paused };
+    else if (op === 'twap:pause' && row.state.status === TwapStatus.Running)
+      row.state = { ...row.state, status: TwapStatus.Paused };
     else if (op === 'twap:cleanup') row.state = { ...row.state, markForCleanup: true };
     else return;
     this.publish();
@@ -78,14 +85,14 @@ export class RustTwapOwnership {
     this.locks.clear();
   }
 
-  private restore(data: unknown) {
+  private restore(data: unknown, ownerSession: TwapOwner | null | undefined) {
     if (!Array.isArray(data)) {
-      console.error('[TWAP] twap:state expects an array');
+      diagnosticConsole.error('[TWAP] twap:state expects an array');
       return;
     }
     let refused = false;
     for (const value of data as Partial<PersistedTwap>[]) {
-      const { id, options, state } = value ?? {};
+      const { id, options, state, ownerId, ownerGeneration } = value ?? {};
       if (!id || id in this.rows || this.pending.has(id) || this.locks.has(id)) continue;
       const symbol = options?.activeMarket?.symbol ?? id;
       const refusal = twapRestoreRefusal(options, state, Date.now());
@@ -94,17 +101,38 @@ export class RustTwapOwnership {
         refused = true;
         continue;
       }
-      this.pending.set(id, { options: options!, state: state! });
-      void this.claim(id, symbol, options!.accountName, state!.inFlight);
+      if (ownerSession !== undefined && ownerId === undefined) {
+        this.cancelForOwnerChange(id, symbol, 'persisted ownerId is missing');
+        continue;
+      }
+      const row: PendingRow = {
+        options: options!,
+        state: state!,
+        ownerSession,
+        ...(ownerId !== undefined ? { ownerId } : {}),
+        ...(ownerGeneration !== undefined ? { ownerGeneration } : {}),
+      };
+      if (!this.ownerCurrent(row)) {
+        this.cancelForOwnerChange(id, symbol);
+        continue;
+      }
+      this.pending.set(id, row);
+      void this.claim(id, symbol, row);
     }
     // Rewrites this tab's rows, so a refused row is not restored and refused on every load.
     if (refused) this.publish();
   }
 
-  private async claim(id: string, symbol: string, accountName: string, inFlight: TwapState['inFlight']) {
-    const release = await acquireTwapLockWithin(twapLockName(accountName, id), TWAP_RESTORE_LOCK_WAIT_MS);
-    if (this.finished || !this.pending.has(id)) {
+  private async claim(id: string, symbol: string, row: PendingRow) {
+    const inFlight = row.state.inFlight;
+    const release = await acquireTwapLockWithin(twapLockName(row.options.accountName, id), TWAP_RESTORE_LOCK_WAIT_MS);
+    if (this.finished || this.pending.get(id) !== row) {
       release?.();
+      return;
+    }
+    if (!this.ownerCurrent(row)) {
+      release?.();
+      this.cancelForOwnerChange(id, symbol);
       return;
     }
     if (!release) {
@@ -114,14 +142,19 @@ export class RustTwapOwnership {
       return;
     }
     this.locks.set(id, release);
-    const placed = inFlight ? await inFlightSlicePlaced(this.exchange, symbol, inFlight) : true;
-    const row = this.pending.get(id);
-    this.pending.delete(id);
-    if (this.finished || !row) {
+    const placed = inFlight
+      ? await inFlightSlicePlaced(this.exchange, symbol, inFlight, () => this.ownerCurrent(row))
+      : true;
+    if (this.finished || this.pending.get(id) !== row) {
       this.release(id);
       this.publish();
       return;
     }
+    if (!this.ownerCurrent(row)) {
+      this.cancelForOwnerChange(id, symbol);
+      return;
+    }
+    this.pending.delete(id);
     const { inFlight: _settled, ...rest } = row.state;
     const state: TwapState = !inFlight
       ? row.state
@@ -129,7 +162,8 @@ export class RustTwapOwnership {
         ? { ...rest, ordersExecuted: rest.ordersExecuted + 1 }
         : { ...rest, ordersSizes: [inFlight.size, ...rest.ordersSizes] };
     // Its last slice was the one in flight: the TWAP is complete.
-    if (state.ordersSizes.length > 0) this.send('twap:state', [{ id, options: row.options, state }]);
+    const { ownerSession: _ownerSession, ...restored } = row;
+    if (state.ordersSizes.length > 0) this.send('twap:state', [{ id, ...restored, state }]);
     // The algos refused it, or it already completed.
     if (!(id in this.rows)) this.release(id);
     this.publish();
@@ -156,7 +190,31 @@ export class RustTwapOwnership {
   }
 
   private publish() {
-    if (!this.finished) this.post({ ...this.rows, ...Object.fromEntries(this.pending) });
+    const pending = [...this.pending].map(([id, { ownerSession: _ownerSession, ...row }]) => [id, row]);
+    if (!this.finished) this.post({ ...this.rows, ...Object.fromEntries(pending) });
+  }
+
+  private ownerCurrent(row: PendingRow): boolean {
+    const current = captureTwapOwner(this.getOwner);
+    const captured = row.ownerSession;
+    if (captured === undefined) return current === undefined && row.ownerId === undefined;
+    return (
+      !!captured &&
+      !!current &&
+      row.ownerId === captured.ownerId &&
+      current.ownerId === captured.ownerId &&
+      current.generation === captured.generation
+    );
+  }
+
+  private cancelForOwnerChange(id: string, symbol: string, reason?: string) {
+    this.pending.delete(id);
+    this.release(id);
+    this.exchange.emitter.emit(
+      'warning',
+      `TWAP ${symbol} restore cancelled-for-owner-change${reason ? `: ${reason}` : ''}`,
+    );
+    this.publish();
   }
 
   private refuse(message: string) {

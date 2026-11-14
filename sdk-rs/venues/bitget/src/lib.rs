@@ -6,6 +6,7 @@ mod history;
 mod identity;
 mod leverage;
 mod paths;
+mod protective;
 mod sign;
 mod telemetry;
 mod trading;
@@ -628,7 +629,15 @@ impl BitgetFutures {
                         }
                     };
                     cx.store
-                        .update_ticker_at(index, |ticker| update_ticker(ticker, &row));
+                        .update_ticker_at_observed(index, row.update_mask(), |ticker| {
+                            update_ticker(ticker, &row)
+                        });
+                    self.observe_protective_quote(
+                        symbol,
+                        row.value(TickerField::LastPr),
+                        row.value(TickerField::MarkPrice),
+                        cx.now,
+                    );
                     self.live_tickers
                         .record(cx.store, symbol, row.update_mask());
                 }
@@ -797,6 +806,14 @@ fn candle(row: &CandleRow) -> Candle {
 }
 
 impl Venue for BitgetFutures {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.protective_release_veto(store, pending, release)
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::FillsAccount,
@@ -1244,6 +1261,9 @@ impl Venue for BitgetFutures {
                         cx.store.set_markets(rows);
                     }
                     Discovered::Tickers(mut rows) => {
+                        for row in &rows {
+                            self.trading_seed_reference(&row.symbol, row.last, cx.now);
+                        }
                         self.live_tickers.finish(cx.store, &mut rows);
                         cx.store.set_tickers(rows);
                     }

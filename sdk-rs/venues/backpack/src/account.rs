@@ -75,6 +75,7 @@ impl ReadData {
 
 pub struct Account {
     pub credentials: Option<Credentials>,
+    pub active: bool,
     pub socket: Connection,
     pub leverage: f64,
     pub leverage_revision: u64,
@@ -100,6 +101,7 @@ impl Default for Account {
     fn default() -> Self {
         Self {
             credentials: None,
+            active: false,
             socket: Connection::default(),
             leverage: 1.0,
             leverage_revision: 0,
@@ -318,7 +320,10 @@ impl Backpack {
         self.account.order_times.get(id).copied().unwrap_or(0.0)
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.options.public_data_only || self.options.key.as_ref().is_none_or(String::is_empty) {
+        let provider_only = self.options.identity.is_some() && self.options.key.is_none();
+        if self.options.public_data_only
+            || (!provider_only && self.options.key.as_ref().is_none_or(String::is_empty))
+        {
             return;
         }
         self.account.credentials = match (&self.options.key, &self.options.secret) {
@@ -340,7 +345,8 @@ impl Backpack {
             },
             _ => None,
         };
-        if self.account.credentials.is_some() {
+        self.account.active = provider_only || self.account.credentials.is_some();
+        if self.account.active {
             cx.store.set_hedged(true);
             self.leverage_settings(cx);
             self.account_info(cx);
@@ -374,9 +380,9 @@ impl Backpack {
         }
         let primary = self
             .account
-            .credentials
-            .as_ref()
-            .and(self.options.identity.clone());
+            .active
+            .then(|| self.options.identity.clone())
+            .flatten();
         let slots = Slots::new(
             primary,
             self.options.read_identity.clone(),
@@ -404,11 +410,7 @@ impl Backpack {
             path: path.into(),
             rows: vec![Params::new()],
             body: None,
-            window: self
-                .account
-                .credentials
-                .as_ref()
-                .map_or(60000, |primary| primary.window),
+            window: self.signing_window(),
         };
         if let Err((pending, reason)) = read.queue(
             cx,
@@ -889,27 +891,38 @@ impl Backpack {
         }
     }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        let Some(c) = &self.account.credentials else {
-            return;
-        };
-        #[derive(serde::Serialize)]
-        struct Subscribe {
-            method: &'static str,
-            params: [&'static str; 2],
-            signature: [String; 4],
+        if self.account.credentials.is_none()
+            && let Some(identity) = self.options.identity.clone()
+        {
+            let recipe = crate::sign::WsAuth::new(identity, socket);
+            cx.send_signed(
+                socket,
+                ControlFrame::authentication(recipe.unsigned()),
+                Box::new(recipe),
+            );
+        } else {
+            let Some(c) = &self.account.credentials else {
+                return;
+            };
+            #[derive(serde::Serialize)]
+            struct Subscribe {
+                method: &'static str,
+                params: [&'static str; 2],
+                signature: [String; 4],
+            }
+            let signature = c.ws_auth(cx.protocol_now());
+            cx.send(
+                socket,
+                ControlFrame::subscription(
+                    serde_json::to_string(&Subscribe {
+                        method: "SUBSCRIBE",
+                        params: ["account.orderUpdate", "account.positionUpdate"],
+                        signature,
+                    })
+                    .unwrap(),
+                ),
+            );
         }
-        let signature = c.ws_auth(cx.protocol_now());
-        cx.send(
-            socket,
-            ControlFrame::subscription(
-                serde_json::to_string(&Subscribe {
-                    method: "SUBSCRIBE",
-                    params: ["account.orderUpdate", "account.positionUpdate"],
-                    signature,
-                })
-                .unwrap(),
-            ),
-        );
         self.account.socket.open = true;
         self.account.socket.ping_at = cx.now;
         cx.send(socket, ControlFrame::heartbeat("{\"method\":\"PING\"}"));
