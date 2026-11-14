@@ -54,6 +54,39 @@ fn flag(v: &Value, key: &str) -> Result<bool, String> {
         _ => Err(format!("drb invalid {key}")),
     }
 }
+#[derive(Clone, Copy)]
+pub(super) struct OrderVersion {
+    millis: f64,
+    pub(super) causal: Option<u64>,
+}
+impl OrderVersion {
+    pub(super) fn supersedes(self, previous: Self) -> bool {
+        // Without both causal stamps, equal milliseconds follow socket order;
+        // the caller filters economic duplicates against the current store row.
+        self.millis >= previous.millis
+            && match (self.causal, previous.causal) {
+                (Some(next), Some(old)) => next > old,
+                _ => true,
+            }
+    }
+}
+pub(super) fn versioned_order(v: Value) -> Result<(Order, OrderVersion), String> {
+    // Causal nanoseconds exceed f64's exact integer range; never round them.
+    let causal = v
+        .get("starbase_last_update_timestamp")
+        .map(|value| {
+            value
+                .as_u64()
+                .ok_or_else(|| "drb invalid causal order timestamp".to_owned())
+        })
+        .transpose()?;
+    let order = order(v)?;
+    let version = OrderVersion {
+        millis: order.last_update,
+        causal,
+    };
+    Ok((order, version))
+}
 fn optional_number(v: &Value, key: &str) -> Result<Option<f64>, String> {
     match v.get(key) {
         None | Some(Value::Null) => Ok(None),
