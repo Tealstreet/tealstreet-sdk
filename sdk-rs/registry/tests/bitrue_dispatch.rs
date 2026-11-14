@@ -1,6 +1,7 @@
 #![cfg(feature = "bitrue")]
 use safe_cex_engine::{Action, Engine, HttpRequest, Venue};
 use safe_cex_venues::{EngineOptions, Visit, build, build_with_signer};
+use serde_json::json;
 struct Catalogue;
 impl Visit for Catalogue {
     type Output = Vec<HttpRequest>;
@@ -163,16 +164,20 @@ fn private_payload_signing_requires_an_injected_provider_before_construction() {
     };
     let error =
         build_with_signer("bitrue", options(), entropy(), None, MustNotConstruct).unwrap_err();
-    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
     assert_eq!(
         error.message,
-        "Rust bitrue payloadSigner requires a configured injected signing provider"
+        "Delegated signing requires a configured callback provider"
     );
 
     let error = build("bitrue", options(), entropy(), MustNotConstruct).unwrap_err();
-    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Delegated signing requires a configured callback provider"
+    );
 
     let requests = build_with_signer(
         "bitrue",
@@ -255,5 +260,57 @@ fn malformed_complete_primary_is_refused_instead_of_made_anonymous() {
         )
         .unwrap_err();
         assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    }
+}
+
+struct Reject;
+impl Visit for Reject {
+    type Output = ();
+    fn visit<V: Venue + 'static>(self, _: Engine<V>) {
+        panic!("Bitrue is outside beta admission");
+    }
+}
+
+#[test]
+fn hosted_bitrue_accounts_require_beta_admission_before_dispatch() {
+    for value in [
+        json!({}),
+        json!({"publicDataOnly":true}),
+        json!({"key":"", "secret":"", "publicDataOnly":true}),
+        json!({"key":"fixture-key", "secret":"", "publicDataOnly":true}),
+        json!({"key":"", "secret":"fixture-material", "publicDataOnly":true}),
+        json!({"key":"fixture-key", "secret":"fixture-material"}),
+        json!({"key":"fixture-key", "secret":"fixture-material", "publicDataOnly":true}),
+        json!({"recvWindow":0, "publicDataOnly":true}),
+        json!({"recvWindow":100000, "publicDataOnly":true}),
+        json!({"signing":{"primary":{"credential":"fixture-ref", "signing":"opaque-key"}}, "publicDataOnly":true}),
+        json!({"signing":{"primary":{"credential":"fixture-ref", "signing":"opaque-key", "stableId":"\n"}}, "publicDataOnly":true}),
+    ] {
+        for injected in [false, true] {
+            let options: EngineOptions = serde_json::from_value(value.clone()).unwrap();
+            let error = if injected {
+                safe_cex_venues::build_with_signer_in_context(
+                    safe_cex_venues::ConstructionContext::Hosted,
+                    "bitrue",
+                    options,
+                    None,
+                    Some(std::sync::Arc::new(
+                        safe_cex_crypto::signer::LocalSigner::new(),
+                    )),
+                    Reject,
+                )
+            } else {
+                safe_cex_venues::build_in_context(
+                    safe_cex_venues::ConstructionContext::Hosted,
+                    "bitrue",
+                    options,
+                    None,
+                    Reject,
+                )
+            }
+            .expect_err("OUT venue cannot construct or dispatch its catalogue");
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
     }
 }

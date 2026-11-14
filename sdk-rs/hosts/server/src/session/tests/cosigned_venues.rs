@@ -347,10 +347,13 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
         let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
             .map(|s| serde_json::from_str(&s).unwrap())
             .collect();
-        let expected_kind = if safe_cex_venues::supported(venue) {
-            "proof-unavailable"
-        } else {
+        // Compiled codecs do not imply account admission. The beta roster
+        // refuses excluded venues before the COSIGNED proof-readiness gate;
+        // admitted venues still require their own proof or refuse unavailable.
+        let expected_kind = if rule["betaAdmitted"] == false || !safe_cex_venues::supported(venue) {
             "unsupported"
+        } else {
+            "proof-unavailable"
         };
         assert!(
             frames

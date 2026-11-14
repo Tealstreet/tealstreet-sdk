@@ -1106,7 +1106,8 @@ impl WasmEngine {
             .map_err(|_| js_sys::Error::new("Invalid Coinbase public signing binding"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
-        let inner = safe_cex_venues::build_with_signer(
+        let inner = safe_cex_venues::build_with_signer_in_context(
+            safe_cex_venues::ConstructionContext::Client,
             venue,
             options,
             Some(production_entropy().map_err(construction_error)?),

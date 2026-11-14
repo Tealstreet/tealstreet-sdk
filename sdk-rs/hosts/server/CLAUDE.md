@@ -197,6 +197,9 @@ pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
 cannot refuse the whole action after another leg may have crossed physical IO.
 Receipt counters share the existing registration lifecycle and size bounds.
 `order.actionCancelQueued` belongs to the router and never issues a venue cancel.
+A matching live registration keeps its output and shared receipt sequence while
+replacement verification is pending. This does not admit new writes; unmatched
+or retired bindings retain their existing rejection and fallback routing.
 Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic

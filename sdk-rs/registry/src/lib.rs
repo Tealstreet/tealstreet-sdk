@@ -77,6 +77,7 @@ mod hyro;
 #[cfg(feature = "bybit")]
 pub use hyro::HyroConfig;
 
+pub use construction::beta_admitted;
 use safe_cex_engine::{Engine, ErrorKind, Level, PublicFeedPolicy, Venue, VenueError};
 #[cfg(feature = "apexomni")]
 use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
@@ -271,9 +272,53 @@ fn hex_of(value: &str, digits: usize) -> bool {
     value.len() == digits && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-#[cfg(feature = "polymarket")]
-fn polymarket_signing_rules(options: &EngineOptions) -> Result<(), VenueError> {
-    if !construction::signer_setup_public_data_only(options)
+fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
+    construction::resolve(venue, options)
+        .map_or(options.public_data_only, |mode| mode.public_data_only)
+}
+
+/// The trusted host chooses admission; account JSON cannot change it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConstructionContext {
+    /// Client callers have their own SDK beta admission layer.
+    Client,
+    /// Hosted engines have no client admission layer above the registry.
+    Hosted,
+}
+
+impl ConstructionContext {
+    /// Refuse unavailable venues before host routing or signer setup.
+    pub fn validate_venue(self, venue: &str) -> Result<(), VenueError> {
+        if !supported(venue) || (self == Self::Hosted && !construction::beta_admitted(venue)) {
+            return Err(unsupported_venue(venue));
+        }
+        Ok(())
+    }
+}
+
+fn private_custody_rules(
+    context: ConstructionContext,
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+) -> Result<(), VenueError> {
+    context.validate_venue(venue)?;
+    let _ = (options, provider_ready);
+    // Preserve closed injected custody before callback/public-mode resolution.
+    #[cfg(feature = "orderly")]
+    if matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi")
+        && !construction::signer_setup_public_data_only(options)
+        && (options.signing.is_some() || provider_ready)
+    {
+        return Err(
+            VenueError::new("Orderly injected private signing admission is closed")
+                .kind(ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
+    }
+    #[cfg(feature = "polymarket")]
+    if venue == "polymarket"
+        && !resolved_public_data_only(venue, options)
         && (options.remote_signing || options.payload_signer)
     {
         return Err(VenueError::new("Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply")
@@ -281,6 +326,88 @@ fn polymarket_signing_rules(options: &EngineOptions) -> Result<(), VenueError> {
             .outcome(safe_cex_engine::Outcome::NotSent));
     }
     Ok(())
+}
+
+fn callback_rules(
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+) -> Result<(), VenueError> {
+    let (remote, payload) = options
+        .public_mode
+        .as_ref()
+        .map_or((false, false), |mode| mode.callback_intent());
+    let remote = remote || options.remote_signing;
+    let payload = payload || options.payload_signer;
+    if !(remote || payload) || construction::signer_setup_public_data_only(options) {
+        return Ok(());
+    }
+    let keyed = primary_key_present(venue, options);
+    let public = resolved_public_data_only(venue, options);
+    // TS DelegatedSignerSetup refuses these payload modes before callbacks.
+    if payload && matches!(venue, "grvt" | "kucoin" | "kucoinspot") {
+        payload_signing_rules_in_mode(venue, options, provider_ready, public)?;
+    }
+    if !provider_ready && (keyed || !public) {
+        return Err(
+            invalid("Delegated signing requires a configured callback provider")
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
+    }
+    // TS beta admission validates disabled-family callbacks before custody.
+    if !construction::bridge(venue, options).dispatch_signing
+        && !remote_signing_policy(venue).enabled
+    {
+        payload_signing_rules_in_mode(venue, options, provider_ready, public)?;
+    }
+    if !public && remote && !remote_signing_policy(venue).enabled {
+        return Err(VenueError::new(format!(
+            "Rust {venue} remote signing is unsupported in this build"
+        ))
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent));
+    }
+    Ok(())
+}
+
+fn primary_key_present(venue: &str, options: &EngineOptions) -> bool {
+    let trim = construction::signer_setup_policy(venue)
+        .primary
+        .is_some_and(|policy| policy.trim_credential == Some(true));
+    options
+        .key
+        .as_deref()
+        .is_some_and(|key| !(if trim { key.trim() } else { key }).is_empty())
+        || options
+            .signing
+            .as_ref()
+            .and_then(|ids| ids.primary.as_ref())
+            .is_some_and(|id| !id.credential.0.is_empty())
+}
+
+fn retain_delegated_public_mode(venue: &str, options: &mut EngineOptions) {
+    let callbacks = options.remote_signing
+        || options.payload_signer
+        || options.public_mode.as_ref().is_some_and(|mode| {
+            let (remote, payload) = mode.callback_intent();
+            remote || payload
+        });
+    let keyed = primary_key_present(venue, options)
+        || options
+            .signing
+            .as_ref()
+            .is_some_and(|ids| ids.primary.is_some());
+    let explicit_private_error = construction::resolve(venue, options)
+        .is_some_and(|mode| mode.explicit_private_error.is_some());
+    if callbacks && resolved_public_data_only(venue, options) && !(keyed && explicit_private_error)
+    {
+        options.public_data_only = true;
+        options.account_startup = false;
+        // Trusted setup must retain this resolution after consuming raw credentials.
+        if let Some(mode) = options.public_mode.as_mut() {
+            mode.requested = Some(true);
+        }
+    }
 }
 
 #[cfg(feature = "polymarket")]
@@ -584,8 +711,9 @@ pub fn supported(venue: &str) -> bool {
     feature = "okx"
 ))]
 fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
-    const DELEGATED: [&str; 8] = [
+    const DELEGATED: [&str; 9] = [
         "hyperliquid",
+        "hyperliquidspot",
         "paradex",
         "lighter",
         "lighter-robinhood",
@@ -1234,8 +1362,7 @@ fn payload_signing_rules(
     options: &EngineOptions,
     provider_ready: bool,
 ) -> Result<(), VenueError> {
-    let public = construction::resolve(venue, options)
-        .map_or(options.public_data_only, |mode| mode.public_data_only);
+    let public = resolved_public_data_only(venue, options);
     payload_signing_rules_in_mode(venue, options, provider_ready, public)
 }
 
@@ -1293,17 +1420,33 @@ fn payload_signing_rules_in_mode(
         .outcome(safe_cex_engine::Outcome::NotSent))
 }
 
-/// Constructs `venue`'s engine from `options`, enforcing its construction rules.
+/// Constructs a client engine; the caller owns SDK beta admission.
 pub fn build<T: Visit>(
     venue: &str,
     options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    #[cfg(feature = "polymarket")]
-    if venue == "polymarket" {
-        polymarket_signing_rules(&options)?;
-    }
+    build_in_context(
+        ConstructionContext::Client,
+        venue,
+        options,
+        entropy,
+        visitor,
+    )
+}
+
+/// Constructs an engine under the trusted host's explicit admission context.
+pub fn build_in_context<T: Visit>(
+    context: ConstructionContext,
+    venue: &str,
+    mut options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    private_custody_rules(context, venue, &options, false)?;
+    callback_rules(venue, &options, false)?;
+    retain_delegated_public_mode(venue, &mut options);
     payload_signing_rules(venue, &options, false)?;
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
@@ -1327,7 +1470,7 @@ pub fn build<T: Visit>(
     };
     #[cfg(not(feature = "dispatch-signing"))]
     let signer = None;
-    build_with_signer(venue, options, entropy, signer, visitor)
+    build_with_signer_in_context(context, venue, options, entropy, signer, visitor)
 }
 
 /// The validation result travels only for a ValidateOnly family, never with
@@ -1441,18 +1584,36 @@ pub fn frame_fed_supported(venue: &str) -> bool {
     FRAME_FED_VENUES.contains(&venue)
 }
 
-/// Generic options contain opaque references; provider owns all credentials.
+/// Constructs a client engine with an injected provider and client admission.
 pub fn build_with_signer<T: Visit>(
+    venue: &str,
+    options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
+    signer: Option<safe_cex_engine::signing::Provider>,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    build_with_signer_in_context(
+        ConstructionContext::Client,
+        venue,
+        options,
+        entropy,
+        signer,
+        visitor,
+    )
+}
+
+/// Generic options contain opaque references; the host chooses admission.
+pub fn build_with_signer_in_context<T: Visit>(
+    context: ConstructionContext,
     venue: &str,
     mut options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     mut signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
-    #[cfg(feature = "polymarket")]
-    if venue == "polymarket" {
-        polymarket_signing_rules(&options)?;
-    }
+    private_custody_rules(context, venue, &options, signer.is_some())?;
+    callback_rules(venue, &options, signer.is_some())?;
+    retain_delegated_public_mode(venue, &mut options);
     let _ = &signer;
     if !supported(venue) {
         return Err(unsupported_venue(venue));
@@ -1463,13 +1624,6 @@ pub fn build_with_signer<T: Visit>(
         options.public_data_only = true;
         options.signing = None;
         signer = None;
-    }
-    if orderly && (options.signing.is_some() || signer.is_some()) {
-        return Err(
-            VenueError::new("Orderly injected private signing admission is closed")
-                .kind(ErrorKind::Unsupported)
-                .outcome(safe_cex_engine::Outcome::NotSent),
-        );
     }
     if (options.signing.is_some() || signer.is_some())
         && !construction::bridge(venue, &options).dispatch_signing
@@ -2677,33 +2831,6 @@ pub struct EngineOptions {
     pub key: Option<String>,
     #[serde(default)]
     pub secret: Option<String>,
-    #[cfg(any(
-        feature = "grvt",
-        feature = "coinbase",
-        feature = "binance",
-        feature = "apexomni",
-        feature = "asterdex",
-        feature = "kucoin",
-        feature = "kucoinspot",
-        feature = "blofin",
-        feature = "bybit",
-        feature = "cryptocom",
-        feature = "bingx",
-        feature = "mexc",
-        feature = "bitget",
-        feature = "bitrue",
-        feature = "backpack",
-        feature = "phemex",
-        feature = "weex",
-        feature = "hyperliquid",
-        feature = "txflow",
-        feature = "polymarket",
-        feature = "kraken",
-        feature = "lighter",
-        feature = "woo",
-        feature = "orderly",
-        feature = "okx"
-    ))]
     /// The caller signs remotely (a remote or payload signer) rather than with a local secret.
     #[serde(default)]
     pub remote_signing: bool,

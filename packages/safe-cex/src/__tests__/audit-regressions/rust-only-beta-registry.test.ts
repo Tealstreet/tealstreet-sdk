@@ -69,7 +69,6 @@ const expected = [
   'what',
   'woofi',
   'backpack',
-  'bitrue',
 ];
 const out = Object.keys(exchangeMetadata).filter((name) => !expected.includes(name)) as ExchangeName[];
 const unsupported = { kind: 'unsupported', outcome: 'notSent' };
@@ -82,7 +81,8 @@ describe('Rust-only beta construction', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
     // Robinhood now uses the same beta runtime as Lighter.
-    expect(new Set(BETA_VENUES).size).toBe(44);
+    expect(new Set(BETA_VENUES).size).toBe(43);
+    expect(out).toContain('bitrue');
     expect(out).toContain('polymarket');
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
@@ -90,7 +90,7 @@ describe('Rust-only beta construction', () => {
       expect(await exchangeRegistry[name]()).toBe(state.Rust);
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
-    expect(state.calls).toHaveLength(44);
+    expect(state.calls).toHaveLength(43);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {

@@ -264,9 +264,8 @@ it.each(matrixVenues)('$label resolves the complete public matrix before custody
 });
 
 it('enumerates every declared venue outside the beta roster', () => {
-  // #3297 admits Bitrue; its public/private controls run in the IN matrix above.
-  expect(venues).toContain('bitrue');
-  expect(outsideBeta.sort()).toEqual(['bingxspot', 'polymarket', 'txflow', 'weex']);
+  expect(venues).not.toContain('bitrue');
+  expect(outsideBeta.sort()).toEqual(['bingxspot', 'bitrue', 'polymarket', 'txflow', 'weex']);
   expect(rules.venues.hyperliquidspot).toMatchObject({ canSign: [['secret', 'remoteSigner']] });
   expect(rules.venues.hyperliquidspot).not.toHaveProperty('privateEligible');
 });
@@ -287,12 +286,12 @@ it.each(outsideBeta)('%s remains outside beta admission in every public form', (
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it('a private Polymarket account keeps its protocol-specific custody refusal', () => {
+it('a private Polymarket account refuses at SDK admission before custody setup', () => {
   const { remoteSigner, payloadSigner } = unusedSigners();
   for (const callbacks of [{ remoteSigner }, { payloadSigner }]) {
     expect(() => new RustEngineExchange('polymarket', { key: `0x${'44'.repeat(32)}`, secret: '', ...callbacks }, new DefaultStore()))
       .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
-        message: 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply' }));
+        message: 'polymarket is unsupported in this build' }));
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
   expect(payloadSigner).not.toHaveBeenCalled();

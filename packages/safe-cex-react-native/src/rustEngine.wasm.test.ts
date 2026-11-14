@@ -2,7 +2,6 @@ vi.mock('@tealstreet/safe-cex/src/exchanges/rust/betaVenues', async (importOrigi
   const { retainedRustPolicy } = await import('@tealstreet/safe-cex/src/__tests__/reference/retainedRustPolicy');
   return retainedRustPolicy(
     await importOriginal<typeof import('@tealstreet/safe-cex/src/exchanges/rust/betaVenues')>(),
-    true,
   );
 });
 

@@ -774,7 +774,10 @@ captured output. Account-holder broadcasts stamp separately for each recipient.
 Each init refreshes fallback reply provenance after the connection's policy
 checks, even when rebuilding is refused or the venue is unsupported. Native
 disposal or join cleanup cannot restore an older registration. Explicit client
-disposal removes it. This metadata grants no engine or signing authority; outputs
+disposal removes it. Typed order receipts select the admitted joined registration's
+output, rather than a later refused init's fallback. Pending verification attempts
+retain their own refusal output; stopped and unjoined accounts retain the latest
+fallback provenance. This metadata grants no engine or signing authority; outputs
 already captured by old clients, commands or callbacks keep their original ID
 while their account generation is current; retired generations are dropped.
 Retained records capture their source account fingerprint before deferral and

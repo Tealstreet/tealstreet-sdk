@@ -54,7 +54,6 @@ export const BETA_VENUES = Object.freeze([
   'what',
   'woofi',
   'backpack',
-  'bitrue',
 ] as const satisfies readonly ExchangeName[]);
 
 export const isBetaVenue = (name: string): name is (typeof BETA_VENUES)[number] =>
@@ -68,16 +67,12 @@ export const assertBetaVenue: (name: string) => asserts name is (typeof BETA_VEN
 
 /** Unsupported signing modes cannot fall through to a TypeScript venue. */
 export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeOptions>): void => {
+  assertBetaVenue(name);
   options = snapshotDelegatedSigningOptions(name, options);
-  // Effective public first: unused callbacks on a public account are not custody.
+  // For admitted venues, unused callbacks on a public account are not custody.
   const publicDataOnly = resolveEffectivePublicDataOnly(name, options);
   // Configured means present, whatever its value: the same predicate as the resolver and setup.
   const delegated = !publicDataOnly && (options.remoteSigner !== undefined || options.payloadSigner !== undefined);
-  if (name === 'polymarket' && delegated) {
-    const message = 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply';
-    throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
-  }
-  assertBetaVenue(name);
   const disabled = deriveRemoteSigningPolicy(name)?.enabled !== true;
   // A keyed caller's present-but-invalid callback refuses whatever mode the rules resolve; only
   // an explicit public request ignores unused callback contents. DelegatedSignerSetup validates

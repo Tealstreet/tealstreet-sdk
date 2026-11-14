@@ -1186,7 +1186,10 @@ impl Session {
         self.cancel_verification(&init.account_name);
         // Refuse before routing can erase the classification or a rebuild can
         // dispose a live account with the same saved name.
-        if !safe_cex_venues::supported(&init.exchange_name) {
+        if safe_cex_venues::ConstructionContext::Hosted
+            .validate_venue(&init.exchange_name)
+            .is_err()
+        {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "unsupported venue");
             out.account(&init.account_name)

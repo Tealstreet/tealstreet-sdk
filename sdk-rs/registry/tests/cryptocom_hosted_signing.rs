@@ -45,7 +45,7 @@ fn cryptocom_registers_opaque_remote_and_payload_custody_without_local_credentia
 }
 
 #[test]
-fn cryptocom_payload_flag_without_a_provider_is_typed_unsupported_and_never_falls_back() {
+fn cryptocom_payload_flag_without_a_provider_is_typed_invalid_input_and_never_falls_back() {
     for raw in ["{}", r#"{"key":"replay-key","secret":"replay-secret"}"#] {
         let mut options: EngineOptions = serde_json::from_str(raw).unwrap();
         options.payload_signer = true;
@@ -57,7 +57,7 @@ fn cryptocom_payload_flag_without_a_provider_is_typed_unsupported_and_never_fall
             Registered,
         )
         .unwrap_err();
-        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
         assert!(!error.message.contains("replay-secret"));
     }

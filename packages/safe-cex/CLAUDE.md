@@ -1,13 +1,16 @@
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
-Polymarket explicitly refuses hosted/delegated signing before construction:
-its private user WebSocket needs the L2 API secret, not a signature. See
+Hosted construction follows that full roster for public and private accounts.
+Bitrue, Polymarket, Weex, TxFlow and the canonical `orderly` name remain OUT;
+KodiakFi, Mode, What and WOOFi retain their admitted Orderly-family aliases.
+Polymarket's native signing layer also refuses delegated
+custody: its private user WebSocket needs the L2 API secret, not a signature. See
 `sdk-rs/venues/polymarket/README.md`; callback payloads must never export it.
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
 and test-only replay/reference implementations remain independent dependencies.
-Historical Rust-adapter fixtures mock only beta admission through
+Historical Rust-adapter fixtures mock both beta admission entry guards through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
@@ -16,7 +19,6 @@ see `sdk-rs/venues/asterdex/README.md`),
 MEXC (RemoteSigner and REST-only PayloadSigner; see `sdk-rs/venues/mexc/README.md`),
 Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
-Bitrue (HMAC RemoteSigner and REST-only PayloadSigner; `sdk-rs/venues/bitrue/README.md`),
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
@@ -396,6 +398,13 @@ explicit empty never inherits. Local signer setup in public mode bypasses only
 the primary requirement, while secondary validation stays active. Shared publicMode intent takes precedence
 over legacy publicDataOnly, including null/omitted requested. This declaration does
 not enable signing for an unmigrated family.
+
+Native public-mode parity uses trusted signer setup's normalized credential
+presence, including per-family Rust whitespace rules. Below SDK admission,
+Coinbase/Spot and TxFlow private payload intent without a native provider refuses with
+`invalidInput/notSent`; an installed provider reaches `unsupported/notSent`.
+Retained WASM fixtures must distinguish these cases rather than equating callback
+intent with provider availability.
 Normalization and required-material validation occur before opaque identities are installed, and SDK cached
 public/private intent uses the same effective presence before raw options are
 stripped. Whitespace follows Rust Unicode White_Space (NEL removed, BOM kept),
@@ -485,8 +494,9 @@ ApeX uses this shared early return for saved-key and keyless accounts explicitly
 requesting public mode. Captured public mode cannot be changed by later
 construction input; no separate ApeX public-mode guard is installed.
 
-Construction snapshots outer signer fields and their methods together under one
-guard before mode resolution. Admission, asynchronous factories and signer setup
+SDK factories and the Rust constructor reject OUT venues before reading options.
+For admitted venues, construction snapshots outer signer fields and their methods
+together under one guard before mode resolution. Admission, asynchronous factories and signer setup
 share that immutable snapshot, preserving receivers without further caller reads.
 Its opaque construction token is stripped before generic options are retained.
 Throwing getters or Proxy traps refuse with a fixed, redacted `invalidInput` /
@@ -1505,23 +1515,25 @@ deterministic request/response regressions; live startup and authentication
 additionally need network or credentialed probes. Do not replace that evidence
 with source-text grep.
 
-## `payloadSigner` (Bybit, Binance)
+## `payloadSigner`
 
-`ExchangeOptions.payloadSigner` replaces `secret` for callers that hold no
-secret and sign elsewhere. It receives the exact bytes the venue would HMAC
-and returns the value for the signature slot, plus headers to add to the same
-request. `utils/payloadSigner.ts` routes both modes through one function, so
-local signing and delegated signing share the same payload. Binance and Bybit
-skip the private websocket with this REST signer. No Rust venue consumes a
-payload signer; the engine's payload-signing actions and events are removed. `runsOnRustEngine` keeps
-Bybit- and Binance-family accounts with one on TS, whose signers honour it.
-Every other TS venue, including the hosted Coinbase/Orderly classes, ignores a
-payload signer while `canSign` counts it, so those accounts stay on the engine.
-A Rust account that would run privately with a payload signer refuses at
-startup, before any engine or transport work: an `ExchangeError` with
-`kind: 'unsupported'`, `outcome: 'notSent'`, which `validateAccount` reports
-with its kind. Lighter's payload-only accounts still start public. Tests: `src/__tests__/payload-signer.test.ts`,
-`src/__tests__/paradex.payload-signer.test.ts` and
+`ExchangeOptions.payloadSigner` signs elsewhere without giving the SDK a local
+secret. It receives the exact venue payload and returns the signature plus any
+permitted result headers. SDK factories select Rust, including Binance and Bybit;
+there is no TypeScript venue fallback. The shared delegated-provider companion
+consumes callbacks only for aliases enabled by `construction-rules.json`, keeps
+their declared REST-only private-feed policy, and strips callbacks and signing
+credentials from retained exchange options.
+
+Public-mode resolution happens before unused custody checks, using each family's
+normalized credential presence and explicit mode intent. Private callback setup
+requires a configured provider; missing configuration refuses with
+`invalidInput` / `notSent`. Unsupported private custody refuses with
+`unsupported` / `notSent` before transport. Below SDK admission, native
+Coinbase/Spot and TxFlow payload intent without a provider gets the former;
+an installed provider reaches the latter. Native intent flags alone are not a
+callback provider and do not enable an unmigrated family. See the shared
+construction and delegated-provider contracts above and
 `src/__tests__/audit-regressions/rust.payload-signer-refusal.test.ts`.
 
 ## Account data on shared public markets (`loadAccountMarketOverlay`)
