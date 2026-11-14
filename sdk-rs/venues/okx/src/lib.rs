@@ -1073,6 +1073,13 @@ impl Venue for Okx {
             && let price @ (PriceChannel::Tickers | PriceChannel::Mark | PriceChannel::Index) =
                 PriceChannel::of(name)
         {
+            cx.record_socket_topic(&[
+                "{\"channel\":\"",
+                name,
+                "\",\"instId\":\"",
+                row.inst_id,
+                "\"}",
+            ]);
             self.price_row(cx, price, row);
             self.account_prices(cx);
             return;
@@ -1087,6 +1094,25 @@ impl Venue for Okx {
                 format!("OKX {}: {}", message.code, message.msg),
             );
             return;
+        }
+        if message.data.is_some() {
+            let topic = message.arg.channel;
+            cx.record_socket_topic(&["{\"channel\":\"", topic, "\"}"]);
+            cx.record_socket_topic(&[
+                "{\"channel\":\"",
+                topic,
+                "\",\"instId\":\"",
+                message.arg.inst_id,
+                "\"}",
+            ]);
+            cx.record_socket_topic(&["{\"channel\":\"", topic, "\",\"instType\":\"ANY\"}"]);
+            cx.record_socket_topic(&[
+                "{\"channel\":\"",
+                topic,
+                "\",\"instType\":\"",
+                message.arg.inst_type,
+                "\"}",
+            ]);
         }
         if channel != PUBLIC
             && (message.event == "login"

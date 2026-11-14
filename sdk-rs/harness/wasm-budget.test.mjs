@@ -1736,39 +1736,6 @@ test('#3383 (run 42493810742 at 1e85d49cc13) retains measured wasm headroom', ()
   }
 });
 
-test('#3314 (run 42560319271 at merge 449511022a8d) retains measured TxFlow headroom', () => {
-  const measured = 2_121_120;
-  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(minimumCap, 2_131_968);
-  const cap = WASM_VENUE_OVERRIDES.txflow;
-  assert.ok(cap >= minimumCap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
-});
-
-test('#3314 repaired c5c8a213f6a5 retains current optimized TxFlow headroom', () => {
-  const measured = 2_121_037;
-  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(minimumCap, 2_131_968);
-  const cap = WASM_VENUE_OVERRIDES.txflow;
-  assert.ok(cap >= minimumCap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
-});
-
-test('#3314 agent setup e2da53cc9f26 retains measured TxFlow headroom', () => {
-  const measured = 2_120_966;
-  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(minimumCap, 2_131_968);
-  const cap = WASM_VENUE_OVERRIDES.txflow;
-  assert.ok(cap >= minimumCap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
-});
-
 test('#3317 current CI (run 42622329629, job 129178042670, artifact 13676298877 at 8e55e01469b) retains WOO headroom', () => {
   const measured = 2_636_672;
   const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -3147,53 +3114,69 @@ for (const [family, artifact, measured, minimumCap, aliases] of [
   });
 }
 
+// #3290 merge 86ea9140052b, Rust SDK run 43561789464: optimized web/Node modules.
+// Replay jobs 132347235888/132347235976 (Hyperliquid) and 132347235852 (TxFlow).
+for (const [family, measured, minimumCap, aliases] of [
+  ['hyperliquid', 2_266_210, 2_277_376, ['hyperliquid', 'hyperliquidspot']],
+  ['txflow', 1_957_203, 1_968_128, ['txflow']],
+]) {
+  test(`#3290 CI 43561789464: ${family} preserves the measured reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
 
-test('#3314 refreshed merge 9bb43250830d retains measured TxFlow reserve', () => {
-  const measured = 2_147_684;
-  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(required, 2_158_592);
-  const cap = WASM_VENUE_OVERRIDES.txflow;
-  assert.ok(cap >= required);
-  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
-});
+// #3290 source 8043e2bb11e5: CI 43563699705 builds cb6f9af848f2 with the identical tree.
+// Archive digests and equal web/Node/replay module hashes verified; retain every historical floor.
+for (const [family, artifact, measured, minimumCap, aliases] of [
+  ["apexomni", 14101309480, 2_099_376, 2_110_464, ["apexomni"]],
+  ["asterdex", 14101975996, 2_263_190, 2_274_304, ["asterdex"]],
+  ["backpack", 14101806150, 2_047_591, 2_058_240, ["backpack"]],
+  ["binance", 14101567436, 2_278_309, 2_288_640, ["binance"]],
+  ["bingx", 14101497823, 2_137_074, 2_147_328, ["bingx"]],
+  ["bitget", 14101418607, 2_769_289, 2_780_160, ["bitget", "bitgetusdc"]],
+  ["bitrue", 14101906115, 1_908_397, 1_918_976, ["bitrue"]],
+  ["bitunix", 14101901190, 1_954_918, 1_966_080, ["bitunix"]],
+  ["blofin", 14101213436, 2_071_746, 2_082_816, ["blofin"]],
+  ["bybit", 14101452734, 2_552_589, 2_563_072, ["bybit"]],
+  ["coinbase", 14102120122, 2_114_517, 2_124_800, ["coinbase"]],
+  ["cryptocom", 14101901106, 1_815_949, 1_826_816, ["cryptocom"]],
+  ["grvt", 14101941136, 2_002_596, 2_013_184, ["grvt"]],
+  ["hyperliquid", 14101826265, 2_266_273, 2_277_376, ["hyperliquid", "hyperliquidspot"]],
+  ["kraken", 14101856260, 2_275_348, 2_286_592, ["kraken", "krakenspot"]],
+  ["kucoin", 14101357803, 1_865_034, 1_875_968, ["kucoin"]],
+  ["kucoinspot", 14102045777, 2_477_104, 2_488_320, ["kucoinspot"]],
+  ["lighter", 14101492956, 2_166_230, 2_177_024, ["lighter", "lighter-robinhood"]],
+  ["mexc", 14101831371, 1_959_030, 1_970_176, ["mexc"]],
+  ["okx", 14101741392, 2_057_167, 2_067_456, ["okx"]],
+  ["orderly", 14101238198, 1_782_494, 1_793_024, ["orderly"]],
+  ["paradex", 14101377600, 2_309_926, 2_320_384, ["paradex"]],
+  ["phemex", 14101582159, 2_144_151, 2_154_496, ["phemex"]],
+  ["polymarket", 14101801194, 1_664_056, 1_675_264, ["polymarket"]],
+  ["txflow", 14102000849, 1_957_266, 1_968_128, ["txflow"]],
+  ["weex", 14101910992, 2_028_911, 2_039_808, ["weex"]],
+  ["woo", 14101841020, 2_680_145, 2_691_072, ["woo"]],
 
-
-test('#3314 refusal fix e959e2a7dc2e retains fresh optimized TxFlow reserve', () => {
-  const measured = 2_147_758;
-  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(required, 2_158_592);
-  const cap = WASM_VENUE_OVERRIDES.txflow;
-  assert.ok(cap >= required);
-  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
-});
-
-
-test('#3314 composed WEEX f6830c3f2466 retains measured optimized reserve', () => {
-  const measured = 2_028_105;
-  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(required, 2_038_784);
-  const cap = WASM_VENUE_OVERRIDES.weex;
-  assert.ok(cap >= required);
-  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'weex'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'weex'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'weex'), /exceeds/);
-});
-
-
-test('#3314 recoverable authorization reads retain freshly measured TxFlow reserve', () => {
-  const measured = 2_148_376;
-  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(required, 2_159_616);
-  const cap = WASM_VENUE_OVERRIDES.txflow;
-  assert.ok(cap >= required);
-  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
-});
+]) {
+  test(`#3290 CI 43563699705: ${family} artifact ${artifact} preserves the merged reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
 
 // #3499 merge f2a87132c7771a459267ff33f270f2efc8deb929: local optimized web/Node bytes.
 // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh twice -Oz, -j2.
@@ -3285,17 +3268,36 @@ for (const [venue, measured, required] of [
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
-
-test('#3314 serial placement source1c2a4f8232c4 retains measured TxFlow reserve', () => {
-  const measured = 2_149_614;
-  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
-  assert.equal(required, 2_160_640);
-  const cap = WASM_VENUE_OVERRIDES.txflow;
-  assert.ok(cap >= required);
-  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+// #3290 master refresh 78d46f0574ef, CI 43569184535, shipped family artifact 14104151569.
+test('#3290 merged BingX module retains the current measured reserve', () => {
+  const measured = 2_142_207;
+  const minimumCap = 2_152_448;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= minimumCap, `${cap} must retain ${minimumCap} bytes`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
+
+// #3290 lookup candidate 11456fb4a3c2, CI 43579592827; optimized web/Node/replay maximum.
+// CI source 2dd9066eb21ffb1d9902f6d3dc19a585b4f18748; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
+// Binance job 132401623226; BingX job 132401623277. Retain all historical floors and boundaries.
+for (const [venue, measured, minimumCap, parentFloor, artifact, sha256] of [
+  ['binance', 2_278_530, 2_289_664, 2_288_640, 14107991476, 'ec6b62ed8987dd234703da1c20aae4b6ae401c54b6ab6b648ac72cd92f0e7a6b'],
+  ['bingx', 2_142_427, 2_153_472, 2_152_448, 14107034718, '3135a5a3ea736112947776cb213111ccb5c0c1b75d625339bf348cf8cf12b3d3'],
+]) {
+  test(`#3290 lookup CI: ${venue} artifact ${artifact} ${sha256} retains measured reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(venueFamily(venue), venue);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= parentFloor, `${venue}: ${cap} must retain parent floor ${parentFloor}`);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
 
 // Local build.sh --venue lighter at d28424d3b6bf51619760093b2004e8a357da1524.
 // Rust 1.99.0, bindgen 0.2.129, Binaryen 132, required two -Oz passes; web/Node
@@ -3375,5 +3377,162 @@ for (const [venue, family, measured, minimumCap, sha256, parentFloor] of [
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
     if (family === 'lighter') assert.equal(cap, WASM_VENUE_OVERRIDES['lighter-robinhood']);
+  });
+}
+
+// #3290 merge bbc40c3cd8ad, CI 43582722154/job 132414117890, family artifact 14109099497.
+// Source 2cf28d853f16058cb6802e0aec598c43f132cd78; web/Node/replay SHA ca71afa4470420325dfcd035152511607e2f288559cffb6fc25a0e32c66168c4.
+// Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; required two -Oz passes.
+for (const venue of ['lighter', 'lighter-robinhood']) {
+  test(`#3290 merged Lighter artifact 14109099497: ${venue} retains fresh measured reserve`, () => {
+    const measured = 2_185_562;
+    const minimumCap = 2_196_480;
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(venueFamily(venue), 'lighter');
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= 2_190_336, `${venue}: ${cap} must retain both parent floors`);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(cap, WASM_VENUE_OVERRIDES.lighter);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
+
+test('#3314 (run 42560319271 at merge 449511022a8d) retains measured TxFlow headroom', () => {
+  const measured = 2_121_120;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_131_968);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+test('#3314 repaired c5c8a213f6a5 retains current optimized TxFlow headroom', () => {
+  const measured = 2_121_037;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_131_968);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+test('#3314 agent setup e2da53cc9f26 retains measured TxFlow headroom', () => {
+  const measured = 2_120_966;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_131_968);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+
+test('#3314 refreshed merge 9bb43250830d retains measured TxFlow reserve', () => {
+  const measured = 2_147_684;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_158_592);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+
+test('#3314 refusal fix e959e2a7dc2e retains fresh optimized TxFlow reserve', () => {
+  const measured = 2_147_758;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_158_592);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+
+test('#3314 composed WEEX f6830c3f2466 retains measured optimized reserve', () => {
+  const measured = 2_028_105;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_038_784);
+  const cap = WASM_VENUE_OVERRIDES.weex;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'weex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'weex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'weex'), /exceeds/);
+});
+
+
+test('#3314 recoverable authorization reads retain freshly measured TxFlow reserve', () => {
+  const measured = 2_148_376;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_159_616);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+
+for (const [venue, measured, required] of [
+  ['txflow', 2_148_377, 2_159_616],
+  ['weex', 2_028_106, 2_038_784],
+]) test(`#3314 merge f19209120d28: ${venue} retains fresh measured reserve`, () => {
+  assert.equal(required, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES[venue];
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+});
+
+
+test('#3314 serial placement source1c2a4f8232c4 retains measured TxFlow reserve', () => {
+  const measured = 2_149_614;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_160_640);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
+
+// #3290 CI 43591113196, source97507acf9371 (head738ee1289): pinned optimized profile.
+// Verified26family archive digests/manifests and equal web/Node/replay modules;
+// TxFlow cap refusal retains current web/Node bytes+hashes in strict-replay artifact14113250022.
+for (const [venue, family, artifact, measured, minimumCap] of [
+  ['apexomni', 'apexomni', 14112672780, 2_100_887, 2_111_488],
+  ['asterdex', 'asterdex', 14112563027, 2_264_745, 2_275_328],
+  ['backpack', 'backpack', 14112672710, 2_048_859, 2_059_264],
+  ['binance', 'binance', 14112821349, 2_279_707, 2_290_688],
+  ['bybit', 'bybit', 14112214193, 2_553_690, 2_564_096],
+  ['hyperliquid', 'hyperliquid', 14112936192, 2_267_769, 2_278_400],
+  ['hyperliquidspot', 'hyperliquid', 14112936192, 2_267_769, 2_278_400],
+  ['kraken', 'kraken', 14112762396, 2_276_461, 2_287_616],
+  ['krakenspot', 'kraken', 14112762396, 2_276_461, 2_287_616],
+  ['lighter', 'lighter', 14112777448, 2_186_833, 2_197_504],
+  ['lighter-robinhood', 'lighter', 14112777448, 2_186_833, 2_197_504],
+  ['paradex', 'paradex', 14112204213, 2_311_211, 2_322_432],
+  ['phemex', 'phemex', 14112821350, 2_144_862, 2_155_520],
+  ['weex', 'weex', 14112856212, 2_029_690, 2_040_832],
+  ['txflow', 'txflow', 14113250022, 2_164_428, 2_174_976],
+]) {
+  test(`#3290 receipt fix CI43591113196: ${venue} artifact${artifact} retains measured reserve`, () => {
+    assert.equal(venueFamily(venue), family);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(cap, WASM_VENUE_OVERRIDES[family]);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }

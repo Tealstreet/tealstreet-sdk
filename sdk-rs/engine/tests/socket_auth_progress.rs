@@ -130,6 +130,9 @@ impl Venue for Native {
     }
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, text: &str) {
         self.messages += 1;
+        if text == "ordinary-data" {
+            cx.record_socket_topic(&["ordinary-interest"]);
+        }
         if text
             .strip_prefix("challenge:")
             .is_some_and(|s| !s.is_empty())
@@ -699,12 +702,12 @@ fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
         sent,
         ["key-challenge", "auth-subscription", "ordinary-interest"]
     );
-    // Recorded before the concrete driver extraction on master 7d9554615dc.
+    // Baseline from master 7d9554615dc; singleton replay now skips its sort-key allocation.
     for (actual, calls, bytes) in [
         (start, start_calls, start_bytes),
         (open, 8, 3541),
         (challenge, 5, 2233),
-        (accepted, 17, 3745),
+        (accepted, 16, 3729),
         (data, 0, 0),
         (expiry, 10, 3218),
     ] {

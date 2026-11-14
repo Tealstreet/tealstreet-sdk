@@ -553,3 +553,80 @@ fn a_u1000_candle_read_sends_the_venues_own_id() {
         }
     }
 }
+
+fn subscription_receipts(frame: &[u8]) -> Vec<(String, u32, f64)> {
+    use safe_cex_engine::wire::{section, sections};
+    let stats = sections(frame)
+        .find(|(kind, _)| *kind == section::MESSAGE_HANDLER_STATS)
+        .unwrap()
+        .1;
+    let strings = sections(frame)
+        .find(|(kind, _)| *kind == section::STRINGS)
+        .unwrap()
+        .1;
+    let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+    let text = |index: usize| {
+        let start =
+            u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap()) as usize;
+        let end =
+            u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap()) as usize;
+        let base = 4 + (count + 1) * 4;
+        std::str::from_utf8(&strings[base + start..base + end])
+            .unwrap()
+            .to_owned()
+    };
+    let rows: Vec<_> = stats[8..]
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .map(|row| {
+            (
+                text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize),
+                u32::from_le_bytes(row[8..12].try_into().unwrap()),
+                f64::from_le_bytes(row[16..24].try_into().unwrap()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows.len(),
+        u32::from_le_bytes(stats[..4].try_into().unwrap()) as usize
+    );
+    rows
+}
+
+#[test]
+fn subscription_receipt_counts_candle_snapshots_without_emitting_live_history() {
+    let (mut e, socket) = started();
+    e.handle(
+        1.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1.);
+    assert!(
+        actions.iter().any(
+            |a| matches!(a, Action::WsSend { text, .. } if text.contains("kline_p.subscribe"))
+        )
+    );
+    e.handle(2., Event::WsMessage { socket, text: r#"{"symbol":"BTCUSDT","type":"snapshot","kline_p":[[1700000000,60,0,"100","110","90","105","2",0]]}"# });
+    let frame = e.take_frame(2.).unwrap_or_default();
+    assert!(
+        !safe_cex_engine::wire::sections(frame)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::CANDLES)
+    );
+    let rows = subscription_receipts(e.snapshot_frame(3.));
+    let candle = rows
+        .iter()
+        .find(|r| r.0.ends_with("2:candle:BTCUSDT:60"))
+        .unwrap();
+    let snapshot_receipt = (candle.1, candle.2);
+    e.handle(4., Event::WsMessage { socket, text: r#"{"symbol":"BTCUSDT","type":"incremental","kline_p":[[1700000060,60,0,"105","115","95","110","3",0]]}"# });
+    let live = e.take_frame(4.).expect("valid incremental candle");
+    assert!(
+        safe_cex_engine::wire::sections(live)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::CANDLES)
+    );
+    assert_eq!(snapshot_receipt, (3, 1.));
+}

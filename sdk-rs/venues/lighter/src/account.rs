@@ -2629,6 +2629,7 @@ impl Lighter {
         {
             return true;
         }
+        cx.record_socket_topic(&["private"]);
         let nested = frame
             .data
             .and_then(|data| serde_json::from_str::<Payload<'_>>(data.get()).ok());

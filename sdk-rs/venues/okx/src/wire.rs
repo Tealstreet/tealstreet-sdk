@@ -168,6 +168,7 @@ pub struct InstrumentId<'a> {
 #[serde(rename_all = "camelCase", default)]
 pub struct Arg<'a> {
     pub channel: &'a str,
+    pub inst_type: &'a str,
     pub inst_id: &'a str,
 }
 

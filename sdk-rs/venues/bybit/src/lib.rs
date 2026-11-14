@@ -3046,6 +3046,12 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
+        if let Some(topic) = topic(text)
+            && !cx.record_socket_topic(&[topic])
+            && let Some((root, _)) = topic.split_once('.')
+        {
+            cx.record_socket_topic(&[root]);
+        }
         match channel {
             Channel::Public => self.on_public_frame(cx, text),
             Channel::Private => {

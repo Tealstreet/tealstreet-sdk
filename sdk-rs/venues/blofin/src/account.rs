@@ -2008,6 +2008,7 @@ impl Blofin {
         if !message.event.is_empty() || !self.account.authenticated {
             return;
         }
+        cx.record_socket_topic(&["{\"channel\":\"", &message.arg.channel, "\"}"]);
         match message.arg.channel.as_ref() {
             "orders" | "orders-algo" => {
                 // Missing quantity is not an explicit zero proof; a present
