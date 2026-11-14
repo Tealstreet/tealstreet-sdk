@@ -90,6 +90,7 @@ enum RequestKind {
 
 #[derive(Default)]
 pub(crate) struct Trading {
+    pub(crate) linkage: crate::drb_linkage::Linkage,
     expiry_timer: Option<TimerId>,
     recovery_timer: Option<TimerId>,
     waiting_timer: Option<TimerId>,
@@ -125,6 +126,21 @@ fn positive(n: f64) -> Result<f64, VenueError> {
         Ok(n)
     } else {
         Err(invalid("drb price and size must be finite and positive"))
+    }
+}
+fn read_leverage(value: &Value) -> Result<f64, VenueError> {
+    let maximum = value["max_leverage"]
+        .as_f64()
+        .filter(|n| n.is_finite() && *n > 0.)
+        .ok_or_else(|| uncertain("drb leverage response omitted a valid native maximum"))?;
+    // The optional custom leverage is nullable; the native maximum is the
+    // documented default. A malformed present value cannot select that default.
+    match value.get("leverage") {
+        None | Some(Value::Null) => Ok(maximum),
+        Some(custom) => custom
+            .as_f64()
+            .filter(|n| n.is_finite() && *n > 0. && *n <= maximum)
+            .ok_or_else(|| uncertain("drb invalid custom leverage")),
     }
 }
 fn trigger(t: Option<StopTriggerType>) -> &'static str {
@@ -417,7 +433,8 @@ impl Coinbase {
                 }
                 let (instrument, m) = self.drb_trading_market(cx, &order.symbol)?;
                 if !m.active || m.is_read_only == Some(true) || !m.precision.is_tradable() {return Err(invalid("drb edit market is not tradable"));}
-                if order.kind != OrderType::Limit || order.stop_loss.is_some() || order.take_profit.is_some() {
+                if order.kind != OrderType::Limit || order.stop_loss.is_some() || order.take_profit.is_some()
+                    || order.parent_id.is_some() || self.trading_drb.linkage.blocks(&id) {
                     return Err(invalid("drb edit supports ordinary limits; linked or protective order edits require native leg identity"));
                 }
                 let amount = positive(safe_cex_engine::num::adjust(positive(amount.unwrap_or(order.amount))?, m.precision.amount))?;
@@ -553,6 +570,32 @@ impl Coinbase {
             let _ = cx.done_context(&job.root, data);
             return;
         };
+        // Authentication can defer this call while stream/read-back evidence
+        // changes. Admission-time checks do not authorize its later dispatch.
+        if matches!(call.method, Method::Buy | Method::Sell | Method::Edit)
+            && let Err(error) = self.drb_require_reconciled(&call.symbol)
+        {
+            let _ = cx.fail_context(&job.root, error);
+            return;
+        }
+        if call.method == Method::Edit
+            && call.id.as_ref().is_none_or(|id| {
+                self.trading_drb.linkage.blocks(id)
+                    || cx.store.order(id).is_none_or(|order| {
+                        order.status != OrderStatus::Open
+                            || order.kind != OrderType::Limit
+                            || order.parent_id.is_some()
+                            || order.stop_loss.is_some()
+                            || order.take_profit.is_some()
+                    })
+            })
+        {
+            let _ = cx.fail_context(
+                &job.root,
+                invalid("drb queued edit is no longer an ordinary reconciled limit"),
+            );
+            return;
+        }
         // A new attempt cannot acquire the same recovery reservation. In
         // particular, its later NotSent/refusal must not erase an older Unknown.
         if call.method.operation() == Operation::Mutation
@@ -886,7 +929,13 @@ impl Coinbase {
                         || call
                             .params
                             .get("type")
-                            .is_some_and(|kind| row["order_type"] != *kind)
+                            .is_some_and(|kind| match kind.as_str() {
+                                Some("market") => order.kind != OrderType::Market,
+                                Some("limit") => {
+                                    row["order_type"] != *kind || order.kind != OrderType::Limit
+                                }
+                                _ => row["order_type"] != *kind,
+                            })
                         || call
                             .params
                             .get("price")
@@ -938,10 +987,7 @@ impl Coinbase {
                 if value["instrument_name"] != call.instrument {
                     return Err(uncertain("drb leverage read instrument mismatch"));
                 }
-                let leverage = value["leverage"]
-                    .as_f64()
-                    .filter(|n| n.is_finite() && *n > 0.)
-                    .ok_or_else(|| uncertain("drb leverage is unavailable"))?;
+                let leverage = read_leverage(value)?;
                 Ok((
                     vec![],
                     Some(json!({"buyLeverage":leverage,"sellLeverage":leverage}).to_string()),
@@ -960,6 +1006,10 @@ impl Coinbase {
                 if let Ok(selected) = self.drb_order_context(cx, call, row)
                     && let Ok(mut order) = decode_order(&selected, row)
                 {
+                    let _ = self.trading_drb.linkage.observe(row); // Validated by decode_order.
+                    if call.params.get("otoco_config").is_some() {
+                        self.trading_drb.linkage.insert(order.id.clone());
+                    }
                     if cx.store.market(&order.symbol).is_none() {
                         return;
                     }
@@ -987,7 +1037,7 @@ impl Coinbase {
                 let leverage = if call.method == Method::SetLeverage {
                     value.as_f64()
                 } else {
-                    value["leverage"].as_f64()
+                    read_leverage(value).ok()
                 };
                 if let Some(n) = leverage {
                     cx.store.update_setting(&call.symbol, |s| s.leverage = n);
@@ -1125,11 +1175,7 @@ impl Coinbase {
             if value["instrument_name"] != call.instrument {
                 return Err(uncertain("drb leverage read instrument mismatch"));
             }
-            let leverage = value["leverage"]
-                .as_f64()
-                .or_else(|| value["max_leverage"].as_f64())
-                .filter(|v| v.is_finite() && *v > 0.)
-                .ok_or_else(|| uncertain("drb invalid leverage read-back"))?;
+            let leverage = read_leverage(&value)?;
             cx.store
                 .update_setting(&call.symbol, |s| s.leverage = leverage);
         } else if matches!(call.method, Method::CancelAll | Method::CancelInstrument) {
@@ -1138,6 +1184,7 @@ impl Coinbase {
                 .filter(|rows| rows.len() <= 10_000)
                 .ok_or_else(|| uncertain("drb invalid open-orders read-back"))?;
             let mut orders = vec![];
+            let mut linkage = crate::drb_linkage::Linkage::default();
             let mut ids = HashSet::new();
             for row in native {
                 let mut selected = call.clone();
@@ -1155,6 +1202,7 @@ impl Coinbase {
                     selected.symbol = m.symbol.clone();
                 }
                 let order = decode_order(&selected, row)?;
+                linkage.observe(row).map_err(uncertain)?;
                 if order.status != OrderStatus::Open || !ids.insert(order.id.clone()) {
                     return Err(uncertain("drb open-orders snapshot is conflicting"));
                 }
@@ -1183,6 +1231,7 @@ impl Coinbase {
                     &unproven,
                 )
                 .ok_or_else(|| uncertain("drb open-orders snapshot lost freshness"))?;
+            self.trading_drb.linkage.merge(linkage);
             if !refused.is_empty() || !unproven.is_empty() {
                 return Err(uncertain(
                     "drb open-orders snapshot cannot resolve every uncertain write",
@@ -1208,6 +1257,10 @@ impl Coinbase {
             }
             if matches!(call.method, Method::Buy | Method::Sell) {
                 self.drb_ack(cx, call, &json!({"order":rows[0]}))?;
+            }
+            let _ = self.trading_drb.linkage.observe(&rows[0]); // Validated by decode_order.
+            if call.params.get("otoco_config").is_some() {
+                self.trading_drb.linkage.insert(order.id.clone());
             }
             if order_is_newer(cx, &order) {
                 cx.store.upsert_order(order);
@@ -1244,7 +1297,6 @@ struct NativeOrder {
     #[serde(default)]
     label: String,
     direction: String,
-    order_type: String,
     order_state: String,
     amount: f64,
     #[serde(default)]
@@ -1258,6 +1310,9 @@ struct NativeOrder {
     trigger: Option<StopTriggerType>,
 }
 fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
+    crate::drb_linkage::Linkage::default()
+        .observe(value)
+        .map_err(uncertain)?;
     let n: NativeOrder = serde_json::from_value(value.clone())
         .map_err(|_| uncertain("drb malformed native order ACK"))?;
     if !valid_id(&n.order_id)
@@ -1286,18 +1341,7 @@ fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
     {
         return Err(uncertain("drb native order ACK side mismatch"));
     }
-    let kind = match n.order_type.as_str() {
-        "limit" | "market_limit" => OrderType::Limit,
-        "market" => OrderType::Market,
-        "stop_market" | "stop_limit" => OrderType::StopLoss,
-        "take_market" | "take_limit" => OrderType::TakeProfit,
-        "trailing_stop" => OrderType::TrailingStopLoss,
-        _ => {
-            return Err(uncertain(
-                "drb native order type is not supported by this codec",
-            ));
-        }
-    };
+    let kind = crate::private_drb::wire::order_kind(value).map_err(uncertain)?;
     let status = match n.order_state.as_str() {
         "open" | "untriggered" => OrderStatus::Open,
         "filled" if n.filled_amount == n.amount => OrderStatus::Closed,
@@ -1325,7 +1369,11 @@ fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
     };
     Ok(Order {
         id: n.order_id,
-        parent_id: None,
+        parent_id: value
+            .get("primary_order_id")
+            .or_else(|| value.get("trigger_order_id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         client_order_id: Some(n.label),
         symbol: call.symbol.clone(),
         kind,

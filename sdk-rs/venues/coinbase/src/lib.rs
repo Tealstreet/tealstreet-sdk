@@ -3,6 +3,7 @@ mod account;
 mod account_wire;
 pub mod drb;
 pub mod drb_auth;
+mod drb_linkage;
 mod history;
 mod local_context;
 mod private_drb;

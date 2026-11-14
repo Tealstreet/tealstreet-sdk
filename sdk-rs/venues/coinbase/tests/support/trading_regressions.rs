@@ -203,3 +203,147 @@ fn protective_ack_and_readback_must_match_trigger_price_and_basis() {
         Some(StopTriggerType::MarkPrice)
     );
 }
+
+#[test]
+fn default_leverage_query_and_recovery_validate_the_native_optional_value() {
+    for (custom, max, expected) in [
+        (Some(Value::Null), Some(json!(50.)), Some(50.)),
+        (None, Some(json!(50.)), Some(50.)),
+        (Some(json!(5.)), Some(json!(50.)), Some(5.)),
+        (Some(Value::Null), None, None),
+        (Some(json!(5.)), None, None),
+        (Some(json!(75.)), Some(json!(50.)), None),
+        (Some(json!("5")), Some(json!(50.)), None),
+        (Some(json!(false)), Some(json!(50.)), None),
+        (Some(Value::Null), Some(json!(-1.)), None),
+    ] {
+        for recovery in [false, true] {
+            let mut e = engine();
+            let cmd = if recovery {
+                Command::SetLeverage {
+                    command: 1,
+                    symbol: SYMBOL.into(),
+                    leverage: 5.,
+                    side: None,
+                }
+            } else {
+                Command::FetchLeverage {
+                    command: 1,
+                    symbol: SYMBOL.into(),
+                }
+            };
+            let a = command(&mut e, cmd);
+            let mut r = requests(&a).pop().unwrap();
+            if recovery {
+                e.handle(
+                    safe_cex_engine::test_support::dispatch_now(&e).max(1001.),
+                    Event::HttpFailed {
+                        request: r.id,
+                        error: "synthetic loss",
+                    },
+                );
+                r = requests(&prepared_now(&mut e))
+                    .into_iter()
+                    .find(|r| packet(r)["method"] == "private/get_leverage")
+                    .unwrap();
+            }
+            let mut result = json!({"instrument_name":"BTC_USDC-PERPETUAL"});
+            if let Some(value) = &custom {
+                result["leverage"] = value.clone();
+            }
+            if let Some(value) = &max {
+                result["max_leverage"] = value.clone();
+            }
+            let a = reply(&mut e, &r, result);
+            if let Some(expected) = expected {
+                assert_eq!(
+                    e.store().setting(SYMBOL).map(|s| s.leverage),
+                    Some(expected),
+                    "valid native default/custom leverage must publish"
+                );
+                if !recovery {
+                    assert!(done(&a));
+                } else {
+                    assert!(
+                        requests(&fresh(&mut e, 2))
+                            .iter()
+                            .any(|r| packet(r)["method"] == "private/buy")
+                    );
+                }
+            } else {
+                assert!(!done(&a));
+                assert!(e.store().setting(SYMBOL).is_none());
+                if recovery {
+                    assert!(
+                        requests(&fresh(&mut e, 2)).is_empty(),
+                        "malformed read must retain uncertainty"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn internal_market_limit_ack_and_readback_keep_the_original_market_intent() {
+    for original in [None, Some("market"), Some("market_limit")] {
+        for recovery in [false, true] {
+            let mut e = engine();
+            let mut o = opts();
+            o.kind = OrderType::Market;
+            let r = place(&mut e, o);
+            let mut row = fixtures()["partial"]["order"].clone();
+            row["time_in_force"] = json!("immediate_or_cancel");
+            if let Some(original) = original {
+                row["original_order_type"] = json!(original);
+            }
+            let a = if recovery {
+                e.handle(
+                    safe_cex_engine::test_support::dispatch_now(&e).max(1001.),
+                    Event::HttpFailed {
+                        request: r.id,
+                        error: "synthetic loss",
+                    },
+                );
+                let read = requests(&prepared_now(&mut e))
+                    .into_iter()
+                    .find(|r| packet(r)["method"] == "private/get_order_state_by_label")
+                    .unwrap();
+                reply(&mut e, &read, json!([row]))
+            } else {
+                reply(&mut e, &r, json!({"order":row,"trades":[]}))
+            };
+            if original.is_some() {
+                assert_eq!(
+                    e.store().order("USDC-94166").map(|o| o.kind),
+                    Some(OrderType::Market),
+                    "documented original market metadata must survive internal limit execution"
+                );
+                if !recovery {
+                    assert!(done(&a));
+                }
+                assert!(
+                    requests(&fresh(&mut e, 2))
+                        .iter()
+                        .any(|r| packet(r)["method"] == "private/buy")
+                );
+            } else {
+                assert!(!done(&a));
+                assert!(e.store().orders().is_empty());
+                assert!(
+                    requests(&fresh(&mut e, 2)).is_empty(),
+                    "a genuine limit cannot prove a market placement"
+                );
+            }
+        }
+    }
+    let mut e = engine();
+    let r = place(&mut e, opts());
+    let mut result = fixtures()["partial"].clone();
+    result["order"]["original_order_type"] = json!("market");
+    assert!(
+        !done(&reply(&mut e, &r, result)),
+        "original market metadata cannot prove a requested limit"
+    );
+    assert!(e.store().orders().is_empty());
+}

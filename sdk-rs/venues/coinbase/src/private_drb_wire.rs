@@ -166,17 +166,8 @@ pub(super) fn position(v: Value) -> Result<Position, String> {
         last_update: None,
     })
 }
-pub(super) fn order(v: Value) -> Result<Order, String> {
-    let id = identity(&v, "order_id")?;
-    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
-    let side = side(&v)?;
-    let status = match text(&v, "order_state")? {
-        "open" | "untriggered" | "triggered" => OrderStatus::Open,
-        "filled" => OrderStatus::Closed,
-        "cancelled" | "rejected" => OrderStatus::Canceled,
-        _ => return Err("drb unknown order state".into()),
-    };
-    let kind = match text(&v, "order_type")? {
+pub(crate) fn order_kind(v: &Value) -> Result<OrderType, String> {
+    let kind = match text(v, "order_type")? {
         "limit" => OrderType::Limit,
         "market" | "market_limit" => OrderType::Market,
         "stop_market" | "stop_limit" => OrderType::StopLoss,
@@ -194,11 +185,24 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
         }
         _ => return Err("drb unsupported original order type".into()),
     };
-    let kind = if kind == OrderType::Limit && original_market {
+    Ok(if kind == OrderType::Limit && original_market {
         OrderType::Market
     } else {
         kind
+    })
+}
+pub(super) fn order(v: Value) -> Result<Order, String> {
+    crate::drb_linkage::Linkage::default().observe(&v)?;
+    let id = identity(&v, "order_id")?;
+    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
+    let side = side(&v)?;
+    let status = match text(&v, "order_state")? {
+        "open" | "untriggered" | "triggered" => OrderStatus::Open,
+        "filled" => OrderStatus::Closed,
+        "cancelled" | "rejected" => OrderStatus::Canceled,
+        _ => return Err("drb unknown order state".into()),
     };
+    let kind = order_kind(&v)?;
     let amount = unsigned(&v, "amount")?;
     let filled = unsigned(&v, "filled_amount")?;
     if filled > amount {

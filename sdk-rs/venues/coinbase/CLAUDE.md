@@ -77,5 +77,18 @@ only and cannot authenticate a private socket. Pre-dispatch signing refusal
 uses `trading_unsent`, preserving NotSent rather than transport-loss Unknown.
 Definite NotSent releases only the reservation acquired by that attempt; it
 must neither clear nor restart reconciliation for an older Unknown placement.
+DRB mutations also reserve their logical recovery key until native read-back;
+a second pending or uncertain mutation cannot replace that reservation.
+Protective ACKs and recovery reads must match the requested trigger and basis.
+Linked native identities survive omitted fields and snapshot readmission;
+ordinary amendments refuse them. Linkage capacity exhaustion refuses edits
+without evicting protection markers. Malformed events publish neither rows nor
+linkage markers.
+Queued DRB placements and amendments recheck instrument uncertainty at dispatch;
+queued amendments also recheck current linked/protective identity after auth.
+Account, ACK and recovery codecs share native order-type normalization: an
+internal limit with documented original market metadata retains market intent.
+Leverage reads share one decoder; the optional null custom value uses the
+explicit native maximum, while malformed values keep uncertainty.
 The caller contract, algorithm selection and S2/S3 coordination boundary are in
 `docs/plans/callers/coinbase-hosted-signing.md` at the root.

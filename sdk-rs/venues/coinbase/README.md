@@ -231,6 +231,13 @@ account-wide SM/PM margin-model change cannot safely implement Tealstreet's
 per-symbol isolated/cross toggle, so that command returns an explicit refusal.
 Testnet commands are refused rather than sent to the production gateway.
 
+The optional custom leverage may be null; reads use the native maximum as its
+documented default. Malformed custom values cannot silently select that default.
+Native internal limits preserve documented original market intent in account,
+acknowledgement and recovery decoding. Linked identities survive refresh and
+snapshot readmission independently of displayed exit prices. A queued amendment
+rechecks linked identity and instrument uncertainty after authentication.
+
 Client IDs map to `label` (at most 64 bytes). **The gateway does not guarantee
 label uniqueness or server-side idempotency.** This engine reserves each label
 once, including after a rejection or loss, and never repeats a released write.
@@ -310,7 +317,7 @@ their canonical claims and signature bytes. REST-only PayloadSigner can sign
 canonical JWS bytes and returns a 64-byte signature in unpadded base64url;
 private WS auth requires RemoteSigner. Wallet/agent and OAuth credentials are
 separate protocols, not CDP JWT substitutes. The signing-only DRB codec accepts
-CDP issuer claims without changing the S2/S3 session transport under development.
+CDP issuer claims through the shared private-session and trading transport.
 Engine-owned signer slots select by request purpose: account/history reads can
 use the read key; catalogue, permission checks, amend proofs and private socket
 authentication use the primary key. A refused read key pins subsequent reads to

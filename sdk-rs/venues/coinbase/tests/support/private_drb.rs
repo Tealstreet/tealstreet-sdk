@@ -314,6 +314,8 @@ impl Rig {
     }
 }
 
+#[path = "drb_linkage.rs"]
+mod linkage_tests;
 #[path = "drb_provider.rs"]
 mod provider_tests;
 #[test]

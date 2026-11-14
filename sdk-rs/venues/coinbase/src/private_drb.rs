@@ -3,7 +3,7 @@
 #[path = "private_drb_history.rs"]
 mod history;
 #[path = "private_drb_wire.rs"]
-mod wire;
+pub(crate) mod wire;
 use crate::{Coinbase, Pending, drb, drb_auth};
 use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
 use safe_cex_engine::credential_selection::CredentialRole;
@@ -651,9 +651,13 @@ impl Coinbase {
                     return Ok(());
                 }
                 let mut ids = HashSet::new();
+                let mut linkage = crate::drb_linkage::Linkage::default();
                 let orders = rows(value)?
                     .into_iter()
-                    .map(order)
+                    .map(|row| {
+                        linkage.observe(&row)?;
+                        order(row)
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 for o in &orders {
                     if o.status != OrderStatus::Open || !ids.insert(o.id.clone()) {
@@ -664,6 +668,7 @@ impl Coinbase {
                 for o in &orders {
                     self.drb_order_version(o);
                 }
+                self.trading_drb.linkage.merge(linkage);
                 cx.store.commit_orders_snapshot([token], |_| orders);
             }
             _ => {}
@@ -898,10 +903,14 @@ impl Coinbase {
         if changes.orders.len() + changes.positions.len() + changes.trades.len() > MAX_ROWS {
             return Err("drb change row limit".into());
         }
+        let mut linkage = crate::drb_linkage::Linkage::default();
         let orders = changes
             .orders
             .into_iter()
-            .map(order)
+            .map(|row| {
+                linkage.observe(&row)?;
+                order(row)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let positions = changes
             .positions
@@ -943,6 +952,7 @@ impl Coinbase {
         if !orders.is_empty() {
             self.private_drb.revisions[3] += 1;
         }
+        self.trading_drb.linkage.merge(linkage);
         if !positions.is_empty() {
             self.private_drb.revisions[2] += 1;
         }
