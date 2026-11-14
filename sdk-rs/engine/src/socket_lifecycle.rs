@@ -3524,6 +3524,35 @@ mod tests {
         assert_eq!(l.feeds[feed.0].message_stats[key].received, Some(11.));
         assert!(l.feeds[feed.0].message_stats[key].public_topic);
     }
+    #[cfg(feature = "socket-topic-aliases")]
+    #[test]
+    fn topic_stats_restore_alias_after_unreleased_replacement_reversion() {
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        let a = r#"{"type":"l2Book","coin":"BTC"}"#;
+        let b = r#"{"coin":"BTC","type":"l2Book"}"#;
+        l.replace_interests(feed, vec![interest(a)], encode)
+            .unwrap();
+        while l.release_batch(epoch, false).is_some() {}
+        assert!(l.record_topic(epoch, &["@l2Book|BTC||||||"], 10.));
+        l.replace_interests(feed, vec![interest(b)], encode)
+            .unwrap();
+        l.replace_interests(feed, vec![interest(a)], encode)
+            .unwrap();
+        assert!(l.record_topic(epoch, &["@l2Book|BTC||||||"], 11.));
+        assert_eq!(l.feeds[feed.0].message_stats[a].received, Some(11.));
+        assert!(!l.feeds[feed.0].message_stats.contains_key(b));
+        assert!(!l.record_topic(epoch, &["@l2Book|ETH||||||"], 12.));
+        assert_eq!(l.feeds[feed.0].message_stats[a].received, Some(11.));
+        l.replace_interests(feed, vec![interest(b)], encode)
+            .unwrap();
+        assert!(l.record_topic(epoch, &["@l2Book|BTC||||||"], 13.));
+        assert_eq!(l.feeds[feed.0].message_stats[a].received, Some(13.));
+        assert_eq!(l.feeds[feed.0].message_stats[b].received, None);
+        while l.release_batch(epoch, false).is_some() {}
+        assert!(l.record_topic(epoch, &["@l2Book|BTC||||||"], 14.));
+        assert_eq!(l.feeds[feed.0].message_stats[b].received, Some(14.));
+        assert!(!l.feeds[feed.0].message_stats.contains_key(a));
+    }
     #[test]
     fn topic_stats_keep_implicit_private_subscription_when_managed_interests_are_empty() {
         let (mut l, feed, epoch) = started(AuthMode::None);

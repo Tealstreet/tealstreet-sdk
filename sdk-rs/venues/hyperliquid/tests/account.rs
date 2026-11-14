@@ -1396,3 +1396,21 @@ fn subscription_receipt_is_scoped_to_the_decoded_clearinghouse_dex() {
     assert_eq!(receipt(&rows, ""), (3, 1001.));
     assert_eq!(receipt(&rows, "xyz"), (3, 2001.));
 }
+
+#[test]
+fn subscription_receipt_maps_user_data_to_user_events_only() {
+    let (mut e, socket) = ready("disabled");
+    message(
+        &mut e,
+        socket,
+        2000.,
+        r#"{"channel":"user","data":{"orders":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1"},"status":"open"}]}}"#,
+    );
+    assert!(e.store().order("9").is_some());
+    let rows = subscription_receipts(e.snapshot_frame(2001.));
+    let user = rows.iter().find(|r| r.0.contains("userEvents")).unwrap();
+    assert_eq!((user.1, user.2), (3, 1.));
+    let sibling = rows.iter().find(|r| r.0.contains("orderUpdates")).unwrap();
+    assert_eq!(sibling.1, 1);
+    assert!(sibling.2.is_nan());
+}
