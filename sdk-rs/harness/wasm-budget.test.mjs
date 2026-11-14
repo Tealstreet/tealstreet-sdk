@@ -3099,3 +3099,17 @@ for (const [family, artifact, measured, minimumCap, aliases] of [
     }
   });
 }
+
+// #3273 run 43563376371, artifact 14101234552; source d420622af083 has merge 18f33911d's tree.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; equal web/Node/replay bytes.
+// Preserve measured + 10 KiB, parent floors, the inclusive cap and cap+1 refusal.
+test('#3273 merged decoder retains TxFlow measured reserve', () => {
+  const measured = 1_929_688;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.equal(minimumCap, 1_940_480);
+  assert.ok(cap >= minimumCap, `txflow: ${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});

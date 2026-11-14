@@ -762,7 +762,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   // #3438 merged-head local build.sh --venue txflow: web/node 1,928,662 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  txflow: 1_939_456,
+  // #3273 run 43563376371, artifact 14101234552: web/Node/replay 1,929,688 B.
+  // Source d420622af083 has merge 18f33911d's tree; module SHA256 9837c6740453f75f8370a643a38e137dffcf7aed43a461c542a872fee706f23d.
+  // Measured + 10 KiB, rounded up to KiB; retain historical floors and overflow refusal.
+  txflow: 1_940_480,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
   // #3302 run 42720697962, job 129514220621: CI 1,991,705 B; local merge 06aa3a745fcc web/node 1,993,745 B.
