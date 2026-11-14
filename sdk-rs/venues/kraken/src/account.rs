@@ -101,6 +101,7 @@ pub enum Scope {
 }
 pub struct Request {
     scope: Scope,
+    read_epoch: u64,
     revision: u64,
     settings_revision: u64,
     orders: SnapshotBuilder<String, Order>,
@@ -114,9 +115,10 @@ pub struct Request {
     read: u32,
 }
 impl Request {
-    fn new(scope: Scope, revision: u64, settings_revision: u64) -> Self {
+    fn new(scope: Scope, revision: u64, settings_revision: u64, read_epoch: u64) -> Self {
         Self {
             scope,
+            read_epoch,
             revision,
             settings_revision,
             orders: SnapshotBuilder::default(),
@@ -852,7 +854,12 @@ impl Kraken {
                 Scope::Settings => self.account.settings_revision,
                 Scope::Balance => 0,
             };
-            let mut request = Request::new(scope, revision, self.account.settings_revision);
+            let mut request = Request::new(
+                scope,
+                revision,
+                self.account.settings_revision,
+                cx.order_read_epoch(),
+            );
             if scope == Scope::Positions {
                 self.account.positions_reads += 1;
                 request.read = self.account.positions_reads;
@@ -1162,7 +1169,7 @@ impl Kraken {
                     self.account.payloads.insert("open_orders".into(), cx.now);
                     self.account_schedule_heal(cx);
                 } else if let Some(raw) = msg.orders {
-                    let mut request = Request::new(Scope::Orders, 0, 0);
+                    let mut request = Request::new(Scope::Orders, 0, 0, 0);
                     let result = json::each::<&RawValue>(raw.get(), |item| {
                         self.account_order_item(cx, &mut request, item.get())
                     });
@@ -1215,7 +1222,7 @@ impl Kraken {
             }
             "open_positions" | "open_positions_snapshot" => {
                 if let Some(raw) = msg.positions {
-                    let mut request = Request::new(Scope::Positions, 0, 0);
+                    let mut request = Request::new(Scope::Positions, 0, 0, 0);
                     let result = json::each::<&RawValue>(raw.get(), |item| {
                         self.account_position_item(cx, &mut request, item.get(), true)
                     });
@@ -1688,7 +1695,7 @@ impl Kraken {
                     // Rejected rows keep their stored copies.
                     let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                     self.account_commit_orders(cx, orders);
-                    cx.orders_reconciled_except(&unproven, u64::MAX);
+                    cx.orders_reconciled_except(&unproven, request.read_epoch);
                 }
             }
             Scope::Positions => {
@@ -2016,7 +2023,7 @@ mod startup_cause_tests {
                 Method::Get,
                 "https://startup.test/orders".into(),
                 None,
-                Pending::Account(Request::new(super::Scope::Orders, 0, 0)),
+                Pending::Account(Request::new(super::Scope::Orders, 0, 0, 0)),
             )
             .unwrap_or_else(|(_, reason)| panic!("startup parent queue refused: {reason:?}"));
         }
