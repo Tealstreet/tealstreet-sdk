@@ -68,11 +68,41 @@ After an ordinary single write's permitted nonce-21104 retry, a native
 earlier nonce refusal. The journal still projects the outcome and retains the
 write evidence; presentation cannot authorize another resend or put-back.
 
-VENUE_STATE remains the same 11-byte version 1 (account index and tier). Native
-provenance and mark receipts are not exported as fake frame-local evidence.
-Frame-fed protective price edits refuse `reference stale`; ordinary orders,
-explicit cancels and ordinary LIMIT edits retain their existing behavior. A
-future mapped-receipt seam must establish freshness before enabling those edits.
+A missing, stale or Store-mismatched MARK receipt now obtains one unsigned
+public exchangeStats read before any destructive admission. It retains the
+original preflight owner/generation and immutable native edit, with one attempt,
+a 20-second bound and no retry or source fallback. The strict target-market
+Stats MARK field must be finite and positive; its actual row receipt must still
+be within the unchanged five-second limit when the whole code-200 envelope is
+accepted. Empty, sparse, time-only, duplicate, failed, foreign and delayed reads
+refuse before cancellation. A newer genuine native MARK is preferred. The pure
+reference check and final-send veto are unchanged, including replacement,
+nonce retries and exact restores; those boundaries never perform a read.
+
+The unsigned preflight entry preserves Lighter's declared authenticated read
+role. Later nonce/approval and post-cancellation proof reads keep their existing
+authentication, owner, handoff and deadline checks.
+
+VENUE_STATE v2 appends canonical validated standalone native protective-order rows to the
+existing account-index/tier header. No MARK value or receipt is imported. Each
+row is revalidated against the receiver's ingested Store order through the same
+native decoder before it grants exact modification or put-back authority.
+Locally canceled identities remain suppressed, and a local modify (including an
+Unknown) retires its old native parameters: replaying that metadata cannot grant
+a second edit until the source supplies changed native parameters.
+The header must name the receiver's already resolved account before tier or
+native provenance is accepted, including address-configured receivers. A foreign
+header cannot rebind the receiver and permanently retires pending edit bindings.
+Each edit captures its initiating account at preflight and rechecks it after the
+public read, before continuation and at final Claim; a return frame cannot revive
+that edit. The existing pure reference/position/order veto remains unchanged. The source sorts rows for stable encoding. Missing native orders wait for their
+ingested rows; a new source state replaces prior provenance. New readers also
+accept the exact 11-byte v1 form, which exports when no originals are present
+and grants no native provenance. Ordinary v1 writes remain supported; a v1-only
+source cannot authorize a protective edit. Matching source/receiver builds are
+required for v2; old readers reject the new version rather than guessing native
+parameters. Frame publication, sparse updates and replays never renew a MARK
+receipt. Lighter and lighter-robinhood use their own existing deployment host.
 
 Native endpoint contract: the official Lighter Python SDK documents
 [`accountOrders`](https://github.com/elliottech/lighter-python/blob/38a34672e7cb43c67d807ece25f125fda2dfdecf/docs/OrderApi.md#account_orders)

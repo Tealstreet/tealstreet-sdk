@@ -294,7 +294,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3499 at 22149d1131cb, run 43550434029 job 132311748258 artifact 14095922408:
   // optimized web/Node 2,135,090 B + 10 KiB, rounded up; retains #3438's 2,142,208 B floor.
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132.
-  bingx: 2_149_376,
+  // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,157,930 B.
+  // Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes; measured + 10 KiB.
+  // Round up to KiB and retain both parent floors; SHA256 pinned in the budget regression.
+  bingx: 2_168_832,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   // #3426 run 43187677592, job 131079474589, artifact 13930235036, CI source b3c4cf6212e6.
@@ -634,7 +637,16 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Retain historical floors; 11,138 B reserve; shares lighter family.
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14094201484: web/Node/replay 2,160,313 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
-  lighter: 2_171_904,
+  // Protective-reference preflight at d28424d3b6bf: local optimized web/Node 2,178,471 B.
+  // build.sh --venue lighter; Rust 1.99.0, bindgen 0.2.129, Binaryen 132 (two -Oz passes).
+  // Measured + 10 KiB rounded up; retain the 2,170,880 B parent floor and alias equality.
+  // #3501 CI run 43559467764/job 132340062664, artifact 14100190688 (bd10840552fe).
+  // Optimized web/Node/replay 2,179,692 B; Rust1.99, bindgen0.2.129, Binaryen132, two -Oz.
+  // Measured + 10 KiB rounded up; retain all parent floors and shared-family equality.
+  // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,178,874 B.
+  // Rust1.99, bindgen0.2.129, Binaryen132, two -Oz; +10 KiB rounds to 2,189,312 B.
+  // Preserve the larger 2,190,336 B parent/CI floor, including both shared aliases.
+  lighter: 2_190_336,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
@@ -648,7 +660,16 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node/replay 2,158,718 B; module SHA256 42f81f3ba0400a925bb311e98021045bf99ac78949badaba9017cdaf06e04376.
   // Rust1.99, bindgen0.2.129, Binaryen132, required -Oz; current bytes + 10 KiB rounded up.
   // Retain historical floors; 11,138 B reserve; shares lighter family.
-  'lighter-robinhood': 2_171_904,
+  // Protective-reference preflight at d28424d3b6bf: local optimized web/Node 2,178,471 B.
+  // build.sh --venue lighter; Rust 1.99.0, bindgen 0.2.129, Binaryen 132 (two -Oz passes).
+  // Measured + 10 KiB rounded up; retain the 2,170,880 B parent floor and alias equality.
+  // #3501 CI run 43559467764/job 132340062664, artifact 14100190688 (bd10840552fe).
+  // Optimized web/Node/replay 2,179,692 B; Rust1.99, bindgen0.2.129, Binaryen132, two -Oz.
+  // Measured + 10 KiB rounded up; retain all parent floors and shared-family equality.
+  // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,178,874 B.
+  // Rust1.99, bindgen0.2.129, Binaryen132, two -Oz; +10 KiB rounds to 2,189,312 B.
+  // Preserve the larger 2,190,336 B parent/CI floor, including both shared aliases.
+  'lighter-robinhood': 2_190_336,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
