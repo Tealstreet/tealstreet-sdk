@@ -625,10 +625,11 @@ impl BitgetFutures {
                             index
                         }
                     };
-                    cx.store
-                        .update_ticker_at_observed(index, row.update_mask(), |ticker| {
-                            update_ticker(ticker, &row)
-                        });
+                    cx.store.update_ticker_with_observations_at(
+                        index,
+                        row.update_mask(),
+                        |ticker| update_ticker(ticker, &row),
+                    );
                     self.observe_protective_quote(
                         symbol,
                         row.value(TickerField::LastPr),

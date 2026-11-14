@@ -29,6 +29,12 @@ HyroTrader main-thread/process CPU and every other venue's CPU objectives retain
   Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and
   multiple runs on one night must not hide the previous night.
 
+The temporary Bitget profiling/composition job and its helpers were retired after
+retaining their diagnostic artifacts in PR #3452. Fingerprint policy remains
+unchanged. Diagnostic profiles never certify a gate or change its fixed
+comparison policy; #3426 still needs its own authenticated certification after
+incorporating the optimization.
+
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.
