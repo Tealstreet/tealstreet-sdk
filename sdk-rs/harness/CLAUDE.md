@@ -40,4 +40,5 @@ to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
 2,158,592-byte floor retains the required 10 KiB reserve.
-The pinned harness profiles and all other family/global budgets are unchanged.
+WEEX in the same composition measures 2,028,105 bytes and retains a 2,038,784-byte
+floor by the same rule. Pinned profiles and remaining family/global budgets are unchanged.
