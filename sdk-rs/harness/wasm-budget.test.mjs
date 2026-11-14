@@ -3460,3 +3460,35 @@ test('#3314 serial placement source1c2a4f8232c4 retains measured TxFlow reserve'
   assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
+
+// #3290 CI 43591113196, source97507acf9371 (head738ee1289): pinned optimized profile.
+// Verified26family archive digests/manifests and equal web/Node/replay modules;
+// TxFlow cap refusal retains current web/Node bytes+hashes in strict-replay artifact14113250022.
+for (const [venue, family, artifact, measured, minimumCap] of [
+  ['apexomni', 'apexomni', 14112672780, 2_100_887, 2_111_488],
+  ['asterdex', 'asterdex', 14112563027, 2_264_745, 2_275_328],
+  ['backpack', 'backpack', 14112672710, 2_048_859, 2_059_264],
+  ['binance', 'binance', 14112821349, 2_279_707, 2_290_688],
+  ['bybit', 'bybit', 14112214193, 2_553_690, 2_564_096],
+  ['hyperliquid', 'hyperliquid', 14112936192, 2_267_769, 2_278_400],
+  ['hyperliquidspot', 'hyperliquid', 14112936192, 2_267_769, 2_278_400],
+  ['kraken', 'kraken', 14112762396, 2_276_461, 2_287_616],
+  ['krakenspot', 'kraken', 14112762396, 2_276_461, 2_287_616],
+  ['lighter', 'lighter', 14112777448, 2_186_833, 2_197_504],
+  ['lighter-robinhood', 'lighter', 14112777448, 2_186_833, 2_197_504],
+  ['paradex', 'paradex', 14112204213, 2_311_211, 2_322_432],
+  ['phemex', 'phemex', 14112821350, 2_144_862, 2_155_520],
+  ['weex', 'weex', 14112856212, 2_029_690, 2_040_832],
+  ['txflow', 'txflow', 14113250022, 2_164_428, 2_174_976],
+]) {
+  test(`#3290 receipt fix CI43591113196: ${venue} artifact${artifact} retains measured reserve`, () => {
+    assert.equal(venueFamily(venue), family);
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(cap, WASM_VENUE_OVERRIDES[family]);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
