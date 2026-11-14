@@ -1164,6 +1164,15 @@ then carries `protection: 'restored' | 'unprotected'` (`ExchangeError.protection
 kept by `serializeCommandError`). An unknown outcome is never restored, and a
 stop the cancel found already gone (filled or triggered) is never put back.
 
+Frame-fed Bybit Partial TP/SL edits first perform real signed target, live-order
+and history proof reads under the initiating command's Preflight. Unavailable
+proof or signing refuses `notSent` before cancellation, retaining the old stop.
+The captured order, position and fresh reference are checked again after each
+read. These reads establish current access, not future availability: cancellation
+still precedes replacement as in the legacy adapter, and fresh post-cancel proof
+remains mandatory. A failure first occurring after cancellation stays Unknown
+and fences further placement; the preflight never grants replay or restoration.
+
 ## Automatic retries are for reads only
 
 **Never let `axios-retry` resend a write.** A connection reset after the venue

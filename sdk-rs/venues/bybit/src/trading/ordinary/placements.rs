@@ -122,6 +122,7 @@ impl BybitLinear {
                 write_credential,
                 command,
                 stage: Stage::Idle,
+                protection: None,
                 hyro: Some(HyroCall {
                     key: key.clone(),
                     proven,

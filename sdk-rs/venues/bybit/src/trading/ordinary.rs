@@ -1,5 +1,5 @@
 //! Ordinary (Linear, Inverse, Spot and Demo) trading on the engine's Preflight
-//! and Plan core. Each command owns one genuine preflight: optional signed mode
+//! and Plan core. Each command owns one genuine preflight: signed prerequisite
 //! reads, then one admitted native plan whose write facts the engine journal
 //! seals. Options run here too; a Hyro placement founds or joins one planned
 //! execution of its retained intent (`placements`).
@@ -34,6 +34,7 @@ use std::collections::VecDeque;
 
 mod cancellations;
 mod placements;
+mod protective;
 mod write_plan;
 use cancellations::Cancellations;
 
@@ -54,6 +55,7 @@ pub(crate) struct Ordinary {
     write_credential: Option<Credential>,
     command: Command,
     stage: Stage,
+    protection: Option<partial::Readiness>,
     hyro: Option<HyroCall>,
 }
 
@@ -71,6 +73,9 @@ struct HyroCall {
 
 enum Stage {
     Idle,
+    ProtectiveRead {
+        context: Context,
+    },
     Mode {
         symbol: String,
         version: u64,
@@ -321,6 +326,7 @@ impl BybitLinear {
                 write_credential,
                 command,
                 stage: Stage::Idle,
+                protection: None,
                 hyro: None,
             },
         );
@@ -441,7 +447,7 @@ impl BybitLinear {
         }
     }
 
-    /// Read the next unresolved mode, or admit the final native plan.
+    /// Read native prerequisites, or admit the final native plan.
     fn resume_ordinary(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId) {
         let Some(mut entry) = self.trading.ordinary.remove(&id) else {
             return;
@@ -494,6 +500,19 @@ impl BybitLinear {
                 return;
             }
         };
+        match self.prepare_protection(cx, id, &mut entry, &job) {
+            Ok(Some(context)) => {
+                entry.stage = Stage::ProtectiveRead { context };
+                self.trading.ordinary.insert(id, entry);
+                return;
+            }
+            Err(error) => {
+                cx.command_error(id, error.message.clone());
+                let _ = cx.fail_preflight(&entry.preflight, error);
+                return;
+            }
+            Ok(None) => {}
+        }
         if job.steps.is_empty() {
             let _ = cx.done_empty_plan(&entry.preflight, "[]".into());
             return;
@@ -1004,6 +1023,9 @@ impl BybitLinear {
         };
         let hyro = entry.hyro.as_ref().map(|call| call.key.clone());
         match &mut entry.stage {
+            Stage::ProtectiveRead { context } if *context == request.context => {
+                self.on_protective_read(cx, request.command, entry, &response)
+            }
             Stage::Mode { context, .. } if *context == request.context => {
                 self.on_mode_response(cx, request.command, entry, &response)
             }
@@ -1761,6 +1783,12 @@ impl BybitLinear {
             let key = call.key.clone();
             self.on_hyro_leg_failed(cx, &request, entry, error);
             self.after_hyro(cx, &key, request.command);
+            return;
+        }
+        if let Stage::ProtectiveRead { context } = &entry.stage
+            && *context == request.context
+        {
+            let _ = cx.fail_preflight(&entry.preflight, error.outcome(Outcome::NotSent));
             return;
         }
         let Stage::Plan(run) = &mut entry.stage else {

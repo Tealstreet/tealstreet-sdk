@@ -4,6 +4,9 @@ use crate::sign::Query;
 use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
 use serde::Deserialize;
 
+mod readiness;
+pub(super) use readiness::Readiness;
+
 const CREATION_WINDOW_MS: u64 = 5_000;
 const TARGET_POLL_DELAY_MS: u32 = 100;
 /// The wait before each target history read: about 5 s in all for history to index the cancel.
