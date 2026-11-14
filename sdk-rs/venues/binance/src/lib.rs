@@ -924,7 +924,11 @@ impl BinanceFutures {
         match event_type(text) {
             Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
-                    cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
+                    if !self.is_spot() && !self.options.portfolio_margin {
+                        cx.record_socket_topic(&["!bookTicker"]);
+                    } else {
+                        cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
+                    }
                     let (bid, ask) = (num::parse(&event.b), num::parse(&event.a));
                     cx.store.update_ticker(&event.s, |t| {
                         t.bid = bid;

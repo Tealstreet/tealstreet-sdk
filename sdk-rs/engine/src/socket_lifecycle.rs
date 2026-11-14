@@ -1660,11 +1660,11 @@ impl Lifecycle {
                 .saturating_sub(f.message_stats.0.len()),
         );
         for (key, _) in f.interests.desired.iter() {
+            #[cfg(feature = "socket-topic-aliases")]
+            let public_topic = observation_routes(feed, key, &mut self.stats_routes);
+            #[cfg(not(feature = "socket-topic-aliases"))]
+            let public_topic = false;
             if !f.message_stats.contains_key(key) {
-                #[cfg(feature = "socket-topic-aliases")]
-                let public_topic = observation_routes(feed, key, &mut self.stats_routes);
-                #[cfg(not(feature = "socket-topic-aliases"))]
-                let public_topic = false;
                 f.message_stats.insert(
                     key.clone(),
                     TopicStats {
@@ -1686,6 +1686,14 @@ impl Lifecycle {
         #[cfg(feature = "socket-topic-aliases")]
         self.stats_routes
             .retain(|route| route.feed != feed || f.message_stats.contains_key(&route.key));
+        // Until replacement frames release, overlapping aliases still name the
+        // released interest. Reversions must rebuild even an existing row's route.
+        #[cfg(feature = "socket-topic-aliases")]
+        for (key, _) in f.interests.released.iter() {
+            if !f.interests.desired.contains_key(key) {
+                observation_routes(feed, key, &mut self.stats_routes);
+            }
+        }
         self.stats_dirty = true;
         self.stats_replace = true;
         self.pending_frames = pending_frames;
@@ -1752,6 +1760,22 @@ impl Lifecycle {
                 f.interests.released.remove(&key);
                 if !f.interests.desired.contains_key(&key) {
                     f.message_stats.remove(&key);
+                }
+            }
+        }
+        #[cfg(feature = "socket-topic-aliases")]
+        if !queued.subscribe {
+            self.stats_routes.retain(|route| {
+                route.feed != epoch.feed || f.message_stats.contains_key(&route.key)
+            });
+            // A released unsubscribe removes its alias ownership; restore the
+            // pending desired routes, then prefer any still-released siblings.
+            for (key, _) in f.interests.desired.iter() {
+                observation_routes(epoch.feed, key, &mut self.stats_routes);
+            }
+            for (key, _) in f.interests.released.iter() {
+                if !f.interests.desired.contains_key(key) {
+                    observation_routes(epoch.feed, key, &mut self.stats_routes);
                 }
             }
         }

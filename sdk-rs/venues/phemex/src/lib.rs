@@ -769,6 +769,9 @@ impl Venue for PhemexPerpetuals {
                 Ok(k) => k,
                 Err(error) => return Self::public_unreadable(cx, &error, text),
             };
+            for r in &k.kline_p {
+                cx.record_socket_topic_number(&["2:candle:", &e.symbol, ":"], r.1.0 as u32 as u64);
+            }
             // Subscribe snapshots are history, including their newest row. Only
             // explicitly incremental frames may enter the live candle path.
             if k.kind != "incremental" {
@@ -776,7 +779,6 @@ impl Venue for PhemexPerpetuals {
             }
             k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
             for r in k.kline_p {
-                cx.record_socket_topic_number(&["2:candle:", &e.symbol, ":"], r.1.0 as u32 as u64);
                 for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                     s == &e.symbol.to_ascii_uppercase()
                         && resolution(*i).is_some_and(|n| n as f64 == r.1.0)

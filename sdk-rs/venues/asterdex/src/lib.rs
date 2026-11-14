@@ -645,7 +645,10 @@ impl AsterDex {
                         update_mark(cx, row);
                     }
                 }
-                FastAggregate::Depth { stream, event } => self.apply_depth(cx, &stream, event),
+                FastAggregate::Depth { stream, event } => {
+                    cx.record_socket_topic(&[&stream]);
+                    self.apply_depth(cx, &stream, event);
+                }
             }
             return;
         }

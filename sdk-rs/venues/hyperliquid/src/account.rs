@@ -2854,7 +2854,12 @@ impl Hyperliquid {
         if frame.channel != "clearinghouseState"
             && let Some(user) = self.user()
         {
-            cx.record_socket_topic(&["@", &frame.channel, "|||", user, "||||"]);
+            let topic = if frame.channel == "user" {
+                "userEvents"
+            } else {
+                &frame.channel
+            };
+            cx.record_socket_topic(&["@", topic, "|||", user, "||||"]);
         }
         match frame.channel.as_ref() {
             "clearinghouseState" if !self.spot => {
