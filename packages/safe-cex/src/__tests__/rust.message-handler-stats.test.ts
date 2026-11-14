@@ -145,3 +145,11 @@ describe('Rust subscription diagnostics', () => {
     expect(store.messageHandlerStats).toEqual({});
   });
 });
+
+it.each([0xffffffff, 99])('refuses a missing or unresolved topic reference %i', (reference) => {
+  const frame = statsFrame([{ group: 0, topic: 'book', flags: 3, age: 1 }]);
+  new DataView(frame.buffer).setUint32(36, reference, true);
+  const store = new DefaultStore();
+  expect(() => new FrameApplier(store).apply(frame)).toThrow(/missing required string|invalid string reference/);
+  expect(store.messageHandlerStats).toEqual({});
+});

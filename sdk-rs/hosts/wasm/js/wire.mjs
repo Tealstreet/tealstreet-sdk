@@ -423,11 +423,12 @@ export class Frame {
     const flags = (i) => this.view.getUint32(at(i) + 8, true);
     const ageMs = (i) => this.view.getFloat64(at(i) + 16, true);
     for (let i = 0; i < count; i++) {
+      requiredString(this, this.view.getUint32(at(i) + 4, true));
       const age = ageMs(i);
       if (group(i) > 3 || flags(i) > 3 || (!Number.isNaN(age) && (!Number.isFinite(age) || age < 0)) ||
           ((flags(i) & 2) && (!(flags(i) & 1) || Number.isNaN(age)))) throw new Error('invalid message handler stats row');
     }
-    return { count, replace: Boolean(mode), group, topic: (i) => this.string(this.view.getUint32(at(i) + 4, true)),
+    return { count, replace: Boolean(mode), group, topic: (i) => requiredString(this, this.view.getUint32(at(i) + 4, true)),
       subscribed: (i) => Boolean(flags(i) & 1), active: (i) => Boolean(flags(i) & 2), ageMs };
   }
 

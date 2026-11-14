@@ -27,6 +27,7 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 
 const align8 = (value: number) => Math.ceil(value / 8) * 8;
 type FixtureOptions = {
+  invalidStats?: boolean;
   brokenBook?: boolean;
   invalidBook?: boolean;
   invalidCandle?: boolean;
@@ -49,6 +50,7 @@ type FixtureOptions = {
 
 // Independent binary sections exercise the real readers and caller recovery.
 const fixture = ({
+  invalidStats = false,
   brokenBook = false,
   invalidBook = false,
   invalidCandle = false,
@@ -94,6 +96,10 @@ const fixture = ({
       secondaryMarket ? [2, ...references, 1, 1] : [1, 0, 0, 1, 2, 1],
       secondaryMarket ? columns.flatMap((value) => [value, value]) : columns,
     );
+  }
+  if (invalidStats) {
+    table(SECTION.MESSAGE_HANDLER_STATS, [0, 2], []);
+    table(SECTION.TICKERS, [1, 0], [99, 101, 100, 100, 100, 1, 2, 0, 1234, 10, 1000]);
   }
   table(SECTION.ORDERS, [1, 3, 0xffffffff, 0xffffffff, 0, 256], [100, 1, 0, 1, 1234, NaN, NaN]);
   table(SECTION.POSITIONS, [1, 0, 2 << 16], [100, 50, 5, 0, 0, 0.5, 80, 10, 1234, NaN, NaN], [0, 0]);
@@ -1676,4 +1682,23 @@ it('forwards PublicDataSource rejection observers and removes them when its prov
     source.dispose();
     vi.restoreAllMocks();
   }
+});
+
+it('invalid subscription diagnostics preserve financial peers and book identity', () => {
+  const store = new DefaultStore();
+  const applier = new FrameApplier(store);
+  applier.apply(new Frame(fixture()));
+  const bad = new Frame(fixture({ invalidStats: true, total: 99 }));
+  expect(() => applier.apply(bad)).toThrow('invalid message handler stats mode');
+  expect(applier.hasMarketIdentity).toBe(true);
+  expect(applier.hasAccountState).toBe(true);
+  expect(applier.hasTickerState).toBe(true);
+  expect(store.orders[0]).toMatchObject({ id: 'order-1', symbol: 'BTCUSDT' });
+  expect(store.positions[0]).toMatchObject({ symbol: 'BTCUSDT' });
+  expect(store.tickers[0]).toMatchObject({ symbol: 'BTCUSDT', bid: 99, ask: 101 });
+  expect(store.balance.total).toBe(99);
+  expect(applier.books(bad)[0].orderbook.bids[0].price).toBe(100);
+  applier.apply(new Frame(fixture({ markets: false, total: 101 })));
+  expect(applier.hasMarketIdentity).toBe(true);
+  expect(store.balance.total).toBe(101);
 });

@@ -119,10 +119,6 @@ export class FrameApplier {
         errors.push(error);
       }
     };
-    attempt(() => {
-      const stats = this.readMessageHandlerStats(frame);
-      if (stats) update.messageHandlerStats = stats;
-    });
     let markets: ReturnType<Frame['markets']>;
     let tickers: ReturnType<Frame['tickers']>;
     let symbols = this.marketSymbols;
@@ -143,6 +139,11 @@ export class FrameApplier {
     }, LOADED_FLAG.MARKETS);
 
     const marketsFailed = errors.length > 0 || (this.marketsNeedSnapshot && !update.markets);
+    attempt(() => {
+      const stats = this.readMessageHandlerStats(frame);
+      if (stats) update.messageHandlerStats = stats;
+    });
+
     this.marketsNeedSnapshot = marketsFailed;
     if (marketsFailed) {
       this.invalidateMarketIdentity();
