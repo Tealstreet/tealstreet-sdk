@@ -44,7 +44,7 @@ compile_error!(
 );
 
 use safe_cex_engine::{
-    Action, Engine, Event, Health, Notice, RequestId, SocketId, TimerId, Value, Venue,
+    Action, CommandId, Engine, Event, Health, Notice, RequestId, SocketId, TimerId, Value, Venue,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -108,6 +108,7 @@ trait AnyEngine {
         Err(entropy_configuration_error())
     }
 
+    fn http_command_owner(&self, request: RequestId) -> Option<CommandId>;
     fn signing_pending(&self, _: RequestId) -> bool {
         false
     }
@@ -267,6 +268,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
         } else {
             Engine::set_entropy(self, fill)
         }
+    }
+    fn http_command_owner(&self, request: RequestId) -> Option<CommandId> {
+        Engine::http_command_owner(self, request)
     }
     fn signing_pending(&self, attempt: RequestId) -> bool {
         Engine::signing_pending(self, attempt)
@@ -2763,6 +2767,9 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
+            fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+                None
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -2980,6 +2987,9 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
+        fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+            None
+        }
         fn external_signer(
             &mut self,
             _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -3061,6 +3071,9 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
+            fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+                None
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,

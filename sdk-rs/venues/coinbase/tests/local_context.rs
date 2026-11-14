@@ -114,6 +114,12 @@ fn startup_capacity_refusal_requires_valid_entry() {
 #[test]
 fn finite_local_results_and_refusals_keep_native_contract() {
     let (mut e, _) = support::ready();
+    e.store_mut().update_markets(|market| {
+        market.id = "BTC-USD".into();
+        market.symbol = "BTC-USD".into();
+        market.is_spot = Some(true);
+        market.is_perpetual = Some(false);
+    });
     e.handle(1000., Event::Command(Command::FetchAccount { command: 7 }));
     let a: Vec<_> = e.drain_actions().collect();
     assert!(

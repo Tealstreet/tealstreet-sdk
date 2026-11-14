@@ -381,6 +381,10 @@ export interface EngineHostOptions {
 export type EntropyProvider = (length: number) => Uint8Array;
 
 export interface CommandOptions {
+  /** Synchronously return undefined or throw if the captured owner retired.
+   * Checked at command-owned managed HTTP continuations/handoffs until native terminal, even after caller timeout.
+   * Requires native httpCommandOwner metadata. */
+  assertCurrent?(): void;
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
    * The effective wait also enters the engine as receipt metadata; never the venue. */
   timeoutMs?: number;
@@ -523,6 +527,7 @@ export interface WasmEngineLike {
   /** Optional engine ownership export; invalid or absent data retains the legacy context. */
   signMeta?(attempt: number): string | undefined;
   httpReadClass?(request: number): 0 | 1 | 2 | 3;
+  httpCommandOwner?(request: number): number | undefined;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;

@@ -34,6 +34,110 @@ function rig(prepareHttp) {
   return { host, events, timers, at(value) { now = value; }, wait(value) { until = value; } };
 }
 
+test('command owner fence follows native ownership without timing attribution, including caller timeout', async () => {
+  for (const expired of [false, true]) {
+    let owner = 'A', command;
+    const r = rig(() => ({ bind: () => ({ ready: () => true, dispatch() { assert.fail('retired owner sent'); } }) }));
+    r.host.engine.command = (json) => { command = JSON.parse(json).command; return ''; };
+    r.host.engine.httpCommandOwner = () => command;
+    const result = r.host.command({ op: 'amendOrder' }, { assertCurrent: () => assert.equal(owner, 'A') }).catch((error) => error);
+    assert.equal(r.host.stageCauses.size, 0);
+    if (expired) r.host.settleCommand(command, new Error('caller expired'), true);
+    assert.equal(r.host.commandAdmissions.size, 1);
+    owner = 'B';
+    r.host.execute(prepare);
+    await tick();
+    assert.deepEqual(r.events, [['failed', token, 'invalid']]);
+    r.host.execute({ op: 'done', command, result: '[]' });
+    assert.equal(r.host.commandAdmissions.size, 0);
+    await result;
+    r.host.dispose();
+  }
+});
+
+test('unguarded HTTP retains its existing path without an extra native owner query', async () => {
+  const r = rig(() => ({ bind: () => ({ ready: () => true, dispatch: () => Promise.resolve({ status: 200, body: new Uint8Array() }) }) }));
+  r.host.engine.httpCommandOwner = () => { assert.fail('unnecessary owner query'); };
+  r.host.execute(prepare);
+  await tick();
+  assert.equal(r.events.some(([kind]) => kind === 'end'), true);
+  assert.equal(r.events.some(([kind]) => kind === 'failed'), false);
+  r.host.dispose();
+});
+
+test('command owner fence rechecks an asynchronously prepared route', async () => {
+  let owner = 'A', command, resolve;
+  const r = rig(() => new Promise((done) => { resolve = done; }));
+  r.host.engine.command = (json) => { command = JSON.parse(json).command; return ''; };
+  r.host.engine.httpCommandOwner = () => command;
+  const result = r.host.command({ op: 'amendOrder' }, { assertCurrent: () => assert.equal(owner, 'A') }).catch((error) => error);
+  r.host.execute(prepare);
+  owner = 'B';
+  resolve({ bind() { assert.fail('retired owner bound'); } });
+  await tick();
+  assert.deepEqual(r.events, [['failed', token, 'invalid']]);
+  r.host.dispose();
+  await result;
+});
+
+test('command owner fence rejects a retired response before native continuation', async () => {
+  let owner = 'A', command, resolve;
+  const r = rig(() => ({ bind: () => ({ ready: () => true, dispatch: () => new Promise((done) => { resolve = done; }) }) }));
+  r.host.engine.command = (json) => { command = JSON.parse(json).command; return ''; };
+  r.host.engine.httpCommandOwner = () => command;
+  const result = r.host.command({ op: 'amendOrder' }, { assertCurrent: () => assert.equal(owner, 'A') }).catch((error) => error);
+  r.host.execute(prepare); await tick();
+  owner = 'B';
+  resolve({ status: 200, body: new Uint8Array([1]) });
+  await tick();
+  assert.equal(r.events.some(([kind]) => kind === 'start'), false);
+  assert.equal(r.events.some(([kind]) => kind === 'httpFailed'), true);
+  r.host.dispose();
+  await result;
+});
+
+test('an owner-checked command refuses an older engine without native command metadata', async () => {
+  const r = rig(() => { assert.fail('older engine prepared'); });
+  r.host.engine.command = () => { assert.fail('older engine admitted'); };
+  await assert.rejects(r.host.command({ op: 'amendOrder' }, { assertCurrent() {} }), { outcome: 'notSent', kind: 'unsupported' });
+  assert.equal(r.host.commandAdmissions.size, 0);
+  r.host.dispose();
+});
+
+test('owner changes in the final clock or claim callback never reach physical dispatch', async () => {
+  for (const phase of ['clock', 'claim']) {
+    let owner = 'A', command, armed = false;
+    const r = rig(() => ({ bind: () => ({
+      ready() { armed = true; return true; },
+      dispatch() { assert.fail('retired owner sent'); },
+    }) }));
+    r.host.engine.command = (json) => { command = JSON.parse(json).command; return ''; };
+    r.host.engine.httpCommandOwner = () => command;
+    const now = r.host.transport.now;
+    r.host.transport.now = () => { if (armed && phase === 'clock') owner = 'B'; return now(); };
+    const claim = r.host.engine.httpClaim;
+    r.host.engine.httpClaim = (...args) => { owner = 'B'; return claim(...args); };
+    const result = r.host.command({ op: 'amendOrder' }, { assertCurrent: () => assert.equal(owner, 'A') }).catch((error) => error);
+    r.host.execute(prepare);
+    await tick();
+    assert.equal(r.events.some(([kind]) => kind === 'claim'), phase === 'claim');
+    assert.equal(r.events.some(([kind]) => kind === 'httpFailed'), phase === 'claim');
+    assert.equal(r.events.some(([kind, , code]) => kind === 'failed' && code === 'invalid'), phase === 'clock');
+    r.host.dispose();
+    await result;
+  }
+});
+
+test('non-synchronous or boolean owner assertions cannot authorize a command', async () => {
+  for (const value of [false, true, Promise.resolve()]) {
+    const r = rig(() => { assert.fail('invalid owner prepared'); });
+    r.host.engine.httpCommandOwner = () => 1;
+    r.host.engine.command = () => { assert.fail('invalid owner admitted'); };
+    await assert.rejects(r.host.command({ op: 'amendOrder' }, { assertCurrent: () => value }), { outcome: 'notSent', kind: 'invalidInput' });
+    r.host.dispose();
+  }
+});
+
 test('prepared JS handoff follows claim immediately, before drain and response callbacks', async () => {
   let r;
   r = rig(async (request) => {

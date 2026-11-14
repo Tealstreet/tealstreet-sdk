@@ -1682,6 +1682,16 @@ impl<V: Venue> Engine<V> {
         })
     }
 
+    /// Descriptive command ownership for host-side caller fences; grants no send authority.
+    pub fn http_command_owner(&self, request: crate::RequestId) -> Option<crate::CommandId> {
+        self.io.core.managed_http.get(&request).and_then(|managed| {
+            match managed.lifecycle.context().owner() {
+                Owner::Command { id, .. } => Some(id),
+                _ => None,
+            }
+        })
+    }
+
     pub fn http_read_class(&self, request: crate::RequestId) -> super::HttpReadClass {
         self.io
             .pending
