@@ -126,6 +126,19 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     expect(calls).toEqual([]);
   });
 
+  it('uses the current mode when the host keeps a mirror across LOCAL/COSIGNED switches', async () => {
+    const fake = fakeModule('mexc', false);
+    setWasmEngineLoader(async () => fake.module);
+    const { exchange, calls } = mirror('mexc', { signingMode: 'local' });
+    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
+    exchange.options = { ...exchange.options, signingMode: 'cosigned' };
+    await expect(exchange.placeOrder(placed)).resolves.toEqual(['hosted']);
+    exchange.options = { ...exchange.options, signingMode: 'local' };
+    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(calls).toEqual([{ method: 'placeOrder', args: [placed] }]);
+    expect(fake.constructed).not.toHaveBeenCalled();
+  });
+
   it.each(['missing capability', 'failed supported construction', 'failed module load'])('never uses hosted RPC after %s', async (failure) => {
     const fake = fakeModule('bybit', failure === 'missing capability' ? undefined : true, false);
     setWasmEngineLoader(async () => { if (failure === 'failed module load') throw new Error('synthetic module failure'); return fake.module; });
@@ -199,5 +212,21 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'unknown' });
     expect(calls).toEqual([{ method: 'placeOrder', args: [placed] }]);
     expect(fake.constructed).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing single retry for an interrupted public candle read', async () => {
+    const fake = fakeModule('bitrue', false);
+    setWasmEngineLoader(async () => fake.module);
+    const { exchange, calls, bridge } = mirror('bitrue');
+    exchange.off('callMethod', bridge);
+    exchange.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      exchange.emitter.emit('callMethod:done', {
+        requestId: event.requestId, success: calls.length > 1,
+        result: calls.length > 1 ? [] : { message: 'synthetic retired public read', code: 'WORKER_STOPPED' },
+      });
+    });
+    await expect(exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '1m' })).resolves.toEqual([]);
+    expect(calls.map(({ method }) => method)).toEqual(['fetchOHLCV', 'fetchOHLCV']);
   });
 });

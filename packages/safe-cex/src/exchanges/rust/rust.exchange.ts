@@ -1959,7 +1959,9 @@ export class RustEngineExchange extends BaseExchange {
     if (admitted && (this.isDisposed || !bridgeIsCurrent())) {
       throw this.workerOwnerChanged(method, args);
     }
-    const call = () => (this.sourceWorkerCall as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    const workerCall = this.isWorkerMirror && FRAME_FED_WRITES.has(method)
+      ? this.sourceWorkerCall : this.callMethodInWorker;
+    const call = () => (workerCall as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
   };
 
