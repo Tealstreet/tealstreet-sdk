@@ -4,6 +4,83 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3513 run 43622387718, artifact 14125280270; source 0a27110da82221143bc3f51377130ae5f98c22ea.
+// sdk-rs tree d1ae9a6dfa82f578465f85541feb6ae013823bc5 equals reviewed b5231048d4.
+// Optimized web/Node SHA256 bd2760d7eaa57e7ef051fa344dc7ff5cb7b23b4791bbd0a971b550087b0b6c41.
+test('#3513 protective preflight retains its measured CI reserve for every Bybit alias', () => {
+  const measured = 2_557_426;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_568_192);
+  for (const venue of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'bybit');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
+// Owner-fence fix round: build.sh --venue bybit, Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz.
+// Optimized web/Node SHA256 9c8836adf04d0a678f0725d213ab3a5e6ecad2c62cdf1a98003b23fa6d3b9834.
+test('#3513 owner-fence composition retains its fresh local reserve and higher CI floor', () => {
+  const measured = 2_555_348;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.equal(minimumCap, 2_566_144);
+  assert.ok(cap >= Math.max(minimumCap, 2_568_192));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
+// #3513 run43629571410, source280b4708aa45963ab4ade5e29b20b9b2754841b0: only a Kraken test differs from21acae318c.
+// Verified identical web/Node/replay and manifest hashes; Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz.
+// Preserve every parent floor and measured +10 KiB rounded up, including live cap/cap+1 refusal.
+const ownerMetadataCertificates = [
+  ['apexomni', 14127810819, 2_101_409, 2_112_512, 2_111_488, '9d4e40a935dc8bd57ba529ce0c356ae1eebdf9b5916b4820b043f3cd709dc18a'],
+  ['asterdex', 14127303101, 2_265_275, 2_276_352, 2_275_328, '77d3af865052d9be5a9b965415671b2ed7d43819e4d38e67ed1d311e85ee3a71'],
+  ['backpack', 14128096165, 2_049_388, 2_060_288, 2_059_264, '39027694b3f5dd6d5ca8480f1680403cdad7710eb63ad937effded72e80edb47'],
+  ['binance', 14127681155, 2_280_227, 2_290_688, 2_290_688, '87ead58e27e28fa012a122f2a2f1bc978dd30a48098d391a553ae235394e5484'],
+  ['bingx', 14127507348, 2_144_095, 2_154_496, 2_174_976, 'dc5edd65730e7cf1e65d5e0c06494cd1f3fffc7ff8be1243c99574cc7144f858'],
+  ['bitget', 14127327967, 2_770_055, 2_781_184, 2_781_184, 'c4ac95e28f3477d54a85da19d802edf8c3de4176e49d534283e96fc78a944026'],
+  ['bitrue', 14127875766, 1_910_052, 1_921_024, 1_925_120, '8b927653347cba75fee36e33b61b90af5c2b7cf95e45bde58e04df00e0a306c2'],
+  ['bitunix', 14127976229, 1_956_569, 1_967_104, 1_967_104, 'c171528627df8f391a6cbf17fae7c2f31e70769a0fb30e16ef368e402a619981'],
+  ['blofin', 14127810932, 2_072_958, 2_083_840, 2_085_888, 'd5342804d9e1fce4ec59701c8d2806f758fd9abeb4b1640227637b94792c49d6'],
+  ['bybit', 14127507376, 2_557_502, 2_568_192, 2_568_192, '20b8de4a1824fa7a49b307375da6a167da27618219c89e1ad47fd9e8ac7070bd'],
+  ['coinbase', 14127333141, 2_221_333, 2_232_320, 2_232_320, 'bc02f877d2a6d7d5da8692f6d91b61d34752151e80196f99928472260e007825'],
+  ['cryptocom', 14127945791, 1_817_571, 1_827_840, 1_827_840, 'e3fdbb36e0c6a3e8e7fa8fe46061c69240f69bee149cd3b234cd419fcfcdee29'],
+  ['grvt', 14127521281, 2_004_367, 2_015_232, 2_014_208, 'a0d4892c8427ef329242e28a5ea955af655730cfb0bd431138198093b013c475'],
+  ['hyperliquid', 14127288589, 2_268_301, 2_279_424, 2_278_400, 'a8bec6534efe4913528b46c9147e2f4c971aaad97462bbdb00884c2f41e31eab'],
+  ['kraken', 14126954553, 2_277_017, 2_287_616, 2_287_616, '02e18fe1f43ba2befe3d90d9f1d7fa39b5c4a60db57cadf6dec774559a147b99'],
+  ['kucoin', 14127716690, 1_866_642, 1_876_992, 1_878_016, '48cc562dad88e11c9255a5ced3b56d1097d7233c951f790172756dd4f9707ec1'],
+  ['kucoinspot', 14127981482, 2_478_273, 2_489_344, 2_488_320, 'f03c7ff8686b83f221b908ab9fab8c45cd23f1906cdc0521bfa1fdb1df5241bb'],
+  ['lighter', 14127840849, 2_187_365, 2_198_528, 2_197_504, '50b7838a11a59a2d6c8209554e57161e10e76a475f4237c8093277361e7fd46c'],
+  ['mexc', 14127791747, 1_960_743, 1_971_200, 1_971_200, 'e9f97f2812047091633b3b0da133e8f681ba4eda06704f9c458f8920eb413d57'],
+  ['okx', 14126639830, 2_058_368, 2_069_504, 2_068_480, 'ece7c50d45d5662aa88322192db8c0a2b39060ee84172742b1d2233a995b7317'],
+  ['orderly', 14127487221, 1_784_084, 1_795_072, 1_794_048, '66a7196b556875b1b3e4e31bc9859125b62e11df8105a6d323a6648f1307151a'],
+  ['paradex', 14127751729, 2_311_734, 2_322_432, 2_322_432, '6e0a3a6c6f905f285ef7e9200ce7b4a174779cab13a879631a79897c1c1a028d'],
+  ['phemex', 14127457235, 2_145_381, 2_156_544, 2_155_520, '6d32c08265abb4f62cb6aedaa7e136bed639ebd185fffde4b3d0cf058bf0ad91'],
+  ['polymarket', 14127785957, 1_665_383, 1_676_288, 1_676_288, '0696ebe921b2e6e0f2f4f891fa12182157ac7859bb3261fc404ad3ab37d8650a'],
+  ['txflow', 14127288519, 2_166_747, 2_177_024, 2_177_024, '30d722886500bbde7610e69048ddf7239ae5afa2fedd13c1f03edff4ed8a6d6e'],
+  ['weex', 14128200821, 2_030_211, 2_040_832, 2_043_904, '03fa189b0710d4e49029c00e7ff1629b818b9aaae25554b426ae61aaee829f75'],
+  ['woo', 14127680983, 2_681_664, 2_692_096, 2_691_072, '61b2119b17289f18981a36d7b551c9c64871c55f4f7c59abb6a46c398d978318'],
+];
+for (const [family, artifact, measured, minimumCap, parentCap, sha256] of ownerMetadataCertificates) {
+  test(`#3513 owner metadata: ${family} CI artifact ${artifact} ${sha256} retains reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= Math.max(minimumCap, parentCap), `${family}: ${cap} < ${Math.max(minimumCap, parentCap)}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
+test('#3513 owner metadata certificates cover every shipped family', () => {
+  assert.deepEqual(ownerMetadataCertificates.map(([family]) => family).sort(), [...venueFamilies].sort());
+});
+
 // #3317 run 43457064180 checks integration source 05d55b30c6f7, not just the PR tree.
 // Family job 131994663823 and replay job 131994664428 independently refused these bytes.
 // Current run 43461440513: family 132020005385 and replay 132020005877 agree;

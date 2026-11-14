@@ -71,6 +71,41 @@ test('all resources are checked before one claim and both sends precede callback
   r.host.dispose();
 });
 
+test('owner invalidation by a later ready callback refuses the whole unclaimed group', async () => {
+  let owner = 'A';
+  const r = rig({ ready(_, id) { if (id === 8) owner = 'B'; return true; } });
+  r.host.engine.httpCommandOwner = () => 1;
+  r.host.commandAdmissions.set(1, () => assert.equal(owner, 'A'));
+  await r.start();
+  assert.equal(r.events.some(([kind]) => kind === 'claim' || kind === 'send'), false);
+  assert.equal(r.events.some(([kind, , code]) => kind === 'preparationFailed' && code === 'invalid'), true);
+  r.host.dispose();
+});
+
+test('owner invalidation after a committed first handoff cannot send its sibling', async () => {
+  let owner = 'A';
+  const r = rig({ dispatch(_, id) { if (id === 7) owner = 'B'; } });
+  r.host.engine.httpCommandOwner = () => 1;
+  r.host.commandAdmissions.set(1, () => assert.equal(owner, 'A'));
+  await r.start();
+  assert.deepEqual(r.events.filter(([kind]) => kind === 'send'), [['send', 7]]);
+  assert.deepEqual(r.events.filter(([kind]) => kind === 'httpFailed'), [['httpFailed', 8]]);
+  r.host.dispose();
+});
+
+test('owner invalidation in the group claim clock refuses before native claim', async () => {
+  let owner = 'A', armed = false;
+  const r = rig({ ready(_, id) { if (id === 8) armed = true; return true; } });
+  const now = r.host.transport.now;
+  r.host.transport.now = () => { if (armed) owner = 'B'; return now(); };
+  r.host.engine.httpCommandOwner = () => 1;
+  r.host.commandAdmissions.set(1, () => assert.equal(owner, 'A'));
+  await r.start();
+  assert.equal(r.events.some(([kind]) => kind === 'claim' || kind === 'send'), false);
+  assert.equal(r.events.some(([kind, , code]) => kind === 'preparationFailed' && code === 'invalid'), true);
+  r.host.dispose();
+});
+
 for (const attack of ['dispose', 'failEngine', 'cleanup', 'cancel', 'run', 'invoke', 'execute', 'command', 'settleCommand', 'hostExecute', 'reconnect']) {
   test(`first dispatch cannot interrupt its sibling through ${attack}`, async () => {
     const r = rig({ dispatch(host, id) {

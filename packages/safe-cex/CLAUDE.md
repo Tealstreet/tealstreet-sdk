@@ -849,6 +849,14 @@ The direct source-order refresh and capability-adopted `fetchClosedPnl` use the
 same optional admission fence. Only the existing public candle read is permitted
 to retry across a replacement bridge.
 
+Page-local `updateOrder` retains that same admission through native managed HTTP
+reads, response continuations, route preparation and final handoff. The host uses
+native `httpCommandOwner` metadata rather than optional timing attribution, and
+retains the check until native completion even after a caller timeout. A fenced
+amend with older WASM lacking this metadata refuses `unsupported` / `notSent`;
+consume matching SDK and WASM together. Owner loss after a committed cancel
+retains Unknown and the existing placement fence.
+
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from
 `{ ...exchange.options, workerMirror: undefined }`; its signing host and any
@@ -1163,6 +1171,15 @@ placed again exactly (a Bybit Limit stop keeps its limit price), once; the error
 then carries `protection: 'restored' | 'unprotected'` (`ExchangeError.protection`,
 kept by `serializeCommandError`). An unknown outcome is never restored, and a
 stop the cancel found already gone (filled or triggered) is never put back.
+
+Frame-fed Bybit Partial TP/SL edits first perform real signed target, live-order
+and history proof reads under the initiating command's Preflight. Unavailable
+proof or signing refuses `notSent` before cancellation, retaining the old stop.
+The captured order, position and fresh reference are checked again after each
+read. These reads establish current access, not future availability: cancellation
+still precedes replacement as in the legacy adapter, and fresh post-cancel proof
+remains mandatory. A failure first occurring after cancellation stays Unknown
+and fences further placement; the preflight never grants replay or restoration.
 
 ## Automatic retries are for reads only
 

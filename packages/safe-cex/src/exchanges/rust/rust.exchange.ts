@@ -2772,7 +2772,12 @@ export class RustEngineExchange extends BaseExchange {
   /** `report: false` is for background reads whose caller owns the failure's visibility. */
   private command = async <T>(
     command: { op: string; [field: string]: unknown },
-    { report = true, timing, timeoutMs }: { report?: boolean; timing?: WriteTiming; timeoutMs?: number } = {},
+    {
+      report = true,
+      timing,
+      timeoutMs,
+      assertCurrent,
+    }: { report?: boolean; timing?: WriteTiming; timeoutMs?: number; assertCurrent?: () => void } = {},
   ): Promise<T> => {
     // Unreported: the account has nothing to read, which is not an error the user caused.
     if (this.options.publicDataOnly === true && PRIVATE_HISTORY_OPS.has(command.op))
@@ -2792,6 +2797,7 @@ export class RustEngineExchange extends BaseExchange {
         if (invalid(command)) throw new Error('Coinbase command numbers must be finite');
       }
       const options = {
+        ...(assertCurrent ? { assertCurrent } : {}),
         ...(timing ? { onStage: timing.mark } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       };
@@ -2829,9 +2835,10 @@ export class RustEngineExchange extends BaseExchange {
   private writeCommand = async <T>(
     claimed: ReturnType<typeof claimWriteTiming>,
     command: { op: string; [field: string]: unknown },
+    assertCurrent?: () => void,
   ): Promise<T> => {
     try {
-      const result = await this.command<T>(command, { timing: claimed.timing });
+      const result = await this.command<T>(command, { timing: claimed.timing, assertCurrent });
       if (claimed.owned) emitWriteTiming(this, claimed.timing, 'ok');
       return result;
     } catch (error) {
@@ -2915,7 +2922,11 @@ export class RustEngineExchange extends BaseExchange {
     return this.placeOrders([opts]);
   };
 
-  updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+  updateOrder = async (options: UpdateOrderOpts) => {
+    const admitted = this.isWorkerMirror ? this.captureWorkerAdmission() : undefined;
+    const assertCurrent = admitted && (() => admitted('updateOrder', [options]));
+    assertCurrent?.();
+    const { order, update } = options;
     const timing = claimWriteTiming('amendOrder');
     const price = 'price' in update ? update.price : undefined;
     const amount = 'amount' in update ? update.amount : undefined;
@@ -2924,13 +2935,17 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Order amendment price and amount must be finite numbers');
     }
     const withSymbol = this.capabilityRecord?.amendWithSymbol;
-    const result = await this.writeCommand<string[] | { orderIds: string[]; clientOrderId: string }>(timing, {
-      op: withSymbol ? 'amendOrderWithSymbol' : 'amendOrder',
-      id: order.id,
-      ...(withSymbol ? { symbol: order.symbol } : {}),
-      ...('price' in update ? { price: update.price } : {}),
-      ...('amount' in update ? { amount: update.amount } : {}),
-    });
+    const result = await this.writeCommand<string[] | { orderIds: string[]; clientOrderId: string }>(
+      timing,
+      {
+        op: withSymbol ? 'amendOrderWithSymbol' : 'amendOrder',
+        id: order.id,
+        ...(withSymbol ? { symbol: order.symbol } : {}),
+        ...('price' in update ? { price: update.price } : {}),
+        ...('amount' in update ? { amount: update.amount } : {}),
+      },
+      assertCurrent,
+    );
     return Array.isArray(result) ? result : withReplacementClientOrderId(result.orderIds, result.clientOrderId);
   };
 
