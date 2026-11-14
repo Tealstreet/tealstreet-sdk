@@ -208,3 +208,8 @@ Browser approval and revocation nonces use the shared corrected virtualClock.
 Failed or unreadable approval reads stay recoverable Network/VenueUnavailable
 with NotSent; only a valid matching-owner response confirming absence is AuthInvalid.
 Every failed check still stops before signing or releasing an exchange write.
+
+Standalone agent reads/approvals/revocations use the registered transport's
+`privateProxy('txflow')` contract unless `options.fetch` explicitly overrides it.
+A configured proxy without authorization refuses before fetch; it never falls
+back to the venue. The direct transport remains direct by its declared contract.

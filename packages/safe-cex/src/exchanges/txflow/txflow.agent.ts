@@ -5,6 +5,7 @@
  */
 import { ethers } from 'ethers';
 import { virtualClock } from '../../utils/virtualClock';
+import { getTransport } from '../../transport/registry';
 
 import type { AgentWalletCreationResult } from '../hyperliquid/hyperliquid.agent';
 
@@ -83,8 +84,18 @@ export async function signTxflowAgentApproval(
 
 async function post(path: '/info' | '/exchange', body: unknown, options: TxflowAgentOptions): Promise<unknown> {
   testnetOnly(options.testnet);
-  const response = await (options.fetch ?? fetch)(`${API}${path}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-version': '2026-08-16' },
+  let url = `${API}${path}`;
+  let proxyHeaders: Record<string, string> = {};
+  if (!options.fetch) {
+    const proxy = getTransport({}).privateProxy('txflow');
+    if (proxy) {
+      proxyHeaders = await proxy.resolveHeaders();
+      if (Object.keys(proxyHeaders).length === 0) throw new Error('TxFlow agent proxy authorization is unavailable');
+      url = `${proxy.url}/${url}`;
+    }
+  }
+  const response = await (options.fetch ?? fetch)(url, {
+    method: 'POST', headers: { ...proxyHeaders, 'Content-Type': 'application/json', 'x-api-version': '2026-08-16' },
     body: JSON.stringify(body),
   });
   // A 202 is still pending, never approval. Do not retry a possibly accepted write.

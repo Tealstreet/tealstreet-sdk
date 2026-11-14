@@ -1,5 +1,7 @@
 import { ethers } from 'ethers';
 import { virtualClock } from '../../utils/virtualClock';
+import { directTransport } from '../../transport/direct';
+import { setDefaultTransport } from '../../transport/registry';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -13,7 +15,7 @@ import {
   type TxflowAgentApproval,
 } from '../../exchanges/txflow/txflow.agent';
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); setDefaultTransport(directTransport); });
 const ADDRESS = '0x0202020202020202020202020202020202020202';
 const OWNER = '0x1111111111111111111111111111111111111111';
 const action = () => buildTxflowAgentApproval(ADDRESS, 'my-trading-bot', 2000, true);
@@ -135,7 +137,9 @@ it('supports the documented wallet-domain override without changing the testnet 
 });
 
 
-it.each(['approve', 'revoke'] as const)('%s uses corrected wallet nonce with a skewed browser clock', async (operation) => {
+it.each([
+  ['approve', 'override'], ['revoke', 'override'], ['approve', 'registered'], ['revoke', 'registered'],
+] as const)('%s uses corrected nonce and the %s transport', async (operation, route) => {
   const owner = new ethers.Wallet(`0x${'ab'.repeat(32)}`);
   const raw = 1_800_000_000_000;
   const corrected = raw - 3_600_000;
@@ -169,7 +173,35 @@ it.each(['approve', 'revoke'] as const)('%s uses corrected wallet nonce with a s
     const agent = operation === 'approve' ? submitted : submitted ? undefined : {agentAddress:ADDRESS,agentName:'clock-test'};
     return new Response(JSON.stringify({success:true,code:0,data:{user:owner.address,agents:agent?[agent]:[]}}));
   });
-  if (operation === 'approve') await createTxflowAgentWithBrowserWallet(owner.address,{testnet:true,fetch:fetcher});
-  else await revokeTxflowAgentWithBrowserWallet(owner.address,ADDRESS,'clock-test',{testnet:true,fetch:fetcher});
+  const resolveHeaders = vi.fn(async () => ({ Authorization: 'Bearer test-proxy' }));
+  const privateProxy = vi.fn(() => ({ url: 'https://proxy.invalid', resolveHeaders }));
+  setDefaultTransport({ ...directTransport, name: 'agent-test', privateProxy });
+  vi.stubGlobal('fetch', fetcher);
+  const options = { testnet: true, ...(route === 'override' ? { fetch: fetcher } : {}) };
+  if (operation === 'approve') await createTxflowAgentWithBrowserWallet(owner.address, options);
+  else await revokeTxflowAgentWithBrowserWallet(owner.address, ADDRESS, 'clock-test', options);
+  if (route === 'registered') {
+    expect(privateProxy).toHaveBeenCalledWith('txflow');
+    expect(resolveHeaders).toHaveBeenCalledTimes(fetcher.mock.calls.length);
+  } else expect(privateProxy).not.toHaveBeenCalled();
+  for (const [url, init] of fetcher.mock.calls) {
+    expect(String(url)).toMatch(route === 'registered'
+      ? /^https:\/\/proxy\.invalid\/https:\/\/rpc\.txflow-testnet\.xyz\/(info|exchange)$/
+      : /^https:\/\/rpc\.txflow-testnet\.xyz\/(info|exchange)$/);
+    expect(init?.headers).toMatchObject({ 'Content-Type': 'application/json', 'x-api-version': '2026-08-16',
+      ...(route === 'registered' ? { Authorization: 'Bearer test-proxy' } : {}) });
+  }
   expect(submitted?.nonce).toBe(corrected);
+});
+
+
+it('refuses missing configured proxy authorization without falling back to the venue', async () => {
+  const fetcher = vi.fn().mockRejectedValue(new Error('Unexpected direct request'));
+  vi.stubGlobal('fetch', fetcher);
+  setDefaultTransport({ ...directTransport, name: 'agent-test', privateProxy: () => ({
+    url: 'https://proxy.invalid', resolveHeaders: async () => ({}),
+  }) });
+  await expect(getTxflowAgentAuthorization(OWNER, ADDRESS, { testnet: true }))
+    .rejects.toThrow('TxFlow agent proxy authorization is unavailable');
+  expect(fetcher).not.toHaveBeenCalled();
 });
