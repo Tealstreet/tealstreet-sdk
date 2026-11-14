@@ -263,16 +263,16 @@ fn malformed_complete_primary_is_refused_instead_of_made_anonymous() {
     }
 }
 
-struct Reject;
-impl Visit for Reject {
-    type Output = ();
-    fn visit<V: Venue + 'static>(self, _: Engine<V>) {
-        panic!("Bitrue is outside beta admission");
+struct Admission;
+impl Visit for Admission {
+    type Output = bool;
+    fn visit<V: Venue + 'static>(self, engine: Engine<V>) -> bool {
+        engine.account_startup()
     }
 }
 
 #[test]
-fn hosted_bitrue_accounts_require_beta_admission_before_dispatch() {
+fn hosted_bitrue_admission_matches_client_validation() {
     for value in [
         json!({}),
         json!({"publicDataOnly":true}),
@@ -287,30 +287,30 @@ fn hosted_bitrue_accounts_require_beta_admission_before_dispatch() {
         json!({"signing":{"primary":{"credential":"fixture-ref", "signing":"opaque-key", "stableId":"\n"}}, "publicDataOnly":true}),
     ] {
         for injected in [false, true] {
-            let options: EngineOptions = serde_json::from_value(value.clone()).unwrap();
-            let error = if injected {
-                safe_cex_venues::build_with_signer_in_context(
-                    safe_cex_venues::ConstructionContext::Hosted,
-                    "bitrue",
-                    options,
-                    None,
-                    Some(std::sync::Arc::new(
-                        safe_cex_crypto::signer::LocalSigner::new(),
-                    )),
-                    Reject,
-                )
-            } else {
-                safe_cex_venues::build_in_context(
-                    safe_cex_venues::ConstructionContext::Hosted,
-                    "bitrue",
-                    options,
-                    None,
-                    Reject,
-                )
-            }
-            .expect_err("OUT venue cannot construct or dispatch its catalogue");
-            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
-            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+            let construct = |context| {
+                let options: EngineOptions = serde_json::from_value(value.clone()).unwrap();
+                let result = if injected {
+                    safe_cex_venues::build_with_signer_in_context(
+                        context,
+                        "bitrue",
+                        options,
+                        None,
+                        Some(std::sync::Arc::new(
+                            safe_cex_crypto::signer::LocalSigner::new(),
+                        )),
+                        Admission,
+                    )
+                } else {
+                    safe_cex_venues::build_in_context(context, "bitrue", options, None, Admission)
+                };
+                result.map_err(|error| (error.kind, error.outcome, error.message))
+            };
+            // restored by #3502; #3317 dropped a live venue without a product decision.
+            assert_eq!(
+                construct(safe_cex_venues::ConstructionContext::Hosted),
+                construct(safe_cex_venues::ConstructionContext::Client),
+                "injected={injected}: {value}"
+            );
         }
     }
 }

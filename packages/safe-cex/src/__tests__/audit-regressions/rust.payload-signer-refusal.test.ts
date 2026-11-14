@@ -190,7 +190,8 @@ describe('factory and worker loaders', () => {
     vi.spyOn(betaPolicy, 'assertBetaAccount').mockImplementation(actual.assertBetaAccount);
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     // Codec support does not admit an OUT venue, regardless of signer mode.
-    for (const name of ['bitrue', 'polymarket'] as const) {
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    for (const name of ['polymarket'] as const) {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {

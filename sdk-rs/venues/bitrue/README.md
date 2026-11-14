@@ -1,9 +1,8 @@
 # Bitrue socket recovery
 
-Hosted construction refuses Bitrue with `unsupported` / `notSent` while it
-remains outside SDK beta admission, including public-only accounts. Client
-construction remains available behind the SDK beta layer, with catalogue,
-signing and socket codecs independently tested.
+Bitrue is admitted by the SDK beta roster for Client and Hosted construction.
+SDK #3502 restores the live venue dropped by #3317 without a product decision;
+existing signing, public-mode and credential-placement checks still apply.
 
 Public and private sockets use independent engine `Supervisor` instances with
 10-second connect/token deadlines, 20-second receive watchdogs, and capped
@@ -25,7 +24,7 @@ signed nonce. The receive window defaults to 20,000 ms and clamps to
 freezes each dispatch timestamp and rejects stale signing completions.
 
 Standalone Client construction and hosted-signing capture use opaque identities
-with the same native dispatch recipes; this does not admit a Hosted account.
+with the same native dispatch recipes; Hosted admission follows the SDK roster.
 Only the provider owns the signing material. RemoteSigner
 receives the canonical payload through the existing `ws-auth` / `hex` envelope;
 no secret or opaque signing ref crosses that wire. Browser `signHttpRequest`
@@ -63,11 +62,9 @@ and an actionable explanation. This adapter delegates API-key custody; it does
 not introduce an agent-wallet or EIP-712 signing mode.
 
 `construction-rules.json` declares `remoteSigning.enabled`, `payloadSupported`
-and `payloadRestOnly` for the standalone codecs. Its `betaAdmitted: false`
-keeps Bitrue outside SDK account admission. Hosted construction refuses it before
-signer setup, including public-only accounts. The WASM beta loader still ships
-the Bitrue family; that codec availability does not grant SDK account admission.
-NX's derived refusal list follows the SDK declaration on import.
+and `payloadRestOnly` for both admitted accounts and standalone codecs. Bitrue
+uses the default admitted construction rule and the WASM beta loader ships its
+family. NX's derived refusal list follows the SDK declaration on import.
 
 Independent HMAC vectors cover every signed route plus listen-key creation and
 refresh. The native fixture provider compares actual dispatched graphs and

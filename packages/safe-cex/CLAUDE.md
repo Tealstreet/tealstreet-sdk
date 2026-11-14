@@ -2,7 +2,9 @@
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
 Hosted construction follows that full roster for public and private accounts.
-Bitrue, Polymarket, Weex, TxFlow and the canonical `orderly` name remain OUT;
+Bitrue admission is restored by SDK #3502; #3317 dropped a live venue without
+a product decision. Its existing signing and credential-placement checks remain.
+Polymarket, Weex, TxFlow and the canonical `orderly` name remain OUT;
 KodiakFi, Mode, What and WOOFi retain their admitted Orderly-family aliases.
 Polymarket's native signing layer also refuses delegated
 custody: its private user WebSocket needs the L2 API secret, not a signature. See
@@ -18,7 +20,7 @@ AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
 see `sdk-rs/venues/asterdex/README.md`),
 MEXC (RemoteSigner and REST-only PayloadSigner; see `sdk-rs/venues/mexc/README.md`),
 Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
+Bitget x3 (USDT, USDC, inverse), Bitrue, Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
