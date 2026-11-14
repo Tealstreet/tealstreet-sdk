@@ -134,6 +134,31 @@ pub(super) struct Guard {
     pub closing: bool,
 }
 impl Guard {
+    // Admission may obtain missing proof once; the final Claim never does I/O.
+    pub(super) fn needs_reference(
+        &self,
+        store: &Store,
+        references: &HashMap<String, References>,
+        now: f64,
+    ) -> bool {
+        self.trigger.is_some()
+            && self.source.is_some_and(|source| {
+                !references
+                    .get(&self.order.symbol)
+                    .and_then(|r| r.get(source, now))
+                    .is_some_and(|value| {
+                        store.ticker(&self.order.symbol).is_some_and(|t| {
+                            value
+                                == match source {
+                                    StopTriggerType::LastPrice => t.last,
+                                    StopTriggerType::MarkPrice => t.mark,
+                                    StopTriggerType::IndexPrice => t.index,
+                                }
+                        })
+                    })
+            })
+    }
+
     pub(super) fn check(
         &self,
         store: &Store,
