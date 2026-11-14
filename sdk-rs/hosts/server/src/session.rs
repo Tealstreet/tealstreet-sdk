@@ -617,28 +617,38 @@ impl Session {
             self.handovers
                 .refusal_context(&init.account_name, &init.exchange_name)
         });
+        let mut signing_mode_reason = None;
         let refusal_kind = if !self.admission_token_valid() {
             Some(RefusalStage::Authentication)
         } else if delegated && !crate::delegated::enabled(&init.exchange_name) {
             Some(RefusalStage::VenuePolicy)
         } else if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
             Some(RefusalStage::PublicAccount)
-        } else if self
-            .registry
-            .signing_mode_refusal(self.user(), &init, false, delegated)
-            .is_some()
+        } else if let Some((reason, _)) =
+            self.registry
+                .signing_mode_refusal_detail(self.user(), &init, false, delegated)
         {
+            signing_mode_reason = Some(reason);
             Some(RefusalStage::SigningMode)
         } else {
             None
         };
         if let Some(kind) = refusal_kind {
             if let Some(diagnostic) = &diagnostic {
-                diagnostic.refused(ProbeRefusal::INVALID.at(kind));
+                if let Some(reason) = signing_mode_reason {
+                    diagnostic.signing_mode_refused(reason);
+                } else {
+                    diagnostic.refused(ProbeRefusal::INVALID.at(kind));
+                }
             }
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated init refused");
-            self.refuse_handover(&init.account_name, false);
+            if signing_mode_reason.is_some() {
+                self.handover_out(&init.account_name)
+                    .send(envelope::init_signing_mode_refused(&init.account_name));
+            } else {
+                self.refuse_handover(&init.account_name, false);
+            }
             return;
         }
         if self.pending_verifications.len() >= 64 {

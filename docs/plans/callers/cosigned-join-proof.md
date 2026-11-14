@@ -46,3 +46,13 @@ signer. KuCoin mainnet now has a configured Futures origin and qualifies under
 that rule; its private-startup proof is still required. Account identity,
 retention and socket protocol version are unchanged, and no refusal grants
 permission to retry an interrupted write.
+
+A pre-probe registry compatibility refusal uses the existing `msg`/`error`
+envelope with `data[1].initRefused: true`, `kind: "signing-mode"` and
+`transient: false`. Its message is "The requested account signing mode is
+unavailable; account not attached". This class does not assert that a key was
+tested or found invalid. Hosts must preserve the class, show the opaque message,
+and keep that registration unadmitted; a fresh handover retry is not a remedy.
+The reason stays off the socket. Existing custody-mode, identity and holder
+checks still apply, and this response does not authorize replacing an account
+or replaying a write.

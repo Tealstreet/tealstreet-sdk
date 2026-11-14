@@ -34,6 +34,14 @@ impl RefusalContext {
         })
     }
 
+    pub(crate) fn signing_mode_refused(&self, reason: crate::accounts::SigningModeRefusalReason) {
+        let mut fields =
+            self.fields(ProbeRefusal::INVALID.at(super::probe::RefusalStage::SigningMode));
+        fields["kind"] = "signing-mode".into();
+        fields["reason"] = serde_json::to_value(reason).expect("closed refusal reason");
+        crate::state::Log::warn(&fields.to_string());
+    }
+
     pub(crate) fn refused(&self, refusal: ProbeRefusal) {
         crate::state::Log::warn(&self.fields(refusal).to_string());
     }
