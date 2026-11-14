@@ -147,6 +147,8 @@ fn done(a: &[Action]) -> bool {
     a.iter()
         .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
 }
+#[path = "trading_regressions.rs"]
+mod regressions;
 #[test]
 fn limit_and_market_controls_are_numeric_and_explicit() {
     for tif in [

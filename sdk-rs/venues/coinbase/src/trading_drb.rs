@@ -553,6 +553,17 @@ impl Coinbase {
             let _ = cx.done_context(&job.root, data);
             return;
         };
+        // A new attempt cannot acquire the same recovery reservation. In
+        // particular, its later NotSent/refusal must not erase an older Unknown.
+        if call.method.operation() == Operation::Mutation
+            && self.trading_drb.recovery.contains_key(&call.key())
+        {
+            let _ = cx.fail_context(
+                &job.root,
+                invalid("drb write already pending or awaiting native read-back"),
+            );
+            return;
+        }
         let context = match cx.http_leg_context(&job.root, policy(call.method.operation())) {
             Ok(c) => c,
             Err(e) => {
@@ -884,6 +895,14 @@ impl Coinbase {
                             .params
                             .get("time_in_force")
                             .is_some_and(|tif| row["time_in_force"] != *tif)
+                        || call
+                            .params
+                            .get("trigger_price")
+                            .is_some_and(|price| row["trigger_price"].as_f64() != price.as_f64())
+                        || call
+                            .params
+                            .get("trigger")
+                            .is_some_and(|basis| row["trigger"] != *basis)
                     {
                         return Err(uncertain(
                             "drb native order ACK differs from requested size or controls",
