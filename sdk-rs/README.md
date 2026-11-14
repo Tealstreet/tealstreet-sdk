@@ -224,8 +224,10 @@ selected time window so later depth resynchronizations remain reproducible.
 Legacy contract families stay filtered as in TypeScript. `Triggered` displays
 as Closed but remains nonterminal; a later native New update can reopen it.
 Public books request full depth and replace periodic snapshots.
-Live candles accept only `kline_p` incremental frames; subscription snapshots
-and backfill never publish live candles. Candle timestamps remain in seconds.
+Kline subscription snapshots replay only wire rows 1 then 0, matching the legacy
+TS `listenOHLCV` callback; the remaining history is not replayed. Explicit
+incremental frames continue streaming; unclassified/backfill frames are refused.
+Candle timestamps remain in seconds.
 Each public frame parse failure emits a `stream.malformed` warning with
 the raw frame's byte count and wire `type` (`unknown` for unreadable JSON).
 
