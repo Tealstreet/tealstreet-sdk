@@ -32,3 +32,7 @@ receipt. Empty provenance still exports the existing 11-byte v1 form; new reader
 accept both versions. A v1 source grants no protective-edit provenance. Deploy
 matching source and receiver builds to use v2; older readers reject the new
 version. See [protective edits](../../../../docs/plans/callers/lighter-protective-edits.md).
+
+A resolved frame receiver cannot rebind its account, including address selectors.
+Each protective edit retains its initiating account through the public read and
+final sends; foreign metadata retires pending edit bindings, even if A returns.

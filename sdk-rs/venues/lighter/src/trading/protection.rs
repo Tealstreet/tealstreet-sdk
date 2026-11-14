@@ -19,6 +19,7 @@ pub(crate) struct ProtectionState {
     pub retired_frame_originals: HashMap<String, Original>,
 }
 pub(super) struct Edit {
+    pub account_index: Option<u64>,
     pub original: Original,
     pub replacement: Order,
     pub canceled: bool,
@@ -366,6 +367,18 @@ impl Lighter {
                 self.protection.marks.remove(symbol);
             }
         }
+    }
+    pub(crate) fn protective_account_veto(&self) -> Result<(), VenueError> {
+        if let Some(edit) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|j| j.protection.as_ref())
+            && (edit.account_index.is_none() || edit.account_index != self.account.account_index)
+        {
+            return Err(not_sent("Lighter stop not changed: account changed"));
+        }
+        Ok(())
     }
     pub(super) fn protective_reference(
         &self,

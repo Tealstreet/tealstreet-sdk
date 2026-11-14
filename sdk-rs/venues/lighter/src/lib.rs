@@ -1082,6 +1082,9 @@ impl Venue for Lighter {
         pending: &Pending,
         release: &safe_cex_engine::request_context::HttpRelease,
     ) -> Result<(), VenueError> {
+        if matches!(pending, Pending::Trade(trading::Request::Submit(_))) {
+            self.protective_account_veto()?;
+        }
         self.protective_release_veto(store, pending, release.time.raw_ms)
     }
     fn cancel_needs_stored_order(&self) -> bool {
@@ -1113,12 +1116,16 @@ impl Venue for Lighter {
             cx.venue_state_unreadable("Unreadable Lighter venue state from the data source");
             return;
         };
-        if let Some(account) = state.account_index {
-            self.apply_account_index(cx, account);
-        }
         self.protection.originals.clear();
         self.protection.frame_originals.clear();
+        if let Some(account) = state.account_index
+            && !self.apply_account_index(cx, account)
+        {
+            self.invalidate_protective_account();
+            return;
+        }
         if state.account_index != self.account.account_index {
+            self.invalidate_protective_account();
             return;
         }
         self.apply_limits_tier_code(state.tier);

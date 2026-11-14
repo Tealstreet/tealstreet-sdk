@@ -165,6 +165,11 @@ impl Lighter {
         {
             return;
         }
+        if let Err(error) = self.protective_account_veto() {
+            self.trading.inflight = false;
+            self.trade_finish(cx, error);
+            return;
+        }
         let accepted = (200..300).contains(&response.status)
             && serde_json::from_str::<Reply>(response.body)
                 .is_ok_and(|r| r.code.as_ref().and_then(Number::integer) == Some(200));

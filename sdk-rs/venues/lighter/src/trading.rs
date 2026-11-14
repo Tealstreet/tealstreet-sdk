@@ -663,6 +663,7 @@ impl Lighter {
                         return;
                     }
                     protection = Some(protection::Edit {
+                        account_index: self.account.account_index,
                         original,
                         replacement: orders[0].order.clone(),
                         canceled: false,
@@ -832,6 +833,20 @@ impl Lighter {
             })
     }
 
+    pub(crate) fn invalidate_protective_account(&mut self) {
+        for job in self
+            .trading
+            .active
+            .iter_mut()
+            .chain(self.trading.queue.iter_mut())
+        {
+            if let Some(edit) = &mut job.protection {
+                // A later matching frame cannot revive this edit's retired binding.
+                edit.account_index = None;
+            }
+        }
+    }
+
     pub(crate) fn trade_kick(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.trading.inflight
             || self.trading.timer.is_some()
@@ -864,6 +879,10 @@ impl Lighter {
                     cx.done_empty_plan(&job.preflight, serde_json::to_string(&job.ids).unwrap());
             }
             self.trade_wake_next(cx);
+            return;
+        }
+        if let Err(error) = self.protective_account_veto() {
+            self.trade_finish(cx, error);
             return;
         }
         if self.account.identity.is_none() {

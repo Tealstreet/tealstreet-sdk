@@ -90,8 +90,12 @@ native decoder before it grants exact modification or put-back authority.
 Locally canceled identities remain suppressed, and a local modify (including an
 Unknown) retires its old native parameters: replaying that metadata cannot grant
 a second edit until the source supplies changed native parameters.
-The header must name the receiver's resolved account before tier or native
-provenance is accepted. The source sorts rows for stable encoding. Missing native orders wait for their
+The header must name the receiver's already resolved account before tier or
+native provenance is accepted, including address-configured receivers. A foreign
+header cannot rebind the receiver and permanently retires pending edit bindings.
+Each edit captures its initiating account at preflight and rechecks it after the
+public read, before continuation and at final Claim; a return frame cannot revive
+that edit. The existing pure reference/position/order veto remains unchanged. The source sorts rows for stable encoding. Missing native orders wait for their
 ingested rows; a new source state replaces prior provenance. New readers also
 accept the exact 11-byte v1 form, which exports when no originals are present
 and grants no native provenance. Ordinary v1 writes remain supported; a v1-only

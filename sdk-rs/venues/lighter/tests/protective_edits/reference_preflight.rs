@@ -12,7 +12,16 @@ fn page_with_status(
     take_profit: bool,
     status: &str,
 ) -> (Engine<Lighter>, Vec<u8>) {
-    let opts = Options {
+    page_with_selector(robinhood, take_profit, status, "718895")
+}
+
+fn page_with_selector(
+    robinhood: bool,
+    take_profit: bool,
+    status: &str,
+    selector: &str,
+) -> (Engine<Lighter>, Vec<u8>) {
+    let mut opts = Options {
         robinhood,
         testnet: true,
         ..options()
@@ -31,6 +40,7 @@ fn page_with_status(
     );
     mark(&mut source, &feeds, NOW, json!({"mark_price":"100"}));
     let frame = source.snapshot_frame(NOW).to_vec();
+    opts.application_id = Some(selector.into());
     let mut e = engine(opts);
     e.set_frame_fed().unwrap();
     e.start(NOW);
@@ -450,4 +460,169 @@ fn a_foreign_account_frame_cannot_grant_protective_provenance() {
     e.apply_frame(NOW, &writer.finish(), false).unwrap();
     edit(&mut e, NOW, false);
     refused(&mut e, NOW);
+}
+
+fn address_page() -> Engine<Lighter> {
+    page_with_selector(
+        false,
+        false,
+        "mark-price",
+        "0x1111111111111111111111111111111111111111",
+    )
+    .0
+}
+
+fn account_frame(e: &mut Engine<Lighter>, account: u64) {
+    use safe_cex_engine::Venue;
+    let state = e.venue().export_venue_state().unwrap();
+    account_frame_from(e, state, account);
+}
+
+fn account_frame_from(e: &mut Engine<Lighter>, mut state: Vec<u8>, account: u64) {
+    state[2..10].copy_from_slice(&account.to_le_bytes());
+    let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), NOW);
+    writer.venue_state(&state);
+    e.apply_frame(NOW, &writer.finish(), false).unwrap();
+}
+
+#[test]
+fn address_receiver_same_account_reference_control() {
+    let mut e = address_page();
+    edit(&mut e, NOW, false);
+    let r = read(&mut e, NOW);
+    account_frame(&mut e, 718_895);
+    reply(&mut e, &r, 200, MARK);
+    let nonce = request(&mut e, NOW, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let write = request(&mut e, NOW, "sendTx");
+    assert_eq!(tx(&write)["AccountIndex"], 718_895);
+    ack(&mut e, &write, NOW);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 8, .. })))
+            .count(),
+        1,
+        "{out:?}"
+    );
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
+}
+
+#[test]
+fn address_receiver_foreign_frame_before_edit_cannot_rebind_account() {
+    use safe_cex_engine::Venue;
+    let mut e = address_page();
+    account_frame(&mut e, 718_896);
+    let state = e.venue().export_venue_state().unwrap();
+    assert_eq!(
+        u64::from_le_bytes(state[2..10].try_into().unwrap()),
+        718_895
+    );
+    edit(&mut e, NOW, false);
+    refused(&mut e, NOW);
+}
+
+#[test]
+fn address_receiver_foreign_frame_during_reference_retires_edit() {
+    use safe_cex_engine::Venue;
+    let mut e = address_page();
+    edit(&mut e, NOW, false);
+    let r = read(&mut e, NOW);
+    let state = e.venue().export_venue_state().unwrap();
+    account_frame_from(&mut e, state.clone(), 718_896);
+    account_frame_from(&mut e, state, 718_895);
+    reply(&mut e, &r, 200, MARK);
+    refused(&mut e, NOW);
+    let state = e.venue().export_venue_state().unwrap();
+    assert_eq!(
+        u64::from_le_bytes(state[2..10].try_into().unwrap()),
+        718_895
+    );
+    reply(&mut e, &r, 200, MARK);
+    assert!(safe_cex_engine::test_support::prepared_actions(&mut e, NOW).is_empty());
+}
+
+#[test]
+fn address_receiver_foreign_frame_after_signing_cannot_revive_final_claim() {
+    use safe_cex_engine::{
+        Venue,
+        request_context::{HttpAction, Prepared},
+    };
+    let mut e = address_page();
+    let state = e.venue().export_venue_state().unwrap();
+    edit(&mut e, NOW, false);
+    let r = read(&mut e, NOW);
+    reply(&mut e, &r, 200, MARK);
+    let nonce = request(&mut e, NOW, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    e.prepare_dispatch(NOW);
+    let out = e.drain_actions().collect::<Vec<_>>();
+    let prep = out
+        .iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.contains("sendTx") => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{out:?}"));
+    e.http_prepared(
+        NOW,
+        prep,
+        Prepared {
+            id: prep.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let permit = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    account_frame_from(&mut e, state.clone(), 718_896);
+    account_frame_from(&mut e, state, 718_895);
+    assert!(e.claim_http(NOW, permit).is_err());
+    refused(&mut e, NOW);
+}
+
+#[test]
+fn address_receiver_foreign_frame_after_handoff_retains_the_accepted_write_fact() {
+    use safe_cex_engine::Venue;
+    let mut e = address_page();
+    let state = e.venue().export_venue_state().unwrap();
+    edit(&mut e, NOW, false);
+    let r = read(&mut e, NOW);
+    reply(&mut e, &r, 200, MARK);
+    let nonce = request(&mut e, NOW, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let write = request(&mut e, NOW, "sendTx");
+    assert_eq!(tx(&write)["AccountIndex"], 718_895);
+    account_frame_from(&mut e, state.clone(), 718_896);
+    account_frame_from(&mut e, state, 718_895);
+    ack(&mut e, &write, NOW);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 8, .. })))
+            .count(),
+        1,
+        "{out:?}"
+    );
+    assert!(
+        !out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { .. }) | Action::Http(_)
+        )),
+        "{out:?}"
+    );
 }
