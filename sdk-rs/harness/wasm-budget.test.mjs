@@ -3255,3 +3255,23 @@ for (const [venue, family, measured, minimumCap, sha256, parentFloor] of [
     if (family === 'lighter') assert.equal(cap, WASM_VENUE_OVERRIDES['lighter-robinhood']);
   });
 }
+
+// #3226 run 43581762045/job 132408167613, CI merge 32c729814fe1b342b7184ac06c871397a662dd74.
+// Optimized web/Node 2,314,538 B, SHA256
+// 5c2d9ff5f7489b48ad64307a289aad14b80f40224689fac3bdc9999150b59bc1.
+// Rust1.99.0, bindgen0.2.129, Binaryen132, two required -Oz passes.
+test('#3226 DRB trading retains current measured reserve and both parent floors', () => {
+  const measured = 2_314_538;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_325_504);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_126_848, 'retain master and PR-parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: less than 10 KiB above current CI artifact`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
