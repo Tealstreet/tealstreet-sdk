@@ -113,6 +113,161 @@ plus scoped Clippy and a `wasm32-unknown-unknown` check. The foundation suite wa
 run RED against the interface stubs before implementation; additional RED tests
 caught legacy ES256 issuer reuse and delayed-response cooldown timing.
 
+## Private derivatives reads (S2)
+
+Selecting the existing INTX portfolio exchanges the primary CDP key on drb
+before starting S1’s drb catalogue and derivatives account reads. Private
+positions, orders and fills use the catalogue’s native instrument symbols.
+A successful, correlated
+`public/auth` response enables `Coinbase::drb_authenticated()`; a configured
+key or failed exchange does not. Consumers of the INTX retirement notice should
+suppress it only when this hook is true. Spot-only and CFM accounts retain their
+Advanced Trade startup, signing, and socket paths.
+After authentication, private startup uses S1's drb catalogue; positions, orders
+and fills share its native `{BASE}_USDC-PERPETUAL` symbols.
+
+`private_drb.rs` owns the HTTP bearer session, independent authenticated main
+WebSocket session, and read contexts. It polls account summary, positions
+(including isolated subaccounts), and open orders (including untriggered OTOCO
+children) and subscribes to `user.changes.future.USDC.100ms`,
+`user.isolated.changes.future.USDC.100ms`, and `user.portfolio.USDC`. It answers
+heartbeat test requests, refreshes with fresh CDP JWTs, and authenticates each
+new socket. Delayed REST snapshots cannot overwrite newer stream observations
+or accepted writes. Malformed account snapshots preserve the last complete
+state. Socket changes without a liquidation estimate or leverage retain the
+last REST values. Isolated position IDs include their native subaccount ID.
+
+The USDC summary exposes equity as total, available funds as free, their
+difference as used, and futures session unrealized PnL as upnl. Position
+contracts use explicit `size_currency`; notional uses base size times mark.
+Linear perpetual order and fill quantities use base-coin units as specified by
+Coinbase's technical migration guide. Nullable liquidation estimates map to the
+engine's unavailable value (zero); absent leverage remains unavailable (zero)
+until an authoritative value is reported. Portfolio margin models refer to
+collateral/risk calculation; isolated positions use the explicit `isolated` flag.
+
+`private_drb_history.rs` serves fills by order, instrument, or account and order
+history by instrument or account. It retains the genuine command Read root
+across recent and historical stages, bounds the walk to 50 pages, deduplicates
+native identities, validates symbol/order filters, and applies inclusive time
+bounds. Fill timestamps remain seconds and historical order times milliseconds,
+matching the existing TypeScript interface. Histories never publish account
+state or live fills. Fills follow native trade sequences/IDs and orders follow
+continuation tokens or documented offsets. Exhausted page bounds are reported
+through the engine's incomplete-history mechanism.
+
+All requests use S0's closed Read method table; this module introduces no
+mutation methods or mutation authority. Trading migration belongs to S3;
+`drb_http_session()` exposes only the opaque engine binding while valid, and
+`drb_ensure_http(cx)` starts/refreshes authentication without consuming a
+trading command's retained root. Trading integrations resume their own waiters
+after the HTTP auth success branch and drain them on definitive auth refusal.
+Provider-backed accounts retain only public CDP bindings and opaque signer
+references. HTTP and WebSocket logins prepare fresh JWTs at dispatch through
+the installed provider, with the RPC ID and physical channel fixed before the
+signing wait. Retiring a socket drops its pending authentication result. Both
+the login and subsequent bearer reads use primary account egress even when a
+separate read key serves legacy account discovery. JWT claims use protocol UTC;
+session expiry and invalidation retain scheduling time.
+The old account/trading integration fixtures now run as internal unit fixtures
+with an explicit test-only legacy selector, preserving their shared Spot/CFM
+regression oracles. This selector is absent from production and public Options;
+the new private tests exercise the production drb startup route. Provider graph
+parity, route authority and delayed socket replacement controls are in
+`tests/support/drb_provider.rs`.
+
+Offline protocol fixtures follow the [technical migration guide](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/derivatives/technical),
+[OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json),
+and [AsyncAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-asyncapi.json).
+No live private authentication, account request, or order is part of validation.
+
+The CI private replay for the `intx` profile (`harness/coinbase-drb-tape.mjs`) runs the
+WASM engine through drb auth, private reads and the private stream. The TS INTX
+implementation is retired and cannot model drb, so that tape is replayed by Rust
+alone and compared against the tape's declared expected account. Its strict result
+stays FAIL with one declared known failure (the retired TS oracle), never parity.
+
+Private read failures retain S0's classified kind and native error fields in
+command failures and startup diagnostics. Rejected credentials terminate the
+startup through `startup_read_refused` and stop further gateway authentication
+attempts; transient network/rate failures retain their classification. Expired
+sessions on an already-loaded account can refresh. This read-error projection
+provides no write resend authority.
+
+Order decoding validates the optional `original_order_type` against the native
+`market`/`market_limit` enum. When the gateway represents one of these orders as
+an internal limit, both live state and history retain the original market type;
+ordinary limits and conditional stop/take/trailing types keep their own type.
+
+## Trading (S3)
+
+`trading_drb` intercepts USDC perpetual commands using the discovered native
+instrument name (or S0's legacy INTX alias mapping). Spot and CFM retain their
+existing trading codecs. All gateway writes use genuine command-owned Mutation
+contexts with `RetryPolicy::Never`; authentication and reconciliation use Read
+contexts. Each trading method takes its Read/Mutation authority from S0's
+closed classifier rather than a second local table. HTTP bearer tokens are exchanged with the primary CDP key, refreshed
+before expiry, and attached only by the engine's session callbacks.
+
+Market and limit entry support IOC/FOK; limits also support GTC and post-only
+with `reject_post_only`, so the gateway cannot silently move a post-only price.
+`amount` is in base-coin units for these linear USDC perpetuals. Native
+`reduce_only` also implements explicit closes. Amend uses `private/edit`,
+preserving the native ID and cumulative fills. Cancel supports one or more IDs,
+all orders on an instrument, and `VenueAction::CancelAccountOrders` for the
+gateway account. Bulk cancellation acknowledgements prove a count; they do not
+invent per-order terminal states.
+
+An entry's attached TP/SL uses OTOCO with incremental fill handling and opposite,
+reduce-only market exits. A single attached exit uses OTO. Standalone protective
+orders use native reduce-only `stop_market` / `take_market` triggers, with last,
+mark or index price. Generic conditional orders, GTT, slippage/BBO/STP controls,
+and edits of linked/protective legs without native leg identity are refused
+before I/O. There is no silent cancel-and-recreate fallback.
+
+Instrument leverage uses `private/set_leverage` and `private/get_leverage`.
+Side-specific leverage and hedged-position mode are unsupported. The gateway's
+account-wide SM/PM margin-model change cannot safely implement Tealstreet's
+per-symbol isolated/cross toggle, so that command returns an explicit refusal.
+Testnet commands are refused rather than sent to the production gateway.
+
+The optional custom leverage may be null; reads use the native maximum as its
+documented default. Malformed custom values cannot silently select that default.
+Native internal limits preserve documented original market intent in account,
+acknowledgement and recovery decoding. Linked identities survive refresh and
+snapshot readmission independently of displayed exit prices. A queued amendment
+rechecks linked identity and instrument uncertainty after authentication.
+
+Client IDs map to `label` (at most 64 bytes). **The gateway does not guarantee
+label uniqueness or server-side idempotency.** This engine reserves each label
+once, including after a rejection or loss, and never repeats a released write.
+Reservations are bounded to 4096 labels per engine lifetime; reaching the bound
+requires an engine restart and fresh IDs. This does not deduplicate submissions
+made by another client or a previous engine instance.
+
+Timeouts, transport loss, mismatched acknowledgements and unlisted RPC errors
+finish as Unknown. Reconciliation reads the primary account by label/native ID,
+or reads leverage/open orders for settings and bulk cancels. Empty/duplicate
+label matches preserve uncertainty and are read again later. New placements and
+edits on an uncertain instrument wait for read-back, including when a new client
+ID is supplied. Recovery cannot reopen the failed command, grant a resend, roll
+back cumulative fills, or overwrite newer terminal state. Accepted writes
+invalidate older order-snapshot tokens.
+An unchanged open-order read does not resolve a lost edit or cancellation;
+recovery keeps polling until it sees the edited values or a terminal order.
+Dispatched HTTP 408, 429 and 5xx responses also finish as Unknown, even if their
+bodies look like a native refusal, as does a gateway rate-limit error (10028) on
+a released write. This covers place, OTOCO, amend, cancel, bulk cancel and
+leverage. The engine cannot resend or put those writes back.
+
+Offline fixtures in `tests/fixtures/drb-trading.json` are adapted from the
+[Coinbase OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json)
+and the [technical migration guide](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/derivatives/technical).
+The first 10 command tests were run RED against the legacy route; further RED
+tests caught acknowledgement mismatch, stale recovery, uncertain-ID fencing,
+settings recovery and absent-label polling bugs. No live private calls or orders
+are used.
+
 ## Public perpetual data (S1)
 
 Keyless derivatives startup discovers active linear USDC perpetual instruments
@@ -162,7 +317,7 @@ their canonical claims and signature bytes. REST-only PayloadSigner can sign
 canonical JWS bytes and returns a 64-byte signature in unpadded base64url;
 private WS auth requires RemoteSigner. Wallet/agent and OAuth credentials are
 separate protocols, not CDP JWT substitutes. The signing-only DRB codec accepts
-CDP issuer claims without changing the S2/S3 session transport under development.
+CDP issuer claims through the shared private-session and trading transport.
 Engine-owned signer slots select by request purpose: account/history reads can
 use the read key; catalogue, permission checks, amend proofs and private socket
 authentication use the primary key. A refused read key pins subsequent reads to

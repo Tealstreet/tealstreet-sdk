@@ -16,6 +16,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const ROOT: &str = "/api/v3/brokerage";
 const STATUSES: [&str; 5] = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 const MAX_ROWS: usize = 10000;
+/// The crate's single private socket site: the legacy Advanced Trade user feed
+/// or the drb gateway. Each caller owns its own lifecycle for the returned socket.
+pub(crate) fn private_socket(cx: &mut Cx<'_, Pending>, url: &'static str) -> SocketId {
+    cx.connect(safe_cex_engine::SocketSpec::new(url).channel(SocketChannel::Private))
+}
 fn skip_level(kept: bool) -> Level {
     if kept { Level::Warn } else { Level::Error }
 }
@@ -103,6 +108,10 @@ struct Snapshot {
 }
 #[derive(Default)]
 pub(crate) struct Account {
+    /// Unit fixtures retain the old protocol's shared-code regression oracles.
+    /// This switch does not exist in production builds or public Options.
+    #[cfg(test)]
+    pub(crate) legacy_protocol_fixture: bool,
     pub kind: Option<ProductKind>,
     pub portfolio_id: Option<String>,
     pub socket: Option<SocketId>,
@@ -959,9 +968,22 @@ impl Coinbase {
         self.account.portfolio_id = Some(p.uuid);
         self.account.kind = Some(kind);
         self.account.startup_failures = 0;
-        self.private_ready(kind, cx);
+        #[cfg(test)]
+        if self.account.legacy_protocol_fixture {
+            self.private_ready(kind, cx);
+            return;
+        }
+        if kind == ProductKind::Intx {
+            self.drb_private_start(cx);
+        } else {
+            self.private_ready(kind, cx);
+        }
     }
     pub(crate) fn private_after_markets(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.private_drb.enabled {
+            self.drb_after_markets(cx);
+            return;
+        }
         if !self.signers.has_primary() || self.account.kind.is_none() || self.account.ready {
             return;
         }
@@ -1000,12 +1022,10 @@ impl Coinbase {
         self.account.has_snapshot = false;
         self.account.wire_snapshot_complete = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new("wss://advanced-trade-ws-user.coinbase.com")
-                    .channel(SocketChannel::Private),
-            ),
-        );
+        self.account.socket = Some(private_socket(
+            cx,
+            "wss://advanced-trade-ws-user.coinbase.com",
+        ));
     }
     pub(crate) fn private_on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -1093,6 +1113,10 @@ impl Coinbase {
         self.account_poll(cx, true);
     }
     fn account_poll(&mut self, cx: &mut Cx<'_, Pending>, orders: bool) {
+        if self.private_drb.enabled {
+            self.drb_poll(cx);
+            return;
+        }
         if cx.now < self.account.backoff_until {
             return;
         }
@@ -2621,3 +2645,7 @@ fn review_startup_prerequisite_has_a_section() {
         safe_cex_engine::startup::Sections::ACCOUNT
     );
 }
+
+#[cfg(test)]
+#[path = "../tests/support/legacy_account.rs"]
+mod legacy_protocol_tests;

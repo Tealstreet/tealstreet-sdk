@@ -1,4 +1,8 @@
-#[path = "support/hosted_parity.rs"]
+//! Offline regression oracles for legacy Advanced Trade codecs and trading.
+//! Production INTX startup is covered by private_drb; this unit fixture alone
+//! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.
+use crate::{Coinbase, Options};
+#[path = "hosted_parity.rs"]
 mod hosted_parity;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::model::*;
@@ -6,7 +10,6 @@ use safe_cex_engine::signing::{
     Algorithm, Capability, KeyRef, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
-use safe_cex_venue_coinbase::{Coinbase, Options};
 use serde::Deserialize;
 use std::sync::{
     Arc,

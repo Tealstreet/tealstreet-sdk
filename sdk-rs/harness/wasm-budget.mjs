@@ -480,7 +480,19 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Retain historical floors; 10,879 B reserve; shares coinbase family.
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14094520418: web/Node/replay 2,114,517 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
-  coinbase: 2_126_848,
+  // #3225 parent: CI 42367168155/job 128387823292 measured 2,022,882 B.
+  // Its 2,033,664 B floor is retained by the larger current master cap.
+  // #3226 at 70534e760247, CI merge 32c729814fe1: run 43581762045/job 132408167613.
+  // Optimized web/Node 2,314,538 B; SHA256
+  // 5c2d9ff5f7489b48ad64307a289aad14b80f40224689fac3bdc9999150b59bc1.
+  // Rust1.99.0, bindgen0.2.129, Binaryen132; build.sh --venue coinbase, two -Oz passes.
+  // DRB trading/provider session recipes and conservative recovery/linkage are newly linked.
+  // Current CI bytes + 10 KiB rounded up; retain all parent floors, shared with Spot.
+  // #3226 composed head 3527907c2249, CI merge 0e5d24c60dde: run 43588966237/job 132429829237.
+  // Artifact 14111067968: optimized web/Node/replay 2,314,622 B; SHA256
+  // 53f76f2a10d4b82a0d6a50013050d152cb618e9f7d5c29b69df64ae56c56e496.
+  // Same pinned toolchain/two -Oz profile; +10 KiB still rounds to this cap (10,882 B reserve).
+  coinbase: 2_325_504,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).

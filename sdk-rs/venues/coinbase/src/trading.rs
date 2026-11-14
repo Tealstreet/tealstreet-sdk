@@ -2022,3 +2022,7 @@ fn cancel_steps(ids: Vec<String>) -> Result<VecDeque<Step>, String> {
         .map(|ids| Step::Cancel { ids: ids.to_vec() })
         .collect())
 }
+
+#[cfg(test)]
+#[path = "../tests/support/legacy_trading.rs"]
+mod legacy_protocol_tests;

@@ -374,6 +374,7 @@ fn prepare_jwt(
     key_name: &str,
     algorithm: JwtAlgorithm,
     uri: Option<&str>,
+    cdp: bool,
     context: safe_cex_engine::signing::Context,
 ) -> Result<(safe_cex_engine::signing::SignRequest, String), safe_cex_engine::signing::SignError> {
     use safe_cex_engine::signing::{
@@ -391,8 +392,12 @@ fn prepare_jwt(
     })
     .map_err(|_| SignError::Unavailable)?;
     let nbf = nbf as u64;
-    let input = signing_input(algorithm, key_name, &nonce, nbf, uri)
-        .map_err(|_| SignError::InvalidRequest)?;
+    let input = if cdp {
+        signing_input_for(algorithm, key_name, &nonce, nbf, uri, true)
+    } else {
+        signing_input(algorithm, key_name, &nonce, nbf, uri)
+    }
+    .map_err(|_| SignError::InvalidRequest)?;
     let request = SignRequest {
         receipt: SignReceipt {
             nonce: None,
@@ -492,6 +497,7 @@ impl safe_cex_engine::SignStep for Http {
             &self.key_name,
             self.algorithm,
             Some(&uri),
+            false,
             safe_cex_engine::signing::Context {
                 venue: "coinbase".into(),
                 method: self.method.as_str().into(),
@@ -517,6 +523,140 @@ impl safe_cex_engine::SignStep for Http {
             ("Authorization", format!("Bearer {jwt}")),
             ("Content-Type", "application/json".into()),
         ];
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DrbAuthParams {
+    grant_type: String,
+    token: String,
+}
+impl Drop for DrbAuthParams {
+    fn drop(&mut self) {
+        self.token.zeroize();
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DrbAuthFrame {
+    jsonrpc: String,
+    id: u64,
+    method: String,
+    params: DrbAuthParams,
+}
+
+/// A gateway login owns one HTTP request or physical socket and one RPC ID.
+/// Only public binding metadata reaches the recipe; the provider keeps the key.
+pub(crate) struct DrbAuth {
+    identity: safe_cex_engine::signing::Identity,
+    binding: Binding,
+    channel: crate::drb::Channel,
+    rpc: crate::drb::RpcId,
+    prepared: Option<String>,
+}
+impl DrbAuth {
+    pub(crate) fn new(
+        identity: safe_cex_engine::signing::Identity,
+        binding: Binding,
+        channel: crate::drb::Channel,
+        rpc: crate::drb::RpcId,
+    ) -> Self {
+        Self {
+            identity,
+            binding,
+            channel,
+            rpc,
+            prepared: None,
+        }
+    }
+    fn text<'a>(
+        &self,
+        outbound: &'a mut safe_cex_engine::Action,
+    ) -> Result<&'a mut String, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        match outbound {
+            safe_cex_engine::Action::Http(http) => {
+                if self.channel != crate::drb::Channel::Http
+                    || http.method != Method::Post
+                    || http.url != "https://drb.coinbase.com/api/v2/public/auth"
+                {
+                    return Err(SignError::InvalidRequest);
+                }
+                http.body.as_mut().ok_or(SignError::InvalidRequest)
+            }
+            safe_cex_engine::Action::WsSend { socket, text } => {
+                if self.channel != crate::drb::Channel::WebSocket(*socket) {
+                    return Err(SignError::InvalidRequest);
+                }
+                Ok(text)
+            }
+            _ => Err(SignError::InvalidRequest),
+        }
+    }
+    fn frame(&self, text: &str) -> Result<DrbAuthFrame, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        let frame: DrbAuthFrame =
+            serde_json::from_str(text).map_err(|_| SignError::InvalidRequest)?;
+        if frame.jsonrpc != "2.0"
+            || frame.id != self.rpc
+            || frame.method != "public/auth"
+            || frame.params.grant_type != "coinbase_cdp"
+            || !frame.params.token.is_empty()
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(frame)
+    }
+}
+impl safe_cex_engine::SignStep for DrbAuth {
+    fn prepare(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        dispatch: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        self.frame(self.text(outbound)?)?;
+        let http = self.channel == crate::drb::Channel::Http;
+        let (request, input) = prepare_jwt(
+            dispatch,
+            &self.identity,
+            &self.binding.key_name,
+            self.binding.algorithm,
+            http.then_some("POST drb.coinbase.com/api/v2/public/auth"),
+            true,
+            safe_cex_engine::signing::Context {
+                venue: "coinbase".into(),
+                method: if http { "POST" } else { "WS" }.into(),
+                host: "drb.coinbase.com".into(),
+                path: if http {
+                    "/api/v2/public/auth"
+                } else {
+                    "/ws/api/v2"
+                }
+                .into(),
+            },
+        )?;
+        self.prepared = Some(input);
+        Ok(request)
+    }
+    fn apply(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        result: &safe_cex_engine::signing::SignResult,
+    ) -> Result<(), safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        let input = self.prepared.take().ok_or(SignError::InvalidRequest)?;
+        let text = self.text(outbound)?;
+        let mut frame = self.frame(text)?;
+        frame.params.token = finish_jwt(&self.binding.key_name, &input, result)?;
+        *text = serde_json::to_string(&frame).map_err(|_| SignError::InvalidRequest)?;
+        if let safe_cex_engine::Action::Http(http) = outbound {
+            http.headers = vec![("Content-Type", "application/json".into())];
+        }
         Ok(())
     }
     fn freshness_ms(&self) -> f64 {
@@ -567,6 +707,7 @@ impl safe_cex_engine::SignStep for WsSubscribe {
             &self.key_name,
             self.algorithm,
             None,
+            false,
             safe_cex_engine::signing::Context {
                 venue: "coinbase".into(),
                 method: "WS".into(),

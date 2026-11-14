@@ -9,6 +9,16 @@ import {
   createCoinbaseSocketAudit,
   installSynchronousEs256,
 } from './coinbase-protocol.mjs';
+import {
+  createDrbSocketAudit,
+  drbRequestBody,
+  drbSocketReplies,
+  isDrbUrl,
+  isDrbWrite,
+  isRustOnlyTape,
+  verifyDrbRequest,
+  verifyDrbSocketMessage,
+} from './coinbase-drb-tape.mjs';
 import { installSynchronousDigest } from './sync-webcrypto.mjs';
 import {
   APEX_SEED,
@@ -784,10 +794,17 @@ const coinbase = (name) => ({
     || Boolean(store.loaded.markets && store.loaded.tickers && exchange.publicWebsocket?.isConnected),
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
-  verifyRequest: verifyCoinbaseRequest,
-  verifySubscribe: verifyCoinbaseSubscribe,
+  // INTX private state is on the drb gateway; its tape replays Rust only.
+  verifyRequest: (request) => (isDrbUrl(request.url) ? verifyDrbRequest : verifyCoinbaseRequest)(request),
+  verifySubscribe: (message) => message?.jsonrpc === '2.0' || verifyCoinbaseSubscribe(message),
+  validateSocketMessage: (socket, text) => {
+    if (!isDrbUrl(socket.url)) return;
+    if (!verifyDrbSocketMessage(socket.url, JSON.parse(text))) throw new Error(`invalid drb socket request on ${socket.url}`);
+  },
+  requestBody: drbRequestBody,
+  socketReplies: drbSocketReplies,
   subscriptionMessage: coinbaseSubscription,
-  createSocketAudit: createCoinbaseSocketAudit,
+  createSocketAudit: (impl, context) => (isRustOnlyTape(context.records) ? createDrbSocketAudit : createCoinbaseSocketAudit)(impl, context),
   streamOf: (text) => {
     try {
       const message = JSON.parse(text);
@@ -812,7 +829,7 @@ const coinbase = (name) => ({
   // must not leave it seconds ahead of a rewound clock.
   monotonicReplayClock: true,
   loadTs: ({ isPrivate }) => { if (isPrivate) installSynchronousEs256(); },
-  isWrite: (method) => method !== 'GET',
+  isWrite: (method, url) => (isDrbUrl(url) ? isDrbWrite(url) : method !== 'GET'),
   generatedBodyId: (key, value) =>
     key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
 });

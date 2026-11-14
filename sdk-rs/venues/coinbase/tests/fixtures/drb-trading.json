@@ -1,0 +1,29 @@
+{
+  "source": "https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json",
+  "partial": {
+    "order": {
+      "order_id": "USDC-94166",
+      "instrument_name": "BTC_USDC-PERPETUAL",
+      "label": "fixture-entry",
+      "direction": "buy",
+      "order_type": "limit",
+      "order_state": "open",
+      "amount": 0.01,
+      "filled_amount": 0.004,
+      "price": 65000.5,
+      "post_only": false,
+      "reduce_only": false,
+      "time_in_force": "good_til_cancelled",
+      "last_update_timestamp": 1001
+    },
+    "trades": []
+  },
+  "auth": {
+    "access_token": "synthetic-trading-token",
+    "expires_in": 900,
+    "scope": "trade:read_write",
+    "token_type": "bearer"
+  },
+  "insufficient_margin": {"code": 10009, "message": "not_enough_funds"},
+  "unknown": {"code": 999999, "message": "unlisted_error"}
+}

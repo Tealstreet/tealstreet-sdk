@@ -1,1 +1,8 @@
-{}
+{
+  "venues/coinbase/src/account.rs": [
+    {
+      "old": "80d6da32d1ff894feb349435b11b1d16783adf7f241e52f37faea1214194f2e0",
+      "new": "4d1561da3c3bb6270c652b69bdf42ad0a0902a14932d247d9262679033920e7d"
+    }
+  ]
+}

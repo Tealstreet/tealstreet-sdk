@@ -58,17 +58,41 @@ impl Session {
         now_ms: f64,
         fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
     ) -> Result<Value, String> {
+        self.params_at(credentials, now_ms, now_ms, fill)
+    }
+    /// Gateway JWTs use protocol UTC; session expiry and invalidation retain the
+    /// scheduling clock captured for the request's owner.
+    pub(crate) fn params_at(
+        &self,
+        credentials: &Credentials,
+        started_ms: f64,
+        protocol_ms: f64,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
+    ) -> Result<Value, String> {
         let uri = match self.channel {
             Channel::Http => Some("POST drb.coinbase.com/api/v2/public/auth"),
             Channel::WebSocket(_) => None,
         };
-        let jwt = Zeroizing::new(credentials.drb_jwt(now_ms, uri, fill)?);
+        let jwt = Zeroizing::new(credentials.drb_jwt(protocol_ms, uri, fill)?);
+        self.remember_start(started_ms)?;
+        Ok(json!({"grant_type":"coinbase_cdp","token":jwt.as_str()}))
+    }
+    /// This placeholder is staged with a signing recipe before it can leave the
+    /// engine. It contains no JWT until the installed provider signs at dispatch.
+    pub(crate) fn pending_params(&self, started_ms: f64) -> Result<Value, String> {
+        self.remember_start(started_ms)?;
+        Ok(json!({"grant_type":"coinbase_cdp","token":""}))
+    }
+    fn remember_start(&self, now_ms: f64) -> Result<(), String> {
+        if !now_ms.is_finite() || now_ms < 0. {
+            return Err("drb invalid authentication clock".into());
+        }
         let mut issued = self
             .issued_ms
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         *issued = issued.max(now_ms);
-        Ok(json!({"grant_type":"coinbase_cdp","token":jwt.as_str()}))
+        Ok(())
     }
     /// Use request-start time so network latency cannot extend token validity.
     /// Call only after Transport has correlated a successful public/auth reply.
