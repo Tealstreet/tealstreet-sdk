@@ -2095,6 +2095,8 @@ struct IoCore {
     socket_driver: crate::socket_driver::Driver,
     #[cfg(feature = "managed-sockets")]
     socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_stats_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
     /// Interest keys repaired recently, and when: a second repair soon after reconnects.
     #[cfg(feature = "managed-sockets")]
     repaired: Vec<(String, f64)>,
@@ -2354,6 +2356,8 @@ impl Default for IoCore {
             socket_driver: Default::default(),
             #[cfg(feature = "managed-sockets")]
             socket_message: None,
+            #[cfg(feature = "managed-sockets")]
+            socket_stats_message: None,
             #[cfg(feature = "managed-sockets")]
             repaired: Vec::new(),
             #[cfg(feature = "managed-sockets")]
@@ -7926,8 +7930,16 @@ impl<V: Venue> Engine<V> {
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
         self.expire_read_roots(now);
+        #[cfg(feature = "managed-sockets")]
+        self.io.core.socket_driver.state.prepare_stats();
         let buffer = std::mem::take(&mut self.io.core.snapshot);
         let mut w = FrameWriter::new(buffer, now);
+        #[cfg(feature = "managed-sockets")]
+        self.io
+            .core
+            .socket_driver
+            .state
+            .write_stats(&mut w, now, true);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
         if let Some(state) = self.venue.export_venue_state_for(&self.store) {
@@ -8033,6 +8045,17 @@ impl<V: Venue> Engine<V> {
         };
         let buffer = std::mem::take(&mut self.io.core.frame);
         let mut w = FrameWriter::new(buffer, now);
+        #[cfg(feature = "managed-sockets")]
+        let publish_stats = store && self.io.core.socket_driver.state.stats_due(now);
+        #[cfg(feature = "managed-sockets")]
+        if publish_stats {
+            self.io.core.socket_driver.state.prepare_stats();
+            self.io
+                .core
+                .socket_driver
+                .state
+                .write_stats(&mut w, now, false);
+        }
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
@@ -8124,6 +8147,10 @@ impl<V: Venue> Engine<V> {
         self.io.core.fills = fills;
         drop(candles);
         self.io.core.candles.clear();
+        #[cfg(feature = "managed-sockets")]
+        if publish_stats {
+            self.io.core.socket_driver.state.stats_published();
+        }
         self.io.core.frame = frame;
         (!empty).then_some(self.io.core.frame.as_slice())
     }

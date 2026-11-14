@@ -514,11 +514,15 @@ impl TxFlow {
         }
         match frame {
             PublicFrame::Contexts(rows) => {
+                cx.record_socket_topic(&["@allAssetCtxs|||||||"]);
                 for row in rows.ctxs {
                     self.context_row(cx, row);
                 }
             }
-            PublicFrame::Context(row) => self.context_row(cx, row),
+            PublicFrame::Context(row) => {
+                cx.record_socket_topic(&["@activeAssetCtx|", &row.coin, "||||||"]);
+                self.context_row(cx, row);
+            }
             PublicFrame::Ticker(row) => {
                 if let Some(instrument) = self.instruments.get(&row.instrument_id) {
                     if !cache_hit
@@ -528,6 +532,10 @@ impl TxFlow {
                     {
                         self.ticker_frames.insert(text.to_owned(), row);
                     }
+                    cx.record_socket_topic_number(
+                        &["@ticker|", &instrument.base_currency, "||||||"],
+                        row.instrument_id as u64,
+                    );
                     let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
                     if let Some(index) = Self::cached_ticker(cx, instrument) {
@@ -541,6 +549,7 @@ impl TxFlow {
                 }
             }
             PublicFrame::Depth(row) => {
+                cx.record_socket_topic(&["@l2Book|", &row.coin, "||||||"]);
                 if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                     && ladder.time.is_none_or(|t| row.time >= t)
@@ -569,6 +578,7 @@ impl TxFlow {
             }
             PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
+                    cx.record_socket_topic(&["@candle|", &row.s, "|", &row.i, "|||||"]);
                     if let Some(symbol) = self.coin_symbol(&row.s)
                         && let Some(interval) = Interval::parse(&row.i)
                         && self.candles.contains_key(&(symbol.to_owned(), interval))

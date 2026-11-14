@@ -1041,6 +1041,27 @@ STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an
 actual zero sample; positive legacy samples remain readable. Frame-fed engines
 and worker stores preserve null. UI callers must hide unknown latency.
 
+### Native subscription statistics
+
+See `sdk-rs/engine/SUBSCRIPTION_STATS.md` for the wire layout and lifecycle rules.
+
+Managed socket interests publish `MESSAGE_HANDLER_STATS` (SCXF section 25) at
+most once per second through the existing store flush. IDs remain stable across
+reconnects; subscription release and actual topic receipts are separate evidence.
+Pongs, adjacent topics and retired socket epochs cannot refresh a topic. Native
+ages use the engine clock; `FrameApplier` converts them to wall-clock timestamps
+only when projecting the existing `messageHandlerStats` shape. Source-frame-fed
+trading engines retain their source's diagnostics independently of held account
+state. `RustSocketHandle.messageHandlersStats` reads that same store bucket.
+
+Native parsers record borrowed topic keys, or bounded stack-built keys, at
+their existing data dispatch sites. JSON route aliases are compiled once when
+interests change. Never scan all subscriptions or parse a second data frame just
+to refresh telemetry. Private feeds without managed interest entries use one
+private-feed row, including URL subscriptions and authentication-owned streams;
+unattributable native topic variants remain without a receipt timestamp rather
+than borrowing another subscription's traffic.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native

@@ -1377,9 +1377,18 @@ impl AsterDex {
             .map(|h| &*h.e)
         {
             Some("listenKeyExpired") => self.restart_private(cx),
-            Some("ORDER_TRADE_UPDATE" | "executionReport") => self.on_order_event(cx, text),
-            Some("outboundAccountPosition") => self.on_legacy_balance(cx, text),
-            Some("ACCOUNT_UPDATE") => self.on_account_event(cx, text),
+            Some("ORDER_TRADE_UPDATE" | "executionReport") => {
+                cx.record_socket_topic(&["private"]);
+                self.on_order_event(cx, text);
+            }
+            Some("outboundAccountPosition") => {
+                cx.record_socket_topic(&["private"]);
+                self.on_legacy_balance(cx, text);
+            }
+            Some("ACCOUNT_UPDATE") => {
+                cx.record_socket_topic(&["private"]);
+                self.on_account_event(cx, text);
+            }
             _ => {}
         }
         true

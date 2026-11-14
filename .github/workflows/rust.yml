@@ -405,14 +405,15 @@ jobs:
               node --test hosts/wasm/js/hostmanagedhttp.test.mjs hosts/wasm/js/hostmanagedhttp-group.test.mjs
     steps:
       - uses: actions/checkout@v7
+      # Workspace test binaries exhausted runner storage; that row caches sources only.
       - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            sdk-rs/target
-          key: ${{ runner.os }}-cargo-${{ matrix.check }}-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ matrix.check }}-
+            ${{ matrix.check != 'test' && 'sdk-rs/target' || '' }}
+          key: ${{ runner.os }}-cargo-${{ matrix.check }}-${{ matrix.check == 'test' && 'sources-' || '' }}${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-${{ matrix.check }}-${{ matrix.check == 'test' && 'sources-' || '' }}
       - name: Install pinned toolchain
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
@@ -429,6 +430,10 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Limit native test build artifacts
+        if: matrix.check == 'test'
+        run: |
+          printf '%s\n' CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 >> "$GITHUB_ENV"
       - name: Run ${{ matrix.check }}
         run: ${{ matrix.command }}
 

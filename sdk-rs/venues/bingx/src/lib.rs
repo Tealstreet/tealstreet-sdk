@@ -485,6 +485,7 @@ impl Bingx {
         if message.pong.is_some() {
             return;
         }
+        cx.record_socket_topic(&[&message.data_type]);
         if message.data_type == "market.contracts" {
             let mut update = |row: LiveTicker<'_>| {
                 let Some(market) = cx.store.market_index_by_id(&row.symbol) else {

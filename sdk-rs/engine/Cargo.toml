@@ -32,6 +32,8 @@ write-preflight-wait = ["http-plans"]
 session-bearer = []
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
+# Only Hyperliquid, Kraken and TxFlow use JSON subscription aliases for diagnostics.
+socket-topic-aliases = ["managed-sockets"]
 # Opt-in native receive, initial-payload and stability timing.
 socket-native-timing = ["managed-sockets"]
 order-locks = []
