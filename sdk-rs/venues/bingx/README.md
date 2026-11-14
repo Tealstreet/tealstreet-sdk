@@ -100,6 +100,7 @@ admission. The target row retains its actual receipt time and is usable only
 after the whole envelope succeeds, within the unchanged 5 s freshness limit.
 Frame-fed edits use this same path; frame arrival never refreshes a reference.
 A failed, sparse, wrong-source or delayed read leaves the original open. Final
-Claims, re-signs and restores still use the same pure veto and never perform I/O.
+Claims, re-signs and restores still use the same pure veto. Only the veto is
+I/O-free; re-signs and restores retain their existing server-time reads and writes.
 See [protective edits](../../../../docs/plans/callers/bingx-protective-edits.md)
 for the native classes, proof requirements and frame-state version contract.
