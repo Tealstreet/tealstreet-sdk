@@ -1658,3 +1658,16 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           CI_JOB_RESULTS: ${{ toJSON(needs) }}
         run: node sdk-rs/harness/ci-result.mjs
+
+  beta-wasm-release:
+    name: Rust / beta wasm release
+    needs: result
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' &&
+          github.ref == 'refs/heads/master' && needs.result.result == 'success' }}
+    permissions:
+      actions: read
+      contents: write
+    uses: ./.github/workflows/rust-beta-wasm-release.yml
+    with:
+      sdk_sha: ${{ github.sha }}

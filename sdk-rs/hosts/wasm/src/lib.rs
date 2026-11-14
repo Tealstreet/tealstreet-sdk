@@ -1336,10 +1336,14 @@ impl WasmEngine {
     }
 
     fn flush(&mut self) -> String {
+        let actions = self.inner.drain();
+        if actions.is_empty() {
+            return String::new();
+        }
         #[cfg(feature = "algos")]
-        return encode(&self.algos.route(self.inner.drain()));
+        return encode(&self.algos.route(actions));
         #[cfg(not(feature = "algos"))]
-        encode(&self.inner.drain())
+        encode(&actions)
     }
 
     /// Health counters as JSON (`safe_cex_engine::Health`, camelCase).

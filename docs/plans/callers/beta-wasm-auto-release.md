@@ -1,8 +1,18 @@
 # Automatic beta wasm release and pin
 
-Change: `rust-beta-wasm-release.yml` publishes after every Rust SDK master push run
-whose `Rust / required coverage` passed (CPU certification does not gate it) and
-whose `sdk-rs/` inputs have no release yet. tealstreet-next
+Change: Rust SDK calls `rust-beta-wasm-release.yml` immediately after its
+`Rust / required coverage` job succeeds on a master push. The call depends only
+on required coverage, so unfinished CPU gates and shared CPU certification do
+not delay it. The guard independently requires completed, successful coverage
+for that exact master SHA; the reusable entry point cannot skip certification.
+The source must match the master push and pass the existing ancestry check.
+
+The workflow-completion trigger remains a fallback. Both paths share release
+concurrency and skip already-published input fingerprints, so a second trigger
+for the same SHA succeeds without rebuilding or replacing its release. Automatic
+cuts also skip source superseded by a newer published release. Manual dispatch
+retains its existing `skip_certification: false` default and explicit override.
+Publication still requires new `sdk-rs/` inputs. tealstreet-next
 `rust-beta-wasm-pin.yml` lands the matching pin by PR once its CI passes. This
 is a release-lane change: an SDK master merge now reaches the NX beta bundle
 without a hand-dispatched release.
@@ -21,3 +31,15 @@ Obligations, in order:
    (bundle-cut lane).
 
 Deletion prerequisites: none added or cleared.
+
+Verification:
+
+```sh
+node --test sdk-rs/harness/beta-wasm-release-workflow.test.mjs sdk-rs/harness/beta-wasm-release-guard.test.mjs
+```
+
+After a master push, the
+`Rust / beta wasm release` job should start once required coverage is green,
+even while CPU jobs remain pending. Missing or unsuccessful coverage still
+refuses publication; `RUST_BETA_HOLD`, exact-tag custody and input deduplication
+remain enforced. The later completion-triggered run should be a successful no-op.
