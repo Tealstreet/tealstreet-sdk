@@ -17,6 +17,8 @@ type Fake = {
   started: number;
   constructed: number;
   refuseNext?: boolean;
+  commandError?: string;
+  callerReports?: boolean;
   /** The next placement leaves an uncertain write, held as its engine names it. */
   holdOrders?: { symbols: string; liftAfterMs: number };
   offsets: Array<number | undefined>;
@@ -57,6 +59,8 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
       fake.commands.push(command);
       const result = ['placeOrders', 'amendOrder', 'amendOrderWithSymbol'].includes(command.op) ? ['placed-1'] : null;
       if (command.command === undefined) return '[]';
+      if (command.op === 'placeOrders' && fake.commandError)
+        return JSON.stringify([{ op: 'done', command: command.command, error: fake.commandError }]);
       const done = { op: 'done', command: command.command, result: JSON.stringify(result) };
       // A confirmed settings write holds it over the source, as a frame-fed venue does.
       const held = {
@@ -105,7 +109,13 @@ const mirrorWith = (
   void fake;
   const exchange = new RustEngineExchange(
     'bybit',
-    { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+    {
+      key: 'k',
+      secret: 's',
+      workerMirror: true,
+      publicDataOnly: false,
+      callerReportsPlacementFailures: fake.callerReports,
+    },
     new DefaultStore(),
   );
   const calls: string[] = [];
@@ -396,5 +406,20 @@ describe('manual page writes never fall back to the hosted RPC', () => {
     await expect(exchange.changeAccountTier?.('premium')).rejects.toMatchObject({ outcome: 'notSent' });
     expect(errors).toHaveBeenCalledOnce();
     expect(fake.commands).toEqual([]);
+  });
+
+  it.each([
+    [true, 0],
+    [false, 1],
+  ] as const)('keeps ready-page placement failure reporting with its caller=%s', async (owned, reports) => {
+    const fake = fakeEngine();
+    fake.commandError = 'Synthetic venue refused the placement';
+    fake.callerReports = owned;
+    exchange = mirrorWith(fake).exchange;
+    await exchange.frameFedReady;
+    const errors = vi.fn();
+    exchange.on('error', errors);
+    await expect(exchange.placeOrders([order])).rejects.toThrow(fake.commandError);
+    expect(errors).toHaveBeenCalledTimes(reports);
   });
 });
