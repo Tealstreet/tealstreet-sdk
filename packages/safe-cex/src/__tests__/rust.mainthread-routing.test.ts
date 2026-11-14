@@ -70,12 +70,12 @@ describe('main-thread Rust trading routing', () => {
     await expect(orders).resolves.toEqual([{ id: 'o1' }]);
     await expect(positions).resolves.toEqual([]);
     await expect(account).resolves.toEqual({ userId: 'u1' });
-    await expect(main.placeOrder(order)).resolves.toEqual(['p1']);
+    await expect(main.placeOrder(order)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
     // The worker's frames, not a local engine, load the mirror's catalogue.
     store.update({ markets: [], loaded: { ...store.loaded, markets: true } });
     await expect(markets).resolves.toEqual([]);
     expect(loader).not.toHaveBeenCalled();
-    expect(calls.sort()).toEqual(['fetchEngineCapabilities', 'fetchOrders', 'fetchPositions', 'getAccount', 'placeOrder']);
+    expect(calls.sort()).toEqual(['fetchEngineCapabilities', 'fetchOrders', 'fetchPositions', 'getAccount']);
     expect(main.hasStarted).toBe(false);
     expect(store.orders).toEqual([]);
   });
