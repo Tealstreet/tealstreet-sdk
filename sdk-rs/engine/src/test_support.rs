@@ -87,6 +87,36 @@ pub fn prepared_actions<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Actio
             count <= 65_536,
             "prepared fixture action loop exceeded its bound"
         );
+        let action = if matches!(
+            action,
+            Action::SignedOutbound {
+                attempt: crate::RequestId(0),
+                ..
+            }
+        ) {
+            let binding =
+                crate::WebSocketWriteBinding::from_action(action).expect("typed socket binding");
+            let _ = engine.claim_websocket_write(
+                now,
+                binding,
+                &mut |socket, text, commit: &mut crate::WebSocketCommit<'_>| {
+                    let mut text = Some(text);
+                    commit(&mut || {
+                        actions.push(Action::WsSend {
+                            socket,
+                            text: text.take().expect("one handoff"),
+                        });
+                        true
+                    })
+                },
+            );
+            for action in engine.drain_actions().collect::<Vec<_>>().into_iter().rev() {
+                queue.push_front(action);
+            }
+            continue;
+        } else {
+            action
+        };
         let Action::ManagedHttp(action) = action else {
             actions.push(action);
             continue;

@@ -50,6 +50,21 @@ describe('boundOemsContext', () => {
     expect(bounded.positions[0].contracts).toBe(0);
   });
 
+  it.each([null, 0, -0, -1, Number.NaN, Infinity, -Infinity])(
+    'keeps an unavailable liquidation price unknown through repeated bounding and JSON: %s',
+    (liquidationPrice) => {
+      const bounded = boundOemsContext(context({ positions: [{ ...position(0), liquidationPrice }] }));
+      expect(bounded.positions[0].liquidationPrice).toBeNull();
+      expect(boundOemsContext(bounded).positions[0].liquidationPrice).toBeNull();
+      expect(JSON.parse(JSON.stringify(bounded)).positions[0].liquidationPrice).toBeNull();
+    },
+  );
+
+  it('preserves a usable liquidation price', () => {
+    const bounded = boundOemsContext(context({ positions: [{ ...position(0), liquidationPrice: 67.8 }] }));
+    expect(bounded.positions[0].liquidationPrice).toBe(67.8);
+  });
+
   it('rebuilds every row by name, so an extra field cannot ride along', () => {
     const smuggled = { ...position(0), apiSecret: 'sk-live-should-never-appear' } as unknown as OemsPositionRef;
     const bounded = boundOemsContext(context({ positions: [smuggled] }));
@@ -228,4 +243,11 @@ describe('a forged dropped count cannot ride along', () => {
   it('drops a key it does not know', () => {
     expect(withDropped({ positions: 3, apiSecret: 'sk-live' }).dropped).toEqual({ positions: 3 });
   });
+});
+
+it.each([null, NaN, Infinity])('preserves unknown native quantity through bounding and JSON: %s', (nativeContracts) => {
+  const bounded = boundOemsContext(context({ positions: [{ ...position(0), nativeContracts }] }));
+  expect(bounded.positions[0].nativeContracts).toBeNull();
+  expect(boundOemsContext(bounded).positions[0].nativeContracts).toBeNull();
+  expect(JSON.parse(JSON.stringify(bounded)).positions[0].nativeContracts).toBeNull();
 });

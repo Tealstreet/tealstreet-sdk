@@ -4,6 +4,421 @@ use safe_cex_engine::model::{OrderStatus, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+fn assert_unknown_notice(actions: &[Action], command: u32, placed: &[&str]) {
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "one journal terminal");
+    let error = failures[0];
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.contains(ENGINE_UNKNOWN_TEXT),
+        "{}",
+        error.message
+    );
+    let ids = error
+        .partial
+        .as_ref()
+        .map(|p| p.order_ids.iter().map(String::as_str).collect::<Vec<_>>())
+        .unwrap_or_default();
+    assert_eq!(ids, placed);
+    assert!(!actions.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command)
+    ));
+}
+
+fn assert_unknown_inventory(actions: &[Action], command: u32, expected: &[(&str, &str, &str)]) {
+    let inventory: Vec<_> = actions
+        .iter()
+        .filter_map(|action| {
+            let Action::Notice(Notice::Event(event)) = action else {
+                return None;
+            };
+            if event.code != "command.unknown_inventory" {
+                return None;
+            }
+            assert_eq!(event.level, safe_cex_engine::Level::Warn);
+            assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(event.fields.iter().any(|(key, value)| *key == "commandId"
+                && *value == safe_cex_engine::Value::from(command)));
+            let field = |name| {
+                event
+                    .fields
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .and_then(|(_, value)| value.as_str())
+                    .unwrap_or("")
+            };
+            if field("scope") != "accepted" {
+                assert!(!field("requestPath").is_empty());
+            }
+            let (kind, identity) = ["orderId", "clientOrderId", "targetOrderId"]
+                .into_iter()
+                .find_map(|key| (!field(key).is_empty()).then_some((key, field(key))))
+                .unwrap_or(("", ""));
+            Some((field("scope"), kind, identity))
+        })
+        .collect();
+    assert_eq!(
+        inventory, expected,
+        "passive identity inventory, separate from the journal terminal"
+    );
+}
+
+fn after_failure_actions(e: &mut TestEngine) -> Vec<Action> {
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
+}
+
+fn after_failure_writes(actions: &[Action]) -> Vec<&safe_cex_engine::HttpRequest> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Http(request) if request.method == safe_cex_engine::Method::Post => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2570-2608
+fn unknown_chunk_stops(failure: &str) {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 990,
+            orders: (0..6)
+                .map(|index| {
+                    let mut row = order("");
+                    row.client_order_id = Some(format!("after-failure-{index}"));
+                    row
+                })
+                .collect(),
+        }),
+    );
+    let actions = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&actions);
+    assert_eq!(writes.len(), 1);
+    let first = writes[0];
+    assert!(first.url.ends_with("/batch_order"));
+    let first_id = first.id;
+    if failure == "transport" {
+        e.handle(
+            0.0,
+            Event::HttpFailed {
+                request: first_id,
+                error: "lost batch response",
+            },
+        );
+    } else {
+        reply(&mut e, first_id, failure);
+    }
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert_unknown_notice(&actions, 990, &[]);
+    if failure != "transport" {
+        assert_unknown_inventory(
+            &actions,
+            990,
+            &[
+                ("currentRequest", "clientOrderId", "after-failure-0"),
+                ("currentRequest", "clientOrderId", "after-failure-1"),
+                ("currentRequest", "clientOrderId", "after-failure-2"),
+                ("currentRequest", "clientOrderId", "after-failure-3"),
+                ("currentRequest", "clientOrderId", "after-failure-4"),
+                ("withheld", "clientOrderId", "after-failure-5"),
+            ],
+        );
+    }
+}
+
+#[test]
+fn unknown_whole_batch_native_error_stops_without_resending() {
+    unknown_chunk_stops(r#"{"code":20003,"msg":"Insufficient balance"}"#);
+}
+
+#[test]
+fn unknown_batch_transport_loss_stops_without_resending() {
+    unknown_chunk_stops("transport");
+}
+
+#[test]
+fn unknown_batch_malformed_ack_stops_without_resending() {
+    unknown_chunk_stops(r#"{"code":0,"data":{"successList":[{}]}}"#);
+}
+
+#[test]
+fn after_failure_single_row_chunk_stops_later_symbols() {
+    let (mut e, _) = startup();
+    let mut markets = e.store().markets().to_vec();
+    let mut other = markets[0].clone();
+    other.id = "ETHUSDT".into();
+    other.symbol = "ETHUSDT".into();
+    markets.push(other);
+    e.store_mut().set_markets(markets);
+    let mut second = order("");
+    second.symbol = "ETHUSDT".into();
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 991,
+            orders: vec![order(""), second],
+        }),
+    );
+    let actions = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&actions);
+    assert_eq!(writes.len(), 1);
+    assert!(writes[0].url.ends_with("/place_order"));
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":20003,"msg":"Insufficient balance"}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 991, .. })
+    )));
+}
+
+#[test]
+fn after_failure_tpsl_stops_remaining_protection_and_ordinary_rows() {
+    for amount in [0.0, 0.001] {
+        let (mut e, _) = startup();
+        let mut protection = order("");
+        protection.kind = safe_cex_engine::model::OrderType::StopLoss;
+        protection.price = Some(110000.0);
+        protection.amount = amount;
+        e.handle(
+            1.0,
+            Event::Command(Command::PlaceOrders {
+                command: 992,
+                orders: vec![protection, order("")],
+            }),
+        );
+        let mut actions = after_failure_actions(&mut e);
+        let mut reads = 0;
+        while after_failure_writes(&actions).is_empty() {
+            let pending: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Http(request) => Some((request.id, request.url.clone())),
+                    _ => None,
+                })
+                .collect();
+            assert!(!pending.is_empty(), "TP-SL preparation has pending reads");
+            for (id, url) in pending {
+                reads += 1;
+                assert!(reads <= 6);
+                let body = if url.contains("get_pending_positions") {
+                    POSITIONS
+                } else if url.contains("get_pending_orders") {
+                    ORDERS
+                } else {
+                    TPSL
+                };
+                reply(&mut e, id, body);
+            }
+            actions = after_failure_actions(&mut e);
+        }
+        let writes = after_failure_writes(&actions);
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].url.contains("/tpsl/"));
+        reply(
+            &mut e,
+            writes[0].id,
+            r#"{"code":20003,"msg":"protection refused"}"#,
+        );
+        let actions = after_failure_actions(&mut e);
+        assert!(after_failure_writes(&actions).is_empty());
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: 992, .. })
+        )));
+    }
+}
+
+#[test]
+fn after_failure_cancel_request_loss_stops_kept_parent_rebuild() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::CancelOrders {
+            command: 993,
+            ids: vec!["one__tp".into()],
+        }),
+    );
+    let actions = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&actions);
+    assert_eq!(writes.len(), 1);
+    e.handle(
+        2.0,
+        Event::HttpFailed {
+            request: writes[0].id,
+            error: "cancel response lost",
+        },
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 993, .. })
+    )));
+}
+
+#[test]
+fn after_failure_resolved_cancel_refusal_still_rebuilds_parent_like_ts() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::CancelOrders {
+            command: 997,
+            ids: vec!["one__tp".into()],
+        }),
+    );
+    let actions = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&actions);
+    assert_eq!(writes.len(), 1);
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":20003,"msg":"cancellation refused"}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&actions);
+    assert_eq!(
+        writes.len(),
+        1,
+        "TS rebuilds after a resolved cancellation response"
+    );
+    assert!(writes[0].url.ends_with("/place_order"));
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":0,"data":{"orderId":"rebuilt"}}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 997, .. })
+    )));
+}
+
+#[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2061-2065
+fn unknown_unsupported_amend_http_503_stops_before_fallback() {
+    for body in [
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+        r#"{"msg":"The order does not support this operation"}"#,
+        r#"{"code":{},"msg":"The order does not support this operation"}"#,
+    ] {
+        let (mut e, _) = startup();
+        e.handle(
+            1.0,
+            Event::Command(Command::AmendOrder {
+                command: 998,
+                id: "one__tp".into(),
+                price: Some(79.0),
+                amount: None,
+            }),
+        );
+        let actions = after_failure_actions(&mut e);
+        let writes = after_failure_writes(&actions);
+        assert_eq!(writes.len(), 1);
+        e.handle(
+            0.0,
+            Event::HttpResponse {
+                request: writes[0].id,
+                response: safe_cex_engine::Response {
+                    status: 503,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions = after_failure_actions(&mut e);
+        assert!(after_failure_writes(&actions).is_empty());
+        assert_unknown_notice(&actions, 998, &[]);
+    }
+}
+
+#[test]
+fn after_failure_fallback_places_without_an_additional_detail_gate() {
+    let (mut e, _) = startup();
+    let replacement = fallback_to_replacement(&mut e, 999);
+    assert_eq!(
+        replacement.method,
+        safe_cex_engine::Method::Post,
+        "TS goes directly from cancellation to replacement"
+    );
+    assert!(replacement.url.ends_with("/place_order"));
+    reply(
+        &mut e,
+        replacement.id,
+        r#"{"code":20003,"msg":"replacement refused"}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 999, .. })
+    )));
+}
+
+#[test]
+fn after_failure_unsupported_amend_enters_fallback_but_cancel_refusal_stops() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 994,
+            id: "one__tp".into(),
+            price: Some(79.0),
+            amount: None,
+        }),
+    );
+    let actions = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&actions);
+    assert_eq!(writes.len(), 1);
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&actions);
+    assert_eq!(
+        writes.len(),
+        1,
+        "unsupported attached edit enters the TS fallback"
+    );
+    assert!(writes[0].url.ends_with("/cancel_orders"));
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":10006,"msg":"request too frequently"}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 994, .. })
+    )));
+}
+
 #[test]
 fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
     for mixed in [false, true] {
@@ -75,47 +490,27 @@ fn an_empty_cancellation_list_remains_a_successful_noop() {
 }
 
 #[test]
-fn nonmultiple_splits_conserve_native_quantity_and_honor_maximum() {
-    for (amount, maximum, step, expected) in [
-        (250.0, 100.0, 0.001, vec![100.0, 100.0, 50.0]),
-        (250.0, 100.0, 1.0, vec![100.0, 100.0, 50.0]),
-        (1.0, 0.3, 0.1, vec![0.3, 0.3, 0.3, 0.1]),
-        (0.75, 0.5, 0.25, vec![0.5, 0.25]),
-    ] {
-        let (mut e, _) = startup();
-        let mut markets = e.store().markets().to_vec();
-        markets[0].precision.amount = step;
-        markets[0].limits.amount.max = maximum;
-        markets[0].limits.amount.min = step;
-        e.store_mut().set_markets(markets);
-        let mut opts = order("");
-        opts.amount = amount;
-        e.handle(
-            1.0,
-            Event::Command(Command::PlaceOrders {
-                command: 901,
-                orders: vec![opts],
-            }),
-        );
-        let writes = requests(&mut e);
-        assert_eq!(writes.len(), 1);
-        let body: serde_json::Value =
-            serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
-        let rows = body["orderList"].as_array().unwrap();
-        let quantities: Vec<f64> = rows
-            .iter()
-            .map(|row| row["qty"].as_str().unwrap().parse().unwrap())
-            .collect();
-        assert_eq!(quantities, expected);
-        assert!(quantities.iter().all(|qty| *qty <= maximum));
-        assert_eq!(
-            quantities
-                .iter()
-                .map(|qty| (qty / step).round() as u64)
-                .sum::<u64>(),
-            (amount / step).round() as u64
-        );
-    }
+fn nonmultiple_ts_equal_lots_pin_fractional_sum() {
+    assert_ts_allocated_writes(
+        250.0,
+        100.0,
+        0.001,
+        &["66.667", "66.667", "66.667", "50"],
+        250.001,
+    );
+}
+#[test]
+fn nonmultiple_ts_equal_lots_pin_integer_sum() {
+    assert_ts_allocated_writes(250.0, 100.0, 1.0, &["67", "67", "67", "50"], 251.0);
+}
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 0.9 of requested 1); kept for exact TS parity per Sam's decision
+fn nonmultiple_ts_equal_lots_pin_tenth_step_sum() {
+    assert_ts_allocated_writes(1.0, 0.3, 0.1, &["0.2", "0.2", "0.2", "0.2", "0.1"], 0.9);
+}
+#[test]
+fn nonmultiple_ts_equal_lots_pin_quarter_step_sum() {
+    assert_ts_allocated_writes(0.75, 0.5, 0.25, &["0.25", "0.25", "0.25"], 0.75);
 }
 
 #[test]
@@ -404,6 +799,7 @@ fn standalone_tpsl_amend_uses_raw_id_and_preserves_sibling() {
     }
 }
 #[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:1663-1729
 fn cancel_failure_restores_open_status_without_replacing_parent() {
     let (mut e, _) = startup();
     e.handle(
@@ -446,6 +842,7 @@ fn rejected_settings_write_never_changes_settings() {
 }
 
 #[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:1663-1729
 fn cancel_item_failure_aborts_replacement_and_keeps_parent_open() {
     let (mut e, _) = startup();
     e.handle(
@@ -601,7 +998,7 @@ fn full_tpsl_without_credentials_completes_with_error() {
 }
 
 #[test]
-fn replacement_waits_for_final_canceled_quantity_before_placing() {
+fn fallback_uses_the_ts_prepared_quantity_without_a_detail_read() {
     let (mut e, s) = startup();
     e.handle(
         1.0,
@@ -633,23 +1030,16 @@ fn replacement_waits_for_final_canceled_quantity_before_placing() {
         cancel.id,
         r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
     );
-    let detail = requests(&mut e).remove(0);
-    assert_eq!(detail.method, safe_cex_engine::Method::Get);
-    assert!(detail.url.contains("get_order_detail?orderId=one"));
-    reply(
-        &mut e,
-        detail.id,
-        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"2","status":"CANCELED","orderType":"LIMIT","side":"SELL"}}"#,
-    );
     let replacement = requests(&mut e).remove(0);
     assert!(replacement.url.ends_with("place_order"));
     let b = replacement.body.as_deref().unwrap();
-    assert!(b.contains(r#""qty":"1""#));
+    assert!(b.contains(r#""qty":"3""#));
     assert!(b.contains(r#""tpPrice":"79""#));
     assert!(b.contains(r#""slPrice":"110""#));
     assert!(!b.contains(r#""clientId":"web""#));
 }
 #[test]
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:1663-1729
 fn incomplete_cancel_ack_never_places_replacement() {
     let (mut e, _) = startup();
     e.handle(
@@ -1065,7 +1455,7 @@ fn failed_without_write(e: &mut TestEngine, command: u32) -> (String, bool) {
         .expect("command failure");
     (error, wrote)
 }
-fn fallback_to_detail(e: &mut TestEngine, command: u32) -> safe_cex_engine::HttpRequest {
+fn fallback_to_replacement(e: &mut TestEngine, command: u32) -> safe_cex_engine::HttpRequest {
     e.handle(
         1.0,
         Event::Command(Command::AmendOrder {
@@ -1090,28 +1480,42 @@ fn fallback_to_detail(e: &mut TestEngine, command: u32) -> safe_cex_engine::Http
     requests(e).remove(0)
 }
 
-// The parent filled before its cancel landed: its TP/SL went live with the old triggers,
-// so the edit failed. It used to finish as a success with nothing placed.
 #[test]
-fn a_parent_that_filled_during_the_fallback_fails_the_tpsl_edit() {
-    for detail_body in [
-        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"3","status":"FILLED","orderType":"LIMIT","side":"SELL"}}"#,
-        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"3","status":"CANCELED","orderType":"LIMIT","side":"SELL"}}"#,
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:1803-1815
+fn unknown_fallback_cancel_without_proof_stops_before_replacement() {
+    for cancel_body in [
+        r#"{"code":0}"#,
+        r#"{"code":0,"data":{"successList":[],"failureList":[]}}"#,
+        r#"{"code":0,"data":{"successList":[],"failureList":[{"orderId":"one","errorCode":20003,"errorMsg":"row refused"}]}}"#,
     ] {
         let (mut e, _) = startup();
-        let detail = fallback_to_detail(&mut e, 13);
-        reply(&mut e, detail.id, detail_body);
-        let (error, wrote) = failed_without_write(&mut e, 13);
-        assert!(!wrote, "{detail_body}");
-        assert!(error.contains("filled before its TP/SL edit"), "{error}");
+        e.handle(
+            1.0,
+            Event::Command(Command::AmendOrder {
+                command: 13,
+                id: "one__tp".into(),
+                price: Some(79.0),
+                amount: None,
+            }),
+        );
+        let amend = requests(&mut e).remove(0);
+        reply(
+            &mut e,
+            amend.id,
+            r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+        );
+        let cancel = requests(&mut e).remove(0);
+        reply(&mut e, cancel.id, cancel_body);
+        let actions = after_failure_actions(&mut e);
+        assert!(after_failure_writes(&actions).is_empty());
+        assert_unknown_notice(&actions, 13, &[]);
     }
 }
 
-// The private channel omits reduceOnly. Native modify_order carries no reduceOnly, so an
-// order seen only there is modified as before; only the cancel-and-re-place fallback,
-// which would carry a guessed flag, is refused before anything is canceled.
+// Legacy TS uses the parent order's reduceOnly/default-false value when its
+// attached edit falls back, including orders first observed on the private WS.
 #[test]
-fn a_ws_only_order_is_modified_natively_but_never_re_placed() {
+fn after_failure_ws_only_attached_edit_uses_the_ts_fallback() {
     let (mut e, s) = startup();
     event(
         &mut e,
@@ -1165,7 +1569,481 @@ fn a_ws_only_order_is_modified_natively_but_never_re_placed() {
         drag.id,
         r#"{"code":20003,"msg":"The order does not support this operation"}"#,
     );
-    let (error, wrote) = failed_without_write(&mut e, 16);
-    assert!(!wrote, "nothing canceled or re-placed");
-    assert!(error.contains("reduce-only state"), "{error}");
+    let cancel = requests(&mut e)
+        .into_iter()
+        .find(|request| request.url.ends_with("/cancel_orders"))
+        .expect("TS fallback does not gate on reduce-only provenance");
+    reply(
+        &mut e,
+        cancel.id,
+        r#"{"code":10006,"msg":"cancel refused"}"#,
+    );
+    let (_, wrote) = failed_without_write(&mut e, 16);
+    assert!(!wrote, "a failed fallback cancellation still stops");
+}
+
+fn parity_next_write(e: &mut TestEngine) -> safe_cex_engine::HttpRequest {
+    for _ in 0..8 {
+        let actions = after_failure_actions(e);
+        if let Some(write) = after_failure_writes(&actions).first() {
+            return (*write).clone();
+        }
+        let reads: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!reads.is_empty(), "preparation has a pending read");
+        for read in reads {
+            let body = if read.url.contains("get_pending_positions") {
+                POSITIONS
+            } else if read.url.contains("get_pending_orders") {
+                ORDERS
+            } else {
+                TPSL
+            };
+            reply(e, read.id, body);
+        }
+    }
+    panic!("preparation did not release a write");
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bitunix | serial-batch-and-five-row-order-chunks
+// TS packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2278-2288,2541-2574.
+fn parity_sixth_off_tick_attached_trigger_is_sent_after_five_accepted_rows() {
+    let (mut e, _) = startup();
+    let rows = (0..6)
+        .map(|i| {
+            let mut row = order("");
+            row.take_profit = Some(if i == 5 { 110000.04 } else { 110000.0 });
+            row
+        })
+        .collect();
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1100,
+            orders: rows,
+        }),
+    );
+    let first = parity_next_write(&mut e);
+    assert!(first.url.ends_with("/batch_order"));
+    let body: serde_json::Value = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["orderList"].as_array().unwrap().len(), 5);
+    reply(
+        &mut e,
+        first.id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"1"},{"orderId":"2"},{"orderId":"3"},{"orderId":"4"},{"orderId":"5"}],"failureList":[]}}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1000.0, Event::TimerFired { timer });
+    let last = parity_next_write(&mut e);
+    assert!(last.url.ends_with("/place_order"));
+    let body: serde_json::Value = serde_json::from_str(last.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["tpPrice"], "110000.04");
+    reply(&mut e, last.id, r#"{"code":0,"data":{"orderId":"6"}}"#);
+    assert_eq!(done(&mut e, 1100).unwrap(), r#"["1","2","3","4","5","6"]"#);
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bitunix | standalone/full-position TP-SL
+// TS packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2432-2456,2492-2515.
+fn parity_standalone_tpsl_sends_below_minimum_second_row() {
+    let (mut e, _) = startup();
+    let mut markets = e.store().markets().to_vec();
+    markets[0].limits.amount.min = 0.01;
+    e.store_mut().set_markets(markets);
+    let rows = [0.01, 0.001].map(|amount| {
+        let mut row = order("");
+        row.kind = safe_cex_engine::model::OrderType::StopLoss;
+        row.price = Some(110000.04);
+        row.amount = amount;
+        row
+    });
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1101,
+            orders: rows.into(),
+        }),
+    );
+    for (qty, id) in [("0.01", "first"), ("0.001", "tail")] {
+        let write = parity_next_write(&mut e);
+        assert!(write.url.ends_with("/tpsl/place_order"));
+        let body: serde_json::Value = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["slQty"], qty);
+        assert_eq!(body["slPrice"], "110000");
+        reply(
+            &mut e,
+            write.id,
+            &format!(r#"{{"code":0,"data":{{"orderId":"{id}"}}}}"#),
+        );
+    }
+    assert!(done(&mut e, 1101).is_ok());
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bitunix | cancel-kept-sibling-parent-rebuild
+// TS packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:1663-1729,2278-2288.
+fn parity_parent_rebuild_sends_preserved_off_tick_sibling_after_cancel() {
+    let (mut e, socket) = startup();
+    event(
+        &mut e,
+        socket,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","slPrice":"110.04"}}"#,
+    );
+    after_failure_actions(&mut e);
+    e.handle(
+        1.0,
+        Event::Command(Command::CancelOrders {
+            command: 1102,
+            ids: vec!["one__tp".into()],
+        }),
+    );
+    let cancel = parity_next_write(&mut e);
+    assert!(cancel.url.ends_with("/cancel_orders"));
+    reply(
+        &mut e,
+        cancel.id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
+    );
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 1);
+    assert!(reads[0].url.contains("get_order_detail"));
+    reply(
+        &mut e,
+        reads[0].id,
+        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"1","status":"CANCELED","orderType":"LIMIT","side":"SELL"}}"#,
+    );
+    let replacement = parity_next_write(&mut e);
+    assert!(replacement.url.ends_with("/place_order"));
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["qty"], "2");
+    assert_eq!(body["slPrice"], "110.04");
+    assert!(body.get("tpPrice").is_none());
+    reply(
+        &mut e,
+        replacement.id,
+        r#"{"code":0,"data":{"orderId":"rebuilt"}}"#,
+    );
+    assert!(done(&mut e, 1102).is_ok());
+}
+
+#[test]
+// KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bitunix | cancel-recreate-edit-fallback
+// TS packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:1751-1815,2278-2288.
+fn parity_amend_fallback_sends_rounded_payload_directly_after_cancel() {
+    let (mut e, socket) = startup();
+    event(
+        &mut e,
+        socket,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","slPrice":"110.04"}}"#,
+    );
+    after_failure_actions(&mut e);
+    let replacement = fallback_to_replacement(&mut e, 1103);
+    assert!(replacement.url.ends_with("/place_order"));
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["qty"], "3");
+    assert_eq!(body["slPrice"], "110");
+    assert_eq!(body["tpPrice"], "79");
+    reply(
+        &mut e,
+        replacement.id,
+        r#"{"code":0,"data":{"orderId":"replaced"}}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 1103,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .expect("journal retains the original amend refusal with successful replacement");
+    assert_eq!(error.outcome, None);
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .unwrap()
+            .order_ids
+            .contains(&"replaced__tp".to_owned())
+    );
+}
+
+#[test]
+// The engine seals a replacement's 503 after the earlier definite amendment refusal.
+fn unknown_fallback_replacement_http503_keeps_engine_sealed_wording() {
+    let (mut e, _) = startup();
+    let replacement = fallback_to_replacement(&mut e, 1107);
+    e.handle(
+        0.0,
+        Event::HttpResponse {
+            request: replacement.id,
+            response: safe_cex_engine::Response {
+                status: 503,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 1107,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "one journal terminal");
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(
+        failures[0].message,
+        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"
+    );
+}
+
+// Legacy allocation: packages/safe-cex/src/__tests__/reference/bitunix/bitunix.exchange.ts:2219,2292-2302.
+fn assert_ts_allocated_writes(amount: f64, maximum: f64, step: f64, expected: &[&str], sum: f64) {
+    let (mut e, _) = startup();
+    let mut markets = e.store().markets().to_vec();
+    markets[0].precision.amount = step;
+    markets[0].limits.amount.min = step;
+    markets[0].limits.amount.max = maximum;
+    e.store_mut().set_markets(markets);
+    let mut opts = order("");
+    opts.amount = amount;
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1200,
+            orders: vec![opts],
+        }),
+    );
+    let mut quantities = Vec::new();
+    let mut actions = after_failure_actions(&mut e);
+    for _ in 0..12 {
+        if actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1200, .. })))
+        {
+            assert_eq!(quantities, expected);
+            let actual_sum: f64 = quantities
+                .iter()
+                .map(|q: &String| q.parse::<f64>().unwrap())
+                .sum();
+            assert!(
+                (actual_sum - sum).abs() < 1e-12,
+                "wire sum {actual_sum} differs from TS sum {sum}"
+            );
+            assert!(after_failure_writes(&actions).is_empty());
+            return;
+        }
+        assert!(
+            !actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: 1200, .. })
+            )),
+            "allocation failed before completion: {actions:?}"
+        );
+        let writes = after_failure_writes(&actions);
+        if let Some(write) = writes.first() {
+            assert_eq!(writes.len(), 1, "only one chunk is released at a time");
+            let body: serde_json::Value =
+                serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+            let rows = body["orderList"]
+                .as_array()
+                .cloned()
+                .unwrap_or_else(|| vec![body.clone()]);
+            let first = quantities.len();
+            quantities.extend(
+                rows.iter()
+                    .map(|row| row["qty"].as_str().unwrap().to_owned()),
+            );
+            let ids: Vec<_> = (first..quantities.len())
+                .map(|i| serde_json::json!({"orderId":format!("alloc-{}",i+1)}))
+                .collect();
+            let data = if write.url.ends_with("/batch_order") {
+                assert!(rows.len() <= 5);
+                serde_json::json!({"successList":ids,"failureList":[]})
+            } else {
+                assert!(write.url.ends_with("/place_order"));
+                assert_eq!(rows.len(), 1);
+                ids[0].clone()
+            };
+            reply(
+                &mut e,
+                write.id,
+                &serde_json::json!({"code":0,"data":data}).to_string(),
+            );
+        } else {
+            let (timer, at) = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some((*timer, *at_ms)),
+                    _ => None,
+                })
+                .expect("next five-row chunk has the TS one-second cooldown");
+            e.handle(at, Event::TimerFired { timer });
+        }
+        actions = after_failure_actions(&mut e);
+    }
+    panic!("allocation did not complete");
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
+fn alloc_ts_26_5_1() {
+    assert_ts_allocated_writes(26.0, 5.0, 1.0, &["4", "4", "4", "4", "4", "4", "1"], 25.0);
+}
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
+fn alloc_ts_11_5_1() {
+    assert_ts_allocated_writes(11.0, 5.0, 1.0, &["3", "3", "3", "1"], 10.0);
+}
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
+fn alloc_ts_12_5_1() {
+    assert_ts_allocated_writes(12.0, 5.0, 1.0, &["3", "3", "3", "2"], 11.0);
+}
+#[test]
+fn alloc_ts_10_5_1() {
+    assert_ts_allocated_writes(10.0, 5.0, 1.0, &["5", "5"], 10.0);
+}
+#[test]
+fn alloc_ts_7_3_half_step() {
+    assert_ts_allocated_writes(7.0, 3.0, 0.5, &["2", "2", "2", "1"], 7.0);
+}
+#[test]
+fn alloc_ts_fractional_thousandth_step() {
+    assert_ts_allocated_writes(
+        1.0005,
+        0.3,
+        0.001,
+        &["0.225", "0.225", "0.225", "0.225", "0.101"],
+        1.001,
+    );
+}
+#[test]
+fn alloc_ts_at_maximum_control() {
+    assert_ts_allocated_writes(5.0, 5.0, 1.0, &["5"], 5.0);
+}
+
+#[test]
+fn unknown_second_chunk_reports_accepted_ids_current_clients_and_withheld_tail() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1210,
+            orders: (0..11)
+                .map(|index| {
+                    let mut row = order("");
+                    row.client_order_id = Some(format!("inventory-{index}"));
+                    row
+                })
+                .collect(),
+        }),
+    );
+    let first = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&first);
+    assert_eq!(writes.len(), 1);
+    assert!(writes[0].url.ends_with("/batch_order"));
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"1"},{"orderId":"2"},{"orderId":"3"},{"orderId":"4"},{"orderId":"5"}],"failureList":[]}}"#,
+    );
+    let paced = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&paced).is_empty());
+    let timer = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("TS chunk pacing");
+    e.handle(1000.0, Event::TimerFired { timer });
+    let second = after_failure_actions(&mut e);
+    let writes = after_failure_writes(&second);
+    assert_eq!(writes.len(), 1);
+    let body: serde_json::Value = serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        body["orderList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["clientId"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "inventory-5",
+            "inventory-6",
+            "inventory-7",
+            "inventory-8",
+            "inventory-9"
+        ]
+    );
+    reply(
+        &mut e,
+        writes[0].id,
+        r#"{"code":20003,"msg":"Insufficient balance"}"#,
+    );
+    let actions = after_failure_actions(&mut e);
+    assert!(after_failure_writes(&actions).is_empty());
+    assert_unknown_notice(&actions, 1210, &["1", "2", "3", "4", "5"]);
+    assert_unknown_inventory(
+        &actions,
+        1210,
+        &[
+            ("accepted", "orderId", "1"),
+            ("accepted", "orderId", "2"),
+            ("accepted", "orderId", "3"),
+            ("accepted", "orderId", "4"),
+            ("accepted", "orderId", "5"),
+            ("currentRequest", "clientOrderId", "inventory-5"),
+            ("currentRequest", "clientOrderId", "inventory-6"),
+            ("currentRequest", "clientOrderId", "inventory-7"),
+            ("currentRequest", "clientOrderId", "inventory-8"),
+            ("currentRequest", "clientOrderId", "inventory-9"),
+            ("withheld", "clientOrderId", "inventory-10"),
+        ],
+    );
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS rounds above-max lots (sum 2 of requested 1.9); kept for exact TS parity per Sam's decision
+fn alloc_ts_rounded_lots_above_maximum() {
+    assert_ts_allocated_writes(1.9, 0.95, 0.1, &["1", "1"], 2.0);
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS rounds above-max lots (sum 6 of requested 5); kept for exact TS parity per Sam's decision
+fn alloc_ts_rounded_whole_unit_lots_above_maximum() {
+    assert_ts_allocated_writes(5.0, 2.5, 1.0, &["3", "3"], 6.0);
+}
+
+#[test]
+// KNOWN-ISSUE: legacy TS under-allocates (sum 1.9 of requested 2); kept for exact TS parity per Sam's decision
+fn alloc_ts_rounded_lots_adjacent_underallocation_control() {
+    assert_ts_allocated_writes(2.0, 0.95, 0.1, &["0.6", "0.6", "0.6", "0.1"], 1.9);
 }

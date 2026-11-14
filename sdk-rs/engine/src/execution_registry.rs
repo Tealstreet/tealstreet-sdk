@@ -622,6 +622,9 @@ impl ContextRegistry {
         else {
             return;
         };
+        let source = self
+            .owner_entry(plan.owner())
+            .and_then(|owner| owner.engine_unknown);
         self.contexts.remove(&identity);
         let Some(execution) = self.executions.roots.get(&identity).copied() else {
             return;
@@ -637,6 +640,11 @@ impl ContextRegistry {
             },
             sealed,
         );
+        for seal in sealed {
+            if let Some(owner) = self.commands.get_mut(&seal.command) {
+                owner.engine_unknown = source;
+            }
+        }
     }
 
     /// Surviving observers of a physical Plan's execution, for preparation.

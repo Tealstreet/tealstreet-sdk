@@ -2840,6 +2840,320 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
     },
   },
+  "bingxspot": {
+    "proxy=0 wsRoute=0 region=JA site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=0 region=JA site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=0 region=NONE site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=0 region=NONE site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=0 region=SG site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=0 region=SG site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=JA site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=JA site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=NONE site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=NONE site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=SG site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=SG site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=JA site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=JA site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=NONE site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=NONE site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=SG site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=SG site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=JA site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=JA site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=NONE site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=NONE site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=SG site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=SG site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+  },
   "bitget": {
     "proxy=0 wsRoute=0 region=JA site=BRA_BTL": {
       "howEgress": "jp",
@@ -15580,7 +15894,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15593,7 +15908,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15606,7 +15922,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15619,7 +15936,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15632,7 +15950,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15645,7 +15964,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15658,7 +15978,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15671,7 +15992,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15684,7 +16006,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15697,7 +16020,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15710,7 +16034,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -15723,7 +16048,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2Fundefined",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,

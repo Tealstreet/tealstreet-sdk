@@ -12,8 +12,10 @@ use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
@@ -74,12 +76,52 @@ struct Job {
     /// The plan is parked in a settle-only wait for group proof.
     settled: bool,
 }
+// Field order preserves the sorted-key JSON used by the original journal.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnknownJournal<'a> {
+    not_sent: Vec<String>,
+    placed: Vec<&'a String>,
+    unknown: Vec<String>,
+}
+
 impl Job {
     /// Every acknowledged group leg has been seen by its own id.
     fn group_proven(&self) -> bool {
         self.group_accepted
             .iter()
             .all(|id| self.group_seen.contains(id))
+    }
+    fn unknown_journal(&self) -> UnknownJournal<'_> {
+        let mut unknown: Vec<_> = self
+            .group_accepted
+            .iter()
+            .filter(|id| !self.group_seen.contains(*id))
+            .cloned()
+            .collect();
+        let skip = if self.settled || self.steps.is_empty() {
+            0
+        } else {
+            unknown.extend(
+                self.steps
+                    .front()
+                    .map(Step::placement_ids)
+                    .unwrap_or_default(),
+            );
+            1
+        };
+        let placed: Vec<_> = self.ids.iter().filter(|id| !unknown.contains(id)).collect();
+        let not_sent: Vec<_> = self
+            .steps
+            .iter()
+            .skip(skip)
+            .flat_map(Step::placement_ids)
+            .collect();
+        UnknownJournal {
+            not_sent,
+            placed,
+            unknown,
+        }
     }
 }
 enum Step {
@@ -104,6 +146,17 @@ enum Step {
         isolated: Option<bool>,
     },
 }
+impl Step {
+    fn placement_ids(&self) -> Vec<String> {
+        match self {
+            Self::Place(orders) | Self::Group { orders, .. } => {
+                orders.iter().map(|p| p.order.id.clone()).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
 struct Prepared {
     native: sign::Order,
     order: Order,
@@ -1252,8 +1305,9 @@ impl Lighter {
             return;
         }
         self.trading.inflight = false;
-        if matches!(response.status, 405 | 429) && !matches!(&request, Request::Submit(_)) {
-            if matches!(&request, Request::CancelProof | Request::RestoreProof) {
+        let kind = &request;
+        if matches!(response.status, 405 | 429) && !matches!(kind, Request::Submit(_)) {
+            if matches!(kind, Request::CancelProof | Request::RestoreProof) {
                 self.trade_finish(cx, uncertain("Lighter protection proof outcome unknown after rate limit; check Open Orders").kind(ErrorKind::RateLimited));
                 return;
             }
@@ -1404,12 +1458,13 @@ impl Lighter {
                     Err(_) => {
                         let _ = cx.http_write_unproven(&context, UNCERTAIN_RESULT);
                         self.submission_uncertain(cx, &submission.effect);
-                        let error = if matches!(response.status, 405 | 429) {
+                        let mut error = if matches!(response.status, 405 | 429) {
                             uncertain(format!("{UNCERTAIN_RESULT}; {RATE_MESSAGE}"))
                                 .kind(ErrorKind::RateLimited)
                         } else {
                             uncertain(UNCERTAIN_RESULT)
                         };
+                        error.presents = true;
                         self.trade_finish(cx, error);
                         return;
                     }
@@ -1444,9 +1499,10 @@ impl Lighter {
                     self.trading.next_nonce.invalidate();
                     // The sequencer may still accept individual transactions of a refused batch.
                     let guarded = self.trading.active.as_ref().unwrap().protection.is_some();
-                    let unknown = (guarded
-                        && (matches!(response.status, 405 | 408 | 429)
-                            || matches!(code, Some(23000 | 23100))))
+                    // Native rate codes prove no refusal, even for an ordinary
+                    // single transaction in HTTP 200. Weaken before journaling.
+                    let unknown = (guarded && matches!(response.status, 405 | 408 | 429))
+                        || matches!(code, Some(23000 | 23100))
                         || response.status >= 500
                         || (submission.grouped && (response.status == 408 || code == Some(21104)))
                         || code.is_none()
@@ -1483,7 +1539,15 @@ impl Lighter {
                         message.push_str("; ");
                         message.push_str(RATE_MESSAGE);
                     }
+                    let present_unknown = matches!(code, Some(23000 | 23100))
+                        || (unknown && self.trading.active.as_ref().unwrap().retried_nonce);
+                    if present_unknown {
+                        message.push_str(". The outcome is unknown. Check Open Orders");
+                    }
                     let mut error = VenueError::new(message);
+                    // Uncertainty must supersede an earlier nonce
+                    // refusal's words; the journal still owns outcome and effects.
+                    error.presents = present_unknown;
                     if matches!(submission.effect, Effect::Modify) {
                         error.message = if unknown {
                             format!(
@@ -1506,7 +1570,7 @@ impl Lighter {
                         Some(code) if !explained => {
                             error.venue_code(code.to_string()).outcome(Outcome::Unknown)
                         }
-                        // Lighter's numeric codes on a sub-500 answer are explicit refusals.
+                        // Other numeric codes on a sub-500 answer are explicit refusals.
                         Some(code) => error
                             .venue_code(code.to_string())
                             .kind(if rate_limited {
@@ -1524,7 +1588,14 @@ impl Lighter {
                     };
                     let error = self.note_replacement_lost(&submission.effect, error);
                     if unknown {
-                        let _ = cx.http_write_unproven(&context, &error.message);
+                        let _ = cx.http_write_unproven_result(&context, |evidence| {
+                            if let Some(code) = &error.venue_code {
+                                evidence.venue_code(code);
+                            }
+                            evidence.venue_message(
+                                error.venue_message.as_deref().unwrap_or(&error.message),
+                            );
+                        });
                     } else if !self.trade_refusal(cx, &context, code.unwrap(), &error.message) {
                         return;
                     }
@@ -1789,6 +1860,11 @@ impl Lighter {
             && let Some(old) = &job.amend
         {
             let unknown = error.outcome == Some(Outcome::Unknown);
+            // The protective plan presents Unknown with an Open Orders check.
+            // An unproven replacement must not acquire a no-stop message.
+            if unknown && job.protection.is_some() {
+                return error;
+            }
             let gone = if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit) {
                 safe_cex_engine::error::stop_gone_text(&old.symbol, old.side, old.kind, unknown)
             } else {
@@ -1804,12 +1880,6 @@ impl Lighter {
         if self.protective_finish(cx, &mut error) {
             return;
         }
-        if let Some(job) = &self.trading.active
-            && let Some(plan) = &job.plan
-            && job.protection.is_some()
-        {
-            let _ = cx.present_plan_failure(plan, error.message.clone());
-        }
         if let Some(wait) = self.trading.position_wait.take() {
             self.trading.retired_snapshot = Some(wait.serial);
         }
@@ -1819,7 +1889,49 @@ impl Lighter {
                 self.trading.next_nonce.invalidate();
             }
             let mut error = error;
-            if !job.ids.is_empty() {
+            let journal = (error.outcome == Some(Outcome::Unknown)).then(|| job.unknown_journal());
+            if error.outcome == Some(Outcome::Unknown) {
+                error
+                    .venue_message
+                    .get_or_insert_with(|| error.message.clone().into());
+                if job.protection.is_some() || job.amend.is_some() {
+                    if !error.message.contains(UNKNOWN_TEXT) {
+                        error.message.push_str(". ");
+                        error.message.push_str(UNKNOWN_TEXT);
+                    }
+                } else {
+                    error.message = UNKNOWN_TEXT.into();
+                }
+                if let Some(journal) = &journal
+                    && !journal.unknown.is_empty()
+                {
+                    error.message = format!(
+                        "{}; unknown order indexes: {}",
+                        error.message,
+                        serde_json::to_string(&journal.unknown).unwrap()
+                    );
+                    cx.event(
+                        safe_cex_engine::Level::Error,
+                        "order.outcome_unknown",
+                        error.message.clone(),
+                        vec![
+                            ("command", job.command.into()),
+                            ("outcome", "unknown".into()),
+                            ("journal", serde_json::to_string(journal).unwrap().into()),
+                        ],
+                    );
+                }
+            }
+
+            if let Some(journal) = &journal {
+                if !journal.placed.is_empty() {
+                    error.message = format!(
+                        "{}; previously placed order indexes: {}",
+                        error.message,
+                        serde_json::to_string(&journal.placed).unwrap()
+                    );
+                }
+            } else if !job.ids.is_empty() {
                 let indexes = job.ids.join_with(",");
                 error.message = format!(
                     "{}; previously placed order indexes: {indexes}",
@@ -1830,6 +1942,16 @@ impl Lighter {
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             {
                 error.outcome = None;
+            }
+            if let Some(plan) = &job.plan
+                && (job.protection.is_some() || error.outcome == Some(Outcome::Unknown))
+            {
+                // Re-presents the venue path's own already-composed message
+                // (e.g. `not_sent("Lighter stop not changed: trigger crossed")`
+                // from protective_edits::protection) on top of a definite leg
+                // failure like `21104 invalid nonce`. Uses the override entry
+                // point because the outcome here is typically `Rejected`.
+                let _ = cx.override_plan_failure_message(plan, error.message.clone());
             }
             if let Some(plan) = &job.plan {
                 if let (Some(slot), Some(context)) = (&job.slot, &job.live) {
@@ -1981,11 +2103,11 @@ impl Lighter {
             child.take_profit = None;
             child.reduce_only = Some(true);
             child.time_in_force = Some(TimeInForce::ImmediateOrCancel);
-            let mut leg = self.prepare_one(cx, &child)?;
+            let mut leg = self.prepare_native(cx, &child, true)?;
             if leg.len() != 1 {
                 return Err(SPLIT.into());
             }
-            let mut leg = leg.pop().unwrap();
+            let mut leg = leg.pop().ok_or(SPLIT)?;
             // Children close the filled parent: native amount zero.
             leg.native.amount = 0;
             orders.push(leg);
@@ -2000,6 +2122,15 @@ impl Lighter {
         &mut self,
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
+    ) -> Result<Vec<Prepared>, String> {
+        self.prepare_native(cx, opts, false)
+    }
+
+    fn prepare_native(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+        parent_sized: bool,
     ) -> Result<Vec<Prepared>, String> {
         let market = cx
             .store
@@ -2141,7 +2272,9 @@ impl Lighter {
             .map_err(|_| "Lighter trigger exceeds uint32 range")?;
         let mut out = Vec::new();
         for amount in amounts {
-            if amount <= 0.0 || (!is_market && (amount < min || amount * price < min_quote)) {
+            if amount <= 0.0
+                || (!is_market && !parent_sized && (amount < min || amount * price < min_quote))
+            {
                 return Err(format!(
                     "Lighter order lot is below exchange minimums for {}",
                     opts.symbol
@@ -2245,7 +2378,7 @@ fn documented_place_refusal(code: u64) -> bool {
             | 21601 | 21602 | 21605 | 21613 | 21618 | 21631 | 21632 | 21638
             | 21701..=21706 | 21710..=21712 | 21717..=21723 | 21727 | 21729
             | 21733..=21735 | 21738..=21741 | 21743..=21745 | 21747 | 21748 | 21752
-            | 23000 | 23100 | 52001 | 52002 | 62007..=62009
+            | 52001 | 52002 | 62007..=62009
     )
 }
 fn uncertain(message: impl Into<String>) -> VenueError {
@@ -2633,7 +2766,8 @@ impl Lighter {
             return;
         }
         self.trading.inflight = false;
-        let error = if matches!(&request, Request::CancelProof | Request::RestoreProof) {
+        let kind = &request;
+        let error = if matches!(kind, Request::CancelProof | Request::RestoreProof) {
             uncertain(format!(
                 "Lighter protection proof outcome unknown: {}; check Open Orders",
                 error.message

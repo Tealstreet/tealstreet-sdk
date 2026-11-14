@@ -26,6 +26,7 @@ import { createHyperliquidRequestValidator } from './hyperliquid-protocol.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
+import { bingxspot } from './bingxspot.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import {
@@ -1749,6 +1750,7 @@ export const VENUES = {
         };
       }),
   },
+  bingxspot,
   bingx: {
     rust: 'bingx',
     virtualPrivateClock: true,
@@ -2031,11 +2033,19 @@ export const VENUES = {
   ...Object.fromEntries(['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map((name) => [name, okx(name)])),
 };
 
-export const venueOf = (name) => {
-  const venue = VENUES[name];
-  if (!venue) throw new Error(`unknown venue ${name}; known: ${Object.keys(VENUES).join(', ')}`);
+const lookupVenue = (name, replay) => {
+  const venue = Object.hasOwn(VENUES, name) ? VENUES[name] : undefined;
+  if (!venue || (!replay && venue.rustFixture)) {
+    const names = Object.keys(VENUES).filter(key => replay || !VENUES[key].rustFixture);
+    throw new Error(`unknown venue ${name}; known: ${names.join(', ')}`);
+  }
   return venue;
 };
+
+// Live recording/smoke lookup must never admit a fixture-only constructor.
+export const venueOf = name => lookupVenue(name, false);
+// Offline gate/replay callers explicitly select the qualification registry.
+export const replayVenueOf = name => lookupVenue(name, true);
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>

@@ -1,3 +1,4 @@
+import { captureStorageSession } from '../storage-context';
 // Listener-side state:cross-trade broadcaster.
 //
 // Two inputs feed the snapshot:
@@ -79,12 +80,16 @@ export interface CrossTradeBroadcastHandle {
 }
 
 export function startCrossTradeBroadcast(server: ServerLike): CrossTradeBroadcastHandle {
+  const ownerSession = captureStorageSession();
+  let stopped = false;
+  const isCurrent = () => !stopped && ownerSession.isCurrent();
   let lastHash = snapshotHash(buildSnapshot());
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let watchers: FSWatcher[] = [];
   let stalenessTimer: ReturnType<typeof setInterval> | null = null;
 
   const broadcast = () => {
+    if (!isCurrent()) return;
     const snap = buildSnapshot();
     const hash = snapshotHash(snap);
     if (hash === lastHash) return;
@@ -97,8 +102,10 @@ export function startCrossTradeBroadcast(server: ServerLike): CrossTradeBroadcas
   };
 
   const onChange = () => {
+    if (!isCurrent()) return;
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      if (!isCurrent()) return;
       debounceTimer = null;
       try {
         broadcast();
@@ -135,6 +142,7 @@ export function startCrossTradeBroadcast(server: ServerLike): CrossTradeBroadcas
       }
     },
     stop() {
+      stopped = true;
       if (debounceTimer) {
         clearTimeout(debounceTimer);
         debounceTimer = null;

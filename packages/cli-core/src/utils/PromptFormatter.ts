@@ -1,9 +1,9 @@
 import type { ExchangeLike } from '../types';
-import type { Position, Order } from '@tealstreet/safe-cex/src/types';
+import type { Market, Position, Order } from '@tealstreet/safe-cex/src/types';
 import { OrderStatus, PositionSide } from '@tealstreet/safe-cex/src/types';
 import { ConnectionMonitor } from './ConnectionMonitor';
-import { getSizeCurrency } from '@tealstreet/safe-cex/src/utils/sizing';
-import { formatPriceCompact, formatSizeCompact } from '@tealstreet/utils/src/formatting';
+import { formatBaseSize } from './formatBaseSize';
+import { formatPriceCompact } from '@tealstreet/utils/src/formatting';
 import chalk from 'chalk';
 
 /**
@@ -137,7 +137,7 @@ export interface PromptInfo {
   price?: number;
   /** Position side ('Long' or 'Short', null for none) */
   positionSide?: 'Long' | 'Short' | null;
-  /** Position size in contracts */
+  /** Position size in base units */
   positionSize?: number;
   /** Connection status indicator */
   connectionIndicator?: string;
@@ -203,15 +203,14 @@ export function formatPrompt(options: PromptOptions): PromptInfo {
     info.positionSize = Math.abs(position.contracts);
     info.unrealizedPnl = position.unrealizedPnl;
     info.entryPrice = position.entryPrice;
-    info.liquidationPrice = position.liquidationPrice;
+    info.liquidationPrice = position.liquidationPrice ?? undefined;
   }
   info.openOrderCount = openOrders.length;
   if (connStatus) info.connectionIndicator = connStatus.trim();
 
   // Build token values
   const pricePrecision = market?.precision?.price;
-  const amountPrecision = market?.precision?.amount;
-  const currency = getSizeCurrency(market as any);
+  const currency = market?.base;
 
   // When the selected account isn't connected yet, the `{conn}` slot carries
   // an explicit status word and the account name is tinted. Only applies when
@@ -227,7 +226,7 @@ export function formatPrompt(options: PromptOptions): PromptInfo {
     side: position ? (position.side === PositionSide.Long ? chalk.green('Long:') : chalk.red('Short:')) : '',
     size: position
       ? (position.side === PositionSide.Long ? chalk.green : chalk.red)(
-          `${formatSizeCompact(Math.abs(position.contracts), amountPrecision)}${currency ? ' ' + currency : ''}`,
+          `${formatBaseSize(position.contracts, market)}${currency ? ' ' + currency : ''}`,
         )
       : '',
     entry: position ? formatPriceCompact(position.entryPrice, pricePrecision) : '',
@@ -236,7 +235,10 @@ export function formatPrompt(options: PromptOptions): PromptInfo {
       position && position.entryPrice
         ? formatPnlPercent(position.unrealizedPnl, position.entryPrice, Math.abs(position.contracts))
         : '',
-    liq: position && position.liquidationPrice > 0 ? formatPriceCompact(position.liquidationPrice, pricePrecision) : '',
+    liq:
+      position && position.liquidationPrice !== null && position.liquidationPrice > 0
+        ? formatPriceCompact(position.liquidationPrice, pricePrecision)
+        : '',
     leverage: position ? `${position.leverage}x` : '',
     orders: openOrders.length > 0 ? openOrders.length.toString() : '',
     conn: connStateToken || (connStatus ? connStatus.trim() + ' ' : ''),
@@ -405,10 +407,7 @@ function escapeRegex(str: string): string {
 /**
  * Get market info for a symbol
  */
-function getMarket(
-  exchange: ExchangeLike | null,
-  symbol: string,
-): { precision?: { price?: number; amount?: number } } | null {
+function getMarket(exchange: ExchangeLike | null, symbol: string): Market | null {
   if (!exchange) return null;
   const markets = exchange.store?.markets;
   if (!markets) return null;

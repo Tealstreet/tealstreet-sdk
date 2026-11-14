@@ -5,6 +5,8 @@ pub const POSITION: &str = r#"{"instId":"BTC-USDT","instType":"SWAP","positionId
 pub struct Harness {
     pub e: Engine<Blofin>,
     pub pending: Vec<HttpRequest>,
+    /// Every transport request, including ones already answered by the script.
+    pub requests: Vec<(safe_cex_engine::Method, String)>,
     pub actions: Vec<Action>,
     /// Structured failures; `actions` holds their legacy `CommandDone` text.
     pub failures: Vec<safe_cex_engine::VenueError>,
@@ -120,6 +122,7 @@ impl Harness {
         let mut h = Self {
             e,
             pending: vec![],
+            requests: vec![],
             actions: vec![],
             failures: vec![],
             private: SocketId(0),
@@ -209,6 +212,7 @@ impl Harness {
                     "receipt must precede the exact outgoing native identities: {}",
                     r.url
                 );
+                self.requests.push((r.method, r.url.clone()));
                 self.pending.push(r);
             } else {
                 if let Action::Notice(safe_cex_engine::Notice::CommandProgress {

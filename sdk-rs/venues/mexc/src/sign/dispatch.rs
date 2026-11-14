@@ -3,6 +3,7 @@ use safe_cex_engine::signing::{
     Context, Identity, PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
     hmac_sha256_work,
 };
+use safe_cex_engine::signing_headers::ResultHeaderPolicy;
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep, SocketId, num};
 
 const HEADERS: &[(&str, &str)] = &[("Content-Type", "application/json")];
@@ -14,6 +15,7 @@ pub struct Http {
     payload: String,
     window: u32,
     stamp: Option<f64>,
+    header_policy: ResultHeaderPolicy,
 }
 impl Http {
     pub fn new(
@@ -30,7 +32,12 @@ impl Http {
             payload,
             window: window.unwrap_or(20_000).clamp(1, 20_000),
             stamp: None,
+            header_policy: ResultHeaderPolicy::Deny,
         }
+    }
+    pub fn with_header_policy(mut self, policy: ResultHeaderPolicy) -> Self {
+        self.header_policy = policy;
+        self
     }
     pub fn url(&self) -> String {
         if self.method == Method::Get && !self.payload.is_empty() {
@@ -58,6 +65,9 @@ impl Http {
     }
 }
 impl SignStep for Http {
+    fn result_header_policy(&self) -> ResultHeaderPolicy {
+        self.header_policy
+    }
     fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
         HEADERS
     }
@@ -86,7 +96,7 @@ impl SignStep for Http {
     fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
         self.attest(action)?;
         let stamp = self.stamp.take().ok_or(SignError::InvalidRequest)?;
-        let (key, signature) = values(result, stamp)?;
+        let (key, signature) = values(result, stamp, self.header_policy)?;
         let Action::Http(http) = action else {
             return Err(SignError::InvalidRequest);
         };
@@ -96,6 +106,7 @@ impl SignStep for Http {
             ("Signature", signature),
             ("Recv-Window", self.window.to_string()),
             ("Content-Type", "application/json".into()),
+            ("source", super::BROKER_CODE.into()),
         ];
         Ok(())
     }
@@ -152,7 +163,7 @@ impl SignStep for Login {
     fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
         self.attest(action)?;
         let stamp = self.stamp.take().ok_or(SignError::InvalidRequest)?;
-        let (key, signature) = values(result, stamp)?;
+        let (key, signature) = values(result, stamp, ResultHeaderPolicy::Deny)?;
         #[derive(serde::Serialize)]
         struct Param<'a> {
             #[serde(rename = "apiKey")]
@@ -212,10 +223,14 @@ fn work(
         receipt,
     ))
 }
-fn values(result: &SignResult, stamp: f64) -> Result<(&str, String), SignError> {
+fn values(
+    result: &SignResult,
+    stamp: f64,
+    policy: ResultHeaderPolicy,
+) -> Result<(&str, String), SignError> {
+    policy.validate(&result.headers)?;
     if result.values.len() != 2
         || result.values[1].len() != 32
-        || !result.headers.is_empty()
         || result.receipt
             != (SignReceipt {
                 stamp_ms: Some(stamp),

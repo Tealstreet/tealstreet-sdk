@@ -3,7 +3,8 @@ import { CommandCategory, type CommandContext, type CommandResult } from '../Com
 import { prepareCliOrder } from '../../order/prepareCliOrder';
 import { OrderSide, OrderType, OrderTimeInForce, type PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 import { adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { amountPrecisionOf } from '../../utils/marketPrecision';
+import { nativeAmountRules } from '@tealstreet/script-api-core/src/order/nativeAmountRules';
+import { assertCloseLikeOrderAmount } from '@tealstreet/script-api-core/src/order/orderPricing';
 
 /**
  * `swarm <side> <size> into <count> [reduce] [irregular]` — fire N
@@ -42,7 +43,13 @@ export class SwarmCommand extends TradingBaseCommand {
     if (!exchange) return this.error('Not connected to exchange');
     if (!exchange.placeOrder) return this.error('Exchange does not support placing orders');
 
+    this.assertUnambiguousOrderModifiers(ctx, 2, ['reduce', 'irregular', 'into'], { into: 1 });
+    ctx = this.resolveLeadingSymbolSlot(ctx, 2);
     const args = this.getRawArgs(ctx);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['irregular']]);
+    if (duplicate) return duplicate;
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
 
     // Side
     const sideStr = args[1]?.toLowerCase();
@@ -54,9 +61,12 @@ export class SwarmCommand extends TradingBaseCommand {
     // Optional leading symbol: `swarm buy SYMBOL $100 into 5`
     let i = 2;
     let symbol = ctx.symbol;
-    const leading = this.validateSymbols(exchange, args[i]?.split(',') || []);
+    let explicitSymbol = false;
+    if (args[i]?.includes(',')) return this.error('swarm supports only one symbol per command');
+    const leading = this.validateSymbols(exchange, args[i] ? [args[i]] : []);
     if (leading.length > 0) {
       symbol = leading[0];
+      explicitSymbol = true;
       i++;
     }
 
@@ -71,8 +81,8 @@ export class SwarmCommand extends TradingBaseCommand {
     if (args[i] !== 'into') {
       return this.error("swarm: expected 'into <count>' after size");
     }
-    const count = parseInt(args[i + 1], 10);
-    if (!Number.isFinite(count) || count <= 0) {
+    const count = this.parseOrderNumber(args[i + 1]);
+    if (!Number.isSafeInteger(count) || count <= 0) {
       return this.error("swarm: 'into' must be followed by a positive integer count");
     }
     i += 2;
@@ -92,10 +102,12 @@ export class SwarmCommand extends TradingBaseCommand {
       }
       const trailing = this.validateSymbols(exchange, [a]);
       if (trailing.length > 0) {
+        if (explicitSymbol) return this.error('swarm accepts only one symbol per command');
+        explicitSymbol = true;
         symbol = trailing[0];
         continue;
       }
-      return this.error(`swarm: unexpected token "${a}"`);
+      return this.error(this.unknownOrderArgument(a));
     }
 
     // Health gate — block opening exposure when the private stream is
@@ -132,7 +144,8 @@ export class SwarmCommand extends TradingBaseCommand {
       return this.error(`Market not found for ${symbol}`);
     }
 
-    const lotStep = amountPrecisionOf(market);
+    assertCloseLikeOrderAmount(totalContracts, { type: OrderType.Market, reduceOnly }, market, exchange.name);
+    const lotStep = nativeAmountRules(market, exchange.name).step;
     const slices = this.distribute(totalContracts, count, irregular, lotStep);
     if (slices.some((s) => s <= 0)) {
       return this.error(`swarm: total size too small to split into ${count} (precision ${lotStep})`);

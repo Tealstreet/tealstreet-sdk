@@ -14,13 +14,12 @@ import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
   'polymarket', 'txflow', 'weex',
-  'bitrue',
 ];
 
-test('the beta set is exactly the 44 IN venues in 23 families', () => {
-  assert.equal(betaVenueNames.length, 44);
+test('the beta set is exactly the 45 IN venues in 24 families', () => {
+  assert.equal(betaVenueNames.length, 45);
   assert.deepEqual(betaVenueFamilies, [
-    'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase',
+    'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitrue', 'bitunix', 'blofin', 'bybit', 'coinbase',
     'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',
     'paradex', 'phemex', 'woo',
   ]);
@@ -66,10 +65,11 @@ test('the beta loader refuses an OUT venue before importing any engine', async (
     imports.push(family);
     return { default: async () => {} };
   }, betaVenueFamily);
-  await assert.rejects(load('bitrue'), BetaVenueUnavailableError);
+  await assert.rejects(load('weex'), BetaVenueUnavailableError);
+  await load('bitrue');
   await load('okxeu');
   await load('lighter-robinhood');
-  assert.deepEqual(imports, ['okx', 'lighter']);
+  assert.deepEqual(imports, ['bitrue', 'okx', 'lighter']);
 });
 
 test('engine.beta.web.mjs is generated from the table and imports only beta families', () => {
@@ -77,4 +77,9 @@ test('engine.beta.web.mjs is generated from the table and imports only beta fami
   assert.equal(loader, betaLoaderSource(), 'run node js/generate-beta-loader.mjs');
   const imported = [...loader.matchAll(/import\('\.\.\/pkg\/web\/([a-z]+)\/safe_cex_wasm\.js'\)/g)].map((match) => match[1]);
   assert.deepEqual(imported, betaVenueFamilies);
+});
+
+test('BingX Spot belongs to the native family but stays outside beta admission until smoke', () => {
+  assert.equal(venueFamily('bingxspot'), 'bingx');
+  assert.throws(() => betaVenueFamily('bingxspot'), BetaVenueUnavailableError);
 });

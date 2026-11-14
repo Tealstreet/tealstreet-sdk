@@ -1,6 +1,8 @@
 //! Preflighted write plans; a lost response never resends a mutation.
 pub(crate) mod protective;
-use crate::wire::{Envelope, Number, not_sent, write_failure};
+use crate::wire::{
+    Envelope, FUTURES_RATE_CODES, Number, dispatched_write_failure, not_sent, write_failure,
+};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
@@ -165,13 +167,14 @@ struct Job {
     effective: bool,
 }
 impl Job {
-    /// Keeps the first failure's text. An Unknown leg makes the whole command
-    /// Unknown with its details; legs that disagree otherwise leave it unset.
+    /// Keeps the first failure unless an Unknown leg supplies its own text and
+    /// details. Legs that disagree otherwise leave the outcome unset.
     fn record(&mut self, error: VenueError) {
         match &mut self.error {
             None => self.error = Some(error),
             Some(first) if first.outcome == Some(Outcome::Unknown) => {}
             Some(first) if error.outcome == Some(Outcome::Unknown) => {
+                first.message = error.message;
                 first.outcome = error.outcome;
                 first.kind = error.kind;
                 first.venue_code = error.venue_code;
@@ -400,12 +403,10 @@ impl Kucoin {
                 return Err("KuCoin price rounds below the market tick".into());
             }
         }
+        // TS: packages/safe-cex/src/__tests__/reference/kucoin/kucoin.exchange.ts:881-925.
+        // Send one normalized payload; the venue enforces its maximum size.
         let amount = num::adjust(order.amount, market.precision.amount);
-        if order.amount > 0.0
-            && (!positive(amount)
-                || amount < market.limits.amount.min
-                || amount > market.limits.amount.max)
-        {
+        if order.amount > 0.0 && (!positive(amount) || amount < market.limits.amount.min) {
             return Err("KuCoin native lots are outside market limits".into());
         }
         let is_stop = advanced(order.kind);
@@ -1126,6 +1127,7 @@ impl Kucoin {
         if let Ok(row) = &envelope
             && row.code == "400005"
             && !request.retried
+            && (request.step.method == Method::Get || !matches!(status, 408 | 429 | 500..))
         {
             request.retried = true;
             request.position_open = false;
@@ -1134,6 +1136,9 @@ impl Kucoin {
             return;
         }
         if status == 404
+            && envelope
+                .as_ref()
+                .is_ok_and(|row| matches!(row.code, "404" | "404000"))
             && let Call::Cancel {
                 id,
                 fallback: false,
@@ -1365,8 +1370,11 @@ impl Kucoin {
                 self.trading.timer = Some(cx.set_timer(100.0));
                 return;
             }
-            cx.command_error(request.command, &error);
-            let mut error = write_failure(status, body, error);
+            let mut error = if read {
+                write_failure(status, body, error)
+            } else {
+                dispatched_write_failure(status, body, error, FUTURES_RATE_CODES)
+            };
             if confirming {
                 // The cancel was accepted; only its outcome is unproven. Whether
                 // the order still stands is unknown, so nothing replaces it.
@@ -1402,6 +1410,7 @@ impl Kucoin {
                     format!("{gone}: {}", error.message)
                 };
             }
+            cx.command_error(request.command, &error.message);
             job.record(error);
             if !job.keep_going {
                 job.steps.clear();

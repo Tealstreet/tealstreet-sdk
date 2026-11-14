@@ -1,4 +1,4 @@
-import type { EngineHost } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineHost, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
 import { createHmac } from 'node:crypto';
@@ -6,9 +6,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
-import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
+import { assertBetaAccount, assertBetaVenue } from '../../exchanges/rust/betaVenues';
+import { deriveBridgeConstruction, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
+import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from '../../exchanges/rust/legacySigning';
+import { LocalSignerSetup } from '../../exchanges/rust/localSignerSetup';
 import { signHttpCapture } from '../../utils/signHttpCapture';
 import { virtualClock } from '../../utils/virtualClock';
 import { createAPI } from '../reference/woo/woo.api';
@@ -53,8 +55,51 @@ it('admits Woo RemoteSigner through its declaration, while an undeclared venue s
   expect(deriveRemoteSigningPolicy('woo')?.enabled).toBe(true);
   expect(deriveBridgeConstruction('woo', {} as ExchangeOptions).dispatchSigning).toBe(true);
   expect(() => assertBetaAccount('woo', { key: 'fixture-public', secret: '', remoteSigner })).not.toThrow();
-  expect(deriveRemoteSigningPolicy('kraken')?.enabled).not.toBe(true);
-  expect(() => assertBetaAccount('kraken', { key: 'fixture-public', secret: '', remoteSigner })).toThrow();
+  expect(() => assertBetaVenue('mode')).not.toThrow();
+  expect(deriveRemoteSigningPolicy('mode')).toBeUndefined();
+  expect(() => assertBetaAccount('mode', { key: 'fixture-public', secret: '', remoteSigner })).toThrow(/isn't available on the Hosted Server/);
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+});
+
+it.each([
+  { secondary_key: 'fixture-read' },
+  { secondary_key: 'fixture-read', secondary_secret: 'fixture-read-material' },
+  { secondary_secret: 'fixture-read-material' },
+  { secondary_passphrase: 'fixture-read-passphrase' },
+  { localSigner: { secondary: {} } },
+])('refuses private WOO secondary RemoteSigner setup before native construction or callbacks: %j', (secondary) => {
+  const remoteSigner = { sign: vi.fn(), isAvailable: vi.fn(() => true), onAvailabilityChange: vi.fn(() => () => {}) };
+  const Constructor = vi.fn();
+  let setup: DelegatedSignerSetup | undefined;
+  try {
+    expect(() => {
+      setup = new DelegatedSignerSetup('woo', { key: 'fixture-public', secret: '', remoteSigner, ...secondary });
+      setup.construct(Constructor as unknown as new (venue: string, options: string) => WasmEngineLike, 'woo', '{}');
+    }).toThrowError(expect.objectContaining({
+      kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('WOO X secondary read keys'),
+    }));
+    expect(Constructor).not.toHaveBeenCalled();
+    expect(remoteSigner.sign).not.toHaveBeenCalled();
+    expect(remoteSigner.isAvailable).not.toHaveBeenCalled();
+    expect(remoteSigner.onAvailabilityChange).not.toHaveBeenCalled();
+  } finally {
+    setup?.dispose();
+  }
+});
+
+it('preserves WOO primary remote setup, local read keys and slot-aware hosted families', () => {
+  const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
+  const options = { key: 'fixture-public', secret: 'fixture-material', secondary_key: 'fixture-read', secondary_secret: 'fixture-read-material' };
+  const local = new LocalSignerSetup(options, deriveSignerSetupPolicy('woo'));
+  expect(local.hasSecondary).toBe(true);
+  expect(local.primaryComplete).toBe(true);
+  local.dispose();
+  for (const [name, secondary] of [['woo', {}], ['kucoin', { secondary_key: 'fixture-read' }], ['backpack', { secondary_key: 'fixture-read' }]] as const) {
+    const setup = new DelegatedSignerSetup(name, { key: 'fixture-public', secret: '', remoteSigner, ...secondary });
+    expect(setup.primaryComplete).toBe(true);
+    expect(setup.hasSecondary).toBe(name !== 'woo');
+    setup.dispose();
+  }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 

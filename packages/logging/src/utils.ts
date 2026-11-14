@@ -5,9 +5,9 @@ import { LogSeverity } from './LogSeverity';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const stringifyMessage = (str: any) => (needsStringification(str) ? JSON.stringify(str) : str);
+const stringifyMessage = (str: unknown) => (needsStringification(str) ? JSON.stringify(str) : str);
 
-const needsStringification = (str: any) =>
+const needsStringification = (str: unknown) =>
   typeof str == 'string' ||
   typeof str == 'number' ||
   typeof str == 'boolean' ||
@@ -17,15 +17,20 @@ const needsStringification = (str: any) =>
     ? false
     : Boolean(Array.isArray(str) || typeof str == 'object');
 
-let logQueue: Array<[string, string, { level: string }]> = [];
+type LoggingOwner = { userId: string; epoch: number };
+type QueuedLogEntry = { owner: LoggingOwner; value: [string, string, { level: string }] };
+type LogBatch = { owner: LoggingOwner; entries: QueuedLogEntry[] };
+
+let logQueue: QueuedLogEntry[] = [];
 let logQueueSizeApprox = 0;
 let localUserId = '';
 let localUsername: string | undefined;
 let sessionKey = nanoid();
 let flushInterval: ReturnType<typeof setInterval> | undefined;
 let visibilityListener: (() => void) | undefined;
+let onlineListener: (() => void) | undefined;
 let uploadInProgress = false;
-let pendingLogBatches: Array<typeof logQueue> = [];
+let pendingLogBatches: LogBatch[] = [];
 
 const LOG_FLUSH_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 5;
@@ -43,6 +48,16 @@ type LoggingMetrics = {
   retries: number;
 };
 
+const loggingMetricNames = [
+  'generatedEvents',
+  'generatedBytes',
+  'pressureFlushes',
+  'droppedBatches',
+  'uploadsStarted',
+  'uploadsSucceeded',
+  'retries',
+] satisfies Array<keyof LoggingMetrics>;
+
 let loggingMetrics: LoggingMetrics = {
   generatedEvents: 0,
   generatedBytes: 0,
@@ -59,10 +74,24 @@ type LogIngestToken = {
   token: string;
 };
 
-let cachedLogIngestToken: LogIngestToken | undefined;
-let logIngestTokenRequest: Promise<LogIngestToken> | undefined;
+type OwnedLogIngestToken = LogIngestToken & LoggingOwner;
+let cachedLogIngestToken: OwnedLogIngestToken | undefined;
+let logIngestTokenRequest: { userId: string; epoch: number; promise: Promise<LogIngestToken | undefined> } | undefined;
+let logIngestTokenEpoch = 0;
 
 const LOG_INGEST_TOKEN_REFRESH_SKEW_MS = 60_000;
+
+function resetLogIngestToken() {
+  logIngestTokenEpoch++;
+  cachedLogIngestToken = undefined;
+  logIngestTokenRequest = undefined;
+}
+
+const isLoggingOwnerCurrent = (userId: string, epoch: number) =>
+  userId === localUserId && epoch === logIngestTokenEpoch;
+
+const sameLoggingOwner = (left: LoggingOwner, right: LoggingOwner) =>
+  left.userId === right.userId && left.epoch === right.epoch;
 
 export const getSessionKey = () => sessionKey;
 
@@ -75,8 +104,7 @@ export const resetLoggingStateForTests = () => {
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
   uploadInProgress = false;
-  cachedLogIngestToken = undefined;
-  logIngestTokenRequest = undefined;
+  resetLogIngestToken();
 };
 
 function splitStringByBytes(input: string, byteSize: number = 200000): string[] {
@@ -119,13 +147,16 @@ const pushLogsToQueue = (level: LogSeverity, rawMessage: string) => {
       }
 
       if (finalMessage) {
-        logQueue.push([
-          date,
-          finalMessage,
-          {
-            level: level === LogSeverity.Error ? 'ERROR' : level === LogSeverity.Warning ? 'WARN' : 'INFO',
-          },
-        ]);
+        logQueue.push({
+          owner: { userId: localUserId, epoch: logIngestTokenEpoch },
+          value: [
+            date,
+            finalMessage,
+            {
+              level: level === LogSeverity.Error ? 'ERROR' : level === LogSeverity.Warning ? 'WARN' : 'INFO',
+            },
+          ],
+        });
       }
 
       logQueueSizeApprox += finalMessage.length;
@@ -144,21 +175,41 @@ export const dumpLogQueue = () => {
   logQueueSizeApprox = 0;
   if (ir.length === 0) return;
 
-  // A noisy source can pressure-flush faster than the network can complete.
-  // Keep only a bounded amount of diagnostic data and never fan it out into
-  // parallel Vercel function invocations.
-  if (pendingLogBatches.length >= MAX_PENDING_LOG_BATCHES) {
-    pendingLogBatches.shift();
-    loggingMetrics.droppedBatches++;
-    console.warn('[Logging] Dropped oldest pending batch because the upload queue is full');
+  const batches: LogBatch[] = [];
+  for (const entry of ir) {
+    const batch = batches.find((candidate) => sameLoggingOwner(candidate.owner, entry.owner));
+    if (batch) batch.entries.push(entry);
+    else batches.push({ owner: entry.owner, entries: [entry] });
   }
-  pendingLogBatches.push(ir);
+  for (const batch of batches) {
+    // Bound pending data while one upload is in progress.
+    if (pendingLogBatches.length >= MAX_PENDING_LOG_BATCHES) {
+      pendingLogBatches.shift();
+      loggingMetrics.droppedBatches++;
+      console.warn('[Logging] Dropped oldest pending batch because the upload queue is full');
+    }
+    pendingLogBatches.push(batch);
+  }
   void drainLogBatches();
 };
 
+function discardLoggingOwnerWork() {
+  // A held token does not authorize deferred work after its lifecycle ends.
+  // In-flight uploads also recheck their captured owner after each await.
+  logQueue = [];
+  logQueueSizeApprox = 0;
+  pendingLogBatches = [];
+}
+
 export const startLoggingToGrafana = (userId: string, username?: string) => {
+  if (userId !== localUserId) {
+    discardLoggingOwnerWork();
+    resetLogIngestToken();
+  }
   localUserId = userId;
   localUsername = username;
+  const owner = { userId, epoch: logIngestTokenEpoch };
+  const isCurrentOwner = () => isLoggingOwnerCurrent(owner.userId, owner.epoch);
 
   if (flushInterval) {
     clearInterval(flushInterval);
@@ -166,8 +217,12 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
   if (visibilityListener && typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', visibilityListener);
   }
+  if (onlineListener && typeof window !== 'undefined') {
+    window.removeEventListener('online', onlineListener);
+  }
 
   const flushIfVisible = () => {
+    if (!isCurrentOwner()) return;
     if (typeof document === 'undefined' || document.visibilityState === 'visible') {
       dumpLogQueue();
     }
@@ -175,14 +230,18 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
 
   const activeFlushInterval = setInterval(flushIfVisible, LOG_FLUSH_INTERVAL_MS);
   const activeVisibilityListener = () => {
+    if (!isCurrentOwner()) return;
     if (document.visibilityState === 'visible') {
       flushIfVisible();
       void drainLogBatches();
     }
   };
-  const activeOnlineListener = () => void drainLogBatches();
+  const activeOnlineListener = () => {
+    if (isCurrentOwner()) void drainLogBatches();
+  };
   flushInterval = activeFlushInterval;
   visibilityListener = activeVisibilityListener;
+  onlineListener = activeOnlineListener;
 
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', activeVisibilityListener);
@@ -193,13 +252,20 @@ export const startLoggingToGrafana = (userId: string, username?: string) => {
     if (flushInterval === activeFlushInterval) {
       clearInterval(activeFlushInterval);
       flushInterval = undefined;
-      localUserId = '';
-      localUsername = undefined;
+      if (isCurrentOwner()) {
+        discardLoggingOwnerWork();
+        localUserId = '';
+        localUsername = undefined;
+        resetLogIngestToken();
+      }
     }
     if (visibilityListener === activeVisibilityListener && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', activeVisibilityListener);
-      window.removeEventListener('online', activeOnlineListener);
       visibilityListener = undefined;
+    }
+    if (onlineListener === activeOnlineListener && typeof window !== 'undefined') {
+      window.removeEventListener('online', activeOnlineListener);
+      onlineListener = undefined;
     }
   };
 };
@@ -215,53 +281,80 @@ const getLogIngestOrigin = () => {
   return origin?.replace(/\/+$/, '') || undefined;
 };
 
-const getLogIngestToken = async (baseUrl: string) => {
-  if (cachedLogIngestToken && cachedLogIngestToken.expiresAt - Date.now() > LOG_INGEST_TOKEN_REFRESH_SKEW_MS) {
+const getLogIngestToken = async (baseUrl: string, { userId, epoch }: LoggingOwner) => {
+  if (!isLoggingOwnerCurrent(userId, epoch)) return undefined;
+  if (
+    cachedLogIngestToken?.userId === userId &&
+    cachedLogIngestToken.epoch === epoch &&
+    cachedLogIngestToken.expiresAt - Date.now() > LOG_INGEST_TOKEN_REFRESH_SKEW_MS
+  ) {
     return cachedLogIngestToken.token;
   }
 
-  if (!logIngestTokenRequest) {
-    logIngestTokenRequest = fetch(`${baseUrl}/api/logs/token`, { credentials: 'same-origin' })
+  if (logIngestTokenRequest?.userId !== userId || logIngestTokenRequest.epoch !== epoch) {
+    const request: Promise<LogIngestToken | undefined> = fetch(`${baseUrl}/api/logs/token`, {
+      credentials: 'same-origin',
+    })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`Log token API responded with status ${response.status}`);
         }
 
-        const payload = (await response.json()) as Partial<LogIngestToken>;
-        if (typeof payload.token !== 'string' || typeof payload.expiresAt !== 'number') {
+        const payload: unknown = await response.json();
+        if (
+          !payload ||
+          typeof payload !== 'object' ||
+          !('token' in payload) ||
+          !('expiresAt' in payload) ||
+          typeof payload.token !== 'string' ||
+          typeof payload.expiresAt !== 'number'
+        ) {
           throw new Error('Log token API returned an invalid response');
         }
 
-        cachedLogIngestToken = { expiresAt: payload.expiresAt, token: payload.token };
+        if (!isLoggingOwnerCurrent(userId, epoch)) return undefined;
+        cachedLogIngestToken = { expiresAt: payload.expiresAt, token: payload.token, userId, epoch };
         return cachedLogIngestToken;
       })
       .finally(() => {
-        logIngestTokenRequest = undefined;
+        if (logIngestTokenRequest?.promise === request) logIngestTokenRequest = undefined;
       });
+    logIngestTokenRequest = { userId, epoch, promise: request };
   }
 
-  return (await logIngestTokenRequest).token;
+  return (await logIngestTokenRequest.promise)?.token;
 };
 
 const drainLogBatches = async () => {
   if (uploadInProgress) return;
+  const owner = { userId: localUserId, epoch: logIngestTokenEpoch };
   uploadInProgress = true;
   try {
-    while (pendingLogBatches.length > 0) {
+    while (pendingLogBatches.length > 0 && isLoggingOwnerCurrent(owner.userId, owner.epoch)) {
       if (!isPageReadyForLogging()) return;
       const batch = pendingLogBatches[0];
       if (batch) {
-        const complete = await sendToGrafana(localUserId, batch);
+        if (!sameLoggingOwner(batch.owner, owner)) {
+          pendingLogBatches.shift();
+          continue;
+        }
+        const complete = await sendToGrafana(batch);
         if (!complete) return;
-        pendingLogBatches.shift();
+        pendingLogBatches = pendingLogBatches.filter((pending) => pending !== batch);
       }
     }
   } finally {
     uploadInProgress = false;
+    if (!isLoggingOwnerCurrent(owner.userId, owner.epoch) && pendingLogBatches.length > 0) {
+      void drainLogBatches();
+    }
   }
 };
 
-const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<boolean> => {
+const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
+  const { userId, epoch: ownerEpoch } = batch.owner;
+  const queue = batch.entries.filter((entry) => sameLoggingOwner(entry.owner, batch.owner)).map((entry) => entry.value);
+  const isAuthorized = () => isLoggingOwnerCurrent(userId, ownerEpoch);
   // Skip logging in development unless explicitly forced
   // Default to logging if process is undefined (e.g., in web workers)
   let isDevelopment = false;
@@ -280,7 +373,9 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
   }
   if (queue.length === 0) return true;
 
-  for (let retries = 0; retries <= MAX_RETRIES; retries++) {
+  const maxRetries = MAX_RETRIES;
+  for (let retries = 0; retries <= maxRetries; retries++) {
+    if (!isAuthorized()) return true;
     if (!isPageReadyForLogging()) return false;
     const reportMetrics = Date.now() - lastMetricsReportAt >= METRICS_REPORT_INTERVAL_MS;
     const metricsSnapshot = reportMetrics ? { ...loggingMetrics } : undefined;
@@ -315,26 +410,34 @@ const sendToGrafana = async (userId: string, queue: typeof logQueue): Promise<bo
       const logIngestOrigin = getLogIngestOrigin();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (logIngestOrigin) {
-        headers.Authorization = `Bearer ${await getLogIngestToken(baseUrl)}`;
+        const token = await getLogIngestToken(baseUrl, batch.owner);
+        if (!token || !isAuthorized()) return true;
+        headers.Authorization = `Bearer ${token}`;
       }
 
+      const body = await compress(JSON.stringify(nr));
+      if (!isAuthorized()) return true;
       const response = await fetch(logIngestOrigin ? `${logIngestOrigin}/v1/logs` : `${baseUrl}/api/logs`, {
         method: 'POST',
-        body: await compress(JSON.stringify(nr)),
+        body,
         headers,
       });
+      if (!isAuthorized()) return true;
       if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
-      loggingMetrics.uploadsSucceeded++;
-      if (metricsSnapshot) {
-        for (const key of Object.keys(metricsSnapshot) as Array<keyof LoggingMetrics>) {
-          loggingMetrics[key] = Math.max(0, loggingMetrics[key] - metricsSnapshot[key]);
+      if (isLoggingOwnerCurrent(userId, ownerEpoch)) {
+        loggingMetrics.uploadsSucceeded++;
+        if (metricsSnapshot) {
+          for (const key of loggingMetricNames) {
+            loggingMetrics[key] = Math.max(0, loggingMetrics[key] - metricsSnapshot[key]);
+          }
+          lastMetricsReportAt = Date.now();
         }
-        lastMetricsReportAt = Date.now();
       }
       return true;
     } catch (error) {
-      if (retries === MAX_RETRIES) {
-        console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${MAX_RETRIES} retries`);
+      if (!isAuthorized()) return true;
+      if (retries === maxRetries) {
+        console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${maxRetries} retries`);
         return true;
       }
       const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 /**
  * ENFORCEMENT: a CLI trading command does not write to a venue directly.
@@ -24,10 +25,68 @@ import { describe, expect, it } from 'vitest';
 
 const COMMANDS_DIR = path.resolve(__dirname, '../commands');
 
-/** A placement call, capturing what it opens with. `if (!exchange.placeOrder)`
- *  and `const placeOrder = exchange.placeOrder;` have no `(` after the name
- *  and do not match. */
-const PLACEMENT_CALL = /\bplaceOrders?[!?]?\s*\(\s*([A-Za-z_$]*)/g;
+const placementCalls = (source: string): ts.CallExpression[] => {
+  const file = ts.createSourceFile('command.ts', source, ts.ScriptTarget.Latest, true);
+  const calls: ts.CallExpression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      let callee = node.expression;
+      if (ts.isNonNullExpression(callee)) callee = callee.expression;
+      const name = ts.isPropertyAccessExpression(callee)
+        ? callee.name.text
+        : ts.isIdentifier(callee)
+          ? callee.text
+          : '';
+      if (name === 'placeOrder' || name === 'placeOrders') calls.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return calls;
+};
+
+// Trace const payloads back to shared preparation, including an order taken
+// from a preflighted array. This permits validation before the first write
+// without accepting arbitrary raw payloads or widening the sender allowlist.
+const isPrepared = (value: ts.Expression, location: ts.Node, batch: boolean): boolean => {
+  if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+    return value.expression.text === (batch ? 'prepareCliOrders' : 'prepareCliOrder');
+  }
+  if (!ts.isIdentifier(value)) return false;
+  for (let scope: ts.Node | undefined = location.parent; scope; scope = scope.parent) {
+    if (
+      !batch &&
+      ts.isForOfStatement(scope) &&
+      ts.isVariableDeclarationList(scope.initializer) &&
+      scope.initializer.flags & ts.NodeFlags.Const
+    ) {
+      const binding = scope.initializer.declarations[0]?.name;
+      if (binding && ts.isIdentifier(binding) && binding.text === value.text) {
+        return isPrepared(scope.expression, scope, true);
+      }
+    }
+    if (ts.isBlock(scope)) {
+      for (const statement of scope.statements) {
+        if (statement.getStart() >= location.getStart()) break;
+        if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          if (ts.isIdentifier(declaration.name) && declaration.name.text === value.text) {
+            return !!declaration.initializer && isPrepared(declaration.initializer, declaration, batch);
+          }
+        }
+      }
+    }
+  }
+  return false;
+};
+
+const hasPreparedPayload = (call: ts.CallExpression): boolean => {
+  const payload = call.arguments[0];
+  let callee = call.expression;
+  if (ts.isNonNullExpression(callee)) callee = callee.expression;
+  const name = ts.isPropertyAccessExpression(callee) ? callee.name.text : callee.getText();
+  return !!payload && isPrepared(payload, call, name === 'placeOrders');
+};
 
 /** Amends carry only a price, and the value is nested inside an object
  *  literal, so this one stays per-file. */
@@ -66,19 +125,17 @@ const HOW = (verb: string, call: string): string =>
   `scripts all get. Wrap the payload: ${call}`;
 
 describe('CLI commands write through the shared order policy', () => {
-  it('every placement call opens with prepareCliOrder(s)', () => {
+  it('every placement call uses a payload prepared by the shared order policy', () => {
     const offenders: string[] = [];
     for (const { rel, source } of sourceFiles()) {
-      for (const match of source.matchAll(PLACEMENT_CALL)) {
-        if (!match[1].startsWith('prepareCli')) {
-          const line = source.slice(0, match.index).split('\n').length;
+      for (const call of placementCalls(source)) {
+        if (!hasPreparedPayload(call)) {
+          const line = source.slice(0, call.getStart()).split('\n').length;
           offenders.push(`${rel}:${line}`);
         }
       }
     }
-    expect(offenders.sort(), HOW('placing an order', '`exchange.placeOrder(prepareCliOrder(exchange, order))`')).toEqual(
-      [],
-    );
+    expect(offenders.sort(), HOW('placing an order', '`prepareCliOrder(s)(exchange, payload)`')).toEqual([]);
   });
 
   it('every command that amends an order rounds the new price', () => {
@@ -89,12 +146,33 @@ describe('CLI commands write through the shared order policy', () => {
     expect(offenders, HOW('amending an order', '`prepareCliAmendPrice(exchange, symbol, price)`')).toEqual([]);
   });
 
-  it('the detectors match real calls and ignore the guards beside them', () => {
-    const hits = (src: string) => [...src.matchAll(PLACEMENT_CALL)].map((m) => m[1]);
-    expect(hits('await exchange.placeOrder!(prepareCliOrder(exchange, order))')).toEqual(['prepareCliOrder']);
-    expect(hits('await placeOrder(order)')).toEqual(['order']);
-    expect(hits('if (!exchange.placeOrder) {')).toEqual([]);
-    expect(hits('const placeOrder = exchange.placeOrder;')).toEqual([]);
+  it('the detectors match real calls and ignore guards, declarations and comments', () => {
+    expect(placementCalls('await exchange.placeOrder!(prepareCliOrder(exchange, order))')).toHaveLength(1);
+    expect(placementCalls('await placeOrder(order)')).toHaveLength(1);
+    expect(placementCalls('if (!exchange.placeOrder) {}')).toHaveLength(0);
+    expect(placementCalls('const placeOrder = exchange.placeOrder;')).toHaveLength(0);
+    expect(placementCalls('// exchange.placeOrder(raw)')).toHaveLength(0);
     expect(AMEND_CALL.test('await ctx.exchange.updateOrder({ order, update })')).toBe(true);
+  });
+
+  it.each([
+    'exchange.placeOrder(prepareCliOrder(exchange, raw))',
+    'exchange.placeOrders(prepareCliOrders(exchange, raw))',
+    'const batch = prepareCliOrders(exchange, raw); exchange.placeOrders(batch)',
+    'const batch = prepareCliOrders(exchange, raw); for (const order of batch) exchange.placeOrder(order)',
+  ])('accepts payloads traced to shared preparation: %s', (source) => {
+    const [call] = placementCalls(`async function submit() { ${source} }`);
+    expect(hasPreparedPayload(call)).toBe(true);
+  });
+
+  it.each([
+    'exchange.placeOrder(raw)',
+    'const batch = raw; for (const order of batch) exchange.placeOrder(order)',
+    'let batch = prepareCliOrders(exchange, raw); exchange.placeOrders(batch)',
+    'exchange.placeOrders(batch); const batch = prepareCliOrders(exchange, raw)',
+    'const batch = prepareCliOrders(exchange, raw); exchange.placeOrder(batch)',
+  ])('rejects payloads without prior shared preparation: %s', (source) => {
+    const [call] = placementCalls(`async function submit() { ${source} }`);
+    expect(hasPreparedPayload(call)).toBe(false);
   });
 });

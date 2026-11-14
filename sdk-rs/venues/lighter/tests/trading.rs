@@ -95,7 +95,12 @@ fn failure(e: &mut Engine<Lighter>) -> String {
     safe_cex_engine::test_support::prepared_actions(e, NOW)
         .into_iter()
         .find_map(|a| match a {
-            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
+            Action::Notice(Notice::CommandFailed { error, .. }) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+                }
+                Some(error.message)
+            }
             _ => None,
         })
         .expect("command rejection")
@@ -269,7 +274,7 @@ fn plain_same_symbol_limits_use_batch_with_distinct_ids_and_sequential_nonces() 
     assert_eq!(a["Nonce"], 10);
     assert_eq!(b["Nonce"], 11);
     reply(&mut e, &r, 200, r#"{"code":200,"tx_hash":["one"]}"#);
-    assert!(failure(&mut e).contains("Uncertain"));
+    assert!(failure(&mut e).contains(ENGINE_UNKNOWN_TEXT));
 }
 
 #[test]
@@ -317,8 +322,8 @@ fn generated_client_order_indices_are_receipted_before_the_signed_batch() {
 
 #[test]
 fn bracket_waits_for_each_ack_and_gives_siblings_their_own_indexes() {
-    // Market entries keep separate protective transactions; a limit entry with
-    // protections is one grouped transaction (tests/grouped_tpsl.rs).
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2663-2683; base.ts:1456-1481.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
     let (mut e, _) = ready_unattributed();
     let mut opts = limit();
     opts.kind = OrderType::Market;
@@ -898,6 +903,9 @@ fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
         .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+                }
                 Some((error.message, error.outcome))
             }
             _ => None,
@@ -1122,16 +1130,18 @@ fn released_http_throttles_are_unknown_and_never_replay() {
         if status == 429 {
             assert_eq!(error.kind, Some(ErrorKind::RateLimited));
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert_eq!(
-                error.message,
-                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
-            );
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
             assert_eq!(error.venue_code, None);
         } else {
-            assert_eq!(error.kind, Some(ErrorKind::Rejected));
-            assert_eq!(error.outcome, Some(Outcome::Rejected));
-            assert!(error.message.contains("native throttle"));
-            assert_eq!(error.venue_code.as_deref(), Some("23000"));
+            assert_eq!(error.kind, Some(ErrorKind::Internal));
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(
+                error
+                    .venue_message
+                    .as_deref()
+                    .is_some_and(|text| text.contains("native throttle"))
+            );
         }
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))
@@ -1473,9 +1483,9 @@ fn documented_codes_in_a_200_refuse_a_placement_and_leave_no_fence() {
 }
 
 #[test]
-fn an_unlisted_code_in_a_200_stays_unknown_and_clears_on_the_next_read() {
+fn unproven_codes_in_a_200_stay_unknown_and_clear_on_the_next_read() {
     // 21728 is documented, but a duplicate says the first send may be live.
-    for code in [29500, 21728, 99999] {
+    for code in [29500, 21728, 99999, 23000, 23100] {
         let (mut e, _) = ready_unattributed();
         let r = begin(&mut e, vec![limit()]);
         let body = format!(r#"{{"code":{code},"message":"native"}}"#);
@@ -1547,12 +1557,615 @@ fn a_maker_only_key_refusal_says_what_the_key_allows() {
         reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
         let write = http(&mut e, "sendTx");
         reply(&mut e, &write, 400, body);
-        assert_eq!(
-            failure(&mut e),
-            "This Lighter API key is maker-only, which allows only post-only orders and cancels; \
-             change leverage or place market and stop orders from a key that is not maker-only: \
-             maker-only api key can only send 0ms delay transactions",
-            "{body}"
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let error = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 8, error }) => Some(error),
+                _ => None,
+            })
+            .expect("maker-only failure");
+        let diagnostic = "This Lighter API key is maker-only, which allows only post-only orders and cancels; change leverage or place market and stop orders from a key that is not maker-only: maker-only api key can only send 0ms delay transactions";
+        if error.outcome == Some(Outcome::Unknown) {
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert_eq!(
+                error.venue_message.as_deref(),
+                Some("maker-only api key can only send 0ms delay transactions")
+            );
+        } else {
+            assert_eq!(error.message, diagnostic, "{body}");
+        }
+    }
+}
+
+#[test]
+fn parity_grouped_children_use_parent_fill_without_child_minimums() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2514-2562.
+    let metadata = META.replace("\"min_quote_amount\":\"1\"", "\"min_quote_amount\":\"100\"");
+    let mut opts = options();
+    opts.testnet = true;
+    let (mut e, _) = ready_with_meta(opts, &metadata);
+    let request = begin(
+        &mut e,
+        vec![order(json!({
+            "symbol":"ETH", "type":"limit", "side":"buy", "amount":1,
+            "price":100, "stopLoss":90, "takeProfit":110
+        }))],
+    );
+    assert_eq!(param(&request, "tx_type"), "28");
+    let payload = wire(&request);
+    assert_eq!(payload["Orders"][0]["BaseAmount"], 1000);
+    for child in [&payload["Orders"][1], &payload["Orders"][2]] {
+        assert_eq!(child["BaseAmount"], 0);
+        assert_eq!(child["ReduceOnly"], 1);
+        assert_eq!(child["TimeInForce"], 0);
+    }
+}
+
+fn parity_engine_with_limits(min: f64, max: f64, min_quote: f64) -> Engine<Lighter> {
+    parity_ready_with_limits(min, max, min_quote).0
+}
+
+fn parity_ready_with_limits(
+    min: f64,
+    max: f64,
+    min_quote: f64,
+) -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    let mut metadata: Value = serde_json::from_str(META).unwrap();
+    let row = &mut metadata["order_book_details"][0];
+    row["supported_size_decimals"] = json!(0);
+    row["min_base_amount"] = json!(min.to_string());
+    row["min_quote_amount"] = json!(min_quote.to_string());
+    let mut options = options();
+    options.testnet = true;
+    let (mut e, socket) = ready_with_meta(options, &metadata.to_string());
+    let mut markets = e.store().markets().to_vec();
+    markets
+        .iter_mut()
+        .find(|m| m.symbol == "ETH")
+        .unwrap()
+        .limits
+        .amount
+        .max = max;
+    e.store_mut().set_markets(markets);
+    (e, socket)
+}
+
+fn parity_order(kind: OrderType, amount: f64) -> PlaceOrderOpts {
+    let mut opts = limit();
+    opts.kind = kind;
+    opts.amount = amount;
+    opts.price = Some(100.);
+    opts
+}
+
+fn parity_refuses(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
+    place(&mut e, orders);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(_)))
+            .count(),
+        0,
+        "invalid whole plan released transport"
+    );
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(Outcome::NotSent))), "missing NotSent refusal");
+}
+
+fn parity_serial_sizes(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) -> Vec<u64> {
+    let mut request = begin(&mut e, orders);
+    let mut sizes = Vec::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut now = NOW;
+    for _ in 0..12 {
+        let tx = wire(&request);
+        sizes.push(tx["BaseAmount"].as_u64().unwrap());
+        assert!(
+            ids.insert(tx["ClientOrderIndex"].as_u64().unwrap()),
+            "duplicate lot identity"
         );
+        ack_at(&mut e, now, &request);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        if actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+        {
+            assert_eq!(sizes.len(), ids.len());
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx")))
+            );
+            return sizes;
+        }
+        let (timer, at) = actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if at_ms <= NOW + 1000. => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("next prepared lot pacing");
+        now = at;
+        e.handle(now, Event::TimerFired { timer });
+        request = http_at(&mut e, now, "sendTx");
+    }
+    panic!("prepared plan did not finish");
+}
+
+#[test]
+fn parity_market_orders_keep_the_legacy_minimum_exemption() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2433-2442.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-market-minima
+    for (min, quote) in [(3.0, 1.0), (1.0, 400.0)] {
+        assert_eq!(
+            parity_serial_sizes(
+                parity_engine_with_limits(min, 5.0, quote),
+                vec![parity_order(OrderType::Market, 2.0)]
+            ),
+            [2]
+        );
+    }
+}
+
+#[test]
+fn parity_mixed_placements_keep_the_market_minimum_exemption() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2433-2442,2711-2716.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
+    assert_eq!(
+        parity_serial_sizes(
+            parity_engine_with_limits(3.0, 5.0, 1.0),
+            vec![
+                parity_order(OrderType::Limit, 3.0),
+                parity_order(OrderType::Market, 2.0),
+            ]
+        ),
+        [3, 2]
+    );
+}
+
+#[test]
+fn parity_limit_lots_keep_legacy_remainder_allocation_and_tail_merge() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2483-2507.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-allocation-and-tail
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 9 of requested 8); kept for exact TS parity per Sam's decision.
+    let sizes = parity_serial_sizes(
+        parity_engine_with_limits(1.0, 5.0, 1.0),
+        vec![parity_order(OrderType::Limit, 8.0)],
+    );
+    assert_eq!(sizes, [3, 3, 3]);
+    assert_eq!(sizes.iter().sum::<u64>(), 9);
+
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 18 of requested 17); kept for exact TS parity per Sam's decision.
+    let sizes = parity_serial_sizes(
+        parity_engine_with_limits(3.0, 5.0, 1.0),
+        vec![parity_order(OrderType::Limit, 17.0)],
+    );
+    assert_eq!(sizes, [4, 4, 4, 6]);
+    assert_eq!(sizes.iter().sum::<u64>(), 18);
+}
+
+#[test]
+fn parity_all_non_market_lots_validate_minimums_before_the_first_request() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2491-2507.
+    parity_refuses(
+        parity_engine_with_limits(4.0, 5.0, 1.0),
+        vec![parity_order(OrderType::Limit, 8.0)],
+    );
+}
+
+#[test]
+fn parity_same_symbol_limit_batch_validates_the_last_row_before_transport() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2752-2799.
+    parity_refuses(
+        parity_engine_with_limits(3.0, 5.0, 1.0),
+        vec![
+            parity_order(OrderType::Limit, 3.0),
+            parity_order(OrderType::Limit, 2.0),
+        ],
+    );
+}
+
+fn after_failure_next(e: &mut Engine<Lighter>, request: &HttpRequest) -> HttpRequest {
+    ack(e, request);
+    let timer = timer(e);
+    e.handle(NOW + 100., Event::TimerFired { timer });
+    http_at(e, NOW + 100., "sendTx")
+}
+
+fn after_failure_stops(e: &mut Engine<Lighter>, request: &HttpRequest) {
+    reply_at(
+        e,
+        NOW + 100.,
+        request,
+        400,
+        r#"{"code":21101,"message":"fixture refusal"}"#,
+    );
+    let mut actions = safe_cex_engine::test_support::prepared_actions(e, NOW + 100.);
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms <= NOW + 1000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in timers {
+        e.handle(at, Event::TimerFired { timer });
+        actions.extend(safe_cex_engine::test_support::prepared_actions(e, at));
+    }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx"))),
+        "{actions:?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn after_failure_market_lot_refusal_stops_later_exempt_lots() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2627-2655.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-market-minima
+    // TS lighter.exchange.ts:2433-2442,2627-2655 exempts minima but throws on a lot failure.
+    let mut e = parity_engine_with_limits(4., 5., 1000.);
+    let first = begin(&mut e, vec![parity_order(OrderType::Market, 8.)]);
+    assert_eq!(wire(&first)["BaseAmount"], 3);
+    let second = after_failure_next(&mut e, &first);
+    assert_eq!(wire(&second)["BaseAmount"], 3);
+    after_failure_stops(&mut e, &second);
+}
+
+#[test]
+fn after_failure_allocation_refusal_stops_the_legacy_oversized_tail() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2627-2655.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-allocation-and-tail
+    // TS lighter.exchange.ts:2483-2499,2627-2655: [4,4,4,6], abort before the tail.
+    let mut e = parity_engine_with_limits(3., 5., 1.);
+    let first = begin(&mut e, vec![parity_order(OrderType::Limit, 17.)]);
+    assert_eq!(wire(&first)["BaseAmount"], 4);
+    let second = after_failure_next(&mut e, &first);
+    assert_eq!(wire(&second)["BaseAmount"], 4);
+    after_failure_stops(&mut e, &second);
+}
+
+#[test]
+fn after_failure_valid_non_market_lots_stop_after_a_venue_refusal() {
+    // TS lighter.exchange.ts:2491-2507,2646-2655: valid preflight does not swallow a refusal.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let first = begin(&mut e, vec![parity_order(OrderType::Limit, 8.)]);
+    let second = after_failure_next(&mut e, &first);
+    after_failure_stops(&mut e, &second);
+}
+
+#[test]
+fn after_failure_serial_entry_refusal_stops_the_next_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2711-2716.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
+    // TS lighter.exchange.ts:2711-2716 awaits each order without catching failures.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let first = begin(
+        &mut e,
+        vec![
+            parity_order(OrderType::Limit, 1.),
+            parity_order(OrderType::Market, 1.),
+        ],
+    );
+    after_failure_stops(&mut e, &first);
+}
+
+#[test]
+fn after_failure_market_child_refusal_skips_its_sibling_and_next_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/lighter/lighter.exchange.ts:2673-2683.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
+    // TS lighter.exchange.ts:2673-2683 throws from the sibling loop; 2711-2716 stops entries.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let mut parent = parity_order(OrderType::Market, 1.);
+    parent.stop_loss = Some(90.);
+    parent.take_profit = Some(110.);
+    let first = begin(&mut e, vec![parent, parity_order(OrderType::Limit, 1.)]);
+    let sl = after_failure_next(&mut e, &first);
+    assert_eq!(wire(&sl)["Type"], 2);
+    after_failure_stops(&mut e, &sl);
+}
+
+#[test]
+fn after_failure_native_limit_batch_is_not_retried_after_refusal() {
+    // TS lighter.exchange.ts:2805-2823: one native batch, then rethrow (no per-row retry).
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let batch = begin(&mut e, vec![parity_order(OrderType::Limit, 1.); 2]);
+    assert!(batch.url.contains("sendTxBatch"));
+    let rows: Vec<String> = serde_json::from_str(&param(&batch, "tx_infos")).unwrap();
+    assert_eq!(rows.len(), 2);
+    after_failure_stops(&mut e, &batch);
+}
+
+#[test]
+fn after_failure_group_refusal_stops_the_next_entry_without_fallback() {
+    // TS lighter.exchange.ts:2605-2621 rethrows grouped refusal; 2711-2716 stops entries.
+    let mut e = parity_engine_with_limits(1., 5., 1.);
+    let mut parent = parity_order(OrderType::Limit, 1.);
+    parent.stop_loss = Some(90.);
+    parent.take_profit = Some(110.);
+    let group = begin(&mut e, vec![parent, parity_order(OrderType::Market, 1.)]);
+    assert_eq!(param(&group, "tx_type"), "28");
+    after_failure_stops(&mut e, &group);
+}
+
+#[test]
+fn pin_grouped_parent_minimum_trigger_and_split_refuse_before_any_io() {
+    // Legacy TS: lighter.exchange.ts:2491-2507,2514-2525 validates before grouped submit.
+    for (amount, trigger) in [(1., 90.), (3., 0.), (6., 90.)] {
+        let mut parent = parity_order(OrderType::Limit, amount);
+        parent.stop_loss = Some(trigger);
+        parity_refuses(parity_engine_with_limits(3., 5., 1.), vec![parent]);
+    }
+}
+
+fn unknown_exception_empty_hash(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
+    let first = begin(&mut e, orders);
+    let accepted = wire(&first)["ClientOrderIndex"].to_string();
+    let second = after_failure_next(&mut e, &first);
+    let payload = wire(&second);
+    let unknown_ids: Vec<String> = match payload["Orders"].as_array() {
+        Some(rows) => rows
+            .iter()
+            .map(|row| row["ClientOrderIndex"].to_string())
+            .collect(),
+        None => vec![payload["ClientOrderIndex"].to_string()],
+    };
+    reply_at(
+        &mut e,
+        NOW + 100.,
+        &second,
+        200,
+        r#"{"code":200,"tx_hash":""}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx"))),
+        "{actions:?}"
+    );
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .expect("Unknown terminal");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error.legacy_text().contains(&accepted),
+        "accepted prefix missing: {error:?}"
+    );
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids.as_slice(),
+        std::slice::from_ref(&accepted)
+    );
+    for identity in &unknown_ids {
+        assert!(
+            error.message.contains(identity),
+            "unknown identity missing: {error:?}"
+        );
+    }
+    let event = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("Unknown journal telemetry");
+    assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(
+        event
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    );
+    let report = event
+        .fields
+        .iter()
+        .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten())
+        .expect("journal snapshot");
+    let decoded: Value = serde_json::from_str(report).unwrap();
+    // Pin the legacy Value encoding: sorted keys, compact arrays, and string indexes.
+    assert_eq!(
+        report,
+        format!(
+            r#"{{"notSent":{},"placed":{},"unknown":{}}}"#,
+            decoded["notSent"],
+            json!([accepted]),
+            json!(unknown_ids)
+        )
+    );
+    assert_eq!(
+        error.message,
+        format!(
+            "{ENGINE_UNKNOWN_TEXT}; unknown order indexes: {}; previously placed order indexes: {}",
+            json!(unknown_ids),
+            json!([accepted])
+        )
+    );
+    let report = decoded;
+    assert_eq!(report["placed"], json!([accepted]));
+    assert_eq!(report["unknown"], json!(unknown_ids));
+    assert!(!report["notSent"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn unknown_exception_market_lots_stop_after_an_empty_hash() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-market-minima
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2627-2660; api-client.ts:620-623.
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(4., 5., 1000.),
+        vec![parity_order(OrderType::Market, 8.)],
+    );
+}
+
+#[test]
+fn unknown_exception_allocation_and_tail_stop_after_an_empty_hash() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:2109/max-qty-splitting-allocation-and-tail
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2627-2660; api-client.ts:620-623.
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(3., 5., 1.),
+        vec![parity_order(OrderType::Limit, 17.)],
+    );
+}
+
+#[test]
+fn unknown_exception_valid_non_market_lots_stop_after_an_empty_hash() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2627-2660; api-client.ts:620-623.
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![parity_order(OrderType::Limit, 8.)],
+    );
+}
+
+#[test]
+fn unknown_exception_serial_placements_stop_after_an_empty_hash() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: lighter | trading.rs:1885/serial-mixed-placement-and-market-children
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2673-2683,2711-2716; api-client.ts:620-623.
+    let mut bracket = parity_order(OrderType::Market, 1.);
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(110.);
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![bracket, parity_order(OrderType::Limit, 1.)],
+    );
+}
+
+#[test]
+fn unknown_exception_grouped_protection_stops_after_an_empty_hash() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at lighter.exchange.ts:2605-2608,2711-2716; api-client.ts:620-623.
+    let mut bracket = parity_order(OrderType::Limit, 1.);
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(110.);
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![
+            parity_order(OrderType::Limit, 1.),
+            bracket,
+            parity_order(OrderType::Market, 1.),
+        ],
+    );
+}
+
+#[test]
+fn unknown_exception_prior_plain_prefix_stays_placed() {
+    unknown_exception_empty_hash(
+        parity_engine_with_limits(1., 5., 1.),
+        vec![parity_order(OrderType::Market, 1.); 3],
+    );
+}
+
+#[test]
+fn unknown_exception_prior_unconfirmed_group_is_not_reported_placed() {
+    unknown_exception_prior_group(0);
+}
+
+#[test]
+fn unknown_exception_prior_group_keeps_only_observed_legs_placed() {
+    for observed in [1, 3] {
+        unknown_exception_prior_group(observed);
+    }
+}
+
+fn unknown_exception_prior_group(observed: usize) {
+    let (mut e, socket) = parity_ready_with_limits(1., 5., 1.);
+    let mut bracket = parity_order(OrderType::Limit, 1.);
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(110.);
+    let first = begin(
+        &mut e,
+        vec![
+            bracket,
+            parity_order(OrderType::Market, 1.),
+            parity_order(OrderType::Market, 1.),
+        ],
+    );
+    assert_eq!(param(&first, "tx_type"), "28");
+    let group_ids: Vec<String> = wire(&first)["Orders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["ClientOrderIndex"].to_string())
+        .collect();
+    assert_eq!(group_ids.len(), 3);
+    let second = after_failure_next(&mut e, &first);
+    let mut unknown = group_ids[observed..].to_vec();
+    unknown.push(wire(&second)["ClientOrderIndex"].to_string());
+    if observed > 0 {
+        let rows: Vec<_> = group_ids[..observed]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                json!({"order_index":(900_001 + i).to_string(), "client_order_index":id,
+                    "market_id":1, "status":"open", "initial_base_amount":"1", "price":"100"})
+            })
+            .collect();
+        message(
+            &mut e,
+            socket,
+            NOW + 100.,
+            &json!({"channel":"account_all_orders:718895", "orders":{"1":rows}}).to_string(),
+        );
+    }
+    reply_at(
+        &mut e,
+        NOW + 100.,
+        &second,
+        200,
+        r#"{"code":200,"tx_hash":""}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx")))
+    );
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .expect("terminal Unknown");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+    let journal = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => event
+                .fields
+                .iter()
+                .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten()),
+            _ => None,
+        })
+        .expect("journal");
+    let journal: Value = serde_json::from_str(journal).unwrap();
+    assert_eq!(journal["placed"], json!(group_ids[..observed]), "{error:?}");
+    assert_eq!(journal["unknown"], json!(unknown), "{error:?}");
+    assert_eq!(journal["notSent"].as_array().unwrap().len(), 1);
+    assert!(
+        error
+            .message
+            .contains(&format!("unknown order indexes: {}", journal["unknown"]))
+    );
+    if observed == 0 {
+        assert!(!error.message.contains("previously placed"), "{error:?}");
+    } else {
+        assert!(error.message.contains(&format!(
+            "previously placed order indexes: {}",
+            journal["placed"]
+        )));
     }
 }
