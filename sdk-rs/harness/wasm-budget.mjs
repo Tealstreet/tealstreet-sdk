@@ -676,7 +676,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,178,874 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two -Oz; +10 KiB rounds to 2,189,312 B.
   // Preserve the larger 2,190,336 B parent/CI floor, including both shared aliases.
-  lighter: 2_190_336,
+  // #3290 merge bbc40c3cd8ad, CI 43582722154/job 132414117890, artifact 14109099497: 2,185,562 B.
+  // Optimized web/Node/replay maximum + 10 KiB rounded up; retain both aliases and parent floors.
+  lighter: 2_196_480,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
@@ -701,7 +703,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,178,874 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two -Oz; +10 KiB rounds to 2,189,312 B.
   // Preserve the larger 2,190,336 B parent/CI floor, including both shared aliases.
-  'lighter-robinhood': 2_190_336,
+  // Same Lighter artifact 14109099497 and measured maximum; keep the shared alias cap equal.
+  'lighter-robinhood': 2_196_480,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.

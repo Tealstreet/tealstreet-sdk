@@ -3335,3 +3335,22 @@ for (const [venue, family, measured, minimumCap, sha256, parentFloor] of [
     if (family === 'lighter') assert.equal(cap, WASM_VENUE_OVERRIDES['lighter-robinhood']);
   });
 }
+
+// #3290 merge bbc40c3cd8ad, CI 43582722154/job 132414117890, family artifact 14109099497.
+// Source 2cf28d853f16058cb6802e0aec598c43f132cd78; web/Node/replay SHA ca71afa4470420325dfcd035152511607e2f288559cffb6fc25a0e32c66168c4.
+// Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; required two -Oz passes.
+for (const venue of ['lighter', 'lighter-robinhood']) {
+  test(`#3290 merged Lighter artifact 14109099497: ${venue} retains fresh measured reserve`, () => {
+    const measured = 2_185_562;
+    const minimumCap = 2_196_480;
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(venueFamily(venue), 'lighter');
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= 2_190_336, `${venue}: ${cap} must retain both parent floors`);
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+    assert.equal(cap, WASM_VENUE_OVERRIDES.lighter);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
