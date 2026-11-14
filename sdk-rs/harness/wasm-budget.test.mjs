@@ -3365,8 +3365,10 @@ for (const [venue, family, measured, minimumCap, sha256, parentFloor] of [
 // Optimized web/Node 2,314,538 B, SHA256
 // 5c2d9ff5f7489b48ad64307a289aad14b80f40224689fac3bdc9999150b59bc1.
 // Rust1.99.0, bindgen0.2.129, Binaryen132, two required -Oz passes.
+// Fresh composed head 3527907c2249, run 43588966237/job 132429829237/artifact 14111067968:
+// optimized web/Node/replay 2,314,622 B, same profile; the existing measured floor remains valid.
 test('#3226 DRB trading retains current measured reserve and both parent floors', () => {
-  const measured = 2_314_538;
+  const measured = 2_314_622;
   const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
   assert.equal(minimumCap, 2_325_504);
   for (const venue of ['coinbase', 'coinbasespot']) {
