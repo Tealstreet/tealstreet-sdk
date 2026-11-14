@@ -99,7 +99,7 @@ enum Call {
     },
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 struct PartialStopGuard {
     original: Order,
     category: String,

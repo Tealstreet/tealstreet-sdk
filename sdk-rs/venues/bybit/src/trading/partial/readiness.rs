@@ -1,7 +1,6 @@
 //! Live proof access before destroying a frame-fed page's Partial protection.
 use super::{Axis, Page, PartialStopGuard, matches_original, proof};
 use crate::trading::Planned;
-use crate::trading::acknowledgement::{self as ack, Answer};
 use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
 
 pub(in crate::trading) struct Readiness {
@@ -19,9 +18,14 @@ impl Readiness {
     }
 
     pub(in crate::trading) fn matches(&self, guard: &PartialStopGuard) -> bool {
-        let mut current = guard.clone();
-        current.original.last_update = self.guard.original.last_update;
-        current == self.guard
+        // validate() compares the stored original; retain the rebuilt edit's target too.
+        self.guard.category == guard.category
+            && self.guard.position_idx == guard.position_idx
+            && self.guard.symbol == guard.symbol
+            && self.guard.side == guard.side
+            && self.guard.kind == guard.kind
+            && self.guard.price == guard.price
+            && self.guard.reference == guard.reference
     }
 
     pub(in crate::trading) fn planned(&self) -> Option<Planned> {
@@ -54,13 +58,7 @@ impl Readiness {
         if response.status != 200 {
             return Err(failed());
         }
-        let Answer::Success {
-            result: Some(raw), ..
-        } = ack::answer(response.body).map_err(|_| failed())?
-        else {
-            return Err(failed());
-        };
-        let page: Page = serde_json::from_str(raw.get()).map_err(|_| failed())?;
+        let page: Page = super::decode_page(response.body).map_err(|_| failed())?;
         if page.category != self.guard.category
             || page.list.len() > 50
             || page.list.iter().any(|row| row.symbol != self.guard.symbol)

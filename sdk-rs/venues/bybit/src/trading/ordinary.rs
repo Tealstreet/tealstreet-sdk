@@ -55,7 +55,7 @@ pub(crate) struct Ordinary {
     write_credential: Option<Credential>,
     command: Command,
     stage: Stage,
-    protection: Option<partial::Readiness>,
+    protection: Option<Box<partial::Readiness>>,
     hyro: Option<HyroCall>,
 }
 

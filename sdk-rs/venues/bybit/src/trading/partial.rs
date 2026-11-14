@@ -76,6 +76,18 @@ struct Page {
     next_page_cursor: String,
 }
 
+// Share strict decoding between readiness and fresh post-cancel evidence.
+#[inline(never)]
+fn decode_page(body: &str) -> Result<Page, &'static str> {
+    let super::acknowledgement::Answer::Success {
+        result: Some(raw), ..
+    } = super::acknowledgement::answer(body).map_err(|_| "envelope")?
+    else {
+        return Err("envelope");
+    };
+    serde_json::from_str(raw.get()).map_err(|_| "decode")
+}
+
 fn equals(raw: &str, expected: f64) -> bool {
     raw.parse::<f64>()
         .is_ok_and(|n| n.is_finite() && n == expected)
@@ -344,13 +356,7 @@ impl Flow {
         if response.status != 200 {
             return Err(failed(&format!("http={}", response.status)));
         }
-        let super::acknowledgement::Answer::Success {
-            result: Some(raw), ..
-        } = super::acknowledgement::answer(response.body).map_err(|_| failed("envelope"))?
-        else {
-            return Err(failed("envelope"));
-        };
-        let mut page: Page = serde_json::from_str(raw.get()).map_err(|_| failed("decode"))?;
+        let mut page = decode_page(response.body).map_err(failed)?;
         self.observed_at = now;
         if page.category != self.guard.category {
             return Err(failed("category"));

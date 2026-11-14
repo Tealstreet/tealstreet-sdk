@@ -4,6 +4,37 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3513 run 43622387718, artifact 14125280270; source 0a27110da82221143bc3f51377130ae5f98c22ea.
+// sdk-rs tree d1ae9a6dfa82f578465f85541feb6ae013823bc5 equals reviewed b5231048d4.
+// Optimized web/Node SHA256 bd2760d7eaa57e7ef051fa344dc7ff5cb7b23b4791bbd0a971b550087b0b6c41.
+test('#3513 protective preflight retains its measured CI reserve for every Bybit alias', () => {
+  const measured = 2_557_426;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_568_192);
+  for (const venue of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'bybit');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} < ${minimumCap}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
+// Owner-fence fix round: build.sh --venue bybit, Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz.
+// Optimized web/Node SHA256 9c8836adf04d0a678f0725d213ab3a5e6ecad2c62cdf1a98003b23fa6d3b9834.
+test('#3513 owner-fence composition retains its fresh local reserve and higher CI floor', () => {
+  const measured = 2_555_348;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.equal(minimumCap, 2_566_144);
+  assert.ok(cap >= Math.max(minimumCap, 2_568_192));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
 // #3317 run 43457064180 checks integration source 05d55b30c6f7, not just the PR tree.
 // Family job 131994663823 and replay job 131994664428 independently refused these bytes.
 // Current run 43461440513: family 132020005385 and replay 132020005877 agree;

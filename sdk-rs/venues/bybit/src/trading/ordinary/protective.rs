@@ -27,7 +27,9 @@ impl BybitLinear {
                 _ => None,
             });
         if entry.protection.is_none() {
-            entry.protection = guard.cloned().map(partial::Readiness::new);
+            entry.protection = guard
+                .cloned()
+                .map(|guard| Box::new(partial::Readiness::new(guard)));
         }
         let Some(readiness) = &entry.protection else {
             return Ok(None);

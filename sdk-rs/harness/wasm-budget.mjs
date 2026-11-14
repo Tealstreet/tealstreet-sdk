@@ -464,7 +464,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI43591113196/job132437636321, artifact14112214193; source97507acf9371 (head738ee1289).
   // Optimized web/Node 2,553,690 B; SHA256 0174ad6c8a3475d0b410e1405d6a5e9dc6beddd8ef15baa8dc3c8b0bceae3160.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
-  bybit: 2_564_096,
+  // #3513 CI43622387718, artifact14125280270: optimized web/Node 2,557,426 B.
+  // SHA256 bd2760d7eaa57e7ef051fa344dc7ff5cb7b23b4791bbd0a971b550087b0b6c41.
+  // Measured + 10 KiB rounded up; source/tree provenance and boundaries in wasm-budget.test.mjs.
+  bybit: 2_568_192,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
