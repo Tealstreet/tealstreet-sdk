@@ -3223,3 +3223,15 @@ for (const [family, measured, minimumCap, sha256, venues] of [
     }
   });
 }
+
+// #3290 master refresh 78d46f0574ef, CI 43569184535, shipped family artifact 14104151569.
+test('#3290 merged BingX module retains the current measured reserve', () => {
+  const measured = 2_142_207;
+  const minimumCap = 2_152_448;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= minimumCap, `${cap} must retain ${minimumCap} bytes`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
