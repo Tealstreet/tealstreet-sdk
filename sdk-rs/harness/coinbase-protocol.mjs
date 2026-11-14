@@ -54,6 +54,29 @@ export const verifyCoinbaseJwt = (token, { method, path, now = Date.now(), algor
   } catch { return false; }
 };
 
+/** drb `coinbase_cdp` exchange: CDP claims (iss cdp, no aud) for either key type;
+ * HTTP signs the gateway auth URI, the socket login carries none. */
+export const verifyCoinbaseCdpJwt = (token, { uri, now = Date.now() } = {}) => {
+  try {
+    if (typeof token !== 'string' || token.length > 8192 || !Number.isFinite(now)) return false;
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts.every(canonicalPart)) return false;
+    const header = JSON.parse(Buffer.from(parts[0], 'base64url'));
+    const claims = JSON.parse(Buffer.from(parts[1], 'base64url'));
+    if (!Object.hasOwn(keys, header.alg) || header.typ !== 'JWT' || header.kid !== COINBASE_REPLAY.key
+      || typeof header.nonce !== 'string' || !/^[A-Za-z0-9_-]{10,128}$/.test(header.nonce)
+      || claims.sub !== COINBASE_REPLAY.key || claims.iss !== 'cdp' || claims.aud !== undefined
+      || !Number.isSafeInteger(claims.nbf) || !Number.isSafeInteger(claims.exp)
+      || claims.exp - claims.nbf !== 120 || claims.nbf < 0
+      || Math.abs(Math.floor(now / 1000) - claims.nbf) > 5
+      || claims.uri !== uri) return false;
+    const signature = Buffer.from(parts[2], 'base64url');
+    return signature.length === 64 && verify(header.alg === 'ES256' ? 'sha256' : null,
+      Buffer.from(`${parts[0]}.${parts[1]}`),
+      header.alg === 'ES256' ? { key: keys.ES256, dsaEncoding: 'ieee-p1363' } : keys.EdDSA, signature);
+  } catch { return false; }
+};
+
 // TS ES256 awaits WebCrypto's thread pool, which a virtual replay clock cannot
 // order against tape frames or its timers. Sign the same imported P-256 key on
 // the calling thread, so each request resolves in that turn's microtasks.
@@ -95,6 +118,8 @@ export const verifyCoinbaseSubscribe = (message) => {
 };
 
 export const coinbaseSubscription = (message) => {
+  if (message?.method === 'public/auth' && message.params?.grant_type === 'coinbase_cdp')
+    return { ...message, params: { ...message.params, token: '<verified-jwt>' } };
   if (!Object.hasOwn(message, 'jwt')) return message;
   return { ...message, jwt: '<verified-jwt>' };
 };

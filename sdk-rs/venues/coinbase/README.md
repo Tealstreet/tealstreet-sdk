@@ -113,6 +113,81 @@ plus scoped Clippy and a `wasm32-unknown-unknown` check. The foundation suite wa
 run RED against the interface stubs before implementation; additional RED tests
 caught legacy ES256 issuer reuse and delayed-response cooldown timing.
 
+## Private derivatives reads (S2)
+
+Selecting the existing INTX portfolio exchanges the primary CDP key on drb
+before starting S1’s drb catalogue and derivatives account reads. Private
+positions, orders and fills use the catalogue’s native instrument symbols.
+A successful, correlated
+`public/auth` response enables `Coinbase::drb_authenticated()`; a configured
+key or failed exchange does not. Consumers of the INTX retirement notice should
+suppress it only when this hook is true. Spot-only and CFM accounts retain their
+Advanced Trade startup, signing, and socket paths.
+
+`private_drb.rs` owns the HTTP bearer session, independent authenticated main
+WebSocket session, and read contexts. It polls account summary, positions
+(including isolated subaccounts), and open orders (including untriggered OTOCO
+children) and subscribes to `user.changes.future.USDC.100ms`,
+`user.isolated.changes.future.USDC.100ms`, and `user.portfolio.USDC`. It answers
+heartbeat test requests, refreshes with fresh CDP JWTs, and authenticates each
+new socket. Delayed REST snapshots cannot overwrite newer stream observations
+or accepted writes. Malformed account snapshots preserve the last complete
+state. Socket changes without a liquidation estimate or leverage retain the
+last REST values. Isolated position IDs include their native subaccount ID.
+
+The USDC summary exposes equity as total, available funds as free, their
+difference as used, and futures session unrealized PnL as upnl. Position
+contracts use explicit `size_currency`; notional uses base size times mark.
+Linear perpetual order and fill quantities use base-coin units as specified by
+Coinbase's technical migration guide. Nullable liquidation estimates map to the
+engine's unavailable value (zero); absent leverage remains unavailable (zero)
+until an authoritative value is reported. Portfolio margin models refer to
+collateral/risk calculation; isolated positions use the explicit `isolated` flag.
+
+`private_drb_history.rs` serves fills by order, instrument, or account and order
+history by instrument or account. It retains the genuine command Read root
+across recent and historical stages, bounds the walk to 50 pages, deduplicates
+native identities, validates symbol/order filters, and applies inclusive time
+bounds. Fill timestamps remain seconds and historical order times milliseconds,
+matching the existing TypeScript interface. Histories never publish account
+state or live fills. Fills follow native trade sequences/IDs and orders follow
+continuation tokens or documented offsets. Exhausted page bounds are reported
+through the engine's incomplete-history mechanism.
+
+All requests use S0's closed Read method table; this module introduces no
+mutation methods or mutation authority. Trading migration belongs to S3;
+`drb_http_session()` exposes only the opaque engine binding while valid, and
+`drb_ensure_http(cx)` starts/refreshes authentication without consuming a
+trading command's retained root. Trading integrations resume their own waiters
+after the HTTP auth success branch and drain them on definitive auth refusal.
+The old account/trading integration fixtures now run as internal unit fixtures
+with an explicit test-only legacy selector, preserving their shared Spot/CFM
+regression oracles. This selector is absent from production and public Options;
+the new private tests exercise the production drb startup route.
+
+Offline protocol fixtures follow the [technical migration guide](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/derivatives/technical),
+[OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json),
+and [AsyncAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-asyncapi.json).
+No live private authentication, account request, or order is part of validation.
+
+The CI private replay for the `intx` profile (`harness/coinbase-drb-tape.mjs`) runs the
+WASM engine through drb auth, private reads and the private stream. The TS INTX
+implementation is retired and cannot model drb, so that tape is replayed by Rust
+alone and compared against the tape's declared expected account. Its strict result
+stays FAIL with one declared known failure (the retired TS oracle), never parity.
+
+Private read failures retain S0's classified kind and native error fields in
+command failures and startup diagnostics. Rejected credentials terminate the
+startup through `startup_read_refused` and stop further gateway authentication
+attempts; transient network/rate failures retain their classification. Expired
+sessions on an already-loaded account can refresh. This read-error projection
+provides no write resend authority.
+
+Order decoding validates the optional `original_order_type` against the native
+`market`/`market_limit` enum. When the gateway represents one of these orders as
+an internal limit, both live state and history retain the original market type;
+ordinary limits and conditional stop/take/trailing types keep their own type.
+
 ## Public perpetual data (S1)
 
 Keyless derivatives startup discovers active linear USDC perpetual instruments
@@ -162,7 +237,10 @@ their canonical claims and signature bytes. REST-only PayloadSigner can sign
 canonical JWS bytes and returns a 64-byte signature in unpadded base64url;
 private WS auth requires RemoteSigner. Wallet/agent and OAuth credentials are
 separate protocols, not CDP JWT substitutes. The signing-only DRB codec accepts
-CDP issuer claims without changing the S2/S3 session transport under development.
+CDP issuer claims. DRB HTTP and main-WebSocket `public/auth` exchanges sign
+through that installed provider at dispatch, with primary-session authority.
+HTTP tokens bind the DRB auth URI; WebSocket tokens omit it. Both retain the
+existing `coinbase-jws` host format and the gateway's CDP issuer claims.
 Engine-owned signer slots select by request purpose: account/history reads can
 use the read key; catalogue, permission checks, amend proofs and private socket
 authentication use the primary key. A refused read key pins subsequent reads to
