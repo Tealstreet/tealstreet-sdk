@@ -1,9 +1,8 @@
 //! Offline regression oracles for legacy Advanced Trade codecs and trading.
 //! Production INTX startup is covered by private_drb; this unit fixture alone
 //! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.
+use crate::hosted_parity;
 use crate::{Coinbase, Options};
-#[path = "hosted_parity.rs"]
-mod hosted_parity;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::model::*;
 use safe_cex_engine::signing::{
@@ -83,10 +82,7 @@ impl Session {
         )
     }
     fn with_options(kind: &'static str, options: Options) -> Self {
-        let mut venue = Coinbase::new(options).unwrap();
-        venue.account.legacy_protocol_fixture = true;
-        let e = safe_cex_engine::test_support::seeded_engine(venue);
-        Self::with_engine(kind, e)
+        Self::with_engine(kind, hosted_parity::engine(options, true))
     }
     fn with_engine(kind: &'static str, mut e: Engine<Coinbase>) -> Self {
         e.start(1000.0);
@@ -2332,12 +2328,15 @@ fn definite_http_rejection_releases_reservation_and_keeps_coinbase_message() {
 }
 
 fn deferred_session(kind: &'static str, spot: bool) -> (Session, Arc<AtomicBool>) {
-    let mut e = hosted_parity::engine(Options {
-        key: ["organizations", "test", "apiKeys", "test"].join("/"),
-        secret: STANDARD.encode([7; 32]),
-        spot_only: spot,
-        ..Default::default()
-    });
+    let mut e = hosted_parity::engine(
+        Options {
+            key: ["organizations", "test", "apiKeys", "test"].join("/"),
+            secret: STANDARD.encode([7; 32]),
+            spot_only: spot,
+            ..Default::default()
+        },
+        true,
+    );
     let deferred = Arc::new(AtomicBool::new(false));
     e.set_signer(Some(Arc::new(DeferredSigner {
         local: e.signer().unwrap(),

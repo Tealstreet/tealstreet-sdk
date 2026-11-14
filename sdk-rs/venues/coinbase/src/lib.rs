@@ -4,6 +4,9 @@ mod account_wire;
 pub mod drb;
 pub mod drb_auth;
 mod history;
+#[cfg(test)]
+#[path = "../tests/support/hosted_parity.rs"]
+mod hosted_parity;
 mod local_context;
 mod private_drb;
 mod public;

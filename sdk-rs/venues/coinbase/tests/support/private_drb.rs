@@ -94,7 +94,7 @@ struct Rig {
 }
 impl Rig {
     fn new(spot: bool) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(
+        let e = safe_cex_engine::test_support::seeded_engine(
             Coinbase::new(Options {
                 key: "organizations/test/apiKeys/test".into(),
                 secret: STANDARD.encode([7; 32]),
@@ -103,6 +103,9 @@ impl Rig {
             })
             .unwrap(),
         );
+        Self::with_engine(e)
+    }
+    fn with_engine(mut e: Engine<Coinbase>) -> Self {
         e.start(1700000000000.);
         Self {
             e,
@@ -187,7 +190,9 @@ fn trade_row(id: &str, seq: u64) -> Value {
 }
 impl Rig {
     fn ready() -> Self {
-        let mut r = Self::new(false);
+        Self::ready_with(Self::new(false))
+    }
+    fn ready_with(mut r: Self) -> Self {
         r.select_intx();
         let auth = r.request();
         r.rpc(auth,json!({"access_token":"fixture-http-token","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
@@ -1047,4 +1052,75 @@ fn authenticated_gateway_catalogue_failure_never_reports_legacy_migration() {
     )));
     let retry = r.request();
     assert!(retry.url.ends_with("/public/get_instruments"));
+}
+
+use crate::hosted_parity;
+
+fn hosted_rig() -> Rig {
+    Rig::with_engine(hosted_parity::engine(
+        Options {
+            key: ["organizations", "test", "apiKeys", "test"].join("/"),
+            secret: STANDARD.encode([7; 32]),
+            ..Default::default()
+        },
+        false,
+    ))
+}
+
+#[test]
+fn hosted_drb_auth_signs_http_and_socket_tokens_through_the_installed_provider() {
+    let mut initial = hosted_rig();
+    initial.select_intx();
+    initial.collect();
+    assert_eq!(
+        initial
+            .http
+            .iter()
+            .filter(|r| r.url.ends_with("/public/auth"))
+            .count(),
+        1,
+        "hosted INTX startup must release one provider-signed DRB login"
+    );
+    let auth = initial
+        .http
+        .iter()
+        .find(|r| r.url.ends_with("/public/auth"))
+        .unwrap();
+    let body: Value = serde_json::from_str(auth.body.as_deref().unwrap()).unwrap();
+    let claims = |token: &Value| -> Value {
+        let payload = token.as_str().unwrap().split('.').nth(1).unwrap();
+        serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let http = claims(&body["params"]["token"]);
+    assert_eq!(http["iss"], "cdp");
+    assert_eq!(http["uri"], "POST drb.coinbase.com/api/v2/public/auth");
+    assert!(http.get("aud").is_none());
+    let mut ready = Rig::ready_with(hosted_rig());
+    let socket = ready.private_socket();
+    ready.e.handle(ready.now, Event::WsOpened { socket });
+    ready.collect();
+    let sent: Vec<Value> = ready
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { socket: s, text } if *s == socket => {
+                Some(serde_json::from_str(text).unwrap())
+            }
+            _ => None,
+        })
+        .collect();
+    let auth = sent
+        .iter()
+        .find(|body| body["method"] == "public/auth")
+        .expect("provider-signed WS login");
+    let ws = claims(&auth["params"]["token"]);
+    assert_eq!(ws["iss"], "cdp");
+    assert_eq!(ws["sub"], http["sub"]);
+    assert!(ws.get("uri").is_none());
+    assert!(ws.get("aud").is_none());
 }

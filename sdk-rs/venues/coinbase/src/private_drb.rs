@@ -223,7 +223,11 @@ impl Coinbase {
             match cx.open_session(SessionPolicy {
                 credential: None,
                 repeat_safe: false,
-                private_egress: None,
+                private_egress: self
+                    .signers
+                    .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+                    .ok()
+                    .and_then(|(selection, _)| selection.session_egress()),
             }) {
                 Ok(s) => self.private_drb.bearer = Some(s),
                 Err(e) => {
@@ -273,13 +277,18 @@ impl Coinbase {
             return;
         }
         let params = self
-            .credentials
-            .as_ref()
-            .ok_or("drb credentials unavailable".to_owned())
+            .signers
+            .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+            .map(|(_, credentials)| credentials)
+            .map_err(|_| "drb credentials unavailable".to_owned())
             .and_then(|c| {
-                self.private_drb
-                    .http
-                    .params(c, cx.now, |b| cx.fill_signing_entropy(b))
+                if c.identity().is_some() {
+                    Ok(self.private_drb.http.params_to_sign(cx.now))
+                } else {
+                    self.private_drb
+                        .http
+                        .params(c, cx.now, |b| cx.fill_signing_entropy(b))
+                }
             });
         match params {
             Ok(params) => self.drb_read(cx, Kind::Auth, "public/auth", params),
@@ -288,9 +297,22 @@ impl Coinbase {
     }
     fn drb_read(&mut self, cx: &mut Cx<'_, Pending>, kind: Kind, method: &str, params: Value) {
         self.private_drb.now = cx.now;
+        let mut read_policy = policy();
+        let step = if matches!(kind, Kind::Auth) {
+            self.signers
+                .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+                .ok()
+                .and_then(|(selection, credentials)| {
+                    let identity = credentials.identity()?;
+                    read_policy.credential = Some(selection.authority(identity));
+                    credentials.drb_auth_step(drb::Channel::Http)
+                })
+        } else {
+            None
+        };
         let issued = match &kind {
-            Kind::History(h) => cx.http_leg_context(h.owner.root(), policy()),
-            _ => cx.http_live_context(Scope::Background, policy()),
+            Kind::History(h) => cx.http_leg_context(h.owner.root(), read_policy),
+            _ => cx.http_live_context(Scope::Background, read_policy),
         };
         let context = match issued {
             Ok(c) => c,
@@ -326,10 +348,15 @@ impl Coinbase {
             self.drb_http_session()
         }
         .cloned();
-        match self
-            .drb
-            .http(cx, &context, method, params, session.as_ref(), pending)
-        {
+        match self.drb.http_with_signing(
+            cx,
+            &context,
+            method,
+            params,
+            session.as_ref(),
+            step,
+            pending,
+        ) {
             Ok((rpc, _)) => {
                 self.private_drb.pending.insert(
                     ticket,
@@ -658,7 +685,21 @@ impl Coinbase {
             .private_drb
             .socket
             .ok_or("drb private socket unavailable")?;
-        let rpc = self.drb.websocket(cx, socket, method, params)?;
+        let step = if matches!(kind, WsKind::Auth) {
+            self.signers
+                .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+                .ok()
+                .and_then(|(_, credentials)| {
+                    credentials.drb_auth_step(drb::Channel::WebSocket(socket))
+                })
+        } else {
+            None
+        };
+        let rpc = if let Some(step) = step {
+            self.drb.websocket_signed(cx, socket, params, step)?
+        } else {
+            self.drb.websocket(cx, socket, method, params)?
+        };
         self.private_drb.ws_pending.insert(
             rpc,
             WsRequest {
@@ -674,11 +715,15 @@ impl Coinbase {
             .ws
             .as_ref()
             .ok_or("drb private socket unavailable")?;
-        let credentials = self
-            .credentials
-            .as_ref()
-            .ok_or("drb credentials unavailable")?;
-        let params = session.params(credentials, cx.now, |b| cx.fill_signing_entropy(b))?;
+        let (_, credentials) = self
+            .signers
+            .select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+            .map_err(|_| "drb credentials unavailable")?;
+        let params = if credentials.identity().is_some() {
+            session.params_to_sign(cx.now)
+        } else {
+            session.params(credentials, cx.now, |b| cx.fill_signing_entropy(b))?
+        };
         self.drb_ws_send(cx, WsKind::Auth, "public/auth", params)
     }
     pub(crate) fn drb_private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
