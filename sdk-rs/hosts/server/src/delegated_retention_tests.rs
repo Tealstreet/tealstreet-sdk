@@ -662,3 +662,53 @@ async fn an_ambiguous_unjoined_label_never_disposes_a_guessed_identity() {
         })
         .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn earlier_disconnected_alias_still_revokes_resident_and_does_not_touch_another_user() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for resumable in [false, true] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                let (other, mut other_inbox) = resident(&registry, "B");
+                let provider = account.delegated.as_ref().unwrap().provider();
+                for (id, label) in [(8, "phone"), (9, "tablet")] {
+                    assert!(account.hold_label(
+                        id,
+                        Live {
+                            outbox: Arc::new(|_| true),
+                            token: None
+                        },
+                        label
+                    ));
+                }
+                if resumable {
+                    registry.park("earlier-phone".into(), "A", vec![(account.clone(), 8)]);
+                    advance(Duration::from_secs(61)).await;
+                } else {
+                    registry.release(&account, 8, Disposal::SocketClosed);
+                }
+                registry.release(&account, 7, Disposal::SocketClosed);
+                registry.release(&account, 9, Disposal::SocketClosed);
+                advance(Duration::from_secs(61)).await;
+                registry.dispose_delegated("A", "phone");
+                assert_eq!(
+                    registry.account_count(),
+                    1,
+                    "the earlier label must still reach its own retained account"
+                );
+                assert_eq!(
+                    provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                    Capability::Unsupported
+                );
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert!(other_inbox.try_recv().is_err());
+                assert!(registry.holds(&other, 7));
+                registry.dispose(&other, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}

@@ -381,4 +381,53 @@ mod tests {
         assert_eq!(releases.load(Ordering::SeqCst), 2);
         assert!(!resident.admit());
     }
+    #[tokio::test(start_paused = true)]
+    async fn retention_expiry_erases_before_live_handles_and_captured_futures_finish() {
+        let (resident, releases) = resident();
+        let provider = resident.provider();
+        let canonical = resident.signer.state().unwrap().current().unwrap();
+        let deferred = provider.sign(request());
+        resident.retain_until(Instant::now() + Duration::from_secs(48 * 60 * 60));
+        assert!(provider.sign_ready(&request()).unwrap().is_ok());
+        tokio::time::advance(Duration::from_secs(48 * 60 * 60)).await;
+        assert_eq!(
+            provider.sign_ready(&request()),
+            Some(Err(SignError::Unavailable))
+        );
+        assert_eq!(
+            releases.load(Ordering::SeqCst),
+            2,
+            "protected owner erased while both engine handles remain live"
+        );
+        assert_eq!(
+            canonical.sign_ready(&request()),
+            Some(Err(SignError::Unavailable))
+        );
+        assert_eq!(
+            deferred.await,
+            Err(SignError::Unavailable),
+            "no signature captured before expiry may escape after erasure"
+        );
+        assert!(!resident.admit());
+    }
+
+    #[tokio::test]
+    async fn explicit_erase_or_last_owner_drop_refuses_previously_created_future() {
+        for explicit in [true, false] {
+            let (resident, releases) = resident();
+            let provider = resident.provider();
+            let deferred = provider.sign(request());
+            if explicit {
+                resident.erase();
+            } else {
+                drop(resident);
+            }
+            assert_eq!(releases.load(Ordering::SeqCst), 2);
+            assert_eq!(deferred.await, Err(SignError::Unavailable));
+            assert_eq!(
+                provider.sign_ready(&request()),
+                Some(Err(SignError::Unavailable))
+            );
+        }
+    }
 }
