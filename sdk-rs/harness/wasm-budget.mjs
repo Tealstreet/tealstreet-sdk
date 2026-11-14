@@ -766,6 +766,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3314 merge 9bb43250830d: optimized web/Node 2,147,684 B; SHA256 51d351b7ae0e7fcd244447101618ed26006cbf57c276cc06d6f6b00f967a5bd1.
   // build.sh --venue txflow; Rust1.99.0, bindgen0.2.129, Binaryen132 twice -Oz; +10 KiB rounded to KiB.
+  // #3314 refusal fix e959e2a7dc2e: optimized web/Node 2,147,758 B; SHA256 1cb8da3ed26c7486315d8020848de440ce8670fb25ea45fa0fa5e1145e9f88e5.
+  // Same pinned build.sh profile; measured +10 KiB still rounds to 2,158,592 B.
   txflow: 2_158_592,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
