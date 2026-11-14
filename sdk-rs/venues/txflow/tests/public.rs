@@ -1406,3 +1406,46 @@ fn subscription_receipt_matches_the_production_coin_and_instrument_ticker_key() 
     let rows = subscription_receipts(e.snapshot_frame(3001.));
     assert_eq!(receipt(&rows), (3, 1001.));
 }
+
+#[test]
+fn cached_ticker_reapplies_financial_fields_and_renews_only_its_receipt() {
+    let (mut engine, node, api) = ready();
+    let receipt = |frame: &[u8]| {
+        let rows = subscription_receipts(frame);
+        let row = rows
+            .iter()
+            .find(|(topic, _, _)| {
+                let (_, payload) = topic.split_once('.').unwrap();
+                let value: serde_json::Value = serde_json::from_str(payload).unwrap();
+                value["subscription"]["type"] == "ticker"
+                    && value["subscription"]["coin"] == "BTC"
+                    && value["subscription"]["instrumentId"] == 1
+            })
+            .unwrap();
+        (row.1, row.2)
+    };
+    let ticker = r#"{"channel":"ticker","data":{"instrumentId":1,"lastPrice":"990","nodeCtx":{"markPx":"991"}}}"#;
+    message(&mut engine, api, 3000., ticker);
+    assert_eq!(engine.store().ticker("BTC-USDC").unwrap().last, 990.);
+    assert_eq!(receipt(engine.snapshot_frame(3001.)), (3, 1.));
+    message(
+        &mut engine,
+        node,
+        4000.,
+        r#"{"channel":"activeAssetCtx","data":{"coin":"1","ctx":{"lastPrice":"1000","markPx":"1001"}}}"#,
+    );
+    assert_eq!(engine.store().ticker("BTC-USDC").unwrap().last, 1000.);
+    assert_eq!(receipt(engine.snapshot_frame(4001.)), (3, 1001.));
+    message(&mut engine, api, 5000., ticker);
+    let row = engine.store().ticker("BTC-USDC").unwrap();
+    assert_eq!((row.last, row.mark), (990., 991.));
+    assert_eq!(receipt(engine.snapshot_frame(5001.)), (3, 1.));
+    message(
+        &mut engine,
+        api,
+        6000.,
+        r#"{"channel":"ticker","data":{"instrumentId":9,"lastPrice":"999"}}"#,
+    );
+    assert_eq!(engine.store().ticker("BTC-USDC").unwrap().last, 990.);
+    assert_eq!(receipt(engine.snapshot_frame(6001.)), (3, 1001.));
+}
