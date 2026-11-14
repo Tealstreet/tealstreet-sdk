@@ -373,6 +373,7 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
                 (
                     Ok(candidate),
                     Some(ProbedInit {
+                        diagnostic: None,
                         init: admitted,
                         permit: Ok(permit),
                     }),
