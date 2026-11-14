@@ -42,6 +42,8 @@ pub mod es256;
 pub mod ethereum;
 pub mod lighter;
 pub mod nonce;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod protected;
 pub mod secrets;
 pub mod signer;
 pub mod starknet;

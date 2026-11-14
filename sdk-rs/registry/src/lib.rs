@@ -820,6 +820,27 @@ pub fn prepare_local_signer(
 }
 
 /// Trusted legacy setup with the shared family policy applied before installation.
+/// Native protected variant of the same canonical setup, including every
+/// specialized wallet/CDP/read-credential path. Never falls back to plain keys.
+#[cfg(all(feature = "dispatch-signing", not(target_arch = "wasm32")))]
+pub fn prepare_protected_local_signer_for(
+    venue: &str,
+    options: &mut EngineOptions,
+) -> Result<
+    (
+        safe_cex_engine::signing::ProtectedProvider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    let (provider, identities) = prepare_local_signer_for(venue, options)?;
+    let protected = provider
+        .protect()
+        .map_err(|_| invalid("Protected local signer setup unavailable"))?;
+    Ok((protected, identities))
+}
+
+/// Trusted legacy setup with the shared family policy applied before installation.
 #[cfg(feature = "dispatch-signing")]
 pub fn prepare_local_signer_for(
     venue: &str,

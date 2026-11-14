@@ -87,6 +87,25 @@ fn algorithm_for(algorithm: JwtAlgorithm) -> Algorithm {
     }
 }
 impl Signer for Owned {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn protect(
+        self: std::sync::Arc<Self>,
+    ) -> Result<safe_cex_engine::signing::ProtectedProvider, SignError> {
+        let owned = std::sync::Arc::try_unwrap(self).map_err(|_| SignError::InvalidRequest)?;
+        let slots = owned
+            .slots
+            .into_iter()
+            .map(|(id, credentials)| {
+                Ok((
+                    id,
+                    credentials
+                        .into_protected()
+                        .map_err(|_| SignError::Unavailable)?,
+                ))
+            })
+            .collect::<Result<_, SignError>>()?;
+        safe_cex_engine::signing::ProtectedProvider::new(std::sync::Arc::new(Self { slots }))
+    }
     fn immediate(&self) -> bool {
         true
     }

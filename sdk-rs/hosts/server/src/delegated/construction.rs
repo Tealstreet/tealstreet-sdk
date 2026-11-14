@@ -58,7 +58,9 @@ impl DelegatedPair {
 /// This handle neither serializes nor makes another copy of the material.
 #[derive(Clone)]
 pub struct ResidentCopy {
-    provider: Provider,
+    protection: Option<std::sync::Arc<safe_cex_engine::signing::ProtectedProvider>>,
+    #[cfg(test)]
+    test_provider: Option<Provider>,
     identities: safe_cex_engine::signing::Identities,
     state: Option<safe_cex_venues::TrustedSignerState>,
 }
@@ -66,7 +68,8 @@ impl ResidentCopy {
     #[cfg(test)]
     pub(crate) fn test_provider(provider: Provider) -> Self {
         Self {
-            provider,
+            protection: None,
+            test_provider: Some(provider),
             identities: Default::default(),
             state: None,
         }
@@ -74,7 +77,21 @@ impl ResidentCopy {
 
     /// Trusted host ingress, as with a remote account's provider.
     pub fn provider(&self) -> Provider {
-        self.provider.clone()
+        #[cfg(test)]
+        if let Some(provider) = &self.test_provider {
+            return provider.clone();
+        }
+        self.protection
+            .as_ref()
+            .expect("canonical protected setup")
+            .provider()
+    }
+
+    /// Retention/disposal authority; all previously issued engine handles refuse.
+    pub fn erase(&self) {
+        if let Some(protection) = &self.protection {
+            protection.erase();
+        }
     }
 
     pub(crate) fn configure(&self, config: &mut safe_cex_native::ServerConfig) {
@@ -132,8 +149,8 @@ pub fn prepare_delegated(
         .passphrase
         .as_mut()
         .map(|value| std::mem::take(&mut **value));
-    let (provider, identities) =
-        safe_cex_venues::prepare_local_signer_for(&init.exchange_name, &mut native)
+    let (protection, identities) =
+        safe_cex_venues::prepare_protected_local_signer_for(&init.exchange_name, &mut native)
             .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
     if identities
         .primary
@@ -154,7 +171,9 @@ pub fn prepare_delegated(
         plan,
         options: options.to_string(),
         resident: ResidentCopy {
-            provider,
+            protection: Some(std::sync::Arc::new(protection)),
+            #[cfg(test)]
+            test_provider: None,
             identities,
             state: Some(state),
         },

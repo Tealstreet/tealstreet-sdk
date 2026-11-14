@@ -137,3 +137,62 @@ impl OwnedSetupExecution for GuardedSetup {
         self.execution.poll_joined(cx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Fault(Arc<AtomicUsize>);
+    impl Drop for Fault {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    impl Signer for Fault {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn sign(&self, _: SignRequest) -> SignFuture {
+            Box::pin(std::future::ready(Err(SignError::Unavailable)))
+        }
+        fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+            panic!("synthetic signing fault")
+        }
+    }
+    #[test]
+    fn poisoned_signer_is_erased_before_engine_handle_release() {
+        for explicit in [false, true] {
+            let released = Arc::new(AtomicUsize::new(0));
+            let owner = ProtectedProvider::new(Arc::new(Fault(released.clone()))).unwrap();
+            let engine = owner.provider();
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![],
+            };
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    || engine.sign_ready(&request)
+                ))
+                .is_err()
+            );
+            if explicit {
+                owner.erase();
+                assert!(owner.is_erased());
+            } else {
+                drop(owner);
+            }
+            assert_eq!(released.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                engine.sign_ready(&request),
+                Some(Err(SignError::Unavailable))
+            );
+            assert_eq!(
+                engine.can_sign(&KeyRef("synthetic".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+            drop(engine);
+            assert_eq!(released.load(Ordering::SeqCst), 1);
+        }
+    }
+}
