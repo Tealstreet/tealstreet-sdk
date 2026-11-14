@@ -123,3 +123,79 @@ fn captured_address_setup_refuses_after_erasure_and_still_joins_cleanup() {
         std::task::Poll::Ready(Ok(()))
     );
 }
+
+#[test]
+fn protected_signing_slots_cannot_be_interpolated_or_returned_by_either_entrypoint() {
+    for operation_kind in 0..3 {
+        let (plain, key) = local();
+        let operation = match operation_kind {
+            0 => Operation::Present { key: key.clone() },
+            1 => Operation::Sha256 {
+                payload: vec![PayloadPart::Credential { key: key.clone() }],
+            },
+            _ => Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: key.clone(),
+                payload: vec![PayloadPart::Credential { key: key.clone() }],
+            },
+        };
+        let work = SignRequest {
+            operations: vec![operation],
+            ..request(key)
+        };
+        assert!(
+            plain.sign_ready(&work).unwrap().is_ok(),
+            "legacy policy remains available"
+        );
+        let owner = plain.protect().unwrap();
+        let provider = owner.provider();
+        let sync = provider.sign_ready(&work).unwrap();
+        let mut future = provider.sign(work);
+        let asynchronous = future
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()));
+        owner.erase();
+        assert!(
+            sync.is_err(),
+            "protected material use {operation_kind} refused synchronously"
+        );
+        assert!(
+            matches!(asynchronous, std::task::Poll::Ready(Err(_))),
+            "protected material use {operation_kind} refused asynchronously"
+        );
+    }
+}
+
+#[test]
+fn protected_arbitrary_insert_is_not_presentation_authority() {
+    // Ref spelling cannot grant permission, nor can replacing previously public material.
+    for previously_public in [false, true] {
+        let reference = KeyRef("primary.credential".into());
+        let mut signer = if previously_public {
+            LocalSigner::from_setup(LocalSetup {
+                primary: Some(LocalIdentity {
+                    key: Secret::new("synthetic-public".into()),
+                    ..Default::default()
+                }),
+                secondary: None,
+            })
+            .unwrap()
+            .0
+        } else {
+            LocalSigner::new()
+        };
+        signer.insert(reference.clone(), b"synthetic-private-replacement".to_vec());
+        let plain: Provider = Arc::new(signer);
+        let owner = plain.protect().unwrap();
+        let work = SignRequest {
+            operations: vec![Operation::Present {
+                key: reference.clone(),
+            }],
+            ..request(reference)
+        };
+        assert!(
+            owner.provider().sign_ready(&work).unwrap().is_err(),
+            "only setup's credential/passphrase install grants presentation"
+        );
+    }
+}
