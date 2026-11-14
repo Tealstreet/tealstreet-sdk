@@ -3777,3 +3777,24 @@ test('#3273 exact-head CI TxFlow artifact retains measured reserve', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
+
+// #3226 review fixes b4bedc2279 + master b991dbd548; clean merge f0660fb9387f.
+// CI43610609451/job132495348457, artifact14120177731, sourceb29eaa51e93a.
+// CI and merged branch share tree40bfb8ec80e2c13f9ae0229229e5e2fa4de6aab6.
+// Five optimized web/Node/replay copies SHA256
+// 9793c41c170e9ee0ce010699f0ba2d0e63a03f18aabdef2cfe293aff22a65f5d.
+test('#3226 reviewed reconciliation CI artifact retains 10 KiB for the Coinbase family', () => {
+  const measured = 2_348_687;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_359_296);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_357_248, 'retain every historical parent floor');
+    assert.ok(cap >= minimumCap, `coinbase: ${cap} leaves less than 10 KiB above ${measured}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});

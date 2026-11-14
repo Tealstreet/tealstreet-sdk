@@ -521,7 +521,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust1.99.0, bindgen0.2.129, Binaryen132, required two -Oz passes.
   // Master causal-order versions now remain attached to per-read stream overlays.
   // Current CI bytes +10 KiB rounded up; 10,485 B reserve, every parent floor retained.
-  coinbase: 2_357_248,
+  // #3226 review fixes b4bedc2279 + master b991dbd548; clean merge f0660fb9387f.
+  // CI43610609451/job132495348457, artifact14120177731, sourceb29eaa51e93a;
+  // identical CI/merged tree40bfb8ec80e2c13f9ae0229229e5e2fa4de6aab6.
+  // Optimized web/Node/replay2,348,687 B; SHA256
+  // 9793c41c170e9ee0ce010699f0ba2d0e63a03f18aabdef2cfe293aff22a65f5d.
+  // Rust1.99.0, bindgen0.2.129, Binaryen132, required two -Oz passes.
+  // Read-scoped close/version guards retain causal floors across bounded cache eviction.
+  // Current CI bytes +10 KiB rounded up; 10,609 B reserve, every prior floor retained.
+  coinbase: 2_359_296,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).
