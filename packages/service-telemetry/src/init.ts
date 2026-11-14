@@ -1,8 +1,10 @@
 import * as Sentry from '@sentry/bun';
 
+import { redactDiagnosticData } from './diagnosticRedaction';
+
 import { RESTRICTIVE_SENTRY_DATA_COLLECTION } from './dataCollection';
 import { SERVICE_DROPPED_INTEGRATIONS } from './integrations';
-import { scrub, scrubString } from './scrub';
+import { boundServiceData } from './scrub';
 
 /**
  * Sentry for the Bun edge services (`exchange-server`, `candle-server`).
@@ -76,8 +78,8 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
     /**
      * The default integration set is the leak, not the events.
      *
-     * `Console` turns every `console.error` into a breadcrumb — and the alert
-     * path logs its own unscrubbed detail line before deciding anything.
+     * `Console` turns every `console.error` into a breadcrumb, duplicating
+     * the alert path even though its diagnostic detail is already scrubbed.
      * `Http` / `NodeFetch` / `Fetch` breadcrumb outgoing request URLs, and a signed venue
      * REST call carries the API key and signature in its QUERY STRING;
      * `RequestData` is what lifts that query string onto an event.
@@ -141,32 +143,29 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
     },
 
     beforeSend(event) {
-      for (const exception of event.exception?.values ?? []) {
-        if (exception.value) exception.value = scrubString(exception.value);
-      }
-      if (event.message) event.message = scrubString(event.message);
-      if (event.extra) event.extra = scrub(event.extra) as Record<string, unknown>;
-      if (event.contexts) event.contexts = scrub(event.contexts) as typeof event.contexts;
+      const safe = redactDiagnosticData(event);
+      if (safe.extra) safe.extra = boundServiceData(safe.extra) as Record<string, unknown>;
+      if (safe.contexts) safe.contexts = boundServiceData(safe.contexts) as typeof safe.contexts;
       // Keep only the explicit box identity, never an SDK-inferred container hostname.
-      delete event.server_name;
+      delete safe.server_name;
       if (exchange) {
-        if (box) event.server_name = box;
-        if (imageRelease) event.release = imageRelease;
-        else delete event.release;
-        event.tags = { ...event.tags };
+        if (box) safe.server_name = box;
+        if (imageRelease) safe.release = imageRelease;
+        else delete safe.release;
+        safe.tags = { ...safe.tags };
         // CONNECT_REGION can describe legacy routing, so it is not a box-location fact.
-        delete event.tags.region;
-        delete event.tags.box;
-        if (box) event.tags.box = box;
+        delete safe.tags.region;
+        delete safe.tags.box;
+        if (box) safe.tags.box = box;
       }
-      return event;
+      return safe;
     },
 
     // Belt and braces: any breadcrumb an integration we did not drop produces.
     beforeBreadcrumb(breadcrumb) {
-      if (breadcrumb.message) breadcrumb.message = scrubString(breadcrumb.message);
-      if (breadcrumb.data) breadcrumb.data = scrub(breadcrumb.data) as Record<string, unknown>;
-      return breadcrumb;
+      const safe = redactDiagnosticData(breadcrumb);
+      if (safe.data) safe.data = boundServiceData(safe.data) as Record<string, unknown>;
+      return safe;
     },
   });
 

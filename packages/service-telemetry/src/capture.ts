@@ -1,5 +1,7 @@
 import * as Sentry from '@sentry/bun';
 
+import { redactDiagnosticData } from './diagnosticRedaction';
+
 import { isServiceSentryEnabled } from './init';
 import { scrub, scrubString } from './scrub';
 
@@ -91,21 +93,6 @@ export type CaptureAlertInput = {
 };
 
 /**
- * A copy carrying a scrubbed message and stack.
- *
- * Sentry sends `error.message` and every frame verbatim, and these services'
- * errors quote venue responses — the same reason `scrubString` exists for the
- * message. Copied rather than mutated: the original is still on its way to
- * whatever else handles it.
- */
-function sanitizedError(err: Error): Error {
-  const copy = new Error(scrubString(err.message));
-  copy.name = err.name;
-  copy.stack = err.stack ? scrubString(err.stack) : undefined;
-  return copy;
-}
-
-/**
  * The fingerprint is scrubbed and length-capped like everything else.
  *
  * exchange-server's `alertKey` embeds up to 160 characters of raw venue error
@@ -128,29 +115,30 @@ export function captureAlert({
   if (!isServiceSentryEnabled()) return;
 
   try {
-    const fingerprint = fingerprintFor(key);
+    const safe = redactDiagnosticData({ fingerprint: key, message, detail, error });
+    const fingerprint = fingerprintFor(safe.fingerprint);
     const { send, suppressed } = claim(fingerprint);
     if (!send) return;
 
     const sentryLevel = level === 'error' ? 'error' : 'warning';
     const tags = { severity, slack_suppressed: String(slackSuppressed) };
     const extra = {
-      ...(scrub(detail) as Record<string, unknown>),
+      ...(scrub(safe.detail) as Record<string, unknown>),
       alert_key: fingerprint,
       ...(suppressed > 0 ? { suppressed_since_last_event: suppressed } : {}),
-      ...(error instanceof Error ? { alert_message: scrubString(message) } : {}),
+      ...(safe.error instanceof Error ? { alert_message: safe.message } : {}),
     };
 
     // An Error goes as an EXCEPTION so the stack survives; the message keeps
     // its place in `extra`. Anything else has no stack to carry, so the message
     // is all there is.
-    if (error instanceof Error) {
-      Sentry.captureException(sanitizedError(error), { level: sentryLevel, fingerprint: [fingerprint], tags, extra });
+    if (safe.error instanceof Error) {
+      Sentry.captureException(safe.error, { level: sentryLevel, fingerprint: [fingerprint], tags, extra });
       return;
     }
 
     Sentry.captureEvent({
-      message: scrubString(message),
+      message: safe.message,
       level: sentryLevel,
       fingerprint: [fingerprint],
       tags,

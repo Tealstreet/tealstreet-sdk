@@ -118,3 +118,15 @@ block, `initServiceSentry` at every ENTRY POINT (exchange-server has two:
 `flushServiceSentry` before any `process.exit`. Add the package to
 `.github/workflows/deploy-connect-data-edge.yml` `paths:` or edits here will not
 deploy.
+
+## Shared diagnostic policy
+
+`src/diagnosticRedaction.ts` owns the single diagnostic-copy policy, exported at
+`@tealstreet/service-telemetry/diagnostic-redaction` without initializing Sentry.
+Web consumers may retain their package facade, but must not maintain a second
+matcher. The complete [diagnostic policy](diagnostic-redaction-policy.md) applies
+to that subpath. Service scrub/capture/final hooks use this same local policy; the only
+workspace dependency is the SDK-owned HTTP diagnostic URL helper.
+
+Parser provenance must cover sibling fingerprints and alert keys before throttle
+retention and final sending. Ordinary grouping and live input objects are preserved.
