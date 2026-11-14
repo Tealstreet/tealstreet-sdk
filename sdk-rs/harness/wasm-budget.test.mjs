@@ -3087,6 +3087,20 @@ test('#3302 run 43517974996 retains merged-head ApeX reserve and exact boundarie
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
 
+// #3499 head 22149d1131cb, run 43550434029, job 132311748258, artifact 14095922408.
+// CI test merge e4514ec78d69 has the identical tree; optimized web/Node/replay
+// SHA256 d69ef94f3c4beee62d2de9192d101670a0c8f6e21b1dbaff99fee7ad2de2fada.
+test('#3499 BingX public-reference preflight retains measured 10 KiB reserve', () => {
+  const measured = 2_135_090;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.equal(minimumCap, 2_146_304);
+  assert.ok(cap >= 2_142_208, 'retain the historical #3438 cap floor');
+  assert.ok(cap >= minimumCap, `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
 
 // #3317 merge e25dc312bd2c: Rust SDK run 43545517625, source b1876cea63af.
 // All 27 family ZIP digests, manifests and equal web/Node/replay hashes verified.
@@ -3180,3 +3194,49 @@ test('#3314 recoverable authorization reads retain freshly measured TxFlow reser
   assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
+
+// #3499 merge f2a87132c7771a459267ff33f270f2efc8deb929: local optimized web/Node bytes.
+// Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh twice -Oz, -j2.
+// Both targets have the pinned SHA256; keep all inherited floors and boundary checks.
+for (const [family, measured, minimumCap, sha256, venues] of [
+  ["apexomni", 2_096_110, 2_106_368, "567beee34b576e856051058c0806272d33ee88ef52e6d1f6fb18ec085313b278", [["apexomni", 2105344]]],
+  ["asterdex", 2_259_398, 2_270_208, "f386784c50b3aa5696602a41a12c6a87025ed52ee4afd98405b345ac4e5be9c4", [["asterdex", 2269184]]],
+  ["backpack", 2_044_034, 2_055_168, "92668e3b4ca517c6190b4127c58f5991ee54c910d9446a160e1f4bf559f18d29", [["backpack", 2053120]]],
+  ["binance", 2_273_578, 2_284_544, "5d7f01edc0b07f1d04eaf6b920ac03015b2190ecb27e681969ff66382effde68", [["binance", 2286592]]],
+  ["bingx", 2_138_113, 2_149_376, "38497edda9c26b968fdfd7894f38c1f5e2c7d4fa6d2144093dd5e2349a23e8c2", [["bingx", 2146304]]],
+  ["bitget", 2_770_480, 2_781_184, "b513162cc6aacd4da661791769bed30765f078c1b441c801e464b55cc4f3368c", [["bitget", 2780160], ["bitgetusdc", 2780160]]],
+  ["bitrue", 1_909_654, 1_920_000, "276947e8095d040d5db49f11f7fb3b8aa28f6e19ca4a479d83c5731661d2c2ea", [["bitrue", 1925120]]],
+  ["bitunix", 1_956_174, 1_967_104, "75529c2d03ed8b533ea09d7f464bbb672f7a173417921be9090fdb99365d6b33", [["bitunix", 1966080]]],
+  ["blofin", 2_067_785, 2_078_720, "3c587c778e336c7e9cf028dc23e4ab05d4cc36e5605f7247b3224bbf03d091ab", [["blofin", 2085888]]],
+  ["bybit", 2_548_513, 2_558_976, "2ceb757a47ef52ae107f4747a634c506b93fa5c3c0099be289da092cb1975854", [["bybit", 2557952]]],
+  ["coinbase", 2_115_717, 2_126_848, "8f1e756380cf3aa131c182b0b20c169dc159538d91f2943e33c31e592a7f97ae", [["coinbase", 2124800]]],
+  ["cryptocom", 1_817_206, 1_827_840, "61dcbdc6521d5487f64955622b4665061dcf624477c4f28b6beae9ed91f869c4", [["cryptocom", 1826816]]],
+  ["grvt", 2_003_900, 2_014_208, "cc51562f8946a8803f173598bfd7ffd85e414b2d33d08e724ec0deed2b99560c", [["grvt", 2013184]]],
+  ["hyperliquid", 2_238_456, 2_248_704, "9eeb077d38fef93cd1d55f9c7930cf0edfd771fb1d72989a1ea71a6276878b3d", [["hyperliquid", 2249728], ["hyperliquidspot", 2249728]]],
+  ["kraken", 2_275_565, 2_286_592, "28c4ded8f737bf6afedbb9d0dbb56c74ca913797532b6bf7a232660c2983ec5c", [["kraken", 2284544], ["krakenspot", 2284544]]],
+  ["kucoin", 1_866_297, 1_876_992, "15c8988c4da51594105b86b7d14d58257f9ed7a90317f72405a53e649c73cf37", [["kucoin", 1878016]]],
+  ["kucoinspot", 2_477_934, 2_488_320, "0e75b89916e645323d17fcac9f6b67e2457c545857ef48eaa551392e8ee8e256", [["kucoinspot", 2488320]]],
+  ["lighter", 2_161_641, 2_171_904, "a68ba37b7bb5cf5626c8aef8e706dc63a25accc78e1d7d234e4528cf15e5541d", [["lighter", 2170880], ["lighter-robinhood", 2170880]]],
+  ["mexc", 1_960_367, 1_971_200, "e8939820ec914ac233aafc4ef82692d2fda4478800a10f85a7597073810af27f", [["mexc", 1970176]]],
+  ["okx", 2_052_230, 2_063_360, "e3fb37a419ff55b0d2642c40c1aa198babd76b6273fdddcc9cebf2858eac068c", [["okx", 2068480]]],
+  ["orderly", 1_783_731, 1_794_048, "8bf9bcd08805790ec750277a4c18b63006df2a616d353b1b77273675106b8743", [["orderly", 1793024]]],
+  ["paradex", 2_311_054, 2_321_408, "d09b9350c4291ebb92b009a175f6d5e8cf1375b5f8762913fe992925981f5620", [["paradex", 2320384]]],
+  ["phemex", 2_138_706, 2_149_376, "468e75b79a6df9a2af00e8254dbc7c45e1348fafea89af406e5d78a4a8a822ad", [["phemex", 2148352]]],
+  ["polymarket", 1_665_253, 1_676_288, "3ce71a13dd298e47164f6f1389a2d17c19e93e29e5dfe04e2ec67c0b11545f9c", [["polymarket", 1675264]]],
+  ["txflow", 1_929_231, 1_940_480, "6aef7bdc32905fa546b7613b9dd31ccdfdfc923838384d6cb66cbe47c09fe901", [["txflow", 1939456]]],
+  ["weex", 2_024_581, 2_035_712, "8e8c2d751f909d1a76344fb3b2ddd608d0370f99a0fe8587753e06a6c25394b7", [["weex", 2033664]]],
+  ["woo", 2_673_019, 2_683_904, "3db40d4e7470855ee11eb59695246ea78fe34bc8fa07de3f3333af4988feef30", [["woo", 2682880]]],
+]) {
+  test(`#3499 local merged-head: ${family} ${sha256} retains measured reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const [venue, parentFloor] of venues) {
+      assert.equal(venueFamily(venue), family);
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= parentFloor, `${venue}: ${cap} must retain parent floor ${parentFloor}`);
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}

@@ -264,8 +264,10 @@ it.each(matrixVenues)('$label resolves the complete public matrix before custody
 });
 
 it('enumerates every declared venue outside the beta roster', () => {
-  expect(venues).not.toContain('bitrue');
-  expect(outsideBeta.sort()).toEqual(['bingxspot', 'bitrue', 'polymarket', 'txflow', 'weex']);
+  // restored by #3502; #3317 dropped a live venue without a product decision.
+  expect(venues).toContain('bitrue');
+  // restored by #3502; #3317 dropped a live venue without a product decision.
+  expect(outsideBeta.sort()).toEqual(['bingxspot', 'polymarket', 'txflow', 'weex']);
   expect(rules.venues.hyperliquidspot).toMatchObject({ canSign: [['secret', 'remoteSigner']] });
   expect(rules.venues.hyperliquidspot).not.toHaveProperty('privateEligible');
 });

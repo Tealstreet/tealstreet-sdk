@@ -8,7 +8,8 @@ import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/ru
 import { createExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
 
-it.each(['bitrue', 'polymarket'] as const)(
+// restored by #3502; #3317 dropped a live venue without a product decision.
+it.each(['polymarket'] as const)(
   '%s refuses account admission before inspecting public-mode or signer options',
   (name) => {
     const inspected = vi.fn(() => {
@@ -32,7 +33,8 @@ it.each(['bitrue', 'polymarket'] as const)(
   },
 );
 
-it.each(['bitrue', 'polymarket'] as const)(
+// restored by #3502; #3317 dropped a live venue without a product decision.
+it.each(['polymarket'] as const)(
   '%s public SDK construction refuses before loading WASM or calling a signer',
   async (name) => {
     const load = vi.fn();
@@ -63,7 +65,8 @@ it.each(['bitrue', 'polymarket'] as const)(
 );
 
 for (const entry of ['constructor', 'factory']) {
-  it.each(['bitrue', 'polymarket'] as const)(
+  // restored by #3502; #3317 dropped a live venue without a product decision.
+  it.each(['polymarket'] as const)(
     `%s ${entry} refuses before reading accessor-backed options`,
     async (name) => {
       const inspected = vi.fn(() => {

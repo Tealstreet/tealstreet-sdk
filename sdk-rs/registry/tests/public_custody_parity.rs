@@ -89,7 +89,8 @@ fn keyless_hyperliquid_spot_remote_signer_keeps_the_declared_private_mode() {
 
 #[test]
 fn outside_beta_native_accounts_refuse_before_public_or_private_custody() {
-    for venue in ["bitrue", "polymarket"] {
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    for venue in ["polymarket"] {
         for flag in ["remoteSigning", "payloadSigner"] {
             for public in [true, false] {
                 let mut value = json!({"key": "unused-key", "secret": "unused-fixture",
