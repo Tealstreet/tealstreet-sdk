@@ -15,6 +15,15 @@ fn options(venue: &str) -> EngineOptions {
             raw["secret"] =
                 safe_cex_crypto::encode(&[7; 32], safe_cex_crypto::Encoding::Base64).into();
         }
+        "txflow" => {
+            // Canonical agent-wallet setup; also a valid legacy local fixture.
+            let address = "0x1111111111111111111111111111111111111111";
+            raw["key"] = address.into();
+            raw["applicationId"] = address.into();
+            raw["secret"] = format!("0x{}", "ab".repeat(32)).into();
+            raw["testnet"] = true.into();
+            raw["passphrase"] = serde_json::Value::Null;
+        }
         "grvt" | "hyperliquid" | "hyperliquidspot" => {
             raw["secret"] = "01".repeat(32).into();
         }

@@ -12,10 +12,14 @@ fn options(venue: &str) -> EngineOptions {
     } else {
         "synthetic-private".into()
     };
-    serde_json::from_value(
-        json!({"key":"synthetic-public", "secret":secret, "passphrase":"synthetic-passphrase"}),
-    )
-    .unwrap()
+    let raw = if venue == "txflow" {
+        let address = "0x1111111111111111111111111111111111111111";
+        json!({"testnet":true, "key":address, "applicationId":address,
+            "secret":format!("0x{}", "ab".repeat(32))})
+    } else {
+        json!({"key":"synthetic-public", "secret":secret, "passphrase":"synthetic-passphrase"})
+    };
+    serde_json::from_value(raw).unwrap()
 }
 fn work(operations: Vec<Operation>) -> SignRequest {
     SignRequest {
@@ -142,7 +146,94 @@ hmac_family!(woo, "woo", "woo");
 
 hmac_family!(kraken, "kraken", "kraken");
 hmac_family!(krakenspot, "kraken", "krakenspot");
-hmac_family!(txflow, "txflow", "txflow");
+// TxFlow's canonical wallet setup on master has a declared asymmetric key;
+// it must never inherit the HMAC matrix's legacy presentation expectations.
+#[cfg(feature = "txflow")]
+#[test]
+fn txflow() {
+    // The branch predates the independent wallet setup. Exercise its legacy
+    // contract there, and the declared wallet contract in CI/master composition.
+    // Choose from trusted setup policy, never from a failed signature or setup.
+    let declared = safe_cex_venues::signer_setup_policy("txflow")
+        .primary
+        .and_then(|policy| policy.signing_algorithm);
+    if declared.is_none() {
+        hmac_custody("txflow");
+        return;
+    }
+    assert_eq!(declared, Some(Algorithm::Secp256k1Digest));
+    let algorithm = Algorithm::Secp256k1Digest;
+    let (plain, ids) = prepare_local_signer_for("txflow", &mut options("txflow")).unwrap();
+    let key = ids.primary.unwrap().signing_ref().unwrap().clone();
+    assert_eq!(plain.can_sign(&key, algorithm), Capability::Supported);
+    assert_eq!(
+        plain.can_sign(&key, Algorithm::HmacSha256),
+        Capability::Unsupported
+    );
+    let present = work(vec![Operation::Present { key: key.clone() }]);
+    assert!(
+        plain.sign_ready(&present).unwrap().is_err(),
+        "LOCAL wallet private slots already refuse presentation"
+    );
+    let signature = work(vec![Operation::Sign {
+        algorithm,
+        key: key.clone(),
+        payload: vec![PayloadPart::Bytes { bytes: vec![7; 32] }],
+    }]);
+    let expected = plain.sign_ready(&signature).unwrap().unwrap();
+    signature.validate_result(&expected).unwrap();
+    let public = work(vec![Operation::PublicAddress { key: key.clone() }]);
+    let expected_public = plain.sign_ready(&public).unwrap().unwrap();
+    drop(plain);
+    let (owner, _) = prepare_protected_local_signer_for("txflow", &mut options("txflow")).unwrap();
+    let provider = owner.provider();
+    assert_eq!(provider.sign_ready(&signature).unwrap().unwrap(), expected);
+    assert_eq!(
+        provider.sign_ready(&public).unwrap().unwrap(),
+        expected_public
+    );
+    assert!(provider.sign_ready(&present).unwrap().is_err());
+    assert!(
+        provider
+            .sign_ready(&work(vec![Operation::Sha256 {
+                payload: vec![PayloadPart::Credential { key: key.clone() }]
+            }]))
+            .unwrap()
+            .is_err()
+    );
+    // A declared wallet cannot be reinterpreted as an ordinary MAC key.
+    assert_eq!(
+        provider.can_sign(&key, Algorithm::HmacSha256),
+        Capability::Unsupported
+    );
+    assert!(
+        provider
+            .sign_ready(&work(vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: key.clone(),
+                payload: vec![PayloadPart::Bytes { bytes: vec![7; 32] }]
+            }]))
+            .unwrap()
+            .is_err()
+    );
+    let mut pending = provider.sign(signature.clone());
+    let mut pending_output = provider.sign(present.clone());
+    owner.erase();
+    assert_eq!(provider.can_sign(&key, algorithm), Capability::Unsupported);
+    for request in [&signature, &present, &public] {
+        assert_eq!(
+            provider.sign_ready(request),
+            Some(Err(SignError::Unavailable))
+        );
+    }
+    let mut cx = Context::from_waker(Waker::noop());
+    for future in [&mut pending, &mut pending_output] {
+        assert_eq!(
+            future.as_mut().poll(&mut cx),
+            Poll::Ready(Err(SignError::Unavailable))
+        );
+    }
+}
 hmac_family!(asterdex, "asterdex", "asterdex");
 
 #[cfg(feature = "paradex")]
