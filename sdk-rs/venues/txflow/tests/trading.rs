@@ -366,6 +366,8 @@ fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
         },
     );
     let [error] = failures(&mut e).try_into().unwrap();
+    // The engine selects the physical transport error over the venue fallback.
+    // Reconciliation remains required by the Unknown outcome below.
     assert_eq!(error.message, "connection reset");
     assert_eq!(
         (error.kind, error.outcome),
@@ -687,4 +689,68 @@ fn unapproved_revoked_or_expired_agent_cannot_release_an_exchange_write() {
         |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 771, error })
         if error.kind == Some(safe_cex_engine::ErrorKind::AuthInvalid))
     ));
+}
+
+#[test]
+fn authorization_read_failures_are_recoverable_without_releasing_a_write() {
+    use safe_cex_engine::ErrorKind;
+    for (status, body, expected) in [
+        (None, "connection reset", ErrorKind::Network),
+        // Managed HTTP delivers a non-success read through HttpFailed.
+        (Some(503), "unavailable", ErrorKind::Network),
+        (Some(200), "malformed", ErrorKind::VenueUnavailable),
+        (
+            Some(200),
+            r#"{"success":true,"code":0,"data":{"user":"0x1111111111111111111111111111111111111111","agents":[]}}"#,
+            ErrorKind::VenueUnavailable,
+        ),
+    ] {
+        let mut e = engine();
+        place(&mut e, 881, vec![limit("authorization-read")]);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+        let authorization = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(r)
+                    if r.body
+                        .as_deref()
+                        .is_some_and(|body| body.contains("approvedAgents")) =>
+                {
+                    Some(r)
+                }
+                _ => None,
+            })
+            .expect("authorization is checked before signing");
+        if let Some(status) = status {
+            ack(&mut e, authorization, status, body);
+        } else {
+            e.handle(
+                NOW + 100.0,
+                Event::HttpFailed {
+                    request: authorization.id,
+                    error: body,
+                },
+            );
+        }
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 881,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("read failure terminates this attempt without an order");
+        assert_eq!(error.kind, Some(expected), "{status:?}");
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        place(&mut e, 882, vec![limit("fresh-after-read-failure")]);
+        assert!(write(&mut e).url.ends_with("/exchange"));
+    }
 }

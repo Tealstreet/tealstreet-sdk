@@ -46,6 +46,9 @@ for (const [index, price] of tickerSeeds) {
   });
 }
 
+// Public disposable signing-vector agent; both consumers authorize before private writes.
+info('approvedAgents', { user: USER }, { user: USER, agents: [{ agentAddress: '0xe239cdc5fbe977a8a141b72194d3cf8c41bc5bc6', agentName: 'replay' }] }, { impl: 'rust' });
+
 const setting = (coin, leverage, type = 'cross') => ({ user: USER, coin: String(coin), leverage: { type, mode: 'oneWay', value: leverage } });
 let btcSetting = setting(1, 10);
 let ethSetting = setting(2, 10);
@@ -90,10 +93,11 @@ write({ type: 'updatePositionMode', isOneway: true }, 'UpdatePositionMode'); sna
 ws(600, 'userAssetData', { user: USER, coins: [btcSetting, ethSetting] });
 command(800, 'setLeverage', { symbol: 'BTC-USDC', leverage: 7 });
 write({ type: 'updateLeverage', asset: 1, leverage: 7 }, 'UpdateLeverage'); btcSetting = setting(1, 7); snapshots();
-ws(900, 'activeAssetData', btcSetting);
+// Native settings can precede their HTTP acknowledgement; exercise that shared schedule.
+ws(900, 'activeAssetData', btcSetting); Object.assign(records.at(-1), { beforeAck: true, ...stage() });
 command(1200, 'setMarginType', { symbol: 'ETH-USDC', isolated: true });
 write({ type: 'updateMarginMode', asset: 2, isCross: false }, 'UpdateMarginMode'); ethSetting = setting(2, 5, 'isolated'); snapshots();
-ws(1300, 'activeAssetData', ethSetting);
+ws(1300, 'activeAssetData', ethSetting); Object.assign(records.at(-1), { beforeAck: true, ...stage() });
 
 command(1600, 'placeOrders', { orders: [{ symbol: 'BTC-USDC', type: 'limit', side: 'buy', amount: 0.25, price: 90, clientOrderId: 'caller-limit' }] });
 write({ type: 'order', grouping: 'na', orders: [limit(1, 'buy', 90, 0.25, 'caller-limit')] }, 'PlaceOrder');

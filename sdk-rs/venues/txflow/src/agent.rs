@@ -1,7 +1,7 @@
 //! Approval reads never carry a secret. Absence covers revocation and expiry.
 use crate::{Pending, TxFlow};
 use safe_cex_engine::request_context::Context;
-use safe_cex_engine::{Cx, Response};
+use safe_cex_engine::{Cx, ErrorKind, Outcome, Response, VenueError};
 use serde::Deserialize;
 pub struct Request {
     pub context: Context,
@@ -63,10 +63,25 @@ impl TxFlow {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        let result = response.map_err(str::to_owned).and_then(|r| {
-            if r.status != 200 { return Err("TxFlow agent authorization read failed".into()); }
-            approved(r.body, self.options.application_id.as_deref().unwrap_or(""), &self.agent_address()?)
-        }).and_then(|present| if present { Ok(()) } else { Err("TxFlow agent is not approved (revoked or expired); approve it with the owner wallet".into()) });
+        let result = response
+            .map_err(|error| VenueError::new(error).kind(ErrorKind::Network).outcome(Outcome::NotSent))
+            .and_then(|response| {
+                if response.status != 200 {
+                    return Err(VenueError::new("TxFlow agent authorization read failed")
+                        .kind(ErrorKind::VenueUnavailable).outcome(Outcome::NotSent));
+                }
+                let agent = self.agent_address().map_err(|error| VenueError::new(error)
+                    .kind(ErrorKind::InvalidInput).outcome(Outcome::NotSent))?;
+                approved(response.body, self.options.application_id.as_deref().unwrap_or(""), &agent)
+                    .map_err(|error| VenueError::new(error)
+                        .kind(ErrorKind::VenueUnavailable).outcome(Outcome::NotSent))
+            })
+            .and_then(|present| {
+                if present { Ok(()) } else {
+                    Err(VenueError::new("TxFlow agent is not approved (revoked or expired); approve it with the owner wallet")
+                        .kind(ErrorKind::AuthInvalid).outcome(Outcome::NotSent))
+                }
+            });
         self.trade_agent_response(cx, request.context, result);
     }
 }

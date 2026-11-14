@@ -162,7 +162,7 @@ impl TxFlow {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         context: Context,
-        result: Result<(), String>,
+        result: Result<(), VenueError>,
     ) {
         let Some(job) = &mut self.trading.active else {
             return;
@@ -179,7 +179,7 @@ impl TxFlow {
                 job.custody.authorized = true;
                 self.pump_trades(cx);
             }
-            Err(e) => self.finish_trade(cx, Err(not_sent(e).kind(ErrorKind::AuthInvalid))),
+            Err(error) => self.finish_trade(cx, Err(error)),
         }
     }
     pub(crate) fn trade_preflight_ready(&mut self, cx: &mut Cx<'_, Pending>, owner: &Preflight) {

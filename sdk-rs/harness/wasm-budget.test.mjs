@@ -3168,3 +3168,15 @@ test('#3314 composed WEEX f6830c3f2466 retains measured optimized reserve', () =
   assert.equal(wasmBudgetError(cap, 'venue', 'weex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'weex'), /exceeds/);
 });
+
+
+test('#3314 recoverable authorization reads retain freshly measured TxFlow reserve', () => {
+  const measured = 2_148_376;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_159_616);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});

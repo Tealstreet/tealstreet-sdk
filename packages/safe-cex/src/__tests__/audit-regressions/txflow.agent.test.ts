@@ -1,17 +1,19 @@
 import { ethers } from 'ethers';
+import { virtualClock } from '../../utils/virtualClock';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildTxflowAgentApproval,
   createTxflowAgentWithBrowserWallet,
   getTxflowAgentAuthorization,
+  revokeTxflowAgentWithBrowserWallet,
   signTxflowAgentApproval,
   TXFLOW_AGENT_DOMAIN,
   TXFLOW_APPROVE_AGENT_TYPES,
   type TxflowAgentApproval,
 } from '../../exchanges/txflow/txflow.agent';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const ADDRESS = '0x0202020202020202020202020202020202020202';
 const OWNER = '0x1111111111111111111111111111111111111111';
 const action = () => buildTxflowAgentApproval(ADDRESS, 'my-trading-bot', 2000, true);
@@ -130,4 +132,44 @@ it('supports the documented wallet-domain override without changing the testnet 
   const { type: _type, ...message } = payload.action;
   expect(ethers.verifyTypedData({ ...TXFLOW_AGENT_DOMAIN, chainId: 1 }, TXFLOW_APPROVE_AGENT_TYPES,
     message, payload.signature)).toBe(wallet.address);
+});
+
+
+it.each(['approve', 'revoke'] as const)('%s uses corrected wallet nonce with a skewed browser clock', async (operation) => {
+  const owner = new ethers.Wallet(`0x${'ab'.repeat(32)}`);
+  const raw = 1_800_000_000_000;
+  const corrected = raw - 3_600_000;
+  vi.spyOn(Date, 'now').mockReturnValue(raw);
+  vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(corrected);
+  const request = vi.fn(async ({ method, params }: { method: string; params?: unknown[] }) => {
+    if (method === 'eth_chainId') return '0x9cf';
+    if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [owner.address];
+    if (method === 'eth_signTypedData_v4') {
+      const typed = JSON.parse(String(params?.[1]));
+      delete typed.types.EIP712Domain;
+      return owner.signTypedData(typed.domain, typed.types, typed.message);
+    }
+    throw new Error(`Unexpected wallet method ${method}`);
+  });
+  vi.stubGlobal('window', { ethereum: { request } });
+  let submitted: TxflowAgentApproval | undefined;
+  const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const body: unknown = JSON.parse(String(init?.body));
+    if (typeof body !== 'object' || body === null) throw new Error('Invalid request');
+    if ('action' in body) {
+      const action = body.action;
+      if (typeof action !== 'object' || action === null || !('agentAddress' in action)
+        || typeof action.agentAddress !== 'string' || !('agentName' in action) || typeof action.agentName !== 'string'
+        || !('nonce' in action) || typeof action.nonce !== 'number') throw new Error('Invalid approval');
+      submitted = buildTxflowAgentApproval(action.agentAddress, action.agentName, action.nonce, true);
+      expect(body).toMatchObject({ nonce: corrected, action: { nonce: corrected } });
+      return new Response(JSON.stringify({ status:'ok', code:0, confirm:'executed',
+        data:{type:'ApproveAgent',data:{statuses:['success']}} }));
+    }
+    const agent = operation === 'approve' ? submitted : submitted ? undefined : {agentAddress:ADDRESS,agentName:'clock-test'};
+    return new Response(JSON.stringify({success:true,code:0,data:{user:owner.address,agents:agent?[agent]:[]}}));
+  });
+  if (operation === 'approve') await createTxflowAgentWithBrowserWallet(owner.address,{testnet:true,fetch:fetcher});
+  else await revokeTxflowAgentWithBrowserWallet(owner.address,ADDRESS,'clock-test',{testnet:true,fetch:fetcher});
+  expect(submitted?.nonce).toBe(corrected);
 });

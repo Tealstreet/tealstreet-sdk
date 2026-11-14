@@ -203,3 +203,8 @@ New shared signing families and request-handoff refusals keep their native rules
 Explicit private PayloadSigner requests retain callback-configuration refusal
 first, then unsupported/notSent for an injected provider, even before an owner
 address is supplied. Explicit public/keyless accounts still discard unused custody.
+
+Browser approval and revocation nonces use the shared corrected virtualClock.
+Failed or unreadable approval reads stay recoverable Network/VenueUnavailable
+with NotSent; only a valid matching-owner response confirming absence is AuthInvalid.
+Every failed check still stops before signing or releasing an exchange write.

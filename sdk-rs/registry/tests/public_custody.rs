@@ -64,7 +64,9 @@ fn public_construction_discards_unused_private_custody() {
                 // The shared keyless case has an unused PayloadSigner. Scalars
                 // and refs can establish private eligibility on other venues;
                 // exercise those only with an explicit public request.
-                if mode["publicMode"]["requested"].is_null() && stale.get("payloadSigner").is_none()
+                if mode["publicDataOnly"] != true
+                    && mode["publicMode"]["requested"].is_null()
+                    && stale.get("payloadSigner").is_none()
                 {
                     continue;
                 }

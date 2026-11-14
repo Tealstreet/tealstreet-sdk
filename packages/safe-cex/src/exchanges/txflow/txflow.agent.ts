@@ -4,6 +4,7 @@
  * https://docs.txflow-testnet.xyz/api/signing.md
  */
 import { ethers } from 'ethers';
+import { virtualClock } from '../../utils/virtualClock';
 
 import type { AgentWalletCreationResult } from '../hyperliquid/hyperliquid.agent';
 
@@ -144,7 +145,7 @@ export async function createTxflowAgentWithBrowserWallet(
   const signer = await ownerSigner(owner);
   const agent = ethers.Wallet.createRandom();
   const label = options.agentName ?? `Tealstreet ${agent.address.slice(2, 10)}`;
-  await approve(signer, buildTxflowAgentApproval(agent.address, label, Date.now(), true), options);
+  await approve(signer, buildTxflowAgentApproval(agent.address, label, virtualClock.getCurrentTimeMs(), true), options);
   const authorized = await getTxflowAgentAuthorization(owner, agent.address, options);
   if (!authorized.approved) throw new Error('TxFlow agent is not approved');
   return { success: true, message: 'TxFlow agent approved', agentAddress: agent.address, agentPrivateKey: agent.privateKey };
@@ -157,7 +158,7 @@ export async function revokeTxflowAgentWithBrowserWallet(
   const signer = await ownerSigner(owner);
   const current = await getTxflowAgentAuthorization(owner, agentAddress, options);
   if (!current.approved || current.agentName !== agentName) throw new Error('TxFlow agent label does not match');
-  await approve(signer, buildTxflowAgentApproval(ethers.ZeroAddress, agentName, Date.now(), true), options);
+  await approve(signer, buildTxflowAgentApproval(ethers.ZeroAddress, agentName, virtualClock.getCurrentTimeMs(), true), options);
   if ((await getTxflowAgentAuthorization(owner, agentAddress, options)).approved) {
     throw new Error('TxFlow agent revocation is not confirmed');
   }

@@ -39,7 +39,12 @@ to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
-2,158,592-byte floor retains the required 10 KiB reserve.
+2,158,592-byte floor retains the required 10 KiB reserve at that source.
+The review fix based on 2c37c0e6af2d measures optimized web/Node 2,148,376 bytes;
+its 2,159,616-byte floor retains 11,240 bytes. The private tape supplies the
+owner-bound disposable agent approval before writes. Replay identity equates only
+absent and explicit default `signatureChainId:2511`; economic action fields and
+nondefault chain values stay exact. Signing validation remains independent.
 WEEX in the same composition measures 2,028,105 bytes and retains a 2,038,784-byte
 floor by the same rule. Pinned profiles and remaining family/global budgets are unchanged.
 

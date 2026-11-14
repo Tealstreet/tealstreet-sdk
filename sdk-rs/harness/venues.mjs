@@ -829,6 +829,8 @@ function validBitunixSignature(key, nonce, timestamp, sign, query, body) {
 export const VENUES = {
   txflow: {
     rust: 'txflow',
+    // Agent actions use the fixed testnet domain; an explicit default is wire-equivalent.
+    defaultBodyValues: { signatureChainId: 2511 },
     independentLeverage: true,
     options: { testnet: true },
     virtualPrivateClock: true,
