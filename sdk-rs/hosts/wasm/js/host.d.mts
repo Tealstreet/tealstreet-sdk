@@ -579,9 +579,10 @@ export class EngineHost {
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
-  /** Abnormally close the open sockets of `channel` (all when omitted) so the
-   * venue reconnects; returns how many were closed. */
-  reconnectSockets(channel?: EngineSocketChannel): number;
+  /** Abnormally close open sockets of `channel` (all when omitted). Recovery
+   * bounds retain pre-pause physical receipts until stale, preserving
+   * fresh/uninitialized siblings; returns how many sockets were closed. */
+  reconnectSockets(channel?: EngineSocketChannel, recovery?: { staleBefore: number; suspendedBefore?: number }): number;
   /** Sockets waiting out plain backoff redial now; a venue-imposed floor still binds. */
   redialWaitingSockets(): void;
   /** Undefined for an engine without `health()`. */

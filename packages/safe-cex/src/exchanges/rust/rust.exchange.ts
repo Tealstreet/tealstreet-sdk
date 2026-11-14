@@ -154,7 +154,7 @@ import {
   rustPublicFeedIdentity,
   serveInProcessPublicData,
 } from './publicFeed';
-import { RustSocketHandle } from './rustSockets';
+import { RUST_SOCKET_STALE_MS, RustSocketHandle } from './rustSockets';
 import { failedPrivateReadKind, startupDiagnosticTags } from './startupDiagnostics';
 
 /** The public registry and direct construction share the same beta policy. */
@@ -637,6 +637,8 @@ export class RustEngineExchange extends BaseExchange {
   private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
+  private socketHealthTimer?: ReturnType<typeof setTimeout>;
+  private socketHealthClock?: () => number;
   private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
@@ -1703,6 +1705,7 @@ export class RustEngineExchange extends BaseExchange {
       (event, message) => this.emitter.emit(event, message),
       (event) => this.emitter.emit('ws-diagnostic', event),
     );
+    this.socketHealthClock = () => transport.now();
     const engine = constructEngine(
       WasmEngine,
       this.name,
@@ -2267,8 +2270,7 @@ export class RustEngineExchange extends BaseExchange {
         this.host?.flush();
       }, STORE_FLUSH_MS * multiplier),
     );
-    // Staleness has no socket event of its own; re-derive health on a slow clock.
-    this.flushTimers.push(setInterval(this.syncSocketHealthToStore, SOCKET_HEALTH_SYNC_MS));
+    this.startSocketHealthCheck();
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
@@ -2654,7 +2656,41 @@ export class RustEngineExchange extends BaseExchange {
     return this.host;
   }
 
-  /** Engine sockets replace the TS watchdog: venues own their reconnect policy. */
+  private startSocketHealthCheck = () => {
+    if (this.isDisposed || this.socketHealthTimer !== undefined) return;
+    let previousWall = Date.now();
+    let previousEngine = this.socketHealthClock?.();
+    const schedule = () => {
+      this.socketHealthTimer = setTimeout(check, SOCKET_HEALTH_SYNC_MS);
+      this.socketHealthTimer.unref?.();
+    };
+    const check = () => {
+      this.socketHealthTimer = undefined;
+      if (this.isDisposed) return;
+      try {
+        const now = Date.now();
+        const engineNow = this.socketHealthClock?.();
+        const engineElapsed = previousEngine !== undefined && engineNow !== undefined
+          ? engineNow - previousEngine : undefined;
+        const gap = engineElapsed === undefined ? 0 : (now - previousWall) - engineElapsed;
+        // Receipts before the sample predate the pause. Within the sample,
+        // a pause longer than all active time also proves receipts at least gap-old.
+        const suspendedBefore = gap > 1_000 ? Math.max(previousWall,
+          engineElapsed !== undefined && gap > engineElapsed ? now - gap : previousWall) : undefined;
+        previousWall = now;
+        previousEngine = engineNow;
+        // The host retains each physical socket's obligation across normal ticks;
+        // aggregate channel handles cannot distinguish fresh/uninitialized siblings.
+        this.host?.reconnectSockets(undefined, { staleBefore: now - RUST_SOCKET_STALE_MS, suspendedBefore });
+        this.syncSocketHealthToStore();
+      } finally {
+        if (!this.isDisposed) schedule();
+      }
+    };
+    schedule();
+  };
+
+  /** Publish engine socket observations; the engine still owns reconnection. */
   override syncSocketHealthToStore = () => {
     if (this.isDisposed) return;
     const shared = this.sharedPublicFeed
@@ -4107,6 +4143,9 @@ export class RustEngineExchange extends BaseExchange {
     this.feedCandleListeners.clear();
     this.stopPollingConfig?.();
     this.stopPollingConfig = undefined;
+    clearTimeout(this.socketHealthTimer);
+    this.socketHealthTimer = undefined;
+    this.socketHealthClock = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
     const host = this.host;

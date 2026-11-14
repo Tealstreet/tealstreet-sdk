@@ -1046,14 +1046,37 @@ only when their public topics are direct; separate sockets remain independent.
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
 CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
 `store.socketHealth` through the shared `summarizeSocketHealth`, on socket
-changes and every 5 s, never through the TS watchdog. A private socket is healthy
-for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
+changes and every 5 s, never through the TS watchdog. Channel health uses a
+60 s silence threshold. Reconnecting closes only
 open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
 `auth.rejected` events raise `authFailureStreak`; a private stream delivering
 again resets it. Private `privateLastMessage` retains the last received frame's
 page-clock timestamp while the socket is uninitialized or reconnecting; a feed
 that has never received a frame still has no timestamp. Health/initialization
 flags remain independent of this diagnostic age.
+
+The existing five-second health check compares elapsed wall time with the exact
+scheduling clock retained by this engine. If wall time gained more than the
+clock's existing one-second correction margin, it retains recovery evidence for
+OPEN, initialized pre-pause channels, then retires them when their last frame
+reaches 60 s of wall age. A 50 s sleep may still be fresh at the first check;
+normal engine ticks afterward must not consume that pending recovery. Receipt
+timestamp and physical host record fence each obligation. Fresh traffic,
+replacement or disposal cancels it, and retirement consumes it before reconnect.
+Already resumed traffic is not enrolled; within a mixed sampling interval the
+pre-pause receipt must be provable from the elapsed gap and active engine time.
+`EngineHost.reconnectSockets` applies recovery bounds per physical record, not
+aggregate channel handles: a fresh sibling cannot hide a stale socket, and an
+uninitialized sibling keeps its connect grace. Ordinary channel reconnect callers
+omit the bounds and retain their existing behavior.
+Laptop sleep can pause `performance.now()` while wall-clock health ages; ordinary
+callback delays with advancing engine time do not activate this fallback. Normal native
+90 s/180 s silence allowances remain authoritative. The check uses the engine
+reconnect path, retaining its epochs, uncertainty and retry policy. Fresh traffic,
+uninitialized replacements and connects in flight are left alone. It neither
+moves command deadlines nor retries writes, rebuilds the engine or reloads the
+chart. Its self-rescheduling timeout keeps one handle and stops on disposal.
+Regression: `rust.socket-health.test.ts`.
 
 `store.latency` is nullable: null means no measurement, including on reset.
 STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an
