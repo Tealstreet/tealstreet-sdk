@@ -196,7 +196,8 @@ test('temporary Bitget diagnostics and their workflow job are retired', () => {
   }
   assert.doesNotMatch(workflow, /^  bitget-cpu-profile:/m);
   assert.match(workflow, /^  bitget-paired:/m);
-  assert.ok(workflow.includes('node sdk-rs/harness/bitget-paired-ci.mjs'));
+  assert.ok(workflow.includes('node sdk-rs/harness/bitget-paired-run.mjs'));
+  assert.ok(read('sdk-rs/harness/bitget-paired-run.mjs').includes("new URL('./bitget-paired-ci.mjs', import.meta.url)"));
   assert.ok(workflow.includes('cargo test --locked --workspace'));
   assert.ok(!workflow.includes('--exclude safe-cex-venue-bitget'));
 });
