@@ -516,12 +516,16 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up to KiB.
   // #3317 at 5d04ddb28ab: run 42703052461, family job 129453575087, node artifact 13712976849.
   // CI web/node 2,237,802 B; max + 10 KiB rounded up. CI merge 46c64a76e282 has the identical source tree.
-  hyperliquid: 2_249_728,
+  // #3290 merge 86ea9140052b: CI run 43561789464, job 132347235888, artifact 14100742691: web/Node 2,266,210 B.
+  // Current optimized module size + 10 KiB rounded up; all historical floors retained.
+  hyperliquid: 2_277_376,
   // #3438 merged-head local build.sh --venue hyperliquid: web/node 2,238,027 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 merge cf112c51b87c + 3f94ec11a27f: optimized web/node 2,238,644 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  hyperliquidspot: 2_249_728,
+  // #3290 merge 86ea9140052b: CI run 43561789464, job 132347235976, web/Node 2,266,210 B.
+  // Current optimized module size + 10 KiB rounded up; all historical floors retained.
+  hyperliquidspot: 2_277_376,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:
@@ -762,7 +766,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   // #3438 merged-head local build.sh --venue txflow: web/node 1,928,662 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  txflow: 1_939_456,
+  // #3290 merge 86ea9140052b: CI run 43561789464, job 132347235852, artifact 14100308868: web/Node 1,957,203 B.
+  // Current optimized module size + 10 KiB rounded up; all historical floors retained.
+  txflow: 1_968_128,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
   // #3302 run 42720697962, job 129514220621: CI 1,991,705 B; local merge 06aa3a745fcc web/node 1,993,745 B.

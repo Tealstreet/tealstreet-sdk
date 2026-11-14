@@ -3099,3 +3099,22 @@ for (const [family, artifact, measured, minimumCap, aliases] of [
     }
   });
 }
+
+// #3290 merge 86ea9140052b, Rust SDK run 43561789464: optimized web/Node modules.
+// Replay jobs 132347235888/132347235976 (Hyperliquid) and 132347235852 (TxFlow).
+for (const [family, measured, minimumCap, aliases] of [
+  ['hyperliquid', 2_266_210, 2_277_376, ['hyperliquid', 'hyperliquidspot']],
+  ['txflow', 1_957_203, 1_968_128, ['txflow']],
+]) {
+  test(`#3290 CI 43561789464: ${family} preserves the measured reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
