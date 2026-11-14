@@ -196,9 +196,12 @@ describe('manual page writes never fall back to the hosted RPC', () => {
     const mirror = mirrorWith(fake);
     exchange = mirror.exchange;
     await expect(exchange.frameFedReady).resolves.toBe(false);
+    const errors = vi.fn();
+    exchange.on('error', errors);
     await expect(Reflect.apply(exchange.callMethodInWorker, exchange, [method])).rejects.toMatchObject({
       outcome: 'notSent',
     });
+    expect(errors).toHaveBeenCalledOnce();
     expect(mirror.calls).toEqual([]);
     expect(fake.commands).toEqual([]);
   });
@@ -358,5 +361,40 @@ describe('manual page writes never fall back to the hosted RPC', () => {
       { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 5, side: 'long', timeoutMs: 120000 },
       { op: 'setLeverage', symbol: 'ETHUSDT', leverage: 5, side: 'short', timeoutMs: 120000 },
     ]);
+  });
+
+  it('reports a direct unsupported scheduleCancel exactly once', async () => {
+    const fake = fakeEngine({ supported: false });
+    const mirror = mirrorWith(fake);
+    exchange = mirror.exchange;
+    await exchange.frameFedReady;
+    const errors = vi.fn();
+    exchange.on('error', errors);
+    await expect(exchange.scheduleCancel()).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(errors).toHaveBeenCalledOnce();
+    expect(mirror.calls).toEqual([]);
+  });
+
+  it('reports an unsupported capability-adopted account tier exactly once', async () => {
+    const fake = fakeEngine({ supported: false, venue: 'lighter' });
+    exchange = new RustEngineExchange(
+      'lighter',
+      { key: 'fake-key', secret: 'fake-secret', workerMirror: true },
+      new DefaultStore(),
+    );
+    exchange.on('callMethod', (event: { requestId: string; method: string }) => {
+      exchange?.emitter.emit('callMethod:done', {
+        requestId: event.requestId,
+        success: true,
+        result: JSON.parse(engineCapabilities('lighter')),
+      });
+    });
+    await exchange.frameFedReady;
+    await exchange.loadCapabilities();
+    const errors = vi.fn();
+    exchange.on('error', errors);
+    await expect(exchange.changeAccountTier?.('premium')).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(errors).toHaveBeenCalledOnce();
+    expect(fake.commands).toEqual([]);
   });
 });

@@ -1632,3 +1632,7 @@ Manual page writes retain the original worker-owner generation and bridge throug
 internal reads, capability waits and nuke retry timers. Composite operations pass
 that admission to every later cancel/close leg; nested calls cannot recapture a
 successor owner. Unchanged-owner command payloads and ordering remain identical.
+
+The page readiness boundary reports local refusals once, including optional methods
+and the direct schedule-cancel/account-tier paths; caller rejection alone cannot
+replace the exchange error event. Already-reported command failures stay deduped.

@@ -1042,7 +1042,7 @@ export class RustEngineExchange extends BaseExchange {
       this.isWorkerMirror && FRAME_FED_WRITES.has(method)
         ? typeof members[method] === 'function'
           ? members[method](...args)
-          : Promise.reject(this.pageWriterUnavailable(method))
+          : this.withPageWriter(method, args, () => Promise.reject(this.pageWriterUnavailable(method)))
         : method === 'fetchOHLCV'
           ? this.callCandleWorker(viaWorker, args)
           : (viaWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args)) as typeof viaWorker;
@@ -1997,12 +1997,17 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private withPageWriter = async <T>(method: string, args: unknown[], send: () => Promise<T>): Promise<T> => {
-    const admitted = this.captureWorkerAdmission();
-    if (!this.frameFedSettled) await this.untilFrameFedSettled(method);
-    admitted?.(method, args);
-    if (this.isDisposed) throw this.workerOwnerChanged(method, args);
-    if (!this.frameFed) throw this.pageWriterUnavailable(method);
-    return send();
+    try {
+      const admitted = this.captureWorkerAdmission();
+      if (!this.frameFedSettled) await this.untilFrameFedSettled(method);
+      admitted?.(method, args);
+      if (this.isDisposed) throw this.workerOwnerChanged(method, args);
+      if (!this.frameFed) throw this.pageWriterUnavailable(method);
+      return await send();
+    } catch (error) {
+      this.reportCommandError(error);
+      throw error;
+    }
   };
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
