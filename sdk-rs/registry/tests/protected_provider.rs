@@ -59,7 +59,7 @@ fn check_options(venue: &str, mut options: EngineOptions) {
         .into_iter()
         .find(|alg| plain.can_sign(&key, *alg) == Capability::Supported)
         .unwrap_or_else(|| panic!("{venue}: signable key"));
-    let mut request = SignRequest {
+    let request = SignRequest {
         receipt: Default::default(),
         context: Default::default(),
         operations: vec![Operation::Sign {
@@ -78,7 +78,7 @@ fn check_options(venue: &str, mut options: EngineOptions) {
         }],
     };
     #[cfg(feature = "coinbase")]
-    if venue == "coinbase" {
+    let request = if venue == "coinbase" {
         let binding = options.coinbase_signing.as_ref().unwrap();
         let input = safe_cex_venue_coinbase::sign::signing_input_for(
             binding.algorithm,
@@ -89,7 +89,7 @@ fn check_options(venue: &str, mut options: EngineOptions) {
             false,
         )
         .unwrap();
-        request.operations = vec![
+        let operations = vec![
             Operation::Present {
                 key: primary.credential.clone(),
             },
@@ -101,7 +101,13 @@ fn check_options(venue: &str, mut options: EngineOptions) {
                 }],
             },
         ];
-    }
+        SignRequest {
+            operations,
+            ..request
+        }
+    } else {
+        request
+    };
     let expected = plain
         .sign_ready(&request)
         .unwrap()

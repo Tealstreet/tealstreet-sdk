@@ -2,6 +2,11 @@
 use super::*;
 use std::sync::{Mutex, MutexGuard};
 
+/// Explicit canonical setup opt-in. Implementations own only protected private
+/// material, erase it on drop, and never retain an alias to an unprotected key.
+/// Existing/custom Signer implementations do not opt in implicitly.
+pub trait ProtectedSigner: Signer {}
+
 /// Trusted setup's owner of an already protected, immediate provider.
 /// Share this owner with `Arc` when needed; the last owner drop erases even if
 /// engine provider handles remain alive. No key read, export or replacement API.
@@ -26,7 +31,7 @@ impl Guarded {
 impl ProtectedProvider {
     /// For canonical implementations only, after all private material has moved
     /// into protected storage. No other reference to the inner provider may live.
-    pub fn new(provider: Provider) -> Result<Self, SignError> {
+    pub fn new(provider: Arc<dyn ProtectedSigner>) -> Result<Self, SignError> {
         if !provider.immediate() || Arc::strong_count(&provider) != 1 {
             return Err(SignError::InvalidRequest);
         }
@@ -143,6 +148,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Fault(Arc<AtomicUsize>);
+    impl ProtectedSigner for Fault {}
     impl Drop for Fault {
         fn drop(&mut self) {
             self.0.fetch_add(1, Ordering::SeqCst);

@@ -104,7 +104,9 @@ impl Signer for Owned {
                 ))
             })
             .collect::<Result<_, SignError>>()?;
-        safe_cex_engine::signing::ProtectedProvider::new(std::sync::Arc::new(Self { slots }))
+        safe_cex_engine::signing::ProtectedProvider::new(std::sync::Arc::new(ProtectedOwned(
+            Self { slots },
+        )))
     }
     fn immediate(&self) -> bool {
         true
@@ -125,6 +127,26 @@ impl Signer for Owned {
         }
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
+struct ProtectedOwned(Owned);
+#[cfg(not(target_arch = "wasm32"))]
+impl safe_cex_engine::signing::ProtectedSigner for ProtectedOwned {}
+#[cfg(not(target_arch = "wasm32"))]
+impl Signer for ProtectedOwned {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(self.0.run(request))
+    }
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.0.sign(request)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
+
 fn install(
     setup: Setup,
     options: &mut EngineOptions,

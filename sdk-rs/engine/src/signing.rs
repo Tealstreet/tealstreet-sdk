@@ -1255,7 +1255,7 @@ pub type Provider = Arc<dyn Signer>;
 #[path = "signing_protected.rs"]
 mod protected;
 #[cfg(not(target_arch = "wasm32"))]
-pub use protected::ProtectedProvider;
+pub use protected::{ProtectedProvider, ProtectedSigner};
 
 /// What a provider declares it can sign for one ref; anything but
 /// `Supported` fails command admission closed.

@@ -1098,7 +1098,9 @@ impl Signer for LocalSigner {
     ) -> Result<safe_cex_engine::signing::ProtectedProvider, SignError> {
         let signer = std::sync::Arc::try_unwrap(self).map_err(|_| SignError::InvalidRequest)?;
         let signer = signer.with_protected_storage()?;
-        safe_cex_engine::signing::ProtectedProvider::new(std::sync::Arc::new(signer))
+        safe_cex_engine::signing::ProtectedProvider::new(std::sync::Arc::new(ProtectedLocalSigner(
+            signer,
+        )))
     }
 
     fn incarnation(&self) -> Option<&Incarnation> {
@@ -1162,6 +1164,35 @@ impl Signer for LocalSigner {
     fn sign(&self, request: SignRequest) -> SignFuture {
         let result = self.sign_now(&request);
         Box::pin(std::future::ready(result))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ProtectedLocalSigner(LocalSigner);
+#[cfg(not(target_arch = "wasm32"))]
+impl safe_cex_engine::signing::ProtectedSigner for ProtectedLocalSigner {}
+#[cfg(not(target_arch = "wasm32"))]
+impl Signer for ProtectedLocalSigner {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(self.0.sign_now(request))
+    }
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.0.sign(request)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+    fn owned_public_address_capability(&self) -> Capability {
+        self.0.owned_public_address_capability()
+    }
+    fn create_public_address_setup(
+        &self,
+        request: SignRequest,
+    ) -> Option<Box<dyn safe_cex_engine::signing::OwnedSetupExecution>> {
+        self.0.create_public_address_setup(request)
     }
 }
 
@@ -3518,7 +3549,10 @@ mod protected_release_tests {
                     released.fetch_add(1, Ordering::SeqCst);
                 });
             }
-            let owner = safe_cex_engine::signing::ProtectedProvider::new(Arc::new(signer)).unwrap();
+            let owner = safe_cex_engine::signing::ProtectedProvider::new(Arc::new(
+                ProtectedLocalSigner(signer),
+            ))
+            .unwrap();
             let engine = owner.provider();
             if explicit {
                 owner.erase();
