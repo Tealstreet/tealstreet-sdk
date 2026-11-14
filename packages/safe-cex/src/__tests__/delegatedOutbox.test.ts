@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
+import { delegatedIntentFingerprint } from '../delegatedOrderFrames';
 import { createDelegatedIntentId, DelegatedOutbox, markDelegatedNotSent } from '../delegatedOutbox';
 import { DelegatedOutbox as LegacyOutbox } from './fixtures/delegatedOutbox.7232375420';
 
@@ -381,14 +382,35 @@ describe('DELEGATED host-neutral outbox', () => {
 
     it('dedupes at capacity and refuses new keys without forgetting completed caller identities', async () => {
       const f = fixture();
-      const box = await DelegatedOutbox.open(f.options);
-      for (let i = 0; i < 1056; i++) {
-        const id = `018bcfe5-6800-7000-8000-${i.toString(16).padStart(12, '0')}`;
-        await box.cancel(await box.enqueue(params, { intentId: id }));
+      const seed = await DelegatedOutbox.open(f.options);
+      await seed.cancel(await seed.enqueue(params, { intentId }));
+      const template = [...f.rows.values()][0];
+      seed.close();
+      f.rows.clear();
+      // Restore validates and persists the completed history in one pass instead
+      // of rescanning it after 1,056 separate enqueue/cancel pairs. Keep the real
+      // production cap and exercise the final slot through live enqueue/cancel.
+      const idAt = (i: number) => `018bcfe5-6800-7000-8000-${i.toString(16).padStart(12, '0')}`;
+      for (let i = 0; i < 1055; i++) {
+        const id = idAt(i);
+        const row = {
+          ...template,
+          intentId: id,
+          seq: i + 1,
+          fingerprint: delegatedIntentFingerprint(template.accountName, id, params, i + 1),
+        };
+        await f.options.storage.put(row, row);
       }
+      const box = await DelegatedOutbox.open(f.options);
+      expect(box.entries()).toHaveLength(1055);
+      await box.cancel(await box.enqueue(params, { intentId: idAt(1055) }));
+      const completed = box.entries();
+      expect(completed).toHaveLength(1056);
+      expect(completed.every((row) => row.state === 'canceled' && row.callerSuppliedIntentId)).toBe(true);
       expect(await box.enqueue(params, { intentId })).toBe(intentId);
+      expect(await box.enqueue(params, { intentId: idAt(1055) })).toBe(idAt(1055));
       await expect(box.enqueue(params, { intentId: '018bcfe5-6800-7000-8000-ffffffffffff' })).rejects.toThrow('full');
-      expect(box.entries()).toHaveLength(1056);
+      expect(box.entries()).toEqual(completed);
       expect(f.rows.size).toBe(1056);
       expect(f.writes).toEqual([]);
       box.close();
