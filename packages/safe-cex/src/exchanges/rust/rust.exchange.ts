@@ -2645,6 +2645,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed || this.socketHealthTimer !== undefined) return;
     let previousWall = Date.now();
     let previousEngine = this.socketHealthClock?.();
+    const suspended = new Map<BaseWebSocket<BaseExchange>, { received: number; closes: number }>();
     const schedule = () => {
       this.socketHealthTimer = setTimeout(check, SOCKET_HEALTH_SYNC_MS);
       this.socketHealthTimer.unref?.();
@@ -2655,21 +2656,37 @@ export class RustEngineExchange extends BaseExchange {
       try {
         const now = Date.now();
         const engineNow = this.socketHealthClock?.();
-        // Only a paused scheduling clock permits this fallback; normal 90s/180s
-        // venue silence policies remain authoritative. Match the clock's 1s step margin.
-        const resumed = previousEngine !== undefined && engineNow !== undefined &&
-          (now - previousWall) - (engineNow - previousEngine) > 1_000;
-        previousWall = now;
-        previousEngine = engineNow;
-        if (resumed) {
+        const engineElapsed = previousEngine !== undefined && engineNow !== undefined
+          ? engineNow - previousEngine : undefined;
+        const gap = engineElapsed === undefined ? 0 : (now - previousWall) - engineElapsed;
+        if (gap > 1_000) {
           for (const socket of this.getAllSockets()) {
             if (this.isDisposed) return;
+            const received = socket.lastReceived;
+            // Keep only receipts known before the pause, not already resumed traffic.
+            // Within this interval that is provable when the pause outlasted active time.
+            const beforePause = received <= previousWall ||
+              (engineElapsed !== undefined && gap > engineElapsed && now - received >= gap);
             if (
               socket?.isConnected &&
               socket.isInitialized &&
-              socket.lastReceived > 0 &&
-              now - socket.lastReceived >= RUST_SOCKET_STALE_MS
-            ) socket.reconnect();
+              received > 0 &&
+              beforePause
+            ) suspended.set(socket, { received, closes: socket.lifetimeCloseCount });
+          }
+        }
+        previousWall = now;
+        previousEngine = engineNow;
+        // A short sleep may not be stale at its first check. Retain only that
+        // lifetime until fresh traffic, replacement/disposal, or its 60s wall deadline.
+        for (const [socket, evidence] of suspended) {
+          if (this.isDisposed) return;
+          if (!socket.isConnected || !socket.isInitialized || socket.lastReceived !== evidence.received ||
+            socket.lifetimeCloseCount !== evidence.closes) {
+            suspended.delete(socket);
+          } else if (now - evidence.received >= RUST_SOCKET_STALE_MS) {
+            suspended.delete(socket);
+            socket.reconnect();
           }
         }
         this.syncSocketHealthToStore();

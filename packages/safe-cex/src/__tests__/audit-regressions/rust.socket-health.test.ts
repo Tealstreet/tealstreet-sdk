@@ -210,8 +210,10 @@ describe('Rust engine socket health (cutover B5)', () => {
     'the first runnable health check after sleep retires %s stale sockets despite a paused engine clock',
     async (venue) => {
       vi.useFakeTimers({ now: 1_800_000_000_000 });
-      const engineNow = Date.now();
+      let engineNow = Date.now();
       const { exchange, sockets, engineCloses, deliver, store } = await setup(undefined, venue, () => engineNow);
+      // Startup advances normally; this control freezes the clock from the sleep onward.
+      engineNow = Date.now();
       deliver('public');
       deliver('private');
       // No socket close callback or native supervisor deadline runs while the laptop sleeps.
@@ -230,8 +232,9 @@ describe('Rust engine socket health (cutover B5)', () => {
 
   it('wake health recovery leaves a freshly delivering private channel alone', async () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 });
-    const engineNow = Date.now();
+    let engineNow = Date.now();
     const { engineCloses, deliver, live } = await setup(undefined, undefined, () => engineNow);
+    engineNow = Date.now();
     deliver('public');
     deliver('private');
     vi.setSystemTime(Date.now() + 101_012);
@@ -242,10 +245,76 @@ describe('Rust engine socket health (cutover B5)', () => {
     expect(privateSocket.closed).toBe(false);
   });
 
+  it.each([50_000, 101_012])(
+    'retains the %i ms sleep obligation while the engine clock resumes normally',
+    async (sleptMs) => {
+      vi.useFakeTimers({ now: 1_800_000_000_000 });
+      let sleepOffset = 0;
+      const { exchange, engineCloses, deliver, live, store } = await setup(
+        undefined, 'blofin', () => Date.now() - sleepOffset,
+      );
+      deliver('private');
+      const original = live('private');
+      sleepOffset = sleptMs;
+      vi.setSystemTime(Date.now() + sleptMs);
+      await vi.advanceTimersByTimeAsync(5_000);
+      if (sleptMs === 50_000) {
+        expect(original.closed).toBe(false);
+        expect(engineCloses).toEqual([]);
+        expect(store.socketHealth).toMatchObject({ privateInitialized: true, privateHealthy: true });
+      } else {
+        expect(original.closed).toBe(true);
+        expect(engineCloses).toEqual([[2, 1006]]);
+      }
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(original.closed).toBe(true);
+      expect(engineCloses).toEqual([[2, 1006]]);
+      expect(exchange.privateWebsocket?.isInitialized).toBe(false);
+    },
+  );
+
+  it.each(['fresh traffic', 'replacement', 'disposal'] as const)(
+    'retires a pending short-sleep obligation on %s',
+    async (recovery) => {
+      vi.useFakeTimers({ now: 1_800_000_000_000 });
+      let sleepOffset = 0;
+      const { exchange, engineCloses, deliver, live } = await setup(
+        undefined, 'cryptocom', () => Date.now() - sleepOffset,
+      );
+      deliver('private');
+      sleepOffset = 50_000;
+      vi.setSystemTime(Date.now() + sleepOffset);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(engineCloses).toEqual([]);
+      if (recovery === 'replacement') exchange.privateWebsocket!.reconnect();
+      if (recovery === 'disposal') exchange.dispose();
+      else deliver('private');
+      const recovered = recovery === 'disposal' ? undefined : live('private');
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(engineCloses).toEqual(recovery === 'replacement' ? [[2, 1006]] : []);
+      expect(recovered?.closed ?? true).toBe(recovery === 'disposal');
+    },
+  );
+
+  it.each([2_000, 50_000])('does not attach a %i ms sleep obligation to already resumed traffic', async (sleptMs) => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    let sleepOffset = 0;
+    const { engineCloses, deliver, live } = await setup(undefined, 'cryptocom', () => Date.now() - sleepOffset);
+    deliver('private');
+    sleepOffset = sleptMs;
+    vi.setSystemTime(Date.now() + sleepOffset);
+    deliver('private');
+    const fresh = live('private');
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(engineCloses).toEqual([]);
+    expect(fresh.closed).toBe(false);
+  });
+
   it('wake health recovery preserves an uninitialized replacement and stops on disposal', async () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 });
-    const engineNow = Date.now();
+    let engineNow = Date.now();
     const { exchange, engineCloses, deliver, live } = await setup(undefined, undefined, () => engineNow);
+    engineNow = Date.now();
     deliver('private');
     vi.setSystemTime(Date.now() + 101_012);
     live('private').handlers.onClose(1006);
