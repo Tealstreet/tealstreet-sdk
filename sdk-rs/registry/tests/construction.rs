@@ -488,7 +488,9 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
         )
         .unwrap(),
         Some(safe_cex_engine::test_support::seeded_entropy(17)),
-        Some(std::sync::Arc::new(safe_cex_crypto::signer::LocalSigner::new())),
+        Some(std::sync::Arc::new(
+            safe_cex_crypto::signer::LocalSigner::new(),
+        )),
         Accept,
     )
     .unwrap_err();
