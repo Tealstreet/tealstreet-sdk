@@ -13,11 +13,113 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const venues = BETA_VENUES.filter((name) => deriveRemoteSigningPolicy(name)?.enabled);
+const publicCases: Array<{ name: ExchangeName; version?: 'v1' | 'v3' }> = venues.map((name) => ({ name }));
+publicCases.push({ name: 'asterdex', version: 'v1' }, { name: 'asterdex', version: 'v3' });
 const unusedSigners = () => ({
   remoteSigner: {
     sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn(),
   },
   payloadSigner: vi.fn(),
+});
+
+it.each<{ key?: string; publicDataOnly?: boolean }>([
+  {}, { key: '' }, { publicDataOnly: false }, { key: '', publicDataOnly: false },
+])('keyless AsterDEX V3 PayloadSigner resolves public mode for %j', (input) => {
+  const payloadSigner = vi.fn();
+  const options: ExchangeOptions = { key: '', secret: '', payloadSigner, extra: { asterdexApiVersion: 'v3' }, ...input };
+  if (input.key === undefined) Reflect.deleteProperty(options, 'key');
+  const setup = new DelegatedSignerSetup('asterdex', options);
+  try {
+    expect(setup.primaryComplete).toBe(false);
+    expect(setup.credentialPresence).toEqual({ key: false, secret: false });
+    const exchange = new RustEngineExchange('asterdex', options, new DefaultStore());
+    try {
+      expect(exchange.isPublicDataOnly).toBe(true);
+      expect(exchange.privateWebsocket).toBeUndefined();
+      expect(payloadSigner).not.toHaveBeenCalled();
+    } finally { exchange.dispose(); }
+  } finally { setup.dispose(); }
+});
+
+it('private AsterDEX V3 PayloadSigner with a wallet key retains its typed custody refusal', () => {
+  const payloadSigner = vi.fn();
+  expect(() => new RustEngineExchange('asterdex', { key: `0x${'11'.repeat(20)}`, secret: '', payloadSigner,
+    extra: { asterdexApiVersion: 'v3' } }, new DefaultStore())).toThrowError(expect.objectContaining({
+    kind: 'unsupported', outcome: 'notSent',
+    message: 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only',
+  }));
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+class CapturedEngine implements WasmEngineLike {
+  readonly options: unknown;
+  constructor(_venue: string, json: string) { this.options = JSON.parse(json); }
+  capabilities = () => '{}';
+  start = () => '[]';
+  command = () => '[]';
+  takeFrame = () => undefined;
+  snapshotFrame = () => new Uint8Array();
+  wsOpen = () => '[]';
+  wsMessage = () => undefined;
+  wsClose = () => '[]';
+  wsRouteExhausted = () => '[]';
+  httpStart = () => '[]';
+  httpChunk = () => '[]';
+  httpEnd = () => '[]';
+  httpFailed = () => '[]';
+  timer = () => '[]';
+}
+
+const bybitHyroVenues: readonly ExchangeName[] = ['bybit', 'hyrotrader'];
+
+it.each(bybitHyroVenues)('%s explicit and keyless public modes install no delegated authority', (name) => {
+  const { remoteSigner, payloadSigner } = unusedSigners();
+  for (const callbacks of [{ remoteSigner }, { payloadSigner }]) {
+    for (const mode of [{ key: 'unused-key', publicDataOnly: true }, { key: '' }, { key: '', publicDataOnly: false }]) {
+      const options: ExchangeOptions = { secret: '', ...mode, ...callbacks };
+      const setup = new DelegatedSignerSetup(name, options);
+      try {
+        const engine = setup.construct(CapturedEngine, name, JSON.stringify(options));
+        if (!(engine instanceof CapturedEngine)) throw new Error('Expected the capture engine');
+        expect(engine.options).toMatchObject({ signing: {}, remoteSigning: false, payloadSigner: false, publicDataOnly: true });
+        expect(setup.signerAlgorithms).toEqual([]);
+        expect(setup.primaryComplete).toBe(false);
+        const exchange = new RustEngineExchange(name, options, new DefaultStore());
+        try {
+          expect(exchange.isPublicDataOnly).toBe(true);
+          expect(exchange.privateWebsocket).toBeUndefined();
+        } finally { exchange.dispose(); }
+      } finally { setup.dispose(); }
+    }
+  }
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(remoteSigner.isAvailable).not.toHaveBeenCalled();
+  expect(remoteSigner.onAvailabilityChange).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+it.each(bybitHyroVenues)('%s keyed private RemoteSigner retains its primary authority', (name) => {
+  const { remoteSigner } = unusedSigners();
+  const options: ExchangeOptions = { key: 'fixture-key', secret: '', remoteSigner };
+  const setup = new DelegatedSignerSetup(name, options);
+  try {
+    const engine = setup.construct(CapturedEngine, name, JSON.stringify(options));
+    if (!(engine instanceof CapturedEngine)) throw new Error('Expected the capture engine');
+    expect(engine.options).toMatchObject({ remoteSigning: true, signing: { primary: {
+      credential: expect.any(String), signing: expect.any(String),
+    } } });
+    expect(setup.primaryComplete).toBe(true);
+    const exchange = new RustEngineExchange(name, options, new DefaultStore());
+    try { expect(exchange.isPublicDataOnly).toBe(false); } finally { exchange.dispose(); }
+  } finally { setup.dispose(); }
+});
+
+it('retains private Bybit PayloadSigner support and Hyro PayloadSigner refusal', () => {
+  const options: ExchangeOptions = { key: 'fixture-key', secret: '', payloadSigner: vi.fn() };
+  const exchange = new RustEngineExchange('bybit', options, new DefaultStore());
+  try { expect(exchange.isPublicDataOnly).toBe(false); } finally { exchange.dispose(); }
+  expect(() => new RustEngineExchange('hyrotrader', options, new DefaultStore()))
+    .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
 });
 
 it('Apex public-only construction ignores a saved key without a passphrase and an unused RemoteSigner', () => {
@@ -210,13 +312,15 @@ it.each(['kucoin', 'kucoinspot', 'kraken'] as const)('%s constructs explicitly p
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it.each(venues)('%s public-only shared setup ignores signing configuration and confers no authority', async (name) => {
+it.each(publicCases)('$name $version public-only shared setup ignores signing configuration and confers no authority', async ({ name, version }) => {
   const { remoteSigner, payloadSigner } = unusedSigners();
   for (const callbacks of [{ payloadSigner }, { remoteSigner }, { remoteSigner, payloadSigner },
+    { remoteSigner: { sign: remoteSigner.sign } }, { payloadSigner: 'unused-invalid-callback' },
     { remoteSigner: null, payloadSigner: 'unused-invalid-callback' }]) {
     const input = {
       key: 'unused-key', secret: 'unused-material', publicDataOnly: true,
       secondary_secret: 'unused-read-material', secondary_passphrase: '', localSigner: null,
+      extra: { asterdexApiVersion: version },
       ...callbacks,
     } as unknown as ExchangeOptions;
     const setup = new DelegatedSignerSetup(name, input);
@@ -322,9 +426,10 @@ const falsyCallbacks = callbackFields.flatMap((field) => [null, false, ''].map((
 
 it('covers every disabled-delegation beta venue', () => {
   expect(venues).toContain('cryptocom');
+  expect(venues).toContain('asterdex');
   expect(venues).toContain('mexc');
   expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
-    'asterdex-v1', 'asterdex-v3', 'kodiakfi', 'krakenspot',
+    'kodiakfi', 'krakenspot',
     'mode', 'what', 'woofi',
   ].sort());
 });

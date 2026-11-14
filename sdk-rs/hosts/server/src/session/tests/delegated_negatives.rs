@@ -141,7 +141,7 @@ impl Drop for RunningAccount {
 fn handover(session: &mut Session, key: &str, secret: &str, id: Option<&str>) -> InitPayload {
     let offer = session
         .handovers
-        .issue("acct", crate::accounts::now_ms())
+        .issue("acct", "bybit", crate::accounts::now_ms())
         .unwrap();
     let sealed = crate::delegated::tests::seal(
         &offer,
@@ -187,7 +187,7 @@ async fn delegated_candidates_preserve_the_running_account() {
                 "new-attempt" => {
                     let fresh = candidate
                         .handovers
-                        .issue("acct", crate::accounts::now_ms())
+                        .issue("acct", "bybit", crate::accounts::now_ms())
                         .unwrap();
                     init.sealed.as_mut().unwrap().attempt_id = fresh.attempt_id;
                 }
@@ -204,6 +204,21 @@ async fn delegated_candidates_preserve_the_running_account() {
                     assert!(completion.probe.as_ref().unwrap().permit.is_ok());
                 }
                 candidate.verification_completed(completion).await.unwrap();
+            }
+            if case == "other-pair" {
+                let other = f
+                    .registry
+                    .held("alice", "acct", candidate.socket)
+                    .expect("separately verified identity is admitted independently");
+                assert!(!Arc::ptr_eq(&other, &resident.account));
+                assert_ne!(other.registry_name(), resident.account.registry_name());
+                assert!(!Arc::ptr_eq(
+                    &other.delegated.as_ref().unwrap().provider(),
+                    &resident.provider,
+                ));
+                candidate.close();
+                resident.untouched(&f);
+                continue;
             }
             assert!(
                 f.registry.held("alice", "acct", candidate.socket).is_none(),

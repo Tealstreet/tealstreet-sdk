@@ -11,6 +11,8 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
+AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
+see `sdk-rs/venues/asterdex/README.md`),
 MEXC (RemoteSigner and REST-only PayloadSigner; see `sdk-rs/venues/mexc/README.md`),
 Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
@@ -47,14 +49,20 @@ read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
-Bybit DELEGATED handover. Its standalone module needs no WASM, Node Buffer or
+DELEGATED handover for a hosted-supported venue. Its standalone module needs no WASM, Node Buffer or
 browser base64 globals; the host supplies the usual secure random source for
-Noble. Call it only after the host's per-venue DELEGATED enablement check. It does
+Noble. Call it only after the host's hosted-signing and server-origin eligibility check. It does
 not select signing modes, open sockets or change LOCAL/COSIGNED setup.
 Inputs contain the host's padded-base64 X25519 public key and attempt/boot/venue
 context; the result contains only the attempt ID and padded-base64 encapsulation
 and ciphertext. Context fields preserve exact UTF-8 bytes and cannot contain
 the protocol's `|` separator. Optional passphrases preserve absence versus empty.
+The key-only registry mapping (currently Paradex) supplies `signingKey` in
+sealed credentials and `secret: ''`; the public input `key` and init key equal `subkeyAddress`, never
+the private scalar. The optional private field is not copied into the result or
+HPKE context. The receiver rejects scalar-in-init layouts, foreign credential
+layouts and empty CEX secrets; existing trusted setup validates actual material.
+HMAC callers omit `signingKey` and retain byte-identical envelopes.
 The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
 one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
 fixtures exercise the same production sender. The shared fixture lives with
@@ -63,13 +71,68 @@ the server handover implementation landing.
 
 ## DELEGATED order outbox
 
-`DelegatedOutbox` is an opt-in host-neutral module for Bybit DELEGATED single-order
+`OutboxOptions`, every connection ticket, persisted intent and proof bind the
+authenticated `owner`, account label, actual `venue` and immutable `accountId`.
+Hosts must change `accountId` when account credentials, network or admission
+identity are replaced, and preserve it through socket reconnects. Storage keys
+and sequence checkpoints include this entire scope. A replacement mismatch
+retires the old ticket and refuses before handoff. Restore rejects an unbound
+or mismatched scope before any writes/compaction; it preserves the stored
+history for host reconciliation and never adopts it into the current account.
+Restore arms expiry only after all rows and final compaction succeed. Every
+failed open retires the partial instance and cancels its timers, including if
+scheduling itself fails; already queued callbacks cannot write after retirement.
+
+`enqueue(params, { intentId })` accepts a caller-owned canonical lowercase UUIDv7.
+Invalid IDs throw `DelegatedIntentError` with code `invalidIntentId`; a different
+canonical payload for the same ID throws `intentConflict`. Identical retries
+return the existing durable ID without another sequence, deadline or submission,
+including after restore. A failed original put refuses retries with
+`intentNotDurable`. Caller-key reservation updates only the last successfully
+committed snapshot, preserving its handoff state and evidence even if a newer
+receipt could not be persisted. A retry never makes that newer outcome durable,
+renews replay permission, or replaces a committed handoff with an in-memory
+queued label. Persisted no-handoff claims still pass the evidence constructors.
+Caller-key rows remain reserved through ordinary history
+compaction, within the existing total capacity of 1,056 records; exhaustion
+refuses new intents rather than forgetting a key. Hosts must preserve scoped
+storage and close a writer before replacing it.
+
+Saved accounts and exchange options accept optional `signingMode` using the
+existing account-worker wire values `local`, `cosigned`, and `delegated`.
+`accountToExchangeOptions` forwards the account mode and permits a validated
+override. Absence preserves existing signer selection; this metadata does not
+activate DELEGATED writes or replace admission. Unknown modes (including null)
+are refused as `invalidInput` / `notSent` during conversion and factory creation.
+
+Sam's 2026-11-11 policy allows activation with place and reduce-only close before
+the other venue actions exist. `activate(connection, { DELEGATED })` checks
+the host-owned feature flag, the captured box/router transport proofs, and only
+the advertised `delegatedActivationScopeV1` place/close capabilities. Discover
+box capabilities using `?exchangeName=<joined venue>` and retain its
+`delegatedVenueV1`; activation refuses a missing or mismatched venue. The neutral
+`DELEGATED` flag replaces `DELEGATED_BYBIT`, and `delegatedDisabled` replaces
+`delegatedBybitDisabled`. `requireDelegatedActivation` takes the connection venue
+as its third argument. `OutboxConnection.venue` is an `ExchangeName`; its trusted
+low-level connection still requires a remote-signing-supported venue. Amend, venue
+cancel, cancel-all and nuke are not activation prerequisites. A failed activation
+retires the old ticket, including deferred work, and throws a named reason.
+The existing low-level `connect` API still requires prior host admission.
+`enqueueAction(actionName, params)` permits place or a close with literal
+`reduceOnly: true` and visibly refuses every other string action before storage
+or a frame; it never chooses another signing mode. Supported string actions
+capture JSON parameters once before validation; fingerprints, persistence and
+handoff use those captured values. A close requires literal `reduceOnly: true`
+in the captured payload. Router queued-intent cancellation keeps its separate
+existing semantics. These admission helpers do not alter handoff, deadline,
+restore, evidence or replay rules below.
+
+`DelegatedOutbox` is an opt-in host-neutral module for admitted DELEGATED single-order
 submits. Both the box's advertised `delegatedOrderFramesV1` and the router's
 `delegatedOrderLedgerV1` must be explicitly true in the captured connection ticket;
 missing/false flags disable writes and receipts. Hosts inject scoped persistence,
 secure randomness, a monotonic clock with a stable epoch, deadline scheduling
-and an admitted socket connection. Close
-the outbox on logout; pass the captured connection ticket to flush and receive.
+and an admitted socket connection. Close the outbox on logout; pass the captured connection ticket to flush and receive.
 Router outcomes may be renumbered per client socket, including stored replays.
 Receipt ordering is checked per intent within that ticket, so one intent's higher
 number cannot hide another's deferred replay. Replacement tickets reset receipt
@@ -78,33 +141,149 @@ The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations
 coverage uncertainty and ledger failures answer unknown, never prove not sent.
 Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
 string coercion. Capability discovery still requires completed socket admission.
-Intent UUIDv7 keys become Bybit client order IDs unchanged. Acknowledged and unknown
-intents are never submitted again. After ten monotonic seconds, including time
-spent waiting for persistence or admission, an intent never handed off is not sent;
-an unresolved physical handoff is unknown. A physical handoff is shown as sending
-until its receipt or deadline. Queue cancellation also preserves uncertainty after
-a handoff. Legacy pending cancellations restore as unknown, never as proof of no send.
-Cancellation or expiry inside a declined first send remains terminal and is
-published to observers; declining a retry cannot erase an earlier handoff's uncertainty.
-Restored ambiguous handoffs are unknown; queued records from another clock epoch
-are not sent. Once enqueue persistence succeeds, temporary unavailability while
+Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
+an intent `sending` in memory; sending, acknowledged and unknown intents are never
+submitted again. At ten monotonic seconds from creation (including persistence
+and admission waits), a never-forwarded queued intent becomes `notSent`; an
+in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+those retained entries to unknown immediately while fencing later work and callbacks.
+Disconnect/replacement makes
+in-flight and acknowledged intents unknown immediately. The synchronous send
+adapter returns true only after socket handoff; only an explicit false guarantees
+neither handoff nor buffering for a later connection. A throw or any other non-true
+return supplies no such evidence: it becomes unknown immediately, loses its replay
+proof, and is never automatically submitted again, including after reconnect or restore.
+Queue cancellation after handoff remains unknown until a router
+receipt positively establishes non-forwarding. Legacy pending cancellations restore
+as unknown. Cancellation or expiry during a declined first send remains terminal
+and is published; a declined retry cannot erase a previous handoff.
+`notSent` is a branded state, constructed only by the exported
+`markDelegatedNotSent(intent, evidence)`. It requires positive evidence for the
+whole intent: a locally known never-attempted intent, a declined adapter handoff
+with no earlier possible handoff, or an admitted authoritative router refusal.
+A failed reconnect attempt cannot prove an earlier handoff did not occur.
+The private runtime brand is read only by the outbox; plain state writes cannot
+manufacture the result. JSON stores the evidence kind and its owner/account/venue/incarnation,
+intent ID, sequence and fingerprint binding. Restore validates that evidence and
+reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
+including their unsupported error outcome. No-evidence clock-epoch/deadline
+expiry of a restored queued record is also unknown rather than proof of no send.
+Restored ambiguous handoffs are unknown. Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
 supplies durable deduplication and queue cancellation;
 see `docs/plans/callers/delegated-order-frames.md`. This module does not select a
 signing mode, open sockets, add an HTTP write path or change LOCAL/COSIGNED calls.
 
 The outbox bounds pending work to 1,024 entries and keeps the latest 32 completed
-records. Acknowledged/unknown work and pending queue cancellations remain retained.
+records. The in-memory completed index refers to the same objects in the live
+intent map and credits only durably completed records. Retirement removes both
+entries through one private helper. Capacity accounting and compaction prune
+stale index entries before use, so a stale entry cannot release capacity or
+participate in sorting. Unknown work, including pending queue cancellation, is retained for 24
+hours from its UUIDv7 Unix creation time, using the injected Unix clock across
+reloads (clock rollback can extend retention). At expiry it remains `unknown`,
+gains `retentionExpired: true`, stops pending queue cancellation, and emits the
+normal `changed` notification. Hosts must surface this as expired, unresolved
+history and reconcile via ordinary orders/history; expiry proves nothing about
+the venue outcome. Only after that explicit expiry state is durable may it join
+the latest-32 completed history and retire. Expiry never enables resubmission or
+changes an unknown to `notSent`; a late positive router refusal can still prove
+non-forwarding. Storage failure keeps the row for a later flush retry.
 Storage adapters implement atomic `compact(scope, checkpoint)`: delete only the
 listed retired intent IDs in that scope and advance its durable sequence using
 the maximum of old/new values. Preserve all other records. `load` returns an
-`OutboxSnapshot` with sequence progress and records (legacy record arrays are
-accepted for migration). `put` preserves checkpoint metadata. Compaction failure
+`OutboxSnapshot` with sequence progress and records (record arrays require the
+same complete account binding). `put` preserves checkpoint metadata. Compaction failure
 keeps records until a later flush retries. Unrelated retirement failure never
 rejects enqueue or hides its durable intent ID after handoff. Close the old
 outbox before replacing it with a new writer for the same scope.
 
+## DELEGATED account actions
+
+`DelegatedOutbox.enqueueAction(action, options)` retains the separate typed
+action API, gated by the boolean `delegatedOrderActionsV1`, independently of
+`delegatedActivationScopeV1`. It adds the versioned `order.action` family for
+amend, venue cancel, cancel-all and nuke. Existing `enqueue` placement frames and
+`cancelQueued` semantics stay unchanged. Action writes/receipts require both
+`delegatedOrderActionsV1` (box) and `delegatedOrderActionLedgerV1` (router), as well
+as the existing two placement/ledger flags and completed DELEGATED admission.
+The action-specific fingerprint includes its version, kind, target IDs/symbols
+and update values in a distinct canonical domain. UUIDv7 intent IDs use the same
+router dedupe namespace across both families; never reuse one for another action.
+Both entry points accept optional `{intentId}` with a canonical caller UUIDv7.
+Identical retries are durable identity lookups: preserve sequence, canonical
+payload/fingerprint, deadline and handoff evidence, and never submit again.
+Different action/targets or placement family rejects `intentConflict`; a failed
+original put rejects an identity retry as `intentNotDurable`. A later state-put
+failure never erases the original identity's durability or authorizes replay.
+The additive
+`callerSuppliedIntentId: true` reservation survives completed-history retirement
+and restore under the same 1,056-record bound. `enqueueAction` shares placement's
+not-sent and replay evidence constructors; no direct not-sent assignment is
+permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
+action unknown; queue cancellation is explicit, never a venue cancel.
+
+Action outcomes are typed `applied`, proven `refused/notSent`, `unsupported`
+for a pre-dispatch schema rejection, or `unknown`.
+Applied results survive later uncertain queue-cancel replies. A proven refusal
+also survives later uncertainty, while its subsequent authoritative refused
+outcome may supply the refusal message after a negative ACK.
+A replayed positive receipt ACK cannot revoke that refusal or clear its bound
+evidence, including after disconnect, close and restore.
+Partial, interrupted and unproven results stay unknown and never become
+resendable. Nuke uses the existing box account operation: stop algos, cancel
+orders and close positions, awaiting all legs. Its queued work carries the
+original registration and rechecks it after load/store waits; retirement drops
+stale replies. Action persistence uses version-2 rows with the exact action and
+result, retaining atomic scoped checkpoints/retirement and all version-1 placement
+records. See `docs/plans/callers/delegated-action-frames.md` and the shared
+`delegated-actions-v1.json` fixture.
+
+The entire typed DELEGATED WS API is one version, v1. New operations extend v1
+additively, without per-operation versions; v2 is reserved for a major redesign.
+Unknown operations or fields must fail closed with a typed `unsupported` outcome,
+never silent omission or execution of the known subset. Unsupported outcomes
+remain terminal across restore without creating replay evidence. Storage row
+versions are independent of the wire version.
+
+The additive full-write vocabulary uses the same v1 action frames. Batch and
+protective placements, reduce-only close, settings, symbol/batch/account cancellation,
+close-only/stop-only nukes and native algo/EXEC operations additionally require
+`delegatedFullWriteActionsV1` and `delegatedFullWriteLedgerV1`, together with the
+four existing flags on the admitted ticket. Old four-action routers confer no
+expanded admission. Native dispatch/completion stays on the hosted account;
+there is no browser-sign or legacy-method fallback. Algo action receipts remain
+unknown and reconcile from account events, never an assumed applied result.
+Typed TWAP-state rows preserve optional `ownerGeneration` as a nonnegative safe
+integer alongside `ownerId`; it is included in the fingerprint, never synthesized.
+Native restoration still requires both tags to match its trusted binding.
+Accepted long-lived jobs keep their account scope; queued admission and EXEC
+continuations keep their captured registration/deadline fences. The complete
+closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
+LOCAL and COSIGNED method forwarding is unchanged.
+
+Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
+unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
+keeps the same job and schedule; never emulate amendment with automatic
+stop-and-replace.
+
+The hosted typed v1 action decoder rejects duplicate object keys recursively in
+placement orders, close orders, scheduling values and algo payloads before they
+can hide unknown or malformed fields. Binding/hash checks retain precedence;
+schema rejection returns typed `unsupported` before ACK or native work.
+
+Native account-wide cancellation requires the venue's `nukeAccountCancel`
+capability; it never falls back to an incomplete symbol census.
+
 ## Mirror CI invariants (don't "clean these up")
+
+Bitget TP/SL metadata is account/path-specific through `getExchangeMetadata`:
+`bitgetAccountMode: 'classic' | 'uta'` and `tpslOrderPath: 'entry' | 'position'`.
+Classic/unknown entries offer no selector while their preset default is
+UNPROVEN; supported UTA entries and position TP/SL offer Last and Mark. Inverse
+UTA has no native route and offers no selections. The conservative
+static list is empty for Bitget and both siblings. Web consumers must adopt the
+path-aware call; see `docs/plans/callers/bitget-tpsl-trigger-types.md`.
 
 safe-cex ships in the `tealstreet-sdk` OSS mirror, whose CI does a clean
 sliced install with **no dependency hoisting and no leaked DOM lib** (see
@@ -254,6 +433,10 @@ wire stays intact. Shared standalone Binance/Bybit and AsterDEX V1 (an explicit,
 setup-resolved `apiVersion: v1` only; never V3 wallet keys) request-shape interceptors,
 their codec/site tables and the capture utility are the TS retained for remote
 signing after TS venue classes are deleted; no TS venue/API factory is created.
+AsterDEX V3 native requests use closed `asterdex-wallet` statements instead;
+the device derives account-bound EIP-191/712 digests and the engine verifies the
+returned signature. `asterdex-address` proves wallets for nonce setup, and
+`asterdex-hmac` selects V1 primary/secondary custody. PayloadSigner is V1 REST only.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
 tokens are single use and fenced by raw deadlines, protocol expiry and clock
 revision; provider text and partial results are not returned on failure.
@@ -344,6 +527,13 @@ binary lifecycle fixtures have separate evidence scopes. See phase 9 of
 merely because its name is registered in Rust.
 
 ## Exchange event listeners
+
+`utils/diagnosticRedaction.ts` makes detached diagnostic copies before console,
+log events, telemetry or retained diagnostic buffers receive them. It shares the
+HTTP diagnostic string policy; live command and market messages stay untouched.
+Its parity fixtures are pinned to the host diagnostic contract at `6fde9450cf`.
+Structured `ws-diagnostic` events use this same detached redaction boundary before
+emitter listeners and worker forwarding; live-result events retain their identity.
 
 `BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
 One throwing listener cannot starve later listeners for the same event; errors
@@ -739,7 +929,13 @@ approval fields; the old class export stays available without prototype repair.
 ## Native reported closed-PnL output
 
 `fetchClosedPnl` returns generated `ClosedPnlEntry` rows directly from Rust
-`history_output`. Bybit inverse sizes, OKX contract conversion, fee signs,
+`history_output`. All seven financial fields and both timestamps are required
+nullable values: unknown inputs and unknown/overflowed derived results stay null;
+measured zero stays zero. Missing close time never borrows opening time, and
+unknown close times sort last without dropping the row. Numeric strings remain
+accepted by the public contract for derived/reference producers. Consumers must
+propagate unknown through totals rather than coerce null to zero.
+Bybit inverse sizes, OKX contract conversion, fee signs,
 account labels and newest-close ordering are native output policy. The four TS
 closed-PnL mappers live only under test references. `fetchClosedPositions`
 remains the raw journal contract; it is never a fallback for reported PnL.
@@ -1922,6 +2118,28 @@ The exchange emits `grafana-http-request` / `grafana-http-response` /
 `error` / `warning` events on `BaseExchange.emitter` — check your
 consuming app's CLAUDE.md for the capture playbook.
 
+Rust engine sockets also emit the opt-in `ws-diagnostic` event with a
+`WsDiagnosticEvent` object: `{ venue, channel, direction, message }`. Channels
+are public/private/business and directions are send/receive. This is generic
+across venues, including Hyro. The package exports `setWsDiagnosticsEnabled`,
+`isWsDiagnosticsEnabled` and the event type. The switch defaults off in each
+realm; worker hosts use the existing `__workerConfig.wsDiagnosticsEnabled` flag.
+`ExchangeWorker` forwards `{ op: 'ws-diagnostic', data: [event] }`; consuming web
+controllers must handle that op and re-emit it before rendering Requests Log rows.
+
+Diagnostics run after socket I/O and validate both field names and values.
+Only closed protocol/status/error enums, bounded integers and success booleans
+survive. IDs, topics, scalar data, messages and other free-form strings become
+fixed placeholders, including nested/encoded echoes inside retained fields.
+Arrays retain at most 32 sanitized entries. Challenge/signature material,
+connection URLs/headers and binary contents are never included. Opaque,
+malformed, oversized and excessive-depth content is withheld. Heartbeats are
+omitted, output is capped and frames are sampled per socket. Disabling the
+switch drops queued entries too, even if it is re-enabled before their callbacks
+run. Queued socket diagnostics capture the cancellation generation and recheck
+it before each structured/legacy callback. Existing private grafana events remain
+available with the same sanitized frame text; do not display both as duplicate rows.
+
 ## Worker Position Refresh Bridge
 
 `BaseExchange.updatePositionsInWebworker()` emits the `updatePositions`
@@ -2119,6 +2337,11 @@ public API. Run `corepack yarn types:generate`, then
 `corepack yarn generate:script-types`; never edit generated declarations or the
 script bundle. The Position-only compiler gate is
 `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs`.
+
+Position notional is required `number | null`. Unknown native valuation survives
+JSON as null; numeric consumers must propagate unknown or refuse, including
+notional-based totals, ratios and sizing. Quantity remains independent and drives
+position presence. Shared helpers return null for incomplete valuations.
 
 The native engine owns Position display normalization and native sizing extras.
 Positions use SCXF section revision 2 with eleven numeric columns and required

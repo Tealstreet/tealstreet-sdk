@@ -14,5 +14,7 @@ export const isBybitInverseSymbol = (symbol: string): boolean => /^[A-Z0-9]+USD(
 export const positionUpnlInQuote = (position: Position): number => {
   const upnl = position.unrealizedPnl || 0;
   if (!isBybitInverseSymbol(position.symbol) || !position.contracts) return upnl;
-  return (upnl * position.notional) / position.contracts;
+  const notional = position.notional;
+  if (typeof notional !== 'number' || !Number.isFinite(notional)) return NaN;
+  return (upnl * notional) / position.contracts;
 };

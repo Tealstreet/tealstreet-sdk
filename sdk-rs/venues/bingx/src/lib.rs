@@ -574,7 +574,6 @@ impl Bingx {
             }
             return;
         }
-        let Some(data) = message.data else { return };
         if let Some(rest) = message.data_type.strip_prefix("market.depth.") {
             let Some(id) = rest.strip_suffix(".step0.level100") else {
                 return;
@@ -583,7 +582,12 @@ impl Bingx {
                 return;
             };
             let symbol = m.symbol.clone();
-            let Ok(Depth { mut bids, mut asks }) = serde_json::from_str::<Depth>(data.get()) else {
+            let depth = message.depth.or_else(|| {
+                message
+                    .data
+                    .and_then(|data| serde_json::from_str::<Depth>(data.get()).ok())
+            });
+            let Some(Depth { mut bids, mut asks }) = depth else {
                 return;
             };
             if let Some(state) = self.books.get_mut(&symbol) {
@@ -601,6 +605,7 @@ impl Bingx {
                 cx.book_changed(&symbol);
             }
         } else if let Some(rest) = message.data_type.strip_prefix("market.kline.") {
+            let Some(data) = message.data else { return };
             let mut split = rest.split('.');
             let (Some(id), Some(native_interval)) = (split.next(), split.next()) else {
                 return;

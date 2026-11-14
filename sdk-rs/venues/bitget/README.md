@@ -76,6 +76,12 @@ UTA protective replacement still attempts the original stop once; a refused
 restore ends the sequence. Zero-rounded anonymous rows remain omitted before
 dispatch. These rules add no whole-plan sizing gate or tail rebalancing.
 
+Classic entry presets expose no documented trigger selector; their default is
+UNPROVEN without a DEMO capture. Explicit selections refuse before send, and
+preset children retain only their returned `fill_price` / `mark_price` reference.
+UTA entries and Classic/UTA position TP/SL honor Last and Mark; Index refuses.
+See [trigger choices and UI integration](../../../../docs/plans/callers/bitget-tpsl-trigger-types.md).
+
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
 

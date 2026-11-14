@@ -350,7 +350,7 @@ export const signHostedHttp = async (
     headers.set({ ApiKey: credential,
       'Request-Time': prepared.stamp, Signature: output.signature,
       'Recv-Window': String(Math.max(1, Math.min(20_000, options.extra?.recvWindow ?? 20_000))),
-      'Content-Type': 'application/json' });
+      'Content-Type': 'application/json', source: 'TEAL' });
     return { ...prepared.config, headers };
   } : okx ? async (config) => {
     // Market paths keep the existing local signing behavior. The skip flag
@@ -429,6 +429,7 @@ export const signHostedWsAuth = async (
   if (outputFormat === 'coinbase-jwt' && request.exchangeName !== 'coinbase' && request.exchangeName !== 'coinbasespot') return { id: request.id, error: 'Unsupported WS auth output format' };
   if (outputFormat === 'coinbase-jwt') return { id: request.id, wsAuthSignature: await signCoinbaseJwt(host) };
   if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
+    || outputFormat === 'asterdex-address' || outputFormat === 'asterdex-hmac' || outputFormat === 'asterdex-wallet'
     || outputFormat === 'grvt-order' || outputFormat === 'grvt-address'
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };

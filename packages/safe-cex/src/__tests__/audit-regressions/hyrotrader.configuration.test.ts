@@ -65,12 +65,22 @@ describe('HyroTrader build-time configuration', () => {
     expect(HYROTRADER_PROD_WS_URL.private.livenet).toBe('wss://prod.test/v5/private');
   });
 
-  it('fails visibly without any Hyro origin instead of falling through to Bybit', async () => {
-    await load();
+  it('uses the Hyro-hosted simulator as the default production origin', async () => {
+    const { HYROTRADER_DEFAULT_PROD_REST_ORIGIN, HYROTRADER_PROD_URL, HYROTRADER_PROD_WS_URL } = await load();
+    expect(HYROTRADER_PROD_URL).toEqual({
+      livenet: HYROTRADER_DEFAULT_PROD_REST_ORIGIN,
+      testnet: HYROTRADER_DEFAULT_PROD_REST_ORIGIN,
+    });
+    expect(HYROTRADER_PROD_WS_URL.public.linear.livenet).toBe('wss://sim-tealstreet.hyro.site/v5/public/linear');
+    expect(HYROTRADER_PROD_WS_URL.private.livenet).toBe('wss://sim-tealstreet.hyro.site/v5/private');
+
     const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
-    expect(() => new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore())).toThrow(
-      'HyroTrader production REST URL is not configured. Set NEXT_PUBLIC_HYROTRADER_PROD_REST_URL, or NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL while v1 is simulator-backed.',
-    );
+    const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+    try {
+      expect(exchange.getBybitRestBaseUrl('livenet')).toBe('https://sim-tealstreet.hyro.site');
+    } finally {
+      exchange.dispose();
+    }
   });
 
   it('marks bundled demo accounts as demo while using simulator config', async () => {
@@ -89,15 +99,15 @@ describe('HyroTrader build-time configuration', () => {
     }
   });
 
-  it('uses simulator config for ordinary v1 accounts when production origins are not live yet', async () => {
+  it('keeps simulator config scoped to bundled demo accounts when production env is unset', async () => {
     await load('https://simulator.test');
     const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
     const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
     try {
       expect(exchange.isDemo).toBe(false);
-      expect(exchange.getBybitRestBaseUrl('livenet')).toBe('https://simulator.test');
-      expect(exchange.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://simulator.test/v5/public/linear');
-      expect(exchange.getBybitPrivateWsUrl('livenet')).toBe('wss://simulator.test/v5/private');
+      expect(exchange.getBybitRestBaseUrl('livenet')).toBe('https://sim-tealstreet.hyro.site');
+      expect(exchange.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://sim-tealstreet.hyro.site/v5/public/linear');
+      expect(exchange.getBybitPrivateWsUrl('livenet')).toBe('wss://sim-tealstreet.hyro.site/v5/private');
     } finally {
       exchange.dispose();
     }
@@ -115,7 +125,7 @@ describe('HyroTrader build-time configuration', () => {
     }
   });
 
-  it('reloads real constructors with fresh origins while existing instances retain their captured config', async () => {
+  it('reloads real constructors with fresh production origins while existing instances retain their captured config', async () => {
     await load('https://first.test');
     const firstModule = await import('../reference/bybit/hyrotrader.exchange');
     const first = new firstModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
@@ -124,9 +134,9 @@ describe('HyroTrader build-time configuration', () => {
       const secondModule = await import('../reference/bybit/hyrotrader.exchange');
       const second = new secondModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
       try {
-        expect(first.getBybitRestBaseUrl('livenet')).toBe('https://first.test');
-        expect(first.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://first.test/v5/public/linear');
-        expect(first.getBybitPrivateWsUrl('livenet')).toBe('wss://first.test/v5/private');
+        expect(first.getBybitRestBaseUrl('livenet')).toBe('https://sim-tealstreet.hyro.site');
+        expect(first.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://sim-tealstreet.hyro.site/v5/public/linear');
+        expect(first.getBybitPrivateWsUrl('livenet')).toBe('wss://sim-tealstreet.hyro.site/v5/private');
         expect(second.getBybitRestBaseUrl('livenet')).toBe('https://second.test');
         expect(second.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://second.test/v5/public/linear');
         expect(second.getBybitPrivateWsUrl('livenet')).toBe('wss://second.test/v5/private');

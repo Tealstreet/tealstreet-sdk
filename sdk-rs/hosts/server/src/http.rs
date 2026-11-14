@@ -671,6 +671,11 @@ async fn user_admin_action(app: Arc<App>, request: UserDrainRequest, action: &st
 }
 
 pub fn capabilities_json() -> serde_json::Value {
+    capabilities_json_for(None)
+}
+
+/// Hosts select the joined account's venue; this grants no account admission.
+pub fn capabilities_json_for(venue: Option<&str>) -> serde_json::Value {
     json!({
         "service": "exchange-server",
         "version": 1,
@@ -681,6 +686,10 @@ pub fn capabilities_json() -> serde_json::Value {
             "auth": "Tealstreet proxy JWT in the proxyToken query parameter",
             "privateSigning": "browser remote signer for COSIGNED; keys enter only in DELEGATED, memory-only",
             "delegatedOrderFramesV1": crate::order_contract::runtime_enabled(),
+            "delegatedOrderActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedFullWriteActionsV1": crate::order_contract::runtime_enabled(),
+            "delegatedActivationScopeV1": crate::order_contract::action_capabilities(venue),
+            "delegatedVenueV1": venue,
         }},
         "publicData": {"unauthenticated": {
             "exchange": crate::accounts::PUBLIC_EXCHANGE,
@@ -691,8 +700,14 @@ pub fn capabilities_json() -> serde_json::Value {
     })
 }
 
-async fn capabilities() -> Response {
-    cors(axum::Json(capabilities_json()).into_response())
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilitiesQuery {
+    exchange_name: Option<String>,
+}
+
+async fn capabilities(Query(query): Query<CapabilitiesQuery>) -> Response {
+    cors(axum::Json(capabilities_json_for(query.exchange_name.as_deref())).into_response())
 }
 
 #[derive(Deserialize)]
@@ -935,8 +950,12 @@ async fn serve(
     let mut drain = app.registry.watch_drain();
     let mut algos_ended = app.registry.watch_algos_ended();
     let close_at = expires.map(|expires_at_ms| {
-        let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()));
-        tokio::time::Instant::now() + remaining + TOKEN_GRACE
+        let remaining = Duration::from_millis(
+            expires_at_ms
+                .saturating_add(TOKEN_GRACE.as_millis() as u64)
+                .saturating_sub(now_ms()),
+        );
+        tokio::time::Instant::now() + remaining
     });
     let expiry = async {
         match close_at {
@@ -973,7 +992,7 @@ async fn serve(
                 break;
             }
             _ = &mut expiry => {
-                send(&mut sink, close(1008, "Tealstreet proxy token expired")).await;
+                send(&mut sink, close(1008, crate::auth::TOKEN_EXPIRED)).await;
                 break;
             }
             Ok(()) = drain.changed() => if let Some(moved) = session.drain_close() {
@@ -1617,6 +1636,8 @@ mod tests {
                         op: op.into(),
                         data: data.into(),
                         origin: "test".into(),
+                        twap_owner: account.twap_owner.snapshot(),
+                        action: None,
                     };
                     account.algos.as_ref().unwrap().send(input).unwrap();
                 };

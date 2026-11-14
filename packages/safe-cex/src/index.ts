@@ -14,6 +14,7 @@ import { getExchangeMetadata } from './exchangeMetadata';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
 import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { snapshotDelegatedSigningOptions } from './exchanges/rust/delegatedSigningSnapshot';
+import { validateSigningMode } from './signingMode';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
 import { unsupportedVenueError } from './unsupportedVenue';
@@ -29,7 +30,30 @@ export {
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
 
-export { DelegatedOutbox, createDelegatedIntentId } from './delegatedOutbox';
+export { DelegatedActivationError, requireDelegatedActivation, requireDelegatedAction } from './delegatedActivation';
+export type {
+  DelegatedActivationFlags,
+  DelegatedActivationCapabilities,
+  DelegatedActivationScopeV1,
+} from './delegatedActivation';
+export {
+  DelegatedOutbox,
+  DelegatedIntentError,
+  createDelegatedIntentId,
+  markDelegatedNotSent,
+} from './delegatedOutbox';
+export type { DelegatedAlgoAction } from './delegatedAlgoActions';
+export { delegatedActionFingerprint } from './delegatedActions';
+export type {
+  DelegatedAction,
+  DelegatedOrderParams,
+  DelegatedActionResult,
+  DelegatedActionOutcome,
+  DelegatedActionRequestFrame,
+  DelegatedActionAckFrame,
+  DelegatedActionOutcomeFrame,
+  DelegatedActionCancelQueuedFrame,
+} from './delegatedActions';
 export { delegatedIntentTime, delegatedIntentFingerprint, delegatedClientOrderId } from './delegatedOrderFrames';
 export type {
   DelegatedOrderBinding,
@@ -40,6 +64,9 @@ export type {
 } from './delegatedOrderFrames';
 export type {
   DelegatedIntent,
+  EnqueueOptions,
+  DelegatedNotSentEvidence,
+  StoredDelegatedNotSentEvidence,
   IntentState,
   OutboxConnection,
   OutboxOptions,
@@ -60,6 +87,8 @@ export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 
 export { createEngineTransport, resolveEngineRoutingPlan } from './transport/engine';
 export type { EngineRoutingPlan } from './transport/engine';
+export { setWsDiagnosticsEnabled, isWsDiagnosticsEnabled } from './utils/wsDiagnostics';
+export type { WsDiagnosticEvent } from './transport/requestsLog';
 
 export { sealDelegatedHandover } from './delegatedHandover';
 export type { DelegatedHandoverInput, SealedDelegatedHandover } from './delegatedHandover';
@@ -113,6 +142,7 @@ export const createExchange = async (
   store?: Store,
 ): Promise<BaseExchange> => {
   options = snapshotDelegatedSigningOptions(exchangeName, options);
+  validateSigningMode(options.signingMode);
   assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
   // Rejected venues never start the clock, load WASM or construct transports.
@@ -278,6 +308,7 @@ export {
   TEALSTREET_BUILDER_ADDRESS_MAINNET,
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
 } from './exchanges/hyperliquid/hyperliquid.builderFee';
+export type { BuilderFeeApprovalGuard } from './exchanges/hyperliquid/hyperliquid.builderFee';
 
 export type {
   BuilderFeeApprovalResult,

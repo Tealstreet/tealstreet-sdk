@@ -643,6 +643,7 @@ impl AsterDex {
                         update_mark(cx, row);
                     }
                 }
+                FastAggregate::Depth { stream, event } => self.apply_depth(cx, &stream, event),
             }
             return;
         }
@@ -710,6 +711,10 @@ impl AsterDex {
         let Ok(event) = serde_json::from_str::<PartialDepth>(body) else {
             return;
         };
+        self.apply_depth(cx, stream, event);
+    }
+
+    fn apply_depth(&mut self, cx: &mut Cx<'_, Pending>, stream: &str, event: PartialDepth<'_>) {
         let symbol = stream
             .split('@')
             .next()

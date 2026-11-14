@@ -10,8 +10,30 @@ snapshots to the main thread on every `store.notify()`.
 ## Worker lifecycle logs
 
 `ExchangeWorker.log` sends the emitter argument array `[JSON text, severity]`,
-serializing its level, message and context. A standalone object is coerced to
-`[object Object]` by existing main-thread log consumers; `warn` maps to `warning`.
+serializing its level, message and context. Global exception and promise rejection
+handlers redact a detached copy of the entire diagnostic packet before delivery
+through DedicatedWorker or SharedWorker ports, preserving the error event shape.
+A standalone object is coerced to `[object Object]` by existing main-thread log
+consumers; `warn` maps to `warning`.
+
+Startup retry explanations are diagnostic copies when cached, so a native read
+failure cannot bypass masking in the later retry warning. Deactivation refusal
+text uses the same text policy while its status flag remains unchanged.
+
+## Public-data frame rejection messages
+
+Book and candle subscription handlers forward typed rejection observers as
+`listenOrderBook:rejected` and `listenOHLCV:rejected`. Each message carries its
+`subId`, stream, symbol, candle interval where applicable, and the existing
+JSON-safe serialized error; receivers restore the error for the optional third
+observer. Rejections fan out to every current subscriber, cancel pending data
+throttles, and send no substitute data. Unsubscribe and handler disposal remove
+these observers. Registration is visible before calling the source, so a
+synchronous unsubscribe or disposal fences data and rejections immediately and
+releases the late handle exactly once. Cancelled registrations cannot overwrite
+a replacement subscription or trigger a candle repair; a thrown source
+registration releases its reservation so callers can retry.
+Worker owner/generation fences apply to these messages too.
 
 ## History result completeness
 
@@ -344,7 +366,9 @@ phase tag and never ship it. Counts from this tag are a floor, not a census.
   postMessaging `{op: '<event>', data: [...args]}` for a fixed
   set (`error`, `warning`, `log`, `exec-log`, `exec-result`,
   `chaser:complete`, `grafana-info`, `grafana-error`, `grafana-pws`, `grafana-pws-sub`,
-  `grafana-http-request`, `grafana-http-response`). Adding a new
+  `grafana-http-request`, `grafana-http-response`, `ws-diagnostic`). The latter
+  carries one sanitized `WsDiagnosticEvent` object and remains default-off via
+  `__workerConfig.wsDiagnosticsEnabled`. Adding a new
   bridged event requires adding it both to the worker-side
   forwarder in `_setupExchangeEventListeners` and the main-side
   `workerListener` switch in `exchangeAccountController.ts`, plus
@@ -462,16 +486,56 @@ Multi-user worker hosts supply `TwapWorkerContext.getTwapOwner()` before creatin
 `ExchangeWorker`: `{ ownerId, generation }`, or `null` after revocation/logout.
 The generation must change for every owner/session transition, including A→B→A;
 it is a non-secret session counter, not an access token. Restore captures a copy
-before the engine-readiness queue, retains `ownerId` in pending/forwarded rows,
+before the engine-readiness queue, retains the original persisted `ownerId` and
+`ownerGeneration` in pending, published and forwarded rows,
 and rechecks identity and generation after the lock and in-flight lookup awaits,
 immediately before handing the row to the algos. Stale restores release their
 lock, are removed from persisted state and emit a `cancelled-for-owner-change` warning.
 Owned rows without a host owner check fail closed. A host with that API must
 also reject untagged rows: the current login never proves an old row's owner.
-Native `PersistedTwap` and `TwapBook::serialize_state` preserve an explicit
-top-level `ownerId`; they never infer it from the account or current session.
-Untagged single-user rows without the API keep their existing behavior. Session snapshots remain private
-to the pending restore and are never persisted or forwarded to the engine.
+Native `PersistedTwap` and `TwapBook::serialize_state` preserve both explicit
+top-level tags. Native restore requires a trusted bound owner matching both;
+missing, foreign or stale evidence stays rejected. The wrapper never fills in a
+missing generation from the current session or replaces an old generation.
+Without the host API, the wrapper still forwards untagged single-user rows
+unchanged; native ownership checks remain authoritative. Captured session
+snapshots remain private to the pending restore and are never persisted or
+forwarded to the engine.
+
+The local Rust engine receives the same provider before startup. The worker
+captures its owner at construction and refuses owned algo startup if that owner
+or generation changes during startup. Buffered messages keep that creation binding;
+both the early call drain and final startup drain recheck it before dispatch.
+Retired buffered work is refused, never treated as initially unowned work.
+The adapter keeps the construction binding separately from its live provider;
+startup and later worker entry retire a changed binding before accepting work.
+An initially unowned worker remains allowed only while its binding stays unowned.
+Calls already admitted into startup or preflight waits recheck that binding at
+native command handoff; retired calls refuse as `notSent` and retire the host
+without running stale algo cleanup cancels.
+`EngineHost.algoStart(accountName,
+twapOwner?, isOwnerCurrent?)` passes a present `{ ownerId: string, generation: number }` as JSON
+to the additive WASM `algoStartOwned(accountName, twapOwnerJson, now, wall)`.
+Absent providers use the existing `algoStart` ABI and its interim account-name
+restore behavior. Explicit null/invalid owners fail closed. The declaration in
+`hosts/wasm/js/host.d.mts` is authored API source, not generated wasm bindings.
+
+The adapter also supplies a live check against the copied startup binding.
+Cached routes, engine entries, action dispatch and deferred signer callbacks
+recheck it. A changed/unavailable owner retires the entire host, cancels its
+timers and transport preparations, releases its engine and refuses queued work;
+it never rebinds that engine to the new owner or runs stale cleanup cancels.
+Unchanged owners keep their schedules. New workers are required after a change.
+Automatic recovery checks the initiating binding before queueing reconstruction,
+at its delayed execution and after startup; changed owners cannot recover that worker.
+
+Once bound, legacy rows with neither top-level tag never resume. The wrapper
+posts a `warning` message `TWAP <symbol> restore cancelled-for-owner-change:
+persisted ownerId is missing` and removes the pending row. A direct native
+restore, or an owner-tagged row missing only generation, emits `error` with
+`TWAP <symbol> not restored: persisted TWAP owner or generation does not match`.
+The native server forwards this error with `forceToast: true`. No path fills in
+a missing generation from `getTwapOwner`.
 
 `twap/RustTwapOwnership.ts`, owned by `TwapHandler`, keeps these rules for the
 Rust TWAPs: it takes each running TWAP's Web Lock, holds a restored row until it

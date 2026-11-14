@@ -1,4 +1,3 @@
-import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
 import type {
   AccountAuthResult,
   AlgoStopAllResult,
@@ -50,8 +49,16 @@ import type {
   UpdateOrderOpts,
   ValidateAccountResult,
 } from '../../types';
+import type { TwapOwner } from '../../webworker/twap/TwapOwner';
+import type { WorkerMethodArguments } from '../../webworker/workerMethodArguments';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, WorkerForwardedMethod } from '../base';
+import type {
+  CallableMethodsInWorker,
+  EngineSnapshot,
+  ExchangeCapabilities,
+  OHLCVFrameRejection,
+  OrderBookFrameRejection,
+} from '../base';
 import type { BaseWebSocket } from '../base.ws';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
@@ -72,17 +79,20 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { SECONDARY_READ_KEYS_ENABLED } from '../../secondaryReadKeys';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
+import { WorkerFrameRecoveryScopes } from '../../store/workerFrameRecoveryScopes';
 import { bybitPublicRateLimitReport } from '../../transport/bybitPublicRateLimitTelemetry';
 import { assertEngineAccountRouting, createEngineTransport, withSecondaryReadKeyPolicy } from '../../transport/engine';
 import { withRequestsLog } from '../../transport/requestsLog';
 import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { stopAccountAlgos as stopLocalAccountAlgos } from '../../webworker/stopAccountAlgos';
+import { captureTwapOwner } from '../../webworker/twap/TwapOwner';
 import {
   claimWriteTiming,
   emitWriteTiming,
@@ -925,7 +935,7 @@ export class RustEngineExchange extends BaseExchange {
         setupError = error;
       }
     }
-    if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
+    if (bridgeConstruction.dispatchSigning && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
       try {
         aster = mapAsterDEXSignerSetup(options);
       } catch (error) {
@@ -1237,7 +1247,7 @@ export class RustEngineExchange extends BaseExchange {
     } catch (error) {
       // A refused frame leaves no baseline to apply deltas to: drop them until a fresh snapshot.
       this.sourceBaseline = false;
-      console.error(`${this.name} source frame refused`, error);
+      diagnosticConsole.error(`${this.name} source frame refused`, error);
       if (!this.engineFailure) this.emitter.emit('frameFed:needsSnapshot');
       return;
     }
@@ -1394,7 +1404,25 @@ export class RustEngineExchange extends BaseExchange {
   /** Whether this account's engine runs algos, once its engine host exists to say. */
   private algoRoute: 'rust' | 'unsupported' | undefined;
   /** Algo ops that arrived before the engine host, replayed in order once it decides. */
-  private queuedAlgoOps: { op: string; rust: () => void; refuse: (message: string) => void }[] = [];
+  private queuedAlgoOps: {
+    op: string;
+    rust: () => void;
+    refuse: (message: string) => void;
+    owner: TwapOwner | null | undefined;
+  }[] = [];
+  private twapOwnerProvider?: () => TwapOwner | null;
+  private twapOwnerBinding: TwapOwner | null | undefined;
+
+  setTwapOwnerProvider(getOwner?: () => TwapOwner | null, owner = captureTwapOwner(getOwner)) {
+    this.twapOwnerProvider = getOwner;
+    this.twapOwnerBinding = owner && { ...owner };
+  }
+
+  private algoOwnerCurrent = (owner: TwapOwner | null | undefined): boolean => {
+    const current = captureTwapOwner(this.twapOwnerProvider);
+    if (owner === undefined || owner === null) return current === owner;
+    return !!current && current.ownerId === owner.ownerId && current.generation === owner.generation;
+  };
 
   /** Chaser, TWAP and exec ops run in this account's engine (an `algos` build). */
   get runsRustAlgos(): boolean {
@@ -1408,7 +1436,8 @@ export class RustEngineExchange extends BaseExchange {
     if (!host || this.isDisposed || this.engineFailure) return false;
     if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
     try {
-      host.algoStart(accountName);
+      const owner = this.twapOwnerBinding;
+      host.algoStart(accountName, owner, owner === undefined ? undefined : () => this.algoOwnerCurrent(owner));
       this.algoRoute = 'rust';
     } catch (error) {
       if (!(error instanceof ExchangeError && error.kind === 'unsupported')) throw error;
@@ -1424,9 +1453,17 @@ export class RustEngineExchange extends BaseExchange {
    * order). An op that cannot run there reaches `refuse` with the reason.
    */
   routeAlgoOp = (accountName: string, op: string, rust: () => void, refuse: (message: string) => void): void => {
-    if (!this.algoRoute) this.startAlgos(accountName);
+    if (!this.algoRoute) {
+      try {
+        this.startAlgos(accountName);
+      } catch (error) {
+        refuse(`${op} was not run: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+    }
     if (this.algoRoute === 'rust') {
-      rust();
+      if (this.runsRustAlgos) rust();
+      else refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
       return;
     }
     if (this.algoRoute === 'unsupported') {
@@ -1441,16 +1478,17 @@ export class RustEngineExchange extends BaseExchange {
       refuse(`${op} was not run: too many algo requests are waiting for the ${this.name} engine to start`);
       return;
     }
-    this.queuedAlgoOps.push({ op, rust, refuse });
+    this.queuedAlgoOps.push({ op, rust, refuse, owner: captureTwapOwner(this.twapOwnerProvider) });
   };
 
   private noAlgosMessage = (op: string) => `${op} was not run: this ${this.name} engine build has no algos`;
 
   private replayQueuedAlgoOps() {
     const queued = this.queuedAlgoOps.splice(0);
-    for (const { op, rust, refuse } of queued) {
+    for (const { op, rust, refuse, owner } of queued) {
       try {
-        if (this.algoRoute === 'rust') rust();
+        if (!this.algoOwnerCurrent(owner)) refuse(`${op} cancelled-for-owner-change`);
+        else if (this.algoRoute === 'rust' && this.runsRustAlgos) rust();
         else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
         else refuse(`${op} was not run: the ${this.name} engine never started`);
       } catch (error) {
@@ -1463,6 +1501,7 @@ export class RustEngineExchange extends BaseExchange {
   algoOp = (op: string, data: unknown): void => {
     try {
       if (!this.host) throw new Error(`${this.name} engine is not started`);
+      if (!this.runsRustAlgos) throw new Error(`${this.name} algos are not running`);
       this.host.algoOp(op, data);
     } catch (error) {
       this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1546,7 +1585,7 @@ export class RustEngineExchange extends BaseExchange {
     const options = this.engineOptions;
     if (this.setupError) throw this.setupError;
     if (deriveEndpointSetupPolicy(this.name) === 'hyrotrader') {
-      const simulator = options.extra?.hyrotraderMode === 'demo' || !HYROTRADER_PROD_URL.livenet;
+      const simulator = options.extra?.hyrotraderMode === 'demo';
       const network = options.testnet ? 'testnet' : 'livenet';
       const rest = simulator ? HYROTRADER_SIMULATOR_URL : HYROTRADER_PROD_URL;
       const sockets = simulator ? HYROTRADER_SIMULATOR_WS_URL : HYROTRADER_PROD_WS_URL;
@@ -1646,8 +1685,11 @@ export class RustEngineExchange extends BaseExchange {
     this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
     this.invalidateInfoCatalogue = routedTransport.invalidateCatalogue;
     this.readReconnectDiagnostics = routedTransport.reconnectDiagnostics;
-    const transport = withRequestsLog(routedTransport, this.name, (event, message) =>
-      this.emitter.emit(event, message),
+    const transport = withRequestsLog(
+      routedTransport,
+      this.name,
+      (event, message) => this.emitter.emit(event, message),
+      (event) => this.emitter.emit('ws-diagnostic', event),
     );
     const engine = constructEngine(
       WasmEngine,
@@ -2305,29 +2347,53 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private applyEngineFrame(buffer: ArrayBuffer, recover: boolean, snapshot = false) {
-    let frame: Frame;
+    if (this.isDisposed) return;
+    let frame: Frame | undefined;
+    let notified: Set<string> | undefined;
+    const rejected = (section: 'frame' | 'books' | 'candles', error: unknown) => {
+      if (notified?.has(section)) return;
+      (notified ??= new Set()).add(section);
+      let symbols: readonly string[] = [];
+      try {
+        if (frame) symbols = this.applier.marketSymbolsFor(frame);
+      } catch {
+        /* Unknown identities fan out. */
+      }
+      const signal = new WorkerFrameRecoveryScopes().reject(section, error, frame, symbols);
+      if (section === 'frame' || section === 'books')
+        this.dispatchFrameEvent(() => this.emitter.emit('workerBookFrameRejected', signal));
+      if (this.isDisposed) return;
+      if (section === 'frame' || section === 'candles')
+        this.dispatchFrameEvent(() => this.emitter.emit('workerCandleFrameRejected', signal));
+    };
     try {
       frame = new Frame(buffer);
     } catch (error) {
       this.applier.invalidateMarketIdentity();
-      console.error('Invalid engine frame', error);
+      rejected('frame', error);
+      diagnosticConsole.error('Invalid engine frame', error);
       if (recover) this.recoverEngineFrame();
       return;
     }
+    const decoded = frame;
     const previousMarkets = this.store.markets;
     let needsSnapshot = false;
     try {
       this.applier.apply(frame, !this.frameConsumerDecodesMarketData || this.feedBookListeners.size > 0);
     } catch (error) {
       needsSnapshot = error instanceof FrameApplyError;
-      console.error('Engine frame apply failed', error);
+      if (error instanceof FrameApplyError && error.bookRejected) rejected('books', error);
+      diagnosticConsole.error('Engine frame apply failed', error);
     }
-    const read = <T>(section: () => T[]): T[] => {
+    if (this.isDisposed) return;
+    const read = <T>(section: () => T[], stream?: 'books' | 'candles'): T[] => {
+      if (this.isDisposed) return [];
       try {
         return section();
       } catch (error) {
         needsSnapshot = true;
-        console.error('Engine frame section failed', error);
+        if (stream) rejected(stream, error);
+        diagnosticConsole.error('Engine frame section failed', error);
         return [];
       }
     };
@@ -2337,7 +2403,7 @@ export class RustEngineExchange extends BaseExchange {
       this.nativeLoaded = receivedLoaded;
     } catch (error) {
       needsSnapshot = true;
-      console.error('Engine status section failed', error);
+      diagnosticConsole.error('Engine status section failed', error);
     }
     const catalogChanged = previousMarkets !== this.store.markets;
     if (this.publicFeedObservers.size) {
@@ -2346,11 +2412,13 @@ export class RustEngineExchange extends BaseExchange {
         publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas() || frame.tickerObservations?.());
       } catch (error) {
         needsSnapshot = true;
-        console.error('Engine public feed section failed', error);
+        diagnosticConsole.error('Engine public feed section failed', error);
       }
       if (publicChanged)
-        for (const observer of this.publicFeedObservers)
+        for (const observer of this.publicFeedObservers) {
           this.dispatchFrameEvent(() => observer.updated(catalogChanged));
+          if (this.isDisposed) return;
+        }
     }
     let sharedFailure: Error | undefined;
     let sendSharedSnapshot = false;
@@ -2377,18 +2445,22 @@ export class RustEngineExchange extends BaseExchange {
         this.startupFailure = sharedFailure;
       }
     }
-    for (const fill of read(() => this.applier.fills(frame)))
+    for (const fill of read(() => this.applier.fills(decoded))) {
       this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
+      if (this.isDisposed) return;
+    }
     if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.size) {
-      for (const { symbol, orderbook } of read(() => this.applier.books(frame))) {
+      for (const { symbol, orderbook } of read(() => this.applier.books(decoded), 'books')) {
         const listeners = this.bookListeners.get(symbol);
         if (!this.capabilityRecord?.isolatedBookSubscriptions)
           listeners?.forEach((listener) => {
+            if (this.isDisposed) return;
             if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener))
               this.dispatchFrameEvent(() => listener(orderbook));
           });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
+            if (this.isDisposed) return;
             if (listeners.has(id) && (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener)))
               this.dispatchFrameEvent(() =>
                 listener({
@@ -2397,17 +2469,23 @@ export class RustEngineExchange extends BaseExchange {
                 }),
               );
           }
+        if (this.isDisposed) return;
       }
     }
+    if (this.isDisposed) return;
     if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.size) {
-      for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
+      for (const { symbol, interval, candle } of read(() => this.applier.candles(decoded), 'candles')) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
+          if (this.isDisposed) return;
           if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.has(listener))
             this.dispatchFrameEvent(() => listener(candle));
         });
+        if (this.isDisposed) return;
       }
     }
+    if (this.isDisposed) return;
     this.dispatchFrameEvent(() => this.onFrame?.(buffer, snapshot));
+    if (this.isDisposed) return;
     if (sharedFailure) {
       const failure = sharedFailure;
       this.dispatchFrameEvent(() => this.emitAndLogError(failure));
@@ -2441,7 +2519,7 @@ export class RustEngineExchange extends BaseExchange {
       this.applyEngineFrame(snapshot.frame, false, true);
       this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
     } catch (error) {
-      console.error('Engine frame recovery failed', error);
+      diagnosticConsole.error('Engine frame recovery failed', error);
     } finally {
       this.frameRecoveryPending = false;
     }
@@ -2689,6 +2767,15 @@ export class RustEngineExchange extends BaseExchange {
         ...(timing ? { onStage: timing.mark } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       };
+      // A call admitted before readiness must still belong to this engine at handoff.
+      if (!this.algoOwnerCurrent(this.twapOwnerBinding)) {
+        const message = `${this.name} ${command.op} was not sent: owner changed; recreate the account worker`;
+        const error = new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+        // Retire without algo cleanup cancels, including before startAlgos installs its check.
+        this.host.dispose();
+        this.receiveEngineFailure(error);
+        throw error;
+      }
       return (await (Object.keys(options).length
         ? this.host.command(command, options)
         : this.host.command(command))) as T;
@@ -3784,7 +3871,16 @@ export class RustEngineExchange extends BaseExchange {
   fetchPublicTrades = (symbol: string, limit?: number) =>
     this.command<PublicTrade[]>({ op: 'fetchPublicTrades', symbol, limit });
 
-  listenOrderBook = (symbol: string, callback: (book: OrderBook) => void) => {
+  listenOrderBook = (
+    symbol: string,
+    callback: (book: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => {
+    const stopRejections = this.observeOrderBookFrameRejections(symbol, onRejection);
+    if (onRejection) {
+      const original = callback;
+      callback = (book) => original(book);
+    }
     let listeners = this.bookListeners.get(symbol);
     const first = !listeners;
     if (!listeners) {
@@ -3799,6 +3895,7 @@ export class RustEngineExchange extends BaseExchange {
     const callbacks = listeners;
     if (first) this.bookDemand(symbol, true);
     return () => {
+      stopRejections();
       if (!callbacks.delete(listenerId)) return;
       if (callbacks.size === 0 && this.bookListeners.get(symbol) === callbacks) {
         this.bookListeners.delete(symbol);
@@ -3824,7 +3921,16 @@ export class RustEngineExchange extends BaseExchange {
     };
   };
 
-  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+  listenOHLCV = (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => {
+    const stopRejections = this.observeOHLCVFrameRejections(opts, onRejection);
+    if (onRejection) {
+      const original = callback;
+      callback = (candle) => original(candle);
+    }
     const { interval } = opts;
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
@@ -3837,6 +3943,7 @@ export class RustEngineExchange extends BaseExchange {
     const callbacks = listeners;
     if (first) this.candleDemand(opts.symbol, interval, true);
     return () => {
+      stopRejections();
       callbacks.delete(callback);
       if (callbacks.size === 0 && this.candleListeners.get(key) === callbacks) {
         this.candleListeners.delete(key);

@@ -4,6 +4,8 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "bingx-spot-replay")]
+mod bingx_spot_replay;
 #[cfg(feature = "hosted-operation-proof")]
 mod hosted_operation_proof;
 #[cfg(feature = "kraken")]
@@ -1082,6 +1084,14 @@ impl WasmEngine {
                         grvt_trading_account_id: options.grvt_trading_account_id.clone(),
                         #[cfg(not(feature = "grvt"))]
                         grvt_trading_account_id: None,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_v3: matches!(options.asterdex.api_version, Some(version) if version.prefix() == "/fapi/v3"),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_v3: false,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_user_address: options.asterdex.user_address.clone(),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_user_address: None,
                     };
                     (venue.to_owned(), identities, account)
                 })

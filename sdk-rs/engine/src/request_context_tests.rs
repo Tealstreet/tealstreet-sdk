@@ -1305,13 +1305,16 @@ fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
         generation: u64::MAX,
     };
     let preparation = Preparation {
+        issuer: u64::MAX,
         attempt,
         sequence: u64::MAX,
     };
     let permit = Permit {
+        issuer: u64::MAX,
         attempt,
         preparation: u64::MAX,
         sequence: u64::MAX,
+        websocket_issuer: 0,
     };
     assert_eq!(
         Preparation::from_wire(&preparation.to_wire()),
@@ -1329,20 +1332,26 @@ fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
 #[test]
 fn host_tokens_reject_noncanonical_aliases_overflow_and_truncation() {
     for token in [
-        "p1:0:1:0",
-        "p1:1:0:0",
-        "p1:01:1:0",
-        "p1:+1:1:0",
-        "p1:1:1:00",
-        "p1:1:1:-1",
-        "p1:1:1:0 ",
-        "p1:1:1:０",
-        "p1:1:1:0:",
-        "p1:1:1",
-        "p1:1::0",
+        "p1:1:1:0",
+        "p2:0:1:1:0",
+        "p2:01:1:1:0",
+        "p2:+1:1:1:0",
+        "p2:1:0:1:0",
+        "p2:1:1:0:0",
+        "p2:1:01:1:0",
+        "p2:1:1:1:00",
+        "p2:1:1:1:-1",
+        "p2:1:1:1:0 ",
+        "p2:1:1:1:０",
+        "p2:1:1:1:0:",
+        "p2:18446744073709551616:1:1:0",
+        "p2:1:9007199254740992:1:0",
+        "p2:1:1:18446744073709551616:0",
+        "p2:1:+1:1:0",
+        "p2:1:1:1",
+        "p2:1:1::0",
         "p2:1:1:0",
-        "p1:9007199254740992:1:0",
-        "p1:1:18446744073709551616:0",
+        "p3:1:1:1:0",
     ] {
         assert_eq!(
             Preparation::from_wire(token),
@@ -1351,13 +1360,18 @@ fn host_tokens_reject_noncanonical_aliases_overflow_and_truncation() {
         );
     }
     for token in [
-        "r1:1:1:0:0",
-        "r1:1:1:0:01",
-        "r1:1:1:+0:1",
-        "r1:1:1:0:1:",
-        "r1:1:1:0",
-        "r1:1:1:18446744073709551616:1",
+        "r1:1:1:0:1",
+        "r2:0:1:1:0:1",
+        "r2:01:1:1:0:1",
+        "r2:1:1:1:0:0",
+        "r2:1:1:1:0:01",
+        "r2:1:1:1:+0:1",
+        "r2:1:1:1:0:1:",
+        "r2:1:1:1:18446744073709551616:1",
+        "r2:18446744073709551616:1:1:0:1",
+        "r2:1:1:1:0",
         "r2:1:1:0:1",
+        "r3:1:1:1:0:1",
     ] {
         assert_eq!(Permit::from_wire(token), Err(Error::Invalid), "{token}");
     }
@@ -1631,4 +1645,40 @@ fn reserved_journal_never_grows_leg_backing_for_generic_registration_or_replacem
             Err(Error::Capacity)
         ));
     }
+}
+
+#[test]
+fn refused_physical_handoff_consumes_no_release_or_pacing() {
+    let group = Pacing {
+        group: 991,
+        minimum_gap_ms: 100.,
+    };
+    let mut pacing = SendPacing::new(&[group]).unwrap();
+    let mut refused = lifecycle(901, Some(group));
+    let permit = ready(&mut refused);
+    let mut callbacks = 0;
+    let result = refused.claim_with_handoff(
+        permit,
+        clock(1.),
+        &mut pacing,
+        &mut |_| {
+            callbacks += 1;
+            Ok(Admission::Unscheduled)
+        },
+        &mut |commit| {
+            assert!(!commit(&mut || false));
+            assert!(!commit(&mut || panic!("reservation cannot be replayed")));
+            false
+        },
+    );
+    assert_eq!(result, Err(Error::Revoked));
+    assert_eq!(callbacks, 1);
+    assert!(refused.release().is_none());
+    assert!(!refused.accepts_response());
+    let mut next = lifecycle(902, Some(group));
+    let permit = ready(&mut next);
+    assert!(matches!(
+        claim(&mut next, permit, 1., &mut pacing),
+        Ok(Claim::Released(_))
+    ));
 }

@@ -7,8 +7,57 @@ pub const ACK_MAX: usize = 4 * 1024;
 pub const OUTCOME_MAX: usize = 8 * 1024;
 pub const KEY_MAX: usize = 128;
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegatedActions {
+    place: bool,
+    close: Close,
+    amend: bool,
+    cancel: bool,
+    cancel_all: bool,
+    nuke: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum Close {
+    Unsupported,
+    ReduceOnly,
+}
+
+const PLACE_AND_CLOSE: DelegatedActions = DelegatedActions {
+    place: true,
+    close: Close::ReduceOnly,
+    amend: false,
+    cancel: false,
+    cancel_all: false,
+    nuke: false,
+};
+
+/// Sam's 2026-11-11 policy: later venue actions do not gate this protocol slice.
+fn activation_allowed(hosted_venue: bool, actions: &DelegatedActions) -> bool {
+    hosted_venue && actions.place && actions.close == Close::ReduceOnly
+}
+
 pub fn enabled() -> bool {
-    cfg!(feature = "delegated-order-frames") && crate::delegated::enabled("bybit")
+    cfg!(feature = "delegated-order-frames") && !crate::delegated::enabled_venues().is_empty()
+}
+
+/// Per-account admission checks the joined account's actual venue.
+pub fn enabled_for(venue: &str) -> bool {
+    cfg!(feature = "delegated-order-frames") && crate::delegated::enabled(venue)
+}
+
+pub fn action_capabilities(venue: Option<&str>) -> DelegatedActions {
+    if activation_allowed(venue.is_some_and(enabled_for), &PLACE_AND_CLOSE) {
+        PLACE_AND_CLOSE
+    } else {
+        DelegatedActions {
+            place: false,
+            close: Close::Unsupported,
+            ..PLACE_AND_CLOSE
+        }
+    }
 }
 
 /// The compiled protocol and venue opt-in are separate from rollout activation.
@@ -31,7 +80,10 @@ pub struct OrderSubmit {
 
 // Match the client's JSON number representation without discarding fractional
 // monotonic ages. In particular, zero is `0`, including negative zero.
-fn serialize_age_ms<S: serde::Serializer>(age: &f64, serializer: S) -> Result<S::Ok, S::Error> {
+pub(crate) fn serialize_age_ms<S: serde::Serializer>(
+    age: &f64,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     if (0.0..=9_007_199_254_740_991.0).contains(age) && age.fract() == 0.0 {
         serializer.serialize_u64(*age as u64)
     } else {
@@ -101,6 +153,54 @@ pub fn fingerprint(
         .collect())
 }
 
+/// Separate identity domain for versioned account actions. Targets and kind are
+/// part of the canonical payload; placement hashes remain unchanged.
+pub fn action_fingerprint(
+    account: &str,
+    id: &str,
+    action: &Value,
+    seq: u64,
+) -> Result<String, &'static str> {
+    if key_time(id).is_none() || seq == 0 || seq > 9_007_199_254_740_991 {
+        return Err("not sent: invalid intent");
+    }
+    let decoded: crate::order_actions::Action =
+        serde_json::from_value(action.clone()).map_err(|_| "not sent: invalid action")?;
+    decoded.call()?;
+    if action
+        .get("update")
+        .and_then(Value::as_object)
+        .is_some_and(|fields| fields.values().any(|v| !v.is_number()))
+    {
+        return Err("not sent: invalid update");
+    }
+    action_wire_fingerprint(account, id, action, seq)
+}
+
+/// Hash the untouched v1 payload from a potentially newer client so a schema
+/// rejection can still be bound to its original identity. This grants no
+/// permission to dispatch: the caller must separately validate the closed schema.
+pub(crate) fn action_wire_fingerprint(
+    account: &str,
+    id: &str,
+    action: &Value,
+    seq: u64,
+) -> Result<String, &'static str> {
+    if key_time(id).is_none() || seq == 0 || seq > 9_007_199_254_740_991 {
+        return Err("not sent: invalid intent");
+    }
+    let value = json!({"accountName":account,"action":action,"intentId":id,"seq":seq,"version":1});
+    let mut canonical = String::from("tealstreet/delegated-action/v1\0");
+    canonical_value(&value, &mut canonical, 0)?;
+    if canonical.len() > SUBMIT_MAX {
+        return Err("not sent: action too large");
+    }
+    Ok(safe_cex_crypto::sha256(canonical.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
 fn canonical_value(value: &Value, out: &mut String, depth: usize) -> Result<(), &'static str> {
     if depth > 32 || out.len() > SUBMIT_MAX {
         return Err("not sent: parameters too large");
@@ -150,4 +250,58 @@ fn canonical_value(value: &Value, out: &mut String, depth: usize) -> Result<(), 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn non_bybit_capabilities_do_not_depend_on_bybit_enablement() {
+        crate::delegated::with_test_declaration(
+            json!({"venues": {
+                "bybit": {"remoteSigning": {"enabled": false}},
+                "binance": {"remoteSigning": {"enabled": true}}
+            }}),
+            async {
+                let actions = serde_json::to_value(action_capabilities(Some("binance"))).unwrap();
+                assert_eq!(actions["place"], cfg!(feature = "delegated-order-frames"));
+                for venue in [None, Some("bybit"), Some("hyrotrader"), Some("unknown")] {
+                    let actions = serde_json::to_value(action_capabilities(venue)).unwrap();
+                    assert_eq!(actions["place"], false);
+                    assert_eq!(actions["close"], "unsupported");
+                }
+                assert!(!enabled_for("bybit"));
+                assert!(!enabled_for("hyrotrader"));
+            },
+        )
+        .await;
+    }
+
+    #[test]
+    fn place_and_reduce_only_close_activate_without_later_actions() {
+        assert!(activation_allowed(true, &PLACE_AND_CLOSE));
+        assert_eq!(
+            serde_json::to_value(PLACE_AND_CLOSE).unwrap(),
+            json!({
+                "place":true, "close":"reduceOnly", "amend":false,
+                "cancel":false, "cancelAll":false, "nuke":false,
+            })
+        );
+        assert!(!activation_allowed(false, &PLACE_AND_CLOSE));
+        assert!(!activation_allowed(
+            true,
+            &DelegatedActions {
+                place: false,
+                ..PLACE_AND_CLOSE
+            }
+        ));
+        assert!(!activation_allowed(
+            true,
+            &DelegatedActions {
+                close: Close::Unsupported,
+                ..PLACE_AND_CLOSE
+            }
+        ));
+    }
 }

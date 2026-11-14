@@ -670,7 +670,9 @@ fn a_transport_failure_on_a_batch_is_not_resent() {
         request: batch,
         error: "connection reset",
     });
-    assert!(matches!(h.result(9), Some(Err(message)) if message == "connection reset"));
+    assert!(matches!(h.result(9), Some(Err(message))
+        if message.contains(support::ENGINE_UNKNOWN_TEXT) && message.contains("connection reset")));
+    assert!(h.unknown.contains(&9));
     // The venue may have the orders: reconcile once, never resend.
     h.reconcile_once(EMPTY_LIST);
 }
@@ -1068,7 +1070,7 @@ fn ambiguous_batch_responses_never_resend_creates() {
 }
 
 #[test]
-fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
+fn a_split_uses_legacy_rounded_quantities_and_ts_first_and_remainder_brackets() {
     #[derive(serde::Deserialize)]
     struct Batch {
         request: Vec<Item>,
@@ -1095,16 +1097,22 @@ fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
             .iter()
             .map(|row| row.qty.as_str())
             .collect::<Vec<_>>(),
-        ["10", "10", "5"]
+        ["7", "7", "7", "5"]
     );
     let total: f64 = batch
         .request
         .iter()
         .map(|row| row.qty.parse::<f64>().unwrap())
         .sum();
-    assert_eq!(total, 25.0);
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 26 of requested 25); kept for exact TS parity per Sam's decision
+    assert_eq!(total, 26.0);
     assert_eq!(batch.request[0].stop_loss.as_deref(), Some("85000"));
-    assert!(batch.request[1..].iter().all(|row| row.stop_loss.is_none()));
+    assert_eq!(batch.request[3].stop_loss.as_deref(), Some("85000"));
+    assert!(
+        batch.request[1..3]
+            .iter()
+            .all(|row| row.stop_loss.is_none())
+    );
 }
 
 #[test]
@@ -1366,6 +1374,7 @@ fn normal_business_rejections_remain_actionable_after_a_signature_retry() {
     let error = h.result(9002).unwrap().as_ref().unwrap_err();
     assert!(error.contains("Available balance is insufficient"));
     assert!(!h.has_request("/v5/order/create-batch"));
+    assert!(!h.has_request("/v5/order/create"));
     assert_private_notices_are_safe(&h);
 }
 

@@ -2,7 +2,8 @@
 
 This opt-in protocol uses the existing authenticated account socket and the
 existing method translation, native completion and order audit. It places one
-Bybit order per submit. LOCAL and COSIGNED retain their existing call protocol.
+order per submit through the joined venue's existing native plan. LOCAL and
+COSIGNED retain their existing call protocol.
 The frozen frame fixture is
 `sdk-rs/hosts/server/tests/data/delegated-orders-v1.json`; synthetic router replies
 are in `sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json`.
@@ -10,18 +11,57 @@ The router integration pins NX #9404 at `9f52873b76`
 (`9f52873b76a64b4258ac38f51e70cd29a1e85941`): frame shapes, socket
 renumbering, capability names and the reply semantics below.
 
+Account amendments, venue cancellations, cancel-all and nuke use the additive
+[versioned action protocol](delegated-action-frames.md); `order.submit` remains
+placement-only and `order.cancelQueued` remains a router queue operation.
+
 ## DESIGN
 
 ### Activation and binding
 
+Sam's 2026-11-11 activation policy permits DELEGATED with **place and reduce-only
+close** while amend, venue cancel, cancel-all and nuke remain unavailable. The
+host owns the per-user `DELEGATED` feature flag; the SDK introduces no
+server environment variable with that name. Use
+`outbox.activate(connection, { DELEGATED })` for explicit SDK admission.
+It requires the flag, the two transport/ledger proofs below, and only
+`delegatedActivationScopeV1.place === true` and `.close === 'reduceOnly'`. Later
+actions are not prerequisites. Missing place/close support refuses with a named
+activation error. The legacy low-level `connect` entry point remains for hosts
+that already completed their own admission; it does not perform feature discovery.
+
+`enqueueAction('place', params)` and `enqueueAction('close', params)` use the same
+durable single-order outbox. Close requires literal `params.reduceOnly === true`;
+it never silently changes a close into an opening placement. Unsupported string actions
+reject with `DelegatedActionUnavailable` before persistence or a frame, and the
+server also rejects their legacy method aliases before native handoff. No path
+falls back to LOCAL or COSIGNED. `order.cancelQueued` remains the router's
+undispatched-intent cancellation, with its existing conservative uncertainty
+semantics; it is not a venue cancel capability.
+Raw exec and chaser/TWAP starts or resumes also refuse before entering their
+runtime, preventing an alternate route to unsupported venue actions. Existing
+stop and cleanup controls remain available.
+
 The server advertises `transports.accountWorkerWebSocket.delegatedOrderFramesV1`
 in `capabilities_json`. It is false by default and true only in a build with the
-`delegated-order-frames` Cargo feature, the existing Bybit DELEGATED flag, and
+`delegated-order-frames` Cargo feature, a hosted-supported venue with a configured server origin, and
 `TEALSTREET_DELEGATED_ORDER_FRAMES=1` in the process environment. The production
 image compiles support and defaults the runtime switch to `0`; unset/empty also
 means off, and other values refuse startup. Change the container environment and
 use the existing drain/restart procedure with the same image to toggle it. It is
 not hot-reloaded. Both advertisement and order admission use that runtime control.
+Query `/account/capabilities?exchangeName=<joined venue>` (or `/capabilities`
+with the same query) on each admitted connection. The response adds
+`delegatedVenueV1`, which the host preserves in the outbox capabilities.
+Unscoped discovery advertises no actions; a missing or mismatched venue refuses
+SDK activation. The neutral host flag is `DELEGATED`, and the disabled refusal
+code is `delegatedDisabled`; the former Bybit-named API is removed.
+The additive `delegatedActivationScopeV1` record advertises place and reduce-only
+close for that hosted venue, with amend, cancel, cancelAll and nuke false. This action record describes
+implemented support; the frame switch still controls live admission. The separate
+boolean `delegatedOrderActionsV1` retains dedicated-action protocol support.
+The typed `enqueueAction(action, options)` API and its action-ledger gate remain
+available independently of this partial activation scope.
 
 
 Hosts enable the outbox only when **both** that box advertisement and the
@@ -196,6 +236,9 @@ never creates an outcome named `canceled`, a new acknowledgement kind, or a fift
 order frame. Ordinary malformed/unbindable request errors likewise remain ordinary
 error messages, not fabricated order receipts. Hosts must not clear pending queue
 cancellation merely on receipt of such an ordinary error.
+Ignored box receipts preserve the current state (`sending` after physical handoff).
+An ordinary request error likewise leaves a handed-off cancellation `unknown`
+with `cancelPending: true`; only an authoritative receipt settles that request.
 
 The router decodes box JSON before classifying it, including escaped kind names
 and reordered fields. Every receipt the outbox can consume is intercepted or
@@ -213,19 +256,35 @@ after admission and capability discovery. Pass the captured ticket to `flush`
 and `receive`, and close the outbox on logout or removal. Deferred storage work
 can neither send through a replaced socket nor switch to another owner.
 
-The injected `send` must use that ticket's currently open socket without a
-reconnect buffer: true means physical handoff, false means neither sent nor
-queued for a later connection. An indeterminate handoff throws and stays unknown.
-
-The outbox persists before handoff and resends the same unacknowledged intent
-across reconnects within ten monotonic seconds, only with both capabilities on
-the new connection. It shows a physical handoff as `sending`. At the deadline an
-intent never handed off is `notSent`; a still-unresolved physical handoff is
-`unknown`. Physical handoff rechecks the cap after storage waits. Queue
-cancellation after a physical handoff also remains unknown until a router receipt
-resolves it. Persisted `sending` records restore as unknown, including when saving a
-later result failed. A queued record from a different monotonic epoch becomes
-not sent rather than inferring elapsed time from wall time. Queue cancellation
+The outbox persists before handoff and marks the row `sending` at the physical
+socket boundary. It never resubmits sending, acknowledged or unknown work.
+Disconnect or connection replacement changes sending/acknowledged rows to unknown;
+late receipts can still resolve those rows on the current admitted connection.
+Direct `close()` immediately exposes those retained rows as unknown and fences
+all later receipts, callbacks and socket work.
+Only `markDelegatedNotSent(intent, evidence)` can construct a `notSent` state.
+Its positive no-handoff or authoritative-refusal evidence is stored with its
+kind and exact scope/intent/sequence/fingerprint binding. The private runtime
+brand is never serialized: restore validates the stored evidence before
+reissuing it. A legacy, missing or mismatched proof restores as unknown and
+cannot enable a replay. Callers must retain the existing changed/persist and
+retention handling after this constructor, including when a local claim is
+refused and becomes unknown.
+At ten monotonic seconds from creation, its deadline observer marks queued,
+never-forwarded work not sent, even while storage is waiting, and marks in-flight
+or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+send adapter must return true only for a physical handoff; only an explicit false
+positively guarantees neither handoff nor buffering for a later connection.
+A throw or any other non-true return is ambiguous and immediately becomes unknown
+with no replay proof, even before the deadline; reconnect and restore cannot
+submit it again. An adapter that can positively prove it never transmitted or
+buffered the intent may return false.
+Cancellation or expiry during a declined first send remains terminal; a legacy
+pending cancellation restores as unknown. A queue cancellation after handoff remains
+unknown until an authoritative receipt proves non-forwarding. Persisted `sending`
+records restore as unknown, including when saving a later result failed. A queued
+record from a different monotonic epoch becomes unknown rather than inferring
+elapsed time from wall time. Queue cancellation
 can be persisted and resent; order submission cannot resume after acknowledgement
 or unknown. Rendering, consent and router ledger storage remain host concerns.
 Legacy `notSent`/`canceled` records with pending router cancellation also restore
@@ -238,7 +297,16 @@ handoff keeps enqueue successful with that same intent ID; retry preserves it.
 Pending work is limited to 1,024 records; at most 32 completed records are kept
 for recent history. Placed, refused, not-sent and canceled records can retire only
 after their state is durable and no queue cancellation is pending. Acknowledged
-and unknown records remain retained and never become resendable through pruning.
+work becomes unknown at the command deadline or disconnect. Unknown rows remain
+unresolved for 24 hours from UUIDv7 Unix creation time, evaluated against the
+injected Unix clock on timers and reload (a clock rollback extends retention).
+Expiry emits `changed` with `state: "unknown", retentionExpired: true`, clears any
+pending queue cancellation, and persists that explicit expired-history marker.
+Hosts surface expired unresolved history and use ordinary order state/history for
+reconciliation. Expired unknowns join the latest-32 completed history only after
+the expiry marker is durable. Compaction never changes their outcome to not sent
+or makes their identity resendable. Storage failure retains them until flush can
+retry. A later authoritative result may still resolve a retained history row.
 
 Adapters provide `compact(scope, {version:1, sequence, retiredIntentIds})` as one
 atomic transaction. It deletes only those IDs for that owner/account and advances

@@ -323,3 +323,9 @@ chase (`apps/web/src/order/chaseOrder.ts`). Three rules keep `filled` right:
 - **It can still undercount** a fill the store has not seen yet, or one on an
   order placed while STOP was in flight (`tryPlaceOrders` cancels those itself). That is the
   safe direction for a reduce-only TP/SL; never pad it upward.
+
+## Position presence is independent of valuation
+
+Reduce-only completion uses `contracts` to detect a flat position. Unknown
+notional (native NaN or JSON null) neither hides an open quantity nor prevents
+a confirmed zero quantity from completing the chase.

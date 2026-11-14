@@ -72,7 +72,7 @@ fn connection(registry: Arc<Registry>) -> (Session, crate::out::Receiver) {
             Identity {
                 user: Some(USER.into()),
                 chat_handle: None,
-                token: None,
+                token: Some(("synthetic-proxy-token".into(), u64::MAX)),
                 resume_from: None,
                 resumable: false,
             },
@@ -135,7 +135,7 @@ async fn sealed_init(
 ) -> Value {
     wire(
         session,
-        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT}}),
+        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT,"data":{"exchangeName":"bybit"}}}),
     )
     .await;
     let response = next(sent, "delegated-key").await;
@@ -262,7 +262,7 @@ async fn delegated_e2e_wrong_pair_replay_and_disabled_venue_leave_no_account() {
             bytes = serde_json::to_vec(&fields).unwrap();
         }
         let name = if case == "other-venue" {
-            "bybitspot"
+            "hyrotrader"
         } else {
             "bybit"
         };
@@ -328,8 +328,11 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
         "../../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    assert_eq!(declaration["venues"]["bybit"]["delegated"]["enabled"], true);
-    declaration["venues"]["bybit"]["delegated"]["enabled"] = false.into();
+    assert_eq!(
+        declaration["venues"]["bybit"]["remoteSigning"]["enabled"],
+        true
+    );
+    declaration["venues"]["bybit"]["remoteSigning"]["enabled"] = false.into();
     crate::delegated::with_test_declaration(declaration, async {
         wire(&mut session, init).await;
         assert_empty(&session, &registry).await;

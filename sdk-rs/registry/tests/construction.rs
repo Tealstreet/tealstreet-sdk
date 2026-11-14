@@ -483,7 +483,7 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
             "asterdex",
             r#"{"key":"k","publicMode":{"payloadSigner":true}}"#
         ),
-        (false, true)
+        (true, false)
     );
     // Lighter's remote signer signs its statements, so it is a signing credential.
     assert_eq!(
@@ -517,6 +517,17 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
 
 #[test]
 fn native_payload_refusal_preserves_classification_with_or_without_local_credentials() {
+    let v3 = construct(
+        "asterdex",
+        r#"{"key":"public-wallet","payloadSigner":true,"asterdex":{"apiVersion":"v3"}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(v3.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(v3.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        v3.message,
+        "AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only"
+    );
     for venue in [
         "binance",
         "binancepm",
@@ -569,15 +580,24 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
         assert_eq!(error.kind, Some(ErrorKind::Unsupported));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
-    // Aster and Lighter payload-only SDK accounts retain their public fallback.
-    for venue in ["asterdex", "lighter"] {
-        construct(venue, r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap();
-    }
+    // Aster V1 PayloadSigner is private and needs an injected provider.
+    let aster = construct(
+        "asterdex",
+        r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(aster.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(aster.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        aster.message,
+        "Rust asterdex payloadSigner requires a configured injected signing provider"
+    );
+    construct("lighter", r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap();
 }
 
 #[cfg(feature = "bybit")]
 #[test]
-fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
+fn hyro_raw_config_preserves_network_and_refuses_environment_fallback() {
     use safe_cex_venues::HyroConfig;
     let config = |mode, production_rest: &str| {
         serde_json::json!({
@@ -599,8 +619,11 @@ fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
         (None, "https://prod.example", true, "prod-test"),
         (Some("demo"), "https://prod.example", false, "sim"),
         (Some("demo"), "https://prod.example", true, "sim-test"),
-        (None, "", false, "sim"),
-        (None, "", true, "sim-test"),
+        (Some("production"), "https://prod.example", false, "prod"),
+        (Some("production"), "", true, "prod-test"),
+        (Some("demo"), "", false, "sim"),
+        (Some("demo"), "", true, "sim-test"),
+        (None, "", true, "prod-test"),
     ] {
         let raw = config(mode, prod);
         let selected = serde_json::from_value::<HyroConfig>(raw.clone())
@@ -622,6 +645,42 @@ fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
                 .to_string(),
         )
         .unwrap();
+    }
+    for mode in [None, Some("production")] {
+        let raw = config(mode, "");
+        let error = serde_json::from_value::<HyroConfig>(raw.clone())
+            .unwrap()
+            .resolve(false)
+            .err()
+            .expect("explicit production must refuse missing livenet");
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert_eq!(
+            rejected(
+                "hyrotrader",
+                &serde_json::json!({
+                    "publicDataOnly":true,"hyrotrader":raw
+                })
+                .to_string()
+            ),
+            "HyroTrader REST/public/private URLs are not configured"
+        );
+    }
+    for testnet in [false, true] {
+        for field in ["rest", "publicWs", "privateWs"] {
+            let mut raw = config(Some("production"), "https://prod.example");
+            raw["production"][field][if testnet { "testnet" } else { "livenet" }] = "".into();
+            let error = construct(
+                "hyrotrader",
+                &serde_json::json!({
+                    "publicDataOnly":true,"testnet":testnet,"hyrotrader":raw
+                })
+                .to_string(),
+            )
+            .expect_err("missing selected production endpoint must refuse before I/O");
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+        }
     }
     let mut incomplete = config(None, "https://prod.example");
     incomplete["production"]["publicWs"]["livenet"] = "".into();

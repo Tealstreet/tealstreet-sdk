@@ -295,6 +295,50 @@ it.each([false, true])('Bitunix applied cancel Unknown retains caller order and 
   expect(r.errors.mock.calls[0][1].classified).toEqual({ kind: 'network', outcome: 'unknown', venueCode: '10001' });
 });
 
+it('preserves Bybit applied cancel counts when one target is canceled and the other is unknown', async () => {
+  const r = await fixture('bybit');
+  const detail: VenueErrorDetail = {
+    message: 'The outcome is unknown. Check Open Orders',
+    kind: 'venueUnavailable',
+    outcome: 'unknown',
+    venueCode: '10016',
+    venueMessage: 'unknown cancellation outcome',
+    partial: { orderIds: [], total: 2, failedIndex: 1 },
+    elements: [
+      { index: 0, status: 'applied', effect: 'cancel', targetOrderId: 'one' },
+      { index: 1, status: 'unknown', error: {
+        message: 'The outcome is unknown. Check Open Orders', kind: 'venueUnavailable',
+        outcome: 'unknown', venueCode: '10016', venueMessage: 'unknown cancellation outcome',
+      } },
+    ],
+  };
+  // Matches trading_variants::applied_batch_cancel_unknown_row_records_only_confirmed_cancellations.
+  // Zero counts created IDs; the native test proves target "one" was canceled.
+  r.onCommand(({ command }) => [{ op: 'done', command, error: detail.message, detail }]);
+  const targets = ['one', 'two'].map((id) => ({
+    ...order, id, status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  }));
+  const error = await r.exchange.cancelOrders(targets).catch((error: unknown) => error);
+  const expected = {
+    message: detail.message,
+    outcome: 'unknown',
+    elements: detail.elements,
+    partialOrderIds: [],
+    partialOrderCount: 0,
+    totalOrderCount: 2,
+    failedOrderIndex: 1,
+  };
+  expect(error).toBeInstanceOf(ExchangeError);
+  expect(error).toMatchObject(expected);
+  expect(serializeCommandError(error)).toMatchObject(expected);
+  expect(r.commands.filter(({ op }) => op === 'cancelOrders')).toMatchObject([
+    { ids: ['one', 'two'], orders: targets.map(({ id, symbol, type }) => ({ id, symbol, type })) },
+  ]);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+  expect(r.errors.mock.calls[0][0]).toBe(detail.message);
+  expect(r.errors.mock.calls[0][1]).toMatchObject({ classified: { outcome: 'unknown' } });
+});
+
 it('keeps populated placement error output byte-identical to master 343e38cbe96', () => {
   const detail: VenueErrorDetail = {
     message: 'Second placement acknowledgement lost',

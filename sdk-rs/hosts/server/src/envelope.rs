@@ -103,13 +103,26 @@ pub struct AccountMsg {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplySettings {
+    pub account_name: String,
+    /// Missing bindings deserialize so the handler can visibly refuse them.
+    pub instance_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(tag = "t", content = "d", rename_all = "kebab-case")]
 pub enum Inbound {
     #[serde(rename = "order.submit")]
     OrderSubmit(crate::order_contract::OrderSubmit),
+    #[serde(rename = "order.action")]
+    OrderAction(crate::order_actions::WireRequest),
+    #[serde(rename = "order.actionCancelQueued")]
+    OrderActionCancelQueued(crate::order_actions::CancelQueued),
     #[serde(rename = "order.cancelQueued")]
     OrderCancelQueued(crate::order_contract::CancelQueued),
     Init(Box<InitPayload>),
+    ApplySettings(ApplySettings),
     Msg(AccountMsg),
     SignRes(Value),
     Dispose {
@@ -149,12 +162,60 @@ pub(crate) fn with_instance_id(text: String, instance_id: &str) -> String {
         Some("sign-req") => "sign-req",
         Some("order.ack") => "order.ack",
         Some("order.outcome") => "order.outcome",
+        Some("order.actionAck") => "order.actionAck",
+        Some("order.actionOutcome") => "order.actionOutcome",
         _ => return text,
     };
     let Some(data) = frame["d"].as_object_mut() else {
         return text;
     };
     data.insert("instanceId".into(), instance_id.into());
+    envelope(kind, frame["d"].take())
+}
+
+pub(crate) fn with_account_label(text: String, label: &str) -> String {
+    let Ok(mut frame) = serde_json::from_str::<Value>(&text) else {
+        return text;
+    };
+    let kind = match frame["t"].as_str() {
+        Some("msg") => "msg",
+        Some("sign-req") => "sign-req",
+        _ => return text,
+    };
+    let Some(data) = frame["d"].as_object_mut() else {
+        return text;
+    };
+    if data.get("accountName").and_then(Value::as_str) == Some(label) {
+        return text;
+    }
+    match data.get("op").and_then(Value::as_str) {
+        Some("store") => {
+            if let Some(rows) = data
+                .get_mut("data")
+                .and_then(|data| data.get_mut("activeTWAPs"))
+                .and_then(Value::as_array_mut)
+            {
+                for row in rows {
+                    if let Some(row) = row.as_object_mut() {
+                        row.insert("accountName".into(), label.into());
+                    }
+                }
+            }
+        }
+        Some("twap:stateUpdate") => {
+            if let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut) {
+                for row in rows.values_mut() {
+                    for field in ["options", "state"] {
+                        if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
+                            fields.insert("accountName".into(), label.into());
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    data.insert("accountName".into(), label.into());
     envelope(kind, frame["d"].take())
 }
 
@@ -260,6 +321,19 @@ pub fn init_unverified(account_name: &str, transient: bool) -> String {
         json!({"op":"error", "accountName":account_name,
             "data":["Could not verify your key; account not attached",
                 {"forceToast":true, "initRefused":true, "kind":"unverified", "transient":transient}]}),
+    )
+}
+
+/// A supported venue without a possession proof never takes a legacy admission path.
+pub fn init_proof_unavailable(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Key verification is not available for this venue; account not attached",
+            {"forceToast": true, "initRefused": true, "kind": "proof-unavailable",
+             "transient": false, "outcome": "notSent"}
+        ]),
     )
 }
 

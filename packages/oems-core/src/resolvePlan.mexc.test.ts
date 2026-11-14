@@ -1,7 +1,13 @@
 import type { OemsContext } from './context.types';
 import type { OemsIntent, OemsPlan } from './intent.types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { venueUsesBaseAmountRails } from '@tealstreet/script-api-core/src/order/orderPricing';
 import { resolveOemsPlan } from './resolvePlan';
+
+vi.mock('@tealstreet/script-api-core/src/order/orderPricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tealstreet/script-api-core/src/order/orderPricing')>();
+  return { ...actual, venueUsesBaseAmountRails: vi.fn(actual.venueUsesBaseAmountRails) };
+});
 
 const NOW = 1700000000000;
 const book = (amountStep = 1, nativeContracts = 130): OemsContext => ({
@@ -63,6 +69,26 @@ const resolve = (step: OemsIntent, context = book()) =>
   resolveOemsPlan({ reply: '', reads: [], steps: [step] } satisfies OemsPlan, context, { now: NOW });
 
 describe('OEMS refuses pre-rounding of MEXC close-like intent', () => {
+  it('selects native close preservation through the shared venue policy', () => {
+    vi.mocked(venueUsesBaseAmountRails).mockClear();
+    const out = resolve({ kind: 'close_positions', scope: { accounts: ['mexc'] } });
+    expect(out.rejections).toEqual([]);
+    expect(out.commands[0].args[0]).toMatchObject({ amount: 130 });
+    expect(venueUsesBaseAmountRails).toHaveBeenCalledExactlyOnceWith('mexc');
+  });
+
+  it('refuses an aligned override above the full position instead of silently clamping', () => {
+    const out = resolveOemsPlan(
+      { reply: '', reads: [], steps: [{ kind: 'close_positions', scope: { accounts: ['mexc'] } }] },
+      book(),
+      { now: NOW, overrides: [{ step: 0, symbol: 'DOGEUSDT', account: 'mexc', side: 'sell', amount: 150 }] },
+    );
+    expect(out.commands).toEqual([]);
+    expect(out.rejections[0]?.reason).toBe(
+      'MEXC close requested 150 native contracts but would send 130; request the available quantity explicitly',
+    );
+  });
+
   it.each([
     {
       kind: 'place_order',

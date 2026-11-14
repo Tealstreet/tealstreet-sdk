@@ -21,6 +21,7 @@ export type { FetchedLeverage } from './generated/FetchedLeverage';
 export type { PositionSettings } from './generated/PositionSettings';
 export type { DisplayedMargin } from './generated/DisplayedMargin';
 
+import type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';
 import type { ExchangeErrorKind } from './commandOutcome';
 import type { Candle } from './generated/Candle';
 import type { OrderBook } from './generated/OrderBook';
@@ -410,8 +411,16 @@ export interface PublicDataSource {
     readonly markets: StoreData['markets'];
     readonly loaded: StoreData['loaded'];
   };
-  listenOrderBook: (symbol: string, callback: (orderbook: OrderBook) => void) => () => void;
-  listenOHLCV: (opts: OHLCVOptions, callback: (candle: Candle) => void) => () => void;
+  listenOrderBook: (
+    symbol: string,
+    callback: (orderbook: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => () => void;
+  listenOHLCV: (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => () => void;
 }
 
 // Remote signing types — used for hosted CLI servers that delegate signing to clients
@@ -444,6 +453,10 @@ export interface RemoteSignerRequest {
       | 'backpack-ed25519'
       | 'orderly-ed25519'
       | 'kucoin-batch'
+      // AsterDEX: device-owned slot selection and canonical wallet statements.
+      | 'asterdex-address'
+      | 'asterdex-hmac'
+      | 'asterdex-wallet'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
       | 'grvt-order'

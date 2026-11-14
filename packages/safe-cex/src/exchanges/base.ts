@@ -8,6 +8,10 @@ import type { WorkerFrameRejection } from '../store/workerFrameRecoveryScopes';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
 import type { HttpFailureRecord } from '../utils/httpFailureContext';
 import type {
+  StoreWorkerOHLCVFrameRejection,
+  StoreWorkerOrderBookFrameRejection,
+} from '../webworker/StoreWorkerPayload';
+import type {
   ClientOrderIdPlaceOrderOpts,
   ClientOrderIdRule,
   ClientOrderLookup,
@@ -71,6 +75,7 @@ import {
   ValidateAccountResult,
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
 import { adjust } from '../utils/safe-math';
 import { signHttpCapture } from '../utils/signHttpCapture';
@@ -546,9 +551,17 @@ export interface Exchange {
   fetchPublicTrades: (symbol: string, limit?: number) => Promise<PublicTrade[]>;
   getActiveTickerSymbols: () => string[];
   setActiveTickerSymbols: (symbols: string[]) => void;
-  listenOHLCV: (o: OHLCVOptions, c: (c: Candle) => void) => () => void;
+  listenOHLCV: (
+    o: OHLCVOptions,
+    c: (c: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => () => void;
   listenOHLCVs: (o: OHLCVSOptions, c: (c: Candle & { symbol: string; interval: Timeframe }) => void) => void;
-  listenOrderBook: (s: string, c: (o: OrderBook) => void) => () => void;
+  listenOrderBook: (
+    s: string,
+    c: (o: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => () => void;
   /** `reset`: a forced resubscribe; the venue re-sends its subscribe for a stream gone dead. */
   listenOHLCVWebworker: (
     o: OHLCVWebworkerOptions,
@@ -1059,7 +1072,7 @@ export class BaseExchange implements Exchange {
 
   log = (message: string, severity: LogSeverity = LogSeverity.Info, engineEvent?: EngineEvent) => {
     if (this.options.tuning?.consoleLogging !== false) {
-      console.log(message, severity);
+      diagnosticConsole.log(message, severity);
     }
     if (engineEvent) this.emitter.emit('log', `[${this.name}] ${message}`, severity, engineEvent);
     else this.emitter.emit('log', `[${this.name}] ${message}`, severity);
@@ -1435,8 +1448,14 @@ export class BaseExchange implements Exchange {
    * Exchanges should override this method and check usesExternalPublicData
    * to use direct WebSocket if not using gateway.
    */
-  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+  listenOHLCV = (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => {
     // If using external public data provider, route through it
+    if (this.externalPublicDataProvider instanceof InProcessPublicDataProvider)
+      return this.externalPublicDataProvider.subscribeCandle(opts, callback, onRejection);
     if (this.externalPublicDataProvider) {
       return this.externalPublicDataProvider.subscribeCandle(opts, callback);
     }
@@ -1457,8 +1476,14 @@ export class BaseExchange implements Exchange {
    * Exchanges should override this method and check usesExternalPublicData
    * to use direct WebSocket if not using gateway.
    */
-  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+  listenOrderBook = (
+    symbol: string,
+    callback: (orderBook: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => {
     // If using external public data provider, route through it
+    if (this.externalPublicDataProvider instanceof InProcessPublicDataProvider)
+      return this.externalPublicDataProvider.subscribeOrderbook(symbol, callback, onRejection);
     if (this.externalPublicDataProvider) {
       return this.externalPublicDataProvider.subscribeOrderbook(symbol, callback);
     }
@@ -1662,11 +1687,13 @@ export class BaseExchange implements Exchange {
 
     this.off('listenOHLCV');
     this.off('workerCandleFrameRejected');
+    this.off('listenOHLCV:rejected');
     this.off('subscribeOHLCV');
     this.off('unsubscribeOHLCV');
 
     this.off('listenOrderBook');
     this.off('workerBookFrameRejected');
+    this.off('listenOrderBook:rejected');
     this.off('subscribeOrderBook');
     this.off('unsubscribeOrderBook');
 
@@ -1688,6 +1715,7 @@ export class BaseExchange implements Exchange {
     this.off('grafana-info');
     this.off('grafana-pws');
     this.off('grafana-pws-sub');
+    this.off('ws-diagnostic');
 
     this.store.reset();
   }
@@ -1698,31 +1726,44 @@ export class BaseExchange implements Exchange {
     onRejection?: (signal: OHLCVFrameRejection) => void,
   ) {
     const subId = nanoid();
+    let active = true;
+    const handler = (event: { symbol: string; interval: string; candle: Candle }) => {
+      if (event.symbol === o.symbol && event.interval === o.interval) {
+        c(event.candle);
+      }
+    };
+    const stopRejections = this.observeOHLCVFrameRejections(o, onRejection);
+    const rejected = (signal: StoreWorkerOHLCVFrameRejection) => {
+      if (
+        active &&
+        !this.isDisposed &&
+        signal.subId === subId &&
+        signal.stream === 'ohlcv' &&
+        signal.symbol === o.symbol &&
+        signal.interval === o.interval
+      )
+        this.dispatchFrameEvent(() =>
+          onRejection?.({
+            stream: 'ohlcv',
+            symbol: o.symbol,
+            interval: o.interval,
+            error: deserializeCommandError(signal.error),
+          }),
+        );
+    };
+    this.emitter.on('listenOHLCV', handler);
+    if (onRejection) this.emitter.on('listenOHLCV:rejected', rejected);
     this.emitter.emit('subscribeOHLCV', {
       symbol: o.symbol,
       interval: o.interval,
       subId,
       ...(o.reset && { reset: true }),
     });
-    const handler = (event: { symbol: string; interval: string; candle: Candle }) => {
-      if (event.symbol === o.symbol && event.interval === o.interval) {
-        c(event.candle);
-      }
-    };
-    const rejected = (signal: WorkerFrameRejection) => {
-      if (
-        signal.candles === undefined ||
-        signal.candles.some((stream) => stream.symbol === o.symbol && stream.interval === o.interval)
-      )
-        this.dispatchFrameEvent(() =>
-          onRejection?.({ stream: 'ohlcv', symbol: o.symbol, interval: o.interval, error: signal.error }),
-        );
-    };
-    this.emitter.on('listenOHLCV', handler);
-    if (onRejection) this.emitter.on('workerCandleFrameRejected', rejected);
     return () => {
+      active = false;
       this.emitter.off('listenOHLCV', handler);
-      this.emitter.off('workerCandleFrameRejected', rejected);
+      stopRejections();
+      this.emitter.off('listenOHLCV:rejected', rejected);
       this.emitter.emit('unsubscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
     };
   }
@@ -1743,11 +1784,43 @@ export class BaseExchange implements Exchange {
     throw new Error('Engine snapshots are unavailable for this exchange');
   };
 
+  protected observeOrderBookFrameRejections(symbol: string, observer?: (signal: OrderBookFrameRejection) => void) {
+    let active = Boolean(observer) && !this.isDisposed;
+    const rejected = (signal: WorkerFrameRejection) => {
+      if (!active || this.isDisposed) return;
+      if (signal.books === undefined || signal.books.includes(symbol))
+        this.dispatchFrameEvent(() => observer?.({ stream: 'orderBook', symbol, error: signal.error }));
+    };
+    if (active) this.emitter.on('workerBookFrameRejected', rejected);
+    return () => {
+      active = false;
+      this.emitter.off('workerBookFrameRejected', rejected);
+    };
+  }
+
+  protected observeOHLCVFrameRejections(opts: OHLCVOptions, observer?: (signal: OHLCVFrameRejection) => void) {
+    const { symbol, interval } = opts;
+    let active = Boolean(observer) && !this.isDisposed;
+    const rejected = (signal: WorkerFrameRejection) => {
+      if (!active || this.isDisposed) return;
+      if (
+        signal.candles === undefined ||
+        signal.candles.some((stream) => stream.symbol === symbol && stream.interval === interval)
+      )
+        this.dispatchFrameEvent(() => observer?.({ stream: 'ohlcv', symbol, interval, error: signal.error }));
+    };
+    if (active) this.emitter.on('workerCandleFrameRejected', rejected);
+    return () => {
+      active = false;
+      this.emitter.off('workerCandleFrameRejected', rejected);
+    };
+  }
+
   protected dispatchFrameEvent(callback: () => void) {
     try {
       callback();
     } catch (error) {
-      console.error('Engine frame listener failed', error);
+      diagnosticConsole.error('Engine frame listener failed', error);
     }
   }
 
@@ -1786,7 +1859,7 @@ export class BaseExchange implements Exchange {
     } catch (error) {
       applier.invalidateMarketIdentity();
       rejected('frame', error);
-      console.error('Invalid engine frame', error);
+      diagnosticConsole.error('Invalid engine frame', error);
     }
     if (frame) {
       const decoded = frame;
@@ -1794,7 +1867,7 @@ export class BaseExchange implements Exchange {
         const capabilities = decoded.capabilities();
         if (capabilities) this.adoptEngineCapabilities(capabilities);
       } catch (error) {
-        console.error('Engine capabilities section failed', error);
+        diagnosticConsole.error('Engine capabilities section failed', error);
       }
       try {
         applier.apply(decoded);
@@ -1805,7 +1878,7 @@ export class BaseExchange implements Exchange {
           if (error.bookRejected) rejected('books', error);
           if (error.otherRejected) this.workerFrameRejectedSections.reject('frame', error);
         }
-        console.error('Engine frame apply failed', error);
+        diagnosticConsole.error('Engine frame apply failed', error);
       }
       const deliver = <T>(
         read: () => T[],
@@ -1819,7 +1892,7 @@ export class BaseExchange implements Exchange {
           if (applier.hasMarketIdentity) accept(rows);
         } catch (error) {
           rejected(section, error);
-          console.error('Engine frame section failed', error);
+          diagnosticConsole.error('Engine frame section failed', error);
           return;
         }
         for (const row of rows) this.dispatchFrameEvent(() => this.emitter.emit(event, row));
@@ -1889,7 +1962,7 @@ export class BaseExchange implements Exchange {
           this.dispatchFrameEvent(() => applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
         }
       })
-      .catch((error) => console.error('Engine frame recovery failed', error))
+      .catch((error) => diagnosticConsole.error('Engine frame recovery failed', error))
       .finally(() => {
         this.workerFrameRecoveryPending = false;
         if (this.workerFrameRecoveryQueued) {
@@ -1905,21 +1978,27 @@ export class BaseExchange implements Exchange {
     onRejection?: (signal: OrderBookFrameRejection) => void,
   ) {
     const subId = nanoid();
-    this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
+    let active = true;
     const handler = (event: { symbol: string; orderbook: OrderBook }) => {
       if (event.symbol === s) {
         c(event.orderbook);
       }
     };
-    const rejected = (signal: WorkerFrameRejection) => {
-      if (signal.books === undefined || signal.books.includes(s))
-        this.dispatchFrameEvent(() => onRejection?.({ stream: 'orderBook', symbol: s, error: signal.error }));
+    const stopRejections = this.observeOrderBookFrameRejections(s, onRejection);
+    const rejected = (signal: StoreWorkerOrderBookFrameRejection) => {
+      if (active && !this.isDisposed && signal.subId === subId && signal.stream === 'orderBook' && signal.symbol === s)
+        this.dispatchFrameEvent(() =>
+          onRejection?.({ stream: 'orderBook', symbol: s, error: deserializeCommandError(signal.error) }),
+        );
     };
     this.emitter.on('listenOrderBook', handler);
-    if (onRejection) this.emitter.on('workerBookFrameRejected', rejected);
+    if (onRejection) this.emitter.on('listenOrderBook:rejected', rejected);
+    this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
     return () => {
+      active = false;
       this.emitter.off('listenOrderBook', handler);
-      this.emitter.off('workerBookFrameRejected', rejected);
+      stopRejections();
+      this.emitter.off('listenOrderBook:rejected', rejected);
       this.emitter.emit('unsubscribeOrderBook', { symbol: s, subId });
     };
   }
@@ -1963,7 +2042,7 @@ export class BaseExchange implements Exchange {
           } else {
             // Only log actual errors, not expected states like retry_too_soon
             if (event.reason && event.reason !== 'retry_too_soon') {
-              console.error('reject in updatePositionsInWebworker', event.reason);
+              diagnosticConsole.error('reject in updatePositionsInWebworker', event.reason);
             }
             reject(new Error(event.reason || 'Unknown error in updatePositionsInWebworker'));
           }
@@ -2110,7 +2189,7 @@ export class BaseExchange implements Exchange {
       if (!this.store.loaded.positions) {
         return [];
       }
-      console.warn(`No positions found for ${symbol} on ${this.name}, fetching...`);
+      diagnosticConsole.warn(`No positions found for ${symbol} on ${this.name}, fetching...`);
       const newPromise = this.fetchPositions([symbol]);
       this._fetchPositionForSymbolPromise[symbol] = newPromise;
       foundPositions = await newPromise;
@@ -2179,7 +2258,7 @@ export class BaseExchange implements Exchange {
 
   emitAndLogError(err: string | Error | undefined | null, msg?: string, extraData?: Record<string, any>) {
     if (this.isDisposed) {
-      console.warn('exchange error (disposed, suppressing)', err);
+      diagnosticConsole.warn('exchange error (disposed, suppressing)', err);
       return;
     }
 
@@ -2188,8 +2267,8 @@ export class BaseExchange implements Exchange {
     const suppressConsoleLog = structuredExtraData.suppressConsoleLog === true;
 
     if (!suppressConsoleLog) {
-      console.error('exchange error', err);
-      console.trace();
+      diagnosticConsole.error('exchange error', err);
+      diagnosticConsole.trace();
     }
 
     let formattedMsg;
@@ -2612,6 +2691,9 @@ export class BaseExchange implements Exchange {
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
       case 'coinbase-jws':
       case 'backpack-ed25519':
+      case 'asterdex-address':
+      case 'asterdex-hmac':
+      case 'asterdex-wallet':
       case 'apexomni-batch':
       case 'kraken-sha512':
       case 'orderly-ed25519':
