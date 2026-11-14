@@ -80,6 +80,9 @@ must neither clear nor restart reconciliation for an older Unknown placement.
 DRB mutations also reserve their logical recovery key until native read-back;
 a second pending or uncertain mutation cannot replace that reservation.
 Protective ACKs and recovery reads must match the requested trigger and basis.
+Bracket ACKs and recovery must also echo the requested fill condition. Missing,
+malformed or different conditions retain Unknown and its instrument fence;
+neither ACK nor read-back may resend the original write.
 Linked native identities survive omitted fields and snapshot readmission;
 ordinary amendments refuse them. Linkage capacity exhaustion refuses edits
 without evicting protection markers. Malformed events publish neither rows nor

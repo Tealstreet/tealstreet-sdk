@@ -254,6 +254,145 @@ fn bracket_exits_are_linked_reduce_only_and_follow_partial_fills() {
             .any(|l| l["type"] == "take_market" && l["trigger_price"] == 70000.)
     );
 }
+fn check_bracket_fill_condition(recovery: bool, condition: Option<Value>) {
+    let mut e = engine();
+    let mut o = opts();
+    o.stop_loss = Some(60000.);
+    o.take_profit = Some(70000.);
+    let write = place(&mut e, o);
+    assert_eq!(
+        packet(&write)["params"]["trigger_fill_condition"],
+        "incremental"
+    );
+    let matches_request = condition == Some(json!("incremental"));
+    let mut row = fixtures()["partial"]["order"].clone();
+    row["creation_timestamp"] = json!(1000);
+    row["api"] = json!(true);
+    row["is_primary_otoco"] = json!(true);
+    row["oto_order_ids"] = json!(["USDC-SYNTHETIC-SL", "USDC-SYNTHETIC-TP"]);
+    if let Some(condition) = condition {
+        row["trigger_fill_condition"] = condition;
+    } else {
+        row.as_object_mut()
+            .unwrap()
+            .remove("trigger_fill_condition");
+    }
+    let actions = if recovery {
+        e.handle(
+            1001.,
+            Event::HttpFailed {
+                request: write.id,
+                error: "synthetic lost ACK",
+            },
+        );
+        let lost = prepared_now(&mut e);
+        assert!(lost.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 1, error })
+                if error.outcome == Some(Outcome::Unknown))));
+        let reads = requests(&lost);
+        assert!(reads.iter().all(|r| packet(r)["method"] != "private/buy"));
+        let read = reads
+            .iter()
+            .find(|r| packet(r)["method"] == "private/get_order_state_by_label")
+            .unwrap();
+        reply(&mut e, read, json!([row]))
+    } else {
+        let actions = reply(&mut e, &write, json!({"order":row,"trades":[]}));
+        assert_eq!(done(&actions), matches_request);
+        if matches_request {
+            let order = e.store().order("USDC-94166").unwrap();
+            assert_eq!(order.stop_loss, Some(60000.));
+            assert_eq!(order.take_profit, Some(70000.));
+            assert_eq!(order.filled, 0.004);
+        } else {
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 1, error })
+                    if error.outcome == Some(Outcome::Unknown))));
+        }
+        actions
+    };
+    assert!(
+        requests(&actions)
+            .iter()
+            .all(|r| packet(r)["method"] != "private/buy"),
+        "ACK and recovery must never resend the original write"
+    );
+    if recovery || !matches_request {
+        let mut next = opts();
+        next.client_order_id = Some("fixture-fresh-entry".into());
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 2,
+                orders: vec![next],
+            },
+        );
+        let writes = requests(&actions);
+        let buys: Vec<_> = writes
+            .iter()
+            .filter(|r| packet(r)["method"] == "private/buy")
+            .collect();
+        assert_eq!(
+            buys.len(),
+            usize::from(matches_request),
+            "only matching protection may release the original uncertainty fence"
+        );
+        if let Some(buy) = buys.first() {
+            assert_eq!(
+                packet(buy)["params"]["amount"],
+                packet(&write)["params"]["amount"]
+            );
+            assert_eq!(
+                packet(buy)["params"]["price"],
+                packet(&write)["params"]["price"]
+            );
+        }
+    }
+    if !matches_request {
+        assert!(
+            e.store().order("USDC-94166").is_none(),
+            "unproven protection must not publish the requested bracket"
+        );
+    }
+}
+#[test]
+fn bracket_ack_matching_fill_condition_control() {
+    check_bracket_fill_condition(false, Some(json!("incremental")));
+}
+#[test]
+fn bracket_ack_contradictory_fill_condition_is_unknown() {
+    check_bracket_fill_condition(false, Some(json!("complete_fill")));
+}
+#[test]
+fn bracket_recovery_matching_fill_condition_control() {
+    check_bracket_fill_condition(true, Some(json!("incremental")));
+}
+#[test]
+fn bracket_recovery_contradictory_fill_condition_keeps_fence() {
+    check_bracket_fill_condition(true, Some(json!("complete_fill")));
+}
+#[test]
+fn bracket_ack_missing_or_malformed_fill_condition_is_unknown() {
+    for condition in [
+        None,
+        Some(Value::Null),
+        Some(json!(1)),
+        Some(json!(["incremental"])),
+    ] {
+        check_bracket_fill_condition(false, condition);
+    }
+}
+#[test]
+fn bracket_recovery_missing_or_malformed_fill_condition_keeps_fence() {
+    for condition in [
+        None,
+        Some(Value::Null),
+        Some(json!(1)),
+        Some(json!(["incremental"])),
+    ] {
+        check_bracket_fill_condition(true, condition);
+    }
+}
 #[test]
 fn standalone_protection_uses_native_trigger_orders() {
     for kind in [OrderType::StopLoss, OrderType::TakeProfit] {

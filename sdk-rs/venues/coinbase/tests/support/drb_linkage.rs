@@ -53,12 +53,16 @@ fn acknowledged_bracket_remains_non_amendable_after_snapshot_or_stream_refresh()
         let mut row = order_row();
         row["order_id"] = json!("USDC-bracket");
         row["label"] = json!("bracket-entry");
+        row["trigger_fill_condition"] = json!("incremental");
         r.rpc(request, json!({"order":row,"trades":[]}));
         r.collect();
         assert_eq!(
             r.e.store().order("USDC-bracket").unwrap().stop_loss,
             Some(55000.)
         );
+        row.as_object_mut()
+            .unwrap()
+            .remove("trigger_fill_condition");
         row["last_update_timestamp"] = json!(1700000002000u64);
         if stream {
             let socket = r.subscribe();

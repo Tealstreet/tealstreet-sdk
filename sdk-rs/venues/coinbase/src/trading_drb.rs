@@ -1054,6 +1054,10 @@ impl Coinbase {
                             .params
                             .get("trigger")
                             .is_some_and(|basis| row["trigger"] != *basis)
+                        || call
+                            .params
+                            .get("trigger_fill_condition")
+                            .is_some_and(|condition| row["trigger_fill_condition"] != *condition)
                     {
                         return Err(uncertain(
                             "drb native order ACK differs from requested size or controls",
