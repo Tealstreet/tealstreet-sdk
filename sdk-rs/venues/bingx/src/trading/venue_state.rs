@@ -114,7 +114,10 @@ impl Trading {
         };
         self.mode_known = mode_known;
         // A frame arrival cannot translate the source's local receipt clock.
-        self.references.clear();
+        // Drop proof, retaining the monotonic clocks that fence older in-flight rows.
+        self.references
+            .values_mut()
+            .for_each(protection::References::invalidate);
         self.observed.clear();
         // Held until their order is ingested: unchanged state is never resent.
         self.pending_observed = rows

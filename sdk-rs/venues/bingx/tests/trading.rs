@@ -7,6 +7,9 @@ mod paths;
 mod sign;
 #[path = "../src/trading.rs"]
 mod trading;
+#[allow(dead_code)]
+#[path = "../src/wire.rs"]
+mod wire;
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::*;
@@ -18,13 +21,20 @@ use trading::Trading;
 
 const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Match the production Trade layout; unrelated native read variants are omitted"
+)]
 pub enum Pending {
     Trade(trading::Request),
+    ProtectiveReference(Box<trading::ReferenceRead>),
 }
 impl Pending {
     fn into_trade(self) -> Option<trading::Request> {
-        let Self::Trade(request) = self;
-        Some(request)
+        match self {
+            Self::Trade(request) => Some(request),
+            _ => None,
+        }
     }
 }
 struct TestVenue {
@@ -51,8 +61,10 @@ impl Venue for TestVenue {
         pending: &Pending,
         release: &safe_cex_engine::request_context::HttpRelease,
     ) -> Result<(), safe_cex_engine::VenueError> {
-        let Pending::Trade(request) = pending;
-        self.trading.protective_release(store, request, release)
+        match pending {
+            Pending::Trade(request) => self.trading.protective_release(store, request, release),
+            _ => Ok(()),
+        }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.trading.set_min_order_value("BTC-USDT", 2.0);
@@ -95,8 +107,25 @@ impl Venue for TestVenue {
         }
     }
     fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::ProtectiveReference(read) = pending {
+            read.item(cx, item);
+        }
+    }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        let Pending::Trade(request) = pending;
+        let request = match pending {
+            Pending::Trade(request) => request,
+            Pending::ProtectiveReference(read) => {
+                let accepted = serde_json::from_str::<serde_json::Value>(response.body)
+                    .ok()
+                    .filter(|v| v["code"] == 0 && response.status == 200)
+                    .map(|_| ())
+                    .ok_or_else(|| "refused public reference".to_string());
+                self.trading
+                    .reference_response(cx, Some(&self.credentials), *read, accepted);
+                return;
+            }
+        };
         let _ = (request.places_order(), request.changes_settings());
         self.acknowledgements.push((
             request.accepts_placement(response),
@@ -111,7 +140,9 @@ impl Venue for TestVenue {
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        let Pending::Trade(request) = pending;
+        let Pending::Trade(request) = pending else {
+            return;
+        };
         self.trading
             .unproven_evidence(request, response.body, evidence);
     }
@@ -122,8 +153,10 @@ impl Venue for TestVenue {
         safe_cex_engine::request_context::ReconciliationData,
         safe_cex_engine::request_context::Error,
     > {
-        let Pending::Trade(request) = pending;
-        request.reconciliation()
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
     }
     fn on_http_owner_retired(
         &mut self,
@@ -137,14 +170,22 @@ impl Venue for TestVenue {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        let Pending::Trade(request) = pending;
-        self.trading
-            .on_sign_failed(cx, Some(&self.credentials), request, error);
+        match pending {
+            Pending::Trade(request) => {
+                self.trading
+                    .on_sign_failed(cx, Some(&self.credentials), request, error)
+            }
+            Pending::ProtectiveReference(read) => read.reject(cx, &error.message),
+        }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        let Pending::Trade(request) = pending;
-        self.trading
-            .on_failed(cx, Some(&self.credentials), request, error);
+        match pending {
+            Pending::Trade(request) => {
+                self.trading
+                    .on_failed(cx, Some(&self.credentials), request, error)
+            }
+            Pending::ProtectiveReference(read) => read.reject(cx, error),
+        }
     }
     fn on_sign_error(
         &mut self,
@@ -152,9 +193,13 @@ impl Venue for TestVenue {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        let Pending::Trade(request) = pending;
-        self.trading
-            .on_sign_failed(cx, Some(&self.credentials), request, error);
+        match pending {
+            Pending::Trade(request) => {
+                self.trading
+                    .on_sign_failed(cx, Some(&self.credentials), request, error)
+            }
+            Pending::ProtectiveReference(read) => read.reject(cx, &error.message),
+        }
     }
     fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -2013,6 +2058,14 @@ fn trigger_amendment_requires_its_reconciled_supported_and_valid_source_before_c
             price: Some(90.0),
             amount: None,
         });
+        if matches!(
+            source,
+            Some(StopTriggerType::LastPrice | StopTriggerType::MarkPrice)
+        ) {
+            assert_eq!(h.requests.len(), 1);
+            assert_eq!(h.requests[0].method, safe_cex_engine::Method::Get);
+            h.reply(r#"{"code":0,"data":[]}"#);
+        }
         assert!(h.requests.is_empty());
         assert!(h.done[0].is_err());
     }
@@ -3084,7 +3137,21 @@ fn genuine_reference_boundary_is_inclusive_and_signature_resend_rechecks_it() {
         let mut h = guarded_stop(true);
         h.now = 1_000.0 + age;
         edit_stop(&mut h);
-        assert_eq!(!h.requests.is_empty(), allowed, "{age}: {:?}", h.done);
+        assert_eq!(
+            h.requests
+                .iter()
+                .any(|r| r.method != safe_cex_engine::Method::Get),
+            allowed,
+            "{age}: {:?}",
+            h.done
+        );
+        if !allowed {
+            assert_eq!(h.requests.len(), 1);
+            assert_eq!(h.requests[0].method, safe_cex_engine::Method::Get);
+            h.reply(r#"{"code":0,"data":[]}"#);
+            assert!(h.requests.is_empty());
+            assert!(h.failures[0].message.contains("reference stale"));
+        }
     }
     let mut h = guarded_stop(false);
     edit_stop(&mut h);
@@ -3292,6 +3359,9 @@ fn another_fresh_ticker_field_never_refreshes_a_stale_or_missing_trigger_referen
             h.engine.store_mut().set_tickers(Vec::new());
         }
         edit_stop(&mut h);
+        assert_eq!(h.requests.len(), 1);
+        assert_eq!(h.requests[0].method, safe_cex_engine::Method::Get);
+        h.reply(r#"{"code":0,"data":[]}"#);
         assert!(h.requests.is_empty());
         assert!(
             h.failures[0].message.contains("reference stale"),
