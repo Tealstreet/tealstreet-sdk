@@ -9,7 +9,21 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { createApiWithSecondaryKey } from '../../../createApiWithSecondaryKey';
+import { BaseExchange } from '../../../exchanges/base';
+import {
+  ENDPOINTS,
+  GET_POSITION_RISK_RESPONSE,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  ORDER_SIDE,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+  POSITION_SIDE,
+  TIME_IN_FORCE,
+} from '../../../exchanges/binance/binancepm.types';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import {
   Candle,
   ExchangeName,
@@ -41,21 +55,8 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { markBinanceOrdersCanceled } from './binance.utils';
 import { createFAPI, createPAPI, createPublicAPI } from './binancepm.api';
-import {
-  ENDPOINTS,
-  GET_POSITION_RISK_RESPONSE,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  ORDER_SIDE,
-  ORDER_TRIGGER_TYPE,
-  ORDER_TYPE,
-  POSITION_SIDE,
-  TIME_IN_FORCE,
-} from '../../../exchanges/binance/binancepm.types';
 import { BinancePMPrivateWebsocket } from './binancepm.ws-private';
 import { BinancePMPublicWebsocket } from './binancepm.ws-public';
 
@@ -595,48 +596,31 @@ export class BinancePMExchange extends BaseExchange {
     return orders;
   };
 
-  // [
-  //   {
-  //       "newClientStrategyId": "Dm34U0aNA2QL7ydi2Z6OlI",
-  //       "strategyId": 60684715,
-  //       "strategyStatus": "NEW",
-  //       "strategyType": "TAKE_PROFIT_MARKET",
-  //       "origQty": "0.083",
-  //       "price": "0",
-  //       "reduceOnly": false,
-  //       "side": "SELL",
-  //       "positionSide": "BOTH",
-  //       "stopPrice": "140000",
-  //       "symbol": "BTCUSDT",
-  //       "bookTime": 1745256761235,
-  //       "updateTime": 1745256761235,
-  //       "timeInForce": "GTC",
-  //       "workingType": "MARK_PRICE",
-  //       "priceProtect": false,
-  //       "goodTillDate": 0,
-  //       "selfTradePreventionMode": "EXPIRE_MAKER"
-  //   }
-  // ]
   fetchConditionalOrders = async () => {
     const { data } = await this.papiXhr.get<unknown>(ENDPOINTS.OPEN_CONDITIONAL_ORDERS);
     const rows = requireBinancePMArrayResponse<BinancePMResponseRecord>(ENDPOINTS.OPEN_CONDITIONAL_ORDERS, data);
 
     const orders: Order[] = rows.map((o) => {
       return {
-        id: v(o, 'newClientStrategyId'),
+        id: v(o, 'clientAlgoId'),
         status: OrderStatus.Open,
         symbol: o.symbol,
-        type: ORDER_TYPE[o.strategyType],
+        type: ORDER_TYPE[o.orderType],
         side: ORDER_SIDE[o.side],
-        price: parseFloat(o.price) || parseFloat(v(o, 'stopPrice')),
-        amount: parseFloat(v(o, 'origQty')),
+        price: parseFloat(o.price) || parseFloat(v(o, 'triggerPrice')),
+        amount: parseFloat(v(o, 'quantity')),
         reduceOnly: v(o, 'reduceOnly') || false,
+        close: v(o, 'closePosition') || false,
         filled: parseFloat(v(o, 'executedQty') || 0),
         lastUpdate: virtualClock.getCurrentTimeMs(),
-        remaining: subtract(v(o, 'origQty'), v(o, 'executedQty') || 0),
+        remaining: subtract(v(o, 'quantity'), v(o, 'executedQty') || 0),
         info: o,
-        ...(ORDER_TYPE[o.type] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')] }),
-        ...(ORDER_TYPE[o.type] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')] }),
+        ...(ORDER_TYPE[o.orderType] === OrderType.TakeProfit && {
+          tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')],
+        }),
+        ...(ORDER_TYPE[o.orderType] === OrderType.StopLoss && {
+          slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'workingType')],
+        }),
       };
     });
 
@@ -773,12 +757,23 @@ export class BinancePMExchange extends BaseExchange {
           try {
             if (conditionalTypes.includes(order.type)) {
               // Use conditional order endpoint for SL/TP/TRAILING_STOP orders
-              await this.papiXhr.delete(ENDPOINTS.CONDITIONAL_ORDER, {
+              const { data } = await this.papiXhr.delete<unknown>(ENDPOINTS.CONDITIONAL_ORDER, {
                 params: {
-                  symbol: request.symbol,
-                  newClientStrategyId: order.id,
+                  clientAlgoId: order.id,
                 },
               });
+              // HTTP 200 without complete:true cannot authorize cancellation or replacement.
+              if (
+                data === null ||
+                typeof data !== 'object' ||
+                Array.isArray(data) ||
+                !('complete' in data) ||
+                data.complete !== true
+              ) {
+                const message =
+                  'Binance PM algo cancellation is unconfirmed. The outcome is unknown. Check Open Orders';
+                throw new ExchangeError(message, { message, kind: 'internal', outcome: 'unknown' });
+              }
             } else {
               // Use regular order endpoint for other order types
               await this.papiXhr.delete(ENDPOINTS.ORDER, {
@@ -802,17 +797,25 @@ export class BinancePMExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    try {
-      const symbolOrders = this.store.orders.filter((order) => order.symbol === symbol);
-      await this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
-        params: { symbol },
-      });
-
-      markBinanceOrdersCanceled(this.store, symbolOrders);
-    } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      throw err;
+    const conditionalTypes = [OrderType.StopLoss, OrderType.TakeProfit, OrderType.TrailingStopLoss];
+    const captured = this.store.orders.filter((order) => order.symbol === symbol);
+    let failure: unknown;
+    for (const [endpoint, conditional] of [
+      [ENDPOINTS.CANCEL_SYMBOL_ORDERS, false],
+      [ENDPOINTS.CANCEL_SYMBOL_ALGO_ORDERS, true],
+    ] as const) {
+      try {
+        await this.papiXhr.delete(endpoint, { params: { symbol } });
+        markBinanceOrdersCanceled(
+          this.store,
+          captured.filter((order) => conditionalTypes.includes(order.type) === conditional),
+        );
+      } catch (err: any) {
+        this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        failure ??= err;
+      }
     }
+    if (failure) throw failure;
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
@@ -967,6 +970,12 @@ export class BinancePMExchange extends BaseExchange {
 
     const distancePercentage = Math.round(((priceDistance * 100) / ticker.last) * 10) / 10;
 
+    if (!Number.isFinite(distancePercentage) || distancePercentage < 0.1 || distancePercentage > 20) {
+      const message = 'Binance PM trailing callbackRate must be from 0.1 to 20';
+      this.emitAndLogError(message);
+      throw new Error(message);
+    }
+
     const payload = {
       symbol: opts.symbol,
       positionSide: this.getOrderPositionSide(opts),
@@ -1015,21 +1024,15 @@ export class BinancePMExchange extends BaseExchange {
     // Separate payloads into groups
     for (const payload of payloads) {
       if (conditionalTypes.includes(payload.type)) {
-        const { type, quantity, ...rest } = payload;
+        const { newClientOrderId, stopPrice, activationPrice, quantity, reduceOnly, ...rest } = payload;
         conditionalOrders.push({
-          strategyType: type,
-          ...(+quantity
-            ? { quantity }
-            : {
-                quantity:
-                  this.store.positions.find(
-                    (p) =>
-                      p.symbol === payload.symbol &&
-                      ((payload.side === 'SELL' && p.side === PositionSide.Long) ||
-                        (payload.side === 'BUY' && p.side === PositionSide.Short)),
-                  )?.contracts || 0,
-              }),
+          algoType: 'CONDITIONAL',
           ...rest,
+          clientAlgoId: newClientOrderId,
+          ...(stopPrice !== undefined && { triggerPrice: stopPrice }),
+          ...(activationPrice !== undefined && { activatePrice: activationPrice }),
+          ...(payload.closePosition !== 'true' && { quantity }),
+          ...(payload.closePosition !== 'true' && reduceOnly !== undefined && { reduceOnly }),
         });
       } else {
         regularOrders.push(payload);
@@ -1051,7 +1054,7 @@ export class BinancePMExchange extends BaseExchange {
     for (const payload of conditionalOrders) {
       try {
         await this.unlimitedXHR.post(ENDPOINTS.CONDITIONAL_ORDER, payload);
-        orderIds.push(payload.newClientOrderId);
+        orderIds.push(payload.clientAlgoId);
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
         throw err;

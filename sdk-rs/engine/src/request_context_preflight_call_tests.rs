@@ -479,4 +479,39 @@ mod preflight_calls {
                 crate::Outcome::Unknown } else { crate::Outcome::NotSent }));
         }
     }
+    #[test]
+    fn public_preflight_read_preserves_the_private_read_role_and_custody() {
+        let mut e = crate::test_support::seeded_engine(Calls { second: true, ..Default::default() });
+        let owner = cx(&mut e, 0., |cx| cx.issue_preflight(7, PreflightPolicy {
+            purpose: PreflightPurpose::ReadOnly, read_credential: policy(true).credential, write_credential: None,
+        })).unwrap();
+        let one = CallTerms { attempts: 1, ..terms(false) };
+        let before = e.io.core.next_id;
+        assert_eq!(cx(&mut e, 0., |cx| cx.preflight_read_context(&owner, policy(false), one)), Err(Error::Invalid));
+        assert_eq!(cx(&mut e, 0., |cx| cx.preflight_public_read_context(&owner, policy(true), one)), Err(Error::Invalid));
+        let mut mutation = policy(false); mutation.operation = Operation::Mutation;
+        assert_eq!(cx(&mut e, 0., |cx| cx.preflight_public_read_context(&owner, mutation, one)), Err(Error::Invalid));
+        assert_eq!(e.io.core.next_id, before);
+        let mut foreign = crate::test_support::seeded_engine(Calls::default());
+        assert!(cx(&mut foreign, 0., |cx| cx.preflight_public_read_context(&owner, policy(false), one)).is_err());
+        let context = cx(&mut e, 0., |cx| cx.preflight_public_read_context(&owner, policy(false), one)).unwrap();
+        assert_eq!(context.owner(), owner.owner());
+        assert!(context.credential().is_none());
+        assert!(cx(&mut e, 0., |cx| cx.preflight_public_read_context(&owner, policy(false), one)).is_err());
+        cx(&mut e, 0., |cx| queue(cx, context.clone(), false)).unwrap();
+        e.venue.owner = Some(owner.clone()); e.venue.context = Some(context);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        e.venue.signed = true;
+        response(&mut e, first, 1., "ok");
+        let next = e.venue.context.as_ref().unwrap();
+        assert_eq!(next.owner(), owner.owner());
+        assert_eq!(next.credential(), policy(true).credential.as_ref());
+        let (second, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, second, 2.);
+        response(&mut e, second, 3., "ok");
+        assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>()), 1);
+        assert!(cx(&mut e, 4., |cx| cx.preflight_public_read_context(&owner, policy(false), one)).is_err());
+    }
+
 }

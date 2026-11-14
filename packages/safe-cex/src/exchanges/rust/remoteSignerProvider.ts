@@ -32,7 +32,7 @@ const paradex = (name: ExchangeName) => name === 'paradex';
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  name === 'asterdex' ? ASTER_ALGORITHMS : name === 'apexomni' ? APEXOMNI_ALGORITHMS : (name === 'coinbase' || name === 'coinbasespot') ? COINBASE_ALGORITHMS : name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
+  name === 'asterdex' ? ASTER_ALGORITHMS : name === 'apexomni' ? APEXOMNI_ALGORITHMS : (name === 'coinbase' || name === 'coinbasespot') ? COINBASE_ALGORITHMS : name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'txflow' || name === 'grvt') ? WALLET_ALGORITHMS
     : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
@@ -608,7 +608,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     return Array.from({ length }, (_, i) => Number.parseInt(value.slice(2 + i * 2, 4 + i * 2), 16));
   };
   const askDevice = async (toSign: string,
-    outputFormat: 'asterdex-address' | 'asterdex-hmac' | 'asterdex-wallet' | 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public' | 'grvt-order' | 'grvt-address', signal: AbortSignal) => {
+    outputFormat: 'txflow-agent' | 'txflow-address' | 'asterdex-address' | 'asterdex-hmac' | 'asterdex-wallet' | 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public' | 'grvt-order' | 'grvt-address', signal: AbortSignal) => {
     const id = nanoid();
     const response = await guarded(signal, remoteSigner, () => remoteSigner!.sign({
       id,
@@ -630,7 +630,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     if (!entry || !entry.primary || operations.some((operation) => record(operation)
       && 'key' in operation && operation.key !== entry.identity.signing)) throw refused();
     if (kinds.length === 1 && kinds[0] === 'publicAddress') {
-      const address = hexBytes(await askDevice(entry.identity.publicCredential, 'hyperliquid-address', signal), 20);
+      const address = hexBytes(await askDevice(entry.identity.publicCredential, exchangeName === 'txflow' ? 'txflow-address' : 'hyperliquid-address', signal), 20);
       // One provider binds one agent; a different device key is never adopted.
       if (boundAddress && boundAddress.some((byte, index) => byte !== address[index])) throw refused();
       boundAddress = address;
@@ -647,7 +647,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     };
     const preimage = bytes(statement.payload, MAX_PAYLOAD);
     if (bytes(sign.payload, 32).length !== 32) throw refused();
-    const signature = hexBytes(await askDevice(decodeUtf8(preimage), 'hyperliquid-l1', signal), 65);
+    const signature = hexBytes(await askDevice(decodeUtf8(preimage), exchangeName === 'txflow' ? 'txflow-agent' : 'hyperliquid-l1', signal), 65);
     return { values: [Array.from(sha256(preimage)), boundAddress.slice(), signature], receipt };
   };
 
@@ -799,6 +799,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (!record(request.receipt) || Object.entries(receipt).some(([key, value]) =>
         exchangeName === 'asterdex' && key === 'nonce' ? typeof value !== 'string'
           || !/^[1-9][0-9]{0,19}$/.test(value) || BigInt(value) > 18446744073709551615n :
+        exchangeName === 'txflow' && key === 'nonce' ? typeof value !== 'string'
+          || !/^(0|[1-9][0-9]{0,19})$/.test(value) || BigInt(value) > 18446744073709551615n :
         exchangeName === 'kraken' && key === 'nonce' ? false :
         !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER
           || (!((exchangeName === 'coinbase' || exchangeName === 'coinbasespot') && key === 'stampMs') && !Number.isInteger(value)))))) throw refused();
@@ -812,7 +814,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (exchangeName === 'backpack') return await signBackpack(operations, receipt, signal);
       if (exchangeName === 'grvt') return await signGrvt(operations, receipt, signal);
       if (kucoin) return await signKucoin(operations, receipt, signal);
-      if (hyperliquid(exchangeName)) return await signWallet(operations, receipt, signal);
+      if (hyperliquid(exchangeName) || exchangeName === 'txflow') return await signWallet(operations, receipt, signal);
       if (lighter(exchangeName)) return await signLighter(operations, receipt, signal);
       if (paradex(exchangeName)) return await signStark(operations, receipt, signal);
       if (operations.some((operation) => operation?.kind === 'sha256'

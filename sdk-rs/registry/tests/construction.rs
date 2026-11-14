@@ -475,7 +475,7 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
         resolve("coinbase", r#"{"key":"k","publicMode":{"requested":true}}"#),
         (true, true)
     );
-    assert_eq!(resolve("txflow", r#"{"publicMode":{}}"#), (false, false));
+    assert_eq!(resolve("txflow", r#"{"publicMode":{}}"#), (false, true));
 }
 
 #[test]

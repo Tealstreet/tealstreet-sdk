@@ -27,15 +27,15 @@ does not enable production, preview, Outcome, spot, TxRelay or fund transfers.
 
 ## Authentication and signing
 
-`applicationId` is the main account wallet, `secret` its already-approved
-agent private key. An optional `vault` selects the queried/traded vault.
-Unsigned reads/subscriptions use that account identity, never the agent's
-address. Private startup validates the account and local signing key before
-I/O. This connector does not approve agents, builders or fund accounts.
-
-TxFlow has no CEX-style API keys; the venue-side `key` field is unused. TxFlow never returns an agent private key. Tealstreet must generate the agent wallet locally, send only the agent address in `approveAgent`, and have the owner wallet sign that approval. TxFlow records the approved agent address for the account; day-to-day trading is signed with the locally stored agent private key.
-
-Private/trading support therefore requires a custom wallet + agent-key onboarding flow, not the generic API-key paste form. Do not expose a generic TxFlow API-key field unless TxFlow later ships a real venue-issued key model.
+`applicationId` is the main account wallet; `key` is the approved agent address.
+The browser approval helper returns the generated key to the caller, whose
+persistence follows the existing HL application path. The Rust venue takes
+provider identities rather than raw `secret`. Hosted servers get only signing
+references; the browser device reconstructs the allowlisted statement and signs.
+No server generation, persistence or recovery is added. Before each queued
+command, verify the agent's current authorization; an absent agent fails closed.
+Private reads/subscriptions use the owner or vault address, never the agent.
+See the adjacent README for exact schemas, measured testnet evidence and NX work.
 
 The testnet EIP-712 domain is `TxFlow-Testnet`, version `1`, chain ID `2511`,
 zero verifying contract. Agent schema:
@@ -121,7 +121,9 @@ orders and terminal replay fences.
 
 Supported placement is plain Limit/Market (`Gtc`, `Ioc`, `Alo`, native
 `FrontendMarket`/`bbo`) within documented size/precision limits. Serialize
-commands, validate whole batches before any write, and recheck queued intent
+commands, validate the entire command before any write, and send physical batches
+of at most 50 placements. Resolve each executed batch's native IDs before admitting
+its successor; uncertainty stops the remaining batches. Recheck queued intent
 against current state before dispatch.
 
 Caller IDs are honored verbatim on one plain native order: nonempty, at most
@@ -194,3 +196,26 @@ signed order or label history with the wrong instrument. That failure is logged,
 preserves the prior store, and retries with the public discovery backoff. Ticker
 read failures retry independently by native asset while later seed reads and the
 private account continue.
+
+Master integration retains trusted Hosted beta admission: TxFlow remains OUT of
+the hosted beta roster even for public accounts. Client testnet construction and
+device agent verification remain available without enabling preview or production.
+New shared signing families and request-handoff refusals keep their native rules.
+
+Explicit private PayloadSigner requests retain callback-configuration refusal
+first, then unsupported/notSent for an injected provider, even before an owner
+address is supplied. Explicit public/keyless accounts still discard unused custody.
+
+Browser approval and revocation nonces use the shared corrected virtualClock.
+Failed or unreadable approval reads stay recoverable Network/VenueUnavailable
+with NotSent; only a valid matching-owner response confirming absence is AuthInvalid.
+Every failed check still stops before signing or releasing an exchange write.
+
+Standalone agent reads/approvals/revocations use the registered transport's
+`privateProxy('txflow')` contract unless `options.fetch` explicitly overrides it.
+A configured proxy without authorization refuses before fetch; it never falls
+back to the venue. The direct transport remains direct by its declared contract.
+
+Native hosted mutations carry a canonical decimal uint64 nonce in their signing
+receipt. The production remote provider validates and echoes it unchanged;
+native apply rejects changed receipt facts before any exchange write.
