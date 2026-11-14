@@ -1039,15 +1039,18 @@ page-clock timestamp while the socket is uninitialized or reconnecting; a feed
 that has never received a frame still has no timestamp. Health/initialization
 flags remain independent of this diagnostic age.
 
-The existing five-second health check also retires an OPEN, initialized channel
-whose last frame is at least 60 s old on the wall clock. Laptop sleep can pause
-`performance.now()` while wall-clock health ages, so native supervisor deadlines
-alone can leave that stale connection in place after JavaScript resumes. The
-check uses the existing engine reconnect path, retaining its epochs, uncertainty
-and retry policy. Fresh traffic, uninitialized replacements and connects in
-flight are left alone. It neither moves command deadlines nor retries writes,
-rebuilds the engine or reloads the chart. Its self-rescheduling timeout keeps one
-handle and stops on disposal. Regression: `rust.socket-health.test.ts`.
+The existing five-second health check compares elapsed wall time with the exact
+scheduling clock retained by this engine. If wall time gained more than the
+clock's existing one-second correction margin, it retires only OPEN, initialized
+channels whose last frame is at least 60 s old on the wall clock. Laptop sleep
+can pause `performance.now()` while wall-clock health ages; ordinary callback
+delays with advancing engine time do not activate this fallback. Normal native
+90 s/180 s silence allowances remain authoritative. The check uses the engine
+reconnect path, retaining its epochs, uncertainty and retry policy. Fresh traffic,
+uninitialized replacements and connects in flight are left alone. It neither
+moves command deadlines nor retries writes, rebuilds the engine or reloads the
+chart. Its self-rescheduling timeout keeps one handle and stops on disposal.
+Regression: `rust.socket-health.test.ts`.
 
 `store.latency` is nullable: null means no measurement, including on reset.
 STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an

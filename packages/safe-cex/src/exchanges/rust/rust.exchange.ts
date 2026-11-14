@@ -636,6 +636,7 @@ export class RustEngineExchange extends BaseExchange {
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private socketHealthTimer?: ReturnType<typeof setTimeout>;
+  private socketHealthClock?: () => number;
   private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
@@ -1698,6 +1699,7 @@ export class RustEngineExchange extends BaseExchange {
       (event, message) => this.emitter.emit(event, message),
       (event) => this.emitter.emit('ws-diagnostic', event),
     );
+    this.socketHealthClock = () => transport.now();
     const engine = constructEngine(
       WasmEngine,
       this.name,
@@ -2253,7 +2255,7 @@ export class RustEngineExchange extends BaseExchange {
         this.host?.flush();
       }, STORE_FLUSH_MS * multiplier),
     );
-    this.scheduleSocketHealthCheck();
+    this.startSocketHealthCheck();
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
@@ -2639,29 +2641,43 @@ export class RustEngineExchange extends BaseExchange {
     return this.host;
   }
 
-  private scheduleSocketHealthCheck = () => {
+  private startSocketHealthCheck = () => {
     if (this.isDisposed || this.socketHealthTimer !== undefined) return;
-    this.socketHealthTimer = setTimeout(() => {
+    let previousWall = Date.now();
+    let previousEngine = this.socketHealthClock?.();
+    const schedule = () => {
+      this.socketHealthTimer = setTimeout(check, SOCKET_HEALTH_SYNC_MS);
+      this.socketHealthTimer.unref?.();
+    };
+    const check = () => {
       this.socketHealthTimer = undefined;
+      if (this.isDisposed) return;
       try {
-        // performance.now() can pause in laptop sleep while wall-clock health ages.
-        // Retire a stale OPEN channel through its engine; do not move command deadlines.
         const now = Date.now();
-        for (const socket of this.getAllSockets()) {
-          if (this.isDisposed) return;
-          if (
-            socket?.isConnected &&
-            socket.isInitialized &&
-            socket.lastReceived > 0 &&
-            now - socket.lastReceived >= RUST_SOCKET_STALE_MS
-          ) socket.reconnect();
+        const engineNow = this.socketHealthClock?.();
+        // Only a paused scheduling clock permits this fallback; normal 90s/180s
+        // venue silence policies remain authoritative. Match the clock's 1s step margin.
+        const resumed = previousEngine !== undefined && engineNow !== undefined &&
+          (now - previousWall) - (engineNow - previousEngine) > 1_000;
+        previousWall = now;
+        previousEngine = engineNow;
+        if (resumed) {
+          for (const socket of this.getAllSockets()) {
+            if (this.isDisposed) return;
+            if (
+              socket?.isConnected &&
+              socket.isInitialized &&
+              socket.lastReceived > 0 &&
+              now - socket.lastReceived >= RUST_SOCKET_STALE_MS
+            ) socket.reconnect();
+          }
         }
         this.syncSocketHealthToStore();
       } finally {
-        this.scheduleSocketHealthCheck();
+        if (!this.isDisposed) schedule();
       }
-    }, SOCKET_HEALTH_SYNC_MS);
-    this.socketHealthTimer.unref?.();
+    };
+    schedule();
   };
 
   /** Publish engine socket observations; the engine still owns reconnection. */
@@ -4104,6 +4120,7 @@ export class RustEngineExchange extends BaseExchange {
     this.stopPollingConfig = undefined;
     clearTimeout(this.socketHealthTimer);
     this.socketHealthTimer = undefined;
+    this.socketHealthClock = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
     const host = this.host;

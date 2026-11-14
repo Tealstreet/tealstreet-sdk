@@ -28,7 +28,7 @@ afterEach(() => {
  */
 const setup = async (
   singleSocket?: 'keyed' | 'public',
-  venueOverride?: 'blofin' | 'okx' | 'bybit',
+  venueOverride?: 'blofin' | 'okx' | 'bybit' | 'cryptocom',
   now = () => Date.now(),
 ) => {
   const venue = venueOverride ?? (singleSocket ? 'hyperliquid' : 'bybit');
@@ -230,7 +230,8 @@ describe('Rust engine socket health (cutover B5)', () => {
 
   it('wake health recovery leaves a freshly delivering private channel alone', async () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 });
-    const { engineCloses, deliver, live } = await setup();
+    const engineNow = Date.now();
+    const { engineCloses, deliver, live } = await setup(undefined, undefined, () => engineNow);
     deliver('public');
     deliver('private');
     vi.setSystemTime(Date.now() + 101_012);
@@ -243,7 +244,8 @@ describe('Rust engine socket health (cutover B5)', () => {
 
   it('wake health recovery preserves an uninitialized replacement and stops on disposal', async () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 });
-    const { exchange, engineCloses, deliver, live } = await setup();
+    const engineNow = Date.now();
+    const { exchange, engineCloses, deliver, live } = await setup(undefined, undefined, () => engineNow);
     deliver('private');
     vi.setSystemTime(Date.now() + 101_012);
     live('private').handlers.onClose(1006);
@@ -256,6 +258,21 @@ describe('Rust engine socket health (cutover B5)', () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(engineCloses).toEqual([[2, 1006]]);
   });
+
+  it.each(['ordinary callbacks', 'withheld callbacks'] as const)(
+    'preserves Crypto.com native 90s silence allowance with advancing clocks and %s',
+    async (mode) => {
+      vi.useFakeTimers({ now: 1_800_000_000_000 });
+      const { engineCloses, deliver, live } = await setup(undefined, 'cryptocom');
+      deliver('private');
+      const privateSocket = live('private');
+      // The 60s display threshold must not replace the native 90s retirement policy.
+      if (mode === 'withheld callbacks') vi.setSystemTime(Date.now() + 65_000);
+      await vi.advanceTimersByTimeAsync(mode === 'ordinary callbacks' ? 65_000 : 5_000);
+      expect(engineCloses).toEqual([]);
+      expect(privateSocket.closed).toBe(false);
+    },
+  );
 
   it('reconnect closes every open engine socket and the venue reopens it', async () => {
     const { exchange, store, sockets, engineCloses, deliver } = await setup();
