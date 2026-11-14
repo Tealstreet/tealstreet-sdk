@@ -14,6 +14,7 @@ const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 const APEXOMNI_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256', 'zkLinkContract']);
 const KRAKEN_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha512']);
 const DOUBLE_SHA256_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['sha256SecretSuffix']);
+const ASTER_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256', 'secp256k1Digest']);
 const WALLET_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['secp256k1Digest']);
 const SCHNORR_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['schnorrDigest']);
 const STARK_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['starkDigest']);
@@ -31,7 +32,7 @@ const paradex = (name: ExchangeName) => name === 'paradex';
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  name === 'apexomni' ? APEXOMNI_ALGORITHMS : (name === 'coinbase' || name === 'coinbasespot') ? COINBASE_ALGORITHMS : name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
+  name === 'asterdex' ? ASTER_ALGORITHMS : name === 'apexomni' ? APEXOMNI_ALGORITHMS : (name === 'coinbase' || name === 'coinbasespot') ? COINBASE_ALGORITHMS : name === 'kraken' ? KRAKEN_ALGORITHMS : name === 'backpack' ? ED25519_ALGORITHMS : doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : (hyperliquid(name) || name === 'grvt') ? WALLET_ALGORITHMS
     : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
@@ -607,7 +608,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     return Array.from({ length }, (_, i) => Number.parseInt(value.slice(2 + i * 2, 4 + i * 2), 16));
   };
   const askDevice = async (toSign: string,
-    outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public' | 'grvt-order' | 'grvt-address', signal: AbortSignal) => {
+    outputFormat: 'asterdex-address' | 'asterdex-hmac' | 'asterdex-wallet' | 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public' | 'grvt-order' | 'grvt-address', signal: AbortSignal) => {
     const id = nanoid();
     const response = await guarded(signal, remoteSigner, () => remoteSigner!.sign({
       id,
@@ -648,6 +649,50 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     if (bytes(sign.payload, 32).length !== 32) throw refused();
     const signature = hexBytes(await askDevice(decodeUtf8(preimage), 'hyperliquid-l1', signal), 65);
     return { values: [Array.from(sha256(preimage)), boundAddress.slice(), signature], receipt };
+  };
+
+  const signAster = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const first = operations[0];
+    if (operations.length === 1 && first?.kind === 'publicAddress') {
+      const entry = owned.get(first.key);
+      if (!entry || first.key !== entry.identity.signing || Object.keys(receipt).length) throw refused();
+      const output = await askDevice(JSON.stringify({ slot: entry.primary ? 'primary' : 'secondary' }), 'asterdex-address', signal);
+      return { values: [hexBytes(output, 20)], receipt };
+    }
+    if (operations.length === 1 && first?.kind === 'present') {
+      const entry = credentials.get(first.key);
+      if (!entry) throw refused();
+      return { values: [entry.bytes.slice()], receipt };
+    }
+    const wallet = operations.length === 3;
+    const commitment = wallet ? operations[1] : undefined;
+    const sign = operations[wallet ? 2 : 1];
+    const entry = sign?.kind === 'sign' ? owned.get(sign.key) : undefined;
+    if ((operations.length !== 2 && !wallet) || first?.kind !== 'present' || sign?.kind !== 'sign'
+      || !entry || sign.key !== entry.identity.signing || first.key !== entry.identity.credential
+      || sign.algorithm !== (wallet ? 'secp256k1Digest' : 'hmacSha256')
+      || (wallet && commitment?.kind !== 'sha256') || (wallet !== (receipt.nonce !== undefined))) throw refused();
+    const bytes = (parts: unknown) => {
+      const part = Array.isArray(parts) && parts.length === 1 ? parts[0] : undefined;
+      if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || !part.bytes.length || part.bytes.length > MAX_PAYLOAD
+        || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+      return Uint8Array.from(part.bytes as number[]);
+    };
+    const digest = bytes(sign.payload);
+    if (wallet && digest.length !== 32) throw refused();
+    const preimage = wallet && commitment?.kind === 'sha256' ? bytes(commitment.payload) : digest;
+    const payload = decodeUtf8(preimage);
+    const toSign = JSON.stringify({ slot: entry.primary ? 'primary' : 'secondary', payload });
+    utf8(toSign);
+    const reply = await askDevice(toSign, wallet ? 'asterdex-wallet' : 'asterdex-hmac', signal);
+    if (typeof reply !== 'string') throw refused();
+    const output: unknown = JSON.parse(reply);
+    if (!record(output) || Object.keys(output).length !== 2 || output.credential !== entry.identity.publicCredential
+      || typeof output.signature !== 'string' || !(wallet ? /^[0-9a-f]{130}$/ : /^[0-9a-f]{64}$/).test(output.signature)) throw refused();
+    const signature = wallet ? hexBytes(`0x${output.signature}`, 65) : mac(output.signature, 'hex');
+    if (wallet && signature[64] > 1) throw refused();
+    return { values: [Array.from(utf8(entry.identity.publicCredential)), ...(wallet ? [Array.from(sha256(preimage))] : []), signature], receipt };
   };
 
   // GRVT session login is Present-only. Orders carry one closed EIP-712
@@ -752,6 +797,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         && (typeof receipt.nonce !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(receipt.nonce)
           || BigInt(receipt.nonce) > 18_446_744_073_709_551_615n)) throw refused();
       if (!record(request.receipt) || Object.entries(receipt).some(([key, value]) =>
+        exchangeName === 'asterdex' && key === 'nonce' ? typeof value !== 'string'
+          || !/^[1-9][0-9]{0,19}$/.test(value) || BigInt(value) > 18446744073709551615n :
         exchangeName === 'kraken' && key === 'nonce' ? false :
         !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER
           || (!((exchangeName === 'coinbase' || exchangeName === 'coinbasespot') && key === 'stampMs') && !Number.isInteger(value)))))) throw refused();
@@ -761,6 +808,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (apexomni) return await signApexOmni(operations, receipt, signal);
       if (exchangeName === 'coinbase' || exchangeName === 'coinbasespot') return await signCoinbase(operations, receipt, signal);
       if (exchangeName === 'kraken') return await signKraken(operations, receipt, signal);
+      if (exchangeName === 'asterdex' && remoteSigner) return await signAster(operations, receipt, signal);
       if (exchangeName === 'backpack') return await signBackpack(operations, receipt, signal);
       if (exchangeName === 'grvt') return await signGrvt(operations, receipt, signal);
       if (kucoin) return await signKucoin(operations, receipt, signal);

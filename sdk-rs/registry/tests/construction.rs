@@ -446,7 +446,7 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
             "asterdex",
             r#"{"key":"k","publicMode":{"payloadSigner":true}}"#
         ),
-        (false, true)
+        (true, false)
     );
     // Lighter's remote signer signs its statements, so it is a signing credential.
     assert_eq!(
@@ -480,6 +480,24 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
 
 #[test]
 fn native_payload_refusal_preserves_classification_with_or_without_local_credentials() {
+    // A configured provider reaches the V3 custody refusal, past callback validation.
+    let v3 = safe_cex_venues::build_with_signer(
+        "asterdex",
+        serde_json::from_str(
+            r#"{"key":"public-wallet","payloadSigner":true,"asterdex":{"apiVersion":"v3"}}"#,
+        )
+        .unwrap(),
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(std::sync::Arc::new(safe_cex_crypto::signer::LocalSigner::new())),
+        Accept,
+    )
+    .unwrap_err();
+    assert_eq!(v3.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(v3.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        v3.message,
+        "AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only"
+    );
     for venue in [
         "binance",
         "binancepm",
@@ -537,6 +555,18 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
+    // Aster V1 PayloadSigner is private and needs an injected provider.
+    let aster = construct(
+        "asterdex",
+        r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(aster.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(aster.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        aster.message,
+        "Delegated signing requires a configured callback provider"
+    );
 }
 
 #[cfg(feature = "bybit")]
