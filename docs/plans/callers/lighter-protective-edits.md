@@ -90,7 +90,8 @@ native decoder before it grants exact modification or put-back authority.
 Locally canceled identities remain suppressed, and a local modify (including an
 Unknown) retires its old native parameters: replaying that metadata cannot grant
 a second edit until the source supplies changed native parameters.
-The source sorts rows for stable encoding. Missing native orders wait for their
+The header must name the receiver's resolved account before tier or native
+provenance is accepted. The source sorts rows for stable encoding. Missing native orders wait for their
 ingested rows; a new source state replaces prior provenance. New readers also
 accept the exact 11-byte v1 form, which exports when no originals are present
 and grants no native provenance. Ordinary v1 writes remain supported; a v1-only

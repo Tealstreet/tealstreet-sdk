@@ -1116,9 +1116,15 @@ impl Venue for Lighter {
         if let Some(account) = state.account_index {
             self.apply_account_index(cx, account);
         }
-        self.apply_limits_tier_code(state.tier);
         self.protection.originals.clear();
-        self.protection.frame_originals = state.originals;
+        self.protection.frame_originals.clear();
+        if state.account_index != self.account.account_index {
+            return;
+        }
+        self.apply_limits_tier_code(state.tier);
+        if state.account_index.is_some() {
+            self.protection.frame_originals = state.originals;
+        }
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
         self.ingest_frame_originals(cx.store);

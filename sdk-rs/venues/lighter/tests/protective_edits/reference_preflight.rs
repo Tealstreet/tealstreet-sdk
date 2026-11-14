@@ -438,3 +438,16 @@ fn a_replayed_pre_modify_frame_cannot_regrant_retired_native_provenance() {
         );
     }
 }
+
+#[test]
+fn a_foreign_account_frame_cannot_grant_protective_provenance() {
+    use safe_cex_engine::Venue;
+    let (mut e, _) = page(false, false);
+    let mut state = e.venue().export_venue_state().unwrap();
+    state[2..10].copy_from_slice(&718_896_u64.to_le_bytes());
+    let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), NOW);
+    writer.venue_state(&state);
+    e.apply_frame(NOW, &writer.finish(), false).unwrap();
+    edit(&mut e, NOW, false);
+    refused(&mut e, NOW);
+}
