@@ -13,3 +13,11 @@ Numeric parsing, null/empty-string policies and observation handling retain
 their existing rules. Public-frame controls are in
 `tests/public_numeric_overlay.rs`. Control fast paths must match complete frames
 so a ticker or rate-limit payload cannot be mistaken for a pong.
+
+## Margin-mode sizing
+
+Quantity-bearing writes require current metadata with explicit `useNotionalMargin: false`.
+Missing/null retains an unknown mode without removing public market data. Limit/market
+placements and price-only or size amendments refuse unmeasured modes before signing.
+Serial placement batches and queued amendments recheck the mode at dispatch. Native-ID
+cancellation remains available because it does not infer quantity units.
