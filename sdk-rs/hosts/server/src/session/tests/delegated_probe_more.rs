@@ -356,3 +356,57 @@ async fn bybit_admission_retains_classified_refusal_and_original_attempt_context
         session.close();
     }
 }
+
+#[tokio::test]
+async fn signing_mode_refusals_report_a_closed_reason_without_claiming_key_failure() {
+    tokio::task::LocalSet::new().run_until(async {
+        for reason in ["resident_mode_conflict", "invalid_identity", "identity_namespace_conflict"] {
+            let f = fixture().await;
+            let (mut candidate, mut sent) = user_session(f.registry.clone(), "alice");
+            let mut init = payload(&mut candidate, Some("candidate"));
+            let attempt = init.sealed.as_ref().unwrap().attempt_id.clone();
+            let resident = match reason {
+                "resident_mode_conflict" => Some(crate::accounts::testing::trading_account(&f.registry, "alice", &init)),
+                "invalid_identity" => { init.key.clear(); None },
+                "identity_namespace_conflict" => {
+                    let collision = InitPayload {
+                        account_name: crate::accounts::identity::digest("alice", &init).unwrap().unwrap(),
+                        exchange_name: "bybitinverse".into(),
+                        ..init.clone()
+                    };
+                    Some(crate::accounts::testing::trading_account(&f.registry, "alice", &collision))
+                }
+                _ => unreachable!(),
+            };
+            let capture = crate::state::log_capture::capture();
+            candidate.init(init).await.unwrap();
+            let warnings: Vec<Value> = capture.finish().into_iter()
+                .map(|line| serde_json::from_str::<Value>(&line).unwrap())
+                .filter(|line| line["level"] == "warn").collect();
+            assert_eq!(warnings.len(), 1);
+            let fields: Value = serde_json::from_str(warnings[0]["msg"].as_str().unwrap()).unwrap();
+            assert_eq!(fields, json!({
+                "event":"hosted.admission_refused", "attempt_id":attempt, "venue":"bybit",
+                "kind":"signing-mode", "stage":"signing_mode", "reason":reason,
+                "transient":false, "error_kind":null, "venue_code":null,
+            }));
+            let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            assert_eq!(reply, json!({"t":"msg", "d":{
+                "op":"error", "accountName":"acct", "instanceId":"candidate",
+                "data":["The requested account signing mode is unavailable; account not attached",
+                    {"forceToast":true, "initRefused":true, "kind":"signing-mode", "transient":false}]
+            }}));
+            assert!(!reply.to_string().contains(reason), "private sub-reasons stay off the wire");
+            assert!(candidate.joined.is_empty());
+            assert!(candidate.pending_verifications.is_empty());
+            assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);
+            assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+            if let Some(account) = resident {
+                assert!(account.handle.disposal_cause().is_none());
+                assert!(!f.registry.holds(&account, candidate.socket));
+                f.registry.dispose(&account, Disposal::PageDisposed);
+            }
+            candidate.close();
+        }
+    }).await;
+}

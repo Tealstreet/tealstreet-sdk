@@ -29,6 +29,15 @@ mod identity_tests;
 pub const PUBLIC_ACCOUNT: &str = "__pub_bybit";
 pub const PUBLIC_EXCHANGE: &str = "bybit";
 
+/// Closed diagnostic labels; never include identity material or account labels.
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SigningModeRefusalReason {
+    InvalidIdentity,
+    IdentityNamespaceConflict,
+    ResidentModeConflict,
+}
+
 enum DelegatedSetup {
     Pair(DelegatedPair),
     Resident(Box<ResidentCopy>),
@@ -1105,6 +1114,17 @@ impl Registry {
         public_only: bool,
         delegated: bool,
     ) -> Option<String> {
+        self.signing_mode_refusal_detail(user, init, public_only, delegated)
+            .map(|(_, message)| message)
+    }
+
+    pub(crate) fn signing_mode_refusal_detail(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        delegated: bool,
+    ) -> Option<(SigningModeRefusalReason, String)> {
         let accounts = self.accounts.lock().unwrap();
         let name = match if public_only {
             Ok(init.account_name.clone())
@@ -1112,15 +1132,16 @@ impl Registry {
             identity::registry_name(user, init)
         } {
             Ok(name) => name,
-            Err(error) => return Some(error),
+            Err(error) => return Some((SigningModeRefusalReason::InvalidIdentity, error)),
         };
         let keyed = accounts.get(&(user.to_owned(), name));
         if keyed.is_some_and(|account| {
             account.identity.is_some() != (!public_only && identity::enabled(init))
         }) {
-            return Some(
+            return Some((
+                SigningModeRefusalReason::IdentityNamespaceConflict,
                 "An existing account has a conflicting label. Rename it and try again.".into(),
-            );
+            ));
         }
         let account = keyed.or_else(|| {
             if !public_only {
@@ -1135,8 +1156,12 @@ impl Registry {
         if public_only && account.delegated.is_none() {
             return None;
         }
-        (!account.is_public() && account.delegated.is_some() != delegated)
-            .then(|| "Account signing mode differs; account not attached".to_owned())
+        (!account.is_public() && account.delegated.is_some() != delegated).then(|| {
+            (
+                SigningModeRefusalReason::ResidentModeConflict,
+                "Account signing mode differs; account not attached".to_owned(),
+            )
+        })
     }
 
     fn rebuild_refusal_for_mode(
