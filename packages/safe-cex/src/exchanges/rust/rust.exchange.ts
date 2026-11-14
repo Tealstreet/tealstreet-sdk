@@ -2008,7 +2008,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private withPageWriter = async <T>(
-    method: string, args: unknown[], send: () => Promise<T>, sendHosted?: (admitted: WorkerAdmission) => Promise<T>,
+    method: string, args: unknown[], send: () => Promise<T>, sendSource?: (admitted: WorkerAdmission) => Promise<T>,
   ): Promise<T> => {
     try {
       const admitted = this.captureWorkerAdmission();
@@ -2016,10 +2016,10 @@ export class RustEngineExchange extends BaseExchange {
       admitted?.(method, args);
       if (this.isDisposed) throw this.workerOwnerChanged(method, args);
       if (!this.frameFed) {
-        // Only a structurally unsupported COSIGNED venue uses its existing source writer.
+        // A structurally unsupported LOCAL/COSIGNED mirror keeps its existing source writer.
         // A missing module/capability or a failed supported page engine must never reroute.
-        if (this.options.signingMode === 'cosigned' && this.pageWriteSupported === false && sendHosted)
-          return await sendHosted(admitted);
+        if (this.options.signingMode !== 'delegated' && this.pageWriteSupported === false && sendSource)
+          return await sendSource(admitted);
         throw this.pageWriterUnavailable(method);
       }
       return await send();

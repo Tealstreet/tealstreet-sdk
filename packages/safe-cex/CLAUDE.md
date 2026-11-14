@@ -776,11 +776,12 @@ alone do not establish it. Callers must handle typed readiness failures.
 key and route, and starts it only when `construction().frameFed` is true (no
 venue streams, no account reads). `frameFedReady` resolves whether it did;
 otherwise manual writes refuse locally with `unsupported/notSent`. The sole
-exception is an explicitly COSIGNED worker mirror (`signingMode: 'cosigned'`)
-whose loaded module explicitly reports `frameFedSupported(venue) === false`:
-it uses the existing hosted `callMethod` writer, including protective amendments.
-The host must supply its actual transport mode, including legacy accounts and
-reused mirrors; absent/LOCAL/DELEGATED modes never opt into this route. A missing
+exception is a non-DELEGATED worker mirror whose loaded module explicitly
+reports `frameFedSupported(venue) === false`: it uses the existing owning-source
+`callMethod` writer, including protective amendments. LOCAL (including the legacy
+absent mode) uses its account worker and keeps keys local; COSIGNED uses its
+existing hosted source. The host supplies the actual mode, including reused
+mirrors; DELEGATED never opts into this route. A missing
 module/capability or a failed supported page engine never falls back. No failed
 or Unknown write is retried or sent through a second writer. Both routes retain
 the initiating owner and bridge admission across readiness waits; #3513's

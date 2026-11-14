@@ -5,9 +5,10 @@ is the single source of truth for boilerplate that would otherwise be repeated
 in every per-exchange `CLAUDE.md`. **Read this first** before diving into any
 individual exchange doc.
 
-Rust page-mirror manual writes use the page engine or refuse locally, except an
-explicitly COSIGNED mirror whose module reports no frame-fed support: it uses
-the existing hosted writer. Failed supported engines and Unknown writes never
+Rust page-mirror manual writes use the page engine or refuse locally, except a
+non-DELEGATED mirror whose module explicitly reports no frame-fed support: its
+existing source writer remains authoritative (LOCAL account worker, COSIGNED
+hosted source). Failed supported engines and Unknown writes never
 fall back. See `packages/safe-cex/CLAUDE.md` → "Rust main-thread trading".
 
 For per-exchange specifics (endpoints, quirks, auth signing details), see
