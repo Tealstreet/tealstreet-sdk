@@ -265,6 +265,14 @@ impl WasmEngine {
     }
 }
 
+/// A request that got no answer must not read as a preparation fault or a refusal.
+fn preparation_failure_text(code: &str) -> &'static str {
+    match code {
+        "timedOut" => "Relay or network request timed out",
+        _ => "HTTP transport preparation failed",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,9 +292,9 @@ mod tests {
             encode(&[Action::Http(request.clone())]),
             r#"[{"op":"http","request":7,"method":"POST","timeoutMs":900,"url":"https://venue.test/read","headers":[],"body":"{}"}]"#
         );
-        let text = "p1:7:18446744073709551615:18446744073709551615";
+        let text = "p2:18446744073709551615:7:18446744073709551615:18446744073709551615";
         let preparation = Preparation::from_wire(text).unwrap();
-        let permit_text = "r1:7:18446744073709551615:18446744073709551615:18446744073709551615";
+        let permit_text = "r2:18446744073709551615:7:18446744073709551615:18446744073709551615:18446744073709551615";
         let actions = [
             HttpAction::Prepare {
                 #[cfg(target_arch = "wasm32")]
@@ -334,7 +342,7 @@ mod tests {
             signer_headers: vec![],
             body: None,
         };
-        let text = format!("p1:{id}:18446744073709551615:0");
+        let text = format!("p2:1:{id}:18446744073709551615:0");
         let preparation = Preparation::from_wire(&text).unwrap();
         let actions = [
             Action::Http(request.clone()),
@@ -617,13 +625,5 @@ mod sign_meta_wire_tests {
             }),
             r#"{"task":7,"owner":{"kind":"setup","generation":3},"deadlineMs":20001.25,"setup":{"operation":"publicKey","algorithm":"starkDigest","slot":"primary"}}"#
         );
-    }
-}
-
-/// A request that got no answer must not read as a preparation fault or a refusal.
-fn preparation_failure_text(code: &str) -> &'static str {
-    match code {
-        "timedOut" => "Relay or network request timed out",
-        _ => "HTTP transport preparation failed",
     }
 }

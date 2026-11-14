@@ -284,11 +284,16 @@ impl Users {
             .find(|tracked| tracked.running.ptr_eq(&Arc::downgrade(running)))
         {
             if account.strong_count() > 0 {
+                if let Some(account) = account.upgrade() {
+                    existing.name = account.name.clone();
+                }
                 existing.account = account;
             }
         } else {
             state.tracked.push(Tracked {
-                name: name.into(),
+                name: account
+                    .upgrade()
+                    .map_or_else(|| name.to_owned(), |account| account.name.clone()),
                 running: Arc::downgrade(running),
                 account,
             });
@@ -1363,6 +1368,7 @@ mod tests {
                     .send(crate::algos::AlgoInput::Nuke {
                         mode: "positions",
                         request_id: json!("nuke"),
+                        action: None,
                     })
                     .unwrap();
                 let started = registry.start_user_drain("u", DEFAULT_CAP_MS);

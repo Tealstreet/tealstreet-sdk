@@ -143,6 +143,7 @@ src/
 ├── config.ts                # Config: ~/.tealstreet/config.json
 ├── exchange-factory.ts      # Exchange instantiation from config
 ├── exchange-manager.ts      # Multi-exchange lifecycle
+├── exchange-listeners.ts    # Exchange fill/exec-log/error/warning handlers (`setupExchangeListeners`)
 ├── auth.ts                  # OAuth2 login flow (port 9876 callback)
 ├── updater.ts               # Version checking + auto-update
 ├── logger.ts                # Rate-limited, deduplicated logging
@@ -241,7 +242,7 @@ User-facing doc: [`cli/operations/config-files.md`](../documentation/cli/operati
 
 ## Config Files
 
-All in `~/.tealstreet/`:
+All relative to the active user directory under `~/.tealstreet/profiles/<profile hash>/users/<user hash>/` (Disrupt uses `~/.disrupt/`). Paths must resolve through `storage-context.ts` on access:
 
 - `config.json` — Account credentials, default symbol, auth token, the `listener.*` kill-switch block (`enabled` / `accountSync` / `remoteExec`, all default true), and the `footer.*` block (`enabled` on unless explicitly false, `intervalMs`, `segments[]`) for the bottom status footer.
 - `tasks.json` — Persisted long-running tasks
@@ -255,7 +256,7 @@ All in `~/.tealstreet/`:
 - `trusted-clients.json` — Approved web `clientId` → `{label, origin, approvedAt}`
 - `hooks.json` — Webhook registry (id + secret + command). **Contains shared secrets.**
 - `scripts/` — User-authored custom scripts (one `.ts` file per script) plus three seeded files: `tsconfig.json` (only-if-missing), `types.d.ts` (regenerated on every CLI launch so ambient types stay in sync with the running binary's script-API surface — content comes from `@tealstreet/script-authoring`'s `script-types-bundle.ts`, see Phase 6 gotcha below), `hello.ts` (only-if-missing example). Loaded via dynamic `import()` by `src/scripts-store.ts`; the directory IS the registry (no JSON manifest). Invoked via the `script:<name>` REPL prefix — see SPEC §6.1 + `apps/documentation/cli/reference/commands.md#scripts`. REPL `script reload` re-scans. Phase 5's dispatcher arm in `repl.ts:runStep` awaits `awaitScriptsLoaded()` so a cold-REPL `script:foo` doesn't race the fire-and-forget initial load.
-- `cli.log` — Log file (cleared on startup)
+- `cli.log` — User-scoped log file (appended on startup)
 - `market-data.db` — SQLite for market data snapshots
 
 ### `login` / `logout` / `auth` exist as subcommands AND REPL commands
@@ -410,6 +411,27 @@ delegated to the client over WebSocket.
 
 ## Logging
 
+All paths resolve through `storage-context.ts` for the active authenticated
+subject and profile. Do not cache a path at module import. `cli.log` appends
+across starts, and `logs --clear` only clears the active user's log. Login
+changes must discard old in-memory state and fence pending work by session
+epoch; never copy accounts or credentials from the previous user's config.
+Exchange output listeners capture that epoch when attached and drop old-session
+events before classification, logging, auditing or watch delivery.
+Every command-producing queue in `repl.ts` uses `enqueueSessionWork` at enqueue
+time, including initial/recreated readline, hosted webhooks and armed triggers.
+Do not rely on starting a scope only when a pending command is dispatched.
+Use `captureStorageSession` for callbacks invoked outside ALS (timers, watchers,
+exchange events); check it on execution and after awaits before publishing results.
+Multi-account daemon startup binds each enable to that captured session and
+propagates owner cancellation instead of continuing the saved account list.
+Stale output and captures must not reach the new login. Footer runs enter their starting session, and every script host binding checks
+the epoch captured at construction. Local-only state uses a stable separate
+profile. Shared legacy-file claims belong to the physical source directory,
+not individual `CONFIG_FILE` profiles; competing owners require re-entry.
+The storage inventory below is relative to the user directory described in
+`apps/documentation/cli/operations/config-files.md`.
+
 **User-facing mirror: [`cli/reference/output.md`](../documentation/cli/reference/output.md) → "Output kinds".** Changing any row here means updating that doc + `README.md` in the same commit (see the doc-sync table above).
 
 | Method                             | Terminal                                                              | Log file (`~/.tealstreet/cli.log`) |
@@ -420,7 +442,7 @@ delegated to the client over WebSocket.
 | `console.debug()`                  | No                                                                    | Only when `DEBUG=1`/`true`³        |
 | `print()` / `originalConsoleLog()` | Yes (no rate limit, no suppression)                                   | No                                 |
 
-¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`.
+¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[ReconnectingWebSocket]`, `RWS>`, `[HOWWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`.
 
 ² Non-`print` terminal output goes through `writeAbovePrompt` (readline-aware redraw) so async lines don't shred the input buffer; `console.warn`/`console.error` (and lines the taxonomy classifies `critical`) additionally call `setStatus` to mirror the latest notable event on the pinned **top alert bar** (`src/status-line.ts`). The always-on **bottom footer** (`src/footer.ts`) is the other pinned surface — both over one shared scroll region (`src/scroll-region.ts`). See the "Output surfaces" row of the doc-sync table.
 
@@ -443,7 +465,16 @@ above the prompt. There is no separate network-debug file. Headers are omitted,
 sensitive keys are redacted, URLs keep query-key names but not query values,
 and large payloads are truncated.
 
+Routine HOW closes and transport errors use info diagnostics; repeated failures
+are reported once per retry streak and exhausted retries remain errors. URL
+providers are resolved only by the dial attempt; reconnect logs never stringify
+functions, queries, credentials, protocols or outgoing frames. Node/Bun relay
+keepalive is native ping/pong at 15 s with a 45 s receive silence bound, separate
+from Bybit's 10 s JSON ping/20 s silence and HOW's 5 s RPC ping/25 s silence.
+
 **Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
+
+**Exchange events (`✓ Fill:`, command output, `Exchange error:` / `warning:`) are wired by `setupExchangeListeners`, once per emitter** — `use` on an already enabled account returns the same exchange, and re-wiring it printed every fill once per switch. Add handlers there; never call `exchange.emitter.on(...)` at a call site.
 
 **`logger.ts` must add no module-level timers at all.** `src/index.ts` imports
 it at the top, so every subcommand pays for it: a ref'd `setInterval` here meant
@@ -495,7 +526,8 @@ yarn logs          # Tail ~/.tealstreet/cli.log
   explicitly `false` (the gate is `enabled !== false`, set via `footer
 off`). `footer-segments.ts` is pure and unit-tested,
   the impure live snapshot (`buildFooterState`) lives in `repl.ts` and is
-  injected via `setFooterRenderer`.
+  injected via `setFooterRenderer`. A null/nonfinite position notional renders
+  `—` for PnL percentage while preserving known currency PnL; it is never zero.
 - **Footer `script` segments are hard read-only.** A `{type:'script',
 name}` footer segment auto-runs the named script ~1×/sec
   (`runFooterScript` in `repl.ts`). Because of that cadence it runs with
@@ -592,7 +624,8 @@ name}` footer segment auto-runs the named script ~1×/sec
   bounded in-memory `orderId → {runId, command, account}` map
   (`rememberOrderLineage`, gated on audit-on so it can't grow unbounded,
   oldest evicted past `MAX_LINEAGE`). The exchange `fill` handler in
-  `setupExchangeListeners` calls `recordFill(fill.orderId ?? fill.id, …)`;
+  `setupExchangeListeners` (`src/exchange-listeners.ts`) calls
+  `recordFill(fill.orderId ?? fill.id, …)`;
   on a hit it appends a `[fill]` entry stamped with the lineage's `runId`
   (set explicitly — fills arrive async, outside the run scope) and a
   `← <originating command>` pointer. Unattributable fills (placed before
@@ -658,7 +691,7 @@ name}` footer segment auto-runs the named script ~1×/sec
   credentials, access, safety limits, files or persistent state belongs on
   that list in the same commit.
 - **A webhook run drains its whole chain before acking** (`processCommand(body,
-  { drainFinalInFlight: true })`), or a one-step `buy` would report `done`
+{ drainFinalInFlight: true })`), or a one-step `buy` would report `done`
   before the order existed. A refused sign-in is never retried with the same
   token; the relay re-reads the token every minute so `login` revives it.
 - **`X-Hook-Token` length-guard.**

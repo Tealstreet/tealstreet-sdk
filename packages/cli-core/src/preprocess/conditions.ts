@@ -437,7 +437,7 @@ export function parseConditionText(text: string): ParsedCondition | null {
   const trimmed = text.trim();
   const m = trimmed.match(/^(either|both)\s+(.+)$/is);
   if (m) {
-    const kw = m[1].toLowerCase() as 'either' | 'both';
+    const kw = m[1].toLowerCase();
     const sep = kw === 'either' ? 'or' : 'and';
     const parts = peelParenGroupsSeparatedBy(m[2], sep);
     if (!parts || parts.length < 2) return null;

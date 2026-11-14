@@ -78,6 +78,64 @@ function createMockContext(
   } as CommandContext;
 }
 
+describe('MEXC close sizing before shared order preparation', () => {
+  it.each([
+    ['100%', 130],
+    ['50%', 260],
+    ['$1300', 130],
+  ] as const)('preserves 130 native contracts from %s', async (size, full) => {
+    const market = {
+      id: 'DOGE_USDT',
+      symbol: 'DOGEUSDT',
+      base: 'DOGE',
+      quote: 'USDT',
+      contractSize: 100,
+      precision: { amount: 100, price: 0.00001 },
+      limits: { amount: { min: 100, max: 44500000 } },
+    };
+    const exchange = createMockExchange([], {
+      name: 'mexc',
+      store: {
+        markets: [market],
+        positions: [
+          { symbol: market.symbol, side: PositionSide.Long, contracts: full * 100, extra: { contractsNative: full } },
+        ],
+        orders: [],
+        tickers: [{ symbol: market.symbol, last: 0.1 }],
+      },
+    } as never);
+    const result = await new CloseCommand().execute(createMockContext(['close', size], exchange, market.symbol));
+    expect(result.success).toBe(true);
+    expect(exchange.placeOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: 130 }));
+  });
+
+  it('floors a partial percent close to the native step per policy option (a)', async () => {
+    const market = {
+      id: 'DOGE_USDT',
+      symbol: 'DOGEUSDT',
+      base: 'DOGE',
+      quote: 'USDT',
+      contractSize: 100,
+      precision: { amount: 100, price: 0.00001 },
+      limits: { amount: { min: 100, max: 44500000 } },
+    };
+    const exchange = createMockExchange([], {
+      name: 'mexc',
+      store: {
+        markets: [market],
+        positions: [
+          { symbol: market.symbol, side: PositionSide.Long, contracts: 26100, extra: { contractsNative: 261 } },
+        ],
+        orders: [],
+        tickers: [{ symbol: market.symbol, last: 0.1 }],
+      },
+    } as never);
+    const result = await new CloseCommand().execute(createMockContext(['close', '50%'], exchange, market.symbol));
+    expect(result.success).toBe(true);
+    expect(exchange.placeOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: 130 }));
+  });
+});
+
 describe('CloseCommand', () => {
   let command: CloseCommand;
 
@@ -131,6 +189,19 @@ describe('CloseCommand', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('Cannot have both long and short closing requests');
     });
+  });
+
+  it('refuses a full close when native sizing is unknown', async () => {
+    const exchange = createMockExchange([{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 2, extra: { contractsNative: 1 } } as never]);
+    await expect(command.execute(createMockContext(['close'], exchange))).rejects.toThrow(/unknown/i);
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
+  });
+  it('refuses a position-percentage close when native sizing is unknown', async () => {
+    const exchange = createMockExchange([{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 2, extra: { contractsNative: 1 } } as never]);
+    const result = await command.execute(createMockContext(['close', '50%'], exchange));
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/unknown/i);
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
   });
 
   describe('closing positions', () => {
@@ -341,9 +412,10 @@ describe('CloseCommand', () => {
       const exchange = createMockExchange([
         { symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 },
       ]);
-      await command.execute(createMockContext(['close', '100'], exchange, 'BTCUSDT'));
-      const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(order.amount).toBe(1); // full close, not 100 anything
+      const result = await command.execute(createMockContext(['close', '100'], exchange));
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/unknown argument/i);
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
     });
 
     it('e2e: `close 1000$` with a base="1000" market still partial-closes correctly', async () => {

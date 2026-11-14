@@ -112,6 +112,18 @@ fn every_compiled_advertised_rest_book_handler_dispatches_with_valid_fixture_sta
     assert!(!names.is_empty(), "production alias roster was read");
     let mut dispatched = 0;
     for name in names.into_iter().filter(|name| supported(name)) {
+        if !safe_cex_venues::beta_admitted(name) {
+            let error = safe_cex_venues::build_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
+                name,
+                serde_json::from_str("{}").expect("options"),
+                None,
+                BookProbe(name),
+            )
+            .expect_err("OUT venues cannot advertise a constructed account");
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
         let mut options = serde_json::json!({ "publicDataOnly": true, "testnet": true });
         if name == "hyrotrader" {
             options["endpoints"] = serde_json::json!({

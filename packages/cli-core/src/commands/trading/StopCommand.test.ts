@@ -24,7 +24,7 @@ function pos(p: Partial<Position> = {}): Position {
     unrealizedPnl: p.unrealizedPnl ?? 0,
     contracts: p.contracts ?? 1,
     liquidationPrice: p.liquidationPrice ?? 0,
-  } as Position;
+  };
 }
 
 function makeExchange(positions: Position[] = []): ExchangeLike {
@@ -158,7 +158,7 @@ describe('StopCommand — fractional percentages', () => {
 
   const placed = (ex: ExchangeLike) => (ex.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
 
-  it('accepts the command\'s own first documented example', async () => {
+  it("accepts the command's own first documented example", async () => {
     const ex = makeExchange([pos()]);
     const r = await cmd.execute(ctx(['stop', 'at', '0.1%'], ex));
     expect(r.success).toBe(true);
@@ -319,8 +319,71 @@ describe('StopCommand — sized stops (partial)', () => {
     await cmd.execute(ctx(['stop', '$500', 'at', '1%'], ex));
     const order = lastOrder(ex);
     expect(order.price).toBe(50500); // +1%
-    // $500 / 50000 = 0.01 (rounded to 0.001 amount precision)
+    // $500 / 50500 rounds to 0.01 at the 0.001 lot step.
     expect(order.amount).toBe(0.01);
+  });
+
+  it('sizes USD at the stop price, not the trigger or last price', async () => {
+    const ex = makeExchange([pos()]);
+    ex.store!.tickers![0].last = 80_000;
+    ex.store!.tickers![0].mark = 80_000;
+
+    const result = await cmd.execute(ctx(['stop', '600$', 'at', '60000', 'trigger', '65000'], ex));
+
+    expect(result.success).toBe(true);
+    expect(lastOrder(ex)).toMatchObject({ price: 60_000, triggerPrice: 65_000, amount: 0.01 });
+  });
+
+  it.each(['$27', '0$'])('refuses explicit %s that rounds to zero instead of placing a Full stop', async (size) => {
+    const ex = makeExchange([pos()]);
+    ex.name = 'bybit';
+
+    const result = await cmd.execute(ctx(['stop', size, 'at', '60000'], ex));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/size.*lot step.*stop not placed/i);
+    expect(ex.placeOrder).not.toHaveBeenCalled();
+
+    const full = await cmd.execute(ctx(['stop', 'at', '60000'], ex));
+    expect(full.success).toBe(true);
+    expect(lastOrder(ex).amount).toBe(0);
+  });
+
+  it('sizes a USD stop at its tick-rounded limit price', async () => {
+    const ex = makeExchange([pos({ symbol: 'MEMEUSDT', contracts: 100_000 })]);
+    Object.assign(ex.store!.markets![0], { symbol: 'MEMEUSDT', base: 'MEME', precision: { amount: 1, price: 0.001 } });
+    Object.assign(ex.store!.tickers![0], { symbol: 'MEMEUSDT', last: 0.002, mark: 0.002 });
+
+    const result = await cmd.execute(ctx(['stop', '$20', 'at', '0.0015', 'trigger', '0.003'], ex, 'MEMEUSDT'));
+
+    expect(result.success).toBe(true);
+    expect(lastOrder(ex)).toMatchObject({ price: 0.002, triggerPrice: 0.003, amount: 10_000 });
+  });
+
+  it.each(['$27', '0$'])('refuses explicit %s that rounds to zero instead of placing a Full stop', async (size) => {
+    const ex = makeExchange([pos()]);
+    ex.name = 'bybit';
+
+    const result = await cmd.execute(ctx(['stop', size, 'at', '60000'], ex));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/size.*lot step.*stop not placed/i);
+    expect(ex.placeOrder).not.toHaveBeenCalled();
+
+    const full = await cmd.execute(ctx(['stop', 'at', '60000'], ex));
+    expect(full.success).toBe(true);
+    expect(lastOrder(ex).amount).toBe(0);
+  });
+
+  it('sizes a USD stop at its tick-rounded limit price', async () => {
+    const ex = makeExchange([pos({ symbol: 'MEMEUSDT', contracts: 100_000 })]);
+    Object.assign(ex.store!.markets![0], { symbol: 'MEMEUSDT', base: 'MEME', precision: { amount: 1, price: 0.001 } });
+    Object.assign(ex.store!.tickers![0], { symbol: 'MEMEUSDT', last: 0.002, mark: 0.002 });
+
+    const result = await cmd.execute(ctx(['stop', '$20', 'at', '0.0015', 'trigger', '0.003'], ex, 'MEMEUSDT'));
+
+    expect(result.success).toBe(true);
+    expect(lastOrder(ex)).toMatchObject({ price: 0.002, triggerPrice: 0.003, amount: 10_000 });
   });
 
   it('"500$ at -1%" suffix form also resolves', async () => {
@@ -488,12 +551,13 @@ describe('StopCommand — suffix-USD size regression', () => {
 
   it('e2e: `stop 1000$ at 49000` (suffix size) places a sized stop on the focused symbol', async () => {
     const ex = makeExchange([pos({ side: PositionSide.Long, contracts: 1 })]);
+    ex.store!.markets![0].precision.amount = 0.000001;
     await cmd.execute(ctx(['stop', '1000$', 'at', '49000'], ex));
     const order = lastOrder(ex);
     expect(order.symbol).toBe('BTCUSDT');
     expect(order.price).toBe(49000);
-    // $1000 / 50000 = 0.02 BTC contracts
-    expect(order.amount).toBeCloseTo(0.02);
+    // $1000 / 49000, rounded to the 0.000001 lot step.
+    expect(order.amount).toBe(0.020408);
   });
 
   it('e2e: `stop 1000$ at 49000` with a base="1000" market still uses focused symbol', async () => {
@@ -502,10 +566,7 @@ describe('StopCommand — suffix-USD size regression', () => {
       ...(ex.store!.markets ?? []),
       { symbol: '1000USDT', base: '1000', quote: 'USDT', precision: { amount: 1, price: 0.0001 } } as never,
     ];
-    ex.store!.tickers = [
-      ...(ex.store!.tickers ?? []),
-      { symbol: '1000USDT', last: 0.5 } as never,
-    ];
+    ex.store!.tickers = [...(ex.store!.tickers ?? []), { symbol: '1000USDT', last: 0.5 } as never];
     await cmd.execute(ctx(['stop', '1000$', 'at', '49000'], ex));
     const order = lastOrder(ex);
     expect(order.symbol).toBe('BTCUSDT');

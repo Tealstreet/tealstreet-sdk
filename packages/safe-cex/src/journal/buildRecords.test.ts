@@ -73,8 +73,9 @@ describe('buildFoldedPositionRecords — a failed income read is not an empty ac
       options({ symbolScoped: true }),
     ).catch((err: unknown) => err);
 
-    expect((thrown as Error).name).toBe('AuthError');
-    expect((thrown as Error).cause).toBe(rejected);
+    if (!(thrown instanceof Error)) throw new Error('Expected a rejected income read');
+    expect(thrown.name).toBe('AuthError');
+    expect(thrown.cause).toBe(rejected);
   });
 
   it('still treats an income read that SUCCEEDED with no symbols as an empty account', async () => {

@@ -74,6 +74,9 @@ const buildCombinedBalance = (seed: MockSeed, filterAccounts?: readonly string[]
       totalUpnl += bal.upnl ?? 0;
     }
     for (const pos of seed.positions[acct] ?? []) {
+      if (typeof pos.notional !== 'number' || !Number.isFinite(pos.notional)) {
+        throw new Error('Position notional is unknown; combined exposure is unavailable');
+      }
       if (pos.side === 'long') longExposure += pos.notional;
       else shortExposure += pos.notional;
     }

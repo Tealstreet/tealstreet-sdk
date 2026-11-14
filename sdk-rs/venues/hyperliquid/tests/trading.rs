@@ -92,11 +92,7 @@ fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
                 let error = errors[0];
                 assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
                 assert_eq!(error.protection, None);
-                assert!(
-                    error.message.to_lowercase().contains("unknown"),
-                    "{error:?}"
-                );
-                assert!(error.message.contains("Check Open Orders"), "{error:?}");
+                assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
                 assert!(!error.message.contains("refused"), "{error:?}");
                 assert!(!error.message.contains("no stop"), "{error:?}");
                 assert!(
@@ -999,11 +995,25 @@ fn unlisted_settings_error_fences_the_next_queued_command() {
         r#"{"status":"err","response":"Cannot switch margin mode with open orders"}"#,
     );
     let actions = fire_timers(&mut e);
-    assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.legacy_text() == "Cannot switch margin mode with open orders"))
+    let error = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+            _ => None,
+        })
+        .expect("uncertain settings failure");
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("Cannot switch margin mode with open orders")
     );
+    let events = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) => Some(event.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_unknown_publication(&serde_json::to_value(error).expect("error"), &events, 1);
     assert!(
         !actions
             .iter()
@@ -1122,7 +1132,8 @@ fn prewrite_rest_revision_blocks_future_clock_settings_but_updates_position_size
 }
 
 #[test]
-fn terminal_cancel_miss_aborts_amend_but_regular_cancel_remains_idempotent() {
+fn terminal_cancel_miss_allows_amend_and_regular_cancel_as_ts() {
+    // TS hyperliquid.exchange.ts:4227-4233 swallows terminal cancel errors before :4416.
     for amend in [false, true] {
         for raw in [
             r#"{"status":"err","response":"Order was never placed, already canceled, or filled. asset=0"}"#,
@@ -1146,15 +1157,42 @@ fn terminal_cancel_miss_aborts_amend_but_regular_cancel_remains_idempotent() {
             e.handle(2000.0, Event::Command(command));
             let cancel = write(&mut e);
             reply_at(&mut e, &cancel, 2001.0, raw);
-            let actions = fire_timers(&mut e);
+            let mut actions = fire_timers(&mut e);
+            let writes: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Http(r) if r.url.ends_with("/exchange") => Some(r.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(writes.len(), usize::from(amend));
+            if let Some(replacement) = writes.first() {
+                let body: serde_json::Value =
+                    serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+                assert_eq!(body["action"]["type"], "order");
+                reply(
+                    &mut e,
+                    replacement,
+                    200,
+                    r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":91}}]}}}"#,
+                );
+                actions = fire_timers(&mut e);
+                assert!(
+                    !actions
+                        .iter()
+                        .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+                );
+            }
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. })))
+            );
             assert!(
                 !actions
                     .iter()
-                    .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
             );
-            assert!(actions.iter().any(|a| matches!(a,
-                Action::Notice(Notice::CommandFailed { command: 1, .. }) if amend)
-                || !amend && matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. }))));
         }
     }
 }

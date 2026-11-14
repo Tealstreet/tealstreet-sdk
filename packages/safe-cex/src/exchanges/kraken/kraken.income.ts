@@ -21,7 +21,7 @@ import type { IncomeRecord } from '../../types';
  * moving 195 -> 196 on a one-contract fill. Mapping that leg would not merely double-count
  * the trade, it would enter a position size into a currency total.
  */
-const isPositionSizeLeg = (row: Record<string, any>) => {
+const isPositionSizeLeg = (row: Record<string, unknown>) => {
   const asset = String(row?.asset ?? '').toLowerCase();
   const contract = String(row?.contract ?? '').toLowerCase();
   return asset.length > 0 && asset === contract;
@@ -45,7 +45,7 @@ const toMs = (value: unknown): number => {
 };
 
 export const mapKrakenAccountLogRow = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   resolveSymbol: (contract: string) => string | undefined,
 ): IncomeRecord[] => {
   if (!row || isPositionSizeLeg(row)) return [];
@@ -132,6 +132,6 @@ export const mapKrakenAccountLogRow = (
 };
 
 export const mapKrakenAccountLog = (
-  rows: Array<Record<string, any>>,
+  rows: Array<Record<string, unknown>>,
   resolveSymbol: (contract: string) => string | undefined,
 ): IncomeRecord[] => rows.flatMap((row) => mapKrakenAccountLogRow(row, resolveSymbol));

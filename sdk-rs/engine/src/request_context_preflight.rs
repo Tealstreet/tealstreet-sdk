@@ -80,6 +80,7 @@ impl ContextRegistry {
                 phase: CommandPhase::Preflight(State::new(policy)),
                 last_deadline: now,
                 writes: None,
+                engine_unknown: None,
                 mutation_declared,
                 pending: 0,
                 deliveries: 0,

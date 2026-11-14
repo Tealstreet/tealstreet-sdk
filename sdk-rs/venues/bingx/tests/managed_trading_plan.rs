@@ -224,27 +224,35 @@ fn eight_serial_calls_keep_each_native_twenty_second_attempt() {
 }
 
 #[test]
-fn each_proven_signature_resend_has_a_fresh_window_within_the_complete_plan() {
+fn first_signature_resend_and_later_single_attempt_calls_keep_native_windows() {
     let mut engine = engine();
     place(&mut engine, 8);
     let mut now = START;
     let mut actions = collect(&mut engine, now);
     for index in 0..8 {
         let first = packet(&actions);
-        now += 19_000.;
-        actions = signature_refusal(&mut engine, &first, now);
-        let second = packet(&actions);
-        assert_eq!(second.timeout_ms, Some(20_000), "fresh attempt {index}");
+        let request = if index == 0 {
+            now += 19_000.;
+            actions = signature_refusal(&mut engine, &first, now);
+            let second = packet(&actions);
+            assert_eq!(
+                without_physical_signature(body(&first)),
+                without_physical_signature(body(&second))
+            );
+            assert_ne!(body(&first)["timestamp"], body(&second)["timestamp"]);
+            second
+        } else {
+            first
+        };
         assert_eq!(
-            without_physical_signature(body(&first)),
-            without_physical_signature(body(&second))
+            request.timeout_ms,
+            Some(20_000),
+            "fresh native window {index}"
         );
-        assert_ne!(body(&first)["timestamp"], body(&second)["timestamp"]);
         now += 19_000.;
-        actions = acknowledge(&mut engine, &second, now, 9_000 + index);
+        actions = acknowledge(&mut engine, &request, now, 9_000 + index);
     }
-    assert_eq!(now - START, 304_000.);
-    assert!(now - START < 320_000.);
+    assert_eq!(now - START, 171_000.);
     assert_eq!(
         ids(&actions),
         (9_000..9_008).map(|id| id.to_string()).collect::<Vec<_>>()
@@ -320,6 +328,122 @@ fn timeout_status_100001_does_not_grant_a_write_resend() {
         r#"{"code":100001,"msg":"Signature verification failed"}"#,
     );
 }
+#[test]
+fn ambiguous_http_timestamp_refusal_never_resends_a_released_create() {
+    for status in [429, 408, 503] {
+        let mut engine = engine();
+        place(&mut engine, 1);
+        let sent = collect(&mut engine, START);
+        let first = packet(&sent);
+        assert_eq!(
+            sent.iter()
+                .filter(|action| matches!(action, Action::Http(request) if request.method != Method::Get))
+                .count(),
+            1,
+            "one physically released create"
+        );
+        let mut after = respond(
+            &mut engine,
+            &first,
+            START + 1.,
+            status,
+            r#"{"code":109400,"msg":"timestamp is invalid","data":{}}"#,
+        );
+        // Drive any armed attempt/pacing timer so a parked resend becomes a
+        // physical HTTP action before checking that the write was sent once.
+        let timers: Vec<_> = after
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        for (timer, at_ms) in timers {
+            engine.handle(at_ms, Event::TimerFired { timer });
+            after.extend(collect(&mut engine, at_ms));
+        }
+        assert!(
+            !after.iter().any(|action| matches!(action,
+                Action::Http(request) if request.method != Method::Get
+            )),
+            "HTTP {status}/109400 must not release a resend or another write: {after:?}"
+        );
+        let errors = failures(&after);
+        assert_eq!(errors.len(), 1, "HTTP {status}: one terminal failure");
+        assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+        assert!(
+            errors[0].message.to_ascii_lowercase().contains("unknown"),
+            "HTTP {status}: CommandFailed must describe the uncertainty: {:?}",
+            errors[0]
+        );
+        assert!(
+            errors[0].message.contains("Check Open Orders"),
+            "HTTP {status}: CommandFailed must direct reconciliation: {:?}",
+            errors[0]
+        );
+        assert!(!after.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone {
+                command: COMMAND,
+                ..
+            })
+        )));
+    }
+}
+
+#[test]
+fn ambiguous_http_timestamp_refusal_fences_writes_until_primary_snapshot() {
+    for status in [429, 408, 503] {
+        let mut engine = engine();
+        place(&mut engine, 1);
+        let first = packet(&collect(&mut engine, START));
+        let after = respond(
+            &mut engine,
+            &first,
+            START + 1.,
+            status,
+            r#"{"code":109400,"msg":"timestamp is invalid","data":{}}"#,
+        );
+        assert_eq!(failures(&after)[0].outcome, Some(Outcome::Unknown));
+
+        // Probe admission before a reconciliation timeout can clear the fence.
+        // A distinct client ID ensures the placement hits the symbol fence.
+        let mut follow_up = orders(1);
+        follow_up[0].client_order_id = Some("follow-up".into());
+        engine.handle(
+            START + 2.,
+            Event::Command(Command::PlaceOrders {
+                command: COMMAND + 10,
+                orders: follow_up,
+            }),
+        );
+        let held = collect(&mut engine, START + 2.);
+        assert!(
+            !held.iter().any(|action| matches!(action,
+                Action::Http(request) if request.method != Method::Get
+            )),
+            "HTTP {status}: follow-up placement must stay fenced: {held:?}"
+        );
+        assert!(
+            held.iter().any(|action| matches!(action,
+                Action::Notice(Notice::CommandFailed { command, error })
+                    if *command == COMMAND + 10
+                        && error.outcome == Some(Outcome::NotSent)
+                        && error.message.contains("reconcile before placing or amending")
+            )),
+            "HTTP {status}: follow-up must be refused by the placement fence: {held:?}"
+        );
+
+        let cancel = cancel_all(&mut engine, COMMAND + 11, START + 2.5);
+        assert!(
+            !cancel_all_sent(&cancel),
+            "HTTP {status}: cancel-all must stay fenced before reconciliation: {cancel:?}"
+        );
+        assert!(fenced(&cancel, COMMAND + 11));
+        assert_fence_clears_only_on_the_primary_snapshot(&mut engine, &after);
+    }
+}
+
 #[test]
 fn signature_text_without_a_refusal_code_does_not_grant_a_write_resend() {
     assert_uncertain_response_never_resends(
@@ -572,8 +696,10 @@ fn absent_cancel_keeps_the_row_until_a_fresh_managed_reconciliation_read() {
     assert!(e.store().orders().is_empty());
     assert!(failures(&done).is_empty());
 }
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:940-962.
 #[test]
-fn independent_cancel_sibling_survives_a_delivered_gateway_failure_without_retry() {
+fn independent_cancel_unknown_halts_the_sibling_without_retry() {
     let mut e = engine();
     e.store_mut()
         .set_orders(vec![open_order("old-a"), open_order("old-b")]);
@@ -592,26 +718,29 @@ fn independent_cancel_sibling_survives_a_delivered_gateway_failure_without_retry
         503,
         r#"{"code":100001,"msg":"Signature verification failed"}"#,
     );
-    let second = cancel_packet(&next);
-    assert_ne!(second.id, first.id);
-    assert!(second.url.contains("orderId=old-b"));
-    assert!(failures(&next).is_empty());
-    let done = respond(
-        &mut e,
-        &second,
-        START + 2.,
-        200,
-        r#"{"code":0,"data":{"orderId":"old-b","status":"CANCELED"}}"#,
-    );
-    assert_eq!(failures(&done).len(), 1);
-    assert_eq!(failures(&done)[0].outcome, Some(Outcome::Unknown));
+    assert!(writes(&next).is_empty(), "Unknown halts the action");
+    assert_eq!(failures(&next).len(), 1);
+    let error = &failures(&next)[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+    let rows = error.elements.as_ref().expect("complete cancel report");
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        &rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(matches!(
+        &rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
     assert_eq!(
         e.store().order("old-a").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
     );
     assert_eq!(
         e.store().order("old-b").unwrap().status,
-        safe_cex_engine::model::OrderStatus::Canceled
+        safe_cex_engine::model::OrderStatus::Open
     );
 }
 #[test]

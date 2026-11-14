@@ -1,0 +1,45 @@
+{
+  "retained-A": {
+    "ownerId": "A",
+    "options": {
+      "accountName": "test-account",
+      "activeMarket": {
+        "id": "BTCUSDT",
+        "symbol": "BTCUSDT",
+        "base": "BTC",
+        "quote": "USDT",
+        "active": true,
+        "precision": { "amount": 0.001, "price": 0.01 },
+        "limits": { "amount": { "min": 0.001, "max": 100 }, "leverage": { "min": 1, "max": 100 } }
+      },
+      "size": 0.3,
+      "duration": 0.01,
+      "ordersCount": 2,
+      "side": "buy",
+      "chaserDelay": 1000,
+      "reduceOnly": false,
+      "randomnessPercentage": 0,
+      "useLimitOrders": false,
+      "useChaserOrders": false
+    },
+    "state": {
+      "accountName": "test-account",
+      "activeMarket": {
+        "id": "BTCUSDT",
+        "symbol": "BTCUSDT",
+        "base": "BTC",
+        "quote": "USDT",
+        "active": true,
+        "precision": { "amount": 0.001, "price": 0.01 },
+        "limits": { "amount": { "min": 0.001, "max": 100 }, "leverage": { "min": 1, "max": 100 } }
+      },
+      "size": 0.3,
+      "ordersSizes": [0.15, 0.15],
+      "side": "buy",
+      "status": "running",
+      "ordersCount": 2,
+      "ordersExecuted": 0,
+      "nextOrderAt": 1700000000100
+    }
+  }
+}

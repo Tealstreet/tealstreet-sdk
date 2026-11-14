@@ -11,16 +11,25 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 const TMP_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'tealstreet-scripts-test-'));
 process.env.HOME = TMP_BASE;
 process.env.USERPROFILE = TMP_BASE;
+process.env.TEALSTREET_CONFIG_DIR = TMP_BASE;
+process.env.TEALSTREET_CONFIG_FILE = path.join(TMP_BASE, 'config.json');
 
 // Now safe to import — the module-scope constants resolve under TMP_BASE.
-const { awaitScriptsLoaded, clearScriptsCache, ensureScriptsDir, listScripts, loadScripts, lookupScript, SCRIPTS_DIR } =
-  await import('./scripts-store');
+const {
+  awaitScriptsLoaded,
+  clearScriptsCache,
+  ensureScriptsDir,
+  listScripts,
+  loadScripts,
+  lookupScript,
+  getScriptsDir,
+} = await import('./scripts-store');
 
 const writeScript = (name: string, contents: string): string => {
-  if (!fs.existsSync(SCRIPTS_DIR)) {
-    fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
+  if (!fs.existsSync(getScriptsDir())) {
+    fs.mkdirSync(getScriptsDir(), { recursive: true });
   }
-  const file = path.join(SCRIPTS_DIR, `${name}.ts`);
+  const file = path.join(getScriptsDir(), `${name}.ts`);
   fs.writeFileSync(file, contents);
   return file;
 };
@@ -56,8 +65,8 @@ beforeEach(() => {
   // out via `withoutHello`. Tests that need to write a script before
   // `ensureScriptsDir` runs go through `writeScript`, which mkdirs the
   // dir lazily.
-  if (fs.existsSync(SCRIPTS_DIR)) {
-    fs.rmSync(SCRIPTS_DIR, { recursive: true, force: true });
+  if (fs.existsSync(getScriptsDir())) {
+    fs.rmSync(getScriptsDir(), { recursive: true, force: true });
   }
   clearScriptsCache();
 });
@@ -65,35 +74,35 @@ beforeEach(() => {
 afterEach(() => {
   // Don't leave the seeded dir lying around — keeps test runs hermetic
   // across re-orders.
-  if (fs.existsSync(SCRIPTS_DIR)) {
-    fs.rmSync(SCRIPTS_DIR, { recursive: true, force: true });
+  if (fs.existsSync(getScriptsDir())) {
+    fs.rmSync(getScriptsDir(), { recursive: true, force: true });
   }
 });
 
 describe('ensureScriptsDir — seeds templates on first launch', () => {
   it('creates the dir + writes tsconfig.json, types.d.ts, and hello.ts', () => {
-    expect(fs.existsSync(SCRIPTS_DIR)).toBe(false);
+    expect(fs.existsSync(getScriptsDir())).toBe(false);
     ensureScriptsDir();
-    expect(fs.existsSync(SCRIPTS_DIR)).toBe(true);
-    expect(fs.existsSync(path.join(SCRIPTS_DIR, 'tsconfig.json'))).toBe(true);
-    expect(fs.existsSync(path.join(SCRIPTS_DIR, 'types.d.ts'))).toBe(true);
-    expect(fs.existsSync(path.join(SCRIPTS_DIR, 'hello.ts'))).toBe(true);
+    expect(fs.existsSync(getScriptsDir())).toBe(true);
+    expect(fs.existsSync(path.join(getScriptsDir(), 'tsconfig.json'))).toBe(true);
+    expect(fs.existsSync(path.join(getScriptsDir(), 'types.d.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(getScriptsDir(), 'hello.ts'))).toBe(true);
   });
 
   it('preserves user edits to tsconfig.json + hello.ts on subsequent launches', () => {
     ensureScriptsDir();
-    fs.writeFileSync(path.join(SCRIPTS_DIR, 'tsconfig.json'), '{ "userEdit": true }');
-    fs.writeFileSync(path.join(SCRIPTS_DIR, 'hello.ts'), '// user-edited');
+    fs.writeFileSync(path.join(getScriptsDir(), 'tsconfig.json'), '{ "userEdit": true }');
+    fs.writeFileSync(path.join(getScriptsDir(), 'hello.ts'), '// user-edited');
     ensureScriptsDir();
-    expect(fs.readFileSync(path.join(SCRIPTS_DIR, 'tsconfig.json'), 'utf-8')).toBe('{ "userEdit": true }');
-    expect(fs.readFileSync(path.join(SCRIPTS_DIR, 'hello.ts'), 'utf-8')).toBe('// user-edited');
+    expect(fs.readFileSync(path.join(getScriptsDir(), 'tsconfig.json'), 'utf-8')).toBe('{ "userEdit": true }');
+    expect(fs.readFileSync(path.join(getScriptsDir(), 'hello.ts'), 'utf-8')).toBe('// user-edited');
   });
 
   it('regenerates types.d.ts on every launch (must stay in sync with CLI version)', () => {
     ensureScriptsDir();
-    fs.writeFileSync(path.join(SCRIPTS_DIR, 'types.d.ts'), '// stale user edit');
+    fs.writeFileSync(path.join(getScriptsDir(), 'types.d.ts'), '// stale user edit');
     ensureScriptsDir();
-    const refreshed = fs.readFileSync(path.join(SCRIPTS_DIR, 'types.d.ts'), 'utf-8');
+    const refreshed = fs.readFileSync(path.join(getScriptsDir(), 'types.d.ts'), 'utf-8');
     expect(refreshed).not.toBe('// stale user edit');
     expect(refreshed).toMatch(/AUTO-GENERATED on every CLI launch/);
   });
@@ -167,7 +176,7 @@ describe('loadScripts — rejection paths', () => {
     // Invalid: starts with a digit.
     writeScript('123start', validScript());
     // Invalid: contains a dot in the name segment.
-    fs.writeFileSync(path.join(SCRIPTS_DIR, 'my.bad.ts'), validScript());
+    fs.writeFileSync(path.join(getScriptsDir(), 'my.bad.ts'), validScript());
 
     const loaded = withoutHello(await loadScripts());
     expect(loaded).toEqual([]);
@@ -175,8 +184,8 @@ describe('loadScripts — rejection paths', () => {
 
   it('skips subdirectories', async () => {
     ensureScriptsDir();
-    fs.mkdirSync(path.join(SCRIPTS_DIR, 'nested'));
-    fs.writeFileSync(path.join(SCRIPTS_DIR, 'nested', 'inner.ts'), validScript());
+    fs.mkdirSync(path.join(getScriptsDir(), 'nested'));
+    fs.writeFileSync(path.join(getScriptsDir(), 'nested', 'inner.ts'), validScript());
 
     const loaded = withoutHello(await loadScripts());
     expect(loaded).toEqual([]);
@@ -188,7 +197,7 @@ describe('loadScripts — rejection paths', () => {
     // picked up as a script. Hidden files (e.g. editor swap files) also
     // skipped.
     writeScript('.hidden', validScript());
-    expect(fs.existsSync(path.join(SCRIPTS_DIR, 'types.d.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(getScriptsDir(), 'types.d.ts'))).toBe(true);
 
     const loaded = withoutHello(await loadScripts());
     expect(loaded).toEqual([]);
