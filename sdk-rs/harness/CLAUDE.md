@@ -36,3 +36,28 @@ normal factories still refuse Spot. Shipped family size checks run before the fi
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
+
+TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
+refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
+2,158,592-byte floor retains the required 10 KiB reserve at that source.
+The review fix based on 2c37c0e6af2d measures optimized web/Node 2,148,376 bytes;
+its 2,159,616-byte floor retains 11,240 bytes. The private tape supplies the
+owner-bound disposable agent approval before writes. Replay identity equates only
+absent and explicit default `signatureChainId:2511`; economic action fields and
+nondefault chain values stay exact. Signing validation remains independent.
+WEEX in the same composition measures 2,028,105 bytes and retains a 2,038,784-byte
+floor by the same rule. Merge f19209120d28 measures one byte more in each
+family (2,148,377 and 2,028,106 bytes), retaining those floors and 10 KiB reserves.
+Pinned profiles and remaining family/global budgets are unchanged.
+
+TxFlow construction-feature guards require dispatch signing, address/nonce setup
+and its hosted-wallet codec, with independent missing-feature refusals. The HTTP
+HMAC hosted-signing feature cannot substitute for that testnet wallet codec.
+
+The #3314 serial-placement fix at 1c2a4f8232c4 measures optimized web/Node
+2,149,614 bytes. Its 2,160,640-byte floor retains 11,026 bytes using the same
+pinned profile and 10 KiB reserve rule; older measured floors remain retained.
+
+Merge ebeb0b38c973 independently remeasures the same TxFlow and WEEX byte
+counts (2,149,614 and 2,028,106), retaining both floors and the pinned profile.
+The exact merged module hashes are recorded beside their budget entries.

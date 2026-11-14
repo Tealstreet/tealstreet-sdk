@@ -113,6 +113,13 @@ mod condition_waits {
         entry_refusals: usize,
         settles: Vec<Result<(), Error>>,
         settle_probes: Vec<(&'static str, Result<(), Error>)>,
+        resume_settle: bool,
+        pending_settle: bool,
+        resolve_on_release: bool,
+        resume_refuse_only: bool,
+        pending_identity: Option<crate::request_context::PendingPlacement>,
+        resume_foreign: Option<(Plan, Context)>,
+        resume_probes: Vec<(&'static str, Result<(), Error>, bool)>,
     }
 
     fn queue(cx: &mut Cx<'_, Context>, context: Context) {
@@ -236,6 +243,10 @@ mod condition_waits {
             if self.release == Release::None {
                 return;
             }
+            if self.resolve_on_release && let Some(receipt) = self.pending_identity.take() {
+                cx.resolve_placement_identity(receipt, vec!["native-a".into()]).unwrap();
+                self.job_ids.push("native-a".into());
+            }
             for wait in std::mem::take(&mut self.waits) {
                 self.releases.push(cx.release_condition_wait(&wait));
             }
@@ -310,6 +321,11 @@ mod condition_waits {
                 ("done while parked", cx.done_plan(plan, "[]".into())),
             ];
             self.settle_probes.extend(probes);
+            if self.resume_settle {
+                let before = snapshot(cx);
+                let result = cx.continue_settled_serial_plan(plan, context, mutation()).map(drop);
+                self.resume_probes.push(("parked delivery", result, snapshot(cx) == before));
+            }
             let _ = id;
             self.waits.push(wait);
         }
@@ -352,7 +368,9 @@ mod condition_waits {
                 .filter(|id| !id.is_empty())
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
-            if response.body == "unknown" {
+            if self.pending_settle {
+                self.pending_identity = Some(cx.http_pending_placement(&context).unwrap());
+            } else if response.body == "unknown" {
                 let _ = cx.http_write_unproven(&context, "reply does not prove the write");
             } else {
                 self.job_ids.extend(ids.iter().cloned());
@@ -450,6 +468,46 @@ mod condition_waits {
             self.plan_ready += 1;
             self.ready_in_callback |= self.in_callback;
             let id = command_of(plan.owner());
+            if self.resume_settle {
+                let context = self.last_data.as_ref().unwrap().1.clone();
+                if let Some((foreign, foreign_context)) = self.resume_foreign.clone() {
+                    for (label, candidate, token) in [("foreign plan", foreign, context.clone()),
+                        ("foreign context", plan.clone(), foreign_context)] {
+                        let before = snapshot(cx);
+                        let result = cx.continue_settled_serial_plan(&candidate, &token, mutation()).map(drop);
+                        self.resume_probes.push((label, result, snapshot(cx) == before));
+                    }
+                }
+                if self.pending_identity.is_none() {
+                    let before = snapshot(cx);
+                    let result = cx.continue_settled_serial_plan(plan, &context, SerialCall {
+                        attempts: 0, ..mutation()
+                    }).map(drop);
+                    self.resume_probes.push(("invalid next terms", result, snapshot(cx) == before));
+                    if self.resume_refuse_only {
+                        let result = cx.done_plan(plan, format!("[{}]", self.job_ids.join(",")));
+                        self.settle_probes.push(("done after refused resume", result));
+                        return;
+                    }
+                }
+                let before = snapshot(cx);
+                let result = cx.continue_settled_serial_plan(plan, &context, mutation());
+                self.resume_probes.push(("resume", result.as_ref().map(drop).map_err(|e| *e), snapshot(cx) == before));
+                match result {
+                    Ok(slot) => {
+                        let before = snapshot(cx);
+                        let repeated = cx.continue_settled_serial_plan(plan, &context, mutation()).map(drop);
+                        self.resume_probes.push(("repeated resume", repeated, snapshot(cx) == before));
+                        self.plans.push((id, plan.clone(), slot));
+                        self.resume_settle = false;
+                        self.pending_settle = false;
+                        self.settle = None;
+                        self.issue(cx, id);
+                    }
+                    Err(_) => { let _ = cx.fail_plan(plan, "unresolved native identity"); }
+                }
+                return;
+            }
             if self.settle.is_some() {
                 if let (Some((plan, slot)), Some((_, context))) = (self.plan(id), self.last_data.clone()) {
                     let again = cx.serial_plan_settle_wait(&plan, &slot, &context, 500).map(drop);
@@ -1449,6 +1507,51 @@ mod condition_waits {
         let actions = e.drain_actions().collect::<Vec<_>>();
         let (actions, now) = drive(&mut e, actions, 0., [body]);
         (e, actions, now)
+    }
+
+    #[test]
+    fn resolved_settle_resume_requires_exact_ready_custody_and_compacts_once() {
+        let (foreign, _, _) = settled(Cond { settle: Some(10_000), pending_settle: true, ..Default::default() }, "ok:");
+        let foreign_context = foreign.venue.last_data.as_ref().unwrap().1.clone();
+        let foreign_plan = foreign.venue.plan(7).unwrap().0;
+        let (mut e, actions, now) = settled(Cond { settle: Some(10_000), pending_settle: true,
+            resolve_on_release: true, resume_settle: true, total: 2,
+            resume_foreign: Some((foreign_plan, foreign_context)), ..Default::default() }, "ok:");
+        assert!(terminals(&actions, 7).is_empty());
+        let actions = borrowed_read(&mut e, now + 100.);
+        let (actions, _) = drive(&mut e, actions, now + 100., ["ok:b"]);
+        assert_eq!(terminals(&actions, 7), [Ok("[native-a,b]".into())]);
+        assert_eq!(e.venue.resume_probes, [
+            ("parked delivery", Err(Error::Revoked), true),
+            ("foreign plan", Err(Error::Revoked), true),
+            ("foreign context", Err(Error::Revoked), true),
+            ("invalid next terms", Err(Error::Invalid), true),
+            ("resume", Ok(()), false),
+            ("repeated resume", Err(Error::State), true),
+        ]);
+        assert_eq!(e.venue.issued.len(), 2);
+    }
+
+    #[test]
+    fn unresolved_settle_resume_issues_nothing_and_stays_unknown() {
+        let (mut e, _, now) = settled(Cond { settle: Some(10_000), pending_settle: true,
+            resume_settle: true, ..Default::default() }, "ok:");
+        let actions = borrowed_read(&mut e, now + 100.);
+        assert!(prepared(&actions).is_none());
+        let result = terminals(&actions, 7);
+        assert!(matches!(&result[..], [Err(error)] if error.outcome == Some(crate::Outcome::Unknown)), "{result:?}");
+        assert_eq!(e.venue.resume_probes[1], ("resume", Err(Error::State), true));
+        assert_eq!(e.venue.issued.len(), 1);
+    }
+
+    #[test]
+    fn refused_settle_continuation_leaves_the_settled_plan_completable() {
+        let (mut e, _, now) = settled(Cond { settle: Some(10_000), pending_settle: true,
+            resolve_on_release: true, resume_settle: true, resume_refuse_only: true, ..Default::default() }, "ok:");
+        let actions = borrowed_read(&mut e, now + 100.);
+        assert_eq!(terminals(&actions, 7), [Ok("[native-a]".into())]);
+        assert_eq!(e.venue.settle_probes.last(), Some(&("done after refused resume", Ok(()))));
+        assert_eq!(e.venue.issued.len(), 1);
     }
 
     #[test]

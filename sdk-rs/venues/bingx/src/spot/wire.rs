@@ -6,9 +6,15 @@ use safe_cex_engine::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 
 pub fn symbol(id: &str) -> String {
     id.replace('-', "")
+}
+pub fn stream_symbol<'a>(id: &str, scratch: &'a mut String) -> &'a str {
+    scratch.clear();
+    scratch.extend(id.split('-'));
+    scratch
 }
 pub fn invalid(message: impl Into<String>) -> VenueError {
     VenueError::new(message)
@@ -448,19 +454,86 @@ pub fn interval(i: Interval, ws: bool) -> Option<&'static str> {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Message<'a> {
+struct GeneralMessage<'a> {
     #[serde(default)]
     pub code: i64,
-    #[serde(default)]
-    pub data_type: String,
+    #[serde(default, borrow)]
+    pub data_type: Cow<'a, str>,
     #[serde(borrow)]
     pub data: Option<&'a RawValue>,
-    #[serde(default)]
-    pub e: String,
+    #[serde(default, borrow)]
+    pub e: Cow<'a, str>,
+}
+pub struct Message<'a> {
+    pub code: i64,
+    pub data_type: Cow<'a, str>,
+    pub data: Option<&'a RawValue>,
+    pub e: Cow<'a, str>,
+    pub ticker: Option<LiveTicker<'a>>,
+    pub depth: Option<Depth>,
+}
+impl<'a> From<GeneralMessage<'a>> for Message<'a> {
+    fn from(message: GeneralMessage<'a>) -> Self {
+        Self {
+            code: message.code,
+            data_type: message.data_type,
+            data: message.data,
+            e: message.e,
+            ticker: None,
+            depth: None,
+        }
+    }
+}
+impl<'a> Message<'a> {
+    #[inline(always)]
+    pub fn decode(text: &'a str, public: bool) -> serde_json::Result<Self> {
+        if public {
+            // Like the swap decoder, retain the general path for reordered fields
+            // and typed row errors; private notifications always use that path.
+            compact_public_message(text).map_or_else(
+                || serde_json::from_str::<GeneralMessage<'a>>(text).map(Into::into),
+                Ok,
+            )
+        } else {
+            serde_json::from_str::<GeneralMessage<'a>>(text).map(Into::into)
+        }
+    }
+}
+// The common compact public envelope needs no RawValue scan before its row.
+// Other field orders, escapes and optional fields retain the general decoder.
+fn compact_public_message(text: &str) -> Option<Message<'_>> {
+    let rest = text
+        .strip_prefix(r#"{"code":0,"dataType":""#)
+        .or_else(|| text.strip_prefix(r#"{"dataType":""#))?;
+    let end = rest.find('"')?;
+    let channel = &rest[..end];
+    if channel.bytes().any(|byte| byte < 0x20 || byte == b'\\') {
+        return None;
+    }
+    let payload = rest[end..]
+        .strip_prefix(r#"","data":"#)?
+        .strip_suffix('}')?;
+    let mut message = Message {
+        code: 0,
+        data_type: Cow::Borrowed(channel),
+        data: None,
+        e: Cow::Borrowed(""),
+        ticker: None,
+        depth: None,
+    };
+    if channel.ends_with("@ticker") {
+        message.ticker = Some(serde_json::from_str(payload).ok()?);
+    } else if channel.ends_with("@depth50") {
+        message.depth = Some(serde_json::from_str(payload).ok()?);
+    } else {
+        return None;
+    }
+    Some(message)
 }
 #[derive(Deserialize)]
-pub struct LiveTicker {
-    pub s: String,
+pub struct LiveTicker<'a> {
+    #[serde(borrow)]
+    pub s: Cow<'a, str>,
     #[serde(deserialize_with = "number")]
     pub c: f64,
     #[serde(rename = "P", deserialize_with = "number")]
@@ -558,5 +631,251 @@ impl Report {
             stop_loss: None,
             extra: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_symbol_reuses_storage_without_changing_normalization() {
+        let mut scratch = String::with_capacity(64);
+        let allocation = scratch.as_ptr();
+        for id in ["BTC-USDT", "ETH--USDT", "BTCUSDT", "", "---", "é-USD"] {
+            assert_eq!(stream_symbol(id, &mut scratch), symbol(id));
+            assert_eq!(scratch.as_ptr(), allocation);
+        }
+    }
+
+    #[test]
+    fn stream_identifiers_borrow_the_frame_instead_of_allocating_per_tick() {
+        let frame = r#"{"code":0,"data":{"s":"BTC-USDT","c":"42","P":"1","v":"2","q":"84","B":"41","A":"43"},"dataType":"BTC-USDT@ticker"}"#;
+        let message: GeneralMessage<'_> = serde_json::from_str(frame).unwrap();
+        assert!(
+            frame
+                .as_bytes()
+                .as_ptr_range()
+                .contains(&message.data_type.as_ptr())
+        );
+        let ticker: LiveTicker = serde_json::from_str(message.data.unwrap().get()).unwrap();
+        assert!(frame.as_bytes().as_ptr_range().contains(&ticker.s.as_ptr()));
+    }
+
+    #[test]
+    fn public_rows_decode_in_the_envelope_pass_and_escaped_identifiers_still_work() {
+        let frame = r#"{"dataType":"BTC-USDT@ticker","data":{"s":"BTC-USDT","c":"42","P":"1","v":"2","q":"84","B":"41","A":"43"}}"#;
+        let message = Message::decode(frame, true).unwrap();
+        assert!(
+            message.data.is_none(),
+            "the payload must not be scanned twice"
+        );
+        let ticker = message.ticker.unwrap();
+        assert_eq!((ticker.c, ticker.bid, ticker.ask), (42., 41., 43.));
+        assert!(frame.as_bytes().as_ptr_range().contains(&ticker.s.as_ptr()));
+
+        let depth = Message::decode(
+            r#"{"dataType":"BTC-USDT@depth50","data":{"bids":[["41","2"]],"asks":[[43,"3"]]}}"#,
+            true,
+        )
+        .unwrap();
+        assert!(depth.data.is_none());
+        assert_eq!(depth.depth.unwrap().bids[0].1.0, 2.);
+
+        let escaped = frame.replace("BTC-USDT", r"BTC\u002dUSDT");
+        let message = Message::decode(&escaped, true).unwrap();
+        assert_eq!(message.data_type, "BTC-USDT@ticker");
+        assert_eq!(
+            projection(message).ticker.map(|row| row.symbol),
+            Some("BTC-USDT".to_owned())
+        );
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct MessageProjection {
+        code: i64,
+        data_type: String,
+        event: String,
+        ticker: Option<TickerProjection>,
+        depth: Option<DepthProjection>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct TickerProjection {
+        symbol: String,
+        last_bits: u64,
+        percentage_bits: u64,
+        volume_bits: u64,
+        quote_volume_bits: u64,
+        bid_bits: u64,
+        ask_bits: u64,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct DepthProjection {
+        bids: Vec<LevelProjection>,
+        asks: Vec<LevelProjection>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct LevelProjection {
+        price_bits: u64,
+        amount_bits: u64,
+    }
+
+    fn projection(message: Message<'_>) -> MessageProjection {
+        let raw = message.data.map(RawValue::get);
+        let ticker = message
+            .ticker
+            .or_else(|| raw.and_then(|data| serde_json::from_str::<LiveTicker<'_>>(data).ok()))
+            .map(|ticker| TickerProjection {
+                symbol: ticker.s.into_owned(),
+                last_bits: ticker.c.to_bits(),
+                percentage_bits: ticker.percentage.to_bits(),
+                volume_bits: ticker.v.to_bits(),
+                quote_volume_bits: ticker.q.to_bits(),
+                bid_bits: ticker.bid.to_bits(),
+                ask_bits: ticker.ask.to_bits(),
+            });
+        let depth = message
+            .depth
+            .or_else(|| raw.and_then(|data| serde_json::from_str::<Depth>(data).ok()))
+            .map(|depth| {
+                let rows = |side: Vec<(Number, Number)>| {
+                    side.into_iter()
+                        .map(|(price, amount)| LevelProjection {
+                            price_bits: price.0.to_bits(),
+                            amount_bits: amount.0.to_bits(),
+                        })
+                        .collect()
+                };
+                DepthProjection {
+                    bids: rows(depth.bids),
+                    asks: rows(depth.asks),
+                }
+            });
+        MessageProjection {
+            code: message.code,
+            data_type: message.data_type.into_owned(),
+            event: message.e.into_owned(),
+            ticker,
+            depth,
+        }
+    }
+
+    #[test]
+    fn projection_distinguishes_signed_zero_in_ticker_and_depth_fields() {
+        for (frame, field) in [
+            (
+                r#"{"dataType":"BTC-USDT@ticker","data":{"s":"BTC-USDT","c":"42","P":"1","v":"2","q":"84","B":"0","A":"43"}}"#,
+                r#""B":"0""#,
+            ),
+            (
+                r#"{"dataType":"BTC-USDT@depth50","data":{"bids":[["41","0"]],"asks":[]}}"#,
+                r#""41","0""#,
+            ),
+        ] {
+            let negative = frame.replace(field, &field.replace(r#""0""#, r#""-0""#));
+            assert_ne!(
+                projection(Message::decode(frame, true).unwrap()),
+                projection(Message::decode(&negative, true).unwrap()),
+                "a byte-parity projection must retain signed zero: {frame}",
+            );
+        }
+    }
+
+    #[test]
+    fn optimized_public_decode_preserves_general_decoder_results_and_refusals() {
+        let ticker = r#"{"s":"BTC-USDT","c":"42","P":"1","v":"2","q":"84","B":"41","A":"43"}"#;
+        let depth = r#"{"bids":[["41","2"],["41","0"]],"asks":[[43,"3"]]}"#;
+        for (channel, payload) in [("BTC-USDT@ticker", ticker), ("BTC-USDT@depth50", depth)] {
+            for frame in [
+                format!(r#"{{"dataType":"{channel}","data":{payload}}}"#),
+                format!(r#"{{"data":{payload},"dataType":"{channel}"}}"#),
+                format!(r#"{{"dataType":"{channel}","data":{payload},"code":9}}"#),
+                format!(r#"{{"dataType":"{channel}","data":{payload},"e":"ACCOUNT_UPDATE"}}"#),
+                format!(
+                    r#"{{"unknown":{{"nested":[1,2]}},"dataType":"{channel}","data":{payload}}}"#
+                ),
+                format!(r#"{{"dataType":"{channel}","data":null}}"#),
+                format!(
+                    r#"{{"dataType":"{channel}","data":{{"s":false,"bids":[[true,2]],"asks":[]}}}}"#
+                ),
+                format!(r#"{{"dataType":"{channel}","data":{payload},"data":null}}"#),
+                format!(r#"{{"dataType":"{channel}","dataType":"other","data":{payload}}}"#),
+                format!(r#"{{"code":null,"dataType":"{channel}","data":{payload}}}"#),
+                format!(r#"{{"e":null,"dataType":"{channel}","data":{payload}}}"#),
+            ] {
+                let general = serde_json::from_str::<GeneralMessage<'_>>(&frame).map(Message::from);
+                let optimized = Message::decode(&frame, true);
+                assert_eq!(general.is_ok(), optimized.is_ok(), "{frame}");
+                if let (Ok(general), Ok(optimized)) = (general, optimized) {
+                    assert_eq!(projection(general), projection(optimized), "{frame}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compact_envelopes_keep_json_validation_and_general_decoder_semantics() {
+        let payload = r#"{"s":"BTC-USDT","c":"42","P":"1","v":"2","q":"84","B":"41","A":"43"}"#;
+        let base = format!(r#"{{"code":0,"dataType":"BTC-USDT@ticker","data":{payload}}}"#);
+        let check = |text: &str| {
+            let general = serde_json::from_str::<GeneralMessage<'_>>(text).map(Message::from);
+            let optimized = Message::decode(text, true);
+            assert_eq!(general.is_ok(), optimized.is_ok(), "{text:?}");
+            if let (Ok(general), Ok(optimized)) = (general, optimized) {
+                assert_eq!(projection(general), projection(optimized), "{text:?}");
+            }
+        };
+        assert!(compact_public_message(&base).is_some());
+        for end in 0..=base.len() {
+            check(&base[..end]);
+        }
+        for byte in 0u8..=127 {
+            let text = base.replace(
+                "BTC-USDT@ticker",
+                &format!("BTC{}USDT@ticker", char::from(byte)),
+            );
+            check(&text);
+        }
+        for text in [
+            format!(" {base}\n"),
+            base.replace("BTC-USDT", r"BTC\u002dUSDT"),
+            base.replace("BTC-USDT", "é-USD"),
+            base.replace(r#""code":0"#, r#""code":-0"#),
+            base.replace(r#""code":0"#, r#""code":1"#),
+            base.replace(r#""code":0"#, r#""code":"0""#),
+            base.replace(r#""code":0"#, r#""code":0,"code":0"#),
+            base.replace(r#""dataType":"#, r#""e":"ACCOUNT_UPDATE","dataType":"#),
+            base.replace(r#""data":"#, r#""extra":{"text":"data"},"data":"#),
+            format!("{},\"e\":\"ACCOUNT_UPDATE\"}}", &base[..base.len() - 1]),
+            format!("{},\"data\":null}}", &base[..base.len() - 1]),
+            format!("{base}}}"),
+            format!("{base}null"),
+        ] {
+            check(&text);
+        }
+    }
+
+    #[test]
+    fn private_notifications_keep_raw_payloads_and_retirement_events() {
+        for frame in [
+            r#"{"dataType":"ACCOUNT_UPDATE","data":{}}"#,
+            r#"{"e":"ACCOUNT_UPDATE","data":[]}"#,
+            r#"{"e":"listenKeyExpired"}"#,
+            r#"{"dataType":"spot.executionReport","data":{"s":"BTC-USDT","i":"9007199254740993"}}"#,
+            r#"{"dataType":"BTC-USDT@depth50","e":"ACCOUNT_UPDATE","data":{"bids":[],"asks":[]}}"#,
+        ] {
+            let expected: GeneralMessage<'_> = serde_json::from_str(frame).unwrap();
+            let actual = Message::decode(frame, false).unwrap();
+            assert!(actual.ticker.is_none() && actual.depth.is_none());
+            assert_eq!(actual.data_type, expected.data_type);
+            assert_eq!(actual.e, expected.e);
+            assert_eq!(
+                actual.data.map(RawValue::get),
+                expected.data.map(RawValue::get)
+            );
+        }
     }
 }

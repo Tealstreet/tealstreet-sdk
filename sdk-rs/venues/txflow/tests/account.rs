@@ -501,13 +501,15 @@ fn an_accepted_setting_write_fences_held_state_without_losing_configured_hedge_r
             isolated: false,
         }),
     );
-    let write = e
-        .drain_actions()
+    let dispatched = signer::prepared_actions(&mut e, NOW + 5100.0);
+    let write = dispatched
+        .iter()
+        .cloned()
         .find_map(|a| match a {
             safe_cex_engine::Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
             _ => None,
         })
-        .unwrap();
+        .unwrap_or_else(|| panic!("{dispatched:?}"));
     reply_at(
         &mut e,
         &write,
@@ -698,11 +700,11 @@ fn account_execution_window_opens_after_the_paced_ticker_seed() {
         safe_cex_venue_txflow::Options {
             testnet: true,
             application_id: Some(WALLET.into()),
-            secret: Some(format!("0x{:064x}", 1)),
+            credentials: signer::identity(),
             ..Default::default()
         },
     ));
-    e.start(NOW);
+    signer::start(&mut e, NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, META);
     let seed = requests(&mut e);
@@ -740,11 +742,11 @@ fn a_failing_ticker_seed_read_does_not_block_account_start() {
         safe_cex_venue_txflow::Options {
             testnet: true,
             application_id: Some(WALLET.into()),
-            secret: Some(format!("0x{:064x}", 1)),
+            credentials: signer::identity(),
             ..Default::default()
         },
     ));
-    e.start(NOW);
+    signer::start(&mut e, NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, META);
     let seed = requests(&mut e);

@@ -2076,6 +2076,53 @@ impl<P> Cx<'_, P> {
             .unproven_native_result(delivery.attempt.request, capture)
     }
 
+    /// Record a strictly executed placement ACK whose protocol returns native IDs
+    /// later. Missing/expired proof remains Unknown; this never supplies a fake ID.
+    /// The codec must validate the execution envelope before calling this method.
+    pub fn http_pending_placement(
+        &mut self,
+        context: &Context,
+    ) -> Result<crate::request_context::PendingPlacement, Error> {
+        let core = self.core();
+        let delivery = core.current_write_delivery(context)?;
+        if core.write_intent(context)? != crate::classify::Intent::Place {
+            return Err(Error::Invalid);
+        }
+        let request = delivery.attempt.request;
+        core.io
+            .core
+            .request_contexts
+            .command_mut(context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .pending_placement(request)?;
+        Ok(crate::request_context::PendingPlacement {
+            context: context.clone(),
+            attempt: request,
+        })
+    }
+
+    /// Resolve only this engine's still-live receipt after the codec validates
+    /// account, generation and client-ID attribution in an authoritative update.
+    pub fn resolve_placement_identity(
+        &mut self,
+        receipt: crate::request_context::PendingPlacement,
+        ids: Vec<String>,
+    ) -> Result<(), Error> {
+        let registry = &mut self.io.core.request_contexts;
+        if registry.latest_write(&receipt.context)? != Some(receipt.attempt) {
+            return Err(Error::Revoked);
+        }
+        registry
+            .owner_entry_mut(receipt.context.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .resolve_placement(receipt.attempt, ids)
+    }
+
     /// Check normalized native facts before synchronous codec-selected effects.
     /// This repeatable read-only check grants no send, retry or completion rights;
     /// native decoding, row attribution and snapshot freshness remain separate.

@@ -261,7 +261,10 @@ mod tests {
             for requested in [false, true] {
                 let mut options: EngineOptions = serde_json::from_value(json!({
                     "key":"public-account", "payloadSigner":true,
-                    "publicDataOnly":!requested, "publicMode":{"requested":requested}
+                    "publicDataOnly":!requested,
+                    // Supply usable private intent for Spot too; keyless Spot
+                    // now resolves public before checking unused PayloadSigner.
+                    "publicMode":{"requested":requested,"remoteSigner":true}
                 }))
                 .unwrap();
                 assert!(options.secret.is_none());
