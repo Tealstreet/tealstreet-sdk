@@ -786,15 +786,24 @@ export class EngineHost {
 
   /**
    * Close the open sockets of `channel` (or all) as an abnormal close, so the
-   * venue runs its own reconnect. Returns how many sockets were closed.
+   * venue runs its own reconnect. Optional recovery bounds retain pre-pause
+   * physical receipts until stale, without closing fresh/uninitialized siblings.
    */
-  reconnectSockets(channel) {
+  reconnectSockets(channel, recovery) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return 0;
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
       // A connect in flight is left alone, as in TS: a second connect would leak it.
-      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open || !this.sockets.has(id)) continue;
+      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open ||
+        !this.sockets.has(id) || this.socketRecords.get(id) !== record) continue;
+      if (recovery) {
+        if (!record.initialized || record.lastReceived <= 0) continue;
+        if (recovery.suspendedBefore !== undefined && record.lastReceived <= recovery.suspendedBefore)
+          record.recoveryReceipt = record.lastReceived;
+        if (record.recoveryReceipt !== record.lastReceived || record.lastReceived > recovery.staleBefore) continue;
+        record.recoveryReceipt = undefined;
+      }
       const socket = this.sockets.get(id);
       this.sockets.delete(id);
       this.socketClosed(id, 1006);
@@ -1404,10 +1413,12 @@ export class EngineHost {
         const channel = Object.hasOwn(this.socketStats, action.channel) ? action.channel : 'public';
         const channels = action.publicTopics === true && channel !== 'public' ? [channel, 'public'] : [channel];
         const stats = channels.map((role) => this.socketStats[role]);
-        const record = { channels, stats, open: false, initialized: false };
+        const record = { channels, stats, open: false, initialized: false, lastReceived: 0, recoveryReceipt: undefined };
         // One timestamp per carried channel; state changes notify once per socket.
         const received = () => {
           const now = Date.now();
+          record.lastReceived = now;
+          record.recoveryReceipt = undefined;
           for (const stat of stats) stat.lastReceived = now;
           if (record.initialized || !record.open) return;
           record.initialized = true;

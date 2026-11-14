@@ -22,14 +22,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/**
- * A venue with one public and one private socket that reopens a socket the
- * moment the engine reports it closed, like every engine venue's reconnect.
- */
+/** A venue that reopens closed sockets, optionally with two public sockets
+ * to exercise physical-socket isolation within the same channel. */
 const setup = async (
   singleSocket?: 'keyed' | 'public',
   venueOverride?: 'blofin' | 'okx' | 'bybit' | 'cryptocom',
   now = () => Date.now(),
+  publicSibling = false,
 ) => {
   const venue = venueOverride ?? (singleSocket ? 'hyperliquid' : 'bybit');
   const sockets: FakeSocket[] = [];
@@ -53,7 +52,7 @@ const setup = async (
       JSON.stringify(
         singleSocket
           ? [connect(singleSocket === 'keyed' ? 'private' : 'public')]
-          : [connect('public'), connect('private')],
+          : [connect('public'), connect('private'), ...(publicSibling ? [connect('public')] : [])],
       ),
     command: (json) => {
       const command = JSON.parse(json);
@@ -309,6 +308,26 @@ describe('Rust engine socket health (cutover B5)', () => {
     expect(engineCloses).toEqual([]);
     expect(fresh.closed).toBe(false);
   });
+
+  it.each(['uninitialized', 'fresh'] as const)(
+    'wake recovery isolates a stale physical socket from its %s same-channel sibling',
+    async (state) => {
+      vi.useFakeTimers({ now: 1_800_000_000_000 });
+      let sleepOffset = 0;
+      const { sockets, engineCloses } = await setup(undefined, 'bybit', () => Date.now() - sleepOffset, true);
+      const [original, , sibling] = sockets;
+      original.handlers.onOpen();
+      original.handlers.onMessage('{}');
+      sleepOffset = 101_012;
+      vi.setSystemTime(Date.now() + sleepOffset);
+      sibling.handlers.onOpen();
+      if (state === 'fresh') sibling.handlers.onMessage('{}');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(original.closed).toBe(true);
+      expect(sibling.closed).toBe(false);
+      expect(engineCloses).toEqual([[1, 1006]]);
+    },
+  );
 
   it('wake health recovery preserves an uninitialized replacement and stops on disposal', async () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 });

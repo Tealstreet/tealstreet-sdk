@@ -1045,10 +1045,14 @@ clock's existing one-second correction margin, it retains recovery evidence for
 OPEN, initialized pre-pause channels, then retires them when their last frame
 reaches 60 s of wall age. A 50 s sleep may still be fresh at the first check;
 normal engine ticks afterward must not consume that pending recovery. Receipt
-timestamp and lifetime close count fence each obligation. Fresh traffic,
+timestamp and physical host record fence each obligation. Fresh traffic,
 replacement or disposal cancels it, and retirement consumes it before reconnect.
 Already resumed traffic is not enrolled; within a mixed sampling interval the
 pre-pause receipt must be provable from the elapsed gap and active engine time.
+`EngineHost.reconnectSockets` applies recovery bounds per physical record, not
+aggregate channel handles: a fresh sibling cannot hide a stale socket, and an
+uninitialized sibling keeps its connect grace. Ordinary channel reconnect callers
+omit the bounds and retain their existing behavior.
 Laptop sleep can pause `performance.now()` while wall-clock health ages; ordinary
 callback delays with advancing engine time do not activate this fallback. Normal native
 90 s/180 s silence allowances remain authoritative. The check uses the engine
