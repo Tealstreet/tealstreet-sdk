@@ -29,7 +29,7 @@ const ids = (response) => JSON.parse(response.body).map((row) => row.orderId ?? 
 test('all 49 covered venue configurations use deterministic private replay clocks', () => {
   const covered = [
     'apexomni', 'asterdex', 'backpack', 'binance', 'binanceinverse',
-    'binanceoptions', 'binancepm', 'binancespot', 'bingx', 'bitget', 'bitgetinverse',
+    'binanceoptions', 'binancepm', 'binancespot', 'bingx', 'bingxspot', 'bitget', 'bitgetinverse',
     'bitgetusdc', 'bitrue', 'bitunix', 'blofin',
     'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'coinbase',
     'coinbasespot', 'cryptocom', 'grvt', 'hyperliquid', 'hyperliquidspot',

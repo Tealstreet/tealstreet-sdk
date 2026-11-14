@@ -64,6 +64,7 @@ struct CommandOwner {
     /// Owner retention only. This never extends any issued logical deadline.
     last_deadline: f64,
     writes: Option<CommandWrites>,
+    engine_unknown: Option<super::unknown_outcome::UnknownOutcomeSource>,
     mutation_declared: bool,
     pending: usize,
     deliveries: usize,
@@ -452,6 +453,27 @@ impl ContextRegistry {
         *entry_owned = true;
     }
 
+    /// Retain the first engine-owned failure until this owner generation seals.
+    pub(super) fn remember_engine_unknown(&mut self, delivery: &Delivery, status: Option<u16>) {
+        if let Some(owner) = self.owner_entry_mut(delivery.context.owner()) {
+            owner
+                .engine_unknown
+                .get_or_insert(super::unknown_outcome::UnknownOutcomeSource {
+                    request: delivery.attempt.request,
+                    status,
+                });
+        }
+    }
+
+    pub(super) fn engine_unknown(
+        &self,
+        command: CommandId,
+    ) -> Option<super::unknown_outcome::UnknownOutcomeSource> {
+        self.commands
+            .get(&command)
+            .and_then(|owner| owner.engine_unknown)
+    }
+
     /// Whether this command's auth-kind failure is credential-health evidence:
     /// a tracked owner only when a Context or declared policy named a
     /// credential; an untracked (legacy) command keeps counting.
@@ -700,6 +722,7 @@ impl ContextRegistry {
                     },
                     last_deadline,
                     writes: None,
+                    engine_unknown: None,
                     mutation_declared: context.operation() == Operation::Mutation,
                     pending: 0,
                     deliveries: 0,
@@ -2206,6 +2229,38 @@ impl<P> Cx<'_, P> {
         message: impl Into<String>,
         reports: Option<RejectionReports>,
     ) -> Result<WriteResult, Error> {
+        self.record_native_batch::<true>(context, table, expected, items, message, reports)
+    }
+
+    /// Record an accepted non-creating batch without publishing its target IDs
+    /// as created orders. Classification and absent-order fencing stay shared.
+    pub fn http_write_applied_batch(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        expected: usize,
+        items: &[crate::classify::BatchItem<'_>],
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<WriteResult, Error> {
+        if matches!(
+            self.write_intent(context)?,
+            crate::classify::Intent::Place | crate::classify::Intent::Read
+        ) {
+            return Err(Error::Invalid);
+        }
+        self.record_native_batch::<false>(context, table, expected, items, message, reports)
+    }
+
+    fn record_native_batch<const CREATES_ORDERS: bool>(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        expected: usize,
+        items: &[crate::classify::BatchItem<'_>],
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<WriteResult, Error> {
         let delivery = self.current_write_delivery(context)?;
         let (status, headers) = self.io.core.http_write_reply.as_ref().ok_or(Error::State)?;
         let response = crate::Response {
@@ -2214,7 +2269,21 @@ impl<P> Cx<'_, P> {
             body: "",
         };
         let intent = self.write_intent(context)?;
-        let result = crate::classify::batch(table, intent, &response, expected, items, message)?;
+        let mut result =
+            crate::classify::batch(table, intent, &response, expected, items, message)?;
+        if !CREATES_ORDERS {
+            match &mut result {
+                WriteResult::Accepted { order_ids } => order_ids.clear(),
+                WriteResult::Rejected(error)
+                | WriteResult::KnownPartial(error)
+                | WriteResult::PartialUnknown(error)
+                | WriteResult::Failed(error) => {
+                    if let Some(partial) = &mut error.partial {
+                        partial.order_ids.clear();
+                    }
+                }
+            }
+        }
         let absent = !matches!(result, WriteResult::Failed(_))
             && items.iter().any(|item| {
                 matches!(item, crate::classify::BatchItem::Native(native)

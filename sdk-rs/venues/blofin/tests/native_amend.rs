@@ -103,6 +103,19 @@ fn an_accepted_tpsl_edit_that_drops_the_other_leg_is_a_typed_error() {
     // outcome); what it left does not read as asked.
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
     assert_eq!(error.outcome, None);
+    let outcomes = error.elements.as_ref().expect("applied edit outcome");
+    assert_eq!(outcomes.len(), 1);
+    assert!(
+        matches!(&outcomes[0].result, safe_cex_engine::write_plan::ElementResult::Applied {
+        effect: safe_cex_engine::write_plan::AppliedEffect::Amend, target_order_id: Some(id), ..
+    } if id == "500")
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
 }
 
 #[test]

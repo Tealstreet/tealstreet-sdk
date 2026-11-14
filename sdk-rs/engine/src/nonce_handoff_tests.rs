@@ -186,7 +186,7 @@ fn in_flight_legacy_and_target_owners_both_block_until_original_cleanup_joins() 
     );
     let old = claim(&e).authority();
     let reserved = old.reserve(0., 0.).unwrap();
-    assert!(reserved.commit_release(|| {}).unwrap());
+    assert!(reserved.commit_release(|| true).unwrap());
     let a = associate(&mut e, CredentialSlot::Primary);
     let mut source = held(e.register_legacy_nonce_owner(&a).unwrap());
     let permit = source.issuer.reserve(7000).unwrap();
@@ -223,7 +223,7 @@ fn in_flight_legacy_and_target_owners_both_block_until_original_cleanup_joins() 
     );
     let new = claim(&e).authority().reserve(0., 0.).unwrap();
     assert_eq!(new.nonce, 7001);
-    assert!(new.commit_release(|| {}).unwrap());
+    assert!(new.commit_release(|| true).unwrap());
     assert!(source.issuer.reserve(0).is_err());
     join(&mut next);
 }
@@ -237,7 +237,7 @@ fn concurrent_reserve_and_release_import_both_source_maxima_and_higher_target() 
     );
     let authority = claim(&e).authority();
     let target_nonce = authority.reserve(50., 50.).unwrap();
-    assert!(target_nonce.commit_release(|| {}).unwrap());
+    assert!(target_nonce.commit_release(|| true).unwrap());
     let a = associate(&mut e, CredentialSlot::Primary);
     let b = associate(&mut e, CredentialSlot::Secondary);
     let mut one = held(e.register_legacy_nonce_owner(&a).unwrap());
@@ -283,7 +283,7 @@ fn concurrent_reserve_and_release_import_both_source_maxima_and_higher_target() 
     assert_eq!(store[&a.source].released, Some(128));
     assert_eq!(store[&b.source].released, Some(128));
     drop(store);
-    assert!(new.commit_release(|| {}).unwrap());
+    assert!(new.commit_release(|| true).unwrap());
     join(&mut next);
 }
 
@@ -354,7 +354,7 @@ fn untracked_raw_history_or_target_history_cannot_be_certified_by_new_owners() {
     assert_eq!(lock().unwrap()[&(KRAKEN.name, digest)].reserved, 77);
     let mut e = engine("target-history");
     let n = claim(&e).authority().reserve(1., 1.).unwrap();
-    assert!(n.commit_release(|| {}).unwrap());
+    assert!(n.commit_release(|| true).unwrap());
     assert!(
         e.register_nonce_owner(CredentialSlot::Primary, &KRAKEN)
             .is_err()

@@ -1,0 +1,47 @@
+{
+  "latency": null,
+  "balance": {
+    "used": 0.0,
+    "free": 0.0,
+    "total": 0.0,
+    "upnl": 0.0
+  },
+  "markets": [],
+  "tickers": [],
+  "orders": [],
+  "positions": [],
+  "positionSettings": {},
+  "displayedPositions": [],
+  "displayedMargin": {
+    "longExposure": 0.0,
+    "shortExposure": 0.0,
+    "totalNotional": 0.0
+  },
+  "ordersRisk": {},
+  "activeChasers": [],
+  "activeTWAPs": [],
+  "loaded": {
+    "balance": false,
+    "orders": false,
+    "markets": false,
+    "tickers": false,
+    "positions": false
+  },
+  "options": {
+    "isHedged": false
+  },
+  "updateIds": {
+    "positions": 0.0,
+    "orders": 0.0
+  },
+  "messageHandlerStats": {},
+  "requestStats": {
+    "ok": 0.0,
+    "rateLimit": 0.0,
+    "auth": 0.0,
+    "network": 0.0,
+    "other": 0.0
+  },
+  "fetchedLeverage": {},
+  "socketHealth": {"publicHealthy":false,"privateHealthy":false,"publicInitialized":false,"privateInitialized":false}
+}

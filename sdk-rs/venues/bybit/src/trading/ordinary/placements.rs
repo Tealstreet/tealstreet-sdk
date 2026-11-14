@@ -3,7 +3,7 @@
 //! that may have been sent, by link, on both order axes.
 use super::{
     CALL_ATTEMPTS, CALL_TIMEOUT_MS, Decision, Gate, HyroCall, Leg, LegIntent, Ordinary, Request,
-    Run, Stage, call_bound, internal,
+    Run, Stage, call_bound, internal, unknown_outcome,
 };
 use crate::hyro::{self, Found, Intent, LookupAxis, LotState, MAX_SENDS, Phase};
 use crate::trading::{Call, Planned, not_sent};
@@ -461,8 +461,15 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         id: CommandId,
         mut entry: Ordinary,
-        legs: VecDeque<Leg>,
+        mut legs: VecDeque<Leg>,
     ) {
+        let writes = match super::write_plan::build(&mut legs) {
+            Ok(writes) => writes,
+            Err(error) => {
+                cx.command_error(id, format!("Bybit outcome reporting unavailable: {error}"));
+                None
+            }
+        };
         let Some(digest) = entry
             .hyro
             .as_ref()
@@ -505,14 +512,19 @@ impl BybitLinear {
             call.observers.push(founder);
         }
         entry.stage = Stage::Plan(Box::new(Run {
+            cancellations: None,
             plan,
+            writes,
             partial: None,
             queue: legs,
             active: None,
             continue_on_error: false,
+            stop_after_spot_order: false,
+            deferred_error: None,
             unlisted: Vec::new(),
             unlisted_read: None,
             unlisted_landed: None,
+            unlisted_scopes: Vec::new(),
             ids: Vec::new(),
             error: None,
         }));
@@ -616,10 +628,10 @@ impl BybitLinear {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &Request,
-        entry: Ordinary,
+        mut entry: Ordinary,
         error: VenueError,
     ) {
-        let Stage::Plan(run) = &entry.stage else {
+        let Stage::Plan(run) = &mut entry.stage else {
             self.park(request.command, entry);
             return;
         };
@@ -634,9 +646,16 @@ impl BybitLinear {
             return;
         };
         let key = call.key.clone();
+        if let (Some(writes), Some(active)) = (&mut run.writes, &run.active) {
+            let _ = super::write_plan::record_failure(writes, &active.leg.elements, error.clone());
+        }
         if error.outcome == Some(Outcome::NotSent) {
             // Refused before release: this send never happened (legacy sign failure).
             self.hyro_leg_unsent(&key, Some(lot));
+            if run.writes.is_some() {
+                run.finish_failure(cx, error);
+                return;
+            }
             self.park(request.command, entry);
             return;
         }
@@ -654,7 +673,7 @@ impl BybitLinear {
         };
         // The journal keeps the transport text; each observer gets this report,
         // then its own terminal naming the link, with the journal's outcome.
-        let error = hyro::unknown(&link, &error.message);
+        let error = run.failure(unknown_outcome(hyro::unknown(&link, &error.message)));
         for root in &call.observers {
             if let Owner::Command { id, .. } = root.owner() {
                 cx.command_error(id, error.message.clone());
@@ -801,6 +820,8 @@ fn hyro_leg(lot: &hyro::Lot, index: usize) -> Leg {
         planned,
         intent,
         lot: Some(index),
+        elements: Vec::new(),
+        effects: Vec::new(),
     }
 }
 

@@ -71,7 +71,7 @@ impl JsNumberOutput for safe_cex_types::DataProvenance {
 impl JsNumberOutput for safe_cex_types::ExchangeName {
     fn check_number_output(&self) {
         // #3034 restores Binance Options to the strict metadata roster; output eligibility must match.
-        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binanceinverse, Binancespot, Binancepm, Binanceoptions, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
+        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binanceinverse, Binancespot, Binancepm, Binanceoptions, Bingx, Bingxspot, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
     }
 }
 
@@ -102,12 +102,6 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicDataVariant
 impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicDataVariant1Type {
     fn check_number_output(&self) {
         crate::js_number_output!(self, enum { InProcess });
-    }
-}
-
-impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtra {
-    fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { hyrotrader_mode, tick_interval, recv_window, asterdex_api_version, aster_builder_address, aster_builder_fee_rate_maker, aster_builder_fee_rate_taker, lighter_builder_fee_mode, lighter_integrator_account_index, lighter_stop_slippage_pct, kucoin_broker });
     }
 }
 
@@ -372,18 +366,6 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicData {
     }
 }
 
-impl JsNumberOutput for safe_cex_types::ExchangeOptionsPolymarket {
-    fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { api_key, api_secret, api_passphrase, signer_type, funder_address });
-    }
-}
-
-impl JsNumberOutput for safe_cex_types::ExchangeOptions {
-    fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, polymarket, remote_signer, transport, payload_signer, hosted_mode, external_public_data });
-    }
-}
-
 impl JsNumberOutput for safe_cex_types::Market {
     fn check_number_output(&self) {
         crate::js_number_output!(self, struct { id, symbol, pretty_symbol, base, quote, active, precision, limits, option, contract_size, is_expiring, is_inverse, is_spot, is_perpetual, is_read_only, taker_fee, maker_fee, runtime } passthrough { info });
@@ -404,7 +386,7 @@ impl JsNumberOutput for safe_cex_types::Position {
 
 impl JsNumberOutput for safe_cex_types::Ticker {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { id, symbol, bid, ask, last, mark, index, mid_price, percentage, open_interest, funding_rate, funding_time, volume, quote_volume, timestamp } passthrough { info });
+        crate::js_number_output!(self, struct { observed_at, id, symbol, bid, ask, last, mark, index, mid_price, percentage, open_interest, funding_rate, funding_time, volume, quote_volume, timestamp } passthrough { info });
     }
 }
 

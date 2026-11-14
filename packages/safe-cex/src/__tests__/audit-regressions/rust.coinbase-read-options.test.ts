@@ -124,20 +124,15 @@ it.each(aliases)(
     await vi.waitFor(() => expect(r.request).toHaveBeenCalledOnce());
     expect(r.options).toMatchObject(saved);
     expect(r.exchange.options).toMatchObject({
-      key: 'primary-key',
-      secret: 'primary-secret',
-      passphrase: 'primary-passphrase',
       overrideProxyUrl: 'https://primary.proxy',
       privateOnly: true,
       publicFeed: { mode: 'disabled' },
     });
     for (const key of Object.keys(saved)) expect(r.exchange.options).not.toHaveProperty(key);
+    for (const key of ['key', 'secret', 'passphrase']) expect(r.exchange.options).not.toHaveProperty(key);
     expect(r.wsRouting.mock.calls.every(([, options]) => options === r.exchange.options)).toBe(true);
     expect(r.route.mock.calls.every(([context]) => context.options === r.exchange.options)).toBe(true);
     expect(JSON.parse(r.construct.mock.calls[0][1])).toMatchObject({
-      key: 'primary-key',
-      secret: 'primary-secret',
-      passphrase: 'primary-passphrase',
       publicDataOnly: false,
       publicFeed: { mode: 'disabled' },
     });

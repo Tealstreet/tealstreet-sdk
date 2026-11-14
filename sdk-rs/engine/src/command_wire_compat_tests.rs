@@ -178,6 +178,16 @@ mod legacy {
             #[serde(default)]
             to: Option<f64>,
         },
+        FetchClosedPnl {
+            command: u32,
+            account: String,
+            #[serde(default)]
+            symbol: Option<String>,
+            #[serde(default)]
+            from: Option<f64>,
+            #[serde(default)]
+            to: Option<f64>,
+        },
         FetchLeverage {
             command: u32,
             symbol: String,
@@ -409,6 +419,21 @@ mod legacy {
                         to_ms: to,
                     },
                 },
+                CommandIn::FetchClosedPnl {
+                    command,
+                    account,
+                    symbol,
+                    from,
+                    to,
+                } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::FetchClosedPnl {
+                        account,
+                        symbol,
+                        from_ms: from,
+                        to_ms: to,
+                    },
+                },
                 CommandIn::FetchLeverage { command, symbol } => {
                     Self::FetchLeverage { command, symbol }
                 }
@@ -611,6 +636,14 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
         vec![
             ("op", r#""fetchClosedPositions""#),
             ("command", "13"),
+            ("symbol", r#""BTCUSDT""#),
+            ("from", "1"),
+            ("to", "2"),
+        ],
+        vec![
+            ("op", r#""fetchClosedPnl""#),
+            ("command", "13"),
+            ("account", r#""fixture-account""#),
             ("symbol", r#""BTCUSDT""#),
             ("from", "1"),
             ("to", "2"),

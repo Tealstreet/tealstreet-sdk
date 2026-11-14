@@ -4,6 +4,10 @@
 portfolio type and can select INTX, CFM or Spot. Public-only non-spot accounts
 read the drb USDC perpetual catalogue and public stream.
 
+DRB candle history bounds implicit and future-clamped ends with synchronized
+protocol UTC, rounded down to whole milliseconds. Scheduling time can stop
+during suspend and remains reserved for deadlines and pacing. Explicit range
+
 ## Advanced Trade ambiguous writes
 
 Released Advanced Trade creates, edits and cancellations answered with HTTP
@@ -54,3 +58,16 @@ INTX migration message.
 
 Deterministic coverage: `tests/intx_moved.rs` and `tests/startup_resilience.rs`.
 No live credentials or private requests are needed.
+
+## Provider JWT custody
+
+Registry/SDK construction uses `Coinbase::with_signing`; only public JWT bindings
+and opaque references reach the venue. Private REST and both private subscription
+frames sign at dispatch. Raw `Coinbase::new` remains the local compatibility API.
+Hosted RemoteSigner sends canonical `coinbase-jws` bytes; PayloadSigner is REST
+only and cannot authenticate a private socket. Pre-dispatch signing refusal
+uses `trading_unsent`, preserving NotSent rather than transport-loss Unknown.
+Definite NotSent releases only the reservation acquired by that attempt; it
+must neither clear nor restart reconciliation for an older Unknown placement.
+The caller contract, algorithm selection and S2/S3 coordination boundary are in
+`docs/plans/callers/coinbase-hosted-signing.md` at the root.

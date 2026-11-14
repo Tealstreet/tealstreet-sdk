@@ -6,6 +6,7 @@ mod seed_read;
 mod sign;
 pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
+mod split_report;
 mod trading;
 mod wire;
 

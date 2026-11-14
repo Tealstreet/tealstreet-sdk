@@ -173,9 +173,246 @@ fn body(request: &HttpRequest) -> &str {
 }
 
 #[test]
+fn second_review_perp_remainder_keeps_ts_protection() {
+    // reference/bybit/bybit.exchange.ts:2723-2731 restores the original request on the remainder.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
+    for (amount, expected, sum) in [
+        (26., &["4", "4", "4", "4", "4", "4", "1"][..], 25.),
+        (10., &["5", "5"][..], 10.),
+    ] {
+        let mut h = ready(Variant::Linear);
+        let mut markets = h.engine.store().markets().to_vec();
+        let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+        market.precision.amount = 1.;
+        market.limits.amount.max = 5.;
+        market.limits.amount.min = 1.;
+        h.engine.store_mut().set_markets(markets);
+        let mut opts = order("BTCUSDT", amount);
+        opts.stop_loss = Some(90.);
+        opts.take_profit = Some(110.);
+        place(&mut h, 901, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let rows = sent["request"].as_array().unwrap();
+        let quantities: Vec<_> = rows
+            .iter()
+            .map(|row| row["qty"].as_str().unwrap())
+            .collect();
+        assert_eq!(quantities, expected);
+        assert_eq!(
+            quantities
+                .iter()
+                .map(|q| q.parse::<f64>().unwrap())
+                .sum::<f64>(),
+            sum
+        );
+        for (index, row) in rows.iter().enumerate() {
+            let protected = index == 0 || (amount == 26. && index == rows.len() - 1);
+            for (key, value) in [
+                ("stopLoss", "90"),
+                ("takeProfit", "110"),
+                ("slTriggerBy", "MarkPrice"),
+                ("tpTriggerBy", "LastPrice"),
+            ] {
+                assert_eq!(
+                    row.get(key).and_then(|v| v.as_str()),
+                    protected.then_some(value),
+                    "amount={amount}, row={index}, key={key}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn second_review_native_unknown_emits_telemetry_and_journal() {
+    for code in [10016, 110007] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 902, vec![order("BTCUSDT", 1.); 3]);
+        let prefix = h.take("/v5/order/create");
+        h.reply(
+            prefix.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
+        );
+        let uncertain = h.take("/v5/order/create");
+        h.reply(
+            uncertain.id,
+            200,
+            &serde_json::json!({"retCode":code,"retMsg":"native result"}).to_string(),
+        );
+        if code == 10016 {
+            support::assert_unknown_pin(&mut h, 902, &["known-prefix"], 1, 3);
+            let events: Vec<_> = h
+                .notices
+                .iter()
+                .filter_map(|notice| match notice {
+                    safe_cex_engine::Notice::Event(event)
+                        if event.code == "order.outcome_unknown" =>
+                    {
+                        Some(event)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                events.len(),
+                1,
+                "HTTP-200 native Unknown must emit telemetry"
+            );
+            assert_eq!(events[0].level, safe_cex_engine::log::Level::Warn);
+            assert!(events[0].message.contains(support::ENGINE_UNKNOWN_TEXT));
+            assert!(events[0].fields.iter().any(|(key, value)| *key == "command"
+                && *value == safe_cex_engine::log::Value::Num(902.)));
+            let error = applied_failure(&h, 902);
+            let safe_cex_engine::write_plan::ElementResult::Unknown { error } =
+                &error.elements.as_ref().unwrap()[1].result
+            else {
+                panic!("native Unknown journal row")
+            };
+            assert!(error.message.contains(support::ENGINE_UNKNOWN_TEXT));
+        } else {
+            assert!(!h.notices.iter().any(|notice| matches!(notice, safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown")));
+            assert!(!h.unknown.contains(&902));
+        }
+    }
+}
+
+fn assert_allocation_quantities(
+    variant: Variant,
+    amount: f64,
+    max: f64,
+    step: f64,
+    expected: &[&str],
+    expected_sum: f64,
+) {
+    let mut h = ready(variant);
+    let mut markets = h.engine.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.max = max;
+    market.limits.amount.min = step;
+    h.engine.store_mut().set_markets(markets);
+    place(&mut h, 900, vec![order("BTCUSDT", amount)]);
+    if h.has_request("/v5/position/list") {
+        resolve_mode(&mut h, "BTCUSDT");
+    }
+    let mut quantities = Vec::new();
+    let mut ids = Vec::new();
+    while h.has_request("/v5/order/create") {
+        assert!(ids.len() < 30, "unexpected additional allocation writes");
+        let batch = h.has_request("/v5/order/create-batch");
+        let request = h.take(if batch {
+            "/v5/order/create-batch"
+        } else {
+            "/v5/order/create"
+        });
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let rows = if batch {
+            sent["request"].as_array().unwrap().clone()
+        } else {
+            vec![sent]
+        };
+        let mut results = Vec::new();
+        for row in &rows {
+            quantities.push(row["qty"].as_str().unwrap().to_owned());
+            let id = format!("lot-{}", ids.len());
+            results.push(serde_json::json!({"orderId": id}));
+            ids.push(id);
+        }
+        let response = if batch {
+            let statuses: Vec<_> = rows
+                .iter()
+                .map(|_| serde_json::json!({"code":0,"msg":"OK"}))
+                .collect();
+            serde_json::json!({"retCode":0,"result":{"list":results},"retExtInfo":{"list":statuses}})
+        } else {
+            serde_json::json!({"retCode":0,"result":results[0]})
+        };
+        h.reply(request.id, 200, &response.to_string());
+        h.advance(25.0);
+    }
+    assert_eq!(
+        quantities, expected,
+        "{variant:?}: amount={amount}, max={max}, step={step}"
+    );
+    let total: f64 = quantities.iter().map(|q| q.parse::<f64>().unwrap()).sum();
+    assert_eq!(safe_cex_engine::num::adjust(total, step), expected_sum);
+    assert_eq!(
+        h.result(900),
+        Some(&Ok(serde_json::to_string(&ids).unwrap()))
+    );
+    assert!(!h.unknown.contains(&900));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn perp_lot_allocation_matches_legacy_ts_audit() {
+    // reference/bybit/bybit.exchange.ts:2718-2731, including rounded totals below the requested amount.
+    for (amount, max, step, expected, expected_sum) in [
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
+        (
+            26.0,
+            5.0,
+            1.0,
+            &["4", "4", "4", "4", "4", "4", "1"][..],
+            25.,
+        ),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
+        (11.0, 5.0, 1.0, &["3", "3", "3", "1"][..], 10.),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
+        (12.0, 5.0, 1.0, &["3", "3", "3", "2"][..], 11.),
+        (10.0, 5.0, 1.0, &["5", "5"][..], 10.),
+        (7.0, 3.0, 0.5, &["2", "2", "2", "1"][..], 7.),
+        (
+            1.0005,
+            0.3,
+            0.001,
+            &["0.225", "0.225", "0.225", "0.225", "0.101"][..],
+            1.001,
+        ),
+    ] {
+        assert_allocation_quantities(Variant::Linear, amount, max, step, expected, expected_sum);
+    }
+}
+
+#[test]
+fn spot_lot_allocation_retains_incoming_spot_parity() {
+    for (amount, max, step, expected, expected_sum) in [
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 25 of requested 26); kept for exact TS parity per Sam's decision
+        (
+            26.0,
+            5.0,
+            1.0,
+            &["4", "4", "4", "4", "4", "4", "1"][..],
+            25.,
+        ),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
+        (11.0, 5.0, 1.0, &["3", "3", "3", "1"][..], 10.),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
+        (12.0, 5.0, 1.0, &["3", "3", "3", "2"][..], 11.),
+        (10.0, 5.0, 1.0, &["5", "5"][..], 10.),
+        (7.0, 3.0, 0.5, &["2", "2", "2", "1"][..], 7.),
+        (
+            1.0005,
+            0.3,
+            0.001,
+            &["0.225", "0.225", "0.225", "0.225", "0.101"][..],
+            1.001,
+        ),
+    ] {
+        assert_allocation_quantities(Variant::Spot, amount, max, step, expected, expected_sum);
+    }
+}
+
+#[test]
 fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
-    // Preserve two and three children under the 500-unit market cap.
-    for (amount, count) in [(900.0, 2), (1400.0, 3)] {
+    // Equal TS lots plus remainder under the 500-unit market cap.
+    for (amount, quantities) in [
+        (900.0, &["250", "250", "400"][..]),
+        (1400.0, &["333.333", "333.333", "333.333", "400"][..]),
+    ] {
         let mut h = ready(Variant::Demo);
         let mut opts = order("BTCUSDT", amount);
         opts.kind = OrderType::Market;
@@ -185,7 +422,23 @@ fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
         let request = h.take("/v5/order/create-batch");
         let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
         let children = sent["request"].as_array().unwrap();
-        assert_eq!(children.len(), count);
+        let count = quantities.len();
+        assert_eq!(
+            children
+                .iter()
+                .map(|child| child["qty"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            quantities
+        );
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 1399.999 of requested 1400); kept for exact TS parity per Sam's decision
+        let total: f64 = children
+            .iter()
+            .map(|child| child["qty"].as_str().unwrap().parse::<f64>().unwrap())
+            .sum();
+        assert_eq!(
+            safe_cex_engine::num::adjust(total, 0.001),
+            if amount == 1400. { 1399.999 } else { 900. }
+        );
         assert!(
             children
                 .iter()
@@ -335,7 +588,9 @@ fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
 }
 
 #[test]
-fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
+fn second_review_inverse_clamps_to_ts_maximum() {
+    // reference/bybit/bybitinverse.exchange.ts:1523-1541 clamps before :1614-1636 allocates.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 25.6); kept for exact TS parity per Sam's decision
     let mut h = ready(Variant::Inverse);
     place(&mut h, 1, vec![order("BTCUSD", 25.6)]);
     let mode = h.take("/v5/position/list");
@@ -347,8 +602,23 @@ fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
     );
     let request = h.take("/v5/order/create-batch");
     assert!(body(&request).contains("\"category\":\"inverse\""));
-    assert_eq!(body(&request).matches("\"qty\":\"10\"").count(), 2);
-    assert_eq!(body(&request).matches("\"qty\":\"6\"").count(), 1);
+    let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+    assert_eq!(
+        sent["request"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["qty"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["10"]
+    );
+    let total: f64 = sent["request"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["qty"].as_str().unwrap().parse::<f64>().unwrap())
+        .sum();
+    assert_eq!(total, 10.);
 }
 
 #[test]
@@ -378,6 +648,117 @@ fn spot_market_buys_use_base_amount_and_single_endpoint() {
         r#"{"retCode":0,"result":{"orderId":"spot"}}"#,
     );
     assert_eq!(h.result(2), Some(&Ok("[\"spot\"]".into())));
+}
+
+fn spot_split_plan_market(minimum: &str, maximum: &str) -> Harness {
+    let instruments = support::INSTRUMENTS
+        .replace(
+            "\"minOrderQty\":\"0.001\"",
+            &format!("\"minOrderQty\":\"{minimum}\""),
+        )
+        .replace(
+            "\"maxOrderQty\":\"1190.000\"",
+            &format!("\"maxOrderQty\":\"{maximum}\""),
+        );
+    let h = ready_listing_with_instruments(options(Variant::Spot), EMPTY, Some(instruments));
+    let market = h.engine.store().market("BTCUSDT").expect("fixture market");
+    assert_eq!(
+        market.limits.amount.min,
+        minimum.parse::<f64>().expect("fixture minimum")
+    );
+    assert_eq!(
+        market.limits.amount.max,
+        maximum.parse::<f64>().expect("fixture maximum")
+    );
+    assert_eq!(market.precision.amount, 0.001);
+    h
+}
+
+fn protected_spot_split_order(amount: f64) -> PlaceOrderOpts {
+    let mut opts = order("BTCUSDT", amount);
+    opts.take_profit = Some(110.);
+    opts.stop_loss = Some(90.);
+    opts
+}
+
+fn assert_spot_split_plan_quantities(amount: f64, quantities: &[&str]) {
+    let mut h = spot_split_plan_market("0.01", "1190");
+    place(&mut h, 92, vec![protected_spot_split_order(amount)]);
+    let mut total = 0.;
+    for (index, quantity) in quantities.iter().enumerate() {
+        let request = h.take("/v5/order/create");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
+        assert_eq!(sent["qty"], *quantity);
+        let protected = index == 0 || index + 1 == quantities.len();
+        for field in ["takeProfit", "stopLoss", "tpOrderType", "slOrderType"] {
+            assert_eq!(sent.get(field).is_some(), protected, "{field} lot {index}");
+        }
+        let qty = quantity.parse::<f64>().expect("fixture quantity");
+        assert!((0.01..=1190.).contains(&qty));
+        assert_eq!(safe_cex_engine::num::adjust(qty, 0.001), qty);
+        total += qty;
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({
+                "retCode": 0, "result": {"orderId": format!("lot-{index}")}
+            })
+            .to_string(),
+        );
+    }
+    assert_eq!(total, amount);
+    assert!(matches!(h.result(92), Some(Ok(_))));
+    assert!(h.requests.is_empty());
+}
+
+#[test]
+fn spot_split_plan_exact_maximum_keeps_both_stops() {
+    assert_spot_split_plan_quantities(1190., &["1190"]);
+}
+
+#[test]
+fn spot_split_plan_exact_minimum_tail_uses_legacy_main_lots() {
+    assert_spot_split_plan_quantities(1190.01, &["595", "595", "0.01"]);
+}
+
+#[test]
+fn spot_ts_parity_does_not_preflight_small_main_lots_or_off_grid_caps() {
+    // TS reference/bybit/bybitspot.exchange.ts:828-841 rounds each main lot independently.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | split-tail
+    for (minimum, maximum, amount, quantities, expected_sum) in [
+        ("0.75", "1", 1.001, vec!["0.5", "0.5", "0.001"], 1.001),
+        (
+            "0.01",
+            "1190.0005",
+            1190.02,
+            vec!["595.001", "595.001", "0.019"],
+            1190.021,
+        ),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 0 of requested 0.002); kept for exact TS parity per Sam's decision
+        ("0.0001", "0.0004", 0.002, vec!["0"; 5], 0.0),
+    ] {
+        let mut h = spot_split_plan_market(minimum, maximum);
+        place(&mut h, 196, vec![protected_spot_split_order(amount)]);
+        let mut sum = 0.0;
+        for (index, quantity) in quantities.iter().enumerate() {
+            let request = h.take("/v5/order/create");
+            let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(wire["qty"], *quantity);
+            sum += wire["qty"].as_str().unwrap().parse::<f64>().unwrap();
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({"retCode":0,"result":{"orderId":format!("wire-{index}")}})
+                    .to_string(),
+            );
+        }
+        assert!(matches!(h.result(196), Some(Ok(_))));
+        assert!(
+            (sum - expected_sum).abs() < 1e-9,
+            "sum {sum}, expected {expected_sum}"
+        );
+        assert!(!h.has_request("/v5/order/create"));
+    }
 }
 
 #[test]
@@ -995,6 +1376,22 @@ fn demo_cancel_all_without_affected_identity_cannot_retire_or_tombstone_live_row
             "{ack}"
         );
         assert!(h.result(92).unwrap().is_err(), "{ack}");
+        if h.has_request("/v5/order/realtime") {
+            // Failed scope proof now seals Unknown and requests the engine's fresh read.
+            assert_eq!(outcome(&h, 92), Some(safe_cex_engine::Outcome::Unknown));
+            assert!(h.has_request("/v5/order/realtime"));
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get)
+            );
+            h.respond(
+                "settleCoin=USDT&limit=50",
+                200,
+                &format!(r#"{{"retCode":0,"result":{{"list":[{row}],"nextPageCursor":""}}}}"#),
+            );
+            h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        }
         assert!(!h.has_request("/v5/order/realtime"), "{ack}");
     }
 }
@@ -1184,6 +1581,7 @@ fn cancel_all_omitting_a_stop_the_venue_already_removed_succeeds_after_the_read(
     h.advance(0.0);
     assert_eq!(h.result(96), Some(&Ok("[]".into())));
     assert!(h.engine.store().order("stop-1").is_none());
+    assert!(!h.notices.iter().any(|n| matches!(n, safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown")));
 }
 
 #[test]
@@ -1223,6 +1621,62 @@ fn cancel_all_whose_read_fails_says_the_order_is_unconfirmed() {
     assert!(
         error.contains("could not confirm 1 order(s) on BTCUSDT: stop-1"),
         "{error}"
+    );
+}
+
+#[test]
+fn cancel_all_failed_read_retains_unknown_scope_and_warning() {
+    use safe_cex_engine::write_plan::ElementResult;
+    use safe_cex_engine::{Notice, Outcome};
+    let mut h = cancel_all_omitting_a_stop(998);
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        r#"{"retCode":0,"result":{}}"#,
+    );
+    h.advance(0.0);
+    let error = applied_failure(&h, 998);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    let rows = error.elements.as_ref().expect("cancel-all scope journal");
+    assert_eq!(rows.len(), 1);
+    assert!(
+        matches!(&rows[0].result, ElementResult::Unknown { error } if error.outcome == Some(Outcome::Unknown))
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|p| p.order_ids.is_empty())
+    );
+    let events: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::Event(event) if event.code == "order.outcome_unknown" => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert!(
+        events[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "command" && *value == 998u32.into())
+    );
+    assert_eq!(
+        h.engine.store().order("stop-1").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    h.advance(120_000.);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method != safe_cex_engine::Method::Get)
     );
 }
 
@@ -1451,6 +1905,9 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
                 }
             };
             h.reply(request.id, 200, reply);
+            if failed == Some(filter) {
+                break;
+            }
         }
         for (id, filter) in [
             ("ordinary", "Order"),
@@ -1460,7 +1917,11 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
         ] {
             assert_eq!(
                 h.engine.store().order(id).unwrap().status,
-                if failed == Some(filter) {
+                if failed.is_some_and(|failed| {
+                    let filters = ["Order", "StopOrder", "tpslOrder"];
+                    filters.iter().position(|item| *item == filter)
+                        >= filters.iter().position(|item| *item == failed)
+                }) {
                     safe_cex_engine::model::OrderStatus::Open
                 } else {
                     safe_cex_engine::model::OrderStatus::Canceled
@@ -1482,7 +1943,7 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     let create = h.take("/v5/order/create");
     let id = link(&create);
     let original = body(&create).to_owned();
-    assert!(original.contains("\"triggerDirection\":\"1\""));
+    assert!(original.contains("\"triggerDirection\":1"));
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
@@ -2123,6 +2584,54 @@ fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
         );
         assert_eq!(h.unknown == [2], unknown, "{case}");
     }
+}
+
+fn assert_native_rate_limit_create_unknown(code: i64) {
+    for variant in [Variant::Spot, Variant::Demo] {
+        let mut h = ready(variant);
+        place(&mut h, 9069, vec![order("BTCUSDT", 0.1)]);
+        let path = if variant.is_spot() {
+            "/v5/order/create"
+        } else {
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/create-batch"
+        };
+        let request = h.take(path);
+        h.reply(
+            request.id,
+            200,
+            &format!(r#"{{"retCode":{code},"retMsg":"rate limited","result":{{}}}}"#),
+        );
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9069,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("one terminal create failure");
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(error.venue_code, Some(code.to_string()));
+        h.advance(1500.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "a released rate-limited create cannot fall back or resend"
+        );
+    }
+}
+
+#[test]
+fn native_system_frequency_limit_keeps_released_creates_unknown() {
+    assert_native_rate_limit_create_unknown(429);
+}
+
+#[test]
+fn native_legacy_ip_limit_keeps_released_creates_unknown() {
+    assert_native_rate_limit_create_unknown(10018);
 }
 
 fn demo_reduce_only_resting(h: &mut Harness) {
@@ -3708,12 +4217,22 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 91, vec![order("BTCUSDT", 1.0)]);
     place(&mut h, 92, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|request| request.url.contains("/v5/order/create"))
+            .count(),
+        1
+    );
     let create = h.take("/v5/order/create");
     let id = link(&create);
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
     });
+    let expected = format!(
+        "The outcome is unknown. Check Open Orders. HyroTrader order outcome is unknown (orderLinkId {id}). Reconcile before placing a replacement: lost"
+    );
     for command in [91, 92] {
         let notices: Vec<_> = h
             .command_notices
@@ -3727,7 +4246,12 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
             .iter()
             .filter(|(c, _)| *c == command)
             .collect();
+        assert_eq!(errors.len(), 1, "command {command}");
+        assert_eq!(errors[0].1, expected, "command {command}");
         assert!(errors[0].1.contains(&id));
+        let failure = applied_failure(&h, command);
+        assert_eq!(failure.message, expected, "command {command}");
+        assert!(failure.presents, "command {command}");
         assert_eq!(
             outcome(&h, command),
             Some(safe_cex_engine::Outcome::Unknown)
@@ -3740,6 +4264,9 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
                 .contains(&id)
         );
     }
+    assert!(!h.has_request("/v5/order/create"));
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/order/create"));
 }
 
 /// A Hyro create refused 10002 is resent once, signed with the clock Bybit
@@ -3950,9 +4477,9 @@ fn brazil_limit_ack_publishes_locally_but_plain_linear_waits_for_the_stream() {
     }
 }
 
-// B3: a named inverse symbol switches alone.
+// Legacy TS discards symbol selection and switches linear USDT once.
 #[test]
-fn inverse_position_mode_switches_a_named_symbol_alone() {
+fn legacy_position_mode_switch_uses_linear_usdt_even_with_an_inverse_symbol() {
     let mut h = ready(Variant::Inverse);
     h.command(Command::SetPositionMode {
         command: 1,
@@ -3962,7 +4489,7 @@ fn inverse_position_mode_switches_a_named_symbol_alone() {
     let request = h.take("/v5/position/switch-mode");
     assert_eq!(
         body(&request),
-        r#"{"category":"inverse","symbol":"BTCUSD","mode":3}"#
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
     );
     h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
     assert_eq!(h.result(1), Some(&Ok("[]".into())));
@@ -4038,42 +4565,33 @@ fn a_position_stop_quantity_rounding_to_zero_is_refused() {
     );
 }
 
-// B3: one coin refusing leaves the other coins to be tried.
+// TS position-mode uses a single linear/USDT command.
 #[test]
-fn inverse_position_mode_tries_every_coin_past_a_refusal() {
+fn after_failure_settings_refusal_does_not_release_a_second_coin() {
+    // TS one linear/USDT request: reference/bybit/bybitinverse.exchange.ts:2318-2335.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | position-mode coin loop
     let mut h = ready(Variant::Inverse);
-    let mut second = h.engine.store().markets()[0].clone();
-    second.base = "ZZZ".into();
-    second.symbol = "ZZZUSD".into();
-    second.id = "ZZZUSD".into();
-    h.engine.store_mut().update_markets(|_| {});
-    let mut markets = h.engine.store().markets().to_vec();
-    markets.push(second);
-    h.engine.store_mut().set_markets(markets);
     h.command(Command::SetPositionMode {
         command: 1,
         hedged: true,
         symbol: None,
     });
-    h.respond(
-        "/v5/position/switch-mode",
-        200,
-        r#"{"retCode":10001,"retMsg":"refused"}"#,
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
     );
-    h.advance(250.0);
-    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+    h.reply(request.id, 200, r#"{"retCode":10001,"retMsg":"refused"}"#);
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
+    assert!(matches!(h.result(1), Some(Err(_))));
 }
 
 #[test]
-fn inverse_position_mode_paces_its_coins() {
+fn legacy_position_mode_success_has_no_per_coin_suffix() {
+    // TS one setting write: reference/bybit/bybitinverse.exchange.ts:2318-2335.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | settings Applied adoption
     let mut h = ready(Variant::Inverse);
-    let mut second = h.engine.store().markets()[0].clone();
-    second.base = "ZZZ".into();
-    second.symbol = "ZZZUSD".into();
-    second.id = "ZZZUSD".into();
-    let mut markets = h.engine.store().markets().to_vec();
-    markets.push(second);
-    h.engine.store_mut().set_markets(markets);
     h.command(Command::SetPositionMode {
         command: 1,
         hedged: true,
@@ -4084,13 +4602,9 @@ fn inverse_position_mode_paces_its_coins() {
         200,
         r#"{"retCode":0,"result":{}}"#,
     );
-    assert!(
-        !h.has_request("/v5/position/switch-mode"),
-        "{:?}",
-        h.paths()
-    );
-    h.advance(250.0);
-    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
 }
 
 // A cached mode Bybit just refused is re-read before the next order.
@@ -4191,6 +4705,573 @@ fn managed_cancel_batch_reordered_partial_success_only_retires_the_accepted_orde
         "a proven refusal stays a refusal"
     );
     assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn applied_batch_cancel_unknown_row_records_only_confirmed_cancellations() {
+    let mut h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two"},{"orderId":"one"}]},"retExtInfo":{"list":[{"code":10016,"msg":"unknown cancellation outcome"},{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert!(h.engine.store().order("one").is_none());
+    assert_eq!(
+        h.engine.store().order("two").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open,
+        "an Unknown row must not confirm its target's cancellation"
+    );
+    h.advance(1_000.0);
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get),
+        "no cancellation replay or compensating write"
+    );
+    let errors: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 120,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        errors[0].partial.as_ref().unwrap().order_ids.is_empty(),
+        "cancellation targets are existing orders, never newly created IDs: {:?}",
+        errors[0]
+    );
+    assert_eq!(
+        serde_json::to_value(errors[0]).unwrap()["partial"],
+        serde_json::json!({ "orderIds": [], "total": 2, "failedIndex": 1 }),
+        "the JS boundary still needs the attempted count and Unknown target index"
+    );
+    let elements = serde_json::to_value(errors[0]).unwrap()["elements"].clone();
+    assert_eq!(
+        elements[0],
+        serde_json::json!({ "index": 0, "status": "applied", "effect": "cancel", "targetOrderId": "one" })
+    );
+    assert_eq!(elements[1]["index"], 1);
+    assert_eq!(elements[1]["status"], "unknown");
+    assert_eq!(elements[1]["error"]["outcome"], "unknown");
+    assert_eq!(elements[1]["error"]["venueCode"], "10016");
+    assert_eq!(elements.as_array().unwrap().len(), 2);
+}
+
+fn cancel_unknown_pair() -> Harness {
+    managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two"},{"orderId":"one"}]},"retExtInfo":{"list":[{"code":10016,"msg":"unknown cancellation outcome"},{"code":0,"msg":"OK"}]}}"#,
+    )
+}
+
+#[test]
+fn applied_cancel_unknown_has_actionable_guidance_and_native_diagnostics() {
+    let h = cancel_unknown_pair();
+    let error = spot_parity_error(&h, 120);
+    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(error.venue_code.as_deref(), Some("10016"));
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("unknown cancellation outcome")
+    );
+    assert_eq!(
+        error.kind,
+        Some(safe_cex_engine::ErrorKind::VenueUnavailable)
+    );
+}
+
+#[test]
+fn applied_cancel_unknown_emits_one_bounded_outcome_event() {
+    let mut h = cancel_unknown_pair();
+    h.advance(1_000.0);
+    let events: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(
+        events[0].message,
+        "The outcome is unknown. Check Open Orders"
+    );
+    assert_eq!(
+        events[0].fields,
+        vec![
+            ("command", 120_u32.into()),
+            ("outcome", "unknown".into()),
+            ("attemptedCount", 2_f64.into()),
+            ("appliedCount", 1_f64.into()),
+            ("unknownCount", 1_f64.into()),
+        ]
+    );
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
+fn applied_cancel_confirmed_and_refused_rows_emit_no_unknown_event() {
+    for code in [0, 10005] {
+        let h = managed_cancel_pair(&format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"orderId":"one"}},{{"orderId":"two"}}]}},"retExtInfo":{{"list":[{{"code":0}},{{"code":{code},"msg":"permission denied"}}]}}}}"#
+        ));
+        assert!(!h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown")));
+        if code == 0 {
+            assert_eq!(h.result(120), Some(&Ok("[]".into())));
+        } else {
+            let error = spot_parity_error(&h, 120);
+            assert_eq!(
+                error.outcome, None,
+                "the existing known-partial classification is retained"
+            );
+            assert_eq!(error.venue_code.as_deref(), Some("10005"));
+            assert_eq!(error.message, "Bybit cancel was not confirmed");
+        }
+    }
+}
+
+#[test]
+fn applied_cancel_reports_prior_batches_and_an_unsent_tail_after_unknown() {
+    let mut h = ready(Variant::Demo);
+    let ids: Vec<String> = (0..21).map(|index| format!("target-{index}")).collect();
+    let rows: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "symbol":"BTCUSDT", "orderId":id, "orderStatus":"New", "orderType":"Limit",
+                "side":"Buy", "price":"100", "qty":"1", "leavesQty":"1"
+            })
+        })
+        .collect();
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"order", "data":rows}).to_string(),
+    );
+    h.command(Command::CancelOrders {
+        command: 123,
+        ids: ids.clone(),
+    });
+    for batch in 0..2 {
+        let request = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let expected: Vec<_> = ids[batch * 10..batch * 10 + 10]
+            .iter()
+            .map(|id| serde_json::json!({"symbol":"BTCUSDT", "orderId":id}))
+            .collect();
+        assert_eq!(wire["request"], serde_json::json!(expected));
+        let targets: Vec<_> = ids[batch * 10..batch * 10 + 10]
+            .iter()
+            .rev()
+            .map(|id| serde_json::json!({"orderId":id}))
+            .collect();
+        let statuses: Vec<_> = ids[batch * 10..batch * 10 + 10]
+            .iter()
+            .rev()
+            .map(|id| serde_json::json!({"code":if id == "target-11" {10016} else {0}}))
+            .collect();
+        h.reply(request.id, 200, &serde_json::json!({"retCode":0,"result":{"list":targets},"retExtInfo":{"list":statuses}}).to_string());
+        h.advance(1_000.0);
+    }
+    let error = spot_parity_error(&h, 123);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().total, Some(21));
+    assert_eq!(error.partial.as_ref().unwrap().failed_index, Some(11));
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(elements.as_array().unwrap().len(), 21);
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(elements[index]["index"], index);
+        if index == 11 {
+            assert_eq!(elements[index]["status"], "unknown");
+        } else if index == 20 {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":20,"status":"notSent"})
+            );
+        } else {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":index,"status":"applied","effect":"cancel","targetOrderId":id})
+            );
+        }
+        assert_eq!(
+            h.engine.store().order(id).is_some(),
+            index == 11 || index == 20
+        );
+    }
+    assert!(error.partial.as_ref().unwrap().order_ids.is_empty());
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+    let events: Vec<_> = h
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert!(
+        events[0]
+            .fields
+            .contains(&("attemptedCount", 20_f64.into()))
+    );
+    assert!(events[0].fields.contains(&("appliedCount", 19_f64.into())));
+    assert!(events[0].fields.contains(&("unknownCount", 1_f64.into())));
+}
+
+fn cancel_journal_started(ids: Vec<String>) -> Harness {
+    cancel_journal_started_with(Variant::Demo, ids)
+}
+
+fn cancel_journal_started_with(variant: Variant, ids: Vec<String>) -> Harness {
+    let mut h = ready(variant);
+    let rows: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "symbol":"BTCUSDT", "orderId":id, "orderStatus":"New", "orderType":"Limit",
+                "side":"Buy", "price":"100", "qty":"1", "leavesQty":"1"
+            })
+        })
+        .collect();
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"order", "data":rows}).to_string(),
+    );
+    h.command(Command::CancelOrders { command: 124, ids });
+    h
+}
+
+fn cancel_journal_first_batch(ids: &[String]) -> Harness {
+    let mut h = cancel_journal_started(ids.to_vec());
+    let request = h.take("/v5/order/cancel-batch");
+    let targets: Vec<_> = ids[..10]
+        .iter()
+        .map(|id| serde_json::json!({"orderId":id}))
+        .collect();
+    h.reply(
+        request.id,
+        200,
+        &serde_json::json!({
+            "retCode":0, "result":{"list":targets},
+            "retExtInfo":{"list":vec![serde_json::json!({"code":0}); 10]}
+        })
+        .to_string(),
+    );
+    h
+}
+
+fn cancel_journal_second_batch(ids: &[String]) -> Harness {
+    let mut h = cancel_journal_first_batch(ids);
+    h.advance(1_000.0);
+    h
+}
+
+fn assert_cancel_journal_terminal(h: &mut Harness, ids: &[String], states: &[&str]) {
+    h.advance(1_000.0);
+    let error = spot_parity_error(h, 124);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(
+        elements
+            .as_array()
+            .expect("complete cancellation journal")
+            .len(),
+        ids.len()
+    );
+    for (index, (id, state)) in ids.iter().zip(states).enumerate() {
+        assert_eq!(elements[index]["index"], index);
+        assert_eq!(
+            elements[index]["status"], *state,
+            "caller occurrence {index}"
+        );
+        if *state == "applied" {
+            assert_eq!(elements[index]["effect"], "cancel");
+            assert_eq!(elements[index]["targetOrderId"], *id);
+        } else if *state == "unknown" {
+            assert_eq!(elements[index]["error"]["outcome"], "unknown");
+        } else {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":index,"status":"notSent"})
+            );
+        }
+    }
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get),
+        "no replay or later cancellation"
+    );
+}
+
+fn cancel_journal_terminal_case(failure: &str) {
+    let ids: Vec<_> = (0..21).map(|index| format!("terminal-{index}")).collect();
+    let mut h = cancel_journal_second_batch(&ids);
+    let request = h.take("/v5/order/cancel-batch");
+    match failure {
+        "http" => h.reply(request.id, 503, "unavailable"),
+        "transport" => h.event(Event::HttpFailed {
+            request: request.id,
+            error: "transport lost",
+        }),
+        "timeout" => h.advance(20_001.0),
+        "expiry" => {
+            // Deliver overdue callbacks after a host-loop pause beyond
+            // the whole Plan deadline. The engine must expire the Plan first;
+            // walking intermediate due times would only test call timeout.
+            h.now += 200_000.0;
+            h.advance(0.0);
+        }
+        "malformed" => h.reply(request.id, 200, r#"{"retCode":0}"#),
+        _ => panic!("unknown test failure"),
+    }
+    if matches!(failure, "expiry" | "timeout") {
+        // Whole-Plan expiry owns the final seal: native cleanup contributes
+        // passive elements, while the engine retains the physical timeout
+        // fact. Call timeout instead uses the venue's presented terminal text.
+        let error = spot_parity_error(&h, 124);
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+        assert_eq!(
+            error
+                .message
+                .starts_with("The outcome is unknown. Check Open Orders"),
+            failure == "timeout",
+            "whole-Plan expiry must own the seal; call timeout remains venue-presented"
+        );
+    }
+    let mut states = vec!["applied"; 10];
+    states.extend(["unknown"; 10]);
+    states.push("notSent");
+    assert_cancel_journal_terminal(&mut h, &ids, &states);
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(h.engine.store().order(id).is_some(), index >= 10);
+    }
+}
+
+#[test]
+fn cancel_journal_http_failure_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("http");
+}
+
+#[test]
+fn cancel_journal_transport_failure_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("transport");
+}
+
+#[test]
+fn cancel_journal_timeout_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("timeout");
+}
+
+#[test]
+fn cancel_journal_plan_expiry_keeps_confirmed_prefix_and_unsent_tail() {
+    cancel_journal_terminal_case("expiry");
+}
+
+#[test]
+fn cancel_journal_plan_expiry_between_batches_keeps_confirmed_prefix() {
+    let ids: Vec<_> = (0..21).map(|index| format!("paced-{index}")).collect();
+    let mut h = cancel_journal_first_batch(&ids);
+    // Deliver the pacing/expiry callbacks after a host-loop pause. Advancing
+    // through every intermediate timer would release the next batch first.
+    h.now += 200_000.0;
+    h.advance(0.0);
+    let error = spot_parity_error(&h, 124);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    assert_eq!(
+        error.outcome, None,
+        "only confirmed effects and never-sent calls"
+    );
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(
+        elements
+            .as_array()
+            .expect("paced cancellation journal")
+            .len(),
+        21
+    );
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(elements[index]["index"], index);
+        if index < 10 {
+            assert_eq!(elements[index]["status"], "applied");
+            assert_eq!(elements[index]["effect"], "cancel");
+            assert_eq!(elements[index]["targetOrderId"], *id);
+        } else {
+            assert_eq!(
+                elements[index],
+                serde_json::json!({"index":index,"status":"notSent"})
+            );
+        }
+    }
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
+fn cancel_journal_malformed_reply_control_keeps_all_occurrences() {
+    cancel_journal_terminal_case("malformed");
+}
+
+#[test]
+fn cancel_journal_repeated_target_keeps_both_mixed_response_orders() {
+    for unknown in [0, 1] {
+        let ids = vec!["one".to_owned(), "one".to_owned()];
+        let mut h = cancel_journal_started(ids.clone());
+        let request = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["request"].as_array().unwrap().len(), 2);
+        let rows: Vec<_> = (0..2)
+            .map(|index| {
+                serde_json::json!({
+                    "code":if index == unknown {10016} else {0}, "msg":"native cancel outcome"
+                })
+            })
+            .collect();
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":0,"retExtInfo":{"list":rows}}).to_string(),
+        );
+        let mut states = ["applied"; 2];
+        states[unknown] = "unknown";
+        assert_cancel_journal_terminal(&mut h, &ids, &states);
+        let events: Vec<_> = h
+            .notices
+            .iter()
+            .filter_map(|notice| match notice {
+                safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown" => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].fields.contains(&("attemptedCount", 2_f64.into())));
+        assert!(events[0].fields.contains(&("appliedCount", 1_f64.into())));
+        assert!(events[0].fields.contains(&("unknownCount", 1_f64.into())));
+    }
+}
+
+#[test]
+fn cancel_journal_repeated_unsent_tail_does_not_inherit_an_earlier_acceptance() {
+    let mut ids: Vec<_> = (0..21).map(|index| format!("repeated-{index}")).collect();
+    ids[20] = ids[0].clone();
+    let mut h = cancel_journal_second_batch(&ids);
+    let request = h.take("/v5/order/cancel-batch");
+    h.reply(request.id, 200, r#"{"retCode":0}"#);
+    let mut states = vec!["applied"; 10];
+    states.extend(["unknown"; 10]);
+    states.push("notSent");
+    assert_cancel_journal_terminal(&mut h, &ids, &states);
+}
+
+#[test]
+fn cancel_journal_private_readiness_refusal_keeps_confirmed_prefix() {
+    let ids = vec!["confirmed".to_owned(), "unsent".to_owned()];
+    let mut h = cancel_journal_started_with(Variant::Hyrotrader, ids.clone());
+    let request = h.take("/v5/order/cancel");
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"confirmed"}}"#,
+    );
+    h.advance(1_000.0);
+    let error = spot_parity_error(&h, 124);
+    assert_eq!(error.message, "HyroTrader private state is recovering");
+    let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+    assert_eq!(
+        elements,
+        serde_json::json!([
+            {"index":0,"status":"applied","effect":"cancel","targetOrderId":"confirmed"},
+            {"index":1,"status":"notSent"}
+        ])
+    );
+    assert!(
+        h.requests
+            .iter()
+            .all(|r| r.method == safe_cex_engine::Method::Get),
+        "private readiness cannot release another cancellation"
+    );
+}
+
+#[test]
+fn cancel_journal_top_level_already_gone_keeps_sent_occurrences_unknown() {
+    top_level_already_gone_case(true);
+}
+
+#[test]
+fn cancel_journal_top_level_already_gone_survives_unproven_http_normalization() {
+    top_level_already_gone_case(false);
+}
+
+fn top_level_already_gone_case(native_failure: bool) {
+    for code in [110001, 170213] {
+        let ids: Vec<_> = (0..21).map(|index| format!("gone-{index}")).collect();
+        let mut h = cancel_journal_started(ids.clone());
+        let request = h.take("/v5/order/cancel-batch");
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":code,"retMsg":"order not exists"}).to_string(),
+        );
+        h.advance(1_000.0);
+        let next = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&next)).unwrap();
+        assert_eq!(wire["request"][0]["orderId"], ids[10]);
+        if native_failure {
+            h.reply(
+                next.id,
+                200,
+                &serde_json::json!({
+                    "retCode":0, "retExtInfo":{"list":vec![
+                        serde_json::json!({"code":10016,"msg":"unknown cancel outcome"});10
+                    ]}
+                })
+                .to_string(),
+            );
+        } else {
+            h.reply(next.id, 503, "unavailable");
+        }
+        let mut states = vec!["unknown"; 20];
+        states.push("notSent");
+        assert_cancel_journal_terminal(&mut h, &ids, &states);
+        let error = spot_parity_error(&h, 124);
+        let elements = serde_json::to_value(error).unwrap()["elements"].clone();
+        if native_failure {
+            assert_eq!(elements[0]["error"]["venueCode"], code.to_string());
+        } else {
+            // The existing unproven-HTTP boundary normalizes Unknown diagnostics.
+            assert_eq!(elements[0]["error"]["kind"], "venueUnavailable");
+        }
+    }
 }
 
 #[test]
@@ -4779,8 +5860,16 @@ fn hyro_a_second_send_cannot_renew_the_earliest_send_retention_window() {
 #[test]
 fn market_quantity_cap_splits_each_reduce_only_child_but_keeps_the_limit_cap() {
     for (kind, reduce_only, expected) in [
-        (OrderType::Market, false, vec![500.0, 500.0, 100.0]),
-        (OrderType::Market, true, vec![500.0, 500.0, 100.0]),
+        (
+            OrderType::Market,
+            false,
+            vec![333.333, 333.333, 333.333, 100.0],
+        ),
+        (
+            OrderType::Market,
+            true,
+            vec![333.333, 333.333, 333.333, 100.0],
+        ),
         (OrderType::Limit, false, vec![1100.0]),
     ] {
         let mut h = ready(Variant::Demo);
@@ -4862,20 +5951,13 @@ fn market_quantity_cap_never_exceeds_limit_cap_and_missing_field_keeps_limit_cap
         let request = h.take("/v5/order/create-batch");
         let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
         assert_eq!(
-            payload["request"][0]["qty"]
-                .as_str()
+            payload["request"]
+                .as_array()
                 .unwrap()
-                .parse::<f64>()
-                .unwrap(),
-            expected
-        );
-        assert_eq!(
-            payload["request"][1]["qty"]
-                .as_str()
-                .unwrap()
-                .parse::<f64>()
-                .unwrap(),
-            1500.0 - expected
+                .iter()
+                .map(|row| row["qty"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["595", "595", "310"]
         );
     }
 }
@@ -5283,4 +6365,1364 @@ fn engine_ambiguity_429_clock_code_cannot_replay() {
             |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
         ));
     }
+}
+
+#[test]
+fn after_failure_hyro_native_refusal_stops_and_reports_each_serial_row() {
+    assert_serial_plan_failure(Some(200));
+}
+
+#[test]
+fn after_failure_hyro_lost_reply_stops_and_reports_unknown_serial_row() {
+    assert_serial_plan_failure(None);
+}
+
+#[test]
+fn after_failure_hyro_server_error_keeps_prefix_pending_and_unsent_rows() {
+    assert_serial_plan_failure(Some(503));
+}
+
+fn assert_serial_plan_failure(status: Option<u16>) {
+    // TS awaits serial creates: reference/bybit/hyrotrader.exchange.ts:352-356; hyrotrader.order-recovery.ts:92-106.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Spot/Hyro serial runtime failure
+    let variant = Variant::Hyrotrader;
+    let mut h = ready(variant);
+    let orders = (0..3)
+        .map(|index| {
+            let mut opts = order("BTCUSDT", 1.0);
+            if variant == Variant::Spot {
+                opts.client_order_id = Some(format!("journal-{index}"));
+            }
+            opts
+        })
+        .collect();
+    place(&mut h, 146, orders);
+    assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
+    let first = h.take("/v5/order/create");
+    let first_link = link(&first);
+    h.reply(first.id, 200, &serde_json::json!({"retCode":0,"result":{"orderId":"placed-first","orderLinkId":first_link}}).to_string());
+    assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
+    let second = h.take("/v5/order/create");
+    let second_link = link(&second);
+    if let Some(status) = status {
+        h.reply(
+            second.id,
+            status,
+            r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+        );
+    } else {
+        h.event(Event::HttpFailed {
+            request: second.id,
+            error: "reply lost",
+        });
+    }
+    let detail = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 146,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .expect("terminal failure");
+    let elements = detail.elements.as_ref().expect("indexed write outcomes");
+    assert_eq!(elements.len(), 3);
+    for (index, row) in elements.iter().enumerate() {
+        assert_eq!(row.element.index, index);
+        if variant == Variant::Spot {
+            assert_eq!(
+                row.element.client_order_id,
+                Some(format!("journal-{index}"))
+            );
+        } else {
+            assert!(
+                row.element
+                    .client_order_id
+                    .as_ref()
+                    .is_some_and(|id| !id.is_empty())
+            );
+        }
+    }
+    assert_eq!(
+        elements[0].element.client_order_id.as_ref(),
+        Some(&first_link)
+    );
+    assert_eq!(
+        elements[1].element.client_order_id.as_ref(),
+        Some(&second_link)
+    );
+    use safe_cex_engine::write_plan::ElementResult;
+    assert!(
+        matches!(&elements[0].result, ElementResult::Placed { order_ids } if order_ids == &["placed-first"])
+    );
+    if status != Some(200) {
+        assert!(
+            matches!(&elements[1].result, ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+        );
+    } else {
+        assert!(
+            matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+        );
+    }
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    assert!(!matches!(
+        detail.outcome,
+        Some(safe_cex_engine::Outcome::NotSent | safe_cex_engine::Outcome::Rejected)
+    ));
+    assert_eq!(
+        detail.partial.as_ref().expect("accepted prefix").order_ids,
+        ["placed-first"]
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "failed row released another write"
+    );
+    h.advance(1_201.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "resend, suffix or rollback write"
+    );
+}
+
+#[test]
+fn legacy_serial_bbo_without_explicit_price_is_still_sent_once() {
+    let mut h = ready(Variant::Inverse);
+    let mut opts = order("BTCUSD", 1.0);
+    opts.price = None;
+    opts.reduce_only = Some(true);
+    opts.client_order_id = Some("bbo-control".into());
+    opts.bybit_bbo = Some(BybitBbo {
+        side_type: "Queue".into(),
+        level: 3.0,
+    });
+    place(&mut h, 143, vec![opts]);
+    assert_eq!(h.requests.len(), 1);
+    resolve_mode(&mut h, "BTCUSD");
+    assert_eq!(h.requests.len(), 1);
+    let request = h.take("/v5/order/create");
+    let sent: serde_json::Value = serde_json::from_str(body(&request)).expect("create body");
+    assert_eq!(sent["bboSideType"], "Queue");
+    assert_eq!(sent["bboLevel"], "3");
+    assert_eq!(sent["reduceOnly"], true);
+    assert_eq!(sent["orderLinkId"], "bbo-control");
+    assert!(sent.get("price").is_none());
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"bbo-accepted","orderLinkId":"bbo-control"}}"#,
+    );
+    assert_eq!(h.result(143), Some(&Ok("[\"bbo-accepted\"]".into())));
+    assert!(h.requests.is_empty());
+}
+
+fn applied_failure(h: &Harness, command: u32) -> &safe_cex_engine::VenueError {
+    h.notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: own,
+                error,
+            } if *own == command => Some(error),
+            _ => None,
+        })
+        .expect("indexed terminal failure")
+}
+
+fn seed_applied_cancel_orders(h: &mut Harness) {
+    let category = if h
+        .engine
+        .store()
+        .market("BTCUSDT")
+        .is_some_and(|market| market.is_spot == Some(true))
+    {
+        "spot"
+    } else {
+        "linear"
+    };
+    let frame = r#"{"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}]}"#.replace("\"category\":\"spot\"", &format!("\"category\":\"{category}\""));
+    h.message("/v5/private", &frame);
+    let base = h
+        .engine
+        .store()
+        .order("parent")
+        .expect("native seed")
+        .clone();
+    let mut orders = vec![base.clone()];
+    for index in 0..3 {
+        let mut order = base.clone();
+        order.id = format!("cancel-{index}");
+        orders.push(order);
+    }
+    let mut attached = base;
+    attached.id = "parent__stop_loss".into();
+    attached.parent_id = Some("parent".into());
+    attached.kind = OrderType::StopLoss;
+    attached.price = 90.0;
+    orders.push(attached);
+    h.engine.store_mut().set_orders(orders);
+}
+
+#[test]
+fn after_failure_cancel_prefix_is_reported_with_targets_and_stops_the_suffix() {
+    // TS awaits each cancel: reference/bybit/hyrotrader.exchange.ts:419-445.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | ordinary cancellation and cancel-all compensating re-place
+    let mut h = ready(Variant::Spot);
+    seed_applied_cancel_orders(&mut h);
+    h.command(Command::CancelOrders {
+        command: 151,
+        ids: (0..3).map(|i| format!("cancel-{i}")).collect(),
+    });
+    let first = h.take("/v5/order/cancel");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"cancel-0"}}"#,
+    );
+    let second = h.take("/v5/order/cancel");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
+    );
+    let elements = applied_failure(&h, 151)
+        .elements
+        .as_ref()
+        .expect("cancel outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert_eq!(elements.len(), 3);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), position_key: None } if id == "cancel-0")
+    );
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    h.advance(1_201.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post)
+    );
+}
+
+#[test]
+fn applied_amend_prefix_names_existing_parent_without_placing_an_order() {
+    let mut h = ready(Variant::Spot);
+    seed_applied_cancel_orders(&mut h);
+    h.command(Command::CancelOrders {
+        command: 152,
+        ids: vec![
+            "parent__stop_loss".into(),
+            "cancel-0".into(),
+            "cancel-1".into(),
+        ],
+    });
+    let first = h.take("/v5/order/amend");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"parent"}}"#,
+    );
+    let second = h.take("/v5/order/cancel");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
+    );
+    let elements = applied_failure(&h, 152)
+        .elements
+        .as_ref()
+        .expect("amend outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::Amend, target_order_id: Some(id), .. } if id == "parent")
+    );
+    assert!(
+        !elements
+            .iter()
+            .any(|row| matches!(row.result, ElementResult::Placed { .. }))
+    );
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post)
+    );
+}
+
+#[test]
+fn applied_trading_stop_prefix_survives_a_rejected_create_without_an_order_id() {
+    let mut h = ready(Variant::Hyrotrader);
+    h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
+    let mut stop = order("BTCUSDT", 1.0);
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = Some(90.0);
+    place(
+        &mut h,
+        154,
+        vec![stop, order("BTCUSDT", 1.0), order("ETHUSDT", 1.0)],
+    );
+    let first = h.take("/v5/position/trading-stop");
+    h.reply(first.id, 200, r#"{"retCode":0,"result":{}}"#);
+    let second = h.take("/v5/order/create");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"native refusal"}"#,
+    );
+    let error = applied_failure(&h, 154);
+    let elements = error.elements.as_ref().expect("trading-stop outcomes");
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    assert_eq!(elements.len(), 3);
+    assert!(
+        matches!(&elements[0].result, ElementResult::Applied { effect: AppliedEffect::TradingStop, target_order_id: None, position_key: Some(key) } if key.contains("BTCUSDT"))
+    );
+    assert_eq!(elements[2].result, ElementResult::NotSent { error: None });
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post)
+    );
+}
+
+#[test]
+fn applied_cancel_batch_keeps_native_target_rows_and_stops_later_chunks() {
+    for code in [10001, 10016] {
+        let mut h = ready(Variant::Demo);
+        seed_applied_cancel_orders(&mut h);
+        let base = h
+            .engine
+            .store()
+            .order("parent")
+            .expect("native cancel seed")
+            .clone();
+        let orders = (0..12)
+            .map(|index| {
+                let mut order = base.clone();
+                order.id = format!("batch-cancel-{index}");
+                order
+            })
+            .collect();
+        h.engine.store_mut().set_orders(orders);
+        h.command(Command::CancelOrders {
+            command: 155,
+            ids: (0..12)
+                .map(|index| format!("batch-cancel-{index}"))
+                .collect(),
+        });
+        let request = h.take("/v5/order/cancel-batch");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["request"].as_array().unwrap().len(), 10);
+        let rows: Vec<_> = (0..10)
+            .map(|index| serde_json::json!({"orderId":format!("batch-cancel-{index}")}))
+            .collect();
+        let statuses: Vec<_> = (0..10).map(|index| serde_json::json!({"code":if index == 1 {code} else {0},"msg":"native cancel row"})).collect();
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":0,"result":{"list":rows},"retExtInfo":{"list":statuses}})
+                .to_string(),
+        );
+        assert!(
+            applied_failure(&h, 155)
+                .partial
+                .as_ref()
+                .is_none_or(|partial| partial.order_ids.is_empty()),
+            "cancel targets are Applied effects, never created-order IDs"
+        );
+        let partial = applied_failure(&h, 155)
+            .partial
+            .as_ref()
+            .expect("whole caller cancellation counts");
+        assert_eq!(partial.total, Some(12));
+        assert_eq!(partial.failed_index, Some(1));
+        assert_eq!(
+            applied_failure(&h, 155).venue_code.as_deref(),
+            Some(code.to_string().as_str())
+        );
+        let elements = applied_failure(&h, 155)
+            .elements
+            .as_ref()
+            .expect("native cancel row outcomes");
+        assert_eq!(elements.len(), 12);
+        use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+        for (index, row) in elements.iter().enumerate() {
+            match index {
+                1 if code == 10001 => assert!(
+                    matches!(&row.result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+                ),
+                1 => assert!(
+                    matches!(&row.result, ElementResult::Unknown { error } if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+                ),
+                10.. => assert_eq!(row.result, ElementResult::NotSent { error: None }),
+                _ => assert!(
+                    matches!(&row.result, ElementResult::Applied { effect: AppliedEffect::Cancel, target_order_id: Some(id), .. } if id == &format!("batch-cancel-{index}"))
+                ),
+            }
+        }
+        assert!(
+            !elements
+                .iter()
+                .any(|row| matches!(row.result, ElementResult::Placed { .. }))
+        );
+        h.advance(1_201.0);
+        assert!(
+            !h.requests
+                .iter()
+                .any(|request| request.method == safe_cex_engine::Method::Post)
+        );
+    }
+}
+
+#[test]
+fn legacy_non_option_price_and_notional_do_not_gain_a_whole_plan_gate() {
+    // TS per-order formatting: reference/bybit/bybitspot.exchange.ts:765-795,881-888; hyrotrader.exchange.ts:342-365.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | create wire quantity/price/minimum-notional adoption gate
+    for variant in [Variant::Spot, Variant::Hyrotrader] {
+        for (price, amount) in [(None, 1.0), (Some(0.0), 1.0), (Some(100.0), 0.01)] {
+            let mut h = ready(variant);
+            let mut last = order("BTCUSDT", amount);
+            last.price = price;
+            let mut first = order("BTCUSDT", 1.0);
+            if variant == Variant::Spot {
+                first.client_order_id = Some("parity-prefix".into());
+                last.client_order_id = Some("parity-last".into());
+            }
+            place(&mut h, 156, vec![first, last]);
+            let first = h.take("/v5/order/create");
+            let first_link = link(&first);
+            h.reply(first.id, 200, &serde_json::json!({"retCode":0,"result":{"orderId":"legacy-prefix","orderLinkId":first_link}}).to_string());
+            let second = h.take("/v5/order/create");
+            let wire: serde_json::Value = serde_json::from_str(body(&second)).unwrap();
+            assert_eq!(wire["qty"], amount.to_string());
+            if price.is_none() || price == Some(0.0) {
+                assert!(wire.get("price").is_none());
+            }
+            h.reply(
+                second.id,
+                200,
+                r#"{"retCode":110007,"retMsg":"native rejection"}"#,
+            );
+            let error = applied_failure(&h, 156);
+            assert_eq!(error.partial.as_ref().unwrap().order_ids, ["legacy-prefix"]);
+            assert!(matches!(
+                error.elements.as_ref().unwrap()[0].result,
+                safe_cex_engine::write_plan::ElementResult::Placed { .. }
+            ));
+        }
+    }
+}
+
+#[test]
+fn after_failure_spot_finishes_the_current_orders_lots_then_stops() {
+    // TS completes payloads, then stops outer orders: reference/bybit/bybitspot.exchange.ts:844-870,881-888.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Spot/Hyro serial runtime failure
+    for (failed, code) in [(0, 110007), (1, 110007)] {
+        let mut h = spot_split_plan_market("0.001", "1");
+        let first = order("BTCUSDT", 3.0);
+        let mut later = order("BTCUSDT", 1.0);
+        later.client_order_id = Some("untouched-next-order".into());
+        place(&mut h, 160, vec![first, later]);
+        for index in 0..3 {
+            let request = h.take("/v5/order/create");
+            assert!(!body(&request).contains("untouched-next-order"));
+            if index == failed {
+                h.reply(
+                    request.id,
+                    200,
+                    &serde_json::json!({"retCode":code,"retMsg":"lot refused"}).to_string(),
+                );
+            } else {
+                h.reply(
+                    request.id,
+                    200,
+                    &serde_json::json!({"retCode":0,"result":{"orderId":format!("lot-{index}")}})
+                        .to_string(),
+                );
+            }
+        }
+        h.advance(1_201.0);
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(matches!(h.result(160), Some(Err(_))));
+        let elements = applied_failure(&h, 160).elements.as_ref().unwrap();
+        assert_eq!(elements.len(), 4);
+        for (index, row) in elements.iter().enumerate() {
+            use safe_cex_engine::write_plan::ElementResult;
+            match index {
+                3 => assert_eq!(row.result, ElementResult::NotSent { error: None }),
+                _ if index == failed && code == 10016 => {
+                    assert!(matches!(row.result, ElementResult::Unknown { .. }))
+                }
+                _ if index == failed => assert!(matches!(
+                    row.result,
+                    ElementResult::NotSent { error: Some(_) }
+                )),
+                _ => assert!(matches!(row.result, ElementResult::Placed { .. })),
+            }
+        }
+    }
+}
+
+#[test]
+fn after_failure_spot_cancel_all_does_not_release_another_family() {
+    // TS stops its failed cancel action: reference/bybit/bybitspot.exchange.ts:1179-1216.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | ordinary cancellation and cancel-all compensating re-place
+    let mut h = ready(Variant::Spot);
+    seed_applied_cancel_orders(&mut h);
+    h.command(Command::CancelSymbolOrders {
+        command: 161,
+        symbol: "BTCUSDT".into(),
+    });
+    let request = h.take("/v5/order/cancel-all");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"cancel refused"}"#,
+    );
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/order/cancel-all"));
+    assert!(matches!(h.result(161), Some(Err(_))));
+}
+
+#[test]
+fn after_failure_native_batch_row_refusal_keeps_the_later_chunk() {
+    // TS continues definite row refusals: reference/bybit/bybit.exchange.ts:3077-3106.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | regular Linear/Inverse create-batch runtime continuation and fallback
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        162,
+        (0..12).map(|_| order("BTCUSDT", 1.0)).collect(),
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let first = h.take("/v5/order/create-batch");
+    let rows: Vec<_> = (0..10).map(|i| serde_json::json!({"orderId":if i == 1 {String::new()} else {format!("batch-{i}")}})).collect();
+    let statuses: Vec<_> = (0..10)
+        .map(|i| serde_json::json!({"code":if i == 1 {110007} else {0},"msg":"native row"}))
+        .collect();
+    h.reply(
+        first.id,
+        200,
+        &serde_json::json!({"retCode":0,"result":{"list":rows},"retExtInfo":{"list":statuses}})
+            .to_string(),
+    );
+    h.advance(1_201.0);
+    let next = h.take("/v5/order/create-batch");
+    let wire: serde_json::Value = serde_json::from_str(body(&next)).unwrap();
+    assert_eq!(wire["request"].as_array().unwrap().len(), 2);
+    h.reply(next.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"last-0"},{"orderId":"last-1"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#);
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(!h.has_request("/v5/order/create-batch"));
+    let elements = applied_failure(&h, 162).elements.as_ref().unwrap();
+    use safe_cex_engine::write_plan::ElementResult;
+    assert_eq!(elements.len(), 12);
+    assert!(
+        matches!(&elements[10].result, ElementResult::Placed { order_ids } if order_ids == &["last-0"])
+    );
+    assert!(
+        matches!(&elements[11].result, ElementResult::Placed { order_ids } if order_ids == &["last-1"])
+    );
+    assert!(matches!(
+        elements[1].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+}
+
+#[test]
+fn pinfix_10001_batch_fallback_continues_past_a_refused_single() {
+    // Preserve master's 10001 trigger; TS catches each fallback refusal: reference/bybit/bybit.exchange.ts:3015-3042.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | regular Linear/Inverse create-batch runtime continuation and fallback
+    let code = 10001;
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        163,
+        vec![order("BTCUSDT", 1.0), order("BTCUSDT", 1.0)],
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let batch = h.take("/v5/order/create-batch");
+    h.reply(
+        batch.id,
+        200,
+        &serde_json::json!({"retCode":code,"retMsg":"batch refused"}).to_string(),
+    );
+    let first = h.take("/v5/order/create");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"first refused"}"#,
+    );
+    let second = h.take("/v5/order/create");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"fallback-last"}}"#,
+    );
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(matches!(h.result(163), Some(Err(_))));
+    let elements = applied_failure(&h, 163).elements.as_ref().unwrap();
+    assert_eq!(elements.len(), 2);
+    use safe_cex_engine::write_plan::ElementResult;
+    assert!(matches!(
+        elements[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(
+        matches!(&elements[1].result, ElementResult::Placed { order_ids } if order_ids == &["fallback-last"])
+    );
+}
+
+#[test]
+fn after_failure_special_tpsl_keeps_the_regular_order_batch() {
+    // TS catches special refusals: reference/bybit/bybit.exchange.ts:2969-2985.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | regular Linear/Inverse create-batch runtime continuation and fallback
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
+    let mut stop = order("BTCUSDT", 0.0);
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = Some(90.0);
+    place(&mut h, 164, vec![stop, order("BTCUSDT", 1.0)]);
+    let request = h.take("/v5/position/trading-stop");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"stop refused"}"#,
+    );
+    let batch = h.take("/v5/order/create-batch");
+    h.reply(batch.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"regular-last"}]},"retExtInfo":{"list":[{"code":0}]}}"#);
+    assert!(!h.has_request("/v5/position/trading-stop"));
+    assert!(matches!(h.result(164), Some(Err(_))));
+    let elements = applied_failure(&h, 164).elements.as_ref().unwrap();
+    assert_eq!(elements.len(), 2);
+    use safe_cex_engine::write_plan::ElementResult;
+    assert!(matches!(
+        elements[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(
+        matches!(&elements[1].result, ElementResult::Placed { order_ids } if order_ids == &["regular-last"])
+    );
+}
+
+#[test]
+fn parity_exception_unknown_spot_halts_lots_and_later_caller_orders() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybitspot.exchange.ts:844-856.
+    for split in [false, true] {
+        for status in [Some(200), Some(503), None] {
+            let mut h = if split {
+                spot_split_plan_market("0.001", "1")
+            } else {
+                ready(Variant::Spot)
+            };
+            let orders = if split {
+                vec![order("BTCUSDT", 3.0), order("BTCUSDT", 1.0)]
+            } else {
+                vec![order("BTCUSDT", 1.0); 3]
+            };
+            place(&mut h, 175, orders);
+            let first = h.take("/v5/order/create");
+            h.reply(
+                first.id,
+                200,
+                r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
+            );
+            let second = h.take("/v5/order/create");
+            if let Some(status) = status {
+                h.reply(
+                    second.id,
+                    status,
+                    r#"{"retCode":10016,"retMsg":"uncertain"}"#,
+                );
+            } else {
+                h.event(Event::HttpFailed {
+                    request: second.id,
+                    error: "reply lost",
+                });
+            }
+            support::assert_unknown_pin(
+                &mut h,
+                175,
+                &["known-prefix"],
+                1,
+                if split { 4 } else { 3 },
+            );
+        }
+    }
+}
+
+#[test]
+fn parity_exception_unknown_batch_halts_chunks_and_single_fallback() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:3015-3042,3077-3106.
+    for row_unknown in [false, true] {
+        let mut h = ready(Variant::Demo);
+        place(
+            &mut h,
+            176,
+            (0..12).map(|_| order("BTCUSDT", 1.0)).collect(),
+        );
+        resolve_mode(&mut h, "BTCUSDT");
+        let batch = h.take("/v5/order/create-batch");
+        if row_unknown {
+            let rows: Vec<_> = (0..10).map(|i| serde_json::json!({"orderId":if i==1 {String::new()} else {format!("known-{i}")}})).collect();
+            let statuses: Vec<_> = (0..10)
+                .map(|i| serde_json::json!({"code":if i==1 {10016} else {0},"msg":"uncertain"}))
+                .collect();
+            h.reply(batch.id, 200, &serde_json::json!({"retCode":0,"result":{"list":rows},"retExtInfo":{"list":statuses}}).to_string());
+            let ids: Vec<_> = (0..10)
+                .filter(|i| *i != 1)
+                .map(|i| format!("known-{i}"))
+                .collect();
+            let refs: Vec<_> = ids.iter().map(String::as_str).collect();
+            support::assert_unknown_pin(&mut h, 176, &refs, 1, 12);
+        } else {
+            h.reply(batch.id, 200, r#"{"retCode":10016,"retMsg":"uncertain"}"#);
+            support::assert_unknown_pin(&mut h, 176, &[], 0, 12);
+        }
+    }
+}
+
+#[test]
+fn parity_exception_unknown_fallback_halts_remaining_singles() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:3026-3042.
+    for status in [Some(200), Some(503), None] {
+        let mut h = ready(Variant::Demo);
+        place(&mut h, 177, vec![order("BTCUSDT", 1.0); 4]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let batch = h.take("/v5/order/create-batch");
+        h.reply(batch.id, 200, r#"{"retCode":10001,"retMsg":"use singles"}"#);
+        let refused = h.take("/v5/order/create");
+        h.reply(
+            refused.id,
+            200,
+            r#"{"retCode":110007,"retMsg":"refused single"}"#,
+        );
+        let first = h.take("/v5/order/create");
+        h.reply(
+            first.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
+        );
+        let second = h.take("/v5/order/create");
+        if let Some(status) = status {
+            h.reply(
+                second.id,
+                status,
+                r#"{"retCode":10016,"retMsg":"uncertain"}"#,
+            );
+        } else {
+            h.event(Event::HttpFailed {
+                request: second.id,
+                error: "reply lost",
+            });
+        }
+        // Engine-owned HTTP seals retain their own canonical text after a refusal.
+        let text = if status == Some(503) {
+            support::ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT
+        } else {
+            support::ENGINE_UNKNOWN_TEXT
+        };
+        support::assert_unknown_pin_with_text(&mut h, 177, &["known-prefix"], 2, 4, text);
+    }
+}
+
+#[test]
+fn parity_exception_unknown_special_halts_regular_batch() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:2969-2985.
+    for lost in [false, true] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"1","avgPrice":"100","markPrice":"100","positionValue":"100","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}]}"#);
+        let mut stop = order("BTCUSDT", 0.0);
+        stop.kind = OrderType::StopLoss;
+        stop.side = OrderSide::Sell;
+        stop.price = Some(90.0);
+        place(&mut h, 178, vec![stop, order("BTCUSDT", 1.0)]);
+        let request = h.take("/v5/position/trading-stop");
+        if lost {
+            h.event(Event::HttpFailed {
+                request: request.id,
+                error: "reply lost",
+            });
+        } else {
+            h.reply(request.id, 200, r#"{"retCode":10016,"retMsg":"uncertain"}"#);
+        }
+        support::assert_unknown_pin(&mut h, 178, &[], 0, 2);
+    }
+}
+
+#[test]
+fn pin_caller_identity_and_execution_checks_precede_the_valid_prefix() {
+    // TS whole-command checks: reference/bybit/bybit.exchange.ts:2940-2946; bybitspot.exchange.ts:881-885.
+    for variant in [Variant::Demo, Variant::Spot, Variant::Hyrotrader] {
+        for fault in 0..2 {
+            let mut h = ready(variant);
+            if variant == Variant::Demo {
+                place(&mut h, 183, vec![order("BTCUSDT", 1.0)]);
+                resolve_mode(&mut h, "BTCUSDT");
+                let setup = h.take("/v5/order/create-batch");
+                h.reply(setup.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"setup-mode"}]},"retExtInfo":{"list":[{"code":0}]}}"#);
+            }
+            let mut invalid = order("BTCUSDT", 1.0);
+            if fault == 0 {
+                invalid.client_order_id = Some("not valid!".into());
+            } else {
+                invalid.bybit_bbo = Some(BybitBbo {
+                    side_type: "Counterparty".into(),
+                    level: 6.0,
+                });
+            }
+            place(&mut h, 181, vec![order("BTCUSDT", 1.0), invalid]);
+            assert!(
+                matches!(h.result(181), Some(Err(_))),
+                "variant={variant:?} fault={fault} done={:?} paths={:?}",
+                h.done,
+                h.paths()
+            );
+            assert!(
+                h.requests.is_empty(),
+                "whole-command preflight: {variant:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn pin_linear_and_inverse_price_rows_are_sent_in_the_native_batch() {
+    // TS formats per chunk: reference/bybit/bybit.exchange.ts:3015-3021,3119-3185; bybitinverse.exchange.ts:1933-2034.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | trading.rs:669 category-batch-and-serial-chunking / plain Limit missing-or-zero price
+    for variant in [Variant::Demo, Variant::Inverse] {
+        for price in [None, Some(0.0)] {
+            let mut h = ready(variant);
+            let symbol = if variant == Variant::Inverse {
+                "BTCUSD"
+            } else {
+                "BTCUSDT"
+            };
+            let mut invalid = order(symbol, 1.0);
+            invalid.price = price;
+            place(&mut h, 182, vec![order(symbol, 1.0), invalid]);
+            resolve_mode(&mut h, symbol);
+            let request = h.take("/v5/order/create-batch");
+            let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(wire["request"].as_array().unwrap().len(), 2);
+            assert_eq!(wire["request"][0]["qty"], "1");
+            assert_eq!(wire["request"][1]["qty"], "1");
+            assert!(wire["request"][1].get("price").is_none());
+            h.reply(request.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"known-prefix"},{}]},"retExtInfo":{"list":[{"code":0},{"code":110007,"msg":"missing price"}]}}"#);
+            assert!(matches!(h.result(182), Some(Err(_))));
+            assert!(
+                !h.requests
+                    .iter()
+                    .any(|r| r.method == safe_cex_engine::Method::Post)
+            );
+        }
+    }
+}
+
+#[test]
+fn parity_exception_lost_native_batch_halts_chunks_without_fallback() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:3015-3042.
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 184, vec![order("BTCUSDT", 1.0); 12]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let batch = h.take("/v5/order/create-batch");
+    h.event(Event::HttpFailed {
+        request: batch.id,
+        error: "reply lost",
+    });
+    support::assert_unknown_pin(&mut h, 184, &[], 0, 12);
+}
+
+#[test]
+fn pinfix_nontrigger_batch_refusal_never_falls_back_to_singles() {
+    // TS fallback context: reference/bybit/bybit.exchange.ts:3015-3042.
+    // The lead's preservation rule retains master's stricter 10001-only trigger.
+    for code in [110007, 10003] {
+        let mut h = ready(Variant::Demo);
+        place(&mut h, 185, vec![order("BTCUSDT", 1.0); 2]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let batch = h.take("/v5/order/create-batch");
+        h.reply(
+            batch.id,
+            200,
+            &serde_json::json!({"retCode":code,"retMsg":"definite batch refusal"}).to_string(),
+        );
+        h.advance(1_201.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "nontrigger {code} released fallback"
+        );
+        assert!(!h.has_request("/v5/order/create-batch"));
+        let error = applied_failure(&h, 185);
+        assert_eq!(error.venue_code.as_deref(), Some(code.to_string().as_str()));
+        let elements = error.elements.as_ref().unwrap();
+        assert_eq!(elements.len(), 2);
+        assert!(elements.iter().all(|row| matches!(&row.result,
+            safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
+                if error.venue_code.as_deref() == Some(code.to_string().as_str()))));
+    }
+}
+
+#[test]
+fn spot_split_limit_entries_follow_legacy_protection_attachment() {
+    for entries in [1, 2] {
+        let mut h = ready(Variant::Spot);
+        let orders = (0..entries)
+            .map(|_| {
+                let mut opts = order("BTCUSDT", 2500.);
+                opts.take_profit = Some(110.);
+                opts
+            })
+            .collect();
+        place(&mut h, 3, orders);
+        let mut ids = Vec::new();
+        for index in 0..entries * 4 {
+            let request = h.take("/v5/order/create");
+            let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(sent["category"], "spot");
+            assert_eq!(sent["orderType"], "Limit");
+            let protected = index % 4 == 0 || index % 4 == 3;
+            assert_eq!(sent.get("takeProfit").is_some(), protected);
+            assert_eq!(sent.get("tpOrderType").is_some(), protected);
+            assert_eq!(sent["qty"], if index % 4 == 3 { "120" } else { "793.333" });
+            let id = format!("spot-{index}");
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({
+                    "retCode": 0, "result": {"orderId": id}
+                })
+                .to_string(),
+            );
+            ids.push(id);
+        }
+        assert_eq!(h.result(3), Some(&Ok(serde_json::to_string(&ids).unwrap())));
+        assert!(!h.unknown.contains(&3));
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+fn spot_parity_error(h: &Harness, command: u32) -> &safe_cex_engine::VenueError {
+    h.notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: id, error } if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .expect("Spot command journal/telemetry failure")
+}
+
+#[test]
+fn spot_ts_parity_sends_the_below_minimum_tail_after_valid_lots() {
+    // TS reference/bybit/bybitspot.exchange.ts:828-846 sends [595,595,0.001].
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | split-tail
+    let mut h = spot_split_plan_market("0.01", "1190");
+    place(&mut h, 191, vec![protected_spot_split_order(1190.001)]);
+    for (i, qty) in ["595", "595", "0.001"].iter().enumerate() {
+        let request = h.take("/v5/order/create");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["qty"], *qty);
+        if i == 2 {
+            h.reply(
+                request.id,
+                200,
+                r#"{"retCode":110007,"retMsg":"tail refused"}"#,
+            );
+        } else {
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({"retCode":0,"result":{"orderId":format!("placed-{i}")}})
+                    .to_string(),
+            );
+        }
+    }
+    let error = spot_parity_error(&h, 191);
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["placed-0", "placed-1"]
+    );
+    h.advance(1_201.0);
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn spot_ts_parity_batch_keeps_prefix_before_a_missing_market() {
+    // TS reference/bybit/bybitspot.exchange.ts:755-758,881-887 formats each order in series.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | multi-order-batch
+    let mut h = ready(Variant::Spot);
+    place(
+        &mut h,
+        192,
+        vec![
+            order("BTCUSDT", 1.0),
+            order("MISSINGUSDT", 1.0),
+            order("BTCUSDT", 1.0),
+        ],
+    );
+    let first = h.take("/v5/order/create");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"placed-prefix"}}"#,
+    );
+    let error = spot_parity_error(&h, 192);
+    assert!(error.message.contains("Market MISSINGUSDT not found"));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["placed-prefix"]);
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn spot_ts_parity_protects_only_first_main_lot_and_remainder() {
+    // TS reference/bybit/bybitspot.exchange.ts:833-841 omits brackets after main lot zero.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 2499.999 of requested 2500); kept for exact TS parity per Sam's decision
+    let mut h = ready(Variant::Spot);
+    place(&mut h, 193, vec![protected_spot_split_order(2500.0)]);
+    let mut sum = 0.0;
+    for (i, qty) in ["793.333", "793.333", "793.333", "120"].iter().enumerate() {
+        let request = h.take("/v5/order/create");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["qty"], *qty);
+        sum += wire["qty"].as_str().unwrap().parse::<f64>().unwrap();
+        for key in ["stopLoss", "takeProfit", "slOrderType", "tpOrderType"] {
+            assert_eq!(wire.get(key).is_some(), i == 0 || i == 3, "{key} lot {i}");
+        }
+        h.reply(
+            request.id,
+            200,
+            &serde_json::json!({"retCode":0,"result":{"orderId":format!("placed-{i}")}})
+                .to_string(),
+        );
+    }
+    assert!(matches!(h.result(193), Some(Ok(_))));
+    assert!((sum - 2499.999).abs() < 1e-9, "sum {sum}, requested 2500");
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn spot_ts_parity_definite_lot_refusal_finishes_order_then_stops_batch() {
+    // TS reference/bybit/bybitspot.exchange.ts:844-870,881-887 finishes lots then throws.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit-spot | multi-order-batch
+    let mut h = spot_split_plan_market("0.01", "1190");
+    place(
+        &mut h,
+        194,
+        vec![protected_spot_split_order(1190.01), order("BTCUSDT", 1.0)],
+    );
+    for i in 0..3 {
+        let request = h.take("/v5/order/create");
+        let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(wire["qty"], ["595", "595", "0.01"][i]);
+        if i == 0 {
+            h.reply(
+                request.id,
+                200,
+                r#"{"retCode":110007,"retMsg":"first lot refused"}"#,
+            );
+        } else {
+            h.reply(
+                request.id,
+                200,
+                &serde_json::json!({"retCode":0,"result":{"orderId":format!("placed-{i}")}})
+                    .to_string(),
+            );
+        }
+    }
+    h.advance(1_201.0);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "next caller order must stop"
+    );
+    assert_eq!(
+        spot_parity_error(&h, 194)
+            .partial
+            .as_ref()
+            .unwrap()
+            .order_ids,
+        ["placed-1", "placed-2"]
+    );
+}
+
+#[test]
+fn spot_ts_parity_unknown_stops_lots_and_batch_with_canonical_evidence() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybitspot.exchange.ts:844-856.
+    const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+    for status in [Some(200), Some(503), None] {
+        let mut h = spot_split_plan_market("0.01", "1190");
+        place(
+            &mut h,
+            195,
+            vec![protected_spot_split_order(1190.01), order("BTCUSDT", 1.0)],
+        );
+        let first = h.take("/v5/order/create");
+        h.reply(
+            first.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"placed-prefix"}}"#,
+        );
+        let uncertain = h.take("/v5/order/create");
+        if let Some(status) = status {
+            h.reply(
+                uncertain.id,
+                status,
+                r#"{"retCode":10016,"retMsg":"unconfirmed"}"#,
+            );
+        } else {
+            h.event(Event::HttpFailed {
+                request: uncertain.id,
+                error: "reply lost",
+            });
+        }
+        h.advance(1_201.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "no tail, next caller or retry"
+        );
+        let error = spot_parity_error(&h, 195);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["placed-prefix"]);
+        assert!(h.unknown.contains(&195));
+    }
+}
+
+#[test]
+fn spot_ts_parity_identity_and_execution_controls_remain_atomic() {
+    // TS reference/bybit/bybitspot.exchange.ts:881-885 checks IDs/execution before mapSeries.
+    for identity in [true, false] {
+        let mut h = ready(Variant::Spot);
+        let mut invalid = order("BTCUSDT", 1.0);
+        if identity {
+            invalid.client_order_id = Some("invalid id!".into());
+        } else {
+            invalid.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.0,
+            });
+        }
+        place(&mut h, 197, vec![order("BTCUSDT", 1.0), invalid]);
+        assert!(matches!(h.result(197), Some(Err(_))));
+        assert!(
+            h.requests.is_empty(),
+            "atomic TS checks must precede the valid prefix"
+        );
+    }
+}
+
+#[test]
+fn hyro_v1_already_gone_chase_cancel_is_satisfied_without_resending() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 991, vec![order("BTCUSDT", 0.1)]);
+    created(&mut h, "chase-gone");
+    h.command(Command::CancelOrders {
+        command: 992,
+        ids: vec!["chase-gone".into()],
+    });
+    let request = h.take("/v5/order/cancel");
+    assert_eq!(
+        Harness::header(&request, "Content-Type").as_deref(),
+        Some("application/json")
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110001,"retMsg":"already filled"}"#,
+    );
+    assert!(h.result(992).expect("cancel completes").is_ok());
+    assert!(!h.unknown.contains(&992));
+    assert!(!h.has_request("/v5/order/cancel"));
+    answer_reconcile(&mut h);
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+#[test]
+fn hyro_v1_conditional_trigger_direction_is_numeric_and_writes_are_strict_json() {
+    for (side, expected) in [(OrderSide::Buy, 1), (OrderSide::Sell, 2)] {
+        let mut h = ready(Variant::Hyrotrader);
+        let mut opts = order("BTCUSDT", 0.1);
+        opts.kind = OrderType::Conditional;
+        opts.side = side;
+        opts.trigger_price = Some(if expected == 1 { 70000. } else { 60000. });
+        place(&mut h, 990, vec![opts]);
+        let request = h.take("/v5/order/create");
+        assert_eq!(
+            Harness::header(&request, "Content-Type").as_deref(),
+            Some("application/json")
+        );
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(payload["triggerDirection"].as_i64(), Some(expected));
+    }
+}
+
+#[test]
+fn hyro_v1_unsupported_modes_are_typed_and_send_nothing() {
+    use safe_cex_engine::{Action, ErrorKind, Notice, Outcome};
+    for command in [
+        Command::SetMarginType {
+            command: 993,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+        Command::SetPositionMode {
+            command: 993,
+            hedged: true,
+            symbol: None,
+        },
+    ] {
+        let mut h = ready(Variant::Hyrotrader);
+        h.engine.handle_command(h.now, command, None).unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 993,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("typed refusal");
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(error.message.contains("only"));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+#[test]
+fn inverse_create_keeps_legacy_integer_clamp_before_allocation() {
+    let mut h = ready(Variant::Inverse);
+    place(&mut h, 1, vec![order("BTCUSD", 25.6)]);
+    let mode = h.take("/v5/position/list");
+    assert!(mode.url.contains("category=inverse&symbol=BTCUSD"));
+    h.reply(
+        mode.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSD","positionIdx":0}]}}"#,
+    );
+    let request = h.take("/v5/order/create-batch");
+    assert!(body(&request).contains("\"category\":\"inverse\""));
+    // reference/bybit/bybitinverse.exchange.ts rounds and clamps before allocation.
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 25.6); kept for exact TS parity per Sam's decision
+    let wire: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+    let quantities: Vec<_> = wire["request"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|order| order["qty"].as_str().unwrap())
+        .collect();
+    assert_eq!(quantities, ["10"]);
+    let total: f64 = quantities
+        .iter()
+        .map(|qty| qty.parse::<f64>().unwrap())
+        .sum();
+    assert_eq!(total, 10.0);
+}
+
+#[test]
+fn inverse_position_mode_legacy_success_has_no_second_coin() {
+    let mut h = ready(Variant::Inverse);
+    let mut second = h.engine.store().markets()[0].clone();
+    second.base = "ZZZ".into();
+    second.symbol = "ZZZUSD".into();
+    second.id = "ZZZUSD".into();
+    let mut markets = h.engine.store().markets().to_vec();
+    markets.push(second);
+    h.engine.store_mut().set_markets(markets);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
+    );
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    h.advance(250.0);
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
+}
+
+#[test]
+fn inverse_position_mode_legacy_discards_a_named_symbol() {
+    let mut h = ready(Variant::Inverse);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: Some("BTCUSD".into()),
+    });
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
+    );
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
+}
+
+#[test]
+fn inverse_position_mode_legacy_refusal_has_no_second_coin() {
+    let mut h = ready(Variant::Inverse);
+    let mut second = h.engine.store().markets()[0].clone();
+    second.base = "ZZZ".into();
+    second.symbol = "ZZZUSD".into();
+    second.id = "ZZZUSD".into();
+    h.engine.store_mut().update_markets(|_| {});
+    let mut markets = h.engine.store().markets().to_vec();
+    markets.push(second);
+    h.engine.store_mut().set_markets(markets);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"linear","coin":"USDT","mode":3}"#
+    );
+    h.reply(request.id, 200, r#"{"retCode":10001,"retMsg":"refused"}"#);
+    h.advance(250.0);
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/position/switch-mode"));
+    assert!(
+        h.result(1)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("refused")
+    );
 }

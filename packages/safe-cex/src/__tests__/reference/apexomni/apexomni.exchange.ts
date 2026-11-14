@@ -1435,6 +1435,16 @@ export class ApexOmniExchange extends BaseExchange {
 
     const payloads = sizes.map((size) => ({ ...req, size: `${size}` }));
 
+    const config = this.store.zkLinkConfig;
+    const contractConfig = config?.contractConfig;
+    const contractAccount = config?.contractAccount;
+    const record = (value: unknown): value is Record<string, unknown> =>
+      value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (!record(contractConfig) || !Array.isArray(contractConfig.perpetualContract) || !record(contractAccount)) {
+      throw new Error('Invalid zkLink contract configuration');
+    }
+    const contracts: readonly unknown[] = contractConfig.perpetualContract;
+
     const responses = await mapSeries(payloads, async (p, index) => {
       const clientOrderId = callerClientOrderId ?? generateApeXRandomClientId(String(this.store.zkLinkConfig?.id));
       const expirationIsoTimestamp = (virtualClock.getCurrentTimeMs() + 30 * 24 * 60 * 60 * 1000) as any;
@@ -1446,13 +1456,14 @@ export class ApexOmniExchange extends BaseExchange {
 
       let l2PairId = 0;
 
-      for (const symbol of this.store.zkLinkConfig?.contractConfig.perpetualContract) {
+      for (const symbol of contracts) {
+        if (!record(symbol)) throw new Error('Invalid zkLink contract row');
         if (symbol.symbol === p.symbol) {
           l2PairId = Number(symbol.l2PairId);
         }
       }
 
-      const takerFeeRate = this.store.zkLinkConfig?.contractAccount.takerFeeRate;
+      const takerFeeRate = String(contractAccount.takerFeeRate || '0');
 
       const limitFee = feeHelper(
         new BigNumber(p.price || 0)
@@ -1468,15 +1479,15 @@ export class ApexOmniExchange extends BaseExchange {
       const orderToSign: SignContractPayload = {
         direction: opts.side === OrderSide.Buy,
         feeRates: [
-          Math.ceil(parseFloat(this.store.zkLinkConfig?.contractAccount.makerFeeRate) * 1e4),
-          Math.ceil(parseFloat(this.store.zkLinkConfig?.contractAccount.takerFeeRate) * 1e4),
+          Math.ceil(parseFloat(String(contractAccount.makerFeeRate)) * 1e4),
+          Math.ceil(parseFloat(String(contractAccount.takerFeeRate)) * 1e4),
         ],
         nonce: nonce.mod(UINT32_MAX).toNumber(),
         pairId: l2PairId,
         price: new BigNumber(p.price || 0).multipliedBy(1e18).toFixed(0, BigNumber.ROUND_DOWN),
         size: new BigNumber(p.size || 0).multipliedBy(1e18).toFixed(0, BigNumber.ROUND_DOWN),
         slotId: nonce.mod(UINT64_MAX).div(UINT32_MAX).toNumber(),
-        accountId: new BigNumber(this.store.zkLinkConfig?.id || 0, 10).mod(UINT32_MAX).toNumber(),
+        accountId: new BigNumber(String(this.store.zkLinkConfig?.id || 0), 10).mod(UINT32_MAX).toNumber(),
         subAccountId: 0,
         hasSubsidy: false,
       };
@@ -1521,15 +1532,15 @@ export class ApexOmniExchange extends BaseExchange {
         const orderToSign: SignContractPayload = {
           direction: opts.side !== OrderSide.Buy,
           feeRates: [
-            Math.ceil(parseFloat(this.store.zkLinkConfig?.contractAccount.makerFeeRate) * 1e4),
-            Math.ceil(parseFloat(this.store.zkLinkConfig?.contractAccount.takerFeeRate) * 1e4),
+            Math.ceil(parseFloat(String(contractAccount.makerFeeRate)) * 1e4),
+            Math.ceil(parseFloat(String(contractAccount.takerFeeRate)) * 1e4),
           ],
           nonce: tpNonce.mod(UINT32_MAX).toNumber(),
           pairId: l2PairId,
           price: new BigNumber(tpPrice || 0).multipliedBy(1e18).toFixed(0, BigNumber.ROUND_DOWN),
           size: new BigNumber(p.size || 0).multipliedBy(1e18).toFixed(0, BigNumber.ROUND_DOWN),
           slotId: tpNonce.mod(UINT64_MAX).div(UINT32_MAX).toNumber(),
-          accountId: new BigNumber(this.store.zkLinkConfig?.id || 0, 10).mod(UINT32_MAX).toNumber(),
+          accountId: new BigNumber(String(this.store.zkLinkConfig?.id || 0), 10).mod(UINT32_MAX).toNumber(),
           subAccountId: 0,
           hasSubsidy: false,
         };
@@ -1567,15 +1578,15 @@ export class ApexOmniExchange extends BaseExchange {
         const orderToSign: SignContractPayload = {
           direction: opts.side !== OrderSide.Buy,
           feeRates: [
-            Math.ceil(parseFloat(this.store.zkLinkConfig?.contractAccount.makerFeeRate) * 1e4),
-            Math.ceil(parseFloat(this.store.zkLinkConfig?.contractAccount.takerFeeRate) * 1e4),
+            Math.ceil(parseFloat(String(contractAccount.makerFeeRate)) * 1e4),
+            Math.ceil(parseFloat(String(contractAccount.takerFeeRate)) * 1e4),
           ],
           nonce: slNonce.mod(UINT32_MAX).toNumber(),
           pairId: l2PairId,
           price: new BigNumber(slPrice || 0).multipliedBy(1e18).toFixed(0, BigNumber.ROUND_DOWN),
           size: new BigNumber(p.size || 0).multipliedBy(1e18).toFixed(0, BigNumber.ROUND_DOWN),
           slotId: slNonce.mod(UINT64_MAX).div(UINT32_MAX).toNumber(),
-          accountId: new BigNumber(this.store.zkLinkConfig?.id || 0, 10).mod(UINT32_MAX).toNumber(),
+          accountId: new BigNumber(String(this.store.zkLinkConfig?.id || 0), 10).mod(UINT32_MAX).toNumber(),
           subAccountId: 0,
           hasSubsidy: false,
         };

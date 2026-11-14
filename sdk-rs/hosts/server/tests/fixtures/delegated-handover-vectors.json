@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "suite": {
+    "mode": 0,
+    "kemId": 32,
+    "kdfId": 1,
+    "aeadId": 3
+  },
+  "info": "tealstreet/delegated-handover/v1",
+  "seedEncoding": "Synthetic X25519 scalar bytes: repeat each seed byte 32 times.",
+  "vectors": [
+    {
+      "name": "without-passphrase",
+      "recipientSeedByte": 17,
+      "senderSeedByte": 34,
+      "input": {
+        "publicKey": "e06Qm75//kTEZaIgA31gjuNYl9Me+XLwf3SJLLD3PxM=",
+        "attemptId": "synthetic-attempt-34",
+        "bootId": "synthetic-boot",
+        "exchangeName": "bybit",
+        "key": "synthetic-key-雪",
+        "secret": " synthetic-secret-雪 "
+      },
+      "sealed": {
+        "attemptId": "synthetic-attempt-34",
+        "enc": "D6poTtKIZ7l/Smot7l34zpdOdrcBjj8iocTPJnhXDyA=",
+        "ciphertext": "KaKrxqPNe/D5rxwXX+5jBHlZoEEXM8acJMoQRjONDBtOoaMiQ6adjnNmJzrJtiTqGxKipqaj7f9t6tsQvRO4uyRYd85coCfsZElI+IQ="
+      }
+    },
+    {
+      "name": "with-passphrase",
+      "recipientSeedByte": 17,
+      "senderSeedByte": 35,
+      "input": {
+        "publicKey": "e06Qm75//kTEZaIgA31gjuNYl9Me+XLwf3SJLLD3PxM=",
+        "attemptId": "synthetic-attempt-35",
+        "bootId": "synthetic-boot",
+        "exchangeName": "bybit",
+        "key": "synthetic-key-雪",
+        "secret": " synthetic-secret-雪 ",
+        "passphrase": "synthetic-passphrase-雪"
+      },
+      "sealed": {
+        "attemptId": "synthetic-attempt-35",
+        "enc": "mkUDqYqxD+jTVMnELL0MnXlE9S59FNjqWXdefcnjv0s=",
+        "ciphertext": "DUq82puJ2ksKWPilEeJAVYFuiFOpWKzCyde9fr07a5fTRgs/YKb+NSY9au0mVxZTyYsFvrgT9dHZtCDk9houewSGqbQrVBCGntDDSipX8BmFyDZQVPKKPeqg3Rrd3wBfifGawUvqLzFVc5qR7E/ikUK/+dF+"
+      }
+    }
+  ]
+}

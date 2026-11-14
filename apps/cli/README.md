@@ -34,7 +34,7 @@ cd apps/cli
 yarn dev                     # run the REPL from source (= bun run src/index.ts)
 yarn typecheck               # tsc --noEmit
 yarn test                    # vitest
-yarn logs                    # tail ~/.tealstreet/cli.log
+yarn logs                    # tail the active user’s cli.log
 ```
 
 ### Build a local binary
@@ -58,8 +58,22 @@ The public `@tealstreet/cli` package is a thin installer/launcher. It does not
 ship CLI source; it downloads the matching binary from
 `https://github.com/Tealstreet/cli/releases` on install or first run.
 
-Config and runtime state live under `~/.tealstreet/` — see
+Config and runtime state are isolated by signed-in user and profile under
+`~/.tealstreet/profiles/<profile hash>/users/<user hash>/` (`~/.disrupt/` for Disrupt).
+Deferred commands, background writes and output stay bound to their starting login;
+switching users cancels their remaining work and reloads the footer for the new user.
+Cross-trade startup also cancels remaining account boots and disposes old connections.
+Login changes clear live exchanges and approvals; unknown-owner legacy files
+require re-entry. Signed-out local-only state persists separately and is never
+imported into an authenticated profile. See
 [`operations/config-files.md`](../documentation/cli/operations/config-files.md).
+They also stop and remove the old user's in-process chasers; late chase results
+are discarded before they can appear in the next user's listings or command result.
+Exchange output listeners retain their starting login, so old-login disposal notices
+and delayed output are discarded. Same-login account disposal still reports interrupted chases.
+An explicitly selected config symlink migrates only from a consistently owned
+target inside the source directory. Unsafe targets or an earlier skipped config
+require re-entry instead of silently completing migration.
 
 ## Architecture
 
@@ -71,7 +85,7 @@ High-level entry points:
 - `src/repl.ts` — interactive REPL (readline)
 - `src/listener/` — loopback `127.0.0.1:53219` WS + HTTP side-car for the web app
 - `src/commands/` — command implementations (shared logic in `@tealstreet/cli-core`)
-- `src/config.ts` — `~/.tealstreet/config.json` (accounts, listener kill-switches, footer layout)
+- `src/config.ts` + `src/storage-context.ts` — user-scoped `config.json` (accounts, listener kill-switches, footer layout)
 - `src/logger.ts` + `src/log-classify.ts` — console interception, severity taxonomy, operational-noise routing
 - `src/scroll-region.ts` + `src/status-line.ts` + `src/footer.ts` + `src/footer-segments.ts` — the pinned output surfaces (top alert bar + bottom status footer over one shared ANSI scroll region)
 - `src/audit-log.ts` — durable append-only write-op trail + command tracing (`audit` command)
@@ -206,6 +220,12 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
   `src/log-classify.ts` (keepalive pings, reconnect chatter, balance dumps) are
   kept out of the terminal — they still hit `~/.tealstreet/cli.log`. Add new
   noisy prefixes there, not in `logger.ts`.
+- **Routine reconnects are diagnostic.** ReconnectingWebSocket and HOW output
+  stays in `cli.log`; URL providers, queries, credentials and frame bodies are
+  omitted. Repeated failures and exhausted retries still surface as errors.
+  Node/Bun relays use native ping/pong (15 s ping, 45 s receive silence) without
+  adding application frames to the exchange pipe. Bybit retains its 10 s JSON
+  ping and 20 s silence recovery; HOW retains its 5 s ping and 25 s recovery.
 - **Everything else prints _above_ the prompt** via `writeAbovePrompt`
   (readline-aware), so async output never corrupts what the user is typing.
 - **Glyphs go through `src/console-glyphs.ts`.** On a legacy Windows console
@@ -242,7 +262,8 @@ print(chalk.green('✓ Operation complete'));
 **Pinned surfaces** (one shared ANSI scroll region, `src/scroll-region.ts`):
 the transient **top alert bar** (`status-line.ts`, warn/error/critical, dims)
 and the always-on **bottom footer** (`footer.ts` + `footer-segments.ts`,
-user-customizable segments). Both no-op on non-TTY.
+user-customizable segments). Both no-op on non-TTY. The PnL segment preserves
+known currency PnL and shows `—` for its percentage when valuation is unknown.
 
 **Command tracing**: write-ops can be recorded to a durable append-only
 `~/.tealstreet/audit.log` with per-invocation `runId` + fill attribution

@@ -7,8 +7,10 @@ it('admits GRVT RemoteSigner while undeclared venues still refuse before signing
   const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
   expect(deriveRemoteSigningPolicy('grvt')?.enabled).toBe(true);
   expect(() => assertBetaAccount('grvt', { remoteSigner })).not.toThrow();
-  for (const name of ['krakenspot', 'cryptocom'] as const) {
-    expect(() => assertBetaAccount(name, { remoteSigner })).toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+  for (const name of ['krakenspot', 'mode'] as const) {
+    expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
+    expect(() => assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner })).toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
+      message: expect.stringContaining("isn't available on the Hosted Server") }));
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });

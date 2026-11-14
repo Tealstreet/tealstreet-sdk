@@ -39,7 +39,9 @@ const exchange = (name: Alias, options: Partial<ExchangeOptions>) => {
   const io = vi.fn(() => { throw new Error('Signing-only roundtrip must not use venue transport'); });
   setRustEngineTransport(() => ({ now: () => STAMP, request: io, connect: io,
     setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
-  const result = new RustEngineExchange(name, { engine: 'rust', key: PUBLIC, secret: '', extra: { recvWindow: 8765 }, ...options }, new DefaultStore());
+  const result = new RustEngineExchange(name, { engine: 'rust', key: PUBLIC, secret: '', extra: {
+    recvWindow: 8765, ...(name === 'hyrotrader' ? { hyrotraderMode: 'demo' } : {}),
+  }, ...options }, new DefaultStore());
   live.push(result);
   return { result, io };
 };
