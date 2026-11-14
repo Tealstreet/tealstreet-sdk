@@ -1,11 +1,21 @@
 //! TxFlow writes are serialized and never retried after an uncertain response.
 //! An execution acknowledgement carries no order IDs: identity comes from reads/streams.
+//! Fields: https://docs.txflow-testnet.xyz/api/exchange/order.md
+//! https://docs.txflow-testnet.xyz/api/exchange/cancel.md
+//! https://docs.txflow-testnet.xyz/api/exchange/modify2.md
+//! https://docs.txflow-testnet.xyz/api/exchange/updateLeverage.md
+//! https://docs.txflow-testnet.xyz/api/exchange/updateMarginMode.md
+//! https://docs.txflow-testnet.xyz/api/exchange/updatePositionMode.md
 use crate::{Pending, TxFlow, sign};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
+mod custody;
+use custody::Custody;
+pub(crate) use custody::PACING;
+use safe_cex_engine::request_context::{Context, Plan};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Default)]
@@ -13,13 +23,12 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     inflight: bool,
-    last_write: Option<f64>,
-    pace: Option<TimerId>,
     reconcile: Option<TimerId>,
     reconcile_count: usize,
 }
 struct Job {
     command: CommandId,
+    custody: Custody,
     steps: VecDeque<Step>,
     ids: Vec<String>,
     waiting: Vec<(String, Option<String>)>,
@@ -31,6 +40,8 @@ struct Step {
     effect: Effect,
 }
 pub struct Request {
+    context: Context,
+    plan: Plan,
     command: CommandId,
     effect: Effect,
     response_type: &'static str,
@@ -123,16 +134,6 @@ struct TypedAction<'a> {
     r#type: &'static str,
     #[serde(flatten)]
     body: &'a Action,
-}
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Envelope<'a> {
-    action: TypedAction<'a>,
-    signature: sign::Signature,
-    nonce: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    vault_address: Option<&'a str>,
-    confirm: &'static str,
 }
 
 impl TxFlow {
@@ -275,23 +276,25 @@ impl TxFlow {
                     #[serde(skip_serializing_if = "Option::is_none")]
                     margin_type: Option<MarginType>,
                 }
-                let result =
-                    self.confirmed_setting(cx, &symbol)
-                        .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
-                        .and_then(|s| {
-                            let buy = s.buy_leverage.unwrap_or(s.leverage);
-                            let sell = s.sell_leverage.unwrap_or(s.leverage);
-                            (buy.is_finite() && buy > 0.0 && sell.is_finite() && sell > 0.0)
-                                .then_some(Leverage {
-                                    buy_leverage: buy,
-                                    sell_leverage: sell,
-                                    margin_type: s.margin_type,
-                                })
-                        })
-                        .map(|leverage| serde_json::to_string(&leverage).unwrap())
-                        .ok_or_else(|| {
-                            format!("TxFlow account leverage is not confirmed for {symbol}")
-                        });
+                let result = self
+                    .confirmed_setting(cx, &symbol)
+                    .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
+                    .and_then(|s| {
+                        let buy = s.buy_leverage.unwrap_or(s.leverage);
+                        let sell = s.sell_leverage.unwrap_or(s.leverage);
+                        (buy.is_finite() && buy > 0.0 && sell.is_finite() && sell > 0.0).then_some(
+                            Leverage {
+                                buy_leverage: buy,
+                                sell_leverage: sell,
+                                margin_type: s.margin_type,
+                            },
+                        )
+                    })
+                    .ok_or_else(|| format!("TxFlow account leverage is not confirmed for {symbol}"))
+                    .and_then(|leverage| {
+                        serde_json::to_string(&leverage)
+                            .map_err(|_| "Invalid TxFlow leverage response".to_owned())
+                    });
                 crate::local_context::complete(
                     cx,
                     safe_cex_engine::request_context::Operation::Read,
@@ -350,8 +353,13 @@ impl TxFlow {
                 Err(not_sent(error)),
             ),
             Ok(steps) => {
+                let custody = match self.admit_trade(cx) {
+                    Some(custody) => custody,
+                    None => return,
+                };
                 self.trading.queue.push_back(Job {
                     command: id,
+                    custody,
                     steps,
                     ids: vec![],
                     waiting: vec![],
@@ -639,7 +647,6 @@ impl TxFlow {
     }
     fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.trading.inflight
-            || self.trading.pace.is_some()
             || self
                 .trading
                 .active
@@ -651,20 +658,20 @@ impl TxFlow {
         if self.trading.active.is_none() {
             self.trading.active = self.trading.queue.pop_front();
         }
+        if self.trading.active.is_none() {
+            return;
+        }
+        if !self.trade_ready(cx) {
+            return;
+        }
         let Some(job) = self.trading.active.as_mut() else {
+            self.finish_trade(cx, Err(not_sent("TxFlow active trade is missing")));
             return;
         };
-        if job.steps.is_empty() {
+        let Some(mut step) = job.steps.pop_front() else {
             self.finish_trade(cx, Ok(()));
             return;
-        }
-        if let Some(last) = self.trading.last_write
-            && cx.now - last < 110.0
-        {
-            self.trading.pace = Some(cx.set_timer((110.0 - (cx.now - last)).max(1.0)));
-            return;
-        }
-        let mut step = job.steps.pop_front().unwrap();
+        };
         if let Effect::Amend { id, price, amount } = &step.effect {
             step = match self.amend_step(cx, id, *price, *amount) {
                 Ok(step) => step,
@@ -704,78 +711,43 @@ impl TxFlow {
             self.finish_trade(cx, Err(not_sent("TxFlow market is halted")));
             return;
         }
-        let nonce = match safe_cex_venue_hyperliquid::sign::reserve_agent_nonce(
-            cx,
-            self.options.secret.as_deref().unwrap_or(""),
-        ) {
-            Ok(n) => n,
-            Err(e) => {
-                self.finish_trade(cx, Err(not_sent(e)));
-                return;
-            }
+        let (_, response_type) = action.kind();
+        let Some(job) = self.trading.active.as_mut() else {
+            self.finish_trade(cx, Err(not_sent("TxFlow active trade is missing")));
+            return;
         };
-        let signature = match sign::sign(
-            &action,
-            self.options.vault.as_deref(),
-            nonce,
-            self.options.secret.as_deref().unwrap_or(""),
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                self.finish_trade(cx, Err(not_sent(e)));
-                return;
-            }
-        };
-        let (kind, response_type) = action.kind();
-        let body = serde_json::to_string(&Envelope {
-            action: TypedAction {
-                r#type: kind,
-                body: &action,
-            },
-            signature,
-            nonce,
-            vault_address: self.options.vault.as_deref(),
-            confirm: "executed",
-        })
-        .unwrap();
-        let command = self.trading.active.as_ref().unwrap().command;
+        let command = job.command;
         if let Effect::Place(ids) = &effect {
-            self.trading.active.as_mut().unwrap().waiting = ids.clone();
+            job.waiting = ids.clone();
         }
         self.trading.inflight = true;
-        self.trading.last_write = Some(cx.now);
         if let Action::Order { orders, .. } = &action {
-            cx.command_progress(
-                command,
-                orders
-                    .iter()
-                    .map(|order| OrderIdentityReceipt {
-                        // Active market validation above already established this asset.
-                        symbol: self
-                            .symbol(order.a)
-                            .expect("validated order asset")
-                            .to_owned(),
+            let receipts = orders
+                .iter()
+                .map(|order| {
+                    let symbol = self
+                        .symbol(order.a)
+                        .ok_or_else(|| not_sent("TxFlow order asset is missing"))?;
+                    Ok(OrderIdentityReceipt {
+                        symbol: symbol.to_owned(),
                         kind: OrderIdentityKind::ClientOrderId,
                         identity: order.c.clone(),
                     })
-                    .collect(),
-            );
+                })
+                .collect::<Result<Vec<_>, VenueError>>();
+            match receipts {
+                Ok(receipts) => cx.command_progress(command, receipts),
+                Err(error) => {
+                    self.finish_trade(cx, Err(error));
+                    return;
+                }
+            }
         }
-        cx.request(
-            Method::Post,
-            format!("{}/exchange", self.rest()),
-            vec![
-                ("Content-Type", "application/json".into()),
-                ("x-api-version", "2026-08-16".into()),
-            ],
-            Some(body),
-            Pending::Trade(Request {
-                command,
-                effect,
-                response_type,
-            }),
-        );
+        if let Err(error) = self.submit_trade(cx, &action, effect, response_type) {
+            self.finish_trade(cx, Err(error));
+        }
     }
+
     pub(crate) fn trade_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -790,21 +762,132 @@ impl TxFlow {
         {
             return;
         }
+        if cx
+            .validate_plan_delivery(&request.plan, &request.context)
+            .is_err()
+        {
+            return;
+        }
         self.trading.inflight = false;
         // A transport or HTTP failure may follow execution.
         if let Err(mut error) = response
             .map_err(|error| unknown(error).kind(ErrorKind::Network))
             .and_then(|r| parse_reply(r, request.response_type))
         {
+            if error.outcome == Some(Outcome::Rejected) {
+                if let Ok(reply) = response {
+                    let code = serde_json::from_str::<Reply>(reply.body)
+                        .ok()
+                        .and_then(|reply| reply.code)
+                        .unwrap_or(-1);
+                    let native = safe_cex_engine::classify::Native {
+                        code: safe_cex_engine::classify::NativeCode::Int(code),
+                        message: &error.message,
+                    };
+                    // Only reached after the strict execution envelope proves a rejection.
+                    let table = safe_cex_engine::classify::CodeTable {
+                        rows: &[],
+                        success: &[],
+                        unlisted: safe_cex_engine::classify::Verdict::Refused(
+                            ErrorKind::InvalidInput,
+                        ),
+                        status: &[],
+                    };
+                    let _ = cx.http_write_failure(
+                        &request.context,
+                        &table,
+                        Some(&native),
+                        error.message.clone(),
+                        None,
+                    );
+                }
+            } else {
+                error.message = format!("{}; reconcile before any resubmission", error.message);
+                if response.is_ok() {
+                    let _ = cx.http_write_unproven(&request.context, &error.message);
+                }
+            }
             self.acknowledge_write(cx);
-            error.message = format!("{}; reconcile before any resubmission", error.message);
             self.finish_trade(cx, Err(error));
             return;
         }
-        self.trading.active.as_mut().unwrap().effective = true;
+        let Some(job) = self.trading.active.as_mut() else {
+            self.finish_trade(cx, Err(unknown("TxFlow active trade is missing")));
+            return;
+        };
+        let pending_place = match &request.effect {
+            Effect::Place(_) => {
+                let receipt = match cx.http_pending_placement(&request.context) {
+                    Ok(receipt) => receipt,
+                    Err(error) => {
+                        self.finish_trade(cx, Err(error.venue_error()));
+                        return;
+                    }
+                };
+                job.custody.pending_identity = Some(receipt);
+                true
+            }
+            _ => {
+                if cx
+                    .http_write_fact(
+                        &request.context,
+                        safe_cex_engine::classify::WriteFact::Accepted { order_ids: vec![] },
+                        None,
+                    )
+                    .is_err()
+                {
+                    return;
+                }
+                false
+            }
+        };
+        job.effective = true;
+        if pending_place {
+            if let (Some(plan), Some(slot)) = (&job.custody.plan, &job.custody.slot) {
+                match cx.serial_plan_settle_wait(plan, slot, &request.context, 5_000) {
+                    Ok(wait) => job.custody.wait = Some(wait),
+                    Err(error) => {
+                        self.finish_trade(cx, Err(error.venue_error()));
+                        return;
+                    }
+                }
+                if job.steps.is_empty() {
+                    job.custody.context = None;
+                }
+            }
+        } else if job.steps.is_empty() {
+            if let (Some(plan), Some(slot)) = (&job.custody.plan, &job.custody.slot) {
+                if let Err(error) = cx.finish_plan_call(plan, slot, &request.context) {
+                    self.finish_trade(cx, Err(error.venue_error()));
+                    return;
+                }
+                job.custody.context = None;
+            }
+        } else {
+            let Some(slot) = job.custody.slot.as_ref() else {
+                self.finish_trade(cx, Err(unknown("TxFlow trade slot is missing")));
+                return;
+            };
+            match cx.serial_plan_condition_wait(
+                &request.plan,
+                slot,
+                &request.context,
+                custody::call(),
+                Some(20_000),
+            ) {
+                Ok(wait) => {
+                    job.custody.wait = Some(wait);
+                    job.custody.context = None;
+                }
+                Err(error) => {
+                    self.finish_trade(cx, Err(error.venue_error()));
+                    return;
+                }
+            }
+        }
         match request.effect {
-            Effect::Place(cloids) => self.trading.active.as_mut().unwrap().waiting = cloids,
-            Effect::Amend { id, .. } => self.trading.active.as_mut().unwrap().ids.push(id),
+            Effect::Place(cloids) => job.waiting = cloids,
+            Effect::Amend { id, .. } => job.ids.push(id),
             Effect::PositionMode(hedged) => cx.store.set_hedged(hedged),
             Effect::Setting {
                 symbol,
@@ -856,6 +939,12 @@ impl TxFlow {
             })
             .collect::<Option<Vec<_>>>();
         if let Some(ids) = resolved {
+            if let Some(receipt) = job.custody.pending_identity.take()
+                && let Err(error) = cx.resolve_placement_identity(receipt, ids.clone())
+            {
+                self.finish_trade(cx, Err(error.venue_error()));
+                return;
+            }
             job.ids.extend(ids);
             job.waiting.clear();
         }
@@ -864,16 +953,18 @@ impl TxFlow {
                 cx.clear_timer(timer);
             }
             self.trading.reconcile_count = 0;
+            if let Some(wait) = job.custody.wait.take() {
+                if let Err(error) = cx.release_condition_wait(&wait) {
+                    self.finish_trade(cx, Err(error.venue_error()));
+                }
+                return;
+            }
             self.pump_trades(cx);
         } else if self.trading.reconcile.is_none() {
             self.trading.reconcile = Some(cx.set_timer(300.0));
         }
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.trading.pace == Some(timer) {
-            self.trading.pace = None;
-            self.pump_trades(cx);
-        }
         if self.trading.reconcile == Some(timer) {
             self.trading.reconcile = None;
             self.trading.reconcile_count += 1;
@@ -899,9 +990,14 @@ impl TxFlow {
                     {
                         error.outcome = None;
                     }
-                    cx.fail(job.command, error);
+                    self.finish_trade_owner(cx, &job, Err(error));
                 }
-                Ok(()) => cx.done(job.command, serde_json::to_string(&job.ids).unwrap()),
+                Ok(()) => self.finish_trade_owner(
+                    cx,
+                    &job,
+                    serde_json::to_string(&job.ids)
+                        .map_err(|_| unknown("Invalid TxFlow order identity response")),
+                ),
             }
         }
         self.pump_trades(cx);
@@ -978,9 +1074,9 @@ fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), VenueError>
     if data.r#type != expected || data.data.statuses.len() != 1 {
         return Err(unknown("Invalid TxFlow whole-action acknowledgement"));
     }
-    match data.data.statuses.into_iter().next().unwrap() {
-        Status::Text(s) if s == "success" => Ok(()),
-        Status::Error { error } => Err(rejected(error)),
+    match data.data.statuses.into_iter().next() {
+        Some(Status::Text(s)) if s == "success" => Ok(()),
+        Some(Status::Error { error }) => Err(rejected(error)),
         _ => Err(unknown("Unknown TxFlow execution status")),
     }
 }

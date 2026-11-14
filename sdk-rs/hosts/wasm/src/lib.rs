@@ -84,7 +84,6 @@ trait AnyEngine {
     fn failed(&self) -> bool {
         false
     }
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
@@ -235,7 +234,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.address_setup_retired_wire(token, now)
     }
 
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
@@ -1019,7 +1017,10 @@ impl WasmEngine {
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         // A false read-key result outranks any provider setup failure, as natively.
         safe_cex_venues::read_key_preflight(venue, &options).map_err(construction_error)?;
-        let external_signer = options.signing.is_some() && signer_setup_json.is_none();
+        let external_setup = options.signing.is_some() && signer_setup_json.is_none();
+        let has_external_refs = options.signing.as_ref().is_some_and(|identities| {
+            identities.primary.is_some() || identities.secondary.is_some()
+        });
         #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
@@ -1035,7 +1036,7 @@ impl WasmEngine {
             .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
-        } else if external_signer {
+        } else if external_setup {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
         } else if dispatch_signing {
             let (signer, identities) =
@@ -1115,6 +1116,9 @@ impl WasmEngine {
             Boxed,
         )
         .map_err(construction_error)?;
+        // Public normalization may discard the provider. Otherwise the external
+        // refs still need a callback, including refs retained inside the venue.
+        let external_signer = external_setup && has_external_refs && inner.signer().is_some();
         Ok(Self {
             inner,
             construction,
@@ -1689,6 +1693,9 @@ impl WasmEngine {
 fn is_false(value: &bool) -> bool {
     !*value
 }
+
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "txflow"))]
+mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {
