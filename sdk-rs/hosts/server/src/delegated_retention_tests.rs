@@ -1,6 +1,5 @@
 use super::*;
 use crate::delegated::{DelegatedPair, prepare_delegated};
-use safe_cex_crypto::signer::Secret;
 use safe_cex_engine::signing::{Algorithm, Capability, KeyRef};
 
 const RETAIN: Duration = Duration::from_secs(48 * 60 * 60);
@@ -51,7 +50,7 @@ fn resident_with_identity(
             &init,
             DelegatedPair::new(
                 init.key.clone(),
-                Secret::new("synthetic-secret".into()),
+                "synthetic-secret".into(),
                 None,
             ),
         )
@@ -208,7 +207,7 @@ async fn admitted_reconnect_resets_retention_and_another_user_does_not() {
                     outbox,
                     DelegatedPair::new(
                         "synthetic-key".into(),
-                        Secret::new("synthetic-secret".into()),
+                        "synthetic-secret".into(),
                         None,
                     ),
                 )
@@ -331,7 +330,7 @@ async fn fresh_verified_admission_after_resume_grace_resets_retention_but_a_pend
                     Arc::new(|_| true),
                     DelegatedPair::new(
                         "synthetic-key".into(),
-                        Secret::new("synthetic-secret".into()),
+                        "synthetic-secret".into(),
                         None,
                     ),
                 )

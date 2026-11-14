@@ -187,7 +187,7 @@ impl Signer for ResidentSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
     use safe_cex_engine::signing::ProtectedSigner;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
