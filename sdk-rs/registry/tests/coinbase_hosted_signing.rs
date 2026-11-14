@@ -293,8 +293,12 @@ fn aliases_construct_with_owned_local_keys_and_payload_mode_refuses_before_io() 
             Start,
         )
         .unwrap_err();
-        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert_eq!(
+            error.message,
+            "Delegated signing requires a configured callback provider"
+        );
     }
 }
 

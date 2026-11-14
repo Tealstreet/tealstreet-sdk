@@ -9,6 +9,7 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import * as betaPolicy from '../../exchanges/rust/betaVenues';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import {
   runsOnRustEngine,
@@ -168,9 +169,9 @@ describe('factory and worker loaders', () => {
   const signed = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions =>
     ({ key: 'k', secret: '', payloadSigner, engine: 'rust', ...extra }) as ExchangeOptions;
 
-  it('createExchange builds Rust venues for declared Bybit, Binance and Bitrue payload signers', async () => {
+  it('createExchange builds Rust venues for admitted Bybit and Binance payload signers', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
-    for (const name of ['bybit', 'binance', 'bitrue'] as const) {
+    for (const name of ['bybit', 'binance'] as const) {
       for (const options of [signed(), signed({ engine: undefined })]) {
         const exchange = await createExchange(name, options);
         try {
@@ -183,14 +184,21 @@ describe('factory and worker loaders', () => {
   }, 60_000);
 
   it('OUT names refuse without constructing a hosted TS class', async () => {
+    // This case exercises admission itself; the other cases exercise native codecs below it.
+    const actual = await vi.importActual<typeof import('../../exchanges/rust/betaVenues')>('../../exchanges/rust/betaVenues');
+    vi.spyOn(betaPolicy, 'assertBetaVenue').mockImplementation(actual.assertBetaVenue);
+    vi.spyOn(betaPolicy, 'assertBetaAccount').mockImplementation(actual.assertBetaAccount);
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
-    // Polymarket remains outside the beta roster, regardless of signer mode.
-    for (const name of ['polymarket'] as const) {
+    // Codec support does not admit an OUT venue, regardless of signer mode.
+    for (const name of ['bitrue', 'polymarket'] as const) {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {
-        recordEngine(name, true);
+        const { construct, transport, io } = recordEngine(name, true);
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+        expect(construct).not.toHaveBeenCalled();
+        expect(transport).not.toHaveBeenCalled();
+        expect(io).not.toHaveBeenCalled();
       }
     }
   }, 60_000);

@@ -166,7 +166,7 @@ describe('delegated signer SDK runtime admission', () => {
   it('keeps unrelated families closed and rejects malformed admitted providers synchronously', () => {
     expect(runsOnRustEngine('bybit', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
     expect(runsOnRustEngine('bitunix', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
-    expect(runsOnRustEngine('bitrue', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
+    expect(runsOnRustEngine('bitrue', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(false);
     expect(runsOnRustEngine('weex', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(false);
     let error: unknown;
     try {

@@ -6,7 +6,7 @@ impl Session {
         let arrived = std::time::Instant::now();
         let name = request.account_name.clone();
         let id = Value::String(request.intent_id.clone());
-        let out = self.handover_out(&name);
+        let out = self.order_out(&name, request.instance_id.as_deref());
         if !out.order_receipt_binding_bounded()
             || name.len() > 256
             || request.intent_id.len() > 128
@@ -135,7 +135,13 @@ impl Session {
     }
 
     pub(super) fn action_cancel_queued(&mut self, cancel: CancelQueued) {
-        let out = self.handover_out(&cancel.account_name);
+        self.forget_disposed();
+        let out = match self.joined.get(&cancel.account_name) {
+            Some(joined) if joined.out.order_binding(cancel.instance_id.as_deref()) => {
+                joined.out.clone()
+            }
+            _ => self.order_out(&cancel.account_name, cancel.instance_id.as_deref()),
+        };
         if !out.order_receipt_binding_bounded()
             || cancel.account_name.len() > 256
             || cancel.intent_id.len() > 128

@@ -9,7 +9,7 @@ it('explicitly refuses Polymarket signature-only custody before callbacks or con
   for (const options of [{ remoteSigner }, { payloadSigner: sign }, { remoteSigner, payloadSigner: sign }]) {
     expect(() => assertBetaAccount('polymarket', { key: 'fixture-private-key', ...options })).toThrowError(expect.objectContaining({
       kind: 'unsupported', outcome: 'notSent',
-      message: expect.stringContaining('user WebSocket requires the API secret'),
+      message: 'polymarket is unsupported in this build',
     }));
   }
   expect(sign).not.toHaveBeenCalled();

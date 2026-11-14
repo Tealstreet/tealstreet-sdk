@@ -1,5 +1,10 @@
 # Bitrue socket recovery
 
+Hosted construction refuses Bitrue with `unsupported` / `notSent` while it
+remains outside SDK beta admission, including public-only accounts. Client
+construction remains available behind the SDK beta layer, with catalogue,
+signing and socket codecs independently tested.
+
 Public and private sockets use independent engine `Supervisor` instances with
 10-second connect/token deadlines, 20-second receive watchdogs, and capped
 exponential reconnect with deterministic jitter. Opening a socket does not
@@ -11,7 +16,7 @@ Each private recovery POSTs a fresh futures listen key. Session generations
 fence late responses and cancel old keepalives. Public reconnects retain
 subscription ownership, retire pending socket reads, and invalidate books.
 
-## Hosted and delegated signing
+## Standalone signing codecs
 
 Bitrue futures uses HMAC-SHA256, rendered as lowercase hex, over the exact
 `timestamp_ms + METHOD + path_and_query + serialized_body` bytes. It has no
@@ -19,8 +24,9 @@ signed nonce. The receive window defaults to 20,000 ms and clamps to
 1–60,000 ms; `recvWindow` is a header outside the signed payload. The engine
 freezes each dispatch timestamp and rejects stale signing completions.
 
-Local and hosted construction install opaque identities into the same native
-dispatch recipes. Only the provider owns the signing material. RemoteSigner
+Standalone Client construction and hosted-signing capture use opaque identities
+with the same native dispatch recipes; this does not admit a Hosted account.
+Only the provider owns the signing material. RemoteSigner
 receives the canonical payload through the existing `ws-auth` / `hex` envelope;
 no secret or opaque signing ref crosses that wire. Browser `signHttpRequest`
 uses a standalone codec backed by native hosted capture, including requests to
@@ -57,11 +63,11 @@ and an actionable explanation. This adapter delegates API-key custody; it does
 not introduce an agent-wallet or EIP-712 signing mode.
 
 `construction-rules.json` declares `remoteSigning.enabled`, `payloadSupported`
-and `payloadRestOnly`. Bitrue is included in both SDK and Wasm beta rosters;
-the existing beta release roster guard counts its additional family. Measured
-cap-only follow-ups in this PR are recorded in `sdk-rs/harness/wasm-budget.test.mjs`.
-NX's derived refusal list
-follows the SDK declaration on import; no separate NX implementation is needed.
+and `payloadRestOnly` for the standalone codecs. Its `betaAdmitted: false`
+keeps Bitrue outside SDK account admission. Hosted construction refuses it before
+signer setup, including public-only accounts. The WASM beta loader still ships
+the Bitrue family; that codec availability does not grant SDK account admission.
+NX's derived refusal list follows the SDK declaration on import.
 
 Independent HMAC vectors cover every signed route plus listen-key creation and
 refresh. The native fixture provider compares actual dispatched graphs and
