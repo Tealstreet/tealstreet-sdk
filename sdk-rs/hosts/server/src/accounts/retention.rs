@@ -37,6 +37,15 @@ impl Registry {
         // waits for the last live client; revocation lookup must not forget it.
         if !holders.disposed {
             holders.departed_labels.extend(labels.iter().cloned());
+            // Parked holders will lose their label map when resume grace ends,
+            // even when another admitted holder prevents the retention clock.
+            let parked_labels: Vec<_> = holders
+                .labels
+                .iter()
+                .filter(|(id, _)| holders.by_id.get(id).is_some_and(Option::is_none))
+                .flat_map(|(_, labels)| labels.keys().cloned())
+                .collect();
+            holders.departed_labels.extend(parked_labels);
         }
         if holders.disposed
             || holders.retention.is_some()

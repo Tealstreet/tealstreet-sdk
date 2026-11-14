@@ -728,35 +728,3 @@ async fn disconnected_alias_on_a_still_live_socket_keeps_revocation_lookup() {
         })
         .await;
 }
-
-#[tokio::test(start_paused = true)]
-async fn explicit_alias_removal_erases_even_when_the_same_socket_holds_another_label() {
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            let registry = tests::registry();
-            let (account, mut inbox) = resident(&registry, "A");
-            let (other, mut other_inbox) = resident(&registry, "B");
-            assert!(account.hold_label(
-                7,
-                Live {
-                    outbox: Arc::new(|_| true),
-                    token: None
-                },
-                "phone"
-            ));
-            let provider = account.delegated.as_ref().unwrap().provider();
-            registry.release_label(&account, 7, "phone", Disposal::PageDisposed);
-            assert_eq!(
-                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
-                Capability::Unsupported
-            );
-            assert!(matches!(
-                inbox.try_recv(),
-                Ok(crate::algos::AlgoInput::Dispose { .. })
-            ));
-            assert!(other_inbox.try_recv().is_err());
-            assert!(registry.holds(&other, 7));
-            registry.dispose(&other, Disposal::PageDisposed);
-        })
-        .await;
-}

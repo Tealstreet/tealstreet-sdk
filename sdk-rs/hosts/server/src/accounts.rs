@@ -1831,7 +1831,7 @@ impl Registry {
         label: &str,
         disposal: Disposal,
     ) {
-        let (still_held, removed) = {
+        let still_held = {
             let mut holders = account.holders.lock().unwrap();
             let (remaining, removed) = if let Some(labels) = holders.labels.get_mut(&holder) {
                 let removed = labels.remove(label).is_some();
@@ -1839,10 +1839,14 @@ impl Registry {
             } else {
                 (None, false)
             };
-            if removed && account.delegated.is_some() && !holders.disposed {
+            if removed
+                && disposal == Disposal::SocketClosed
+                && account.delegated.is_some()
+                && !holders.disposed
+            {
                 holders.departed_labels.insert(label.to_owned());
             }
-            let still_held = if let Some(live) = remaining {
+            if let Some(live) = remaining {
                 holders.by_id.insert(holder, Some(live.clone()));
                 if holders.signing == Some(holder) {
                     account.sign_through(&mut holders, holder, &live);
@@ -1850,16 +1854,8 @@ impl Registry {
                 true
             } else {
                 false
-            };
-            (still_held, removed)
+            }
         };
-        if removed
-            && account.delegated.is_some()
-            && matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned)
-        {
-            self.dispose_for(account, disposal, "account disposed", None);
-            return;
-        }
         if !still_held {
             self.release_with_labels(account, holder, disposal, vec![label.to_owned()]);
         }
