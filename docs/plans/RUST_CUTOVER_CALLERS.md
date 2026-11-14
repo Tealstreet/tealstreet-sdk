@@ -10563,6 +10563,10 @@ is bounded to 0.1–20. Ordinary limit/market placement and single cancellation
 payload bytes are pinned against the unchanged base. Snapshot failure and
 non-array guards retain previous Store state.
 
+Single algo cancellation additionally requires the native `complete:true`
+acknowledgement. An incomplete or malformed reply remains Unknown, preserves
+the local order and stops later cancels or replacement placement.
+
 This changes the retained TypeScript reference only; it does not change the
 runtime Rust implementation or patch a separate legacy production branch.
 

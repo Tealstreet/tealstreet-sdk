@@ -82,7 +82,12 @@ for (const profile of ['binance', 'binancepm'] as const) {
         await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
         store.updateOrder({ id: original.id }, { filled: 3, remaining: 0 });
         store.updateOrderStatus(original, OrderStatus.Closed);
-        resolve({ data: { orderId: original.id, status: 'CANCELED' } });
+        resolve({
+          data:
+            profile === 'binancepm' && type === OrderType.StopLoss
+              ? { complete: true }
+              : { orderId: original.id, status: 'CANCELED' },
+        });
         await pending;
         expect(store.orders.find((row) => row.id === original.id)).toMatchObject({
           status: OrderStatus.Closed,

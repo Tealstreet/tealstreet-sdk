@@ -181,9 +181,95 @@ describe('Binance PM Algo Service migration', () => {
 
   it('cancels one algo by clientAlgoId without strategy field names', async () => {
     const { exchange } = subject();
-    const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data: { algoId: 123 } } as any);
+    const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data: { complete: true } } as any);
     await exchange.cancelOrders([{ id: 'protection', symbol: 'BTCUSDT', type: OrderType.StopLoss } as Order]);
     expect(remove).toHaveBeenCalledWith('/papi/v1/um/algo/order', { params: { clientAlgoId: 'protection' } });
+  });
+
+  const protection = (): Order => ({
+    id: 'protection',
+    symbol: 'BTCUSDT',
+    type: OrderType.StopLoss,
+    side: OrderSide.Sell,
+    status: OrderStatus.Open,
+    amount: 0.01,
+    filled: 0,
+    remaining: 0.01,
+    price: 59000,
+    reduceOnly: true,
+    lastUpdate: 0,
+  });
+
+  // PM's cancel response proves completion only with the literal boolean true.
+  // https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade#cancel-um-algo-order
+  it.each([{ complete: false }, {}, { complete: 'true' }, null, []])(
+    'preserves an unconfirmed cancellation as unknown for response %j',
+    async (data) => {
+      const { exchange, store } = subject();
+      const original = protection();
+      store.update({ orders: [original] });
+      const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data } as any);
+
+      await expect(exchange.cancelOrders([original])).rejects.toMatchObject({ outcome: 'unknown' });
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(store.orders.find((order) => order.id === original.id)).toMatchObject({ status: OrderStatus.Open });
+      expect(exchange.emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('outcome is unknown'));
+    },
+  );
+
+  it.each([{ complete: false }, {}])('never replaces protection after an unconfirmed cancel %j', async (data) => {
+    const { exchange, store } = subject();
+    const original = protection();
+    store.update({ orders: [original] });
+    const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data } as any);
+    const post = vi.spyOn(exchange.unlimitedXHR, 'post').mockResolvedValue({ data: { algoId: 456 } } as any);
+
+    await expect(exchange.updateOrder({ order: original, update: { price: 58000 } })).rejects.toMatchObject({
+      outcome: 'unknown',
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(post).not.toHaveBeenCalled();
+    expect(store.orders.find((order) => order.id === original.id)).toMatchObject({ status: OrderStatus.Open });
+  });
+
+  it('retains confirmed prefix cancellation and stops the suffix after an unknown algo cancel', async () => {
+    const { exchange, store } = subject();
+    const prefix = { ...protection(), id: 'prefix', type: OrderType.Limit };
+    const original = protection();
+    const suffix = { ...prefix, id: 'suffix' };
+    store.update({ orders: [prefix, original, suffix] });
+    const remove = vi
+      .spyOn(exchange.papiXhr, 'delete')
+      .mockResolvedValueOnce({ data: {} } as any)
+      .mockResolvedValueOnce({ data: { complete: false } } as any)
+      .mockResolvedValue({ data: {} } as any);
+
+    await expect(exchange.cancelOrders([prefix, original, suffix])).rejects.toMatchObject({ outcome: 'unknown' });
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(store.orders.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: 'prefix', status: OrderStatus.Canceled },
+      { id: 'protection', status: OrderStatus.Open },
+      { id: 'suffix', status: OrderStatus.Open },
+    ]);
+  });
+
+  it('allows replacement only after the algo cancellation proves complete', async () => {
+    const { exchange, store } = subject();
+    const original = protection();
+    store.update({ orders: [original] });
+    const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data: { complete: true } } as any);
+    const post = vi.spyOn(exchange.unlimitedXHR, 'post').mockResolvedValue({ data: { algoId: 456 } } as any);
+
+    await expect(exchange.updateOrder({ order: original, update: { price: 58000 } })).resolves.toEqual([
+      'x-s3vFFRQpgenerated',
+    ]);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(
+      '/papi/v1/um/algo/order',
+      expect.objectContaining({ triggerPrice: '58000', clientAlgoId: 'x-s3vFFRQpgenerated' }),
+    );
+    expect(store.orders.find((order) => order.id === original.id)?.status).toBe(OrderStatus.Canceled);
   });
 
   it('cancels both symbol families and preserves the failed family', async () => {

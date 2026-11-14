@@ -9,6 +9,7 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { createApiWithSecondaryKey } from '../../../createApiWithSecondaryKey';
 import { BaseExchange } from '../../../exchanges/base';
 import {
@@ -756,11 +757,23 @@ export class BinancePMExchange extends BaseExchange {
           try {
             if (conditionalTypes.includes(order.type)) {
               // Use conditional order endpoint for SL/TP/TRAILING_STOP orders
-              await this.papiXhr.delete(ENDPOINTS.CONDITIONAL_ORDER, {
+              const { data } = await this.papiXhr.delete<unknown>(ENDPOINTS.CONDITIONAL_ORDER, {
                 params: {
                   clientAlgoId: order.id,
                 },
               });
+              // HTTP 200 without complete:true cannot authorize cancellation or replacement.
+              if (
+                data === null ||
+                typeof data !== 'object' ||
+                Array.isArray(data) ||
+                !('complete' in data) ||
+                data.complete !== true
+              ) {
+                const message =
+                  'Binance PM algo cancellation is unconfirmed. The outcome is unknown. Check Open Orders';
+                throw new ExchangeError(message, { message, kind: 'internal', outcome: 'unknown' });
+              }
             } else {
               // Use regular order endpoint for other order types
               await this.papiXhr.delete(ENDPOINTS.ORDER, {

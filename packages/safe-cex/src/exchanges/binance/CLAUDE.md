@@ -717,7 +717,8 @@ re-thrown so the caller cannot mistake a partial cancel for full success.
 **Portfolio Margin** (`binancepm.exchange.ts:626-673`):
 
 - Groups by symbol, cancels one at a time via `forEachSeries`.
-- Conditional orders (SL/TP/trailing): `DELETE /papi/v1/um/conditional/order` with `newClientStrategyId`.
+- Conditional orders (SL/TP/trailing): `DELETE /papi/v1/um/algo/order` with `clientAlgoId`.
+- A single algo cancellation requires the literal `complete:true` reply. False, missing or malformed completion remains Unknown, preserves the local row and stops cancel/replace and subsequent cancels.
 - Regular orders: `DELETE /papi/v1/um/order` with `origClientOrderId`.
 - No `-2011` silent error handling.
 
@@ -1072,13 +1073,11 @@ PM only returns positions with non-zero size from the API. The implementation cr
 
 ### Portfolio Margin Conditional Orders
 
-PM uses a different naming convention than futures:
-
-- `strategyType` instead of `type` for conditional orders
-- `strategyId` / `newClientStrategyId` instead of `algoId` / `clientAlgoId`
-- WebSocket event is `CONDITIONAL_ORDER_TRADE_UPDATE` (data in `so` object) vs `ALGO_UPDATE` (data in `o` object)
-- Status field is `data.os` instead of `data.X`
-- Order type field is `data.st` instead of `data.o`
+PM UM conditional orders use the Algo Service with native `type`, `algoId` and
+`clientAlgoId`. PM `ALGO_UPDATE` wraps the order in `ao`, while USD-M uses `o`;
+both carry status `X` and order type `o`. The retained TS reference still reads
+legacy `CONDITIONAL_ORDER_TRADE_UPDATE.so` during handover, but never writes the
+retired strategy endpoints. A trigger lifecycle event is not proof of a fill.
 
 ### Portfolio Margin Margin Type
 
