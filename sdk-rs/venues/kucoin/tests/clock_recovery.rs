@@ -149,13 +149,21 @@ fn slow_time_probe<V: Venue>(make: impl FnOnce(safe_cex_venue_kucoin::Options) -
     assert_eq!(replay.url, first.url);
     assert_eq!(header(&replay, "KC-API-KEY"), "read-key");
     assert_eq!(replay.timeout_ms, Some(14_000));
-    h.reply(&replay, 200, r#"{"code":"200000","data":{"userId":"user"}}"#);
+    h.reply(
+        &replay,
+        200,
+        r#"{"code":"200000","data":{"userId":"user"}}"#,
+    );
     assert_eq!(h.terminals(), 1);
     assert!(h.actions.iter().any(|action| matches!(
         action,
         Action::Notice(Notice::CommandDone { command: 71, .. })
     )));
-    assert!(!h.actions.iter().any(|action| matches!(action, Action::Http(_))));
+    assert!(
+        !h.actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
 }
 
 #[test]
@@ -187,7 +195,11 @@ fn background_order_books_can_recover_from_a_time_probe_slower_than_five_seconds
         assert_eq!(header(&replay, "KC-API-KEY"), "read-key");
         h.reply(&replay, 400, SKEW);
         assert!(!h.e.store().loaded().orders);
-        assert!(!h.actions.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(
+            !h.actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
     }
 }
 
@@ -199,21 +211,39 @@ fn failed_order_book_time_probe_reports_the_original_read_without_restarting_rec
         h.actions.clear();
         h.reply(&first, 400, SKEW);
         let clock = h.take("/timestamp");
-        h.e.handle(h.now, Event::HttpFailed {
-            request: clock.id,
-            error: "untrusted transport text",
-        });
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: clock.id,
+                error: "untrusted transport text",
+            },
+        );
         h.collect();
-        let failures = h.actions.iter().filter_map(|action| match action {
-            Action::Notice(Notice::Event(event))
-                if event.code == safe_cex_engine::log::code::REQUEST_FAILED => Some(event),
-            _ => None,
-        }).collect::<Vec<_>>();
+        let failures = h
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::REQUEST_FAILED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert_eq!(failures.len(), 1);
         assert!(failures[0].message.contains(path));
-        assert!(failures[0].message.contains("source=transport signError=false HTTP=none"));
+        assert!(
+            failures[0]
+                .message
+                .contains("source=transport signError=false HTTP=none")
+        );
         assert!(!failures[0].message.contains("untrusted transport text"));
-        assert!(!h.actions.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(
+            !h.actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
     }
 }
 
