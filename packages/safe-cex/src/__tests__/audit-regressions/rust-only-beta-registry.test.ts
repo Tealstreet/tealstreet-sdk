@@ -77,6 +77,12 @@ beforeEach(() => {
   vi.mocked(virtualClock.start).mockClear();
 });
 describe('Rust-only beta construction', () => {
+  it('admits the live Bitrue venue before loading an engine', () => {
+    // restored by this PR; #3317 dropped a live venue without a product decision.
+    expect(BETA_VENUES).toContain('bitrue');
+    // restored by this PR; #3317 dropped a live venue without a product decision.
+    expect(() => assertBetaAccount('bitrue', { key: '', secret: '', publicDataOnly: true })).not.toThrow();
+  });
   it('has exactly the declared IN names', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
