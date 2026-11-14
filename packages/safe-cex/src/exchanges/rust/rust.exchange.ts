@@ -2005,7 +2005,9 @@ export class RustEngineExchange extends BaseExchange {
       if (!this.frameFed) throw this.pageWriterUnavailable(method);
       return await send();
     } catch (error) {
-      this.reportCommandError(error);
+      const callerReports = this.options.callerReportsPlacementFailures &&
+        (method === 'placeOrder' || method === 'placeOrders' || method === 'placeOrderWithClientOrderId');
+      if (!callerReports) this.reportCommandError(error);
       throw error;
     }
   };
@@ -2072,10 +2074,7 @@ export class RustEngineExchange extends BaseExchange {
           return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker) return local(...args);
         if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
-          return this.withPageWriter(method, args, () => local(...args)).catch((error: unknown) => {
-            this.reportCommandError(error);
-            throw error;
-          });
+          return this.withPageWriter(method, args, () => local(...args));
         }
         if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
         const admitted = this.captureWorkerAdmission();
