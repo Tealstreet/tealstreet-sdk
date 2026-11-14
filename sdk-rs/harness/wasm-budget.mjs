@@ -761,7 +761,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node/replay 1,664,022 B; SHA256 c7c5a3503743c1d3efc30738948fe3cc7993217c44a8b58af597e2a5e2018f42.
   // Rust1.99, bindgen0.2.129, Binaryen132, required twice -Oz; current bytes + 10 KiB rounded up (11,242 B reserve).
   // Preserve both parent floors and all provenance above.
-  polymarket: 1_675_264,
+  // #3266 merge 2d0fdf629b84: local optimized web/Node 1,665,253 B, build.sh --venue polymarket.
+  // Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz; measured + 10 KiB rounded up.
+  // Module SHA256 3ce71a13dd298e47164f6f1389a2d17c19e93e29e5dfe04e2ec67c0b11545f9c; retain parent floors.
+  polymarket: 1_676_288,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   // #3438 merged-head local build.sh --venue txflow: web/node 1,928,662 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
