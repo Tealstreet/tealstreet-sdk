@@ -453,7 +453,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3225 F1 e475fa4f85a6: optimized web/Node 2,220,861 B; Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz.
   // build.sh --venue coinbase; SHA256 6f7ba5ddba55ca7f7018005601257e0dc093d995b8e1b572c34566c66ca3e619.
   // Current measured bytes + 10 KiB rounded up; preserve all parent floors.
-  coinbase: 2_231_296,
+  // #3225 merge ee6f72edcfdc with master829f80ec68cb: optimized web/Node 2,222,017 B.
+  // build.sh --venue coinbase; Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz; measured + 10 KiB rounded up.
+  // SHA256 4251aa2f7169b389159e3af3c6126df4c9f0e0572fc4597a13634ecccabc1a48; retain all parent floors.
+  coinbase: 2_232_320,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).
