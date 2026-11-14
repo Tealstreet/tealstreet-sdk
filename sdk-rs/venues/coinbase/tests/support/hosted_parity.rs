@@ -1,5 +1,5 @@
 //! Real trading fixtures compare every native JWT graph with the device capture.
-use super::{Coinbase, Options};
+use crate::{Coinbase, Options};
 use safe_cex_engine::Engine;
 use safe_cex_engine::signing::{
     Algorithm, Capability, Identities, KeyRef, Operation, PayloadPart, Provider, SignError,
@@ -78,10 +78,10 @@ impl Signer for Parity {
         self.local.can_sign(key, algorithm)
     }
 }
-pub fn engine(mut options: Options) -> Engine<Coinbase> {
+pub fn engine(mut options: Options, legacy: bool) -> Engine<Coinbase> {
     if std::env::var_os("COINBASE_LEGACY_CONTROL").is_some() {
         let mut venue = Coinbase::new(options).unwrap();
-        venue.account.legacy_protocol_fixture = true;
+        venue.account.legacy_protocol_fixture = legacy;
         return safe_cex_engine::test_support::seeded_engine(venue);
     }
     let mut setup: EngineOptions = serde_json::from_str("{}").unwrap();
@@ -91,8 +91,6 @@ pub fn engine(mut options: Options) -> Engine<Coinbase> {
     setup.read_credentials = options.read_credentials.take();
     let (provider, ids) =
         safe_cex_venues::prepare_local_signer_for("coinbase", &mut setup).unwrap();
-    // Unit fixtures use this crate's Binding while the registry's dev-dependency
-    // owns the same public wire type in the non-test crate instance.
     let primary = setup
         .coinbase_signing
         .take()
@@ -104,9 +102,7 @@ pub fn engine(mut options: Options) -> Engine<Coinbase> {
         .map(|binding| serde_json::from_value(serde_json::to_value(binding).unwrap()).unwrap())
         .zip(ids.secondary.clone());
     let mut venue = Coinbase::with_signing(options, primary, secondary).unwrap();
-    // This helper belongs to the relocated legacy-protocol unit fixtures; the
-    // provider and device graphs still run for every legacy REST/WS signature.
-    venue.account.legacy_protocol_fixture = true;
+    venue.account.legacy_protocol_fixture = legacy;
     let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
     engine
         .set_signer(Some(Arc::new(Parity {

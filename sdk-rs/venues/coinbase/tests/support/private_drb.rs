@@ -1,3 +1,4 @@
+use super::wire::order;
 use super::*;
 use serde_json::json;
 
@@ -94,7 +95,7 @@ struct Rig {
 }
 impl Rig {
     fn new(spot: bool) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(
+        let e = safe_cex_engine::test_support::seeded_engine(
             Coinbase::new(Options {
                 key: "organizations/test/apiKeys/test".into(),
                 secret: STANDARD.encode([7; 32]),
@@ -103,6 +104,9 @@ impl Rig {
             })
             .unwrap(),
         );
+        Self::with_engine(e)
+    }
+    fn with_engine(mut e: Engine<Coinbase>) -> Self {
         e.start(1700000000000.);
         Self {
             e,
@@ -353,6 +357,111 @@ fn websocket_changes_are_atomic_and_fill_ids_deduplicate() {
     b["equity"] = json!(1030.);
     r.notification(socket, "user.portfolio.USDC", b);
     assert_eq!(r.e.store().balance().total, 1030.);
+}
+#[test]
+fn order_versions_accept_same_millisecond_terminal_fill() {
+    assert_streamed_terminal_fill(1700000002000, true);
+}
+#[test]
+fn order_versions_later_millisecond_control() {
+    assert_streamed_terminal_fill(1700000002001, true);
+}
+#[test]
+fn order_versions_without_causal_timestamp_keep_socket_order() {
+    assert_streamed_terminal_fill(1700000002000, false);
+}
+fn assert_streamed_terminal_fill(terminal_ms: u64, causal: bool) {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    for (state, filled, millis, nanos) in [
+        ("open", 0.05, 1700000002000, 1700000002000000001u64),
+        ("filled", 0.1, terminal_ms, 1700000002000000002u64),
+    ] {
+        let mut row = order_row();
+        row["order_state"] = json!(state);
+        row["filled_amount"] = json!(filled);
+        row["last_update_timestamp"] = json!(millis);
+        if causal {
+            row["starbase_last_update_timestamp"] = json!(nanos);
+        }
+        r.notification(socket, CHANNELS[0], json!({"orders":[row]}));
+    }
+    let order = r.e.store().order("USDC-123").unwrap();
+    assert_eq!(order.status, OrderStatus::Closed);
+    assert_eq!(order.filled, 0.1);
+}
+#[test]
+fn order_versions_reject_duplicate_and_older_causal_updates() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    let mut terminal = order_row();
+    terminal["order_state"] = json!("filled");
+    terminal["filled_amount"] = json!(0.1);
+    terminal["last_update_timestamp"] = json!(1700000002000u64);
+    terminal["starbase_last_update_timestamp"] = json!(1700000002000000002u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[terminal]}));
+    for (millis, nanos) in [
+        (1700000002000u64, 1700000002000000002u64),
+        (1700000002000, 1700000002000000001),
+        (1700000001000, 1700000001000000001),
+    ] {
+        let mut old = order_row();
+        old["last_update_timestamp"] = json!(millis);
+        old["starbase_last_update_timestamp"] = json!(nanos);
+        r.notification(socket, CHANNELS[0], json!({"orders":[old]}));
+        let order = r.e.store().order("USDC-123").unwrap();
+        assert_eq!(order.status, OrderStatus::Closed);
+        assert_eq!(order.filled, 0.1);
+    }
+}
+#[test]
+fn order_versions_missing_causal_keeps_the_last_known_floor() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    for (filled, nanos) in [
+        (0.05, Some(1700000002000000002u64)),
+        (0.075, None),
+        (0.025, Some(1700000002000000001)),
+    ] {
+        let mut row = order_row();
+        row["filled_amount"] = json!(filled);
+        row["last_update_timestamp"] = json!(1700000002000u64);
+        if let Some(nanos) = nanos {
+            row["starbase_last_update_timestamp"] = json!(nanos);
+        }
+        r.notification(socket, CHANNELS[0], json!({"orders":[row]}));
+    }
+    assert_eq!(r.e.store().order("USDC-123").unwrap().filled, 0.075);
+}
+#[test]
+fn order_versions_exact_duplicate_without_causal_does_not_mutate_store() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    let token = r.e.store_mut().begin_orders_snapshot().unwrap();
+    r.notification(socket, CHANNELS[0], json!({"orders":[order_row()]}));
+    assert!(r.e.store().orders_snapshot_current(&token));
+}
+#[test]
+fn order_versions_invalid_causal_timestamp_refuses_whole_event() {
+    for malformed in [
+        json!(-1),
+        json!(1.5),
+        json!("1700000002000000001"),
+        Value::Null,
+    ] {
+        let mut r = Rig::ready();
+        let socket = r.subscribe();
+        let mut row = order_row();
+        row["filled_amount"] = json!(0.1);
+        row["order_state"] = json!("filled");
+        row["last_update_timestamp"] = json!(1700000002000u64);
+        row["starbase_last_update_timestamp"] = malformed;
+        let mut p = position_row();
+        p["size_currency"] = json!(-0.2);
+        r.notification(socket, CHANNELS[0], json!({"orders":[row],"positions":[p]}));
+        assert_eq!(r.e.store().order("USDC-123").unwrap().filled, 0.025);
+        assert_eq!(r.e.store().positions()[0].contracts, 0.1);
+    }
 }
 #[test]
 fn fills_query_retains_bounds_symbol_order_identity_and_seconds_output() {
@@ -1473,4 +1582,75 @@ fn post_reconnect_census_removes_gap_cancellations_during_other_instrument_updat
             "ETH_USDC-PERPETUAL"
         );
     }
+}
+
+use crate::hosted_parity;
+
+fn hosted_rig() -> Rig {
+    Rig::with_engine(hosted_parity::engine(
+        Options {
+            key: ["organizations", "test", "apiKeys", "test"].join("/"),
+            secret: STANDARD.encode([7; 32]),
+            ..Default::default()
+        },
+        false,
+    ))
+}
+
+#[test]
+fn hosted_drb_auth_signs_http_and_socket_tokens_through_the_installed_provider() {
+    let mut initial = hosted_rig();
+    initial.select_intx();
+    initial.collect();
+    assert_eq!(
+        initial
+            .http
+            .iter()
+            .filter(|r| r.url.ends_with("/public/auth"))
+            .count(),
+        1,
+        "hosted INTX startup must release one provider-signed DRB login"
+    );
+    let auth = initial
+        .http
+        .iter()
+        .find(|r| r.url.ends_with("/public/auth"))
+        .unwrap();
+    let body: Value = serde_json::from_str(auth.body.as_deref().unwrap()).unwrap();
+    let claims = |token: &Value| -> Value {
+        let payload = token.as_str().unwrap().split('.').nth(1).unwrap();
+        serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let http = claims(&body["params"]["token"]);
+    assert_eq!(http["iss"], "cdp");
+    assert_eq!(http["uri"], "POST drb.coinbase.com/api/v2/public/auth");
+    assert!(http.get("aud").is_none());
+    let mut ready = Rig::ready_with(hosted_rig());
+    let socket = ready.private_socket();
+    ready.e.handle(ready.now, Event::WsOpened { socket });
+    ready.collect();
+    let sent: Vec<Value> = ready
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { socket: s, text } if *s == socket => {
+                Some(serde_json::from_str(text).unwrap())
+            }
+            _ => None,
+        })
+        .collect();
+    let auth = sent
+        .iter()
+        .find(|body| body["method"] == "public/auth")
+        .expect("provider-signed WS login");
+    let ws = claims(&auth["params"]["token"]);
+    assert_eq!(ws["iss"], "cdp");
+    assert_eq!(ws["sub"], http["sub"]);
+    assert!(ws.get("uri").is_none());
+    assert!(ws.get("aud").is_none());
 }

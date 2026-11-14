@@ -20,7 +20,7 @@ use safe_cex_engine::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use wire::{order, position, summary};
+use wire::{position, summary};
 
 const CHANNELS: [&str; 3] = [
     "user.changes.future.USDC.100ms",
@@ -96,7 +96,7 @@ struct PositionChange {
 }
 enum Overlay {
     None,
-    Orders(Changes<Order>),
+    Orders(Changes<(Order, wire::OrderVersion)>),
     Positions(Changes<PositionChange>),
 }
 impl Overlay {
@@ -150,7 +150,7 @@ pub(crate) struct Private {
     reconnect_at: f64,
     auth_retry_at: f64,
     failures: u32,
-    versions: HashMap<String, f64>,
+    versions: HashMap<String, wire::OrderVersion>,
     versions_fifo: VecDeque<String>,
     trades: HashSet<String>,
     trade_fifo: VecDeque<String>,
@@ -740,10 +740,10 @@ impl Coinbase {
                     .into_iter()
                     .map(|row| {
                         linkage.observe(&row)?;
-                        order(row)
+                        wire::versioned_order(row)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                for o in &orders {
+                for (o, _) in &orders {
                     if o.status != OrderStatus::Open || !ids.insert(o.id.clone()) {
                         return Err("drb invalid open order snapshot".into());
                     }
@@ -753,16 +753,20 @@ impl Coinbase {
                     if changes.overflow {
                         return Err("drb order snapshot change limit".into());
                     }
-                    let mut merged: BTreeMap<_, _> =
-                        orders.into_iter().map(|o| (o.id.clone(), o)).collect();
+                    let mut merged: BTreeMap<_, _> = orders
+                        .into_iter()
+                        .map(|(o, version)| (o.id.clone(), (o, version)))
+                        .collect();
                     merged.extend(changes.rows);
                     orders = merged.into_values().collect();
                 }
-                for o in &orders {
-                    self.drb_order_version(o);
+                for (o, version) in &orders {
+                    self.drb_order_version(o, *version);
                 }
                 self.trading_drb.linkage.merge(linkage);
-                cx.store.commit_orders_snapshot([token], |_| orders);
+                cx.store.commit_orders_snapshot([token], |_| {
+                    orders.into_iter().map(|(o, _)| o).collect()
+                });
             }
             _ => {}
         }
@@ -782,13 +786,15 @@ impl Coinbase {
             s.margin_type = p.margin_type;
         });
     }
-    fn drb_order_version(&mut self, o: &Order) {
+    fn drb_order_version(&mut self, o: &Order, mut version: wire::OrderVersion) {
+        if let Some(previous) = self.private_drb.versions.get(&o.id) {
+            // An omitted optional field must not erase the known causal floor.
+            version.causal = version.causal.or(previous.causal);
+        }
         if !self.private_drb.versions.contains_key(&o.id) {
             self.private_drb.versions_fifo.push_back(o.id.clone());
         }
-        self.private_drb
-            .versions
-            .insert(o.id.clone(), o.last_update);
+        self.private_drb.versions.insert(o.id.clone(), version);
         while self.private_drb.versions_fifo.len() > MAX_ROWS {
             if let Some(id) = self.private_drb.versions_fifo.pop_front() {
                 self.private_drb.versions.remove(&id);
@@ -1002,7 +1008,7 @@ impl Coinbase {
             .into_iter()
             .map(|row| {
                 linkage.observe(&row)?;
-                order(row)
+                wire::versioned_order(row)
             })
             .collect::<Result<Vec<_>, _>>()?;
         let positions = changes
@@ -1041,7 +1047,7 @@ impl Coinbase {
         // Validate the whole event before publishing any component.
         for s in orders
             .iter()
-            .map(|o| o.symbol.as_str())
+            .map(|(o, _)| o.symbol.as_str())
             .chain(positions.iter().map(|p| p.row.symbol.as_str()))
         {
             self.drb_market(cx, s)?;
@@ -1053,12 +1059,12 @@ impl Coinbase {
             )?;
         }
         self.trading_drb.linkage.merge(linkage);
-        for o in orders {
+        for (o, version) in orders {
             if self
                 .private_drb
                 .versions
                 .get(&o.id)
-                .is_some_and(|t| *t >= o.last_update)
+                .is_some_and(|previous| !version.supersedes(*previous))
             {
                 continue;
             }
@@ -1067,10 +1073,13 @@ impl Coinbase {
                     && read.revision == self.private_drb.revisions[3]
                     && let Overlay::Orders(changes) = &mut read.overlay
                 {
-                    changes.insert(o.id.clone(), o.clone());
+                    changes.insert(o.id.clone(), (o.clone(), version));
                 }
             }
-            self.drb_order_version(&o);
+            self.drb_order_version(&o, version);
+            if cx.store.order(&o.id) == Some(&o) {
+                continue;
+            }
             cx.store.upsert_order(o);
         }
         for p in positions {

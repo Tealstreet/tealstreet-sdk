@@ -317,7 +317,11 @@ their canonical claims and signature bytes. REST-only PayloadSigner can sign
 canonical JWS bytes and returns a 64-byte signature in unpadded base64url;
 private WS auth requires RemoteSigner. Wallet/agent and OAuth credentials are
 separate protocols, not CDP JWT substitutes. The signing-only DRB codec accepts
-CDP issuer claims through the shared private-session and trading transport.
+CDP issuer claims. DRB HTTP and main-WebSocket `public/auth` exchanges sign
+through that installed provider at dispatch, with primary-session authority.
+HTTP tokens bind the DRB auth URI; WebSocket tokens omit it. Both retain the
+existing `coinbase-jws` host format and the gateway's CDP issuer claims through
+the shared private-session and trading transport.
 Engine-owned signer slots select by request purpose: account/history reads can
 use the read key; catalogue, permission checks, amend proofs and private socket
 authentication use the primary key. A refused read key pins subsequent reads to
