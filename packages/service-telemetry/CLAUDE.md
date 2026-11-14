@@ -134,3 +134,7 @@ workspace dependency is the SDK-owned HTTP diagnostic URL helper.
 
 Parser provenance must cover sibling fingerprints and alert keys before throttle
 retention and final sending. Ordinary grouping and live input objects are preserved.
+
+Whole-copy omission is a refusal: final event/breadcrumb hooks return null, and
+alert capture drops the diagnostic before claiming any throttle bucket. Never
+project fields from the omission marker or fall back to uninspected raw input.

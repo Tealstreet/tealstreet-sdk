@@ -116,6 +116,7 @@ export function captureAlert({
 
   try {
     const safe = redactDiagnosticData({ fingerprint: key, message, detail, error });
+    if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return;
     const fingerprint = fingerprintFor(safe.fingerprint);
     const { send, suppressed } = claim(fingerprint);
     if (!send) return;

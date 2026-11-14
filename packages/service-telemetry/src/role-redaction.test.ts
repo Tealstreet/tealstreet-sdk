@@ -152,3 +152,50 @@ describe('parser fingerprints before normalization', () => {
     expect(keys[0]).toBe(keys[1]);
   });
 });
+
+
+describe('whole-copy omission at service schemas', () => {
+  const uninspectable = (kind: string) => kind === 'parser limit' ? '['.repeat(65) : new Proxy({}, {
+    ownKeys() { throw new Error('Synthetic unreadable diagnostic'); },
+  });
+  const enable = (service: string) => {
+    vi.mocked(Sentry.init).mockClear();
+    resetServiceSentryForTests();
+    initServiceSentry({ dsn: 'https://fake@o1.ingest.us.sentry.io/2', service });
+  };
+
+  for (const service of ['exchange-server', 'candle-server']) {
+    it.each(['parser limit', 'host object'])(`${service} returns null for an omitted %s event`, (kind) => {
+      enable(service);
+      const event: ErrorEvent = { type: undefined, message: 'ordinary failure', extra: { detail: uninspectable(kind) } };
+      expect(redactDiagnosticData(event)).toBe('[unserializable diagnostic]');
+      expect(() => hooks().beforeSend(event, {})).not.toThrow();
+      expect(hooks().beforeSend(event, {})).toBeNull();
+      expect(event.message).toBe('ordinary failure');
+    });
+
+    it.each(['parser limit', 'host object'])(`${service} returns null for an omitted %s breadcrumb`, (kind) => {
+      enable(service);
+      const crumb = { category: 'test', message: 'ordinary failure', data: { detail: uninspectable(kind) } };
+      expect(redactDiagnosticData(crumb)).toBe('[unserializable diagnostic]');
+      expect(() => hooks().beforeBreadcrumb(crumb, {})).not.toThrow();
+      expect(hooks().beforeBreadcrumb(crumb, {})).toBeNull();
+      expect(crumb.message).toBe('ordinary failure');
+    });
+  }
+
+  it.each(['parser limit', 'host object'])('drops omitted %s alerts before claiming any throttle bucket', (kind) => {
+    for (const status of [401, 503]) {
+      captureAlert({ key: `status:${status}`, message: `HTTP ${status}`, detail: { nested: uninspectable(kind) }, level: 'error', severity: 'low' });
+    }
+    expect(Sentry.captureEvent).not.toHaveBeenCalled();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+    for (const [key, message] of [['status:401', 'HTTP 401'], ['status:503', 'HTTP 503'], ['undefined', 'Literal undefined condition']]) {
+      captureAlert({ key, message, detail: { count: 1 }, level: 'error', severity: 'low' });
+    }
+    const events = vi.mocked(Sentry.captureEvent).mock.calls.map(([event]) => event);
+    expect(events).toHaveLength(3);
+    expect(events.map(event => event.message)).toEqual(['HTTP 401', 'HTTP 503', 'Literal undefined condition']);
+    expect(events.map(event => event.fingerprint)).toEqual([['status:401'], ['status:503'], ['undefined']]);
+  });
+});

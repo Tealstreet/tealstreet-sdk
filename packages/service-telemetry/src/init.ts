@@ -144,6 +144,7 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
 
     beforeSend(event) {
       const safe = redactDiagnosticData(event);
+      if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return null;
       if (safe.extra) safe.extra = boundServiceData(safe.extra) as Record<string, unknown>;
       if (safe.contexts) safe.contexts = boundServiceData(safe.contexts) as typeof safe.contexts;
       // Keep only the explicit box identity, never an SDK-inferred container hostname.
@@ -164,6 +165,7 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
     // Belt and braces: any breadcrumb an integration we did not drop produces.
     beforeBreadcrumb(breadcrumb) {
       const safe = redactDiagnosticData(breadcrumb);
+      if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return null;
       if (safe.data) safe.data = boundServiceData(safe.data) as Record<string, unknown>;
       return safe;
     },
