@@ -1082,7 +1082,11 @@ impl Lighter {
         self.account.records.remove(id);
     }
     pub(crate) fn record_modify(&mut self, id: &str) {
-        self.protection.originals.remove(id);
+        if let Some(original) = self.protection.originals.remove(id) {
+            self.protection
+                .retired_frame_originals
+                .insert(id.into(), original);
+        }
         self.account.revision += 1;
         self.account
             .order_revision

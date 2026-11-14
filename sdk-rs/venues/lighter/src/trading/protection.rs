@@ -8,12 +8,15 @@ pub(crate) struct Original {
     pub client: u64,
     pub index: u64,
     pub waiting_mark: bool,
+    pub frame: String,
 }
 #[derive(Default)]
 pub(crate) struct ProtectionState {
     pub originals: HashMap<String, Original>,
     pub complex: HashSet<String>,
     pub marks: HashMap<String, (f64, f64)>,
+    pub frame_originals: Vec<String>,
+    pub retired_frame_originals: HashMap<String, Original>,
 }
 pub(super) struct Edit {
     pub original: Original,
@@ -22,7 +25,7 @@ pub(super) struct Edit {
     pub restoring: bool,
     pub refusal: Option<VenueError>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(untagged)]
 enum Scalar {
     Text(String),
@@ -46,7 +49,7 @@ impl Scalar {
         .filter(|n| n.is_finite())
     }
 }
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, Serialize)]
 #[serde(default)]
 struct NativeRow {
     #[serde(rename = "type")]
@@ -279,6 +282,11 @@ impl Original {
             client,
             index: integer(row, "order_index")?,
             waiting_mark: row.trigger_status.as_deref() == Some("mark-price"),
+            frame: if matches!(native_kind, 2..=5) {
+                serde_json::to_string(row).ok()?
+            } else {
+                String::new()
+            },
         })
     }
 }
@@ -316,6 +324,37 @@ impl Lighter {
             }
             None => {
                 self.protection.originals.remove(&observed.id);
+            }
+        }
+    }
+    pub(crate) fn ingest_frame_originals(&mut self, store: &Store) {
+        for raw in std::mem::take(&mut self.protection.frame_originals) {
+            let Ok(row) = serde_json::from_str::<NativeRow>(&raw) else {
+                continue;
+            };
+            let Some(id) = integer(&row, "order_index").map(|id| id.to_string()) else {
+                continue;
+            };
+            if self.account_order_terminal(&id) {
+                continue;
+            }
+            let Some(order) = store.order(&id) else {
+                self.protection.frame_originals.push(raw);
+                continue;
+            };
+            if let Some(original) = Original::from_row(store, &row, order) {
+                // A replay cannot regrant native parameters retired by a local modify.
+                if self
+                    .protection
+                    .retired_frame_originals
+                    .get(&id)
+                    .is_some_and(|retired| native_same(&retired.native, &original.native))
+                {
+                    continue;
+                }
+                self.protection.retired_frame_originals.remove(&id);
+                self.protection.complex.remove(&id);
+                self.protection.originals.insert(id, original);
             }
         }
     }

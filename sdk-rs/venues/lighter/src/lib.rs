@@ -1092,6 +1092,19 @@ impl Venue for Lighter {
         let state = venue_state::VenueState {
             account_index: self.account.account_index,
             tier: self.limits_tier_code(),
+            originals: {
+                let mut rows: Vec<_> = self
+                    .protection
+                    .originals
+                    .values()
+                    .filter(|o| {
+                        !o.frame.is_empty()
+                            && o.observed.status == safe_cex_engine::model::OrderStatus::Open
+                    })
+                    .collect();
+                rows.sort_by(|a, b| a.observed.id.cmp(&b.observed.id));
+                rows.into_iter().map(|o| o.frame.clone()).collect()
+            },
         };
         (state != venue_state::VenueState::default()).then(|| state.encode())
     }
@@ -1104,6 +1117,11 @@ impl Venue for Lighter {
             self.apply_account_index(cx, account);
         }
         self.apply_limits_tier_code(state.tier);
+        self.protection.originals.clear();
+        self.protection.frame_originals = state.originals;
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.ingest_frame_originals(cx.store);
     }
     /// Data source: re-read the account snapshot, which carries each market's
     /// leverage and margin type. Never a write; the tier is the source's own
@@ -1460,6 +1478,7 @@ impl Venue for Lighter {
                     self.account_item(cx, request, item);
                 }
             }
+            Pending::Trade(trading::Request::Reference(read)) => read.item(cx, item),
             Pending::Trade(_) | Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Markets {
