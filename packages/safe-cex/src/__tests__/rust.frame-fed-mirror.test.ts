@@ -227,10 +227,13 @@ describe('frame-fed main-thread mirror', () => {
       }
     });
 
-    it('refuses locally once a family proves to have no page engine', async () => {
+    // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed's
+    // source matrix; this sibling control retains the DELEGATED refusal.
+    it('refuses DELEGATED locally once a family proves to have no page engine', async () => {
       const fake = fakeEngine({ supported: false });
       const mirror = mirrorWith(fake);
       exchange = mirror.exchange;
+      exchange.options = { ...exchange.options, signingMode: 'delegated' };
 
       await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
@@ -239,10 +242,13 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
-  describe('a write refused before reaching its data source', () => {
+  describe('a DELEGATED write refused before reaching its data source', () => {
     const failingMirror = async (failure: Record<string, unknown>) => {
       const mirror = mirrorWith(fakeEngine({ supported: false }), failure);
       exchange = mirror.exchange;
+      // SDK #3521 (87d0f386) moves LOCAL source replies to rust.cosigned-non-frame-fed;
+      // both reporting controls here retain the pre-dispatch DELEGATED refusal.
+      exchange.options = { ...exchange.options, signingMode: 'delegated' };
       await mirror.exchange.frameFedReady;
       const errors: unknown[] = [];
       mirror.exchange.on('error', (error: unknown) => errors.push(error));
@@ -282,11 +288,14 @@ describe('frame-fed main-thread mirror', () => {
     const mirrorOnly = () =>
       new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, new DefaultStore());
 
-    it('rejects the removed read bridge and refuses an unsupported page write as notSent', async () => {
+    // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed;
+    // only an ineligible DELEGATED write remains notSent without a page engine.
+    it('rejects the removed read bridge and refuses an unsupported DELEGATED page write as notSent', async () => {
       vi.useFakeTimers();
       try {
         fakeEngine({ supported: false });
         exchange = mirrorOnly();
+        exchange.options = { ...exchange.options, signingMode: 'delegated' };
         const bridge = silentBridge(exchange);
         const pendingRead = exchange.callMethodInWorker('fetchHistoricalFills', { from: 0, to: 1 } as never);
         const pendingWrite = exchange.callMethodInWorker('placeOrder', order as never);
@@ -329,11 +338,14 @@ describe('frame-fed main-thread mirror', () => {
       return target;
     };
 
-    it('bounds the read at 30 s while refusing an unsupported page write locally', async () => {
+    // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed;
+    // the read bound stays independent of the DELEGATED pre-dispatch refusal.
+    it('bounds the read at 30 s while refusing an unsupported DELEGATED page write locally', async () => {
       vi.useFakeTimers();
       try {
         fakeEngine({ supported: false });
         exchange = silentMirror();
+        exchange.options = { ...exchange.options, signingMode: 'delegated' };
         const read = exchange.callMethodInWorker('fetchOrders');
         const refused = expect(read).rejects.toThrow('has not finished loading');
         const write = vi.fn();
@@ -805,10 +817,13 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
-  it('refuses writes where the family has no frame-fed engine', async () => {
+  // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed's
+  // source matrix; a structurally unsupported DELEGATED writer still refuses.
+  it('refuses DELEGATED writes where the family has no frame-fed engine', async () => {
     const fake = fakeEngine({ supported: false });
     const mirror = mirrorWith(fake);
     exchange = mirror.exchange;
+    exchange.options = { ...exchange.options, signingMode: 'delegated' };
     await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(fake.started).toBe(0);
     expect(fake.constructed).toBe(0);
