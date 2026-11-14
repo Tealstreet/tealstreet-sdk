@@ -352,3 +352,43 @@ fn fix_round_older_public_reply_never_overwrites_a_newer_receipt_after_a_frame()
         }
     }
 }
+
+#[test]
+fn fix_round_expired_protective_ban_does_not_restart_on_a_later_list_retry() {
+    for code in [100400, 100410] {
+        let orders=serde_json::json!({"code":0,"data":{"orders":[{
+            "orderId":ORDER_ID,"symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL","status":"NEW",
+            "origQty":"0.1","executedQty":"0","stopPrice":"59000","positionSide":"BOTH",
+            "reduceOnly":true,"workingType":"CONTRACT_PRICE"}]}}).to_string();
+        let mut h = Harness::unstarted();
+        h.respond("/quote/contracts", 200, MARKETS);
+        let initial_daily = h.take("/quote/ticker");
+        let mut h = Harness::finish_ready(h, &orders);
+        amend(&mut h, false);
+        let reference = h.take("/quote/ticker");
+        h.event(Event::HttpResponse {
+            request: reference.id,
+            response: Response {
+                status: 200,
+                headers: "Retry-After: 10\r\n",
+                body: &serde_json::json!({"code":code,"msg":"refused","data":{}}).to_string(),
+            },
+        });
+        refused(&h);
+        if code == 100410 {
+            assert!(h.logs.iter().any(|m| m.contains("rate-limited")));
+        }
+        h.now += 11000.;
+        h.timers.clear();
+        h.reply(initial_daily.id, 200, r#"{"code":0,"data":[]}"#);
+        let waits: Vec<_> = h.timers.iter().map(|(_, at)| at - h.now).collect();
+        assert!(
+            waits.iter().any(|wait| *wait > 0. && *wait < 2000.),
+            "code={code}: {waits:?}"
+        );
+        assert!(
+            !waits.iter().any(|wait| *wait >= 10000.),
+            "code={code}: {waits:?}"
+        );
+    }
+}

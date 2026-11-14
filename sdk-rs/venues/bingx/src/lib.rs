@@ -1472,6 +1472,7 @@ impl Venue for Bingx {
                     "public reference response did not contain the expected list".into()
                 }),
             );
+            self.ban_wait_ms = None;
             return;
         }
         if sign::timestamp::refused(response.body) {
