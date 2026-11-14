@@ -134,3 +134,16 @@ test('drb audit refuses mismatched, closed and invalid-login successful replies'
     assert.equal(audit.ready(), false, mode);
   }
 });
+
+
+test('drb audit keeps error diagnostics for heartbeat and other untracked RPCs', () => {
+  const audit = createDrbSocketAudit();
+  audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auditAuth()), 1);
+  audit.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 1, result: { access_token: 'synthetic', expires_in: 900 } }), 1);
+  audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auditSubscribe()), 1);
+  audit.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 2, result: auditChannels }), 1);
+  assert.equal(audit.ready(), true);
+  audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'public/set_heartbeat', params: { interval: 30 } }), 1);
+  audit.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 3, error: { code: 11050, message: 'synthetic heartbeat refusal' } }), 1);
+  assert.match(audit.errors().join('\n'), /socket returned an error/);
+});

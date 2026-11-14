@@ -138,10 +138,16 @@ export const createDrbSocketAudit = () => {
       catch { errors.push('Coinbase drb received invalid JSON'); return; }
       const state = get(url, generation);
       if (state.closed || message?.jsonrpc !== '2.0' || !Number.isSafeInteger(message.id)) return;
+      // Heartbeat/test replies do not grant readiness, but their failures still
+      // belong to the protocol audit even without a readiness request pending.
+      if (message.error) {
+        state.pending.delete(message.id);
+        errors.push('Coinbase drb socket returned an error');
+        return;
+      }
       const pending = state.pending.get(message.id);
       if (!pending) return;
       state.pending.delete(message.id);
-      if (message.error) { errors.push('Coinbase drb socket returned an error'); return; }
       if (pending.method === 'public/auth') {
         if (typeof message.result?.access_token !== 'string' || !message.result.access_token
             || !Number.isFinite(message.result.expires_in) || message.result.expires_in <= 0) {
