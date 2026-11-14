@@ -60,8 +60,9 @@ it.each([null, true])('EngineHost accepts public TxFlow refs without a provider 
 
 it.each(['bingx', 'weex', 'bitget', 'okx'])('%s private references require an EngineHost provider', (venue) => {
   const engine = new wasm.WasmEngine(venue, JSON.stringify({
-    testnet: true, remoteSigning: true,
-    publicMode: { requested: false, remoteSigner: true },
+    // WEEX's callback policy is closed; retained trusted-client refs still need a provider.
+    testnet: true, remoteSigning: venue !== 'weex',
+    publicMode: { requested: false, remoteSigner: venue !== 'weex' },
     signing: { primary: { credential: 'private-account', signing: 'private-signing',
       ...(venue === 'bingx' ? {} : { passphrase: 'private-passphrase-ref' }) } },
   }));
@@ -74,10 +75,14 @@ it.each(['bingx', 'weex', 'bitget', 'okx'])('%s private references require an En
   } finally { engine.free?.(); }
 });
 
-const expectRefused = (options: unknown) => {
+const expectRefused = (
+  options: unknown,
+  venue = 'polymarket',
+  message = 'user WebSocket requires the API secret',
+) => {
   let failure: unknown;
   try {
-    const engine = new wasm.WasmEngine('polymarket', JSON.stringify(options));
+    const engine = new wasm.WasmEngine(venue, JSON.stringify(options));
     engine.free?.();
   } catch (error) {
     failure = error;
@@ -92,8 +97,16 @@ const expectRefused = (options: unknown) => {
   }
   const refusal: unknown = JSON.parse(failure.venueError);
   expect(refusal).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-  expect(refusal).toMatchObject({ message: expect.stringContaining('user WebSocket requires the API secret') });
+  expect(refusal).toMatchObject({ message: expect.stringContaining(message) });
 };
+
+it('WEEX callback intent still refuses before an EngineHost can use it', () => {
+  expectRefused({
+    testnet: true, remoteSigning: true,
+    publicMode: { requested: false, remoteSigner: true },
+    signing: { primary: { credential: 'private-account', signing: 'private-signing', passphrase: 'private-passphrase-ref' } },
+  }, 'weex', 'Rust weex remote signing is unsupported in this build');
+});
 
 it.each(modes)('client public construction delegates beta admission to the SDK: %j', (mode) => {
   for (const publicOptions of [

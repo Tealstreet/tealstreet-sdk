@@ -21,7 +21,11 @@ credentials retain their separate policies.
 The WASM host derives `requiresExternalSigner` from nonempty submitted external
 refs and the provider retained after registry construction. Refs may be owned by
 the venue rather than `Engine::identities()`. Discarded public providers require
-no callback; private and retained PublicRead providers still require one.
+no callback; private and retained PublicRead providers still require one. WEEX's
+native/actual-WASM retained-ref controls use trusted client refs without callback
+intent; its closed callback and Hosted beta policies remain separate refusals. TxFlow's
+landed dispatch/RemoteSigner declarations retain explicit no-PayloadSigner and
+no-beta assertions; the unmigrated provider-metadata refusal remains on Polymarket.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
 see `sdk-rs/venues/asterdex/README.md`),

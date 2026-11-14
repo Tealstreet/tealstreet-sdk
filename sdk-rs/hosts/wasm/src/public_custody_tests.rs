@@ -90,9 +90,9 @@ fn empty_public_read_refs_need_no_engine_host_provider() {
     feature = "bitget",
     feature = "okx"
 ))]
-fn venue_owned_private_refs(venue: &str, passphrase: bool) {
-    let mut options = json!({"testnet":true,"remoteSigning":true,
-        "publicMode":{"requested":false,"remoteSigner":true},
+fn venue_owned_private_refs(venue: &str, passphrase: bool, remote: bool) {
+    let mut options = json!({"testnet":true,"remoteSigning":remote,
+        "publicMode":{"requested":false,"remoteSigner":remote},
         "signing":{"primary":{"credential":"private-account","signing":"private-signing"}}});
     if passphrase {
         options["signing"]["primary"]["passphrase"] = "private-passphrase-ref".into();
@@ -103,23 +103,25 @@ fn venue_owned_private_refs(venue: &str, passphrase: bool) {
 #[cfg(feature = "bingx")]
 #[test]
 fn bingx_private_refs_require_an_engine_host_provider() {
-    venue_owned_private_refs("bingx", false);
+    venue_owned_private_refs("bingx", false, true);
 }
 
 #[cfg(feature = "weex")]
 #[test]
 fn weex_private_refs_require_an_engine_host_provider() {
-    venue_owned_private_refs("weex", true);
+    // WEEX callback admission is closed; trusted client refs still require
+    // the EngineHost provider whenever native construction retains them.
+    venue_owned_private_refs("weex", true, false);
 }
 
 #[cfg(feature = "bitget")]
 #[test]
 fn bitget_private_refs_require_an_engine_host_provider() {
-    venue_owned_private_refs("bitget", true);
+    venue_owned_private_refs("bitget", true, true);
 }
 
 #[cfg(feature = "okx")]
 #[test]
 fn okx_private_refs_require_an_engine_host_provider() {
-    venue_owned_private_refs("okx", true);
+    venue_owned_private_refs("okx", true, true);
 }
