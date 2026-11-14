@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
 mod material;
-use material::{Material, heap};
+use material::{Material, heap, presentable_heap};
 mod primitives;
 pub use key_material::KeyEncoding;
 
@@ -255,9 +255,10 @@ impl DecodedIdentity {
     }
     fn install(self, signer: &mut LocalSigner, slot: &str) {
         if !self.key.is_empty() {
-            signer
-                .keys
-                .insert(KeyRef(format!("{slot}.credential")), heap(self.key));
+            signer.keys.insert(
+                KeyRef(format!("{slot}.credential")),
+                presentable_heap(self.key),
+            );
         }
         if !self.secret.is_empty() {
             signer
@@ -265,9 +266,10 @@ impl DecodedIdentity {
                 .insert(KeyRef(format!("{slot}.signing")), heap(self.secret));
         }
         if let Some(passphrase) = self.passphrase {
-            signer
-                .keys
-                .insert(KeyRef(format!("{slot}.passphrase")), heap(passphrase));
+            signer.keys.insert(
+                KeyRef(format!("{slot}.passphrase")),
+                presentable_heap(passphrase),
+            );
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
@@ -316,10 +318,7 @@ impl LocalSigner {
     fn with_protected_storage(mut self) -> Result<Self, SignError> {
         let mut protected = HashMap::with_capacity(self.keys.len());
         for (reference, bytes) in std::mem::take(&mut self.keys) {
-            protected.insert(
-                reference,
-                Material::Protected(crate::protected::ProtectedSecret::copy(bytes.as_slice())?),
-            );
+            protected.insert(reference, bytes.protect()?);
         }
         self.keys = protected;
         self.incarnation = None;
@@ -708,6 +707,16 @@ impl LocalSigner {
     /// whichever identity names it, so no private scalar is ever emitted.
     fn presentable_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         if self.algorithms.contains_key(reference) {
+            return Err(SignError::InvalidRequest);
+        }
+        // Only the protected path narrows legacy presentation/interpolation.
+        // Check the material's setup provenance, not caller-controlled ref names.
+        #[cfg(not(target_arch = "wasm32"))]
+        if self
+            .keys
+            .get(reference)
+            .is_some_and(Material::refuses_presentation)
+        {
             return Err(SignError::InvalidRequest);
         }
         self.key(reference)
@@ -1173,8 +1182,8 @@ struct ProtectedLocalSigner(LocalSigner);
 impl safe_cex_engine::signing::ProtectedSigner for ProtectedLocalSigner {
     fn memory_locked(&self) -> bool {
         self.0.keys.values().all(|key| match key {
-            Material::Protected(bytes) => bytes.memory_locked(),
-            Material::Heap(_) => false,
+            Material::Protected { bytes, .. } => bytes.memory_locked(),
+            Material::Heap(_) | Material::PresentableHeap(_) => false,
         })
     }
 }
@@ -1199,7 +1208,66 @@ impl Signer for ProtectedLocalSigner {
         &self,
         request: SignRequest,
     ) -> Option<Box<dyn safe_cex_engine::signing::OwnedSetupExecution>> {
-        self.0.create_public_address_setup(request)
+        if matches!(request.operations.as_slice(), [Operation::PublicKey { .. }]) {
+            if request.receipt != Default::default() || request.context != Default::default() {
+                return None;
+            }
+            // Derive only a declared public value under the provider lock. The
+            // retained execution owns no secret; GuardedSetup fences both start
+            // and delivery against erasure of the originating owner.
+            let result = self.0.sign_now(&request).ok()?;
+            Some(Box::new(ProtectedPublicKeySetup {
+                pending: Some(result),
+                result: None,
+                started: false,
+            }))
+        } else {
+            self.0.create_public_address_setup(request)
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ProtectedPublicKeySetup {
+    pending: Option<SignResult>,
+    result: Option<SignResult>,
+    started: bool,
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl safe_cex_engine::signing::OwnedSetupExecution for ProtectedPublicKeySetup {
+    fn start(&mut self) -> Result<(), SignError> {
+        if self.started {
+            return Err(SignError::InvalidRequest);
+        }
+        self.started = true;
+        self.result = self.pending.take();
+        Ok(())
+    }
+    fn cancel(&mut self) -> Result<(), SignError> {
+        self.pending = None;
+        self.result = None;
+        self.started = true;
+        Ok(())
+    }
+    fn poll_result(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<SignResult, SignError>> {
+        self.result
+            .take()
+            .map_or(std::task::Poll::Pending, |value| {
+                std::task::Poll::Ready(Ok(value))
+            })
+    }
+    fn poll_joined(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), SignError>> {
+        if self.started {
+            std::task::Poll::Ready(Ok(()))
+        } else {
+            std::task::Poll::Pending
+        }
     }
 }
 
@@ -3547,7 +3615,7 @@ mod protected_release_tests {
             let released = Arc::new(AtomicUsize::new(0));
             let count = signer.keys.len();
             for bytes in signer.keys.values_mut() {
-                let Material::Protected(bytes) = bytes else {
+                let Material::Protected { bytes, .. } = bytes else {
                     panic!("unprotected key survived")
                 };
                 let released = released.clone();

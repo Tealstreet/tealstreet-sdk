@@ -6,8 +6,16 @@ use safe_cex_venues::{
 use serde_json::json;
 use std::task::{Context, Poll, Waker};
 
-fn options() -> EngineOptions {
-    serde_json::from_value(json!({"key":"synthetic-public", "secret":"synthetic-private", "passphrase":"synthetic-passphrase"})).unwrap()
+fn options(venue: &str) -> EngineOptions {
+    let secret = if matches!(venue, "kraken" | "krakenspot") {
+        safe_cex_crypto::encode(&[7; 32], safe_cex_crypto::Encoding::Base64)
+    } else {
+        "synthetic-private".into()
+    };
+    serde_json::from_value(
+        json!({"key":"synthetic-public", "secret":secret, "passphrase":"synthetic-passphrase"}),
+    )
+    .unwrap()
 }
 fn work(operations: Vec<Operation>) -> SignRequest {
     SignRequest {
@@ -17,7 +25,7 @@ fn work(operations: Vec<Operation>) -> SignRequest {
     }
 }
 fn hmac_custody(venue: &str) {
-    let (plain, ids) = prepare_local_signer_for(venue, &mut options()).unwrap();
+    let (plain, ids) = prepare_local_signer_for(venue, &mut options(venue)).unwrap();
     let id = ids.primary.unwrap();
     let signing = id.signing_ref().unwrap().clone();
     let present = work(vec![Operation::Present {
@@ -51,7 +59,7 @@ fn hmac_custody(venue: &str) {
         "{venue}: protected signing material cannot be presented"
     );
 
-    let (owner, ids) = prepare_protected_local_signer_for(venue, &mut options()).unwrap();
+    let (owner, ids) = prepare_protected_local_signer_for(venue, &mut options(venue)).unwrap();
     let provider = owner.provider();
     let id = ids.primary.unwrap();
     for operation in [
@@ -132,6 +140,11 @@ hmac_family!(phemex, "phemex", "phemex");
 hmac_family!(weex, "weex", "weex");
 hmac_family!(woo, "woo", "woo");
 
+hmac_family!(kraken, "kraken", "kraken");
+hmac_family!(krakenspot, "kraken", "krakenspot");
+hmac_family!(txflow, "txflow", "txflow");
+hmac_family!(asterdex, "asterdex", "asterdex");
+
 #[cfg(feature = "paradex")]
 #[path = "../../venues/paradex/tests/support/mod.rs"]
 mod support;
@@ -177,8 +190,18 @@ mod paradex {
         let mut dormant = setup(&provider, &ids);
         let mut started = setup(&provider, &ids);
         started.start().unwrap();
-        let (replacement, replacement_ids) =
-            prepare_protected_local_signer_for("paradex", &mut options()).unwrap();
+        let mut second_options = options();
+        second_options.key = Some(format!("0x{}2", "0".repeat(63)));
+        let (second_plain, replacement_ids) =
+            prepare_local_signer_for("paradex", &mut second_options).unwrap();
+        let second_public = replacement_ids
+            .primary
+            .as_ref()
+            .unwrap()
+            .public_key_sealed_by(Algorithm::StarkDigest, second_plain.incarnation())
+            .unwrap();
+        assert_ne!(expected, second_public, "two independent account keys");
+        let replacement = second_plain.protect().unwrap();
         let mut replacement_work = setup(&replacement.provider(), &replacement_ids);
         owner.erase();
         let mut cx = Context::from_waker(Waker::noop());
@@ -194,7 +217,7 @@ mod paradex {
         let Poll::Ready(Ok(result)) = replacement_work.poll_result(&mut cx) else {
             panic!("replacement must remain usable")
         };
-        assert_eq!(result.values, vec![expected.to_vec()]);
+        assert_eq!(result.values, vec![second_public.to_vec()]);
         assert_eq!(replacement_work.poll_joined(&mut cx), Poll::Ready(Ok(())));
     }
     #[test]

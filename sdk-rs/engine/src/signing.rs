@@ -1227,8 +1227,10 @@ pub trait Signer: ProviderBounds {
     fn owned_public_address_capability(&self) -> Capability {
         Capability::Unsupported
     }
-    /// Dormant owned work; refuse anything except one own-ref Secp256k1 PublicAddress
-    /// with an empty receipt/context. Pure local derivation may happen here;
+    /// Dormant owned work: one own-ref Secp256k1 PublicAddress, or a declared
+    /// PublicKey for a provider supporting key setup, with empty receipt/context.
+    /// Refuse signing, presentation, multiple operations and undeclared keys.
+    /// Pure local public-value derivation may happen here;
     /// asynchronous emission starts only through the retained execution's start.
     fn create_public_address_setup(
         &self,

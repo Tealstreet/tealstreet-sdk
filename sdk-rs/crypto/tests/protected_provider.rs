@@ -199,3 +199,144 @@ fn protected_arbitrary_insert_is_not_presentation_authority() {
         );
     }
 }
+
+#[cfg(all(feature = "stark", feature = "address-nonce"))]
+#[test]
+fn protected_public_key_factory_refuses_unbound_work_and_owner_drop_settles_cleanup() {
+    let key = KeyRef("synthetic-stark".into());
+    let mut signer = LocalSigner::new();
+    signer
+        .insert_declared(key.clone(), vec![1; 32], Algorithm::StarkDigest)
+        .unwrap();
+    signer.insert(KeyRef("synthetic-mac".into()), vec![2; 32]);
+    let plain: Provider = Arc::new(signer);
+    let owner = plain.protect().unwrap();
+    let provider = owner.provider();
+    let valid = SignRequest {
+        operations: vec![Operation::PublicKey {
+            algorithm: Algorithm::StarkDigest,
+            key: key.clone(),
+        }],
+        ..request(key.clone())
+    };
+    for operations in [
+        vec![],
+        vec![Operation::Present { key: key.clone() }],
+        request(key.clone()).operations,
+        vec![Operation::PublicKey {
+            algorithm: Algorithm::StarkDigest,
+            key: KeyRef("missing".into()),
+        }],
+        vec![Operation::PublicKey {
+            algorithm: Algorithm::StarkDigest,
+            key: KeyRef("synthetic-mac".into()),
+        }],
+        vec![Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: key.clone(),
+        }],
+        vec![valid.operations[0].clone(), valid.operations[0].clone()],
+    ] {
+        assert!(
+            provider
+                .create_public_address_setup(SignRequest {
+                    operations,
+                    ..valid.clone()
+                })
+                .is_none()
+        );
+    }
+    let mut receipt = valid.clone();
+    receipt.receipt.stamp_ms = Some(1.);
+    assert!(provider.create_public_address_setup(receipt).is_none());
+    let mut contextual = valid.clone();
+    contextual.context.venue = "synthetic-venue".into();
+    assert!(provider.create_public_address_setup(contextual).is_none());
+    let mut execution = provider.create_public_address_setup(valid.clone()).unwrap();
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    assert_eq!(execution.poll_result(&mut cx), std::task::Poll::Pending);
+    assert_eq!(execution.poll_joined(&mut cx), std::task::Poll::Pending);
+    execution.start().unwrap();
+    assert_eq!(execution.start(), Err(SignError::InvalidRequest));
+    drop(owner);
+    assert!(provider.create_public_address_setup(valid).is_none());
+    assert_eq!(
+        execution.poll_result(&mut cx),
+        std::task::Poll::Ready(Err(SignError::Unavailable))
+    );
+    assert_eq!(
+        execution.poll_joined(&mut cx),
+        std::task::Poll::Ready(Ok(()))
+    );
+}
+
+#[test]
+fn protected_secondary_and_aliased_signing_slots_refuse_but_credential_recipes_keep_parity() {
+    for alias in [false, true] {
+        let identity = || LocalIdentity {
+            key: Secret::new("synthetic-public".into()),
+            secret: Secret::new("synthetic-private".into()),
+            passphrase: Some(Secret::new("synthetic-passphrase".into())),
+            ..Default::default()
+        };
+        let mut secondary = identity();
+        if alias {
+            secondary.secret = Secret::empty();
+            secondary.signing_from_primary = true;
+        }
+        let (signer, ids) = LocalSigner::from_setup(LocalSetup {
+            primary: Some(identity()),
+            secondary: Some(secondary),
+        })
+        .unwrap();
+        let plain: Provider = Arc::new(signer);
+        let primary = ids.primary.unwrap();
+        let secondary = ids.secondary.unwrap();
+        let mut recipe = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Present {
+                key: primary.credential.clone(),
+            }],
+        };
+        for id in [&primary, &secondary] {
+            recipe.operations.push(Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: id.signing_ref().unwrap().clone(),
+                payload: vec![
+                    PayloadPart::Credential {
+                        key: id.credential.clone(),
+                    },
+                    PayloadPart::Credential {
+                        key: id.passphrase.clone().unwrap(),
+                    },
+                    PayloadPart::Result {
+                        index: 0,
+                        encoding: Encoding::Raw,
+                    },
+                ],
+            });
+        }
+        let expected = plain.sign_ready(&recipe).unwrap().unwrap();
+        let owner = plain.protect().unwrap();
+        let provider = owner.provider();
+        assert_eq!(provider.sign_ready(&recipe).unwrap().unwrap(), expected);
+        for id in [primary, secondary] {
+            let work = SignRequest {
+                operations: vec![Operation::Present {
+                    key: id.signing_ref().unwrap().clone(),
+                }],
+                ..recipe.clone()
+            };
+            assert!(provider.sign_ready(&work).unwrap().is_err());
+        }
+        let mut future = provider.sign(recipe);
+        drop(owner);
+        assert_eq!(
+            future
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop())),
+            std::task::Poll::Ready(Err(SignError::Unavailable))
+        );
+    }
+}
