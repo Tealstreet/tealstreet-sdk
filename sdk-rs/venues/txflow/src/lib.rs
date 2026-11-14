@@ -497,8 +497,11 @@ impl TxFlow {
                 self.context_row(cx, row);
             }
             PublicFrame::Ticker(row) => {
-                cx.record_socket_topic_number(&["@ticker|||||||"], row.instrument_id as u64);
                 if let Some(instrument) = self.instruments.get(&row.instrument_id) {
+                    cx.record_socket_topic_number(
+                        &["@ticker|", &instrument.base_currency, "||||||"],
+                        row.instrument_id as u64,
+                    );
                     let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
                     if let Some(index) = Self::cached_ticker(cx, instrument) {

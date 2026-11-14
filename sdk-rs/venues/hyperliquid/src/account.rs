@@ -2850,7 +2850,10 @@ impl Hyperliquid {
             return;
         };
         let raw = frame.data.get();
-        if let Some(user) = self.user() {
+        // Clearinghouse receipts are attributed only after decoding their dex below.
+        if frame.channel != "clearinghouseState"
+            && let Some(user) = self.user()
+        {
             cx.record_socket_topic(&["@", &frame.channel, "|||", user, "||||"]);
         }
         match frame.channel.as_ref() {
