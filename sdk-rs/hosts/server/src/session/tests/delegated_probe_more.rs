@@ -315,20 +315,38 @@ async fn bybit_admission_retains_classified_refusal_and_original_attempt_context
         let mut results = session.take_verified();
         let init = payload(&mut session, Some("candidate"));
         let attempt_id = init.sealed.as_ref().unwrap().attempt_id.clone();
+        let capture = crate::state::log_capture::capture();
         session.init(init).await.unwrap();
         let completed = tokio::time::timeout(Duration::from_secs(10), results.recv())
             .await
             .unwrap()
             .unwrap();
-        let probe = completed.probe.as_ref().unwrap();
-        let refusal = probe.permit.as_ref().err().unwrap();
-        let fields = probe.diagnostic.as_ref().unwrap().fields(*refusal);
-        assert_eq!(fields["attempt_id"], attempt_id);
-        assert_eq!(fields["venue"], "bybit");
-        assert_eq!(fields["error_kind"], kind);
-        assert_eq!(fields["venue_code"], code);
-        assert_eq!(fields["transient"], transient);
         session.verification_completed(completed).await.unwrap();
+        let warnings: Vec<Value> = capture
+            .finish()
+            .into_iter()
+            .map(|line| serde_json::from_str::<Value>(&line).unwrap())
+            .filter(|line| line["level"] == "warn")
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "exactly one refusal warning must be emitted"
+        );
+        let warning = &warnings[0];
+        assert_eq!(warning["service"], "exchange-server");
+        assert_eq!(warning.as_object().unwrap().len(), 3);
+        let fields: Value = serde_json::from_str(warning["msg"].as_str().unwrap()).unwrap();
+        assert_eq!(fields.as_object().unwrap().len(), 8);
+        assert_eq!(
+            fields,
+            json!({
+                "event":"hosted.admission_refused", "attempt_id":attempt_id,
+                "venue":"bybit", "kind":"unverified", "stage":"private_read",
+                "transient":transient, "error_kind":kind, "venue_code":code,
+            })
+        );
+        assert!(!warning.to_string().contains("synthetic"));
         assert_eq!(
             sent.try_recv().unwrap(),
             envelope::with_instance_id(envelope::init_unverified("acct", transient), "candidate")
