@@ -397,9 +397,7 @@ impl Coinbase {
         } else {
             Operation::Mutation
         };
-        let Some(root) = command_root(cx, operation) else {
-            return None;
-        };
+        let root = command_root(cx, operation)?;
         let result = self.drb_calls(cx, command);
         match result {
             Ok((calls, collect)) => self.drb_submit(
