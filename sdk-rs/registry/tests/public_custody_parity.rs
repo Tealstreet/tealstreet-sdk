@@ -193,14 +193,29 @@ fn keyed_missing_callbacks_keep_adoption_and_configuration_refusals() {
 }
 
 #[test]
-fn valid_provider_keeps_disabled_private_remote_signing_unsupported() {
-    let value = json!({"remoteSigning": true,
-        "publicMode": {"requested": false, "remoteSigner": true},
-        "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent"}}});
-    let error = build_with_signer("asterdex", options(value), None, Some(Arc::new(NoIo)), Mode)
-        .expect_err("valid provider cannot enable unsupported private custody");
-    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
-    assert_eq!(error.outcome, Some(Outcome::NotSent));
+fn valid_provider_admits_asterdex_private_signing_after_hosted_adoption() {
+    use safe_cex_venues::{ConstructionContext, build_with_signer_in_context};
+
+    for context in [ConstructionContext::Client, ConstructionContext::Hosted] {
+        let value = json!({"remoteSigning": true,
+            "publicMode": {"requested": false, "remoteSigner": true},
+            "signing": {"primary": {"credential": "configured-key", "signing": "opaque-agent"}}});
+        // #3302 (1bc6ca7c41) enables AsterDEX RemoteSigner custody; the former
+        // Unsupported expectation becomes private construction with provider/entropy.
+        // Missing-callback and V3 PayloadSigner refusal controls remain unchanged.
+        assert!(
+            build_with_signer_in_context(
+                context,
+                "asterdex",
+                options(value),
+                Some(safe_cex_engine::test_support::seeded_entropy(17)),
+                Some(Arc::new(NoIo)),
+                Mode,
+            )
+            .expect("configured AsterDEX provider is admitted"),
+            "{context:?}: RemoteSigner admission must keep private startup"
+        );
+    }
 }
 
 #[cfg(feature = "apexomni")]
