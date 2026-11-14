@@ -30,6 +30,8 @@ fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
             construction: "{}".into(),
             #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
             websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             hosted_identity: None,
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]

@@ -33,6 +33,8 @@ pub fn fixture(public_data_only: bool) -> Result<WasmEngine, js_sys::Error> {
         construction: "{}".into(),
         #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
         websocket_input: Vec::new(),
+        #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+        websocket_memory: None,
         #[cfg(feature = "coinbase")]
         coinbase_binding: None,
         #[cfg(feature = "hosted-signing")]
