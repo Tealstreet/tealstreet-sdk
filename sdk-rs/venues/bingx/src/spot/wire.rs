@@ -685,24 +685,57 @@ mod tests {
         let escaped = frame.replace("BTC-USDT", r"BTC\u002dUSDT");
         let message = Message::decode(&escaped, true).unwrap();
         assert_eq!(message.data_type, "BTC-USDT@ticker");
-        assert_eq!(projection(message)[3][0], "BTC-USDT");
+        assert_eq!(
+            projection(message).ticker.map(|row| row.symbol),
+            Some("BTC-USDT".to_owned())
+        );
     }
 
-    fn projection(message: Message<'_>) -> serde_json::Value {
+    #[derive(Debug, PartialEq)]
+    struct MessageProjection {
+        code: i64,
+        data_type: String,
+        event: String,
+        ticker: Option<TickerProjection>,
+        depth: Option<DepthProjection>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct TickerProjection {
+        symbol: String,
+        last_bits: u64,
+        percentage_bits: u64,
+        volume_bits: u64,
+        quote_volume_bits: u64,
+        bid_bits: u64,
+        ask_bits: u64,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct DepthProjection {
+        bids: Vec<LevelProjection>,
+        asks: Vec<LevelProjection>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct LevelProjection {
+        price_bits: u64,
+        amount_bits: u64,
+    }
+
+    fn projection(message: Message<'_>) -> MessageProjection {
         let raw = message.data.map(RawValue::get);
         let ticker = message
             .ticker
             .or_else(|| raw.and_then(|data| serde_json::from_str::<LiveTicker<'_>>(data).ok()))
-            .map(|ticker| {
-                serde_json::json!([
-                    ticker.s,
-                    ticker.c,
-                    ticker.percentage,
-                    ticker.v,
-                    ticker.q,
-                    ticker.bid,
-                    ticker.ask
-                ])
+            .map(|ticker| TickerProjection {
+                symbol: ticker.s.into_owned(),
+                last_bits: ticker.c.to_bits(),
+                percentage_bits: ticker.percentage.to_bits(),
+                volume_bits: ticker.v.to_bits(),
+                quote_volume_bits: ticker.q.to_bits(),
+                bid_bits: ticker.bid.to_bits(),
+                ask_bits: ticker.ask.to_bits(),
             });
         let depth = message
             .depth
@@ -710,12 +743,45 @@ mod tests {
             .map(|depth| {
                 let rows = |side: Vec<(Number, Number)>| {
                     side.into_iter()
-                        .map(|(p, q)| (p.0, q.0))
-                        .collect::<Vec<_>>()
+                        .map(|(price, amount)| LevelProjection {
+                            price_bits: price.0.to_bits(),
+                            amount_bits: amount.0.to_bits(),
+                        })
+                        .collect()
                 };
-                serde_json::json!([rows(depth.bids), rows(depth.asks)])
+                DepthProjection {
+                    bids: rows(depth.bids),
+                    asks: rows(depth.asks),
+                }
             });
-        serde_json::json!([message.code, message.data_type, message.e, ticker, depth])
+        MessageProjection {
+            code: message.code,
+            data_type: message.data_type.into_owned(),
+            event: message.e.into_owned(),
+            ticker,
+            depth,
+        }
+    }
+
+    #[test]
+    fn projection_distinguishes_signed_zero_in_ticker_and_depth_fields() {
+        for (frame, field) in [
+            (
+                r#"{"dataType":"BTC-USDT@ticker","data":{"s":"BTC-USDT","c":"42","P":"1","v":"2","q":"84","B":"0","A":"43"}}"#,
+                r#""B":"0""#,
+            ),
+            (
+                r#"{"dataType":"BTC-USDT@depth50","data":{"bids":[["41","0"]],"asks":[]}}"#,
+                r#""41","0""#,
+            ),
+        ] {
+            let negative = frame.replace(field, &field.replace(r#""0""#, r#""-0""#));
+            assert_ne!(
+                projection(Message::decode(frame, true).unwrap()),
+                projection(Message::decode(&negative, true).unwrap()),
+                "a byte-parity projection must retain signed zero: {frame}",
+            );
+        }
     }
 
     #[test]
