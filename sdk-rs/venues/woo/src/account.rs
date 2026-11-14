@@ -754,7 +754,7 @@ impl Woo {
         if let Some(identity) = &self.options.credentials {
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(crate::sign::dispatch::WsAuth::new(identity.clone(), socket)),
             );
             return true;

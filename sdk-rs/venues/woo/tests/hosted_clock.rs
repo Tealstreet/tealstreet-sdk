@@ -1,4 +1,5 @@
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::signing::{
     Algorithm, Capability, Identities, Identity, KeyRef, SignFuture, SignRequest, Signer,
 };
@@ -71,7 +72,7 @@ impl Venue for Probe {
     fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
         cx.send_signed(
             socket,
-            String::new(),
+            ControlFrame::authentication(String::new()),
             Box::new(WsAuth::new(self.identity.clone(), socket)),
         );
     }

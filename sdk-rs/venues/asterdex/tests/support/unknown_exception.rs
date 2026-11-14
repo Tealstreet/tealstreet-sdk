@@ -5,7 +5,7 @@ use safe_cex_engine::{Outcome, VenueError};
 
 const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 const HTTP_UNKNOWN_TEXT: &str =
-    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders";
+    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders";
 const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
 
 #[derive(Clone, Copy, Debug)]

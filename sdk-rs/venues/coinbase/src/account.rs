@@ -1032,7 +1032,7 @@ impl Coinbase {
             {
                 cx.send_signed(
                     socket,
-                    String::new(),
+                    ControlFrame::authentication(String::new()),
                     Box::new(crate::sign::WsSubscribe::new(
                         identity.clone(),
                         c.key(),

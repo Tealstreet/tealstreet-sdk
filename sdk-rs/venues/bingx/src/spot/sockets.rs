@@ -1,5 +1,6 @@
 //! Managed Spot feeds own epochs, reconnect backoff and subscription release.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::{
     SocketChannel, SocketSpec, Store, SubscriptionTopic,
     socket::Config,
@@ -98,7 +99,7 @@ impl BingxSpot {
             return;
         }
         if text == "Ping" {
-            cx.send(socket, "Pong");
+            cx.send(socket, ControlFrame::heartbeat("Pong"));
             return;
         }
         if text == "Pong" {
@@ -301,7 +302,7 @@ impl BingxSpot {
                     return Err(SocketError::Stale);
                 }
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "Ping"),
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), ControlFrame::heartbeat("Ping")),
             LifecycleEvent::InterestsRefused { error, .. } => return Err(error),
             _ => {}
         }
