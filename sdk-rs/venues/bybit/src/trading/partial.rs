@@ -4,6 +4,9 @@ use crate::sign::Query;
 use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
 use serde::Deserialize;
 
+mod readiness;
+pub(super) use readiness::Readiness;
+
 const CREATION_WINDOW_MS: u64 = 5_000;
 const TARGET_POLL_DELAY_MS: u32 = 100;
 /// The wait before each target history read: about 5 s in all for history to index the cancel.
@@ -71,6 +74,18 @@ struct Page {
     category: String,
     list: Vec<NativeStop>,
     next_page_cursor: String,
+}
+
+// Share strict decoding between readiness and fresh post-cancel evidence.
+#[inline(never)]
+fn decode_page(body: &str) -> Result<Page, &'static str> {
+    let super::acknowledgement::Answer::Success {
+        result: Some(raw), ..
+    } = super::acknowledgement::answer(body).map_err(|_| "envelope")?
+    else {
+        return Err("envelope");
+    };
+    serde_json::from_str(raw.get()).map_err(|_| "decode")
 }
 
 fn equals(raw: &str, expected: f64) -> bool {
@@ -341,13 +356,7 @@ impl Flow {
         if response.status != 200 {
             return Err(failed(&format!("http={}", response.status)));
         }
-        let super::acknowledgement::Answer::Success {
-            result: Some(raw), ..
-        } = super::acknowledgement::answer(response.body).map_err(|_| failed("envelope"))?
-        else {
-            return Err(failed("envelope"));
-        };
-        let mut page: Page = serde_json::from_str(raw.get()).map_err(|_| failed("decode"))?;
+        let mut page = decode_page(response.body).map_err(failed)?;
         self.observed_at = now;
         if page.category != self.guard.category {
             return Err(failed("category"));

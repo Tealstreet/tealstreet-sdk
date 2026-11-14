@@ -315,6 +315,19 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
     )
 }
 
+/// A pre-probe registry refusal says nothing about credential validity.
+/// Keep the reason opaque on the socket; closed sub-reasons belong in diagnostics.
+pub fn init_signing_mode_refused(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "The requested account signing mode is unavailable; account not attached",
+            {"forceToast":true, "initRefused":true, "kind":"signing-mode", "transient":false}
+        ]),
+    )
+}
+
 pub fn init_unverified(account_name: &str, transient: bool) -> String {
     envelope(
         "msg",

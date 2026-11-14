@@ -58,8 +58,22 @@ fn flag(v: &Value, key: &str) -> Result<bool, String> {
 pub(super) struct OrderVersion {
     millis: f64,
     pub(super) causal: Option<u64>,
+    observed_causal: Option<u64>,
 }
 impl OrderVersion {
+    pub(super) fn provably_newer(self, previous: Self) -> bool {
+        self.millis >= previous.millis
+            // An inherited floor cannot establish exact ordering, but an
+            // explicitly older stamp still contradicts retained evidence.
+            && match (self.observed_causal, previous.causal) {
+                (Some(next), Some(floor)) => next > floor,
+                _ => true,
+            }
+            && match (self.observed_causal, previous.observed_causal) {
+                (Some(next), Some(old)) => next > old,
+                _ => self.millis > previous.millis,
+            }
+    }
     pub(super) fn supersedes(self, previous: Self) -> bool {
         // Without both causal stamps, equal milliseconds follow socket order;
         // the caller filters economic duplicates against the current store row.
@@ -84,6 +98,9 @@ pub(super) fn versioned_order(v: Value) -> Result<(Order, OrderVersion), String>
     let version = OrderVersion {
         millis: order.last_update,
         causal,
+        // The retained floor may later be inherited by an omitted field;
+        // only an actually observed stamp proves cross-source ordering.
+        observed_causal: causal,
     };
     Ok((order, version))
 }
@@ -199,17 +216,8 @@ pub(super) fn position(v: Value) -> Result<Position, String> {
         last_update: None,
     })
 }
-pub(super) fn order(v: Value) -> Result<Order, String> {
-    let id = identity(&v, "order_id")?;
-    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
-    let side = side(&v)?;
-    let status = match text(&v, "order_state")? {
-        "open" | "untriggered" | "triggered" => OrderStatus::Open,
-        "filled" => OrderStatus::Closed,
-        "cancelled" | "rejected" => OrderStatus::Canceled,
-        _ => return Err("drb unknown order state".into()),
-    };
-    let kind = match text(&v, "order_type")? {
+pub(crate) fn order_kind(v: &Value) -> Result<OrderType, String> {
+    let kind = match text(v, "order_type")? {
         "limit" => OrderType::Limit,
         "market" | "market_limit" => OrderType::Market,
         "stop_market" | "stop_limit" => OrderType::StopLoss,
@@ -227,11 +235,62 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
         }
         _ => return Err("drb unsupported original order type".into()),
     };
-    let kind = if kind == OrderType::Limit && original_market {
+    Ok(if kind == OrderType::Limit && original_market {
         OrderType::Market
     } else {
         kind
+    })
+}
+pub(crate) struct OrderPrices {
+    pub(crate) price: f64,
+    pub(crate) trigger: Option<StopTriggerType>,
+    pub(crate) execution: Option<f64>,
+}
+pub(crate) fn order_prices(v: &Value, kind: OrderType) -> Result<OrderPrices, String> {
+    let price = match v.get("price") {
+        Some(Value::String(s)) if s == "market_price" && kind != OrderType::Limit => 0.,
+        _ => unsigned(v, "price")?,
     };
+    let conditional = matches!(
+        kind,
+        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+    );
+    let trigger_type = if conditional {
+        Some(match text(v, "trigger")? {
+            "mark_price" => StopTriggerType::MarkPrice,
+            "index_price" => StopTriggerType::IndexPrice,
+            "last_price" => StopTriggerType::LastPrice,
+            _ => return Err("drb invalid trigger".into()),
+        })
+    } else {
+        None
+    };
+    let trigger_price = if conditional {
+        unsigned(v, "trigger_price")?
+    } else {
+        price
+    };
+    Ok(OrderPrices {
+        price: trigger_price,
+        trigger: trigger_type,
+        execution: conditional.then_some(price),
+    })
+}
+pub(crate) fn order_status(state: &str) -> Result<OrderStatus, String> {
+    match state {
+        "open" | "untriggered" | "triggered" => Ok(OrderStatus::Open),
+        "filled" => Ok(OrderStatus::Closed),
+        "cancelled" | "rejected" => Ok(OrderStatus::Canceled),
+        _ => Err("drb unknown order state".into()),
+    }
+}
+pub(super) fn order(v: Value) -> Result<Order, String> {
+    crate::drb_linkage::Linkage::default().observe(&v)?;
+    let id = identity(&v, "order_id")?;
+    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
+    let side = side(&v)?;
+    let status = order_status(text(&v, "order_state")?)?;
+    let kind = order_kind(&v)?;
     let amount = unsigned(&v, "amount")?;
     let filled = unsigned(&v, "filled_amount")?;
     if filled > amount {
@@ -242,29 +301,7 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
     if updated < created {
         return Err("drb order clock precedes creation".into());
     }
-    let price = match v.get("price") {
-        Some(Value::String(s)) if s == "market_price" && kind != OrderType::Limit => 0.,
-        _ => unsigned(&v, "price")?,
-    };
-    let conditional = matches!(
-        kind,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
-    );
-    let trigger_type = if conditional {
-        Some(match text(&v, "trigger")? {
-            "mark_price" => StopTriggerType::MarkPrice,
-            "index_price" => StopTriggerType::IndexPrice,
-            "last_price" => StopTriggerType::LastPrice,
-            _ => return Err("drb invalid trigger".into()),
-        })
-    } else {
-        None
-    };
-    let trigger_price = if conditional {
-        unsigned(&v, "trigger_price")?
-    } else {
-        price
-    };
+    let prices = order_prices(&v, kind)?;
     let post = flag(&v, "post_only")?;
     let tif = match text(&v, "time_in_force")? {
         "good_til_cancelled" => Some(TimeInForce::GoodTillCancel),
@@ -291,7 +328,7 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
         symbol,
         kind,
         side,
-        price: trigger_price,
+        price: prices.price,
         amount,
         filled,
         remaining: amount - filled,
@@ -304,10 +341,10 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
             tif
         },
         last_update: updated,
-        trigger_type,
+        trigger_type: prices.trigger,
         take_profit: None,
         stop_loss: None,
-        extra: conditional.then_some(OrderExtra {
+        extra: prices.execution.map(|price| OrderExtra {
             conditional_order_price: Some(price),
             ..Default::default()
         }),

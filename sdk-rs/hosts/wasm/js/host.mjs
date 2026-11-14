@@ -453,6 +453,7 @@ export class EngineHost {
     this.socketStats = { public: socketStats(), business: socketStats(), private: socketStats() };
     this.timers = new Map();
     this.commands = new Map();
+    this.commandAdmissions = new Map();
     // Timed commands owning a sign attempt, HTTP request or managed preparation.
     this.stageCauses = new Map();
     this.stageCause = undefined;
@@ -583,6 +584,7 @@ export class EngineHost {
     let timeoutMs;
     let onEvent;
     let onStage;
+    let assertCurrent;
     try {
       if (command.op === 'scheduleCancel' && command.time != null
           && (!Number.isSafeInteger(command.time) || command.time < 0)) {
@@ -594,6 +596,16 @@ export class EngineHost {
       if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');
       onStage = options?.onStage;
       if (onStage !== undefined && typeof onStage !== 'function') throw new TypeError('Command stage observer must be a function');
+      assertCurrent = options?.assertCurrent;
+      if (assertCurrent !== undefined) {
+        if (typeof assertCurrent !== 'function') throw new TypeError('Command owner check must be a function');
+        if (typeof this.engine.httpCommandOwner !== 'function') {
+          throw new ExchangeError('Engine predates command ownership checks; update the SDK/WASM', { kind: 'unsupported', outcome: 'notSent' });
+        }
+        if (assertCurrent() !== undefined) {
+          throw new ExchangeError('Command owner check must complete synchronously', { kind: 'invalidInput', outcome: 'notSent' });
+        }
+      }
     } catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'networkRestored' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles' || command.op === 'repairSubscription'
@@ -607,6 +619,7 @@ export class EngineHost {
         clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds,
         receiptKey: `${this.receiptSession ??= receiptSession(this.entropy)}:${reply}`, commandId: reply, orderIdentities: [] };
     } catch (error) { return Promise.reject(error); }
+    if (reply !== undefined && assertCurrent) this.commandAdmissions.set(reply, assertCurrent);
     const promise = reply === undefined
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent, onStage }));
@@ -984,6 +997,7 @@ export class EngineHost {
     };
     for (const [id, pending] of this.commands) this.settleCommand(id, this.deadError
       ? new EngineDeadError(this.deadError.cause, pending.identity) : new EngineDisposedError(pending.identity, true), true);
+    this.commandAdmissions.clear();
     for (const id of this.socketFailures.keys()) attempt(() => this.clearSocketFailure(id));
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
@@ -1615,6 +1629,7 @@ export class EngineHost {
         break;
       }
       case 'done': {
+        this.commandAdmissions.delete(action.command);
         this.stage(action.command, 'reply');
         const pending = this.commands.get(action.command);
         if (!pending) {
