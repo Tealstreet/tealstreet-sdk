@@ -3118,3 +3118,48 @@ for (const [family, measured, minimumCap, aliases] of [
     }
   });
 }
+
+// #3290 source 8043e2bb11e5: CI 43563699705 builds cb6f9af848f2 with the identical tree.
+// Archive digests and equal web/Node/replay module hashes verified; retain every historical floor.
+for (const [family, artifact, measured, minimumCap, aliases] of [
+  ["apexomni", 14101309480, 2_099_376, 2_110_464, ["apexomni"]],
+  ["asterdex", 14101975996, 2_263_190, 2_274_304, ["asterdex"]],
+  ["backpack", 14101806150, 2_047_591, 2_058_240, ["backpack"]],
+  ["binance", 14101567436, 2_278_309, 2_288_640, ["binance"]],
+  ["bingx", 14101497823, 2_137_074, 2_147_328, ["bingx"]],
+  ["bitget", 14101418607, 2_769_289, 2_780_160, ["bitget", "bitgetusdc"]],
+  ["bitrue", 14101906115, 1_908_397, 1_918_976, ["bitrue"]],
+  ["bitunix", 14101901190, 1_954_918, 1_966_080, ["bitunix"]],
+  ["blofin", 14101213436, 2_071_746, 2_082_816, ["blofin"]],
+  ["bybit", 14101452734, 2_552_589, 2_563_072, ["bybit"]],
+  ["coinbase", 14102120122, 2_114_517, 2_124_800, ["coinbase"]],
+  ["cryptocom", 14101901106, 1_815_949, 1_826_816, ["cryptocom"]],
+  ["grvt", 14101941136, 2_002_596, 2_013_184, ["grvt"]],
+  ["hyperliquid", 14101826265, 2_266_273, 2_277_376, ["hyperliquid", "hyperliquidspot"]],
+  ["kraken", 14101856260, 2_275_348, 2_286_592, ["kraken", "krakenspot"]],
+  ["kucoin", 14101357803, 1_865_034, 1_875_968, ["kucoin"]],
+  ["kucoinspot", 14102045777, 2_477_104, 2_488_320, ["kucoinspot"]],
+  ["lighter", 14101492956, 2_166_230, 2_177_024, ["lighter", "lighter-robinhood"]],
+  ["mexc", 14101831371, 1_959_030, 1_970_176, ["mexc"]],
+  ["okx", 14101741392, 2_057_167, 2_067_456, ["okx"]],
+  ["orderly", 14101238198, 1_782_494, 1_793_024, ["orderly"]],
+  ["paradex", 14101377600, 2_309_926, 2_320_384, ["paradex"]],
+  ["phemex", 14101582159, 2_144_151, 2_154_496, ["phemex"]],
+  ["polymarket", 14101801194, 1_664_056, 1_675_264, ["polymarket"]],
+  ["txflow", 14102000849, 1_957_266, 1_968_128, ["txflow"]],
+  ["weex", 14101910992, 2_028_911, 2_039_808, ["weex"]],
+  ["woo", 14101841020, 2_680_145, 2_691_072, ["woo"]],
+
+]) {
+  test(`#3290 CI 43563699705: ${family} artifact ${artifact} preserves the merged reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
