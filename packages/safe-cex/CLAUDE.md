@@ -849,6 +849,14 @@ The direct source-order refresh and capability-adopted `fetchClosedPnl` use the
 same optional admission fence. Only the existing public candle read is permitted
 to retry across a replacement bridge.
 
+Page-local `updateOrder` retains that same admission through native managed HTTP
+reads, response continuations, route preparation and final handoff. The host uses
+native `httpCommandOwner` metadata rather than optional timing attribution, and
+retains the check until native completion even after a caller timeout. A fenced
+amend with older WASM lacking this metadata refuses `unsupported` / `notSent`;
+consume matching SDK and WASM together. Owner loss after a committed cancel
+retains Unknown and the existing placement fence.
+
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from
 `{ ...exchange.options, workerMirror: undefined }`; its signing host and any

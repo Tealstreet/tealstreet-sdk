@@ -13,6 +13,8 @@ import { prepareRecordedHttp } from '../support/managedHttp';
 
 type Kind = 'StopLoss' | 'TakeProfit';
 type Scope = 'Full' | 'Partial';
+type ProofAxis = 'target' | 'live' | 'history';
+type Owner = { ownerId: string; generation: number } | undefined;
 type ReadFault = 'none' | 'target' | 'live' | 'history' | 'afterCancel' | 'network' | 'denied' | 'changed';
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
@@ -22,7 +24,10 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
   let cancelled = false;
   let fault: ReadFault = 'none';
   let afterCancel = () => {};
-  let heldProof: { entered: () => void; resume: Promise<void> } | undefined;
+  let heldProof: { axis: ProofAxis; entered: () => void; resume: Promise<void> } | undefined;
+  let heldCancel: { entered: () => void; resume: Promise<void> } | undefined;
+  let beforeCancelReady: (() => void) | undefined;
+  let owner: Owner;
   const original = {
     category: 'linear',
     symbol: 'BTCUSDT',
@@ -62,7 +67,33 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
   };
   const list = (rows: unknown[]) => ({ category: 'linear', list: rows, nextPageCursor: '' });
   const transport = (role: string): Transport => ({
-    prepareHttp: prepareRecordedHttp,
+    prepareHttp: async function (request) {
+      const prepared = await prepareRecordedHttp.call(this, request);
+      const cancelling = role === 'page' && new URL(request.url).pathname.includes('/order/cancel');
+      if (cancelling && heldCancel) {
+        const held = heldCancel;
+        heldCancel = undefined;
+        held.entered();
+        await held.resume;
+      }
+      return {
+        ...prepared,
+        bind(packet) {
+          const bound = prepared.bind(packet);
+          return {
+            ...bound,
+            ready() {
+              if (cancelling && beforeCancelReady) {
+                const before = beforeCancelReady;
+                beforeCancelReady = undefined;
+                before();
+              }
+              return bound.ready();
+            },
+          };
+        },
+      };
+    },
     now: () => Date.now(),
     connect: (_url, handlers) => {
       queueMicrotask(handlers.onOpen);
@@ -196,7 +227,7 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
       if (role === 'page' && axis === 'target' && fault === 'changed') {
         result = list([{ ...original, triggerPrice: '89', orderStatus: cancelled ? 'Cancelled' : 'Untriggered' }]);
       }
-      if (role === 'page' && axis === 'target' && heldProof) {
+      if (role === 'page' && heldProof && axis === heldProof.axis) {
         const held = heldProof;
         heldProof = undefined;
         held.entered();
@@ -300,10 +331,26 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
     afterCancel: (callback: () => void) => {
       afterCancel = callback;
     },
-    pauseProof: () => {
+    bindOwner: (value: Owner = { ownerId: 'A', generation: 1 }) => {
+      owner = value;
+      page.setWorkerOwner(() => owner);
+    },
+    changeOwner: (value: Owner) => {
+      owner = value;
+    },
+    pauseCancel: () => {
       const entered = Promise.withResolvers<void>();
       const resumed = Promise.withResolvers<void>();
-      heldProof = { entered: entered.resolve, resume: resumed.promise };
+      heldCancel = { entered: entered.resolve, resume: resumed.promise };
+      return { entered: entered.promise, resume: resumed.resolve };
+    },
+    beforeCancelReady: (callback: () => void) => {
+      beforeCancelReady = callback;
+    },
+    pauseProof: (axis: ProofAxis = 'target') => {
+      const entered = Promise.withResolvers<void>();
+      const resumed = Promise.withResolvers<void>();
+      heldProof = { axis, entered: entered.resolve, resume: resumed.promise };
       return { entered: entered.promise, resume: resumed.resolve };
     },
     changeSourceOrder: async () => {
@@ -320,6 +367,80 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
 }
 
 describe('Bybit frame-fed COSIGNED protective edit preflight (real WASM)', () => {
+  for (const localPage of [false, true]) {
+    for (const axis of ['target', 'live', 'history'] as const) {
+      for (const transition of ['B', 'ABA', 'unavailable', 'unchanged'] as const) {
+        it(`fences ${localPage ? 'local' : 'remote'} page ${axis} proof across owner ${transition}`, async () => {
+          const fixture = await account('StopLoss', 'Partial', localPage);
+          fixture.bindOwner();
+          const gate = fixture.pauseProof(axis);
+          const result = fixture.edit().catch((error: unknown) => error);
+          try {
+            await gate.entered;
+            if (transition !== 'unchanged') fixture.changeOwner({ ownerId: 'B', generation: 2 });
+            if (transition === 'ABA') fixture.changeOwner({ ownerId: 'A', generation: 3 });
+            if (transition === 'unavailable') fixture.changeOwner(undefined);
+          } finally {
+            gate.resume();
+          }
+          if (transition === 'unchanged') {
+            await expect(result).resolves.toEqual([]);
+            expect(fixture.writes().map((call) => call.path)).toEqual([
+              '/v5/order/cancel-batch',
+              '/v5/position/trading-stop',
+            ]);
+          } else {
+            await expect(result).resolves.toMatchObject({ outcome: 'notSent' });
+            expect(fixture.writes()).toEqual([]);
+          }
+        }, 15_000);
+      }
+    }
+    it(`refuses an initially unavailable owner on a ${localPage ? 'local' : 'remote'} page`, async () => {
+      const fixture = await account('StopLoss', 'Partial', localPage);
+      fixture.bindOwner();
+      fixture.changeOwner(undefined);
+      await expect(fixture.edit()).rejects.toMatchObject({ outcome: 'notSent' });
+      expect(fixture.writes()).toEqual([]);
+    }, 15_000);
+    it(`rechecks owner after deferred cancel preparation on a ${localPage ? 'local' : 'remote'} page`, async () => {
+      const fixture = await account('StopLoss', 'Partial', localPage);
+      fixture.bindOwner();
+      const gate = fixture.pauseCancel();
+      const result = fixture.edit().catch((error: unknown) => error);
+      try {
+        await gate.entered;
+        fixture.changeOwner({ ownerId: 'B', generation: 2 });
+      } finally {
+        gate.resume();
+      }
+      await expect(result).resolves.toMatchObject({ outcome: 'notSent' });
+      expect(fixture.writes()).toEqual([]);
+    }, 15_000);
+    it(`rechecks owner after cancel readiness on a ${localPage ? 'local' : 'remote'} page`, async () => {
+      const fixture = await account('StopLoss', 'Partial', localPage);
+      fixture.bindOwner();
+      fixture.beforeCancelReady(() => fixture.changeOwner({ ownerId: 'B', generation: 2 }));
+      await expect(fixture.edit()).rejects.toMatchObject({ outcome: 'notSent' });
+      expect(fixture.writes()).toEqual([]);
+    }, 15_000);
+    it(`keeps owner loss after cancel Unknown and fenced on a ${localPage ? 'local' : 'remote'} page`, async () => {
+      const fixture = await account('StopLoss', 'Partial', localPage);
+      fixture.bindOwner();
+      fixture.afterCancel(() => fixture.changeOwner({ ownerId: 'B', generation: 2 }));
+      await expect(fixture.edit()).rejects.toMatchObject({ outcome: 'unknown' });
+      expect(fixture.writes().map((call) => call.path)).toEqual(['/v5/order/cancel-batch']);
+      await expect(
+        fixture.page.placeOrder({
+          symbol: 'BTCUSDT',
+          side: OrderSide.Buy,
+          type: OrderType.Limit,
+          amount: 1,
+          price: 100,
+        }),
+      ).rejects.toThrow('uncertain');
+    }, 15_000);
+  }
   for (const kind of ['StopLoss', 'TakeProfit'] as const) {
     it(`checks ${kind} proof before a local page cancels a COSIGNED source's stop`, async () => {
       const fixture = await account(kind, 'Partial', true);
