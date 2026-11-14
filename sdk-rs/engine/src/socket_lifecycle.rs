@@ -570,6 +570,30 @@ impl TopicKey {
     }
 }
 
+// Compare whole fragments so subscription lookup can use byte-slice comparisons
+// instead of walking both keys through a per-byte flattened iterator.
+#[inline]
+fn compare_topic_parts(key: &str, parts: &[&str]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    if let [topic] = parts {
+        return key.cmp(topic);
+    }
+    let mut remaining = key.as_bytes();
+    for part in parts {
+        let bytes = part.as_bytes();
+        let common = remaining.len().min(bytes.len());
+        let ordering = remaining[..common].cmp(&bytes[..common]);
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+        if remaining.len() < bytes.len() {
+            return Ordering::Less;
+        }
+        remaining = &remaining[bytes.len()..];
+    }
+    remaining.len().cmp(&0)
+}
+
 struct TopicStats {
     id: String,
     received: Option<f64>,
@@ -762,15 +786,10 @@ impl Lifecycle {
             self.stats_dirty = true;
             return true;
         }
-        let found = if let [topic] = parts {
-            f.message_stats
-                .0
-                .binary_search_by(|(key, _)| key.as_ref().cmp(topic))
-        } else {
-            f.message_stats.0.binary_search_by(|(key, _)| {
-                key.bytes().cmp(parts.iter().flat_map(|part| part.bytes()))
-            })
-        };
+        let found = f
+            .message_stats
+            .0
+            .binary_search_by(|(key, _)| compare_topic_parts(key, parts));
         let index = match found {
             Ok(index) => index,
             Err(_) => {
@@ -779,12 +798,11 @@ impl Lifecycle {
                 #[cfg(feature = "socket-topic-aliases")]
                 {
                     let Ok(route) = self.stats_routes.binary_search_by(|route| {
-                        route.feed.0.cmp(&epoch.feed.0).then_with(|| {
-                            route
-                                .alias
-                                .bytes()
-                                .cmp(parts.iter().flat_map(|part| part.bytes()))
-                        })
+                        route
+                            .feed
+                            .0
+                            .cmp(&epoch.feed.0)
+                            .then_with(|| compare_topic_parts(&route.alias, parts))
                     }) else {
                         return false;
                     };
@@ -3431,6 +3449,41 @@ mod tests {
         while l.release_batch(next, false).is_some() {}
         l.record_topic(next, &["ticker.BTC"], 1_005.);
         assert!(!l.feeds[feed.0].message_stats.contains_key("ticker.BTC"));
+    }
+
+    #[test]
+    fn fragmented_topic_receipts_match_exact_keys_at_every_character_boundary() {
+        let keys = ["a", "ab", "abé", "abé😀", "abé😀z", "b", "é"];
+        let (mut l, feed, epoch) = started(AuthMode::None);
+        l.replace_interests(feed, keys.map(interest).into(), encode)
+            .unwrap();
+        while l.release_batch(epoch, false).is_some() {}
+        let mut now = 0.;
+        for topic in keys.into_iter().chain(["", "abc", "abé😁", "abé😀zz", "ë"]) {
+            for split in (0..=topic.len()).filter(|&i| topic.is_char_boundary(i)) {
+                let before: Vec<_> = keys
+                    .iter()
+                    .map(|key| l.feeds[feed.0].message_stats[*key].received)
+                    .collect();
+                now += 1.;
+                assert_eq!(
+                    l.record_topic(epoch, &["", &topic[..split], "", &topic[split..], ""], now),
+                    keys.contains(&topic),
+                    "topic={topic:?}, split={split}"
+                );
+                for (index, key) in keys.iter().enumerate() {
+                    assert_eq!(
+                        l.feeds[feed.0].message_stats[*key].received,
+                        if *key == topic {
+                            Some(now)
+                        } else {
+                            before[index]
+                        },
+                        "topic={topic:?}, key={key:?}, split={split}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
