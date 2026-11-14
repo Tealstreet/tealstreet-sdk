@@ -492,7 +492,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Artifact 14111067968: optimized web/Node/replay 2,314,622 B; SHA256
   // 53f76f2a10d4b82a0d6a50013050d152cb618e9f7d5c29b69df64ae56c56e496.
   // Same pinned toolchain/two -Oz profile; +10 KiB still rounds to this cap (10,882 B reserve).
-  coinbase: 2_325_504,
+  // #3226 fix c548d1eb3319 + master b86a48664: composed head89f7496f69aca.
+  // CI43598275562/job132457674114, source1108664e5141: optimized web/Node2,344,277 B.
+  // SHA256864e305c0b2edc517397404b064cf2255d429d2041d02cd679264201f2ac2d05.
+  // Rust1.99.0, bindgen0.2.129, Binaryen132; same required two-Oz profile.
+  // Bounded per-read stream reconciliation and dispatch-time edit intent add code.
+  // Current CI bytes +10 KiB rounded up; 10,923 B reserve, all older floors retained.
+  coinbase: 2_355_200,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).

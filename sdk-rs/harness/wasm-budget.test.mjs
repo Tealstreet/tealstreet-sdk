@@ -3540,3 +3540,24 @@ for (const [venue, family, artifact, measured, minimumCap] of [
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
+
+
+// #3226 c548d1eb3 fix + master b86a48664; head89f7496f69aca.
+// CI43598275562/job132457674114, source1108664e5141: optimized web/Node2344277B.
+// SHA256864e305c0b2edc517397404b064cf2255d429d2041d02cd679264201f2ac2d05.
+// Rust1.99.0, bindgen0.2.129, Binaryen132, two required -Oz passes.
+test('#3226 per-identity census and queued intent keep current CI reserve', () => {
+  const measured = 2_344_277;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_355_200);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_325_504, 'retain all measured parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: less than 10 KiB above current CI module`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
