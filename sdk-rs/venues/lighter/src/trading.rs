@@ -1458,12 +1458,13 @@ impl Lighter {
                     Err(_) => {
                         let _ = cx.http_write_unproven(&context, UNCERTAIN_RESULT);
                         self.submission_uncertain(cx, &submission.effect);
-                        let error = if matches!(response.status, 405 | 429) {
+                        let mut error = if matches!(response.status, 405 | 429) {
                             uncertain(format!("{UNCERTAIN_RESULT}; {RATE_MESSAGE}"))
                                 .kind(ErrorKind::RateLimited)
                         } else {
                             uncertain(UNCERTAIN_RESULT)
                         };
+                        error.presents = true;
                         self.trade_finish(cx, error);
                         return;
                     }
@@ -1538,13 +1539,15 @@ impl Lighter {
                         message.push_str("; ");
                         message.push_str(RATE_MESSAGE);
                     }
-                    if matches!(code, Some(23000 | 23100)) {
+                    let present_unknown = matches!(code, Some(23000 | 23100))
+                        || (unknown && self.trading.active.as_ref().unwrap().retried_nonce);
+                    if present_unknown {
                         message.push_str(". The outcome is unknown. Check Open Orders");
                     }
                     let mut error = VenueError::new(message);
-                    // Native rate uncertainty must supersede an earlier nonce
+                    // Uncertainty must supersede an earlier nonce
                     // refusal's words; the journal still owns outcome and effects.
-                    error.presents = matches!(code, Some(23000 | 23100));
+                    error.presents = present_unknown;
                     if matches!(submission.effect, Effect::Modify) {
                         error.message = if unknown {
                             format!(
@@ -1943,7 +1946,12 @@ impl Lighter {
             if let Some(plan) = &job.plan
                 && (job.protection.is_some() || error.outcome == Some(Outcome::Unknown))
             {
-                let _ = cx.present_plan_failure(plan, error.message.clone());
+                // Re-presents the venue path's own already-composed message
+                // (e.g. `not_sent("Lighter stop not changed: trigger crossed")`
+                // from protective_edits::protection) on top of a definite leg
+                // failure like `21104 invalid nonce`. Uses the override entry
+                // point because the outcome here is typically `Rejected`.
+                let _ = cx.override_plan_failure_message(plan, error.message.clone());
             }
             if let Some(plan) = &job.plan {
                 if let (Some(slot), Some(context)) = (&job.slot, &job.live) {

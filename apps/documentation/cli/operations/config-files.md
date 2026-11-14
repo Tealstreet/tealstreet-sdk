@@ -27,6 +27,10 @@ old login with a message. This includes queued exit/quit commands. In-flight
 scripts cannot make further adapter calls after their starting session ends. A new login reconnects the listener with that user's identity;
 browser approval is specific to that user.
 
+Changing login stops the old user's in-process chasers and removes them from
+chase listings before disconnecting exchanges. Late chase results are discarded;
+they do not appear in the next user's chase watch or one-shot command result.
+
 Pending account starts, retries, script captures, recorder completions and
 background update checks also stay bound to their starting login. Cross-trade
 startup stops its remaining account list on cancellation and disposes old
@@ -127,27 +131,21 @@ tealstreet`) or for keeping multiple identity configs on one machine.
 
 ## Exchange endpoint overrides
 
-Most exchange URLs are built into the CLI through safe-cex. HyroTrader is
-different: its challenge endpoint is not stored in `config.json`, so the
-standalone CLI reads it from environment variables at process start:
+Most exchange URLs are built into the CLI through safe-cex. HyroTrader defaults
+to Hyro's hosted simulator at `https://sim-tealstreet.hyro.site`, and the standalone
+CLI reads optional overrides from environment variables at process start:
 
 - `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL` — HyroTrader production REST
-  origin. Required for ordinary `hyrotrader` challenge accounts.
+  origin override for ordinary `hyrotrader` challenge accounts.
 - `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL` — optional public
   WebSocket URL. Defaults to REST origin + `/v5/public/linear`.
 - `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL` — optional private
   WebSocket URL. Defaults to REST origin + `/v5/private`.
 
 Use the REST origin only, for example `https://example.hyrotrader.invalid`,
-not a `/v5/...` endpoint path. If the REST origin is missing, the CLI
-cannot connect and prints:
-
-```text
-HyroTrader production REST URL is not configured
-```
-
-These variables must be set in the shell that launches `tealstreet`, or
-persisted in your shell profile if you want them available every time.
+not a `/v5/...` endpoint path. These variables must be set in the shell that
+launches `tealstreet`, or persisted in your shell profile if you want them
+available every time.
 `NEXT_PUBLIC_HYROTRADER_SIMULATOR_*` is reserved for the shared Tealstreet
 demo/development simulator account and should not be used as a production
 challenge template.

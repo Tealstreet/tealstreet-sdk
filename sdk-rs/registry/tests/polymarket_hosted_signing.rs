@@ -10,6 +10,85 @@ impl Visit for Reject {
     }
 }
 
+fn refuse_public(value: serde_json::Value) {
+    for injected in [false, true] {
+        let options = serde_json::from_value(value.clone()).unwrap();
+        let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
+        let error = if injected {
+            safe_cex_venues::build_with_signer_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
+                "polymarket",
+                options,
+                entropy,
+                None,
+                Reject,
+            )
+        } else {
+            safe_cex_venues::build_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
+                "polymarket",
+                options,
+                entropy,
+                Reject,
+            )
+        }
+        .expect_err("Polymarket remains outside beta admission");
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+    }
+}
+
+#[test]
+fn inferred_public_mode_keeps_beta_refusal_with_unused_remote_signing() {
+    refuse_public(serde_json::json!({
+        "key": "", "accountStartup": true, "remoteSigning": true,
+        "publicMode": {"requested": null, "remoteSigner": true}
+    }));
+}
+
+#[test]
+fn inferred_public_mode_keeps_beta_refusal_with_unused_payload_signer() {
+    refuse_public(serde_json::json!({
+        "key": "", "accountStartup": true, "payloadSigner": true,
+        "publicMode": {"requested": null, "payloadSigner": true}
+    }));
+}
+
+#[test]
+fn inferred_public_mode_without_signing_flags_keeps_beta_refusal() {
+    refuse_public(serde_json::json!({"key": "", "publicMode": {"requested": null}}));
+}
+
+#[test]
+fn inferred_private_mode_keeps_custody_refusal() {
+    for (flag, intent) in [
+        ("remoteSigning", "remoteSigner"),
+        ("payloadSigner", "payloadSigner"),
+    ] {
+        let mut value = serde_json::json!({
+            "key": "12".repeat(32), "publicMode": {"requested": null}
+        });
+        value[flag] = true.into();
+        value["publicMode"][intent] = true.into();
+        for injected in [false, true] {
+            let options = serde_json::from_value(value.clone()).unwrap();
+            let error = if injected {
+                build_with_signer("polymarket", options, None, None, Reject)
+            } else {
+                build("polymarket", options, None, Reject)
+            }
+            .unwrap_err();
+            assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+            assert!(
+                error
+                    .message
+                    .contains("user WebSocket requires the API secret")
+            );
+        }
+    }
+}
+
 #[test]
 fn signature_only_custody_cannot_supply_user_websocket_credentials() {
     for mode in ["remoteSigning", "payloadSigner"] {
@@ -47,25 +126,15 @@ fn construction_policy_explicitly_refuses_both_callback_modes() {
 }
 
 #[test]
-fn explicit_public_mode_still_constructs_without_signing_material() {
-    struct Accept;
-    impl Visit for Accept {
-        type Output = ();
-        fn visit<V: Venue + 'static>(self, _: Engine<V>) {}
-    }
+fn explicit_public_mode_keeps_beta_refusal_without_signing_material() {
     for public in [
         serde_json::json!({"publicDataOnly": true}),
         serde_json::json!({"publicMode": {"requested": true}}),
     ] {
-        let mut value = public;
-        value["remoteSigning"] = true.into();
-        value["payloadSigner"] = true.into();
-        build(
-            "polymarket",
-            serde_json::from_value(value).unwrap(),
-            Some(safe_cex_engine::test_support::seeded_entropy(17)),
-            Accept,
-        )
-        .unwrap();
+        for flag in ["remoteSigning", "payloadSigner"] {
+            let mut value = public.clone();
+            value[flag] = true.into();
+            refuse_public(value);
+        }
     }
 }

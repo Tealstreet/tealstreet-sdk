@@ -194,3 +194,8 @@ signed order or label history with the wrong instrument. That failure is logged,
 preserves the prior store, and retries with the public discovery backoff. Ticker
 read failures retry independently by native asset while later seed reads and the
 private account continue.
+
+Master integration retains trusted Hosted beta admission: TxFlow remains OUT of
+the hosted beta roster even for public accounts. Client testnet construction and
+device agent verification remain available without enabling preview or production.
+New shared signing families and request-handoff refusals keep their native rules.

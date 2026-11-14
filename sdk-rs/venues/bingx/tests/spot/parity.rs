@@ -63,7 +63,7 @@ fn unknown_outcome_and_journal(actions: &[Action], accepted: &[&str]) {
     );
 }
 
-fn unknown_telemetry(actions: &[Action], operation: &str) {
+fn unknown_event(actions: &[Action]) -> &safe_cex_engine::LogEvent {
     let events = actions
         .iter()
         .filter_map(|action| match action {
@@ -88,14 +88,34 @@ fn unknown_telemetry(actions: &[Action], operation: &str) {
     let event = events[0];
     assert_eq!(event.level, safe_cex_engine::Level::Error);
     assert_eq!(event.message, ENGINE_UNKNOWN_TEXT);
+    event
+}
+
+fn unknown_telemetry(actions: &[Action], operation: &str) {
     assert_eq!(
-        event.fields,
+        unknown_event(actions).fields,
         vec![
             ("command", 70u32.into()),
             ("outcome", "unknown".into()),
             ("operation", operation.into()),
         ]
     );
+}
+
+fn engine_unknown_telemetry(
+    actions: &[Action],
+    request: safe_cex_engine::RequestId,
+    status: Option<u16>,
+) {
+    let mut fields = vec![
+        ("command", 70u32.into()),
+        ("outcome", "unknown".into()),
+        ("request", request.0.to_string().into()),
+    ];
+    if let Some(status) = status {
+        fields.push(("status", u32::from(status).into()));
+    }
+    assert_eq!(unknown_event(actions).fields, fields);
 }
 
 fn late_unknown_ack_is_inert(e: &mut Engine<BingxSpot>, request: &HttpRequest) {
@@ -144,6 +164,14 @@ fn partial_row(row: Value, quantity: f64, price: Option<f64>) {
     assert_eq!(middle.len(), 1, "TS sends this numeric payload");
     let body: Value = serde_json::from_str(middle[0].body.as_deref().unwrap()).unwrap();
     assert_eq!(body["quantity"], quantity);
+    let sum: f64 = middle
+        .iter()
+        .map(|request| {
+            let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            body["quantity"].as_f64().unwrap()
+        })
+        .sum();
+    assert_eq!(sum, quantity);
     assert_eq!(body.get("price").and_then(Value::as_f64), price);
     reply(
         &mut e,
@@ -181,6 +209,8 @@ fn below_minimum_and_notional_rows_follow_the_prefix_and_refusal_continues() {
 // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bingx-spot | quantity-normalization
 #[test]
 fn rounded_quantity_is_sent_without_a_conservation_gate() {
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 0.002 of requested 0.002004);
+    // kept for exact TS parity per Sam's decision.
     partial_row(
         batch_order(0.002004, 41000., "rounded"),
         0.002,
@@ -262,8 +292,6 @@ fn missing_market_is_a_formatter_failure_before_any_write() {
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
 #[test]
 fn unknown_middle_payload_halts_with_prefix_ids_and_a_terminal_event() {
-    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
-    // Only telemetry is deferred; outcome, native IDs and no-resend stay pinned.
     unknown_middle_payload(&[0, 1]);
 }
 
@@ -357,6 +385,8 @@ fn unknown_middle_payload(modes: &[u8]) {
             unknown_outcome_and_journal(&actions, &accepted);
             if mode >= 2 {
                 unknown_telemetry(&actions, "place");
+            } else {
+                engine_unknown_telemetry(&actions, requests[0].id, (mode == 1).then_some(503));
             }
             late_unknown_ack_is_inert(&mut e, &requests[0]);
         }
@@ -409,12 +439,304 @@ fn cancellation_continues_after_a_definite_refusal() {
     )));
 }
 
+#[test]
+fn spot_followup_empty_refusal_data_preserves_classification_and_continuation() {
+    // TS: reference/bingx/bingx.exchange.ts:1854-1889 continues after native refusal.
+    for data in [
+        None,
+        Some(json!(null)),
+        Some(json!({})),
+        Some(json!([])),
+        Some(json!({"orders":[]})),
+    ] {
+        let (mut e, _) = seed(true);
+        let actions = submit_batch(
+            &mut e,
+            [0.002, 0.003, 0.004]
+                .into_iter()
+                .enumerate()
+                .map(|(i, amount)| batch_order(amount, 41000., &format!("row_{i}")))
+                .collect(),
+        );
+        let (_, actions) = ack(&mut e, &actions, "1001");
+        let middle = writes(&actions);
+        assert_eq!(middle.len(), 1);
+        let mut refusal = json!({"code":100440,"msg":"fixture known refusal"});
+        if let Some(data) = data {
+            refusal["data"] = data;
+        }
+        reply(&mut e, &middle[0], 200, &refusal.to_string());
+        let actions = collect(&mut e);
+        assert_eq!(
+            writes(&actions).len(),
+            1,
+            "definite refusal continues: {refusal}"
+        );
+        assert!(!actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+        )));
+        let (body, actions) = ack(&mut e, &actions, "1003");
+        assert_eq!(body["quantity"], 0.004);
+        let error = failure(&actions);
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+        assert_eq!(error.venue_code.as_deref(), Some("100440"));
+        assert_eq!(
+            error.venue_message.as_deref(),
+            Some("fixture known refusal")
+        );
+        assert_eq!(error.outcome, None);
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["1001", "1003"]);
+        assert!(writes(&actions).is_empty());
+        let actions = submit_batch(&mut e, vec![batch_order(0.002, 41000., "fresh")]);
+        let (_, actions) = ack(&mut e, &actions, "1004");
+        assert_eq!(done(&actions, 70), json!(["1004"]));
+    }
+}
+
+#[test]
+fn spot_followup_cancel_empty_refusal_data_continues() {
+    for data in [json!({}), json!([]), json!({"orders": []})] {
+        let (mut e, _) = seed(true);
+        let first = writes(&cancels(&mut e));
+        reply(
+            &mut e,
+            &first[0],
+            200,
+            &json!({
+                "code":100421,"msg":"definite refusal","data":data
+            })
+            .to_string(),
+        );
+        let second = writes(&collect(&mut e));
+        assert_eq!(second.len(), 1);
+        let body: Value = serde_json::from_str(second[0].body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["orderId"], "1002");
+        reply(
+            &mut e,
+            &second[0],
+            200,
+            r#"{"code":0,"data":{"orderId":"1002","symbol":"BTC-USDT","status":"CANCELED"}}"#,
+        );
+        let actions = collect(&mut e);
+        assert_eq!(failure(&actions).venue_code.as_deref(), Some("100421"));
+        assert_eq!(failure(&actions).outcome, None);
+        assert!(!actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+        )));
+    }
+}
+
+#[test]
+fn spot_followup_effect_claims_and_empty_success_stay_unknown() {
+    for body in [
+        json!({"code":100440,"data":{"orderId":"1002","symbol":"BTC-USDT","status":"NEW","side":"BUY","type":"LIMIT"}}),
+        json!({"code":100440,"data":{"orderId":"1002"}}),
+        json!({"code":100440,"data":{"order":{"orderId":"1002"}}}),
+        json!({"code":100440,"data":{"orders":[{"orderId":"1002"}]}}),
+        json!({"code":0,"data":{}}),
+        json!({"code":0,"data":{"orders":[]}}),
+    ] {
+        assert_indexed_spot_unknown(body);
+    }
+}
+
+#[test]
+fn spot_followup_incomplete_execution_evidence_stays_unknown() {
+    for data in [
+        json!({"symbol":"BTC-USDT","side":"BUY","type":"LIMIT",
+            "status":"FILLED","executedQty":"0.003","origQty":"0.003"}),
+        json!({"executedQty":"0.003","cummulativeQuoteQty":"123"}),
+        json!({"status":"FILLED"}),
+        json!({"status":"PARTIALLY_FILLED","executedQty":0.001}),
+        json!({"executedQty":0.003}),
+        json!({"cummulativeQuoteQty":123}),
+        json!({"orders":[],"executedQty":"0.003"}),
+    ] {
+        for null_id in [false, true] {
+            let mut data = data.clone();
+            if null_id {
+                data["orderId"] = Value::Null;
+            }
+            assert_indexed_spot_unknown(json!({"code":100440,"data":data}));
+        }
+    }
+}
+
+#[test]
+fn spot_followup_nonempty_unrecognized_data_stays_unknown() {
+    for data in [
+        json!({"unrecognizedExecutionField":"execution evidence"}),
+        json!([null, null, []]),
+        json!({"orderId":null,"orders":[],"fills":[{"quantity":"0.003"}]}),
+    ] {
+        assert_indexed_spot_unknown(json!({"code":100440,"data":data}));
+    }
+}
+
+fn assert_indexed_spot_unknown(body: Value) {
+    let (mut e, _) = seed(true);
+    let actions = submit_batch(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "prefix"),
+            batch_order(0.003, 41000., "middle"),
+            batch_order(0.004, 41000., "suffix"),
+        ],
+    );
+    let (_, actions) = ack(&mut e, &actions, "1001");
+    let middle = writes(&actions);
+    reply(&mut e, &middle[0], 200, &body.to_string());
+    let actions = collect(&mut e);
+    assert!(
+        writes(&actions).is_empty(),
+        "Unknown must halt before suffix: {body}"
+    );
+    unknown_outcome_and_journal(&actions, &["1001"]);
+    let error = failure(&actions);
+    let elements = error.elements.as_ref().expect("indexed Spot outcomes");
+    assert_eq!(elements.len(), 3);
+    for (index, client) in ["prefix", "middle", "suffix"].iter().enumerate() {
+        assert_eq!(elements[index].element.index, index);
+        assert_eq!(
+            elements[index].element.client_order_id.as_deref(),
+            Some(*client)
+        );
+    }
+    assert!(matches!(&elements[0].result,
+            safe_cex_engine::write_plan::ElementResult::Placed { order_ids }
+                if order_ids == &["1001"]));
+    assert!(matches!(&elements[1].result,
+            safe_cex_engine::write_plan::ElementResult::Unknown { error }
+                if error.outcome == Some(Outcome::Unknown)
+                    && error.message == ENGINE_UNKNOWN_TEXT));
+    assert!(matches!(
+        &elements[2].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
+    let partial = error.partial.as_ref().unwrap();
+    assert_eq!(partial.failed_index, Some(1));
+    assert_eq!(partial.total, Some(3));
+    unknown_telemetry(&actions, "place");
+    late_unknown_ack_is_inert(&mut e, &middle[0]);
+}
+
+#[test]
+fn spot_unknown_journal_keeps_an_earlier_refusal_and_later_failed_index() {
+    let (mut e, _) = seed(true);
+    let actions = submit_batch(
+        &mut e,
+        vec![
+            batch_order(0.002, 41000., "prefix"),
+            batch_order(0.003, 41000., "refused"),
+            batch_order(0.004, 41000., "unknown"),
+            batch_order(0.005, 41000., "suffix"),
+        ],
+    );
+    let (_, actions) = ack(&mut e, &actions, "1001");
+    reply(
+        &mut e,
+        &writes(&actions)[0],
+        200,
+        r#"{"code":100440,"data":{}}"#,
+    );
+    let actions = collect(&mut e);
+    reply(&mut e, &writes(&actions)[0], 200, r#"{"code":0,"data":{}}"#);
+    let actions = collect(&mut e);
+    assert!(writes(&actions).is_empty());
+    unknown_outcome_and_journal(&actions, &["1001"]);
+    unknown_telemetry(&actions, "place");
+    let error = failure(&actions);
+    assert_eq!(error.venue_code.as_deref(), Some("100440"));
+    let partial = error.partial.as_ref().unwrap();
+    assert_eq!(partial.total, Some(4));
+    assert_eq!(partial.failed_index, Some(2));
+    let elements = error.elements.as_ref().unwrap();
+    assert_eq!(elements.len(), 4);
+    assert!(matches!(&elements[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
+            if error.outcome == Some(Outcome::Rejected)));
+    assert!(matches!(
+        &elements[2].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(matches!(
+        &elements[3].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
+}
+
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:940-962.
 #[test]
 fn cancellation_unknown_halts_the_action() {
-    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
     cancellation_unknown(&[0, 1]);
+}
+
+#[test]
+fn engine_sealed_cancel_all_reports_only_bounded_facts_once() {
+    for status in [None, Some(408), Some(429), Some(500), Some(503)] {
+        let (mut e, _) = seed(true);
+        e.handle(
+            NOW,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 70,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let r = request(&collect(&mut e), "/trade/cancelOpenOrders");
+        if let Some(status) = status {
+            reply(
+                &mut e,
+                &r,
+                status,
+                "fixture-private-response-not-for-telemetry",
+            );
+        } else {
+            e.handle(
+                NOW,
+                Event::HttpFailed {
+                    request: r.id,
+                    error: "fixture-private-error-not-for-telemetry",
+                },
+            );
+        }
+        let actions = collect(&mut e);
+        assert!(writes(&actions).is_empty());
+        unknown_outcome_and_journal(&actions, &[]);
+        engine_unknown_telemetry(&actions, r.id, status);
+        late_unknown_ack_is_inert(&mut e, &r);
+    }
+}
+
+#[test]
+fn read_failures_do_not_emit_order_unknown_diagnostics() {
+    for status in [None, Some(503)] {
+        let (mut e, _) = seed(true);
+        e.handle(
+            NOW,
+            Event::Command(Command::Venue {
+                command: 70,
+                action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+            }),
+        );
+        let r = request(&collect(&mut e), "/trade/openOrders");
+        if let Some(status) = status {
+            reply(&mut e, &r, status, "fixture-read-failed");
+        } else {
+            e.handle(
+                NOW,
+                Event::HttpFailed {
+                    request: r.id,
+                    error: "fixture-read-failed",
+                },
+            );
+        }
+        let actions = collect(&mut e);
+        assert!(writes(&actions).is_empty());
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+        )));
+    }
 }
 
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
@@ -454,6 +776,8 @@ fn cancellation_unknown(modes: &[u8]) {
         unknown_outcome_and_journal(&actions, &[]);
         if mode >= 2 {
             unknown_telemetry(&actions, "cancel");
+        } else {
+            engine_unknown_telemetry(&actions, first[0].id, (mode == 1).then_some(503));
         }
         late_unknown_ack_is_inert(&mut e, &first[0]);
     }
@@ -497,7 +821,6 @@ fn explicit_client_id_cannot_be_reused_across_native_lots() {
 // packages/safe-cex/src/__tests__/reference/bingx/bingx.exchange.ts:1871-1889.
 #[test]
 fn gateway_after_refusal_preserves_native_prefix_and_unknown_text() {
-    // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
     unknown_after_refusal(503, "upstream unavailable");
 }
 
@@ -530,6 +853,8 @@ fn unknown_after_refusal(status: u16, body: &str) {
     unknown_outcome_and_journal(&actions, &["1001"]);
     if status == 200 {
         unknown_telemetry(&actions, "place");
+    } else {
+        engine_unknown_telemetry(&actions, third[0].id, Some(status));
     }
     late_unknown_ack_is_inert(&mut e, &third[0]);
 }

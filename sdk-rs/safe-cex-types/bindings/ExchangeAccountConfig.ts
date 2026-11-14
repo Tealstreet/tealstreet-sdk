@@ -6,6 +6,10 @@ export type ExchangeAccountConfig = {
     testnet?: boolean;
     apiKey: string;
     apiSecret: string;
+    /**
+     * Account-worker mode; absent keeps existing signing selection.
+     */
+    signingMode?: "local" | "cosigned" | "delegated";
     passphrase?: string;
     secondary_apiKey?: string;
     secondary_apiSecret?: string;
@@ -24,6 +28,10 @@ export type ExchangeAccountConfig = {
     subkeyAddress?: string;
     grvtSignerAddress?: string;
     grvtTradingAccountId?: string;
+    /**
+     * Hosted CDP key algorithm; local custody infers it from key material.
+     */
+    coinbaseJwtAlgorithm?: "es256" | "edDsa";
     tealstreetProxy?: boolean;
     tealstreetTunnel?: boolean;
     tealstreetWsRoute?: boolean;

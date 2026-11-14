@@ -1,9 +1,8 @@
 //! Synchronous SDK and native construction share these declarative conditions.
+use crate::EngineOptions;
 use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy, SetupFieldPolicy};
 use safe_cex_engine::signing_policy::{RemoteSigningPolicy, SignatureEncoding};
 use serde::{Deserialize, Serialize};
-
-use crate::EngineOptions;
 
 type Conditions = &'static [&'static [Input]];
 
@@ -23,6 +22,7 @@ enum Input {
 }
 
 struct Rule {
+    beta_admitted: bool,
     can_sign: Option<Conditions>,
     private_eligible: Option<Conditions>,
     explicit_private_error: Option<&'static str>,
@@ -58,6 +58,8 @@ struct BridgeRule {
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
     read_credentials: ReadCredentialsPolicy,
+    #[cfg(any(feature = "phemex", feature = "okx"))]
+    helpers: Option<HelperCapabilities>,
 }
 
 /// What trusted setup does with a family's read key (declared, never inferred).
@@ -71,12 +73,6 @@ pub enum ReadCredentialsPolicy {
     ValidateOnly,
     /// Also usable without a primary in public-only mode, for Read roles only.
     PublicRead,
-}
-
-impl ReadCredentialsPolicy {
-    fn is_install(&self) -> bool {
-        *self == Self::Install
-    }
 }
 
 enum DemoRule {
@@ -99,6 +95,9 @@ pub struct BridgeConstruction {
     /// Omitted when `Install`, so undeclared families keep their exact record.
     #[serde(skip_serializing_if = "ReadCredentialsPolicy::is_install")]
     pub read_credentials: ReadCredentialsPolicy,
+    #[cfg(any(feature = "phemex", feature = "okx"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub helpers: Option<HelperCapabilities>,
 }
 
 pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
@@ -130,6 +129,8 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
         isolated_book_subscriptions: rule.isolated_book_subscriptions,
         dispatch_signing: rule.dispatch_signing,
         read_credentials: rule.read_credentials,
+        #[cfg(any(feature = "phemex", feature = "okx"))]
+        helpers: rule.helpers,
     }
 }
 
@@ -162,6 +163,10 @@ pub fn remote_signing_policy(venue: &str) -> RemoteSigningPolicy {
     venue_rule(venue).unwrap_or(&DEFAULT_RULE).remote_signing
 }
 
+pub fn beta_admitted(venue: &str) -> bool {
+    venue_rule(venue).unwrap_or(&DEFAULT_RULE).beta_admitted
+}
+
 /// Trusted setup uses explicit caller intent before keys are stripped/resolved.
 /// An explicit shared publicMode request takes precedence over the legacy flag.
 pub fn signer_setup_public_data_only(options: &EngineOptions) -> bool {
@@ -184,6 +189,12 @@ pub struct PublicMode {
     payload_signer: bool,
     #[serde(default)]
     api_key_index_present: bool,
+}
+
+impl PublicMode {
+    pub(crate) fn callback_intent(&self) -> (bool, bool) {
+        (self.remote_signer, self.payload_signer)
+    }
 }
 
 pub struct Resolved {
@@ -217,20 +228,31 @@ fn resolve_with_pending_setup(
         .signing
         .as_ref()
         .filter(|_| bridge(venue, options).dispatch_signing);
+    let primary_policy = signer_setup_policy(venue).primary.unwrap_or_default();
+    let credential_present = |value: &Option<String>, trim: Option<bool>| {
+        value.as_deref().is_some_and(|value| {
+            !(if trim == Some(true) {
+                value.trim()
+            } else {
+                value
+            })
+            .is_empty()
+        })
+    };
     let present = |value: &Option<String>| value.as_ref().is_some_and(|value| !value.is_empty());
     let matches = |conditions: Conditions, can_sign: bool| {
         conditions.iter().all(|group| {
             group.iter().any(|input| match input {
                 Input::Key => {
                     pending_local_setup
-                        || present(&options.key)
+                        || credential_present(&options.key, primary_policy.trim_credential)
                         || identities
                             .and_then(|s| s.primary.as_ref())
                             .is_some_and(|id| !id.credential.0.is_empty())
                 }
                 Input::Secret => {
                     pending_local_setup
-                        || present(&options.secret)
+                        || credential_present(&options.secret, primary_policy.trim_signing)
                         || identities
                             .and_then(|s| s.primary.as_ref())
                             .is_some_and(|id| id.signing_opt().is_some_and(|key| !key.0.is_empty()))
@@ -297,6 +319,25 @@ fn resolve_with_pending_setup(
         public_data_only,
         explicit_private_error,
     })
+}
+
+// Keep helper definitions after existing functions so unrelated families retain
+// their panic locations as well as their layout and certified compiled bytes.
+#[cfg(any(feature = "phemex", feature = "okx"))]
+/// Optional SDK helpers available from the shared declaration before startup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelperCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolve_leverage_context: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetch_algo_orders: Option<bool>,
+}
+
+impl ReadCredentialsPolicy {
+    fn is_install(&self) -> bool {
+        *self == Self::Install
+    }
 }
 
 /// Test-only declaration for one family, since no shipped row declares a policy.

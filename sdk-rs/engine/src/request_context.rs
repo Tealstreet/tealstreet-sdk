@@ -7,6 +7,11 @@
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
+#[path = "http_token_issuer.rs"]
+mod token_issuer;
+
+const MAX_HOST_TOKEN_BYTES: usize = 103;
+
 #[cfg(feature = "http-plans")]
 #[path = "request_context_plan.rs"]
 pub mod plan;
@@ -768,14 +773,18 @@ impl HttpRelease {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Permit {
+    issuer: u64,
     attempt: Attempt,
     preparation: u64,
     sequence: u64,
+    // Native WS envelope provenance; never part of an HTTP wire token.
+    websocket_issuer: u64,
 }
 
 /// Returned to asynchronous route/sign work and checked again on completion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Preparation {
+    issuer: u64,
     attempt: Attempt,
     sequence: u64,
 }
@@ -788,21 +797,34 @@ impl Preparation {
     /// Lossless opaque host token: wide counters must never cross JS as numbers.
     pub fn to_wire(self) -> String {
         format!(
-            "p1:{}:{}:{}",
-            self.attempt.request.0, self.attempt.generation, self.sequence
+            "p2:{}:{}:{}:{}",
+            self.issuer, self.attempt.request.0, self.attempt.generation, self.sequence
         )
     }
 
     pub fn from_wire(token: &str) -> Result<Self, Error> {
-        let parts = token_parts(token.strip_prefix("p1:").ok_or(Error::Invalid)?, 3)?;
+        let parts = token_parts(token.strip_prefix("p2:").ok_or(Error::Invalid)?, 4)?;
+        if parts[0] == 0 {
+            return Err(Error::Invalid);
+        }
         Ok(Self {
-            attempt: token_attempt(parts[0], parts[1])?,
-            sequence: parts[2],
+            issuer: parts[0],
+            attempt: token_attempt(parts[1], parts[2])?,
+            sequence: parts[3],
         })
     }
 }
 
 impl Permit {
+    pub(crate) fn with_websocket_issuer(mut self, issuer: u64) -> Self {
+        self.websocket_issuer = issuer;
+        self
+    }
+
+    pub(crate) fn take_websocket_issuer(&mut self) -> u64 {
+        std::mem::take(&mut self.websocket_issuer)
+    }
+
     pub fn attempt(self) -> Attempt {
         self.attempt
     }
@@ -813,20 +835,26 @@ impl Permit {
 
     pub fn to_wire(self) -> String {
         format!(
-            "r1:{}:{}:{}:{}",
-            self.attempt.request.0, self.attempt.generation, self.preparation, self.sequence
+            "r2:{}:{}:{}:{}:{}",
+            self.issuer,
+            self.attempt.request.0,
+            self.attempt.generation,
+            self.preparation,
+            self.sequence
         )
     }
 
     pub fn from_wire(token: &str) -> Result<Self, Error> {
-        let parts = token_parts(token.strip_prefix("r1:").ok_or(Error::Invalid)?, 4)?;
-        if parts[3] == 0 {
+        let parts = token_parts(token.strip_prefix("r2:").ok_or(Error::Invalid)?, 5)?;
+        if parts[0] == 0 || parts[4] == 0 {
             return Err(Error::Invalid);
         }
         Ok(Self {
-            attempt: token_attempt(parts[0], parts[1])?,
-            preparation: parts[2],
-            sequence: parts[3],
+            issuer: parts[0],
+            attempt: token_attempt(parts[1], parts[2])?,
+            preparation: parts[3],
+            sequence: parts[4],
+            websocket_issuer: 0,
         })
     }
 }
@@ -841,11 +869,11 @@ fn token_attempt(request: u64, generation: u64) -> Result<Attempt, Error> {
     })
 }
 
-fn token_parts(token: &str, count: usize) -> Result<[u64; 4], Error> {
-    if token.len() > 80 {
+fn token_parts(token: &str, count: usize) -> Result<[u64; 5], Error> {
+    if token.len() > MAX_HOST_TOKEN_BYTES - 3 {
         return Err(Error::Invalid);
     }
-    let mut values = [0; 4];
+    let mut values = [0; 5];
     let mut words = token.split(':');
     for value in &mut values[..count] {
         let word = words.next().ok_or(Error::Invalid)?;
@@ -879,6 +907,7 @@ enum State {
 /// One physical attempt. A retry constructs another lifecycle with the same
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
+    issuer: u64,
     #[cfg(not(target_arch = "wasm32"))]
     created_at: f64,
     context: Context,
@@ -899,6 +928,10 @@ pub enum Claim {
     WaitUntil(f64),
 }
 
+/// Commit a reserved write only if its synchronous physical handoff accepts it.
+pub type WebSocketCommit<'a> = dyn FnMut(&mut dyn FnMut() -> bool) -> bool + 'a;
+pub(crate) type ClaimHandoff<'a> = dyn FnMut(&mut WebSocketCommit<'_>) -> bool + 'a;
+
 #[path = "request_context_group_protocol.rs"]
 mod group_protocol;
 pub use group_protocol::{GroupClaim, GroupPacket, GroupPermit, GroupRelease};
@@ -909,6 +942,7 @@ pub(crate) mod group_lifecycle;
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            issuer: token_issuer::next(),
             #[cfg(not(target_arch = "wasm32"))]
             created_at: context.created_at,
             deadline: context.deadline(),
@@ -981,6 +1015,17 @@ impl Lifecycle {
     pub fn deadline(&self) -> f64 {
         self.deadline
     }
+    #[cfg(test)]
+    pub(crate) fn narrow_test_window(&mut self, created_at: f64, deadline: f64) {
+        assert!(created_at.is_finite() && deadline.is_finite());
+        assert!(created_at < deadline && deadline < self.deadline);
+        assert_eq!(self.state, State::Preparing);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.created_at = created_at;
+        }
+        self.deadline = deadline;
+    }
     pub fn context(&self) -> &Context {
         &self.context
     }
@@ -990,6 +1035,7 @@ impl Lifecycle {
 
     pub fn preparation(&self) -> Preparation {
         Preparation {
+            issuer: self.issuer,
             attempt: self.attempt,
             sequence: self.preparation,
         }
@@ -1064,9 +1110,11 @@ impl Lifecycle {
         };
         self.permits = self.permits.checked_add(1).ok_or(Error::Capacity)?;
         let permit = Permit {
+            issuer: self.issuer,
             attempt: self.attempt,
             preparation: route.id,
             sequence: self.permits,
+            websocket_issuer: 0,
         };
         self.state = State::Permitted(route, permit);
         Ok(permit)
@@ -1080,6 +1128,19 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
+        self.claim_with_handoff(permit, time, pacing, admit, &mut |commit| {
+            commit(&mut || true)
+        })
+    }
+
+    pub(crate) fn claim_with_handoff(
+        &mut self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &mut SendPacing,
+        admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
+        handoff: &mut ClaimHandoff<'_>,
+    ) -> Result<Claim, Error> {
         let draft = match self.prepare_claim(permit, time, pacing)? {
             group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
             group_lifecycle::ClaimPreparation::Ready(draft) => draft,
@@ -1091,7 +1152,25 @@ impl Lifecycle {
                 return Err(error);
             }
         };
-        Ok(Claim::Released(self.commit_claim(ready, pacing)))
+        let mut ready = Some(ready);
+        let mut released = None;
+        handoff(&mut |send| {
+            let Some(ready) = ready.take() else {
+                return false;
+            };
+            if !send() {
+                return false;
+            }
+            released = Some(self.commit_claim(ready, pacing));
+            true
+        });
+        match released {
+            Some(release) => Ok(Claim::Released(release)),
+            None => {
+                self.state = State::Settled(None);
+                Err(Error::Revoked)
+            }
+        }
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes
@@ -1450,7 +1529,18 @@ pub struct CommandWrites {
     // An earlier attempt of this intent may have reached the venue.
     inherited_uncertain: bool,
     /// The venue's words for a failure whose terminal presents none of its own.
+    /// Applied only when the projected outcome is `Unknown`; a definite
+    /// acceptance or rejection keeps the venue's own words. Used by venue
+    /// paths that stage a generic "unknown outcome; check Open Orders"
+    /// sentence BEFORE a leg is dispatched.
     presentation: Option<String>,
+    /// The venue has already computed the correct user-facing message for
+    /// this failure and wants it to replace the projected venue text on any
+    /// outcome, including `Rejected`/`NotSent`. Used by venue paths that
+    /// RE-present their own composed message AFTER a terminal leg (protective
+    /// edit put-backs, batch-unknown summaries), where the venue's raw native
+    /// text would be strictly less informative.
+    presentation_force: Option<String>,
     /// The engine recorded an unproven status reply the venue never saw.
     unproven_status: bool,
     #[cfg(feature = "serial-plans")]
@@ -1485,6 +1575,18 @@ impl PreparedWriteSeal {
 
     pub(crate) fn failure(&self) -> Option<&VenueError> {
         self.failure.as_ref()
+    }
+
+    #[cfg(feature = "plan-element-reports")]
+    pub(crate) fn retain_missing_elements(
+        &mut self,
+        elements: Option<&crate::write_plan::ElementOutcomes>,
+    ) {
+        if let Some(error) = &mut self.failure
+            && error.elements.is_none()
+        {
+            error.elements = elements.cloned().map(Box::new);
+        }
     }
 }
 impl CommandWrites {
@@ -1526,6 +1628,7 @@ impl CommandWrites {
             evidence: evidence::EvidenceBudget::default(),
             inherited_uncertain: false,
             presentation: None,
+            presentation_force: None,
             unproven_status: false,
             #[cfg(feature = "serial-plans")]
             stream: None,
@@ -2091,6 +2194,25 @@ impl CommandWrites {
         Ok(error)
     }
 
+    #[cfg(feature = "plan-element-reports")]
+    pub(crate) fn retain_failed_attempt_elements(
+        &mut self,
+        id: RequestId,
+        elements: Box<crate::write_plan::ElementOutcomes>,
+    ) -> Result<(), Error> {
+        self.failed_attempt(id)?;
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|attempt| attempt.id == id)
+            .unwrap();
+        let Some(WriteResult::Failed(error)) = &mut attempt.result else {
+            return Err(Error::State);
+        };
+        error.elements = Some(elements);
+        Ok(())
+    }
+
     /// Seal success only when every terminal logical leg is proven accepted.
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
@@ -2137,13 +2259,28 @@ impl CommandWrites {
     }
 
     /// Words for this journal's failure when its terminal presents none; the
-    /// latest replaces any earlier. Outcome and protection stay projected.
+    /// latest replaces any earlier. Applied only to `Unknown` seals. Outcome
+    /// and protection stay projected.
     #[cfg(feature = "http-plans")]
     pub(crate) fn present_failure(&mut self, message: String) -> Result<(), Error> {
         if self.sealed {
             return Err(Error::State);
         }
         self.presentation = Some(message);
+        Ok(())
+    }
+
+    /// Words for this journal's failure that should REPLACE the venue text on
+    /// any outcome. Used where the venue path has already composed the right
+    /// user-facing message (protective put-back, batch-unknown summary) and
+    /// the raw native text would be strictly less informative. Outcome and
+    /// protection stay projected.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn force_present_failure(&mut self, message: String) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        self.presentation_force = Some(message);
         Ok(())
     }
 
@@ -2176,6 +2313,13 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let elements = fallback.elements.take();
+        // Identity-only fallbacks declare no logical counts. They must neither
+        // invent an empty partial result nor erase selected native counts.
+        let plan_counts = elements
+            .as_ref()
+            .and(fallback.partial.as_ref())
+            .filter(|partial| partial.total.is_some() || partial.failed_index.is_some())
+            .map(|partial| (partial.total, partial.failed_index));
         let presented = (fallback.protection.is_some() || fallback.presents)
             .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
@@ -2224,7 +2368,7 @@ impl CommandWrites {
             .all(|a| matches!(&a.result, Some(WriteResult::Rejected(e)) if e.outcome == Some(Outcome::NotSent)));
         #[cfg(feature = "serial-plans")]
         let all_not_sent = all_not_sent && !self.streamed().is_some_and(|s| s.sent_refusal);
-        let error = |a: &WriteAttempt| match &a.result {
+        let error_from_attempt = |a: &WriteAttempt| match &a.result {
             Some(
                 WriteResult::Rejected(error)
                 | WriteResult::KnownPartial(error)
@@ -2259,7 +2403,7 @@ impl CommandWrites {
             self.attempts
                 .iter()
                 .filter(|a| self.terminal(a) && (!sent_only || self.reached(a.leg)))
-                .filter_map(|a| error(a).map(|error| (self.order(a.leg), error)))
+                .filter_map(|a| error_from_attempt(a).map(|error| (self.order(a.leg), error)))
                 .min_by(|(a, _), (b, _)| a.cmp(b))
                 .map(|(_, error)| error)
         };
@@ -2318,6 +2462,28 @@ impl CommandWrites {
             // existing partial contract; do not invent execution uncertainty.
             None
         };
+        // Earlier refusal text/evidence must not erase a later cooldown. Any
+        // unresolved rate limit still constrains reconciliation; keep the
+        // longest terminal pause, including the default for a missing header.
+        if error.outcome == Some(Outcome::Unknown)
+            && let Some(rate) = self
+                .attempts
+                .iter()
+                .filter(|attempt| attempt.released && self.terminal(attempt))
+                .filter_map(error_from_attempt)
+                .filter(|error| error.kind == Some(crate::ErrorKind::RateLimited))
+                .max_by(|a, b| {
+                    let delay = |error: &VenueError| {
+                        error
+                            .retry_after_ms
+                            .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS)
+                    };
+                    delay(a).total_cmp(&delay(b))
+                })
+        {
+            error.kind = rate.kind;
+            error.retry_after_ms = rate.retry_after_ms;
+        }
         // Preserve the selected native/fallback evidence prefix exactly. Append
         // additional facts in logical replacement order, without charging known
         // IDs again or reordering a bounded retained prefix.
@@ -2365,6 +2531,19 @@ impl CommandWrites {
                 error = error.partial_ids(&ids);
             }
         }
+        // Logical counts travel with the complete venue journal, independently
+        // of native-error selection and the engine's accepted identity prefix.
+        if let Some((total, failed_index)) = plan_counts {
+            let partial = error.partial.get_or_insert_with(|| {
+                Box::new(crate::Partial {
+                    order_ids: Vec::new(),
+                    total: None,
+                    failed_index: None,
+                })
+            });
+            partial.total = total;
+            partial.failed_index = failed_index;
+        }
         if overflow {
             evidence::mark_id_overflow(&mut error);
         }
@@ -2379,7 +2558,20 @@ impl CommandWrites {
         if let Some((message, protection)) = presented {
             error.message = message;
             error.protection = protection;
-        } else if let Some(message) = &self.presentation {
+        } else if let Some(message) = &self.presentation_force {
+            // The venue path has already composed the exact user-facing
+            // message it wants for this failure (protective put-back summary,
+            // batch-unknown aggregate, re-presented local reason). Replace the
+            // projected venue text on every outcome, including definite
+            // rejections, where raw native text would be strictly less
+            // informative.
+            error.message = message.clone();
+        } else if let Some(message) = &self.presentation
+            && error.outcome == Some(Outcome::Unknown)
+        {
+            // A caller-staged presentation names an uncertain outcome. A
+            // definite acceptance or rejection carries the venue's own words;
+            // overwriting it would hide a real refusal behind generic text.
             error.message = message.clone();
         } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
             error.message = UNKNOWN_AFTER_REFUSAL.into();

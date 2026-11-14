@@ -75,6 +75,7 @@ export const deriveBridgeConstruction = (name: ExchangeName, options: ExchangeOp
     dispatchSigning:policy?.dispatchSigning===true,
     // Omitted when undeclared, matching the native record byte for byte.
     ...(policy?.readCredentials === undefined ? {} : { readCredentials: policy.readCredentials }),
+    ...(policy?.helpers === undefined ? {} : { helpers: { ...policy.helpers } }),
   };
 };
 

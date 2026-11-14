@@ -67,6 +67,10 @@ Login changes clear live exchanges and approvals; unknown-owner legacy files
 require re-entry. Signed-out local-only state persists separately and is never
 imported into an authenticated profile. See
 [`operations/config-files.md`](../documentation/cli/operations/config-files.md).
+They also stop and remove the old user's in-process chasers; late chase results
+are discarded before they can appear in the next user's listings or command result.
+Exchange output listeners retain their starting login, so old-login disposal notices
+and delayed output are discarded. Same-login account disposal still reports interrupted chases.
 An explicitly selected config symlink migrates only from a consistently owned
 target inside the source directory. Unsafe targets or an earlier skipped config
 require re-entry instead of silently completing migration.
@@ -258,7 +262,8 @@ print(chalk.green('✓ Operation complete'));
 **Pinned surfaces** (one shared ANSI scroll region, `src/scroll-region.ts`):
 the transient **top alert bar** (`status-line.ts`, warn/error/critical, dims)
 and the always-on **bottom footer** (`footer.ts` + `footer-segments.ts`,
-user-customizable segments). Both no-op on non-TTY.
+user-customizable segments). Both no-op on non-TTY. The PnL segment preserves
+known currency PnL and shows `—` for its percentage when valuation is unknown.
 
 **Command tracing**: write-ops can be recorded to a durable append-only
 `~/.tealstreet/audit.log` with per-invocation `runId` + fill attribution

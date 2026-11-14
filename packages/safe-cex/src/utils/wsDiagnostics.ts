@@ -1,4 +1,5 @@
 let wsDiagnosticsEnabled = false;
+let wsDiagnosticsGeneration = 0;
 
 const REDACTED = '[redacted]';
 const HEX_SECRET_RE = /\b[0-9a-f]{40,}\b/gi;
@@ -48,26 +49,37 @@ const SECRET_KEY_PARTS = [
   'listenkey',
   'authkey',
   'authorization',
+  'credential',
+  'cookie',
+  'challenge',
+  'bearer',
 ];
 
 const isSecretKey = (key: string): boolean => {
   const normalized = key.replace(/[^a-z0-9_]/gi, '').toLowerCase();
-  if (SECRET_KEYS.has(normalized) || normalized === 'auth') return true;
+  if (SECRET_KEYS.has(normalized) || normalized.startsWith('auth')) return true;
   const compact = normalized.replace(/_/g, '');
-  return SECRET_KEY_PARTS.some((part) => compact.includes(part));
+  return (
+    compact.endsWith('sign') || compact.endsWith('auth') || SECRET_KEY_PARTS.some((part) => compact.includes(part))
+  );
 };
 
 const JSON_KEY_VALUE_RE = /("((?:\\.|[^"\\])*)"\s*:\s*)("(?:\\.|[^"])*"|[^,}\]\s]+)/g;
 const QUERY_KEY_VALUE_RE = /((?:^|[?&\s])([A-Za-z0-9_.-]+)=)([^&\s]+)/g;
 /** A JWT, whatever key or position carries it. */
 const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
-const AUTH_OPERATION_RE = /auth|login|signature|jwt/i;
+const AUTH_OPERATION_RE = /auth|login|logon|signature|jwt|challenge/i;
 
 export const setWsDiagnosticsEnabled = (enabled: boolean): void => {
-  wsDiagnosticsEnabled = enabled === true;
+  const next = enabled === true;
+  if (wsDiagnosticsEnabled && !next) wsDiagnosticsGeneration += 1;
+  wsDiagnosticsEnabled = next;
 };
 
 export const isWsDiagnosticsEnabled = (): boolean => wsDiagnosticsEnabled;
+
+/** Internal cancellation generation; re-enabling cannot revive queued diagnostics. */
+export const getWsDiagnosticsGeneration = (): number => wsDiagnosticsGeneration;
 
 /** Literal or JSON ping/pong frames, which the Requests Log leaves out. */
 export function isHeartbeatFrame(message: string): boolean {
@@ -137,25 +149,80 @@ export const stringifyWsDiagnosticPayload = (data: unknown): string => {
 
 const normalizeSecretKey = (key: string): string => key.replace(/[^a-z0-9_]/gi, '').toLowerCase();
 
-const isAuthOperationObject = (value: Record<string, unknown>): boolean =>
-  ['op', 'method', 'type', 'event'].some((key) => {
-    const field = value[key];
-    return typeof field === 'string' && AUTH_OPERATION_RE.test(field);
-  });
+const isAuthOperationObject = (value: object): boolean =>
+  Object.keys(value).some((key) => normalizeSecretKey(key).includes('challenge')) ||
+  Object.entries(value).some(([key, field]) =>
+    ['op', 'method', 'type', 'event', 'action'].includes(key)
+      && typeof field === 'string' && AUTH_OPERATION_RE.test(field));
+
+// Field names and values are independently allowlisted. Even an id or topic
+// can contain a venue's authentication echo; no free-form string is safe.
+const DIAGNOSTIC_OPERATIONS = new Set([
+  'auth', 'login', 'challenge', 'error', 'echo', 'subscribe', 'subscribed', 'unsubscribe', 'unsubscribed',
+  'SUBSCRIBE', 'UNSUBSCRIBE', 'snapshot', 'delta', 'update',
+]);
+const DIAGNOSTIC_ENUMS: Readonly<Record<string, ReadonlySet<string> | undefined>> = {
+  op: DIAGNOSTIC_OPERATIONS, method: DIAGNOSTIC_OPERATIONS, type: DIAGNOSTIC_OPERATIONS,
+  event: DIAGNOSTIC_OPERATIONS, action: DIAGNOSTIC_OPERATIONS,
+  e: new Set(['ORDER_TRADE_UPDATE', 'ACCOUNT_UPDATE', 'executionReport', 'outboundAccountPosition']),
+  channel: new Set(['public', 'private', 'business']),
+  code: new Set(['AUTH_FAILED', 'INVALID_SIGNATURE', 'INVALID_API_KEY', 'RATE_LIMITED', 'UNAUTHORIZED',
+    'FORBIDDEN', 'INVALID_REQUEST', 'INTERNAL_ERROR']),
+  side: new Set(['Buy', 'Sell', 'buy', 'sell', 'BUY', 'SELL']),
+  orderType: new Set(['Market', 'Limit', 'market', 'limit', 'MARKET', 'LIMIT']),
+  orderStatus: new Set(['New', 'Filled', 'Canceled', 'Cancelled', 'PartiallyFilled', 'Rejected', 'Untriggered', 'Triggered']),
+};
+const DIAGNOSTIC_NUMBERS = new Set([
+  'code', 'count', 'length', 'i', 'id', 'price', 'qty', 'size', 'amount', 'lastPrice', 'bidPrice', 'askPrice',
+  'timestamp', 'ts',
+]);
+const DIAGNOSTIC_FIELDS = new Set([
+  'op', 'method', 'type', 'event', 'action', 'e', 'topic', 'channel', 'feed',
+  'args', 'params', 'data', 'result', 'o', 'i', 'id', 'code', 'success', 'count', 'length',
+  'symbol', 'orderId', 'orderLinkId', 'clientOrderId', 'orderStatus', 'side', 'orderType',
+  'price', 'qty', 'size', 'amount', 'lastPrice', 'bidPrice', 'askPrice', 'timestamp', 'ts',
+]);
+
+const diagnosticJsonValue = (value: unknown, depth = 0, field = ''): unknown => {
+  if (depth > MAX_JSON_REDACTION_DEPTH) return REDACTED;
+  if (typeof value === 'string') return DIAGNOSTIC_ENUMS[field]?.has(value) ? value : REDACTED;
+  if (typeof value === 'number') return DIAGNOSTIC_NUMBERS.has(field)
+    && Number.isSafeInteger(value) && Math.abs(value) <= 2_147_483_647
+    && (!(field === 'count' || field === 'length') || value >= 0) ? value : REDACTED;
+  if (typeof value === 'boolean') return field === 'success' ? value : REDACTED;
+  if (Array.isArray(value)) {
+    const entries = value.slice(0, 32).map((child) => diagnosticJsonValue(child, depth + 1));
+    if (value.length > 32) entries.push(REDACTED);
+    return entries;
+  }
+  if (!value || typeof value !== 'object') return REDACTED;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (DIAGNOSTIC_FIELDS.has(key)) result[key] = diagnosticJsonValue(child, depth + 1, key);
+    else result.redacted = REDACTED;
+  }
+  return result;
+};
 
 const redactJsonValue = (value: unknown, depth = 0, redactStrings = false): unknown => {
-  if (depth > MAX_JSON_REDACTION_DEPTH) return value;
-  if (typeof value === 'string') return redactStrings ? REDACTED : value;
+  if (depth > MAX_JSON_REDACTION_DEPTH) return REDACTED;
+  if (typeof value === 'string') {
+    return redactStrings ? REDACTED : value;
+  }
   if (Array.isArray(value)) return value.map((item) => redactJsonValue(item, depth + 1, redactStrings));
   if (!value || typeof value !== 'object') return value;
 
   const result: Record<string, unknown> = {};
-  const authScope = redactStrings || isAuthOperationObject(value as Record<string, unknown>);
+  const authScope = redactStrings || isAuthOperationObject(value);
   for (const [key, child] of Object.entries(value)) {
     const normalizedKey = normalizeSecretKey(key);
     result[key] = isSecretKey(key)
       ? REDACTED
-      : redactJsonValue(child, depth + 1, authScope && (normalizedKey === 'args' || normalizedKey === 'params'));
+      : redactJsonValue(
+          child,
+          depth + 1,
+          authScope && (normalizedKey === 'args' || normalizedKey === 'params'),
+        );
   }
   return result;
 };
@@ -171,8 +238,6 @@ const redactStructuredJson = (message: string): string | undefined => {
   }
 };
 
-const shortenHexSecret = (value: string): string => `${value.slice(0, 4)}...${value.slice(-4)}`;
-
 export const redactWsDiagnosticPayload = (message: string): string => {
   const structured = redactStructuredJson(message);
   const source = structured ?? message;
@@ -181,5 +246,17 @@ export const redactWsDiagnosticPayload = (message: string): string => {
     .replace(JSON_KEY_VALUE_RE, (match, prefix, key) => (isSecretKey(key) ? `${prefix}"${REDACTED}"` : match))
     .replace(QUERY_KEY_VALUE_RE, (match, prefix, key) => (isSecretKey(key) ? `${prefix}${REDACTED}` : match))
     .replace(JWT_RE, REDACTED)
-    .replace(HEX_SECRET_RE, shortenHexSecret);
+    .replace(HEX_SECRET_RE, REDACTED);
+};
+
+/** Opaque or incomplete frames cannot be safely redacted; never fall back to their wire text. */
+export const sanitizeWsDiagnosticFrame = (message: string): string => {
+  if (message.length > WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS * 4) return '[redacted oversized frame]';
+  try {
+    const parsed: unknown = JSON.parse(message);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '[redacted opaque frame]';
+    return redactWsDiagnosticPayload(JSON.stringify(diagnosticJsonValue(parsed)));
+  } catch {
+    return '[redacted malformed frame]';
+  }
 };

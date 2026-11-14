@@ -37,8 +37,6 @@
   },
   "venues/coinbase/src/rest.rs": {
     "388c9f66c40d488788f2f4a9808088e22a0425615dfd2818c9d63d58675392d1": 1,
-    "3fa81ac71523a7b891447ad724997c5c20f6a631052c8a00f4d91013552d35dd": 1,
-    "a77bee10a9c0761ddbd5fe3a58636cabc28caded9abae529ea4861b8b8634cd8": 1,
     "dcf83acae473b7e34bc8c4f078d94f2ca5fbf999114c7f8e5af43f956237699b": 1
   },
   "venues/coinbase/src/trading.rs": {

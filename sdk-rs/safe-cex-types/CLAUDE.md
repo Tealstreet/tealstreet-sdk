@@ -88,6 +88,15 @@ and excludes the retired SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Rost
 changes must update this independent fixture and the strict native enum, not
 replace equality checks with floors.
 
+`get_exchange_metadata_with_options` mirrors the live Bitget account-mode and
+TP/SL-path resolution through `ExchangeMetadataOptions`; the existing boolean
+`get_exchange_metadata` entrypoint keeps its Bybit unified-account behavior and
+conservative Bitget entry defaults. Static Bitget metadata offers no trigger
+selector. Supported UTA entries and position protection offer Last/Mark with
+explicit Mark defaults, while inverse UTA remains unavailable. The native
+metadata target compares all fields against 96 live TypeScript context cases;
+regenerate the static snapshot with `corepack yarn rust:metadata`, never by hand.
+
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the
 source's numeric count, not an integer restriction. Optional numbers/venue ID/
@@ -205,6 +214,15 @@ JSON syntax and surviving-value refusals remain separate negative cases.
 
 ExchangeOptions.polymarket carries the five runtime account fields consumed by the Polymarket constructor. Its typed ExchangeOptionsPolymarket record uses existing UTF-8 credential strings and native f64 signerType; do not coerce numeric signature modes or replace the venue retained UTF-16 Text record with it. The source root declaration lacks this opts-as-any extension, so the field is skipped only in generated static TS, never in native serialization or source projection.
 
+ExchangeOptions and ExchangeAccountConfig declare coinbaseJwtAlgorithm here for
+hosted CDP signing. Regenerate their public TypeScript declarations from options.rs;
+the optional algorithm is the closed union es256 | edDsa and rejects explicit null.
+
+Both canonical account models also declare optional signingMode with the existing
+account-worker literals local | cosigned | delegated. Absence preserves legacy
+selection; explicit null and unknown literals refuse decoding. Regenerate the
+public declarations from options.rs; signingMode is metadata, not new authority.
+
 Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
 
 DisplayedPosition decodes its flattened Position through the original MapAccess.
@@ -312,9 +330,11 @@ private codecs and the Position serializer; `lib.rs` only re-exports the contrac
 Keep Position edits in that module so later type slices do not touch shared codecs.
 Position now owns the SDK declaration (and PositionSide/PositionMode/MarginType/
 OptionGreeks dependencies), published by `generate.cjs` into
-`packages/safe-cex/src/generated`. `liquidation_price` is `Option<f64>` but the
-wire property is required and nullable, not optional. The private decoder uses
-an explicit required nullable field reader. Run the scoped compiler/freshness
+`packages/safe-cex/src/generated`. `notional` and `liquidation_price` are
+`Option<f64>` with required nullable wire properties. Native engine valuation
+uses NaN for unknown; its JSON null must survive typed Position/Store decoding
+and raw, owned and borrowed numeric ingress without becoming zero. The private
+decoder uses an explicit required nullable field reader. Run the scoped compiler/freshness
 gate `node --test sdk-rs/safe-cex-types/tests/position-contract.cjs` after generation.
 The legacy broad parity script still has unrelated missing capability-declaration
 coverage on this baseline; do not mistake it for the Position cutover gate.
@@ -327,3 +347,25 @@ strict codecs. `initial_store_data` owns unloaded Store defaults. The scoped
 publishes six modules and the initial value without overwriting other slices.
 Composed model imports use their owning public generated identities. Opaque
 config/user data projects to unknown; its native retained/JSON policy is unchanged.
+
+DisplayedMargin sides and total are required nullable numbers: unknown exposure
+remains null through Store serialization, while known zero stays zero. The
+postprocessor poisons only incomplete scopes; native codecs reject missing fields.
+
+`PositionSettings` is the Store slice's separate last-reported settings record.
+`StoreData.positionSettings` is generated as a map keyed by exact position ID;
+its default is empty and old snapshots decode without it. The private record
+codec preserves required identity/leverage and optional margin/mode without
+adding exposure fields. Regenerate with the scoped `store` example and
+`store-generate.cjs`; PositionSettings does not replace Position or its display
+contract.
+
+## Closed-PnL unknown values
+
+`history.rs` owns generated `ClosedPnlEntry`. Its seven financial fields and
+`time`/`closedTime` are required nullable values; zero is a measurement, null is
+unknown. Existing string/number variants remain accepted. The strict private
+reader rejects absent keys while allowing explicit null. Regenerate with the
+scoped `history` Cargo example and `history-generate.cjs`; run `history_fixtures`
+and `tests/history-contract.cjs`. Native projection has its own missing-value
+matrix and actual JSON fixture consumed through the SDK host and worker paths.

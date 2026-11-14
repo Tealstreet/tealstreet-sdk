@@ -20,6 +20,8 @@ pub(super) struct State {
 
 struct Body {
     handle: Plan,
+    #[cfg(feature = "plan-element-reports")]
+    idle_elements: Option<Box<crate::write_plan::ElementOutcomes>>,
     receipt_cap: Option<(u64, f64)>,
     policy: PlanPolicy,
     timer: TimerId,
@@ -212,6 +214,15 @@ impl ContextRegistry {
         let mut reports = Vec::new();
         let (journal, legacy) = if let Some(writes) = owner.writes.as_ref() {
             let prepared = writes.prepare_seal(error, note)?;
+            #[cfg(feature = "plan-element-reports")]
+            let prepared = {
+                let mut prepared = prepared;
+                let body = self.plan_body(plan)?;
+                if body.entries.iter().all(|entry| entry.call.is_none()) {
+                    prepared.retain_missing_elements(body.idle_elements.as_deref());
+                }
+                prepared
+            };
             if prepared.is_failure() {
                 for message in writes.reports() {
                     reports.try_reserve(1).map_err(|_| Error::Capacity)?;
@@ -803,6 +814,8 @@ impl crate::engine::CoreCx<'_> {
         });
         body.push(Body {
             handle: handle.clone(),
+            #[cfg(feature = "plan-element-reports")]
+            idle_elements: None,
             receipt_cap,
             policy,
             timer,
@@ -1607,6 +1620,8 @@ impl<P> Cx<'_, P> {
     }
 
     /// Failure-only retirement; expired authority never creates fresh sends.
+    /// Expiry cleanup retains passive element reports for the eventual seal;
+    /// its error kind, outcome and completion timing remain engine-owned.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
         self.fail_plan_checked(plan, error.into(), None)
     }
@@ -1713,6 +1728,25 @@ impl crate::engine::CoreCx<'_> {
                 self.now,
                 self.io.core.http_delivery.as_ref(),
             )?;
+            // Cleanup cannot seal early, but its passive report must survive the final seal.
+            #[cfg(feature = "plan-element-reports")]
+            if let Some(elements) = error.elements {
+                let request = self
+                    .io
+                    .core
+                    .http_delivery
+                    .as_ref()
+                    .ok_or(Error::Revoked)?
+                    .attempt
+                    .request;
+                self.io
+                    .core
+                    .request_contexts
+                    .owner_entry_mut(plan.owner())
+                    .and_then(|owner| owner.writes.as_mut())
+                    .ok_or(Error::State)?
+                    .retain_failed_attempt_elements(request, elements)?;
+            }
             return Ok(());
         }
         self.seal_plan(plan, None, Some(error), note)
@@ -1979,6 +2013,35 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    /// Retain passive outcomes for failures between calls under this exact live Plan.
+    /// Active calls and existing terminal reports win; no execution authority changes.
+    #[cfg(feature = "plan-element-reports")]
+    pub fn retain_idle_plan_elements(
+        &mut self,
+        plan: &Plan,
+        report: &crate::write_plan::WritePlan,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        if body.entries.iter().any(|entry| entry.call.is_some()) {
+            return Err(Error::State);
+        }
+        self.io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)?
+            .idle_elements = Some(Box::new(crate::write_plan::ElementOutcomes(
+            report.outcomes(),
+        )));
+        Ok(())
+    }
+
     pub(in super::super) fn finish_failed_plan_call(
         &mut self,
         delivery: &Delivery,
@@ -2324,6 +2387,37 @@ impl<P> Cx<'_, P> {
             .as_mut()
             .ok_or(Error::State)?
             .present_failure(message.into())
+    }
+
+    /// Replace the projected venue text for a live Mutation Plan's failure
+    /// on any outcome, including definite `Rejected`/`NotSent`. Use this where
+    /// the venue path has already composed the correct user-facing message
+    /// (protective put-back after a cancel, batch-unknown summary, locally
+    /// re-presented reason) and the venue's raw text would be strictly less
+    /// informative. Only the message: outcome and protection stay projected.
+    /// The latest call replaces any earlier words.
+    pub fn override_plan_failure_message(
+        &mut self,
+        plan: &Plan,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .force_present_failure(message.into())
     }
 
     /// Retire the current unissued call of an independent complete Plan that

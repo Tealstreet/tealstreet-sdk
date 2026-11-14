@@ -707,6 +707,24 @@ impl BingxSpot {
 }
 impl Venue for BingxSpot {
     type Pending = Pending;
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(|facts| {
+            let mut fields = vec![
+                ("command", facts.command.into()),
+                ("outcome", "unknown".into()),
+                ("request", facts.request.0.to_string().into()),
+            ];
+            if let Some(status) = facts.status {
+                fields.push(("status", u32::from(status).into()));
+            }
+            safe_cex_engine::LogEvent {
+                level: Level::Error,
+                code: "order.outcome_unknown",
+                message: safe_cex_engine::UNKNOWN_OUTCOME_TEXT.into(),
+                fields,
+            }
+        })
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -978,7 +996,7 @@ impl Venue for BingxSpot {
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: VenueError) {
         match p {
-            Pending::Write(r) => self.write_failed(cx, *r, error),
+            Pending::Write(r) => self.write_failed(cx, *r, error, true),
             Pending::Read { context, .. } => Self::fail_read(cx, &context, error),
             Pending::History { rows, .. } => {
                 let _ = rows.finish(cx, Err(error));
@@ -996,10 +1014,14 @@ impl Venue for BingxSpot {
         }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: VenueError) {
-        self.on_sign_error(cx, p, error);
+        match p {
+            // Managed HTTP failures report once through the engine's telemetry hook.
+            Pending::Write(r) => self.write_failed(cx, *r, error, false),
+            pending => self.on_sign_error(cx, pending, error),
+        }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
-        self.on_sign_error(cx, p, invalid(error).kind(ErrorKind::Network));
+        self.on_http_failed(cx, p, invalid(error).kind(ErrorKind::Network));
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if self.poll == Some(timer) {

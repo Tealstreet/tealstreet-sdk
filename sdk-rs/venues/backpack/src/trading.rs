@@ -23,6 +23,13 @@ use std::collections::{HashMap, HashSet};
 
 pub(crate) const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
+fn with_unknown_guidance(mut error: VenueError) -> VenueError {
+    if error.outcome == Some(Outcome::Unknown) {
+        error.message = UNKNOWN_TEXT.into();
+    }
+    error
+}
+
 const BACKPACK: CodeTable = CodeTable {
     rows: &[],
     success: &[],
@@ -1504,8 +1511,10 @@ impl Backpack {
                             .get(&request.command)
                             .is_some_and(|job| job.protect.is_some() && job.ids.is_empty());
                     let fact = if unproven {
-                        cx.http_write_unproven(&managed.context, &e)
-                            .map(|()| VenueError::new(e.clone()).outcome(Outcome::Unknown))
+                        let error =
+                            with_unknown_guidance(VenueError::new(e).outcome(Outcome::Unknown));
+                        cx.http_write_unproven(&managed.context, &error.message)
+                            .map(|()| error)
                     } else {
                         native_failure(
                             cx,
@@ -1559,6 +1568,7 @@ impl Backpack {
             self.managed_trade_failed(cx, request, error, false);
             return;
         }
+        let error = with_unknown_guidance(error);
         if let Step::Cancel { id, .. } = &request.step
             && self.finish_trade_cancel(request.command, id)
             && let Some(previous) = request.previous
@@ -1800,9 +1810,7 @@ impl Backpack {
         mut error: VenueError,
         pending: bool,
     ) -> VenueError {
-        if error.outcome == Some(Outcome::Unknown) {
-            error.message = UNKNOWN_TEXT.into();
-        }
+        error = with_unknown_guidance(error);
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
             if pending {
                 record_failure(&mut job.write_plan, &job.elements[request.write], &error);
@@ -1811,7 +1819,10 @@ impl Backpack {
         }
         if error.outcome == Some(Outcome::Unknown) {
             if let Some(managed) = &request.managed {
-                let _ = cx.present_plan_failure(&managed.plan, &error.message);
+                // The venue path has already composed its own user-facing
+                // message for an unknown write; keep it verbatim. The local
+                // outcome gate here is intentional and must not be dropped.
+                let _ = cx.override_plan_failure_message(&managed.plan, &error.message);
             }
             cx.notice(Level::Warn, "backpack.write.unknown", &error.message);
         }
@@ -1846,9 +1857,7 @@ impl Backpack {
         if !data && error.outcome.is_none() {
             error.outcome = Some(Outcome::Unknown);
         }
-        if error.outcome == Some(Outcome::Unknown) {
-            error.message = UNKNOWN_TEXT.into();
-        }
+        error = with_unknown_guidance(error);
         let managed = request.managed.as_ref().expect("foreground delivery");
         let optional = matches!(
             request.step,
@@ -2078,7 +2087,7 @@ fn refused_in_body(body: &str) -> bool {
 /// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
 pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
-    match status {
+    with_unknown_guidance(match status {
         408 | 500.. => error.outcome(Outcome::Unknown),
         401 => error
             .kind(ErrorKind::AuthInvalid)
@@ -2090,7 +2099,7 @@ pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
             .kind(ErrorKind::RateLimited)
             .outcome(Outcome::Rejected),
         _ => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
-    }
+    })
 }
 
 /// Refused before any request was sent.
@@ -2136,10 +2145,16 @@ fn native_failure(
         code: Option<&'a serde_json::value::RawValue>,
         #[serde(borrow)]
         message: Option<&'a str>,
+        #[serde(borrow)]
+        error: Option<&'a serde_json::value::RawValue>,
     }
     let failure = serde_json::from_str::<Failure<'_>>(body).ok();
     let raw = failure.as_ref().and_then(|failure| failure.code);
     let text = raw.and_then(|raw| serde_json::from_str::<String>(raw.get()).ok());
+    let error_text = failure
+        .as_ref()
+        .and_then(|failure| failure.error)
+        .and_then(|raw| serde_json::from_str::<String>(raw.get()).ok());
     let code = raw
         .and_then(|raw| safe_cex_engine::classify::decode_int(raw.get()))
         .map(NativeCode::Int)
@@ -2150,10 +2165,11 @@ fn native_failure(
         message: failure
             .as_ref()
             .and_then(|failure| failure.message)
+            .or(error_text.as_deref())
             .unwrap_or(""),
     };
     let fact = cx.classify_write(context, table, Some(&native), message)?;
-    let error = fact.error().clone();
+    let error = with_unknown_guidance(fact.error().clone());
     cx.http_write_fact(
         context,
         WriteFact::Failed {
@@ -2252,6 +2268,20 @@ fn pair_fact(
         "Backpack invalid batch response identity",
         None,
     )?;
+    match &result {
+        WriteResult::Accepted { .. } => {}
+        WriteResult::Rejected(error)
+        | WriteResult::KnownPartial(error)
+        | WriteResult::PartialUnknown(error)
+        | WriteResult::Failed(error) => {
+            if error.outcome == Some(Outcome::Unknown) {
+                let _ = cx.present_plan_failure(
+                    &managed.plan,
+                    with_unknown_guidance(error.clone()).message,
+                );
+            }
+        }
+    }
     Ok((result, results))
 }
 

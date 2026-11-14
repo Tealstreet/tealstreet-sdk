@@ -13,6 +13,27 @@ pub enum LocalSignerMetadataCapability {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RustPublicFeedCapability {}
 
+/// Account-worker signing modes. Absence preserves legacy caller selection.
+/// @ts-union
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub enum SigningMode {
+    #[serde(rename = "local")]
+    Local,
+    #[serde(rename = "cosigned")]
+    Cosigned,
+    #[serde(rename = "delegated")]
+    Delegated,
+}
+
+/// @ts-union
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub enum CoinbaseJwtAlgorithm {
+    #[serde(rename = "es256")]
+    Es256,
+    #[serde(rename = "edDsa")]
+    EdDsa,
+}
+
 /// @ts-union
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 pub enum ExchangeAccountConfigBybitSiteId {
@@ -58,6 +79,16 @@ pub struct ExchangeAccountConfig {
     /// @ts-mutable
     #[serde(rename = "apiSecret")]
     pub api_secret: String,
+    /// @ts-mutable
+    /// Account-worker mode; absent keeps existing signing selection.
+    #[serde(rename = "signingMode")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub signing_mode: Option<SigningMode>,
     /// @ts-mutable
     #[serde(rename = "passphrase")]
     #[serde(
@@ -203,6 +234,16 @@ pub struct ExchangeAccountConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub grvt_trading_account_id: Option<String>,
+    /// Hosted CDP key algorithm; local custody infers it from key material.
+    /// @ts-mutable
+    #[serde(rename = "coinbaseJwtAlgorithm")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
     /// @ts-mutable
     #[serde(rename = "tealstreetProxy")]
     #[serde(
@@ -634,6 +675,15 @@ pub struct ExchangeOptions {
     pub key: String,
     #[serde(rename = "secret")]
     pub secret: String,
+    /// Account-worker mode; absent keeps existing signing selection.
+    #[serde(rename = "signingMode")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub signing_mode: Option<SigningMode>,
     #[serde(rename = "passphrase")]
     #[serde(
         default,
@@ -705,6 +755,15 @@ pub struct ExchangeOptions {
         skip_serializing_if = "Option::is_none"
     )]
     pub grvt_trading_account_id: Option<String>,
+    /// Hosted CDP key algorithm; local custody infers it from key material.
+    #[serde(rename = "coinbaseJwtAlgorithm")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
     #[serde(rename = "starkPrivateKey")]
     #[serde(
         default,
@@ -1036,6 +1095,40 @@ pub struct ExchangeOptionsPolymarket {
 mod strict_codecs {
     use super::*;
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::SigningMode")]
+    enum WireSigningMode {
+        #[serde(rename = "local")]
+        Local,
+        #[serde(rename = "cosigned")]
+        Cosigned,
+        #[serde(rename = "delegated")]
+        Delegated,
+    }
+    impl<'de> Deserialize<'de> for SigningMode {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireSigningMode::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+                String::deserialize(deserializer)?,
+            ))
+        }
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::CoinbaseJwtAlgorithm")]
+    enum WireCoinbaseJwtAlgorithm {
+        #[serde(rename = "es256")]
+        Es256,
+        #[serde(rename = "edDsa")]
+        EdDsa,
+    }
+    impl<'de> Deserialize<'de> for CoinbaseJwtAlgorithm {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireCoinbaseJwtAlgorithm::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(String::deserialize(
+                    deserializer,
+                )?),
+            )
+        }
+    }
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::ExchangeOptionsEngine")]
     enum WireExchangeOptionsEngine {
         #[serde(rename = "rust")]
@@ -1108,6 +1201,13 @@ mod strict_codecs {
         api_key: String,
         #[serde(rename = "apiSecret")]
         api_secret: String,
+        #[serde(rename = "signingMode")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        signing_mode: Option<SigningMode>,
         #[serde(rename = "passphrase")]
         #[serde(
             default,
@@ -1234,6 +1334,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         grvt_trading_account_id: Option<String>,
+        #[serde(rename = "coinbaseJwtAlgorithm")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
         #[serde(rename = "tealstreetProxy")]
         #[serde(
             default,
@@ -1721,6 +1828,13 @@ mod strict_codecs {
         key: String,
         #[serde(rename = "secret")]
         secret: String,
+        #[serde(rename = "signingMode")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        signing_mode: Option<SigningMode>,
         #[serde(rename = "passphrase")]
         #[serde(
             default,
@@ -1791,6 +1905,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         grvt_trading_account_id: Option<String>,
+        #[serde(rename = "coinbaseJwtAlgorithm")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        coinbase_jwt_algorithm: Option<CoinbaseJwtAlgorithm>,
         #[serde(rename = "starkPrivateKey")]
         #[serde(
             default,

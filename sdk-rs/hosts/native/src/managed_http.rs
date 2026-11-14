@@ -58,6 +58,63 @@ impl Requests {
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
+    pub(super) fn execute_websocket_write(
+        &mut self,
+        binding: safe_cex_engine::WebSocketWriteBinding,
+    ) {
+        let Some(socket) = self.engine.websocket_write_socket(&binding) else {
+            return;
+        };
+        let preparation = binding.preparation();
+        let request = preparation.attempt().request;
+        let writer = self
+            .sockets
+            .get(&socket)
+            .and_then(|_| self.socket_writers.get(&socket).cloned());
+        let Some(writer) = writer else {
+            self.engine.http_preparation_failed(
+                (self.clock)(),
+                preparation,
+                safe_cex_engine::request_context::Error::Revoked,
+                VenueError::new("WebSocket write transport is unavailable"),
+            );
+            return;
+        };
+        let mut binding = Some(binding);
+        let mut released = false;
+        let result = writer.try_write(request, &mut |handoff| {
+            let Some(binding) = binding.take() else {
+                return;
+            };
+            released = self
+                .engine
+                .claim_websocket_write((self.clock)(), binding, handoff)
+                .is_ok();
+        });
+        if binding.is_some() {
+            self.engine.http_preparation_failed(
+                (self.clock)(),
+                preparation,
+                Error::Revoked,
+                VenueError::new("WebSocket writer is not ready; no frame sent"),
+            );
+        } else if released && let Err(error) = result {
+            let message = match error {
+                WebSocketWriteError::NotReady => {
+                    "WebSocket writer refused the claimed frame".into()
+                }
+                WebSocketWriteError::Send(message) => message,
+            };
+            self.engine.handle(
+                (self.clock)(),
+                Event::HttpFailed {
+                    request,
+                    error: &message,
+                },
+            );
+        }
+    }
+
     pub(super) fn execute_managed_http(&mut self, action: HttpAction) {
         match action {
             HttpAction::Prepare {

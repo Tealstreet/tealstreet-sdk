@@ -3,6 +3,10 @@ import type { LocalSignerMetadata, PayloadSigner, PublicDataSource, RemoteSigner
 export type ExchangeOptions = {
     readonly key: string;
     readonly secret: string;
+    /**
+     * Account-worker mode; absent keeps existing signing selection.
+     */
+    readonly signingMode?: "local" | "cosigned" | "delegated";
     readonly passphrase?: string;
     readonly secondary_key?: string;
     readonly secondary_secret?: string;
@@ -17,6 +21,10 @@ export type ExchangeOptions = {
     readonly subkeyAddress?: string;
     readonly grvtSignerAddress?: string;
     readonly grvtTradingAccountId?: string;
+    /**
+     * Hosted CDP key algorithm; local custody infers it from key material.
+     */
+    readonly coinbaseJwtAlgorithm?: "es256" | "edDsa";
     readonly starkPrivateKey?: string;
     readonly vault?: string;
     readonly applicationId?: string;

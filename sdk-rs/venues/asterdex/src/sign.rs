@@ -8,7 +8,7 @@ use safe_cex_engine::signing::{
 };
 use safe_cex_engine::url;
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -136,6 +136,7 @@ impl Query {
                 preimage: Preimage::Mac(self.as_str()),
                 query: self,
                 encoded: true,
+                statement: None,
             });
         };
         if code_endpoint(method, path) {
@@ -148,6 +149,7 @@ impl Query {
                 preimage: Preimage::Digest(code_digest(&self.as_str(), testnet)),
                 query: self,
                 encoded: false,
+                statement: None,
             });
         }
         self = self.num("recvWindow", 20_000.0).num("timestamp", stamp_ms);
@@ -166,6 +168,7 @@ impl Query {
                 .str("signer", signer)
                 .str("nonce", &nonce.to_string()),
             encoded: true,
+            statement: None,
         })
     }
 }
@@ -192,6 +195,7 @@ struct Prepared {
     query: Query,
     /// Code endpoints keep the signed raw query; others use client encoding.
     encoded: bool,
+    statement: Option<String>,
 }
 impl Prepared {
     fn finish(self, signature: &str) -> String {
@@ -280,6 +284,117 @@ fn join(params: &[(String, String)], encoded: bool) -> String {
         }
     }
     result
+}
+
+/// Closed request statement; the device derives EIP-191/712 digests itself.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Statement {
+    method: String,
+    path: String,
+    query: Vec<(String, String)>,
+    user: String,
+    signer: String,
+    nonce: String,
+    stamp_ms: u64,
+    testnet: bool,
+}
+
+pub fn hosted_digest(
+    text: &str,
+    user: &str,
+    signer: &str,
+    testnet: bool,
+    now: f64,
+) -> Result<[u8; 32], SignError> {
+    let bad = || SignError::InvalidRequest;
+    let input: Statement = serde_json::from_str(text).map_err(|_| bad())?;
+    let method = match input.method.as_str() {
+        "GET" => Method::Get,
+        "POST" => Method::Post,
+        "PUT" => Method::Put,
+        "DELETE" => Method::Delete,
+        _ => return Err(bad()),
+    };
+    let endpoint = input.path.strip_prefix("/fapi/v3/").ok_or_else(bad)?;
+    let allowed = match method {
+        Method::Get => matches!(
+            endpoint,
+            "account"
+                | "positionRisk"
+                | "openOrders"
+                | "order"
+                | "allOrders"
+                | "userTrades"
+                | "income"
+                | "leverageBracket"
+                | "positionSide/dual"
+                | "stpMode"
+                | "builder"
+                | "agent"
+        ),
+        Method::Post => matches!(
+            endpoint,
+            "order" | "leverage" | "marginType" | "positionSide/dual" | "stpMode" | "listenKey"
+        ),
+        Method::Put => endpoint == "listenKey",
+        Method::Delete => matches!(endpoint, "order" | "allOpenOrders" | "listenKey"),
+        _ => false,
+    };
+    let nonce = input.nonce.parse::<u64>().map_err(|_| bad())?;
+    if !allowed
+        || !now.is_finite()
+        || now < 0.
+        || (input.stamp_ms as f64 - now).abs() > 30_000.
+        || nonce.to_string() != input.nonce
+        || nonce == 0
+        || input.testnet != testnet
+        || ethereum::get_address(&input.user).map_err(|_| bad())?
+            != ethereum::get_address(user).map_err(|_| bad())?
+        || ethereum::get_address(&input.signer).map_err(|_| bad())?
+            != ethereum::get_address(signer).map_err(|_| bad())?
+        || input.query.len() > 64
+    {
+        return Err(bad());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for (key, value) in &input.query {
+        if key.is_empty()
+            || key.len() > 64
+            || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            || matches!(
+                key.as_str(),
+                "signature"
+                    | "timestamp"
+                    | "recvWindow"
+                    | "user"
+                    | "signer"
+                    | "nonce"
+                    | "asterChain"
+            )
+            || value.len() > 8192
+            || !seen.insert(key)
+        {
+            return Err(bad());
+        }
+    }
+    let prepared = Query(input.query)
+        .prepared(
+            &Mode::V3 {
+                user: ethereum::get_address(user).map_err(|_| bad())?,
+                signer: ethereum::get_address(signer).map_err(|_| bad())?,
+                nonce,
+            },
+            method,
+            &input.path,
+            input.stamp_ms as f64,
+            testnet,
+        )
+        .map_err(|_| bad())?;
+    match prepared.preimage {
+        Preimage::Digest(digest) => Ok(digest),
+        _ => Err(bad()),
+    }
 }
 
 /// Verification oracle: the signed V3 URL for an explicit nonce, through the
@@ -434,6 +549,59 @@ impl SignStep for Recipe {
             Preimage::Mac(message) => (Algorithm::HmacSha256, message.as_bytes().to_vec()),
             Preimage::Digest(digest) => (Algorithm::Secp256k1Digest, digest.to_vec()),
         };
+        let mut prepared = prepared;
+        if let Mode::V3 {
+            user,
+            signer,
+            nonce,
+        } = &mode
+        {
+            prepared.statement = Some(
+                serde_json::to_string(&Statement {
+                    method: self.method.as_str().into(),
+                    path: self.path.clone(),
+                    query: self
+                        .query
+                        .0
+                        .iter()
+                        .filter(|(key, _)| {
+                            !matches!(
+                                key.as_str(),
+                                "signature"
+                                    | "timestamp"
+                                    | "recvWindow"
+                                    | "user"
+                                    | "signer"
+                                    | "nonce"
+                                    | "asterChain"
+                            )
+                        })
+                        .cloned()
+                        .collect(),
+                    user: user.clone(),
+                    signer: signer.clone(),
+                    nonce: nonce.to_string(),
+                    stamp_ms: stamp as u64,
+                    testnet: self.testnet,
+                })
+                .map_err(|_| SignError::InvalidRequest)?,
+            );
+        }
+        let mut operations = vec![Operation::Present {
+            key: self.identity.credential.clone(),
+        }];
+        if let Some(statement) = &prepared.statement {
+            operations.push(Operation::Sha256 {
+                payload: vec![PayloadPart::Bytes {
+                    bytes: statement.as_bytes().to_vec(),
+                }],
+            });
+        }
+        operations.push(Operation::Sign {
+            algorithm,
+            key: self.identity.signing_ref()?.clone(),
+            payload: vec![PayloadPart::Bytes { bytes: message }],
+        });
         self.prepared = Some(prepared);
         let (host, _) = self
             .origin
@@ -447,16 +615,7 @@ impl SignStep for Recipe {
                 stamp_ms: (!code).then_some(stamp),
                 expiry_ms: None,
             },
-            operations: vec![
-                Operation::Present {
-                    key: self.identity.credential.clone(),
-                },
-                Operation::Sign {
-                    algorithm,
-                    key: self.identity.signing_ref()?.clone(),
-                    payload: vec![PayloadPart::Bytes { bytes: message }],
-                },
-            ],
+            operations,
             context: Context {
                 venue: "asterdex".into(),
                 method: http.method.as_str().into(),
@@ -475,12 +634,31 @@ impl SignStep for Recipe {
             .and_then(|key| std::str::from_utf8(key).ok())
             .filter(|key| !key.is_empty() && !key.contains(['\r', '\n']))
             .ok_or(SignError::InvalidResult)?;
-        let raw = result.values.get(1).ok_or(SignError::InvalidResult)?;
         let prepared = self.prepared.take().ok_or(SignError::InvalidRequest)?;
+        let offset = usize::from(prepared.statement.is_some());
+        if let Some(statement) = &prepared.statement
+            && result.values.get(1).map(Vec::as_slice)
+                != Some(safe_cex_crypto::sha256(statement.as_bytes()).as_slice())
+        {
+            return Err(SignError::InvalidResult);
+        }
+        if result.values.len() != 2 + offset || (offset != 0 && !result.headers.is_empty()) {
+            return Err(SignError::InvalidResult);
+        }
+        let raw = result
+            .values
+            .get(1 + offset)
+            .ok_or(SignError::InvalidResult)?;
         let signature = match prepared.preimage {
             Preimage::Mac(_) if raw.len() == 32 => safe_cex_crypto::hex(raw),
             // Wire form is ethers' 0x r||s||v with v as 27/28.
-            Preimage::Digest(_) if raw.len() == 65 && raw[64] <= 1 => {
+            Preimage::Digest(digest) if raw.len() == 65 && raw[64] <= 1 => {
+                let Resolved::V3 { signer, .. } = &self.auth else {
+                    return Err(SignError::InvalidResult);
+                };
+                if !ethereum::signed_by(&digest, raw, signer) {
+                    return Err(SignError::InvalidResult);
+                }
                 format!("0x{}{:02x}", safe_cex_crypto::hex(&raw[..64]), raw[64] + 27)
             }
             _ => return Err(SignError::InvalidResult),

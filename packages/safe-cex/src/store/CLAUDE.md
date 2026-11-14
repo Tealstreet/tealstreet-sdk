@@ -80,7 +80,8 @@ indexes. Keep those ticker rows without synthesizing markets or filtering them.
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths
 must not depend on postprocessors happening to reconstruct a field after
-serialization.
+serialization. Unknown displayed-margin sides and totals remain explicit `null`
+through serialization; only an absent entire margin record uses unloaded defaults.
 
 **A field added to `store.stub.ts` MUST also be added to `serialize()`.**
 `apps/web`'s IndexedDB warm-boot cache validates snapshots with
@@ -456,11 +457,33 @@ without exposing the internal tags.
 
 ### Full position refreshes retain closed-symbol settings
 
-`addOrUpdatePositionsFull` merges supplied rows into existing objects, retaining
-omitted optional settings. Omitted rows remain with zero exposure and null
-liquidation, preserving leverage/margin/mode metadata for later operations. An
-empty full refresh closes retained rows rather than removing them. Native frame
-application through `update({ positions })` remains a separate replacement path.
+`addOrUpdatePositionsFull` merges matching supplied rows into existing objects,
+then removes every omitted ID, including on an empty full refresh. A zero-size
+row explicitly supplied by a producer is preserved; the store does not infer
+closure from size alone. `createEmptyPositionFrom` now projects only
+`PositionSettings` (id, symbol, side, reported leverage and optional margin/mode),
+never a Position or numeric exposure defaults. The generated
+`StoreData.positionSettings` map retains those values by exact position ID,
+separately for hedge sides and simultaneous margin modes. It is serialized for
+workers/late subscribers and cleared by reset. Reopening an ID retains its
+omitted optional settings without restoring financial fields. Writer context
+prefers live margin settings, then confirmed fetched settings, then this cache.
+Single and batched incremental inserts restore omitted settings by exact ID too;
+incoming fields, including explicit unknown values, take precedence. They do
+not copy settings between hedge legs or restore old exposure values.
+Native frame application through `update({ positions })` retains its existing
+replacement contract and independent SETTINGS/fetchedLeverage rails.
+
+`setAllLeverage` and account-wide writer context include cached symbols even
+when no position remains. Leverage work retains its captured exchange and
+disposal guard across awaits.
+The Rust override preserves a separate write for each live hedge leg and adds
+one symbol-wide write per settings-only symbol, without repeating live symbols.
+Disposal during the native read or any write drops all remaining queued work.
+
+Consumers needing flat-symbol settings must read `positionSettings` (or the
+existing authoritative `fetchedLeverage` rails), not expect a closed row in
+`positions`. Position and DisplayedPosition numeric types are unchanged.
 
 ### Balance frame updates retain omitted fields
 

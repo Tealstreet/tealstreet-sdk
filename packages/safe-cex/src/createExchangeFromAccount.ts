@@ -4,8 +4,10 @@ import { getExchangeMetadata } from './exchangeMetadata';
 import { normalizeBybitSiteId } from './exchanges/bybit/bybit.site';
 import { assertBetaVenue } from './exchanges/rust/betaVenues';
 import { createExchange } from './index';
+import { validateSigningMode } from './signingMode';
 import { getTransport } from './transport/registry';
 import { resolveAccountTransport } from './transport/tealstreet/transportResolution';
+import { diagnosticConsole } from './utils/diagnosticRedaction';
 
 type KucoinBrokerConfig = NonNullable<NonNullable<ExchangeOptions['extra']>['kucoinBroker']>;
 
@@ -80,7 +82,9 @@ export function accountToExchangeOptions(
   account: ExchangeAccountConfig,
   overrides?: Partial<ExchangeOptions>,
 ): ExchangeOptions {
+  const signingMode = validateSigningMode(account.signingMode);
   const { extra: overrideExtra, ...optionOverrides } = overrides ?? {};
+  validateSigningMode(optionOverrides.signingMode);
   const metadata = getExchangeMetadata(account.exchange);
   const shouldForwardApplicationId =
     metadata.requiresApplicationId || isLighterExchange(account.exchange) || account.exchange === 'asterdex';
@@ -104,7 +108,7 @@ export function accountToExchangeOptions(
     throw new Error(`[${account.exchange}] Invalid metadata: requiresCors and forbidCors are both true`);
   }
   if (metadata.enforceWsTunnel && metadata.supportsTunnel === false) {
-    console.warn(
+    diagnosticConsole.warn(
       `[${account.exchange}] Metadata warning: enforceWsTunnel is true but supportsTunnel is false. ` +
         `enforceWsTunnel takes precedence — tunnel will be enabled.`,
     );
@@ -122,6 +126,7 @@ export function accountToExchangeOptions(
   const options: ExchangeOptions = {
     key: account.apiKey,
     secret: account.apiSecret,
+    ...(signingMode !== undefined ? { signingMode } : {}),
 
     // Passphrase (OKX, Bitget, BloFin, KuCoin, etc.)
     ...(metadata.requiresPassphrase && account.passphrase ? { passphrase: account.passphrase } : {}),
@@ -141,6 +146,9 @@ export function accountToExchangeOptions(
     // Testnet
     ...(account.testnet ? { testnet: account.testnet } : {}),
     ...(bybitSiteId ? { bybitSiteId } : {}),
+    ...((account.exchange === 'coinbase' || account.exchange === 'coinbasespot') && account.coinbaseJwtAlgorithm
+      ? { coinbaseJwtAlgorithm: account.coinbaseJwtAlgorithm }
+      : {}),
 
     // Spot opt-in, for venues that serve spot + derivatives from one
     // connection. Only forwarded when the venue actually offers the toggle,

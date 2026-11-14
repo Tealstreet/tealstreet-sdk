@@ -69,12 +69,21 @@ UTA protective replacement still attempts the original stop once; a refused
 restore ends the sequence. Zero-rounded anonymous rows remain omitted before
 dispatch. These rules add no whole-plan sizing gate or tail rebalancing.
 
+Classic entry presets expose no documented trigger selector; their default is
+UNPROVEN without a DEMO capture. Explicit selections refuse before send, and
+preset children retain only their returned `fill_price` / `mark_price` reference.
+UTA entries and Classic/UTA position TP/SL honor Last and Mark; Index refuses.
+See [trigger choices and UI integration](../../../../docs/plans/callers/bitget-tpsl-trigger-types.md).
+
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
 
 Classic TPSL rows explicitly marked `orderType=market` with an absent or blank
 `executePrice` retain market execution in REST, WebSocket and version-2 source
-frames. Native TPSL amendments send `executePrice="0"`, the documented market
+frames. This includes the documented `psl`, `ptp`, `sl` and `tp`
+[WebSocket plan aliases](https://bitgetlimited.github.io/apidoc/en/mix/#websocket-plantype),
+normalized to their position-level or sized TPSL kind. Native TPSL amendments
+send `executePrice="0"`, the documented market
 form, while preserving the order identity, quantity and trigger reference.
 Unknown or malformed execution evidence stays refused; it never borrows a live
 price. Version-1 frames still lack this evidence and require re-placing the stop.

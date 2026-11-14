@@ -906,7 +906,7 @@ OKX in this implementation **only supports cross margin** (`marginTypes: [Margin
 - **Trailing stop price calculation**: For trailing stop loss orders, the displayed price is calculated relative to the position entry price and last price, with special handling when a position exists.
 - **`afterMethodCalledInWorker`**: When `changePositionMode` is called in a WebWorker, the local `_accountPositionMode` cache is updated to match.
 - **WebSocket diagnostics**: Private and business WebSocket diagnostics go through `BaseWebSocket`'s runtime-gated `emitWsDiagnostic*` helpers. They populate the web Requests drawer only when WS diagnostics are enabled through the Requests Log toggle; Grafana upload is a separate opt-in.
-- **Potential follow-up (not confirmed bug)**: Inverse close sizing in the web layer currently prefers `Math.max(extra.contractsNative, notional/contractSize)` in [`getPositionNativeSize.ts`](mdc:apps/web/src/utils/position/getPositionNativeSize.ts) to avoid partial closes. This can theoretically oversize if notional is briefly inflated or stale. Re-evaluate if oversize-close reports appear; consider freshness/tolerance-based bounds instead of raw max/min switching.
+- **Close sizing**: the shared SDK `nativePositionSize` never selects a maximum. Coherent native evidence wins; absent native uses the derived quantity. Disagreement beyond floating-point roundoff has no proven freshness ordering and returns null; close/reduce callers must refuse or request refreshed position data. Host consumers must adopt the same nullable contract.
 
 ## Income History / Account Bills
 

@@ -484,7 +484,8 @@ pub enum Action {
     },
     Http(HttpRequest),
     ManagedHttp(Box<crate::request_context::HttpAction>),
-    /// Internal outbound queue wrapper; always unwrapped/validated by drain.
+    /// Shared outbound envelope. Drain unwraps nonzero signing attempts;
+    /// zero carries a `WebSocketWriteBinding` for the host's final write claim.
     SignedOutbound {
         attempt: RequestId,
         outbound: Box<Action>,
@@ -1118,6 +1119,9 @@ mod execution_cx;
 mod execution_cx_tests;
 pub use command_entry::{CommandWait, DEFAULT_COMMAND_WAIT_MS, MAX_COMMAND_WAIT_MS};
 pub use execution_cx::{ExecutionHandle, Joined, Window};
+pub use http_lifecycle::{
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
+};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
 /// venue answered, so this is never transport loss.
@@ -1454,7 +1458,7 @@ mod resource_identity_regressions {
     fn unsafe_managed_cancel_signing_id_uses_the_same_terminal_boundary() {
         assert_unsafe_batch_retires(Action::ManagedHttp(Box::new(
             crate::request_context::HttpAction::Cancel {
-                preparation: crate::request_context::Preparation::from_wire("p1:1:1:0").unwrap(),
+                preparation: crate::request_context::Preparation::from_wire("p2:1:1:1:0").unwrap(),
                 signing: Some(RequestId(crate::resource_ids::MAX_RESOURCE_ID + 1)),
             },
         )));
@@ -1913,8 +1917,11 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    websocket_write_host: bool,
+    websocket_write_issuer: u64,
     write_failure_text: Option<fn(&VenueError) -> String>,
     unknown_outcome_telemetry: Option<crate::UnknownOutcomeTelemetry>,
+    command_failure_summary: fn(&VenueError) -> Option<String>,
     startup_causes: crate::startup_causes::Causes,
     startup_delivery: crate::startup_causes::Delivery,
     #[cfg(feature = "address-nonce")]
@@ -2217,8 +2224,11 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            websocket_write_host: false,
+            websocket_write_issuer: 0,
             write_failure_text: None,
             unknown_outcome_telemetry: None,
+            command_failure_summary: |_| None,
             #[cfg(feature = "address-nonce")]
             address_setup: Default::default(),
             nonce_unscheduled: false,
@@ -2799,6 +2809,9 @@ impl<P> Cx<'_, P> {
         self.stage_signed(index, outbound, step);
     }
 
+    /// Control traffic only (subscriptions, authentication and heartbeats).
+    /// Order and setting mutations must use `websocket_write` and
+    /// `send_websocket_write`, including when the wire protocol signs them.
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
         if !self.managed_send_allowed(socket) {
             return;
@@ -2938,6 +2951,7 @@ impl<P> Cx<'_, P> {
     }
 
     /// WS authentication uses the same deadline/freshness/generation service.
+    /// Mutations use `send_websocket_write` with a signing recipe instead.
     pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
         if !self.managed_send_allowed(socket) {
             return;
@@ -3879,7 +3893,8 @@ impl crate::engine::CoreCx<'_> {
         seal: request_context_registry::Seal,
     ) -> Result<(), crate::request_context::Error> {
         let mut write_sealed = false;
-        let result = match seal {
+        let mut reports = Vec::new();
+        let mut result = match seal {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -3900,7 +3915,7 @@ impl crate::engine::CoreCx<'_> {
                         }
                         None => message,
                     };
-                    self.command_error(command, message);
+                    reports.push(message);
                 }
                 let mut error = error;
                 if let Some(present) = self.io.core.write_failure_text {
@@ -3909,6 +3924,27 @@ impl crate::engine::CoreCx<'_> {
                 Err(error)
             }
         };
+        // Presentation sees the final journal outcome, including engine-owned
+        // failures; it cannot change evidence, partial IDs or reconciliation.
+        if let Err(error) = &mut result
+            && let Some(summary) = (self.io.core.command_failure_summary)(error)
+        {
+            error.message = if error.message.is_empty() {
+                summary.clone()
+            } else {
+                format!("{summary}\nContext: {}", error.message)
+            };
+            for report in &mut reports {
+                *report = if report.is_empty() {
+                    summary.clone()
+                } else {
+                    format!("{summary}\nContext: {report}")
+                };
+            }
+        }
+        for message in reports {
+            self.command_error(command, message);
+        }
         // A credential-free route's auth-kind refusal is no credential evidence.
         let engine_unknown = self.io.core.request_contexts.engine_unknown(command);
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
@@ -4121,6 +4157,15 @@ pub use unknown_outcome::{
 };
 
 pub trait Venue {
+    /// Optional summary after outcome projection, preceding the command failure
+    /// and its warnings. Their original detail remains as context; facts are read-only.
+    fn command_failure_summary(_error: &VenueError) -> Option<String>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
     /// Optional static telemetry for an engine-sealed Unknown. Receives no venue,
     /// Cx, Store, Context or journal authority; returns only a bounded log event.
     fn unknown_outcome_telemetry() -> Option<UnknownOutcomeTelemetry>
@@ -4129,6 +4174,7 @@ pub trait Venue {
     {
         None
     }
+
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
@@ -4151,10 +4197,12 @@ pub trait Venue {
     }
 
     /// Rate-limit bookkeeping for a validated delivery, before its Unknown seal.
+    /// Use raw `now` for scheduling, calibrated `protocol_now` for absolute dates.
     /// No Cx: this cannot send, publish financial rows or complete a command.
     fn observe_unproven_http_response(
         &mut self,
         _now: f64,
+        _protocol_now: f64,
         _pending: &Self::Pending,
         _response: Response<'_>,
     ) {
@@ -4163,6 +4211,10 @@ pub trait Venue {
     /// Drop only this generation's native command planning after the engine
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
+
+    /// Finish retained queues outside another command's HTTP delivery.
+    /// Context validation and journal projection still govern every completion.
+    fn finish_deferred_commands(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
 
     /// The engine retired this tracked Read root at its deadline. `pending`
     /// holds the continuations of its outstanding requests, already discarded
@@ -5004,6 +5056,7 @@ impl<V: Venue> Engine<V> {
         )?;
         core.write_failure_text = V::write_failure_text();
         core.unknown_outcome_telemetry = V::unknown_outcome_telemetry();
+        core.command_failure_summary = V::command_failure_summary;
         Ok(Self {
             venue,
             http_release,
@@ -5049,6 +5102,7 @@ impl<V: Venue> Engine<V> {
     }
 
     /// Trusted construction installs the provider handle; no key material enters the engine.
+    /// Replacing it retires queued signing and unclaimed signed packets.
     pub fn set_signer(
         &mut self,
         signer: Option<crate::signing::Provider>,
@@ -5061,6 +5115,14 @@ impl<V: Venue> Engine<V> {
         self.invalidate_address_setup()?;
         #[cfg(feature = "nonce-handoff")]
         self.invalidate_nonce_handoff();
+        let changed = match (&self.io.core.signer, &signer) {
+            (Some(previous), Some(next)) => !std::sync::Arc::ptr_eq(previous, next),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            self.io.core.signing.replace_provider();
+        }
         self.io.core.signer = signer;
         Ok(())
     }
@@ -6222,6 +6284,7 @@ impl<V: Venue> Engine<V> {
                 polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
             Event::WsOpened { socket } => {
+                cx.io.core.sockets.opened(socket);
                 cx.io.core.health.ws_opened = cx.io.core.health.ws_opened.saturating_add(1);
                 self.venue.on_open(&mut cx, socket)
             }
@@ -6710,8 +6773,6 @@ impl<V: Venue> Engine<V> {
 
     #[inline(never)]
     fn finish_deferred_commands(&mut self, now: f64) {
-        #[cfg(not(feature = "order-locks"))]
-        let _ = now;
         // Deferred commands are engine-owned work, not part of the HTTP codec
         // whose callback just released the lock. Do not lend that codec's
         // attempt authority to an unrelated internal finalization.
@@ -6723,6 +6784,11 @@ impl<V: Venue> Engine<V> {
         let entry = self.io.core.command_entry.take();
         #[cfg(feature = "order-locks")]
         let order_response = self.io.core.order_response_token.take();
+        self.venue.finish_deferred_commands(&mut Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        });
         #[cfg(feature = "order-locks")]
         let ready = self.io.core.order_locks.ready();
         #[cfg(feature = "order-locks")]
@@ -7526,6 +7592,15 @@ impl<V: Venue> Engine<V> {
     #[inline(never)]
     fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
+        let revoked = self.io.core.signing.take_revoked();
+        if !revoked.is_empty() {
+            self.io.core.actions.retain(|action| !matches!(action,
+                Action::Sign { attempt, .. } if revoked.binary_search_by_key(&attempt.0, |id| id.0).is_ok()));
+        }
+        for attempt in revoked {
+            self.sign_completed(now, attempt, Err(crate::signing::SignError::Refused));
+            self.assert_live();
+        }
         for (outbound, error) in std::mem::take(&mut self.io.core.signing_admission) {
             self.sign_failed(now, outbound, error);
             self.assert_live();
@@ -7564,7 +7639,20 @@ impl<V: Venue> Engine<V> {
                 if !live {
                     continue;
                 }
+                let Some(action) = self.dispatch_websocket_write_action(now, action) else {
+                    self.queue_dispatch_callback_actions(&mut queued, emitted);
+                    continue;
+                };
+                self.queue_dispatch_callback_actions(&mut queued, emitted);
                 match action {
+                    action @ Action::SignedOutbound {
+                        attempt: RequestId(0),
+                        ..
+                    } => {
+                        // Reserved mutation marker: the host still owes its
+                        // synchronous write claim immediately before sending.
+                        self.io.core.actions.push(action);
+                    }
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.core.signing.release(
                             attempt,
@@ -8269,7 +8357,7 @@ fn orders_held_notice(
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]
 struct SocketRoles {
-    live: Vec<(SocketId, u8)>,
+    live: Vec<(SocketId, u8, bool)>,
     /// Private sockets alone, so the per-frame check scans one or two ids.
     private: Vec<SocketId>,
     /// Closes per role whose replacement connect has not happened yet.
@@ -8288,7 +8376,19 @@ impl SocketRoles {
     fn role_of(&self, socket: SocketId) -> Option<u8> {
         self.live
             .iter()
-            .find_map(|(id, role)| (*id == socket).then_some(*role))
+            .find_map(|(id, role, _)| (*id == socket).then_some(*role))
+    }
+
+    fn opened(&mut self, socket: SocketId) {
+        if let Some((_, _, opened)) = self.live.iter_mut().find(|(id, _, _)| *id == socket) {
+            *opened = true;
+        }
+    }
+
+    fn is_open(&self, socket: SocketId) -> bool {
+        self.live
+            .iter()
+            .any(|(id, _, opened)| *id == socket && *opened)
     }
 
     fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {
@@ -8298,7 +8398,7 @@ impl SocketRoles {
             *awaiting -= 1;
             health.reconnects = health.reconnects.saturating_add(1);
         }
-        self.live.push((socket, role));
+        self.live.push((socket, role, false));
         if role == 1 {
             self.private.push(socket);
         }
@@ -8307,10 +8407,10 @@ impl SocketRoles {
     /// Whether `socket` was a live role socket. Only an unexpected close makes
     /// the role's next connect a reconnect.
     fn closed(&mut self, socket: SocketId, unexpected: bool) -> bool {
-        let Some(index) = self.live.iter().position(|(id, _)| *id == socket) else {
+        let Some(index) = self.live.iter().position(|(id, _, _)| *id == socket) else {
             return false;
         };
-        let (_, role) = self.live.swap_remove(index);
+        let (_, role, _) = self.live.swap_remove(index);
         if unexpected {
             self.awaiting_reconnect[role as usize] =
                 self.awaiting_reconnect[role as usize].saturating_add(1);
@@ -8601,6 +8701,42 @@ mod streaming_tests {
         assert!(matches!(engine.drain_actions().next(), Some(Action::Notice(
             Notice::CommandFailed { command: 8, error }
         )) if error.message == "read response lost" && error.outcome.is_none()));
+    }
+
+    #[test]
+    fn write_failure_text_and_summary_compose_once_without_changing_facts() {
+        let mut engine = frame_engine();
+        engine.io.core.write_failure_text = Some(|error| format!("MASTER: {}", error.message));
+        engine.io.core.command_failure_summary =
+            |error| (error.outcome == Some(crate::Outcome::Unknown)).then(|| "SUMMARY".to_owned());
+        let expected = VenueError::new("journal failure")
+            .kind(ErrorKind::Network)
+            .outcome(crate::Outcome::Unknown)
+            .venue_code("native-code")
+            .venue_message("native diagnostic");
+        Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            7,
+            None,
+            request_context_registry::Seal::Failure(
+                expected.clone(),
+                vec!["journal warning".into()],
+            ),
+        )
+        .unwrap();
+        let mut presented = expected;
+        presented.message = "SUMMARY\nContext: MASTER: journal failure".into();
+        assert!(
+            matches!(engine.drain_actions().collect::<Vec<_>>().as_slice(), [
+            Action::Notice(Notice::CommandError { command: 7, message }),
+            Action::Notice(Notice::CommandFailed { command: 7, error }),
+        ] if message == "SUMMARY\nContext: MASTER: journal warning" && *error == presented)
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use serde_json::json;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::test]
-async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
+async fn unavailable_hosted_accounts_refuse_typed_without_disturbing_live_accounts() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let app = support::app(
@@ -18,6 +18,7 @@ async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
                 account_name: "live-bybit".into(),
                 exchange_name: "bybit".into(),
                 key: "fixture-key".into(),
+                instance_id: Some("live-registration".into()),
                 ..Default::default()
             };
             testing::trading_account(&app.registry, "saved-accounts", &live);
@@ -33,7 +34,15 @@ async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
             page.until("frame", |d| d["accountName"] == live.account_name)
                 .await;
 
-            for venue in ["bitmex", "bitmextestnet"] {
+            for venue in [
+                "bitmex",
+                "bitmextestnet",
+                "bitrue",
+                "orderly",
+                "polymarket",
+                "txflow",
+                "weex",
+            ] {
                 for (public_only, same_name) in
                     [(true, false), (false, false), (true, true), (false, true)]
                 {
@@ -43,6 +52,7 @@ async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
                         } else {
                             format!("saved-{venue}-{public_only}")
                         },
+                        instance_id: Some(format!("refused-{venue}-{public_only}-{same_name}")),
                         exchange_name: venue.into(),
                         key: "fixture-key".into(),
                         public_only: Some(public_only),
@@ -53,6 +63,7 @@ async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
                     let refusal = page
                         .until("error", |d| d["accountName"] == removed.account_name)
                         .await;
+                    assert_eq!(refusal["instanceId"], removed.instance_id.clone().unwrap());
                     assert_eq!(
                         refusal["data"],
                         json!([
@@ -68,6 +79,16 @@ async fn saved_bitmex_accounts_refuse_typed_without_disturbing_live_accounts() {
                     );
                 }
             }
+
+            page.send(json!({"t":"order.submit","d":{
+                "accountName":live.account_name,"instanceId":"live-registration",
+                "intentId":"invalid","params":{},"seq":1,"ageMs":0,"fingerprint":""
+            }}))
+            .await;
+            let receipt = page.until("order.outcome", |_| true).await;
+            assert_eq!(receipt["instanceId"], "live-registration");
+            assert_eq!(receipt["outcomeSeq"], 1);
+            assert_eq!(receipt["outcome"], "refused");
 
             page.send(json!({"t": "ping", "d": {}})).await;
             assert_eq!(
