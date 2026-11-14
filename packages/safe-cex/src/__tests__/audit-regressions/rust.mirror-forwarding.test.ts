@@ -44,12 +44,12 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   nuke: 'writer',
   nukePositions: 'writer',
   nukeOrders: 'writer',
-  setLeverage: 'worker',
-  setAllLeverage: 'worker',
-  changeMarginType: 'worker',
-  changePositionMode: 'worker',
-  changeStpMode: 'worker',
-  scheduleCancel: 'worker',
+  setLeverage: 'writer',
+  setAllLeverage: 'writer',
+  changeMarginType: 'writer',
+  changePositionMode: 'writer',
+  changeStpMode: 'writer',
+  scheduleCancel: 'writer',
   changeAccountTier: 'writer',
   // Engine and account reads.
   refreshMarkets: 'worker',
@@ -144,6 +144,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   stopAccountAlgos: 'mirror',
   // The worker's own handlers call these on the engine they own; a mirror has none.
   startAlgos: 'mirror',
+  setTwapOwnerProvider: 'mirror',
   algoOp: 'mirror',
   routeAlgoOp: 'mirror',
   refreshAccountSettings: 'worker',
@@ -262,24 +263,25 @@ it('keeps unsupported methods working on an exchange that owns its engine', () =
 });
 
 // A never-ready page engine is rebuilt on reload only while none of its writes is unsettled.
-it('counts a forwarded write as unsettled until the worker answers it, success or failure', async () => {
-  mirror = mirrorFor('bybit');
-  const requests: string[] = [];
-  mirror.on('callMethod', (event: { requestId: string; method: string }) => {
-    if (event.method === 'cancelOrders') requests.push(event.requestId);
-    else mirror!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: [] });
-  });
-  expect(mirror.hasUnsettledWrites).toBe(false);
-  const first = mirror.cancelOrders([{ id: 'a', symbol: 'BTCUSDT' } as never]);
-  const second = mirror.cancelOrders([{ id: 'b', symbol: 'BTCUSDT' } as never]).catch(() => 'failed');
-  await vi.waitFor(() => expect(requests).toHaveLength(2));
-  expect(mirror.hasUnsettledWrites).toBe(true);
-  mirror.emitter.emit('callMethod:done', { requestId: requests[0], success: true, result: [] });
-  await first;
-  expect(mirror.hasUnsettledWrites).toBe(true);
-  mirror.emitter.emit('callMethod:done', { requestId: requests[1], success: false, error: 'venue refused' });
-  await second;
-  expect(mirror.hasUnsettledWrites).toBe(false);
+it('counts waiting page writes as unsettled until each local startup deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    setWasmEngineLoader(() => new Promise<never>(() => {}));
+    mirror = new RustEngineExchange('bybit', { key: 'fake-key', secret: 'fake-secret', workerMirror: true }, new DefaultStore());
+    const rpc = vi.fn();
+    mirror.on('callMethod', rpc);
+    const first = mirror.cancelOrders([{ id: 'a', symbol: 'BTCUSDT' } as never]).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const second = mirror.cancelOrders([{ id: 'b', symbol: 'BTCUSDT' } as never]).catch((error: unknown) => error);
+    expect(mirror.hasUnsettledWrites).toBe(true);
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(await first).toMatchObject({ outcome: 'notSent' });
+    expect(mirror.hasUnsettledWrites).toBe(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await second).toMatchObject({ outcome: 'notSent' });
+    expect(mirror.hasUnsettledWrites).toBe(false);
+    expect(rpc).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
 });
 
 // 19pt8s: sending the ask cleared the fence, though the hold lifts only when the source's orders return.

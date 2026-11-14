@@ -730,6 +730,7 @@ impl Venue for Woo {
             && msg.event.is_empty()
             && matches!(msg.topic.as_ref(), "tickers" | "bbos" | "markprices")
         {
+            cx.record_socket_topic(&[&msg.topic]);
             self.apply_ticks(cx, msg.topic.as_ref(), msg.data);
             return;
         }
@@ -756,6 +757,7 @@ impl Venue for Woo {
         let Some(data) = msg.data else {
             return;
         };
+        cx.record_socket_topic(&[&msg.topic]);
         match msg.topic.as_ref() {
             "tickers" | "bbos" | "markprices" => (),
             topic => {

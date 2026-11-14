@@ -298,13 +298,20 @@ fn payload_admission_requires_both_an_injected_provider_and_valid_owned_primary_
                     ReadStartup(CATALOG, Next::None),
                 )
                 .unwrap_err();
-                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
-                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
-                assert!(
-                    error
-                        .message
-                        .contains("configured injected signing provider")
+                assert_eq!(
+                    error.kind,
+                    Some(if injected {
+                        safe_cex_engine::ErrorKind::Unsupported
+                    } else {
+                        safe_cex_engine::ErrorKind::InvalidInput
+                    })
                 );
+                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+                assert!(error.message.contains(if injected {
+                    "configured injected signing provider"
+                } else {
+                    "configured callback provider"
+                }));
             }
         }
     }

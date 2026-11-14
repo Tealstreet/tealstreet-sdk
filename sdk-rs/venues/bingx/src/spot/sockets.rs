@@ -104,7 +104,7 @@ impl BingxSpot {
         if text == "Pong" {
             return;
         }
-        let Ok(m) = serde_json::from_str::<Message<'_>>(text) else {
+        let Ok(m) = Message::decode(text, public) else {
             return;
         };
         if m.code != 0 {
@@ -116,74 +116,96 @@ impl BingxSpot {
             }
             return;
         }
-        let Some(data) = m.data else {
+        if m.data.is_none() && m.ticker.is_none() && m.depth.is_none() {
             return;
-        };
+        }
         if public {
-            if m.data_type.ends_with("@ticker") {
-                if let Ok(t) = serde_json::from_str::<LiveTicker>(data.get())
-                    && t.c > 0.
-                    && t.bid >= 0.
-                    && t.ask >= 0.
-                    && t.v >= 0.
-                    && t.q >= 0.
-                {
-                    let s = wire::symbol(&t.s);
-                    if m.data_type == format!("{}@ticker", t.s) {
-                        cx.store.ensure_ticker(&s);
-                        self.live_tickers.insert(s.clone());
-                        cx.store.update_ticker(&s, |r| {
-                            r.last = t.c;
-                            r.bid = t.bid;
-                            r.ask = t.ask;
-                            r.volume = t.v;
-                            r.quote_volume = t.q;
-                            r.percentage = t.percentage;
-                        });
-                    }
-                }
-            } else if let Some(id) = m.data_type.strip_suffix("@depth50") {
-                let s = wire::symbol(id);
-                if let Some(b) = self.books.get_mut(&s)
-                    && let Ok(d) = serde_json::from_str::<Depth>(data.get())
-                {
-                    if !d.valid() {
-                        return;
-                    }
-                    b.book.clear();
-                    for (p, q) in d.bids {
-                        b.book.apply(BookSide::Bids, p.0, q.0);
-                    }
-                    for (p, q) in d.asks {
-                        b.book.apply(BookSide::Asks, p.0, q.0);
-                    }
-                    cx.book_changed(&s);
-                }
-            } else if let Some((id, native)) = m.data_type.split_once("@kline_")
-                && let Ok(c) = serde_json::from_str::<LiveCandle>(data.get())
+            self.public_message(cx, m);
+        } else {
+            self.private_message(cx, m);
+        }
+    }
+    // Keep private report handling out of the public stream's WASM body.
+    #[inline(never)]
+    fn public_message(&mut self, cx: &mut Cx<'_, Pending>, m: Message<'_>) {
+        if m.data_type.ends_with("@ticker") {
+            if let Some(t) = m.ticker.or_else(|| {
+                m.data
+                    .and_then(|data| serde_json::from_str::<LiveTicker<'_>>(data.get()).ok())
+            }) && t.c > 0.
+                && t.bid >= 0.
+                && t.ask >= 0.
+                && t.v >= 0.
+                && t.q >= 0.
+                && m.data_type.strip_suffix("@ticker") == Some(t.s.as_ref())
             {
-                if c.s != id {
-                    return;
+                let s = wire::stream_symbol(&t.s, &mut self.stream_symbol);
+                let index = cx.store.ensure_ticker(s);
+                if !self.live_tickers.contains(s) {
+                    self.live_tickers.insert(s.to_owned());
                 }
-                let s = wire::symbol(id);
-                if let Some(i) = self.candles.keys().find_map(|(symbol, i)| {
-                    (symbol == &s && wire::interval(*i, true) == Some(native)).then_some(*i)
-                }) {
-                    let b = c.k;
-                    if let Ok(c) = candle(vec![
-                        safe_cex_engine::de::Number(b.t),
-                        safe_cex_engine::de::Number(b.o),
-                        safe_cex_engine::de::Number(b.h),
-                        safe_cex_engine::de::Number(b.l),
-                        safe_cex_engine::de::Number(b.c),
-                        safe_cex_engine::de::Number(b.v),
-                    ]) {
-                        cx.candle(&s, i, c);
-                    }
+                if let Some(index) = index {
+                    cx.store.update_ticker_at(index, |r| {
+                        r.last = t.c;
+                        r.bid = t.bid;
+                        r.ask = t.ask;
+                        r.volume = t.v;
+                        r.quote_volume = t.q;
+                        r.percentage = t.percentage;
+                    });
                 }
             }
-        } else if m.data_type == "spot.executionReport" {
-            if let Ok(r) = serde_json::from_str::<Report>(data.get()) {
+        } else if let Some(id) = m.data_type.strip_suffix("@depth50") {
+            let s = wire::stream_symbol(id, &mut self.stream_symbol);
+            if let Some(b) = self.books.get_mut(s)
+                && let Some(d) = m.depth.or_else(|| {
+                    m.data
+                        .and_then(|data| serde_json::from_str::<Depth>(data.get()).ok())
+                })
+            {
+                if !d.valid() {
+                    return;
+                }
+                b.book.clear();
+                for (p, q) in d.bids {
+                    b.book.apply(BookSide::Bids, p.0, q.0);
+                }
+                for (p, q) in d.asks {
+                    b.book.apply(BookSide::Asks, p.0, q.0);
+                }
+                cx.book_changed(s);
+            }
+        } else if let Some((id, native)) = m.data_type.split_once("@kline_")
+            && let Some(data) = m.data
+            && let Ok(c) = serde_json::from_str::<LiveCandle>(data.get())
+        {
+            if c.s != id {
+                return;
+            }
+            let s = wire::symbol(id);
+            if let Some(i) = self.candles.keys().find_map(|(symbol, i)| {
+                (symbol == &s && wire::interval(*i, true) == Some(native)).then_some(*i)
+            }) {
+                let b = c.k;
+                if let Ok(c) = candle(vec![
+                    safe_cex_engine::de::Number(b.t),
+                    safe_cex_engine::de::Number(b.o),
+                    safe_cex_engine::de::Number(b.h),
+                    safe_cex_engine::de::Number(b.l),
+                    safe_cex_engine::de::Number(b.c),
+                    safe_cex_engine::de::Number(b.v),
+                ]) {
+                    cx.candle(&s, i, c);
+                }
+            }
+        }
+    }
+    #[inline(never)]
+    fn private_message(&mut self, cx: &mut Cx<'_, Pending>, m: Message<'_>) {
+        if m.data_type == "spot.executionReport" {
+            if let Some(data) = m.data
+                && let Ok(r) = serde_json::from_str::<Report>(data.get())
+            {
                 let Ok(order) = r.order() else {
                     return;
                 };

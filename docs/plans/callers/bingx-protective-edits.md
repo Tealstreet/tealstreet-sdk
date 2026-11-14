@@ -31,6 +31,11 @@ Receipts come from actual Daily Last, Premium Mark and Live trade/fair-price
 messages, including unchanged values. Delayed seed publication cannot re-date
 an earlier field, and a Live row without tradePrice cannot renew Last. REST row
 receipts become usable only after the whole response envelope is accepted.
+Receipt times are monotonic per symbol/source; a ticker mismatch or frame reset
+cannot let an older pending reply replace newer evidence. Frame resets invalidate
+proof without discarding the clocks that fence earlier reads.
+The <=5 s genuine proof intentionally remains stricter than legacy TS
+replaceTriggerOrderPrice, which optionally checked Store Mark without an age gate.
 
 Remaining supported shapes use guarded serial cancel/create. A target-matching
 terminal cancellation with explicit zero execution is required before creating;
@@ -59,11 +64,28 @@ a put-back that may already be resting. Outcome and protection remain engine-own
 VENUE_STATE exports version 2 with the typed native original and existing
 observation. Readers also accept version 1 from older sources, loading mode and
 observations without any put-back provenance. Unknown versions fail closed. The real native
-snapshot -> frame control pins this contract. Frame-fed engines retain orders,
-cancels and ordinary LIMIT edits, but protective price edits refuse "reference
-stale": frame arrival never grants local freshness. Enabling those edits needs
-a separate engine-owned receipt-clock mapping seam; there is no production
-frame-fed caller listed today.
+snapshot -> frame control pins this contract. Frame arrival, replayed snapshots,
+time-only updates and sparse rows never grant local reference freshness.
+
+Before admitting a protective edit whose requested Last/Mark receipt is absent,
+stale or inconsistent with the Store, the native command obtains one unsigned
+public Daily/Premium read under its existing preflight owner and generation.
+It has a 20 s bound and one attempt, with no credential, signing, retry or
+cross-source fallback. Omitting the symbol parameter preserves the existing
+streamed all-contracts array shape; only the exact native target row is retained
+and the existing strict Daily/Premium decoder is reused. The source is never
+inferred from a different ticker field. The actual row receipt is not re-dated
+when the envelope finishes; an invalid, duplicate, missing or >5 s old target
+cannot authorize any destructive leg. A newer genuine live receipt is retained.
+
+The command captures its original immutable edit before the read. Once the full
+envelope succeeds, it validates the captured guard and hands that same preflight
+to the existing write plan. Changed/filled orders, a vanished protected position,
+a crossed trigger, a retired owner or a failed read leave the original open with
+NotSent. Every later managed Claim still performs the unchanged pure guard,
+including re-signs and exact put-backs; expiry at that boundary never schedules
+another read. LOCAL/COSIGNED frame-fed page engines can therefore obtain genuine
+proof without trusting frame arrival or changing the VENUE_STATE format.
 
 Fixture changes preserve the positive wire assertions while supplying explicit
 unfilled target cancellation proof in raw-trigger, last-price and moved-stop

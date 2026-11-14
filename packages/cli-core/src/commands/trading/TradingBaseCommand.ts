@@ -3,6 +3,7 @@ import type { CommandContext, CommandResult } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
+import { roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveCompleteMarketSymbol, resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';
@@ -12,10 +13,16 @@ import { nativeAmountRules } from '@tealstreet/script-api-core/src/order/nativeA
 import { roundPercentageCloseSize } from '@tealstreet/script-api-core/src/order/orderPricing';
 
 // Preserve MEXC's original native intent until shared preparation can validate it.
-const roundParsedSize = (exchange: ExchangeLike, market: Market | undefined, raw: number): number =>
-  market && nativeAmountRules(market, exchange.name).basePerContract !== undefined
-    ? raw
-    : adjust(raw, amountPrecisionOf(market));
+const roundParsedSize = (
+  exchange: ExchangeLike,
+  market: Market | undefined,
+  raw: number,
+  roundDown = false,
+): number => {
+  const rules = market ? nativeAmountRules(market, exchange.name) : undefined;
+  if (roundDown) return roundToNearestMultipleDown(raw, rules?.step ?? amountPrecisionOf(market));
+  return rules?.basePerContract !== undefined ? raw : adjust(raw, amountPrecisionOf(market));
+};
 
 class OrderArgumentError extends Error {
   override name = 'OrderArgumentError';
@@ -194,6 +201,8 @@ export abstract class TradingBaseCommand extends BaseCommand {
    *        (`buy`, non-reduce `chase`) pass `'balance'`; exit commands
    *        (`close`, reduce-only `stop`/`chase`) pass `'position'`.
    * @param price resolved order price; omitted for market-price sizing.
+   * @param sizeFraction share of the requested size, applied before lot rounding.
+   * @param roundDown floor scale shares so lot rounding cannot exceed the allocation.
    */
   protected parseSizeAndConvertIfUsd(
     exchange: ExchangeLike,
@@ -203,6 +212,8 @@ export abstract class TradingBaseCommand extends BaseCommand {
     side?: PositionSide,
     defaultPercentScope: 'position' | 'balance' = 'position',
     price?: number,
+    sizeFraction = 1,
+    roundDown = false,
   ): number {
     const trimmed = size.trim();
 
@@ -241,8 +252,8 @@ export abstract class TradingBaseCommand extends BaseCommand {
         // multiple of the position rather than half of it.
         const full = nativeCloseSize(exchange, position);
         return defaultPercentScope === 'position'
-          ? roundPercentageCloseSize(full, Math.min(pct, 100), market, exchange.name)
-          : roundParsedSize(exchange, market, (full * pct) / 100);
+          ? roundPercentageCloseSize(full, Math.min(pct, 100) * sizeFraction, market, exchange.name)
+          : roundParsedSize(exchange, market, (full * pct * sizeFraction) / 100, roundDown);
       }
 
       // balance scope
@@ -252,7 +263,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       }
       const positionForLev = (exchange.store?.positions ?? []).find((p) => p.symbol === symbol && p.contracts !== 0);
       const leverage = positionForLev?.leverage ?? 1;
-      const notional = (balance.free * leverage * pct) / 100;
+      const notional = (balance.free * leverage * pct * sizeFraction) / 100;
       // Inverse contracts are USD-denominated: each contract is
       // `contractSize` USD (1 for Bybit/Bitget; 100 or 10 for
       // Binance Coin-M / Deribit). The contract count is notional /
@@ -261,7 +272,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
       // explanation in `notionalToSize`.
       if (market.isInverse) {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-        return roundParsedSize(exchange, market, notional / contractSize);
+        return roundParsedSize(exchange, market, notional / contractSize, roundDown);
       }
       const conversionPrice =
         price === undefined
@@ -271,11 +282,11 @@ export abstract class TradingBaseCommand extends BaseCommand {
         throw new Error(`Price not available for ${symbol}`);
       }
       // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return roundParsedSize(exchange, market, baseToNativeContracts(market, notional / conversionPrice));
+      return roundParsedSize(exchange, market, baseToNativeContracts(market, notional / conversionPrice), roundDown);
     }
 
     if (this.looksLikeSize(trimmed)) {
-      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed), price);
+      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed) * sizeFraction, price, roundDown);
     }
 
     throw new Error(`Invalid size "${size}". Use $1000, 1000$, or NN% (or NN%bal / NN%pos).`);
@@ -306,12 +317,18 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * populate `contractSize` in their `fetchMarkets` mapping so this
    * formula stays correct without per-exchange branches here.
    */
-  protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number, price?: number): number {
+  protected notionalToSize(
+    exchange: ExchangeLike,
+    symbol: string,
+    notional: number,
+    price?: number,
+    roundDown = false,
+  ): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
 
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
-      return roundParsedSize(exchange, market, notional / contractSize);
+      return roundParsedSize(exchange, market, notional / contractSize, roundDown);
     }
 
     // Use the same validated tick-rounded price that order preparation sends.
@@ -326,7 +343,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     // on its linear swaps (1000 DOGE, 0.01 BTC), so the base amount has to be
     // divided by it to get the native contract count.
     const baseAmount = notional / conversionPrice;
-    return roundParsedSize(exchange, market, baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount));
+    return roundParsedSize(exchange, market, baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), roundDown);
   }
 
   /**

@@ -6,16 +6,16 @@ async fn venue_declaration_controls_handover_requests() {
         (false, true, Some("binance"), true),
         (true, false, Some("binance"), false),
         (false, true, Some("bybit"), false),
-        (false, true, None, true),
-        (true, false, None, true),
+        (false, true, None, false),
+        (true, false, None, false),
         (true, true, None, false),
         (false, false, None, false),
         (true, false, Some("unknown"), false),
     ] {
         crate::delegated::with_test_declaration(
             json!({"venues": {
-                "bybit": {"delegated": {"enabled": bybit}},
-                "binance": {"delegated": {"enabled": binance}}
+                "bybit": {"remoteSigning": {"enabled": bybit}},
+                "binance": {"remoteSigning": {"enabled": binance}}
             }}),
             async {
                 let (mut session, mut sent) =

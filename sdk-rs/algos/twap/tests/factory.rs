@@ -118,6 +118,388 @@ async fn settle() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn captured_start_cannot_adopt_the_binding_refreshed_after_its_check() {
+    LocalSet::new()
+        .run_until(async {
+            for (owner_id, generation) in [("A", 7), ("B", 8), ("A", 8), ("A", 9)] {
+                let initial = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "A".into(),
+                    generation: 7,
+                };
+                let replacement = safe_cex_algo_twap::TwapOwner {
+                    owner_id: owner_id.into(),
+                    generation,
+                };
+                let changed = initial != replacement;
+                let owner = Rc::new(RefCell::new(initial.clone()));
+                let armed = Rc::new(Cell::new(false));
+                let port = Rc::new(Port::default());
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory =
+                    TwapFactory::with_owner("a", initial, cx.clone(), Rc::new(Chasers::default()))
+                        .guard_owner(Rc::new({
+                            let owner = owner.clone();
+                            let armed = armed.clone();
+                            move || {
+                                let snapshot = owner.borrow().clone();
+                                if armed.replace(false) {
+                                    *owner.borrow_mut() = replacement.clone();
+                                }
+                                snapshot
+                            }
+                        }));
+                let captured = factory.capture_owner();
+                armed.set(true);
+                let result =
+                    captured.start(serde_json::from_str(&twap_options(json!({}))).unwrap());
+                settle().await;
+                assert_eq!(
+                    result.is_err(),
+                    changed,
+                    "captured start adopted {owner_id}/{generation}"
+                );
+                assert_eq!(
+                    placed_amounts(&port),
+                    if changed { vec![] } else { vec![0.5] }
+                );
+                if changed {
+                    assert!(factory.active_twaps("a").is_empty());
+                    factory
+                        .capture_owner()
+                        .start(serde_json::from_str(&twap_options(json!({}))).unwrap())
+                        .unwrap();
+                    settle().await;
+                    assert_eq!(placed_amounts(&port), vec![0.5], "fresh owner control");
+                }
+                cx.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn typed_start_reports_owner_change_during_first_effects() {
+    LocalSet::new()
+        .run_until(async {
+            for (change, after_dispatch, chaser) in [
+                (true, false, false),
+                (true, true, false),
+                (false, false, false),
+                (true, true, true),
+                (false, true, true),
+            ] {
+                let initial = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "A".into(),
+                    generation: 7,
+                };
+                let replacement = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "B".into(),
+                    generation: 8,
+                };
+                let reads = Rc::new(Cell::new(0));
+                let port = Rc::new(Port::default());
+                let chasers = Rc::new(Chasers::default());
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let factory =
+                    TwapFactory::with_owner("a", initial.clone(), cx.clone(), chasers.clone())
+                        .guard_owner(Rc::new({
+                            let reads = reads.clone();
+                            let port = port.clone();
+                            let chasers = chasers.clone();
+                            move || {
+                                reads.set(reads.get() + 1);
+                                let dispatched = !port.commands.borrow().is_empty()
+                                    || !chasers.started.borrow().is_empty();
+                                if change
+                                    && if after_dispatch {
+                                        dispatched
+                                    } else {
+                                        reads.get() >= 4
+                                    }
+                                {
+                                    replacement.clone()
+                                } else {
+                                    initial.clone()
+                                }
+                            }
+                        }));
+                let result = factory.capture_owner().start(
+                    serde_json::from_str(&twap_options(json!({"useChaserOrders":chaser}))).unwrap(),
+                );
+                if change {
+                    let message =
+                        result.expect_err("discarded work must never report Starting TWAP");
+                    assert!(
+                        message.message.contains(if after_dispatch {
+                            "outcome is unknown"
+                        } else {
+                            "cancelled-for-owner-change"
+                        }),
+                        "{message:?}"
+                    );
+                    assert_eq!(
+                        message.outcome,
+                        Some(if after_dispatch {
+                            safe_cex_engine::error::Outcome::Unknown
+                        } else {
+                            safe_cex_engine::error::Outcome::NotSent
+                        })
+                    );
+                    assert!(factory.active_twaps("a").is_empty());
+                } else {
+                    assert_eq!(factory.active_twaps("a")[0]["id"], result.unwrap());
+                }
+                assert_eq!(
+                    placed_amounts(&port),
+                    if chaser || (change && !after_dispatch) {
+                        vec![]
+                    } else {
+                        vec![0.5]
+                    }
+                );
+                assert_eq!(chasers.started.borrow().len(), usize::from(chaser));
+                cx.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn binding_changes_during_slice_deferral_drop_the_retired_schedule() {
+    LocalSet::new()
+        .run_until(async {
+            for settle_before_rebind in [false, true] {
+                for (owner_id, generation, expected) in [("A", 7, 2), ("B", 7, 1), ("A", 8, 1)] {
+                    let owner = Rc::new(RefCell::new(safe_cex_algo_twap::TwapOwner {
+                        owner_id: "A".into(),
+                        generation: 7,
+                    }));
+                    let port = Rc::new(Port::default());
+                    // Exercise a deferred completion and, separately, a scheduled next slice.
+                    port.answer_ms.set(100);
+                    let cx = AlgoCx::new(port.clone(), Scope::new());
+                    let factory = TwapFactory::with_owner(
+                        "a",
+                        owner.borrow().clone(),
+                        cx.clone(),
+                        Rc::new(Chasers::default()),
+                    )
+                    .guard_owner(Rc::new({
+                        let owner = owner.clone();
+                        move || owner.borrow().clone()
+                    }));
+                    factory
+                        .handle("twap:start", &twap_options(json!({"duration": 0.5})), &cx)
+                        .unwrap();
+                    settle().await;
+                    assert_eq!(placed_amounts(&port), vec![0.5]);
+                    if settle_before_rebind {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        settle().await;
+                    }
+                    *owner.borrow_mut() = safe_cex_algo_twap::TwapOwner {
+                        owner_id: owner_id.into(),
+                        generation,
+                    };
+                    let before = port.emits.borrow().len();
+                    if !settle_before_rebind {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        settle().await;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15_001)).await;
+                    settle().await;
+                    assert_eq!(placed_amounts(&port), vec![0.5; expected]);
+                    if expected == 1 {
+                        assert!(factory.active_twaps("a").is_empty());
+                        assert!(
+                            port.emits.borrow()[before..].iter().all(|(op, data)| {
+                                op != "twap:stateUpdate" || data == &json!({})
+                            }),
+                            "retired completion must not republish the saved row"
+                        );
+                        assert!(port.emits.borrow().iter().any(|(op, data)| {
+                            op == "error"
+                                && data == "TWAPs stopped: authenticated connection binding changed"
+                        }));
+                    }
+                    cx.scope.dispose();
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn same_name_different_owner_cannot_restore_a_pending_slice() {
+    LocalSet::new()
+        .run_until(async {
+            for tagged in [false, true] {
+                let port_a = Rc::new(Port::default());
+                let scope_a = Scope::new();
+                let cx_a = AlgoCx::new(port_a.clone(), scope_a.clone());
+                let factory_a = TwapFactory::with_owner(
+                    "a",
+                    safe_cex_algo_twap::TwapOwner {
+                        owner_id: "A".into(),
+                        generation: 7,
+                    },
+                    cx_a.clone(),
+                    Rc::new(Chasers::default()),
+                );
+                factory_a
+                    .handle("twap:start", &twap_options(json!({"duration": 0.5})), &cx_a)
+                    .unwrap();
+                settle().await;
+                assert_eq!(placed_amounts(&port_a), vec![0.5]);
+                let mut rows: Vec<Value> = port_a
+                    .emits
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .find(|(op, data)| {
+                        op == "twap:stateUpdate" && !data.as_object().unwrap().is_empty()
+                    })
+                    .unwrap()
+                    .1
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(id, row)| {
+                        let mut row = row.clone();
+                        row["id"] = json!(id);
+                        row
+                    })
+                    .collect();
+                if tagged {
+                    rows[0]["ownerId"] = json!("A");
+                    rows[0]["ownerGeneration"] = json!(7);
+                } else {
+                    rows[0].as_object_mut().unwrap().remove("ownerId");
+                    rows[0].as_object_mut().unwrap().remove("ownerGeneration");
+                }
+                scope_a.dispose();
+                let port_b = Rc::new(Port::default());
+                let cx_b = AlgoCx::new(port_b.clone(), Scope::new());
+                let factory_b = TwapFactory::with_owner(
+                    "a",
+                    safe_cex_algo_twap::TwapOwner {
+                        owner_id: "B".into(),
+                        generation: 7,
+                    },
+                    cx_b.clone(),
+                    Rc::new(Chasers::default()),
+                );
+                factory_b
+                    .handle("twap:state", &json!(rows).to_string(), &cx_b)
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(15_001)).await;
+                settle().await;
+                assert!(
+                    placed_amounts(&port_b).is_empty(),
+                    "tagged={tagged}: stale A slice reached same-name B"
+                );
+                assert!(
+                    factory_b.active_twaps("a").is_empty(),
+                    "mismatched rows must be dropped"
+                );
+                assert_eq!(
+                    placed_amounts(&port_a),
+                    vec![0.5],
+                    "disposed A must stay stopped"
+                );
+                cx_b.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_checks_generation_and_requires_a_trusted_current_owner() {
+    LocalSet::new()
+        .run_until(async {
+            for generation in [Some(7), Some(8), None] {
+                let source = Rc::new(Port::default());
+                let source_scope = Scope::new();
+                let source_cx = AlgoCx::new(source.clone(), source_scope.clone());
+                let a = TwapFactory::with_owner(
+                    "a",
+                    safe_cex_algo_twap::TwapOwner {
+                        owner_id: "A".into(),
+                        generation: 7,
+                    },
+                    source_cx.clone(),
+                    Rc::new(Chasers::default()),
+                );
+                a.handle(
+                    "twap:start",
+                    &twap_options(
+                        json!({"duration": 0.5, "ownerId": "forged", "ownerGeneration": 999}),
+                    ),
+                    &source_cx,
+                )
+                .unwrap();
+                settle().await;
+                assert_eq!(placed_amounts(&source), vec![0.5]);
+                let rows: Vec<Value> = source
+                    .emits
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .find(|(op, data)| {
+                        op == "twap:stateUpdate" && !data.as_object().unwrap().is_empty()
+                    })
+                    .unwrap()
+                    .1
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(id, row)| {
+                        assert_eq!(row["ownerId"], "A");
+                        assert_eq!(row["ownerGeneration"], 7);
+                        let mut row = row.clone();
+                        row["id"] = json!(id);
+                        row
+                    })
+                    .collect();
+                source_scope.dispose();
+                let target = Rc::new(Port::default());
+                let target_cx = AlgoCx::new(target.clone(), Scope::new());
+                let b = match generation {
+                    Some(generation) => TwapFactory::with_owner(
+                        "a",
+                        safe_cex_algo_twap::TwapOwner {
+                            owner_id: "A".into(),
+                            generation,
+                        },
+                        target_cx.clone(),
+                        Rc::new(Chasers::default()),
+                    ),
+                    None => TwapFactory::new("a", target_cx.clone(), Rc::new(Chasers::default())),
+                };
+                b.handle("twap:state", &json!(rows).to_string(), &target_cx)
+                    .unwrap();
+                assert_eq!(
+                    b.active_twaps("a").len(),
+                    usize::from(generation == Some(7))
+                );
+                tokio::time::sleep(Duration::from_millis(15_001)).await;
+                settle().await;
+                assert_eq!(
+                    placed_amounts(&target),
+                    if generation == Some(7) {
+                        vec![0.5]
+                    } else {
+                        vec![]
+                    }
+                );
+                assert_eq!(placed_amounts(&source), vec![0.5]);
+                target_cx.scope.dispose();
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn runs_slices_on_the_interval_and_reports_state() {
     LocalSet::new()
         .run_until(async {
@@ -364,6 +746,75 @@ impl TwapChasers for RefusingChasers {
         None
     }
     fn remove(&self, _cx: &AlgoCx, _chaser_id: &str) {}
+}
+
+#[tokio::test(start_paused = true)]
+async fn typed_start_counts_only_accepted_chaser_admission_as_dispatch() {
+    LocalSet::new()
+        .run_until(async {
+            for (refused, change) in [(false, false), (true, false), (false, true), (true, true)] {
+                let initial = safe_cex_algo_twap::TwapOwner {
+                    owner_id: "A".into(),
+                    generation: 7,
+                };
+                let reads = Rc::new(Cell::new(0));
+                let port = Rc::new(Port::default());
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                let accepted = Rc::new(Chasers::default());
+                let chasers: Rc<dyn TwapChasers> = if refused {
+                    Rc::new(RefusingChasers)
+                } else {
+                    accepted.clone()
+                };
+                let factory = TwapFactory::with_owner("a", initial.clone(), cx.clone(), chasers)
+                    .guard_owner(Rc::new({
+                        let reads = reads.clone();
+                        move || {
+                            reads.set(reads.get() + 1);
+                            // capture + initial check/refresh precede child admission.
+                            if change && reads.get() >= 4 {
+                                safe_cex_algo_twap::TwapOwner {
+                                    owner_id: "B".into(),
+                                    generation: 8,
+                                }
+                            } else {
+                                initial.clone()
+                            }
+                        }
+                    }));
+                let result = factory.capture_owner().start(
+                    serde_json::from_str(&twap_options(json!({"useChaserOrders":true}))).unwrap(),
+                );
+                assert!(placed_amounts(&port).is_empty());
+                assert_eq!(accepted.started.borrow().len(), usize::from(!refused));
+                if !change {
+                    assert_eq!(
+                        port.emits
+                            .borrow()
+                            .iter()
+                            .filter(|(op, data)| op == "error" && data == &json!("chaser refused"))
+                            .count(),
+                        usize::from(refused)
+                    );
+                }
+                if change {
+                    let error = result.expect_err("retired starts must refuse");
+                    assert_eq!(
+                        error.outcome,
+                        Some(if refused {
+                            safe_cex_engine::error::Outcome::NotSent
+                        } else {
+                            safe_cex_engine::error::Outcome::Unknown
+                        })
+                    );
+                    assert!(factory.active_twaps("a").is_empty());
+                } else {
+                    assert_eq!(factory.active_twaps("a")[0]["id"], result.unwrap());
+                }
+                cx.scope.dispose();
+            }
+        })
+        .await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -683,7 +1134,10 @@ async fn typed_start_and_stop_for_the_exec_twap_command() {
             let emitted = port.emits.borrow().len();
             assert_eq!(
                 factory.start(unbounded),
-                Err("TWAP BTCUSDT rejected: ordersCount must be between 1 and 1000".to_owned())
+                Err(VenueError::new(
+                    "TWAP BTCUSDT rejected: ordersCount must be between 1 and 1000"
+                )
+                .outcome(safe_cex_engine::error::Outcome::NotSent))
             );
             assert_eq!(
                 port.emits.borrow().len(),
@@ -792,10 +1246,18 @@ async fn legacy_parity_restored_invalid_tail_is_left_to_each_native_write() {
                 market.limits.amount.max = 10.0;
             }
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            let factory = TwapFactory::with_owner(
+                "a",
+                safe_cex_algo_twap::TwapOwner {
+                    owner_id: "parity-owner".into(),
+                    generation: 7,
+                },
+                cx.clone(),
+                Rc::new(Chasers::default()),
+            );
             let options: Value = serde_json::from_str(&twap_options(json!({ "size": 4 }))).unwrap();
             let restore = json!([{
-                "id": "legacy-tail", "options": options,
+                "id": "legacy-tail", "ownerId": "parity-owner", "ownerGeneration": 7, "options": options,
                 "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
                     "size": 4, "ordersSizes": [3, 1], "side": "buy", "status": "running",
                     "ordersCount": 2, "ordersExecuted": 0, "nextOrderAt": cx.now_ms() }

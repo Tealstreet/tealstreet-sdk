@@ -10549,3 +10549,26 @@ journal and needs its own venue fix. Lighter's HTTP-200 23000/23100 path labels
 all codes Rejected rather than RateLimited; the engine cannot infer that native
 meaning. A codec that hides a later rate row behind an earlier different refusal
 also needs a venue fix; the engine batch API checks every supplied BatchItem.
+
+### Binance PM TypeScript Algo Service reference migration
+
+The retained test-reference `BinancePMExchange` under
+`src/__tests__/reference/binance` now reads and writes
+UM conditional/trailing orders through `/papi/v1/um/algo/*`, retaining its client
+identity as `clientAlgoId`. The old strategy field spellings are not sent. Symbol
+cancel-all attempts regular and algo families independently, marking only each
+successful captured family canceled. PM `ALGO_UPDATE` reads `ao`, never fabricates
+a trade at trigger, and retains the actual-trade event path. Trailing callbackRate
+is bounded to 0.1–20. Ordinary limit/market placement and single cancellation
+payload bytes are pinned against the unchanged base. Snapshot failure and
+non-array guards retain previous Store state.
+
+Single algo cancellation additionally requires the native `complete:true`
+acknowledgement. An incomplete or malformed reply remains Unknown, preserves
+the local order and stops later cancels or replacement placement.
+
+This changes the retained TypeScript reference only; it does not change the
+runtime Rust implementation or patch a separate legacy production branch.
+
+Sources: [PM trade API](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade),
+[PM stream schema](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/ws-streams/~schemas#algoorderupdate).

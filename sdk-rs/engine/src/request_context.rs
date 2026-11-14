@@ -777,6 +777,8 @@ pub struct Permit {
     attempt: Attempt,
     preparation: u64,
     sequence: u64,
+    // Native WS envelope provenance; never part of an HTTP wire token.
+    websocket_issuer: u64,
 }
 
 /// Returned to asynchronous route/sign work and checked again on completion.
@@ -814,6 +816,15 @@ impl Preparation {
 }
 
 impl Permit {
+    pub(crate) fn with_websocket_issuer(mut self, issuer: u64) -> Self {
+        self.websocket_issuer = issuer;
+        self
+    }
+
+    pub(crate) fn take_websocket_issuer(&mut self) -> u64 {
+        std::mem::take(&mut self.websocket_issuer)
+    }
+
     pub fn attempt(self) -> Attempt {
         self.attempt
     }
@@ -843,6 +854,7 @@ impl Permit {
             attempt: token_attempt(parts[1], parts[2])?,
             preparation: parts[3],
             sequence: parts[4],
+            websocket_issuer: 0,
         })
     }
 }
@@ -915,6 +927,10 @@ pub enum Claim {
     Released(HttpRelease),
     WaitUntil(f64),
 }
+
+/// Commit a reserved write only if its synchronous physical handoff accepts it.
+pub type WebSocketCommit<'a> = dyn FnMut(&mut dyn FnMut() -> bool) -> bool + 'a;
+pub(crate) type ClaimHandoff<'a> = dyn FnMut(&mut WebSocketCommit<'_>) -> bool + 'a;
 
 #[path = "request_context_group_protocol.rs"]
 mod group_protocol;
@@ -1098,6 +1114,7 @@ impl Lifecycle {
             attempt: self.attempt,
             preparation: route.id,
             sequence: self.permits,
+            websocket_issuer: 0,
         };
         self.state = State::Permitted(route, permit);
         Ok(permit)
@@ -1111,6 +1128,19 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
+        self.claim_with_handoff(permit, time, pacing, admit, &mut |commit| {
+            commit(&mut || true)
+        })
+    }
+
+    pub(crate) fn claim_with_handoff(
+        &mut self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &mut SendPacing,
+        admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
+        handoff: &mut ClaimHandoff<'_>,
+    ) -> Result<Claim, Error> {
         let draft = match self.prepare_claim(permit, time, pacing)? {
             group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
             group_lifecycle::ClaimPreparation::Ready(draft) => draft,
@@ -1122,7 +1152,25 @@ impl Lifecycle {
                 return Err(error);
             }
         };
-        Ok(Claim::Released(self.commit_claim(ready, pacing)))
+        let mut ready = Some(ready);
+        let mut released = None;
+        handoff(&mut |send| {
+            let Some(ready) = ready.take() else {
+                return false;
+            };
+            if !send() {
+                return false;
+            }
+            released = Some(self.commit_claim(ready, pacing));
+            true
+        });
+        match released {
+            Some(release) => Ok(Claim::Released(release)),
+            None => {
+                self.state = State::Settled(None);
+                Err(Error::Revoked)
+            }
+        }
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes
@@ -1435,10 +1483,18 @@ impl std::fmt::Debug for RejectionReports {
     }
 }
 
+/// One live, executed placement awaiting native IDs from an authoritative read/stream.
+/// The receipt is engine-bound and cannot be constructed by a host.
+pub struct PendingPlacement {
+    pub(super) context: Context,
+    pub(super) attempt: RequestId,
+}
+
 struct WriteAttempt {
     id: RequestId,
     // A classified RefusedResend verdict: the only evidence one resend may use.
     resend_granted: bool,
+    pending_identity: bool,
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
@@ -1520,6 +1576,18 @@ impl PreparedWriteSeal {
     pub(crate) fn failure(&self) -> Option<&VenueError> {
         self.failure.as_ref()
     }
+
+    #[cfg(feature = "plan-element-reports")]
+    pub(crate) fn retain_missing_elements(
+        &mut self,
+        elements: Option<&crate::write_plan::ElementOutcomes>,
+    ) {
+        if let Some(error) = &mut self.failure
+            && error.elements.is_none()
+        {
+            error.elements = elements.cloned().map(Box::new);
+        }
+    }
 }
 impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
@@ -1597,6 +1665,7 @@ impl CommandWrites {
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
+            pending_identity: false,
         });
         Ok(())
     }
@@ -1621,6 +1690,7 @@ impl CommandWrites {
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
+            pending_identity: false,
         });
         Ok(())
     }
@@ -1862,6 +1932,50 @@ impl CommandWrites {
         Ok(&mut attempt.released)
     }
 
+    pub(super) fn pending_placement(&mut self, id: RequestId) -> Result<(), Error> {
+        self.result(id, WriteResult::Accepted { order_ids: vec![] })?;
+        self.attempts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(Error::State)?
+            .pending_identity = true;
+        Ok(())
+    }
+    pub(super) fn resolve_placement(
+        &mut self,
+        id: RequestId,
+        ids: Vec<String>,
+    ) -> Result<(), Error> {
+        if ids.len() > evidence::ID_COUNT {
+            return Err(Error::Capacity);
+        }
+        if self.sealed
+            || ids.is_empty()
+            || ids.iter().any(String::is_empty)
+            || ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len()
+        {
+            return Err(Error::Invalid);
+        }
+        let index = self
+            .attempts
+            .iter()
+            .position(|a| a.id == id && a.pending_identity)
+            .ok_or(Error::Revoked)?;
+        if self.latest(self.attempts[index].leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        let (budget, result, overflow) = self
+            .evidence
+            .result(WriteResult::Accepted { order_ids: ids });
+        if overflow {
+            return Err(Error::Capacity);
+        }
+        self.evidence = budget;
+        self.attempts[index].result = Some(result);
+        self.attempts[index].pending_identity = false;
+        Ok(())
+    }
+
     /// Mark a recorded effects-free refusal as resendable once. Only the
     /// engine classifier calls this, for a `RefusedResend` verdict.
     pub(crate) fn grant_resend(&mut self, id: RequestId) -> Result<(), Error> {
@@ -2080,6 +2194,25 @@ impl CommandWrites {
         Ok(error)
     }
 
+    #[cfg(feature = "plan-element-reports")]
+    pub(crate) fn retain_failed_attempt_elements(
+        &mut self,
+        id: RequestId,
+        elements: Box<crate::write_plan::ElementOutcomes>,
+    ) -> Result<(), Error> {
+        self.failed_attempt(id)?;
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|attempt| attempt.id == id)
+            .unwrap();
+        let Some(WriteResult::Failed(error)) = &mut attempt.result else {
+            return Err(Error::State);
+        };
+        error.elements = Some(elements);
+        Ok(())
+    }
+
     /// Seal success only when every terminal logical leg is proven accepted.
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
@@ -2090,6 +2223,9 @@ impl CommandWrites {
     }
 
     fn validate_success(&self) -> Result<(), Error> {
+        if self.attempts.iter().any(|a| a.pending_identity) {
+            return Err(Error::State);
+        }
         #[cfg(feature = "serial-plans")]
         if let Some(stream) = &self.stream {
             return self.validate_streamed_success(stream);
@@ -2194,15 +2330,19 @@ impl CommandWrites {
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (match &a.result {
-                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => true,
-                    Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
-                        error.outcome == Some(Outcome::Unknown)
+                && (a.pending_identity
+                    || match &a.result {
+                        None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => {
+                            true
+                        }
+                        Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                            error.outcome == Some(Outcome::Unknown)
+                        }
+                        Some(WriteResult::Accepted { .. }) => false,
                     }
-                    Some(WriteResult::Accepted { .. }) => false,
-                } || self.attempts[index + 1..]
-                    .iter()
-                    .any(|later| later.leg == a.leg && !later.released))
+                    || self.attempts[index + 1..]
+                        .iter()
+                        .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {
             !leg.superseded
                 && leg.parent.is_some()
@@ -2559,6 +2699,7 @@ impl CommandWrites {
         self.inherited_uncertain
             || self.attempts.iter().any(|attempt| {
                 attempt.id_overflow
+                    || attempt.pending_identity
                     || (attempt.released
                         && matches!(
                             attempt.result,

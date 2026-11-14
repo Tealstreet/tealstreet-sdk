@@ -420,6 +420,43 @@ fn a_timestamp_rejection_resyncs_then_resends_each_write_method_once() {
     }
 }
 
+#[test]
+fn v3_clock_recovery_resigns_code_and_standard_requests_then_preserves_unknown_on_loss() {
+    for (command_of, method, path) in [
+        (place as fn() -> Command, Method::Post, "/order"),
+        (cancel as fn() -> Command, Method::Delete, "/order"),
+        (leverage as fn() -> Command, Method::Post, "/leverage"),
+    ] {
+        let mut engine = support::engine(Options::v3_wallet());
+        engine.store_mut().set_markets(vec![market()]);
+        engine.store_mut().set_orders(vec![open("777")]);
+        let sent = command(&mut engine, command_of());
+        let first = write(&sent, method, path).clone();
+        let resent = answer(&mut engine, &first, 400, TIMESTAMP);
+        managed(&resent, 1);
+        let second = write(&resent, method, path).clone();
+        assert_ne!(query(&first.url, "nonce"), query(&second.url, "nonce"));
+        assert_ne!(signature(&first.url), signature(&second.url));
+        if method == Method::Post && path == "/order" {
+            assert!(stamp(&first.url).is_none());
+            assert!(stamp(&second.url).is_none());
+        } else {
+            assert_ne!(stamp(&first.url), stamp(&second.url));
+        }
+        let failed = lost(&mut engine, &second);
+        assert_eq!(
+            terminal(&failed).unwrap().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(
+            failed
+                .requests
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
+    }
+}
+
 /// A placed order must report placed: a failure here makes the user place it again.
 #[test]
 fn a_write_placed_by_its_timestamp_resend_reports_success() {

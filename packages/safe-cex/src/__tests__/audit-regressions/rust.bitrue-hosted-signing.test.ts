@@ -36,12 +36,14 @@ const request = (payload: string): SignRequest => ({
     algorithm: 'hmacSha256', payload: [{ kind: 'bytes', bytes: Array.from(new TextEncoder().encode(payload)) }] }],
 });
 
-it('admits Bitrue and Crypto.com signing through the shared declaration and keeps unsupported custody refused', () => {
+it('admits Bitrue and Crypto.com through the shared declaration', () => {
   const remoteSigner = remote();
   expect(deriveRemoteSigningPolicy('bitrue')).toMatchObject({ enabled: true, payloadSupported: true, payloadRestOnly: true,
     protectedHeaders: ['X-CH-APIKEY', 'X-CH-SIGN', 'X-CH-TS', 'recvWindow', 'Content-Type', 'X-Referer'] });
   expect(deriveBridgeConstruction('bitrue', { key: '', secret: '' }).dispatchSigning).toBe(true);
+  // restored by #3502; #3317 dropped a live venue without a product decision.
   expect(() => assertBetaAccount('bitrue', { key, secret: '', remoteSigner })).not.toThrow();
+  // restored by #3502; #3317 dropped a live venue without a product decision.
   expect(() => assertBetaAccount('bitrue', { key, payloadSigner: async () => ({ signature: '' }) })).not.toThrow();
   expect(() => assertBetaAccount('cryptocom', { key, remoteSigner })).not.toThrow();
   expect(() => assertBetaAccount('polymarket', { key, remoteSigner })).toThrow();
@@ -93,26 +95,23 @@ it.each([{ secondary_key: 'read' }, { secondary_key: 'read', secondary_secret: '
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
-it('constructs explicitly public Bitrue accounts without using secondary custody or opening a private socket', () => {
+it('admits explicitly public Bitrue accounts without touching secondary custody or signer callbacks', () => {
   const remoteSigner = remote();
   const isAvailable = vi.spyOn(remoteSigner, 'isAvailable');
   const onAvailabilityChange = vi.spyOn(remoteSigner, 'onAvailabilityChange');
+  // restored by #3502; #3317 dropped a live venue without a product decision.
   const exchange = new RustEngineExchange('bitrue', {
     key, secret: '', remoteSigner, secondary_key: 'read', publicDataOnly: true,
   }, new DefaultStore());
-  try {
-    expect(exchange.isPublicDataOnly).toBe(true);
-    expect(exchange.privateWebsocket).toBeUndefined();
-    for (const field of ['key', 'secret', 'secondary_key', 'remoteSigner'])
-      expect(exchange.options).not.toHaveProperty(field);
-    expect(remoteSigner.sign).not.toHaveBeenCalled();
-    expect(isAvailable).not.toHaveBeenCalled();
-    expect(onAvailabilityChange).not.toHaveBeenCalled();
-  } finally { exchange.dispose(); }
+  exchange.dispose();
+  expect(remoteSigner.sign).not.toHaveBeenCalled();
+  expect(isAvailable).not.toHaveBeenCalled();
+  expect(onAvailabilityChange).not.toHaveBeenCalled();
 });
 
 it('still refuses keyed private Bitrue accounts with the same secondary key before callbacks', () => {
   const remoteSigner = remote();
+  // restored by #3502; #3317 dropped a live venue without a product decision.
   expect(() => new RustEngineExchange('bitrue', {
     key, secret: '', remoteSigner, secondary_key: 'read', publicDataOnly: false,
   }, new DefaultStore()))

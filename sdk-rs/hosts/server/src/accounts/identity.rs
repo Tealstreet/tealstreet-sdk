@@ -2,7 +2,7 @@ use crate::envelope::InitPayload;
 
 pub(crate) fn enabled(init: &InitPayload) -> bool {
     init.exchange_name == "bybit"
-        && safe_cex_remote_signer::delegated_enabled(&init.exchange_name)
+        && crate::delegated::enabled(&init.exchange_name)
         && init.public_only != Some(true)
         && !init.account_name.starts_with("__pub_")
 }

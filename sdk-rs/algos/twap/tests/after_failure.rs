@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use safe_cex_algo_twap::ChaserProgress;
 use safe_cex_algo_twap::ChaserRequest;
+use safe_cex_algo_twap::TwapOwner;
 use safe_cex_algo_twap::factory::{TwapChasers, TwapFactory};
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory, AlgoStore, Change, CommandFuture, Scope};
 use safe_cex_engine::engine::{Command, CommandId};
@@ -19,6 +20,11 @@ use tokio::task::LocalSet;
 
 mod support;
 use support::{ClockGuard, ENGINE_UNKNOWN_TEXT};
+
+// These parity fixtures exercise restore outcomes under an authenticated host.
+// Keep valid ownership explicit so the owner gate does not mask the outcome assertions.
+const RESTORE_OWNER: &str = "parity-owner";
+const RESTORE_GENERATION: u64 = 7;
 
 #[derive(Debug, PartialEq)]
 enum RecordedWrite {
@@ -180,7 +186,15 @@ fn fixture(venue: &str) -> (Rc<Port>, AlgoCx, TwapFactory) {
         store.markets.insert("BTCUSDT".to_owned(), market());
     }
     let cx = AlgoCx::new(port.clone(), Scope::new());
-    let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+    let factory = TwapFactory::with_owner(
+        "a",
+        TwapOwner {
+            owner_id: RESTORE_OWNER.into(),
+            generation: RESTORE_GENERATION,
+        },
+        cx.clone(),
+        Rc::new(Chasers::default()),
+    );
     (port, cx, factory)
 }
 
@@ -212,7 +226,7 @@ async fn check_continuation(
     .unwrap();
     if let Some(status) = restored_status {
         let restore = json!([{
-            "id": "restored", "options": options,
+            "id": "restored", "ownerId": RESTORE_OWNER, "ownerGeneration": RESTORE_GENERATION, "options": options,
             "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
                 "size": 3, "ordersSizes": [1, 1, 1], "side": "buy", "status": status,
                 "ordersCount": 3, "ordersExecuted": 0, "nextOrderAt": cx.now_ms() }
@@ -520,7 +534,7 @@ async fn check_unknown_halt(venue: &str, restored_status: Option<&str>) {
         serde_json::from_str(&twap_options(json!({ "size": 3, "ordersCount": 3 }))).unwrap();
     if let Some(status) = restored_status {
         let rows = json!([{
-            "id": "unknown-restore", "options": options,
+            "id": "unknown-restore", "ownerId": RESTORE_OWNER, "ownerGeneration": RESTORE_GENERATION, "options": options,
             "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" },
                 "size": 3, "ordersSizes": [1, 1, 1], "side": "buy", "status": status,
                 "ordersCount": 3, "ordersExecuted": 0, "nextOrderAt": cx.now_ms() }
@@ -684,7 +698,7 @@ async fn unknown_exception_restored_in_flight_halts_without_replay_or_suffix() {
     LocalSet::new().run_until(async {
         let _clock = ClockGuard::new();
         let (port, cx, factory) = fixture("binance");
-        let rows = json!([{ "id": "restored-flight", "options": serde_json::from_str::<Value>(&twap_options(json!({"size": 3, "ordersCount": 3}))).unwrap(),
+        let rows = json!([{ "id": "restored-flight", "ownerId": RESTORE_OWNER, "ownerGeneration": RESTORE_GENERATION, "options": serde_json::from_str::<Value>(&twap_options(json!({"size": 3, "ordersCount": 3}))).unwrap(),
             "state": { "accountName": "a", "activeMarket": { "symbol": "BTCUSDT" }, "size": 3,
                 "ordersSizes": [1, 1], "side": "buy", "status": "running", "ordersCount": 3,
                 "ordersExecuted": 0, "nextOrderAt": cx.now_ms(), "inFlight": {"size": 1, "clientOrderId": "uncertain-client"} }

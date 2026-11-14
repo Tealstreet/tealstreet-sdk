@@ -1,108 +1,61 @@
-use super::KeyRef;
-#[cfg(not(target_arch = "wasm32"))]
-use super::{Incarnation, LocalSigner, SignError};
-use std::collections::HashMap;
+//! Native protected storage preserves the exact WASM map representation.
 use zeroize::Zeroizing;
-
 #[cfg(target_arch = "wasm32")]
-macro_rules! heap {
-    ($bytes:expr) => {
-        $bytes
-    };
-}
-#[cfg(not(target_arch = "wasm32"))]
-macro_rules! heap {
-    ($bytes:expr) => {
-        $crate::signer::material::Material::Heap($bytes)
-    };
-}
-pub(super) use heap;
-
-/// Optional native host storage for installed local signing material.
-/// The provider erases it before releasing the host buffer.
-#[cfg(not(target_arch = "wasm32"))]
-pub trait ProtectedBytes: zeroize::Zeroize + Send + Sync {
-    fn as_bytes(&self) -> &[u8];
-}
-
-// WASM keeps the original map value and drop glue; protected storage is native-only.
+pub(super) type Material = Zeroizing<Vec<u8>>;
 #[cfg(target_arch = "wasm32")]
-pub(super) type KeyMap = HashMap<KeyRef, Zeroizing<Vec<u8>>>;
-
+pub(super) fn heap(bytes: Zeroizing<Vec<u8>>) -> Material {
+    bytes
+}
+#[cfg(target_arch = "wasm32")]
+pub(super) use heap as presentable_heap;
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) enum Material {
     Heap(Zeroizing<Vec<u8>>),
-    Protected(Box<dyn ProtectedBytes>),
+    // Permission belongs to the bytes installed by trusted credential/passphrase
+    // setup, never the spelling of a ref. Replacing material drops permission.
+    PresentableHeap(Zeroizing<Vec<u8>>),
+    Protected {
+        bytes: crate::protected::ProtectedSecret,
+        presentable: bool,
+    },
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn heap(bytes: Zeroizing<Vec<u8>>) -> Material {
+    Material::Heap(bytes)
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn presentable_heap(bytes: Zeroizing<Vec<u8>>) -> Material {
+    Material::PresentableHeap(bytes)
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl Material {
     pub(super) fn as_slice(&self) -> &[u8] {
         match self {
-            Self::Heap(bytes) => bytes.as_slice(),
-            Self::Protected(bytes) => bytes.as_bytes(),
+            Self::Heap(v) | Self::PresentableHeap(v) => v.as_slice(),
+            Self::Protected { bytes, .. } => bytes.as_bytes(),
         }
     }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for Material {
-    fn drop(&mut self) {
-        if let Self::Protected(bytes) = self {
-            bytes.zeroize();
-        }
+    pub(super) fn protect(self) -> Result<Self, safe_cex_engine::signing::SignError> {
+        let presentable = matches!(self, Self::PresentableHeap(_));
+        Ok(Self::Protected {
+            bytes: crate::protected::ProtectedSecret::copy(self.as_slice())?,
+            presentable,
+        })
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Default)]
-pub(super) struct KeyMap {
-    bytes: HashMap<KeyRef, Material>,
-    protected_storage: bool,
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl KeyMap {
-    pub(super) fn new() -> Self {
-        Self::default()
+    pub(super) fn refuses_presentation(&self) -> bool {
+        matches!(
+            self,
+            Self::Protected {
+                presentable: false,
+                ..
+            }
+        )
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
-impl std::ops::Deref for KeyMap {
-    type Target = HashMap<KeyRef, Material>;
-    fn deref(&self) -> &Self::Target {
-        &self.bytes
-    }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl std::ops::DerefMut for KeyMap {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.bytes
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl LocalSigner {
-    /// Ends every seal made under the previous material.
-    pub(super) fn redraw(&mut self) {
-        if self.keys.protected_storage {
-            self.incarnation = None;
-            return;
-        }
-        self.incarnation = Incarnation::fresh().ok();
-    }
-    /// Move installed bytes to a host-owned protected allocation. Ref bindings,
-    /// policy and signing operations stay with this local provider. Setup seals
-    /// are retired for host-owned storage. Failure drops
-    /// and erases every completed allocation and every remaining input buffer.
-    pub fn with_protected_storage(
-        mut self,
-        mut allocate: impl FnMut(&[u8]) -> Result<Box<dyn ProtectedBytes>, SignError>,
-    ) -> Result<Self, SignError> {
-        self.keys.protected_storage = true;
-        self.incarnation = None;
-        let mut protected = HashMap::with_capacity(self.keys.len());
-        for (reference, bytes) in std::mem::take(&mut self.keys.bytes) {
-            protected.insert(reference, Material::Protected(allocate(bytes.as_slice())?));
-        }
-        self.keys.bytes = protected;
-        Ok(self)
+impl std::ops::Deref for Material {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.as_slice()
     }
 }

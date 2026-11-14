@@ -323,6 +323,35 @@ fn proof_diag_names_the_first_mismatched_field() {
 }
 
 #[test]
+fn failed_proof_preserves_its_read_diagnostic_without_mutation_telemetry_or_resend() {
+    for kind in ["StopLoss", "TakeProfit"] {
+        let (mut control, row) = first_proof(kind);
+        answer(&mut control, vec![row], "");
+        assert!(advanced(&control), "valid cancellation proof advances");
+
+        let (mut h, mut row) = first_proof(kind);
+        row["triggerBy"] = "LastPrice".into();
+        answer(&mut h, vec![row], "");
+        assert_proof_diag(&h, "axis=target target-field=triggerBy");
+        h.advance(60_000.0);
+        assert!(h.unknown.contains(&91));
+        assert!(
+            !h.requests
+                .iter()
+                .any(|request| request.method == safe_cex_engine::Method::Post),
+            "a failed proof must never release replacement, restore or resend"
+        );
+        assert!(
+            !h.notices.iter().any(|notice| matches!(
+                notice,
+                safe_cex_engine::Notice::Event(event) if event.code == "order.outcome_unknown"
+            )),
+            "read-only proof diagnostics must not claim a mutation response"
+        );
+    }
+}
+
+#[test]
 fn proof_diag_names_status_and_field_together() {
     let (mut h, mut row) = first_proof("TakeProfit");
     row["orderStatus"] = "Filled".into();

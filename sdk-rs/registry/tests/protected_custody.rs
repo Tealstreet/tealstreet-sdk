@@ -1,0 +1,355 @@
+#![cfg(all(feature = "dispatch-signing", not(target_arch = "wasm32")))]
+use safe_cex_engine::signing::*;
+use safe_cex_venues::{
+    EngineOptions, prepare_local_signer_for, prepare_protected_local_signer_for,
+};
+use serde_json::json;
+use std::task::{Context, Poll, Waker};
+
+fn options(venue: &str) -> EngineOptions {
+    let secret = if matches!(venue, "kraken" | "krakenspot") {
+        safe_cex_crypto::encode(&[7; 32], safe_cex_crypto::Encoding::Base64)
+    } else {
+        "synthetic-private".into()
+    };
+    let raw = if venue == "txflow" {
+        let address = "0x1111111111111111111111111111111111111111";
+        json!({"testnet":true, "key":address, "applicationId":address,
+            "secret":format!("0x{}", "ab".repeat(32))})
+    } else {
+        json!({"key":"synthetic-public", "secret":secret, "passphrase":"synthetic-passphrase"})
+    };
+    serde_json::from_value(raw).unwrap()
+}
+fn work(operations: Vec<Operation>) -> SignRequest {
+    SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations,
+    }
+}
+fn hmac_custody(venue: &str) {
+    let (plain, ids) = prepare_local_signer_for(venue, &mut options(venue)).unwrap();
+    let id = ids.primary.unwrap();
+    let signing = id.signing_ref().unwrap().clone();
+    let present = work(vec![Operation::Present {
+        key: signing.clone(),
+    }]);
+    // Legacy LOCAL policy is unchanged; the stricter custody boundary is opt-in.
+    assert!(plain.sign_ready(&present).unwrap().is_ok());
+    let public = work(vec![Operation::Present {
+        key: id.credential.clone(),
+    }]);
+    let expected_public = plain.sign_ready(&public).unwrap().unwrap();
+    let signature = work(vec![Operation::Sign {
+        algorithm: Algorithm::HmacSha256,
+        key: signing.clone(),
+        payload: vec![PayloadPart::Bytes {
+            bytes: b"synthetic-payload".to_vec(),
+        }],
+    }]);
+    let expected_signature = plain.sign_ready(&signature).unwrap().unwrap();
+    let owner = plain.protect().unwrap();
+    let provider = owner.provider();
+    let mut escaped = provider.sign_ready(&present).unwrap();
+    let rejected = escaped.is_err();
+    owner.erase();
+    // Keep any returned copy live across erasure. Do not print its contents.
+    if let Ok(result) = &mut escaped {
+        result.values.clear();
+    }
+    assert!(
+        rejected,
+        "{venue}: protected signing material cannot be presented"
+    );
+
+    let (owner, ids) = prepare_protected_local_signer_for(venue, &mut options(venue)).unwrap();
+    let provider = owner.provider();
+    let id = ids.primary.unwrap();
+    for operation in [
+        Operation::Sha256 {
+            payload: vec![PayloadPart::Credential {
+                key: signing.clone(),
+            }],
+        },
+        Operation::Sign {
+            algorithm: Algorithm::HmacSha256,
+            key: signing,
+            payload: vec![PayloadPart::Credential {
+                key: id.signing_ref().unwrap().clone(),
+            }],
+        },
+    ] {
+        assert!(
+            provider
+                .sign_ready(&work(vec![operation]))
+                .unwrap()
+                .is_err(),
+            "{venue}: private-slot interpolation refused"
+        );
+    }
+    let result = provider.sign_ready(&public).unwrap().unwrap();
+    assert_eq!(result, expected_public);
+    assert_eq!(
+        provider.sign_ready(&signature).unwrap().unwrap(),
+        expected_signature
+    );
+    if let Some(key) = id.passphrase {
+        assert!(
+            provider
+                .sign_ready(&work(vec![Operation::Present { key }]))
+                .unwrap()
+                .is_ok()
+        );
+    }
+    let mut deferred = provider.sign(present);
+    owner.erase();
+    assert_eq!(
+        provider.sign_ready(&public),
+        Some(Err(SignError::Unavailable))
+    );
+    assert_eq!(
+        deferred
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Err(SignError::Unavailable))
+    );
+    assert_eq!(
+        result, expected_public,
+        "only permitted output survives erasure"
+    );
+}
+macro_rules! hmac_family {
+    ($name:ident, $feature:literal, $venue:literal) => {
+        #[cfg(feature=$feature)]
+        #[test]
+        fn $name() {
+            hmac_custody($venue);
+        }
+    };
+}
+hmac_family!(binance, "binance", "binance");
+hmac_family!(bybit, "bybit", "bybit");
+hmac_family!(bitget, "bitget", "bitget");
+hmac_family!(bingx, "bingx", "bingx");
+hmac_family!(bitrue, "bitrue", "bitrue");
+hmac_family!(bitunix, "bitunix", "bitunix");
+hmac_family!(blofin, "blofin", "blofin");
+hmac_family!(cryptocom, "cryptocom", "cryptocom");
+hmac_family!(kucoin, "kucoin", "kucoin");
+hmac_family!(kucoinspot, "kucoinspot", "kucoinspot");
+hmac_family!(mexc, "mexc", "mexc");
+hmac_family!(okx, "okx", "okx");
+hmac_family!(phemex, "phemex", "phemex");
+hmac_family!(weex, "weex", "weex");
+hmac_family!(woo, "woo", "woo");
+
+hmac_family!(kraken, "kraken", "kraken");
+hmac_family!(krakenspot, "kraken", "krakenspot");
+// TxFlow's canonical wallet setup on master has a declared asymmetric key;
+// it must never inherit the HMAC matrix's legacy presentation expectations.
+#[cfg(feature = "txflow")]
+#[test]
+fn txflow() {
+    // The branch predates the independent wallet setup. Exercise its legacy
+    // contract there, and the declared wallet contract in CI/master composition.
+    // Choose from trusted setup policy, never from a failed signature or setup.
+    let declared = safe_cex_venues::signer_setup_policy("txflow")
+        .primary
+        .and_then(|policy| policy.signing_algorithm);
+    if declared.is_none() {
+        hmac_custody("txflow");
+        return;
+    }
+    assert_eq!(declared, Some(Algorithm::Secp256k1Digest));
+    let algorithm = Algorithm::Secp256k1Digest;
+    let (plain, ids) = prepare_local_signer_for("txflow", &mut options("txflow")).unwrap();
+    let key = ids.primary.unwrap().signing_ref().unwrap().clone();
+    assert_eq!(plain.can_sign(&key, algorithm), Capability::Supported);
+    assert_eq!(
+        plain.can_sign(&key, Algorithm::HmacSha256),
+        Capability::Unsupported
+    );
+    let present = work(vec![Operation::Present { key: key.clone() }]);
+    assert!(
+        plain.sign_ready(&present).unwrap().is_err(),
+        "LOCAL wallet private slots already refuse presentation"
+    );
+    let signature = work(vec![Operation::Sign {
+        algorithm,
+        key: key.clone(),
+        payload: vec![PayloadPart::Bytes { bytes: vec![7; 32] }],
+    }]);
+    let expected = plain.sign_ready(&signature).unwrap().unwrap();
+    signature.validate_result(&expected).unwrap();
+    let public = work(vec![Operation::PublicAddress { key: key.clone() }]);
+    let expected_public = plain.sign_ready(&public).unwrap().unwrap();
+    drop(plain);
+    let (owner, _) = prepare_protected_local_signer_for("txflow", &mut options("txflow")).unwrap();
+    let provider = owner.provider();
+    assert_eq!(provider.sign_ready(&signature).unwrap().unwrap(), expected);
+    assert_eq!(
+        provider.sign_ready(&public).unwrap().unwrap(),
+        expected_public
+    );
+    assert!(provider.sign_ready(&present).unwrap().is_err());
+    assert!(
+        provider
+            .sign_ready(&work(vec![Operation::Sha256 {
+                payload: vec![PayloadPart::Credential { key: key.clone() }]
+            }]))
+            .unwrap()
+            .is_err()
+    );
+    // A declared wallet cannot be reinterpreted as an ordinary MAC key.
+    assert_eq!(
+        provider.can_sign(&key, Algorithm::HmacSha256),
+        Capability::Unsupported
+    );
+    assert!(
+        provider
+            .sign_ready(&work(vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: key.clone(),
+                payload: vec![PayloadPart::Bytes { bytes: vec![7; 32] }]
+            }]))
+            .unwrap()
+            .is_err()
+    );
+    let mut pending = provider.sign(signature.clone());
+    let mut pending_output = provider.sign(present.clone());
+    owner.erase();
+    assert_eq!(provider.can_sign(&key, algorithm), Capability::Unsupported);
+    for request in [&signature, &present, &public] {
+        assert_eq!(
+            provider.sign_ready(request),
+            Some(Err(SignError::Unavailable))
+        );
+    }
+    let mut cx = Context::from_waker(Waker::noop());
+    for future in [&mut pending, &mut pending_output] {
+        assert_eq!(
+            future.as_mut().poll(&mut cx),
+            Poll::Ready(Err(SignError::Unavailable))
+        );
+    }
+}
+hmac_family!(asterdex, "asterdex", "asterdex");
+
+#[cfg(feature = "paradex")]
+#[path = "../../venues/paradex/tests/support/mod.rs"]
+mod support;
+
+#[cfg(feature = "paradex")]
+mod paradex {
+    use super::*;
+
+    fn options() -> EngineOptions {
+        serde_json::from_value(
+            json!({"key":support::STARK_KEY, "paradexAddress":"0x0123", "subkeyAddress":"0x456"}),
+        )
+        .unwrap()
+    }
+    fn setup(provider: &Provider, ids: &Identities) -> Box<dyn OwnedSetupExecution> {
+        assert!(
+            provider.incarnation().is_none(),
+            "protected wrapper must not revive a seal"
+        );
+        let id = ids.primary.as_ref().unwrap();
+        assert!(
+            id.public_key_sealed_by(Algorithm::StarkDigest, provider.incarnation())
+                .is_err()
+        );
+        provider
+            .create_public_address_setup(work(vec![Operation::PublicKey {
+                algorithm: Algorithm::StarkDigest,
+                key: id.signing_ref().unwrap().clone(),
+            }]))
+            .expect("protected Paradex needs an owned public-key setup path")
+    }
+    #[test]
+    fn owned_public_key_setup_is_guarded_at_start_and_delivery_and_account_bound() {
+        let (plain, ids) = prepare_local_signer_for("paradex", &mut options()).unwrap();
+        let expected = ids
+            .primary
+            .as_ref()
+            .unwrap()
+            .public_key_sealed_by(Algorithm::StarkDigest, plain.incarnation())
+            .unwrap();
+        let owner = plain.protect().unwrap();
+        let provider = owner.provider();
+        let mut dormant = setup(&provider, &ids);
+        let mut started = setup(&provider, &ids);
+        started.start().unwrap();
+        let mut second_options = options();
+        second_options.key = Some(format!("0x{}2", "0".repeat(63)));
+        let (second_plain, replacement_ids) =
+            prepare_local_signer_for("paradex", &mut second_options).unwrap();
+        let second_public = replacement_ids
+            .primary
+            .as_ref()
+            .unwrap()
+            .public_key_sealed_by(Algorithm::StarkDigest, second_plain.incarnation())
+            .unwrap();
+        assert_ne!(expected, second_public, "two independent account keys");
+        let replacement = second_plain.protect().unwrap();
+        let mut replacement_work = setup(&replacement.provider(), &replacement_ids);
+        owner.erase();
+        let mut cx = Context::from_waker(Waker::noop());
+        assert_eq!(dormant.start(), Err(SignError::Unavailable));
+        for execution in [&mut dormant, &mut started] {
+            assert_eq!(
+                execution.poll_result(&mut cx),
+                Poll::Ready(Err(SignError::Unavailable))
+            );
+            assert_eq!(execution.poll_joined(&mut cx), Poll::Ready(Ok(())));
+        }
+        replacement_work.start().unwrap();
+        let Poll::Ready(Ok(result)) = replacement_work.poll_result(&mut cx) else {
+            panic!("replacement must remain usable")
+        };
+        assert_eq!(result.values, vec![second_public.to_vec()]);
+        assert_eq!(replacement_work.poll_joined(&mut cx), Poll::Ready(Ok(())));
+    }
+    #[test]
+    fn protected_paradex_private_startup_reaches_signed_auth() {
+        use safe_cex_engine::{SocketId, test_support::seeded_engine};
+        use safe_cex_venue_paradex::{Options, Paradex};
+        let (owner, ids) = prepare_protected_local_signer_for("paradex", &mut options()).unwrap();
+        let mut e = seeded_engine(Paradex::new(Options {
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            credentials: ids.primary.clone(),
+            ..Default::default()
+        }));
+        e.set_signer(Some(owner.provider())).unwrap();
+        e.set_identities(ids).unwrap();
+        e.initialize_address_nonce(1_700_000_000_000.).unwrap();
+        e.poll_address_setup(1_700_000_000_000., &mut Context::from_waker(Waker::noop()));
+        assert!(e.address_nonce_setup_ready());
+        e.set_frame_fed().unwrap();
+        e.start(1_700_000_000_000.);
+        let mut h = support::Harness {
+            e,
+            pending: vec![],
+            actions: vec![],
+            failures: vec![],
+            receipt_trace: vec![],
+            public: SocketId(0),
+            now: 1_700_000_000_000.,
+        };
+        h.collect();
+        h.reply("/markets", support::MARKETS);
+        h.reply(
+            "/system/config",
+            r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#,
+        );
+        assert!(
+            h.pending.iter().any(|r| r.url.contains("/auth/")),
+            "private startup must construct credentials and sign authentication"
+        );
+        h.reply("/auth/", r#"{"jwt_token":"synthetic-jwt"}"#);
+        assert!(h.failures.is_empty());
+        owner.erase();
+    }
+}

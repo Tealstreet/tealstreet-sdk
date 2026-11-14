@@ -2756,6 +2756,18 @@ impl Venue for BybitLinear {
         self.on_ordinary_plan_ready(cx, plan);
     }
 
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        self.ordinary_write_evidence(pending, evidence);
+        if let Then::Ordinary(request) = &pending.then {
+            self.ordinary_cancel_evidence(request, evidence);
+        }
+    }
+
     fn on_http_owner_retired(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
@@ -3034,6 +3046,12 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
+        if let Some(topic) = topic(text)
+            && !cx.record_socket_topic(&[topic])
+            && let Some((root, _)) = topic.split_once('.')
+        {
+            cx.record_socket_topic(&[root]);
+        }
         match channel {
             Channel::Public => self.on_public_frame(cx, text),
             Channel::Private => {

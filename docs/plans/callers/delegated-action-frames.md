@@ -33,7 +33,7 @@ required capability flags.
 ## Capability and admission
 
 The box advertises transports.accountWorkerWebSocket.delegatedOrderActionsV1.
-It is true only with delegated-order-frames compiled, DELEGATED_BYBIT enabled,
+It is true only with delegated-order-frames compiled, hosted signing/origin support available,
 and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` at process startup. It defaults off;
 activation changes require a box drain/restart and fresh admission, as placement
 does. Each session captures its activation at creation.
@@ -44,7 +44,7 @@ An SDK action requires all four flags explicitly true on the captured admitted
 socket: delegatedOrderFramesV1, delegatedOrderLedgerV1, delegatedOrderActionsV1,
 and delegatedOrderActionLedgerV1. Missing/false flags never downgrade to an
 unledgered callMethod. Existing placement calls retain their two-flag gate.
-Only the connection's admitted private Bybit DELEGATED account/current
+Only the connection's admitted private DELEGATED account/current
 registration may dispatch actions. Auth, lease/drain, key age and owner checks
 apply before execution and again after deferred work; replacement/logout retires
 old work and receipts. The existing DO-start/socket admission guard also applies.
@@ -281,6 +281,11 @@ stop algos or approximate account coverage with currently observed symbols.
 Its internal method translation is DELEGATED-only; LOCAL/COSIGNED are unchanged.
 The new internal account-cancel/STP/tier methods are reachable only after typed
 action validation; legacy DELEGATED `callMethod` does not acquire these names.
+
+TWAP-state rows may carry `ownerId` and a nonnegative safe-integer
+`ownerGeneration`. Both fields remain in the v1 fingerprint; neither is filled
+from the current account. Missing generation stays wire-compatible but cannot
+authorize restoration when the native host binds owner and generation.
 
 Algo actions preserve the existing native algo protocol, including interruption
 restore pauses and drain admission. Their ACK means admitted, not completed.

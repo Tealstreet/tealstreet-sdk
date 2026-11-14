@@ -141,6 +141,7 @@ export const createExchange = async (
   options: ExchangeOptions,
   store?: Store,
 ): Promise<BaseExchange> => {
+  assertBetaVenue(exchangeName);
   options = snapshotDelegatedSigningOptions(exchangeName, options);
   validateSigningMode(options.signingMode);
   assertBetaAccount(exchangeName, options);
@@ -435,5 +436,16 @@ export type {
   CandleCacheRangeLookup,
   CandleCacheSparseChunk,
 } from './candleCache';
+
+export {
+  TXFLOW_AGENT_DOMAIN,
+  TXFLOW_APPROVE_AGENT_TYPES,
+  buildTxflowAgentApproval,
+  signTxflowAgentApproval,
+  getTxflowAgentAuthorization,
+  createTxflowAgentWithBrowserWallet,
+  revokeTxflowAgentWithBrowserWallet,
+} from './exchanges/txflow/txflow.agent';
+export type { TxflowAgentOptions, TxflowAgentApproval, TxflowAgentAuthorization } from './exchanges/txflow/txflow.agent';
 
 export type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';

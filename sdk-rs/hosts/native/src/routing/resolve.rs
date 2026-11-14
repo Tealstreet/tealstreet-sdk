@@ -419,6 +419,7 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         "phemex" => pick("https://api.phemex.com", "https://testnet-api.phemex.com"),
         "woo" => pick("https://api.woox.io", "https://api.staging.woox.io"),
         "bitunix" => "https://fapi.bitunix.com",
+        "kucoin" if !testnet => "https://api-futures.kucoin.com",
         "backpack" if !testnet => "https://api.backpack.exchange",
         "grvt" => pick("https://trades.grvt.io", "https://trades.testnet.grvt.io"),
         _ => return Err(RoutingError::NoBaseUrl(name.into())),

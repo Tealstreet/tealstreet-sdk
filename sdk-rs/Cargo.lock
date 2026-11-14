@@ -4084,6 +4084,7 @@ dependencies = [
  "getrandom 0.4.3",
  "goldilocks-crypto",
  "hmac 0.12.1",
+ "libc",
  "p256",
  "poseidon-hash",
  "safe-cex-engine",
@@ -4258,6 +4259,7 @@ dependencies = [
  "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venue-binance",
+ "safe-cex-venues",
  "serde",
  "serde_json",
 ]

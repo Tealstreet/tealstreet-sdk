@@ -1005,3 +1005,60 @@ fn unsupported_candle_intervals_are_rejected_not_served_as_one_hour() {
         "AsterDEX does not support 8h candles"
     );
 }
+
+fn subscription_receipts(frame: &[u8]) -> Vec<(String, u32, f64)> {
+    use safe_cex_engine::wire::{section, sections};
+    let stats = sections(frame)
+        .find(|(kind, _)| *kind == section::MESSAGE_HANDLER_STATS)
+        .unwrap()
+        .1;
+    let strings = sections(frame)
+        .find(|(kind, _)| *kind == section::STRINGS)
+        .unwrap()
+        .1;
+    let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+    let text = |index: usize| {
+        let start =
+            u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap()) as usize;
+        let end =
+            u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap()) as usize;
+        let base = 4 + (count + 1) * 4;
+        std::str::from_utf8(&strings[base + start..base + end])
+            .unwrap()
+            .to_owned()
+    };
+    let rows: Vec<_> = stats[8..]
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .map(|row| {
+            (
+                text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize),
+                u32::from_le_bytes(row[8..12].try_into().unwrap()),
+                f64::from_le_bytes(row[16..24].try_into().unwrap()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows.len(),
+        u32::from_le_bytes(stats[..4].try_into().unwrap()) as usize
+    );
+    rows
+}
+
+#[test]
+fn subscription_receipt_observes_fast_depth_without_refreshing_tickers() {
+    let mut h = Harness::ready();
+    h.subscribe();
+    h.message(DOCUMENTED_DEPTH);
+    assert_eq!(h.engine.book("BTCUSDT").unwrap().best_bid(), Some(7405.43));
+    let rows = subscription_receipts(h.engine.snapshot_frame(h.now + 1.));
+    let depth = rows
+        .iter()
+        .find(|r| r.0.ends_with("btcusdt@depth20@100ms"))
+        .unwrap();
+    assert_eq!((depth.1, depth.2), (3, 1.));
+    let ticker = rows.iter().find(|r| r.0.ends_with("!ticker@arr")).unwrap();
+    assert_eq!(ticker.1, 1);
+    assert!(ticker.2.is_nan());
+}

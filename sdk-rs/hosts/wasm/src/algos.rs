@@ -48,6 +48,23 @@ const MAX_PLACED_SYMBOLS: usize = 256;
 
 type Emits = Rc<RefCell<Vec<(String, String)>>>;
 
+/// Who may restore persisted TWAP rows into this engine.
+pub(crate) enum TwapRestore {
+    /// No owner hook: the pre-ownership account-name restore.
+    Legacy,
+    /// The host's authenticated owner.
+    Bound(safe_cex_algo_twap::TwapOwner),
+    /// The host has an owner hook but no current owner: algos run, every restore is refused.
+    Unavailable,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BoundTwapOwner {
+    owner_id: String,
+    generation: u64,
+}
+
 struct Port {
     store: RefCell<AlgoStore>,
     subscribers: RefCell<Vec<mpsc::UnboundedSender<Change>>>,
@@ -209,6 +226,7 @@ impl Algos {
         emits: Emits,
         now_ms: f64,
         wall_ms: f64,
+        restore: TwapRestore,
     ) -> Self {
         let executor = HostExecutor::new(now_ms, wall_ms);
         let _installed = Installed(executor::set_current(Some(Rc::new(executor.clone()))));
@@ -230,7 +248,15 @@ impl Algos {
         let cx = AlgoCx::new(port.clone(), scope.clone());
         let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
         let book = chasers.book();
-        let twap = Rc::new(TwapFactory::new(&name, cx.clone(), Rc::new(book.clone())));
+        let twap = Rc::new(match restore {
+            TwapRestore::Bound(owner) => {
+                TwapFactory::with_owner(&name, owner, cx.clone(), Rc::new(book.clone()))
+            }
+            TwapRestore::Legacy => {
+                TwapFactory::with_legacy_restore(&name, cx.clone(), Rc::new(book.clone()))
+            }
+            TwapRestore::Unavailable => TwapFactory::new(&name, cx.clone(), Rc::new(book.clone())),
+        });
         #[cfg_attr(not(feature = "algos-exec"), allow(unused_mut))]
         let mut factories: Vec<Box<dyn safe_cex_algos::AlgoFactory>> =
             vec![Box::new(chasers), Box::new(twap.clone())];
@@ -502,16 +528,13 @@ fn emit_json(op: &str, data: &str) -> Value {
     serde_json::json!({ "op": op, "data": data })
 }
 
-#[wasm_bindgen]
 impl WasmEngine {
-    /// Start this account's algos. `now_ms` is the clock engine calls take as
-    /// `now`; `wall_ms` is epoch milliseconds.
-    #[wasm_bindgen(js_name = algoStart)]
-    pub fn algo_start(
+    fn start_algos(
         &mut self,
         account_name: &str,
         now_ms: f64,
         wall_ms: f64,
+        restore: TwapRestore,
     ) -> Result<(), JsError> {
         if self.algos.running.is_some() {
             return Err(JsError::new("algos are already running"));
@@ -523,9 +546,61 @@ impl WasmEngine {
             self.algos.emits.clone(),
             now_ms,
             wall_ms,
+            restore,
         );
         self.algos.running = Some(algos);
         Ok(())
+    }
+}
+
+#[wasm_bindgen]
+impl WasmEngine {
+    /// Compatibility entry point for hosts without an authenticated TWAP owner.
+    #[wasm_bindgen(js_name = algoStart)]
+    pub fn algo_start(
+        &mut self,
+        account_name: &str,
+        now_ms: f64,
+        wall_ms: f64,
+    ) -> Result<(), JsError> {
+        self.start_algos(account_name, now_ms, wall_ms, TwapRestore::Legacy)
+    }
+
+    /// Bound restore authority supplied by the host, never by a saved row.
+    #[wasm_bindgen(js_name = algoStartOwned)]
+    pub fn algo_start_owned(
+        &mut self,
+        account_name: &str,
+        twap_owner_json: &str,
+        now_ms: f64,
+        wall_ms: f64,
+    ) -> Result<(), JsError> {
+        let owner: BoundTwapOwner = serde_json::from_str(twap_owner_json)
+            .map_err(|_| JsError::new("Invalid TWAP owner or generation"))?;
+        if owner.owner_id.is_empty() || owner.generation > 9_007_199_254_740_991 {
+            return Err(JsError::new("Invalid TWAP owner or generation"));
+        }
+        self.start_algos(
+            account_name,
+            now_ms,
+            wall_ms,
+            TwapRestore::Bound(safe_cex_algo_twap::TwapOwner {
+                owner_id: owner.owner_id,
+                generation: owner.generation,
+            }),
+        )
+    }
+
+    /// The host has an owner hook but no current owner yet: start algos so the
+    /// account trades, and refuse every TWAP restore visibly until it has one.
+    #[wasm_bindgen(js_name = algoStartUnowned)]
+    pub fn algo_start_unowned(
+        &mut self,
+        account_name: &str,
+        now_ms: f64,
+        wall_ms: f64,
+    ) -> Result<(), JsError> {
+        self.start_algos(account_name, now_ms, wall_ms, TwapRestore::Unavailable)
     }
 
     /// One algo op (`chaser:start`, `twap:stop`, `exec`, ...); returns the

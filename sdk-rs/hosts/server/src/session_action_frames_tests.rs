@@ -113,7 +113,7 @@ async fn action_frames_refuse_wrong_version_fingerprint_registration_mode_and_ex
     tokio::task::LocalSet::new().run_until(async {
         for case in ["version","fingerprint","binding","mode","expired","pending"] {
             let registry = crate::accounts::tests::registry(); let tape = Tape::default();
-            let account = delegated_account(&registry,"A",if case == "mode" {"bybitspot"} else {"bybit"},tape.clone());
+            let account = delegated_account(&registry,"A",if case == "mode" {"hyrotrader"} else {"bybit"},tape.clone());
             let (mut session,mut sent) = joined(registry.clone(),"A",account.clone()).await;
             let payload = json!({"kind":"cancelAll"});
             let mut id = action_key();
@@ -926,6 +926,7 @@ async fn full_writes_sign_and_send_each_supported_operation_without_browser_sign
                 if payload["op"] == "twap:state" {
                     for row in payload["data"].as_array_mut().unwrap() {
                         row["ownerId"] = account.registry_name().into();
+                        row["ownerGeneration"] = account.twap_owner.snapshot().generation.into();
                     }
                 }
                 action(&mut session, payload, 1, false).await;
@@ -1377,6 +1378,7 @@ async fn exec_review_f2_keeps_factory_identity_across_legacy_and_overlapping_typ
                     op: "exec".into(),
                     data: json!({"command":"tasks","reqId":"legacy-before-typed","symbol":"BTCUSDT"}).to_string(),
                     origin: "native-legacy-identity-control".into(),
+                    twap_owner: account.twap_owner.snapshot(),
                     action: None,
                 }).unwrap();
                 let seed = exec_review_result(&mut sent, "legacy-before-typed").await;
@@ -1776,6 +1778,7 @@ async fn j6b_restored_twap_stays_paused_until_explicit_resume_and_account_stop()
                 .clone();
             for row in restore["data"].as_array_mut().unwrap() {
                 row["ownerId"] = account.registry_name().into();
+                row["ownerGeneration"] = account.twap_owner.snapshot().generation.into();
             }
             action(&mut session, restore, 1, false).await;
             assert_eq!(

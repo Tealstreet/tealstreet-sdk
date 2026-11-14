@@ -22,6 +22,8 @@ function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const options: OutboxOptions = {
     owner,
     accountName: 'main',
+    venue: 'bybit',
+    accountId: 'account-A',
     storage: {
       async load(scope) {
         return [...rows.values()].filter((r) => r.owner === scope.owner);
@@ -45,6 +47,7 @@ function setup(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const connection: OutboxConnection = {
     owner,
     accountName: 'main',
+    accountId: 'account-A',
     venue: 'bybit',
     signingMode: 'delegated',
     ready: true,
@@ -164,6 +167,25 @@ describe('DELEGATED versioned actions', () => {
   it.each(fullWrites)('pins full-write canonical hash for $method', ({ action, fingerprint }) => {
     expect(isDelegatedFullWriteAction(action as unknown as DelegatedAction)).toBe(true);
     expect(delegatedActionFingerprint('main', golden.key, action as unknown as DelegatedAction, 1)).toBe(fingerprint);
+  });
+  it('preserves explicit TWAP generation evidence in the typed action and its fingerprint', () => {
+    const action = JSON.parse(JSON.stringify(fullWrites.find((entry) => entry.action.op === 'twap:state')!.action));
+    const original = JSON.parse(JSON.stringify(action));
+    for (const generation of [0, 7, Number.MAX_SAFE_INTEGER]) {
+      action.data[0].ownerGeneration = generation;
+      expect(isDelegatedFullWriteAction(action)).toBe(true);
+    }
+    action.data[0].ownerGeneration = 7;
+    const owned = JSON.parse(JSON.stringify(action));
+    const hash = delegatedActionFingerprint('main', golden.key, action, 1);
+    expect(action).toEqual(owned);
+    expect(hash).not.toBe(delegatedActionFingerprint('main', golden.key, original, 1));
+    action.data[0].ownerGeneration = 6;
+    expect(hash).not.toBe(delegatedActionFingerprint('main', golden.key, action, 1));
+    for (const generation of [null, '7', true, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      action.data[0].ownerGeneration = generation;
+      expect(isDelegatedAction(action)).toBe(false);
+    }
   });
   it.each(['delegatedFullWriteActionsV1', 'delegatedFullWriteLedgerV1'] as const)(
     'requires the expanded %s attestation',

@@ -240,6 +240,7 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         "https://openapi.blofin.com",
         Some("https://demo-trading-openapi.blofin.com"),
     ),
+    ("kucoin", "https://api-futures.kucoin.com", None),
     ("bingx", "https://open-api.bingx.com", None),
     (
         "lighter",

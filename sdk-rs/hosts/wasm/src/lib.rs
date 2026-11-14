@@ -84,7 +84,6 @@ trait AnyEngine {
     fn failed(&self) -> bool {
         false
     }
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
@@ -235,7 +234,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.address_setup_retired_wire(token, now)
     }
 
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
@@ -1019,7 +1017,10 @@ impl WasmEngine {
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         // A false read-key result outranks any provider setup failure, as natively.
         safe_cex_venues::read_key_preflight(venue, &options).map_err(construction_error)?;
-        let external_signer = options.signing.is_some() && signer_setup_json.is_none();
+        let external_setup = options.signing.is_some() && signer_setup_json.is_none();
+        let has_external_refs = options.signing.as_ref().is_some_and(|identities| {
+            identities.primary.is_some() || identities.secondary.is_some()
+        });
         #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
@@ -1035,7 +1036,7 @@ impl WasmEngine {
             .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
-        } else if external_signer {
+        } else if external_setup {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
         } else if dispatch_signing {
             let (signer, identities) =
@@ -1084,6 +1085,14 @@ impl WasmEngine {
                         grvt_trading_account_id: options.grvt_trading_account_id.clone(),
                         #[cfg(not(feature = "grvt"))]
                         grvt_trading_account_id: None,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_v3: matches!(options.asterdex.api_version, Some(version) if version.prefix() == "/fapi/v3"),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_v3: false,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_user_address: options.asterdex.user_address.clone(),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_user_address: None,
                     };
                     (venue.to_owned(), identities, account)
                 })
@@ -1098,7 +1107,8 @@ impl WasmEngine {
             .map_err(|_| js_sys::Error::new("Invalid Coinbase public signing binding"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
-        let inner = safe_cex_venues::build_with_signer(
+        let inner = safe_cex_venues::build_with_signer_in_context(
+            safe_cex_venues::ConstructionContext::Client,
             venue,
             options,
             Some(production_entropy().map_err(construction_error)?),
@@ -1106,6 +1116,9 @@ impl WasmEngine {
             Boxed,
         )
         .map_err(construction_error)?;
+        // Public normalization may discard the provider. Otherwise the external
+        // refs still need a callback, including refs retained inside the venue.
+        let external_signer = external_setup && has_external_refs && inner.signer().is_some();
         Ok(Self {
             inner,
             construction,
@@ -1327,10 +1340,14 @@ impl WasmEngine {
     }
 
     fn flush(&mut self) -> String {
+        let actions = self.inner.drain();
+        if actions.is_empty() {
+            return String::new();
+        }
         #[cfg(feature = "algos")]
-        return encode(&self.algos.route(self.inner.drain()));
+        return encode(&self.algos.route(actions));
         #[cfg(not(feature = "algos"))]
-        encode(&self.inner.drain())
+        encode(&actions)
     }
 
     /// Health counters as JSON (`safe_cex_engine::Health`, camelCase).
@@ -1676,6 +1693,9 @@ impl WasmEngine {
 fn is_false(value: &bool) -> bool {
     !*value
 }
+
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "txflow"))]
+mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {

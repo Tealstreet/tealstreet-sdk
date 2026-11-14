@@ -5,7 +5,7 @@ use std::rc::{Rc, Weak};
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory};
 use safe_cex_engine::command::decode_command;
 use safe_cex_engine::engine::{Command, CommandId};
-use safe_cex_engine::error::VenueError;
+use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::model::OrderStatus;
 use serde_json::{Value, json};
 
@@ -179,7 +179,7 @@ impl AlgoFactory for ExecFactory {
             nuking: self.nuking.clone(),
             account_name: self.account_name.clone(),
             chasers: self.chasers.clone(),
-            twap: self.twap.clone(),
+            twap: self.twap.as_ref().map(TwapFactory::capture_owner),
             cancel_all: self.cancel_all.clone(),
         };
         exec.borrow_mut().handle(&payload, &mut host);
@@ -223,8 +223,10 @@ impl Host for Adapter {
         if self.cx.scope.is_disposed() {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         }
-        self.run_algo(request)
-            .map_err(|message| json!({"message":message,"outcome":"notSent"}))
+        self.run_algo(request).map_err(|mut error| {
+            error.outcome.get_or_insert(Outcome::NotSent);
+            json!(error)
+        })
     }
 
     fn random(&mut self) -> Result<f64, String> {
@@ -501,11 +503,13 @@ pub fn serialize_error(error: VenueError) -> Value {
 }
 
 impl Adapter {
-    fn run_algo(&self, request: AlgoRequest) -> Result<AlgoReply, String> {
+    fn run_algo(&self, request: AlgoRequest) -> Result<AlgoReply, VenueError> {
         let mut reply = AlgoReply::default();
         match request {
-            AlgoRequest::Tasks => return self.task_control(None),
-            AlgoRequest::Kill(target) => return self.task_control(Some(&target)),
+            AlgoRequest::Tasks => return self.task_control(None).map_err(Into::into),
+            AlgoRequest::Kill(target) => {
+                return self.task_control(Some(&target)).map_err(Into::into);
+            }
             AlgoRequest::ChaseStart { options, errors } => {
                 reply.logs = errors;
                 let book = self
@@ -536,7 +540,8 @@ impl Adapter {
                         } else {
                             format!(": {}", reply.logs.join("; "))
                         }
-                    ));
+                    )
+                    .into());
                 }
                 let labels = ids
                     .iter()
@@ -718,7 +723,7 @@ impl Adapter {
                             format!("No TWAP found with ID starting with \"{target}\"")
                         })?;
                     if !factory.stop(id) {
-                        return Err(format!("TWAP [{id}] is already completed"));
+                        return Err(format!("TWAP [{id}] is already completed").into());
                     }
                     reply.message = format!("Stopping TWAP [{id}]");
                 }

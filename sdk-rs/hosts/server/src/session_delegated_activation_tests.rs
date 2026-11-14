@@ -259,6 +259,7 @@ async fn partial_activation_paused_restore_and_cleanup_preserve_dispatch() {
                     op: received,
                     data: payload,
                     origin,
+                    twap_owner,
                     action: None,
                 }) = inbox.recv().await
                 else {
@@ -267,6 +268,7 @@ async fn partial_activation_paused_restore_and_cleanup_preserve_dispatch() {
                 assert_eq!(received, op);
                 assert_eq!(payload, data.to_string());
                 assert_eq!(origin, format!("socket:{}", session.socket));
+                assert_eq!(twap_owner, account.twap_owner.snapshot());
             }
             assert!(tape.writes.lock().unwrap().is_empty());
             session.close();
@@ -303,6 +305,7 @@ async fn partial_activation_cosigned_running_restore_preserves_dispatch() {
                 op,
                 data,
                 origin,
+                twap_owner,
                 action: None,
             }) = inbox.recv().await
             else {
@@ -311,6 +314,7 @@ async fn partial_activation_cosigned_running_restore_preserves_dispatch() {
             assert_eq!(op, "twap:state");
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
+            assert_eq!(twap_owner, account.twap_owner.snapshot());
             assert!(account.delegated.is_none());
             assert!(account.link.is_some());
             session.close();
@@ -348,6 +352,7 @@ async fn native_restore_is_refused(chaser: bool) {
                 account.placed.clone(),
                 account.held.clone(),
                 account.running.clone(),
+                account.twap_owner.clone(),
                 inbox,
             ));
             send_algo(
@@ -464,6 +469,7 @@ async fn partial_activation_decoded_paused_restore_preserves_dispatch() {
                 op,
                 data,
                 origin,
+                twap_owner,
                 action: None,
             }) = inbox.recv().await
             else {
@@ -472,6 +478,7 @@ async fn partial_activation_decoded_paused_restore_preserves_dispatch() {
             assert_eq!(op, "twap:state");
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
+            assert_eq!(twap_owner, account.twap_owner.snapshot());
             assert!(tape.writes.lock().unwrap().is_empty());
             session.close();
             drop(inbox);
@@ -487,9 +494,11 @@ async fn partial_activation_decoded_row_restore_is_visibly_refused() {
         json!("running"),
         safe_cex_algo_twap::TwapStatus::Running,
     );
-    let row = json!([row["id"], null, row["options"], row["state"]]);
+    let row = json!([row["id"], null, null, row["options"], row["state"]]);
     let parsed: safe_cex_algo_twap::PersistedTwap =
         serde_json::from_value(row.clone()).expect("valid complete runtime restore row");
+    assert_eq!(parsed.owner_id, None);
+    assert_eq!(parsed.owner_generation, None);
     assert_eq!(parsed.state.status, safe_cex_algo_twap::TwapStatus::Running);
     restore_is_refused(json!([row])).await;
 }
@@ -525,6 +534,7 @@ async fn partial_activation_cosigned_decoded_running_restore_preserves_dispatch(
                 op,
                 data,
                 origin,
+                twap_owner,
                 action: None,
             }) = inbox.recv().await
             else {
@@ -533,6 +543,7 @@ async fn partial_activation_cosigned_decoded_running_restore_preserves_dispatch(
             assert_eq!(op, "twap:state");
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
+            assert_eq!(twap_owner, account.twap_owner.snapshot());
             assert!(account.delegated.is_none());
             assert!(account.link.is_some());
             session.close();

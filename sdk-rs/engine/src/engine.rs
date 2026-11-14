@@ -484,7 +484,8 @@ pub enum Action {
     },
     Http(HttpRequest),
     ManagedHttp(Box<crate::request_context::HttpAction>),
-    /// Internal outbound queue wrapper; always unwrapped/validated by drain.
+    /// Shared outbound envelope. Drain unwraps nonzero signing attempts;
+    /// zero carries a `WebSocketWriteBinding` for the host's final write claim.
     SignedOutbound {
         attempt: RequestId,
         outbound: Box<Action>,
@@ -1118,6 +1119,9 @@ mod execution_cx;
 mod execution_cx_tests;
 pub use command_entry::{CommandWait, DEFAULT_COMMAND_WAIT_MS, MAX_COMMAND_WAIT_MS};
 pub use execution_cx::{ExecutionHandle, Joined, Window};
+pub use http_lifecycle::{
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
+};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
 /// venue answered, so this is never transport loss.
@@ -1913,6 +1917,8 @@ impl OrdersRefresh {
 }
 
 struct IoCore {
+    websocket_write_host: bool,
+    websocket_write_issuer: u64,
     write_failure_text: Option<fn(&VenueError) -> String>,
     unknown_outcome_telemetry: Option<crate::UnknownOutcomeTelemetry>,
     command_failure_summary: fn(&VenueError) -> Option<String>,
@@ -2089,6 +2095,8 @@ struct IoCore {
     socket_driver: crate::socket_driver::Driver,
     #[cfg(feature = "managed-sockets")]
     socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_stats_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
     /// Interest keys repaired recently, and when: a second repair soon after reconnects.
     #[cfg(feature = "managed-sockets")]
     repaired: Vec<(String, f64)>,
@@ -2218,6 +2226,8 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            websocket_write_host: false,
+            websocket_write_issuer: 0,
             write_failure_text: None,
             unknown_outcome_telemetry: None,
             command_failure_summary: |_| None,
@@ -2346,6 +2356,8 @@ impl Default for IoCore {
             socket_driver: Default::default(),
             #[cfg(feature = "managed-sockets")]
             socket_message: None,
+            #[cfg(feature = "managed-sockets")]
+            socket_stats_message: None,
             #[cfg(feature = "managed-sockets")]
             repaired: Vec::new(),
             #[cfg(feature = "managed-sockets")]
@@ -2801,6 +2813,9 @@ impl<P> Cx<'_, P> {
         self.stage_signed(index, outbound, step);
     }
 
+    /// Control traffic only (subscriptions, authentication and heartbeats).
+    /// Order and setting mutations must use `websocket_write` and
+    /// `send_websocket_write`, including when the wire protocol signs them.
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
         if !self.managed_send_allowed(socket) {
             return;
@@ -2940,6 +2955,7 @@ impl<P> Cx<'_, P> {
     }
 
     /// WS authentication uses the same deadline/freshness/generation service.
+    /// Mutations use `send_websocket_write` with a signing recipe instead.
     pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
         if !self.managed_send_allowed(socket) {
             return;
@@ -6272,6 +6288,7 @@ impl<V: Venue> Engine<V> {
                 polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
             Event::WsOpened { socket } => {
+                cx.io.core.sockets.opened(socket);
                 cx.io.core.health.ws_opened = cx.io.core.health.ws_opened.saturating_add(1);
                 self.venue.on_open(&mut cx, socket)
             }
@@ -7626,7 +7643,20 @@ impl<V: Venue> Engine<V> {
                 if !live {
                     continue;
                 }
+                let Some(action) = self.dispatch_websocket_write_action(now, action) else {
+                    self.queue_dispatch_callback_actions(&mut queued, emitted);
+                    continue;
+                };
+                self.queue_dispatch_callback_actions(&mut queued, emitted);
                 match action {
+                    action @ Action::SignedOutbound {
+                        attempt: RequestId(0),
+                        ..
+                    } => {
+                        // Reserved mutation marker: the host still owes its
+                        // synchronous write claim immediately before sending.
+                        self.io.core.actions.push(action);
+                    }
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.core.signing.release(
                             attempt,
@@ -7900,8 +7930,16 @@ impl<V: Venue> Engine<V> {
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
         self.expire_read_roots(now);
+        #[cfg(feature = "managed-sockets")]
+        self.io.core.socket_driver.state.prepare_stats();
         let buffer = std::mem::take(&mut self.io.core.snapshot);
         let mut w = FrameWriter::new(buffer, now);
+        #[cfg(feature = "managed-sockets")]
+        self.io
+            .core
+            .socket_driver
+            .state
+            .write_stats(&mut w, now, true);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
         if let Some(state) = self.venue.export_venue_state_for(&self.store) {
@@ -8007,6 +8045,17 @@ impl<V: Venue> Engine<V> {
         };
         let buffer = std::mem::take(&mut self.io.core.frame);
         let mut w = FrameWriter::new(buffer, now);
+        #[cfg(feature = "managed-sockets")]
+        let publish_stats = store && self.io.core.socket_driver.state.stats_due(now);
+        #[cfg(feature = "managed-sockets")]
+        if publish_stats {
+            self.io.core.socket_driver.state.prepare_stats();
+            self.io
+                .core
+                .socket_driver
+                .state
+                .write_stats(&mut w, now, false);
+        }
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
@@ -8098,6 +8147,10 @@ impl<V: Venue> Engine<V> {
         self.io.core.fills = fills;
         drop(candles);
         self.io.core.candles.clear();
+        #[cfg(feature = "managed-sockets")]
+        if publish_stats {
+            self.io.core.socket_driver.state.stats_published();
+        }
         self.io.core.frame = frame;
         (!empty).then_some(self.io.core.frame.as_slice())
     }
@@ -8331,7 +8384,7 @@ fn orders_held_notice(
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]
 struct SocketRoles {
-    live: Vec<(SocketId, u8)>,
+    live: Vec<(SocketId, u8, bool)>,
     /// Private sockets alone, so the per-frame check scans one or two ids.
     private: Vec<SocketId>,
     /// Closes per role whose replacement connect has not happened yet.
@@ -8350,7 +8403,19 @@ impl SocketRoles {
     fn role_of(&self, socket: SocketId) -> Option<u8> {
         self.live
             .iter()
-            .find_map(|(id, role)| (*id == socket).then_some(*role))
+            .find_map(|(id, role, _)| (*id == socket).then_some(*role))
+    }
+
+    fn opened(&mut self, socket: SocketId) {
+        if let Some((_, _, opened)) = self.live.iter_mut().find(|(id, _, _)| *id == socket) {
+            *opened = true;
+        }
+    }
+
+    fn is_open(&self, socket: SocketId) -> bool {
+        self.live
+            .iter()
+            .any(|(id, _, opened)| *id == socket && *opened)
     }
 
     fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {
@@ -8360,7 +8425,7 @@ impl SocketRoles {
             *awaiting -= 1;
             health.reconnects = health.reconnects.saturating_add(1);
         }
-        self.live.push((socket, role));
+        self.live.push((socket, role, false));
         if role == 1 {
             self.private.push(socket);
         }
@@ -8369,10 +8434,10 @@ impl SocketRoles {
     /// Whether `socket` was a live role socket. Only an unexpected close makes
     /// the role's next connect a reconnect.
     fn closed(&mut self, socket: SocketId, unexpected: bool) -> bool {
-        let Some(index) = self.live.iter().position(|(id, _)| *id == socket) else {
+        let Some(index) = self.live.iter().position(|(id, _, _)| *id == socket) else {
             return false;
         };
-        let (_, role) = self.live.swap_remove(index);
+        let (_, role, _) = self.live.swap_remove(index);
         if unexpected {
             self.awaiting_reconnect[role as usize] =
                 self.awaiting_reconnect[role as usize].saturating_add(1);

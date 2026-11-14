@@ -3,12 +3,21 @@
 //! Synchronous over the local provider, without the HMAC capture codec.
 use safe_cex_engine::signing::{Context, Identities, Operation, Provider, SignError, SignRequest};
 
-#[cfg(any(feature = "hyperliquid", feature = "lighter", feature = "paradex"))]
+#[cfg(any(
+    feature = "hyperliquid",
+    feature = "txflow",
+    feature = "lighter",
+    feature = "paradex"
+))]
 use safe_cex_engine::signing::{Algorithm, PayloadPart};
 
 #[cfg(feature = "grvt")]
 #[path = "hosted_signing/grvt.rs"]
 mod grvt;
+
+#[cfg(feature = "asterdex")]
+#[path = "hosted_signing/asterdex.rs"]
+mod asterdex;
 
 /// The signed-in account a device signs for, captured at construction.
 #[derive(Clone, Debug, Default)]
@@ -22,11 +31,15 @@ pub struct Account {
     /// Paradex: the account address this device's Stark key signs for.
     pub paradex_address: Option<String>,
     pub grvt_trading_account_id: Option<String>,
+    pub asterdex_v3: bool,
+    pub asterdex_user_address: Option<String>,
 }
 
 pub fn admitted(venue: &str) -> bool {
     (cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot"))
         || (cfg!(feature = "grvt") && venue == "grvt")
+        || (cfg!(feature = "txflow") && venue == "txflow")
+        || (cfg!(feature = "asterdex") && venue == "asterdex")
         || lighter(venue)
         || (cfg!(feature = "paradex") && venue == "paradex")
 }
@@ -191,8 +204,8 @@ fn lighter_sign(
     ))
 }
 
-/// Answer one remote ws-auth wallet request with `0x` hex: `hyperliquid-address`
-/// returns the agent address, `hyperliquid-l1` returns `r || s || v` (v 27/28).
+/// Answer a remote wallet request: wallet formats use hex, Aster request
+/// formats return a JSON credential/signature batch.
 /// `now_ms` is the device's protocol clock, for families whose statements expire.
 pub fn sign(
     venue: &str,
@@ -205,6 +218,17 @@ pub fn sign(
 ) -> Result<String, SignError> {
     if !admitted(venue) {
         return Err(SignError::Unsupported);
+    }
+    #[cfg(feature = "asterdex")]
+    if venue == "asterdex" {
+        return asterdex::sign(
+            identities,
+            account,
+            provider,
+            to_sign,
+            output_format,
+            now_ms,
+        );
     }
     #[cfg(feature = "grvt")]
     if venue == "grvt" {
@@ -219,6 +243,12 @@ pub fn sign(
     }
     if output_format.starts_with("grvt-") {
         return Err(SignError::Unsupported);
+    }
+    if (venue == "txflow") != output_format.starts_with("txflow-") {
+        return Err(SignError::InvalidRequest);
+    }
+    if venue == "txflow" && !account.testnet {
+        return Err(SignError::InvalidRequest);
     }
     let paradex_format = output_format.starts_with("paradex-");
     if paradex_format != (venue == "paradex") {
@@ -252,7 +282,7 @@ pub fn sign(
         key: signing.clone(),
     }];
     match output_format {
-        "hyperliquid-address" => {
+        "hyperliquid-address" | "txflow-address" => {
             let own = account.key.as_deref().ok_or(SignError::Unavailable)?;
             if !to_sign.eq_ignore_ascii_case(own) {
                 return Err(SignError::InvalidRequest);
@@ -267,6 +297,24 @@ pub fn sign(
                     mainnet: !account.testnet,
                     vault: account.vault.as_deref(),
                 },
+            )?;
+            operations.push(Operation::Sign {
+                algorithm: Algorithm::Secp256k1Digest,
+                key: signing,
+                payload: vec![PayloadPart::Bytes {
+                    bytes: digest.to_vec(),
+                }],
+            });
+        }
+        #[cfg(feature = "txflow")]
+        "txflow-agent" => {
+            let digest = safe_cex_venue_txflow::sign::statement::derive(
+                to_sign,
+                account
+                    .application_id
+                    .as_deref()
+                    .ok_or(SignError::Unavailable)?,
+                account.vault.as_deref(),
             )?;
             operations.push(Operation::Sign {
                 algorithm: Algorithm::Secp256k1Digest,

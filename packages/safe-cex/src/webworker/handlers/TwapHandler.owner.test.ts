@@ -203,12 +203,14 @@ it('captures the owner before the engine-readiness queue, and drops a stale queu
   expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT restore cancelled-for-owner-change');
 });
 
-it('retains ownerId in waiting and dispatched rows without publishing the session snapshot', async () => {
+it.each([undefined, 0, 1, 7])('preserves persisted generation %s in waiting and dispatched rows without publishing the session snapshot', async (ownerGeneration) => {
   const h = harness();
-  handler.handle({ op: 'twap:state', data: [restored(false)] } as StoreWorkerPayload);
+  const row = { ...restored(false), ...(ownerGeneration !== undefined ? { ownerGeneration } : {}) };
+  const expected = structuredClone(row);
+  handler.handle({ op: 'twap:state', data: [row] } as StoreWorkerPayload);
   await h.lockEntered.promise;
   h.exchange.listeners.get('twap:stateUpdate')?.({});
-  const { id, ...pending } = restored(false);
+  const { id, ...pending } = expected;
   expect(h.postMessage).toHaveBeenLastCalledWith({
     op: 'twap:stateUpdate',
     data: { [id]: pending },
@@ -216,7 +218,7 @@ it('retains ownerId in waiting and dispatched rows without publishing the sessio
   h.setOwner({ ownerId: 'A', generation: 1 });
   h.lockGrant.resolve();
   await vi.advanceTimersByTimeAsync(0);
-  expect(h.adopted).toEqual([restored(false)]);
+  expect(h.adopted).toEqual([expected]);
 });
 
 it('does not reuse a mutated live session snapshot', async () => {

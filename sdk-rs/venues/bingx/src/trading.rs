@@ -4,6 +4,9 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+#[path = "trading/reference.rs"]
+mod reference;
+pub use reference::ReferenceRead;
 #[path = "trading/protection.rs"]
 pub(crate) mod protection;
 #[path = "trading/venue_state.rs"]
@@ -618,30 +621,15 @@ impl Trading {
         }
         match result {
             Ok(job) => {
-                let count = job.steps.len();
-                let writes = Journals::new(&job.steps);
-                let admitted = if job.continue_on_error {
-                    entry.admit_independent(cx, count).map(|plan| (plan, None))
-                } else {
-                    entry
-                        .admit_serial(cx, count)
-                        .map(|(plan, slot)| (plan, Some(slot)))
-                };
-                if let Some((plan, next)) = admitted {
+                if job
+                    .guard
+                    .as_ref()
+                    .is_some_and(|guard| guard.needs_reference(cx.store, &self.references, cx.now))
+                {
                     on_entry(cx);
-                    self.retain_open_orders(cx.store);
-                    self.jobs.insert(
-                        id,
-                        Run {
-                            job,
-                            writes,
-                            plan,
-                            next,
-                            native_ids: Vec::new(),
-                            error: None,
-                        },
-                    );
-                    self.advance(cx, credentials, id);
+                    self.read_reference(cx, entry, id, job);
+                } else {
+                    self.admit_job(cx, credentials, entry, id, job, on_entry);
                 }
             }
             Err(error) => {
@@ -650,6 +638,42 @@ impl Trading {
             }
         }
         true
+    }
+
+    fn admit_job(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: Option<&Credentials>,
+        entry: Entry,
+        id: CommandId,
+        job: Job,
+        on_entry: impl FnOnce(&mut Cx<'_, Pending>),
+    ) {
+        let count = job.steps.len();
+        let writes = Journals::new(&job.steps);
+        let admitted = if job.continue_on_error {
+            entry.admit_independent(cx, count).map(|plan| (plan, None))
+        } else {
+            entry
+                .admit_serial(cx, count)
+                .map(|(plan, slot)| (plan, Some(slot)))
+        };
+        if let Some((plan, next)) = admitted {
+            on_entry(cx);
+            self.retain_open_orders(cx.store);
+            self.jobs.insert(
+                id,
+                Run {
+                    job,
+                    writes,
+                    plan,
+                    next,
+                    native_ids: Vec::new(),
+                    error: None,
+                },
+            );
+            self.advance(cx, credentials, id);
+        }
     }
 
     fn advance(
@@ -1772,7 +1796,13 @@ impl Trading {
                         ("LONG", OrderSide::Sell) | ("SHORT", OrderSide::Buy)
                     ),
             };
-            guard
+            // Validate the original before reading; the full guard still gates admission
+            // after the requested reference arrives and every destructive final Claim.
+            let mut initial = guard.clone();
+            if guard.needs_reference(cx.store, &self.references, cx.now) {
+                initial.trigger = None;
+            }
+            initial
                 .check(cx.store, &self.references, cx.now, false)
                 .map_err(|e| e.message)?;
             if !meta.attached

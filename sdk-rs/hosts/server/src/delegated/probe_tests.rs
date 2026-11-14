@@ -17,15 +17,15 @@ const SECRET: &str = "synthetic-material";
 const PASS: &str = "synthetic-passphrase";
 
 #[derive(Default)]
-struct Seen {
-    signed_reads: usize,
-    refused: usize,
+pub(crate) struct Seen {
+    pub(crate) signed_reads: usize,
+    pub(crate) refused: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
-struct VenueIo {
-    venue: &'static str,
-    seen: Arc<Mutex<Seen>>,
+pub(crate) struct VenueIo {
+    pub(crate) venue: &'static str,
+    pub(crate) seen: Arc<Mutex<Seen>>,
 }
 fn header<'a>(r: &'a HttpRequest, name: &str) -> Option<&'a str> {
     r.headers
@@ -72,10 +72,22 @@ impl VenueIo {
             "POST"
         };
         let suffix = r.body.as_deref().unwrap_or("");
-        let mac = |payload: String, encoding| {
-            hmac_sha256(SECRET.as_bytes(), payload.as_bytes(), encoding)
-        };
         let h = |name: &str| header(r, name).unwrap_or("");
+        let key = h(match self.venue {
+            "binance" => "X-MBX-APIKEY",
+            "okx" => "OK-ACCESS-KEY",
+            "bitget" | "blofin" => "ACCESS-KEY",
+            "kucoin" => "KC-API-KEY",
+            _ => unreachable!(),
+        });
+        let material = match key {
+            KEY => SECRET,
+            "synthetic-other-key" => "synthetic-other-material",
+            _ => return false,
+        };
+        let mac = |payload: String, encoding| {
+            hmac_sha256(material.as_bytes(), payload.as_bytes(), encoding)
+        };
         match self.venue {
             "binance" => {
                 let Some((_, query)) = r.url.split_once('?') else {
@@ -84,7 +96,7 @@ impl VenueIo {
                 let Some((payload, sig)) = query.rsplit_once("&signature=") else {
                     return false;
                 };
-                h("X-MBX-APIKEY") == KEY && sig == mac(payload.into(), Encoding::Hex)
+                h("X-MBX-APIKEY") == key && sig == mac(payload.into(), Encoding::Hex)
             }
             "okx" | "bitget" => {
                 let prefix = if self.venue == "okx" {
@@ -93,7 +105,7 @@ impl VenueIo {
                     "ACCESS-"
                 };
                 let sig = h(&(prefix.to_owned() + "SIGN"));
-                h(&(prefix.to_owned() + "KEY")) == KEY
+                h(&(prefix.to_owned() + "KEY")) == key
                     && h(&(prefix.to_owned() + "PASSPHRASE")) == PASS
                     && sig
                         == mac(
@@ -116,13 +128,13 @@ impl VenueIo {
                     ),
                     Encoding::Hex,
                 );
-                h("ACCESS-KEY") == KEY
+                h("ACCESS-KEY") == key
                     && h("ACCESS-PASSPHRASE") == PASS
                     && sig == safe_cex_crypto::encode(hex.as_bytes(), Encoding::Base64)
             }
             "kucoin" => {
                 let sig = h("KC-API-SIGN");
-                h("KC-API-KEY") == KEY
+                h("KC-API-KEY") == key
                     && sig
                         == mac(
                             format!("{}{method}{}{suffix}", h("KC-API-TIMESTAMP"), path(r)),
@@ -309,6 +321,47 @@ async fn admission_hmac_private_startup_accepts_valid_pairs() {
         .await;
 }
 
+#[tokio::test]
+async fn hosted_venues_use_real_delegated_construction_and_the_existing_probe() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for &venue in VENUES {
+                if safe_cex_native::resolve::rest_base_url(venue, false).is_err() {
+                    continue;
+                }
+                let init = crate::envelope::InitPayload {
+                    exchange_name: venue.into(),
+                    account_name: "fixture".into(),
+                    key: KEY.into(),
+                    signing_mode: Some("delegated".into()),
+                    ..Default::default()
+                };
+                for (material, accepted) in [(SECRET, true), ("different-material", false)] {
+                    let pair = crate::delegated::DelegatedPair::new(
+                        KEY.into(),
+                        material.into(),
+                        Some(PASS.into()),
+                    );
+                    let prepared = crate::delegated::prepare_delegated(&init, pair)
+                        .unwrap_or_else(|_| panic!("{venue}: hosted venue must construct"));
+                    let (result, seen) = check(venue, prepared).await;
+                    assert_eq!(result.is_ok(), accepted, "{venue}: {result:?}");
+                    assert!(seen.lock().unwrap().signed_reads > 0);
+                    if !accepted {
+                        assert!(matches!(
+                            result,
+                            Err(ProbeRefusal {
+                                transient: false,
+                                ..
+                            })
+                        ));
+                    }
+                }
+            }
+        })
+        .await;
+}
+
 #[derive(Clone, Copy)]
 enum DeviceAnswer {
     Correct,
@@ -317,7 +370,7 @@ enum DeviceAnswer {
 }
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
-fn operation(venue: &str, canonical: &str) -> String {
+pub(crate) fn operation(venue: &str, canonical: &str) -> String {
     if venue == "binance" {
         return canonical
             .split('&')
@@ -451,7 +504,13 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                             assert_eq!(seen.refused, 0);
                         } else {
                             assert!(
-                                matches!(result, Err(ProbeRefusal { transient: false })),
+                                matches!(
+                                    result,
+                                    Err(ProbeRefusal {
+                                        transient: false,
+                                        ..
+                                    })
+                                ),
                                 "{venue}: {result:?}"
                             );
                             assert!(seen.refused > 0, "{venue}: fixture verified the signature");
@@ -466,7 +525,13 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                 }
                 let (result, seen) = check(venue, local(venue, "synthetic-other-material")).await;
                 assert!(
-                    matches!(result, Err(ProbeRefusal { transient: false })),
+                    matches!(
+                        result,
+                        Err(ProbeRefusal {
+                            transient: false,
+                            ..
+                        })
+                    ),
                     "{venue}: different delegated pair"
                 );
                 assert!(seen.lock().unwrap().refused > 0);
@@ -478,8 +543,16 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
 #[tokio::test]
 async fn admission_hmac_handover_is_single_use_and_bound_to_the_attempt_and_pair() {
     for &venue in VENUES {
+        if safe_cex_native::resolve::rest_base_url(venue, false).is_err() {
+            assert!(
+                crate::delegated::Handovers::default()
+                    .issue("pending", venue, 0)
+                    .is_err()
+            );
+            continue;
+        }
         crate::delegated::with_test_declaration(
-            json!({"venues": {venue: {"delegated": {"enabled": true}}}}),
+            json!({"venues": {venue: {"remoteSigning": {"enabled": true}}}}),
             async {
                 let mut handovers = crate::delegated::Handovers::default();
                 let offer = handovers.issue("pending", venue, 0).unwrap();
@@ -535,19 +608,10 @@ fn admission_enabled_venues_require_an_offline_suite() {
             "{venue}: missing offline suite"
         );
     }
-    for (venue, rule) in rules["venues"].as_object().unwrap() {
-        if rule["delegated"]["enabled"] == true {
-            assert!(
-                venue == "bybit" || VENUES.contains(&venue.as_str()),
-                "{venue}: add and pass admission checks before enabling"
-            );
-        }
-    }
-    for &venue in VENUES {
-        assert_ne!(
-            rules["venues"][venue]["delegated"]["enabled"], true,
-            "{venue}: this change must keep rollout off"
-        );
+    // DELEGATED uses shared hosted support rather than a separate rollout list.
+    // The catalog above pins COSIGNED proof coverage; it does not gate DELEGATED.
+    for rule in rules["venues"].as_object().unwrap().values() {
+        assert!(rule.get("delegated").is_none());
     }
 }
 
@@ -567,7 +631,13 @@ async fn admission_hmac_public_or_frame_fed_startup_cannot_prove_a_private_key()
                     prepared.options = options.to_string();
                     let (result, seen) = check(venue, prepared).await;
                     assert!(
-                        matches!(result, Err(ProbeRefusal { transient: false })),
+                        matches!(
+                            result,
+                            Err(ProbeRefusal {
+                                transient: false,
+                                ..
+                            })
+                        ),
                         "{venue}: {field} cannot satisfy private admission"
                     );
                     assert_eq!(seen.lock().unwrap().signed_reads, 0);

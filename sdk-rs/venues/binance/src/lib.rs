@@ -924,6 +924,11 @@ impl BinanceFutures {
         match event_type(text) {
             Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
+                    if !self.is_spot() && !self.options.portfolio_margin {
+                        cx.record_socket_topic(&["!bookTicker"]);
+                    } else {
+                        cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
+                    }
                     let (bid, ask) = (num::parse(&event.b), num::parse(&event.a));
                     cx.store.update_ticker(&event.s, |t| {
                         t.bid = bid;
@@ -942,6 +947,10 @@ impl BinanceFutures {
     }
 
     fn apply_ticker(&mut self, cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+        cx.record_socket_topic(&["!ticker@arr"]);
+        if self.is_spot() {
+            cx.record_socket_symbol_topic(&event.s, &["@ticker"]);
+        }
         let last = num::parse(&event.c);
         let percentage = num::parse(&event.percentage);
         let volume = num::parse(&event.v);
@@ -996,6 +1005,7 @@ impl BinanceFutures {
                 }
             }
             Some("markPriceUpdate") => {
+                cx.record_socket_topic(&["!markPrice@arr@1s"]);
                 if let Ok(events) = serde_json::from_str::<Vec<MarkPriceEvent>>(text) {
                     for event in events {
                         let mark = num::parse(&event.p);
@@ -1016,6 +1026,7 @@ impl BinanceFutures {
             Some("kline") => {
                 if let Ok(event) = serde_json::from_str::<KlineEvent>(text) {
                     let k = &event.k;
+                    cx.record_socket_symbol_topic(&k.s, &["@kline_", &k.i]);
                     if let Some(interval) = Interval::parse(&k.i)
                         && self.candles.contains_key(&(k.s.to_string(), interval))
                     {
@@ -1033,6 +1044,7 @@ impl BinanceFutures {
     }
 
     fn on_depth(&mut self, cx: &mut Cx<'_, Pending>, event: DepthEvent<'_>) {
+        cx.record_socket_symbol_topic(&event.s, &["@depth"]);
         let paused = cx.now < self.rest_paused_until;
         let Some(state) = self.books.get_mut(event.s.as_ref()) else {
             return;
@@ -1597,7 +1609,14 @@ impl Venue for BinanceFutures {
                 }
             }
             Channel::Market | Channel::SpotTicker(_) => self.on_market_frame(cx, text),
-            Channel::Private => self.on_user_event(cx, text),
+            Channel::Private => {
+                if event_type(text)
+                    .is_some_and(|event| !matches!(event, "listenKeyExpired" | "serverShutdown"))
+                {
+                    cx.record_socket_topic(&["private"]);
+                }
+                self.on_user_event(cx, text);
+            }
         }
     }
 

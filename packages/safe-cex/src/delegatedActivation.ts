@@ -1,3 +1,5 @@
+import type { ExchangeName } from './types';
+
 /** Capabilities of this protocol slice, separate from transport/ledger readiness. */
 export interface DelegatedActivationScopeV1 {
   place?: boolean;
@@ -14,15 +16,18 @@ export interface DelegatedActivationCapabilities {
   delegatedOrderActionsV1?: boolean;
   delegatedOrderActionLedgerV1?: boolean;
   delegatedActivationScopeV1?: DelegatedActivationScopeV1;
+  /** Venue echoed by fresh box capability discovery for this joined account. */
+  delegatedVenueV1?: string | null;
 }
 
 export interface DelegatedActivationFlags {
   /** Resolved by the host for this owner; never a signer-selection fallback. */
-  DELEGATED_BYBIT: boolean;
+  DELEGATED: boolean;
 }
 
 type RefusalCode =
-  | 'delegatedBybitDisabled'
+  | 'delegatedDisabled'
+  | 'delegatedVenueUnavailable'
   | 'delegatedOrderFramesUnavailable'
   | 'delegatedOrderLedgerUnavailable'
   | 'delegatedPlaceUnavailable'
@@ -49,9 +54,10 @@ export class DelegatedActivationError extends Error {
 export function requireDelegatedActivation(
   capabilities: DelegatedActivationCapabilities,
   flags: DelegatedActivationFlags,
+  venue: ExchangeName,
 ): void {
-  if (flags?.DELEGATED_BYBIT !== true)
-    throw new DelegatedActivationError('delegatedBybitDisabled', 'DELEGATED_BYBIT is not enabled for this owner');
+  if (flags?.DELEGATED !== true)
+    throw new DelegatedActivationError('delegatedDisabled', 'DELEGATED is not enabled for this owner');
   if (capabilities.delegatedOrderFramesV1 !== true)
     throw new DelegatedActivationError(
       'delegatedOrderFramesUnavailable',
@@ -62,6 +68,8 @@ export function requireDelegatedActivation(
       'delegatedOrderLedgerUnavailable',
       'DELEGATED requires the router ledger on this connection',
     );
+  if (capabilities.delegatedVenueV1 !== venue)
+    throw new DelegatedActivationError('delegatedVenueUnavailable', 'DELEGATED capabilities belong to another venue');
   if (capabilities.delegatedActivationScopeV1?.place !== true)
     throw new DelegatedActivationError('delegatedPlaceUnavailable', 'DELEGATED place capability is unavailable');
   if (capabilities.delegatedActivationScopeV1.close !== 'reduceOnly')

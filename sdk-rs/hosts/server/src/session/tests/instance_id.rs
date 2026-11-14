@@ -1190,7 +1190,7 @@ async fn delegated_mode_refusal_reply(
             let pair = || {
                 crate::delegated::DelegatedPair::new(
                     payload.key.clone(),
-                    safe_cex_crypto::signer::Secret::new("synthetic-registration-fixture".into()),
+                    "synthetic-registration-fixture".into(),
                     None,
                 )
             };
@@ -1304,7 +1304,7 @@ async fn queued_mode_refusal_retired_queue(
             let pair = || {
                 crate::delegated::DelegatedPair::new(
                     payload.key.clone(),
-                    safe_cex_crypto::signer::Secret::new("synthetic-registration-fixture".into()),
+                    "synthetic-registration-fixture".into(),
                     None,
                 )
             };

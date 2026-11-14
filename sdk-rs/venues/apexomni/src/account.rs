@@ -1503,6 +1503,7 @@ impl ApexOmni {
         if message.topic != "ws_zk_accounts_v3" {
             return true;
         }
+        cx.record_socket_topic(&["ws_zk_accounts_v3"]);
         let Some(contents) = message.contents else {
             return true;
         };

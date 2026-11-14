@@ -1,11 +1,17 @@
 import type { BinancePMExchange } from './binancepm.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import {
+  BASE_WS_URL,
+  ENDPOINTS,
+  ORDER_SIDE,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+} from '../../../exchanges/binance/binancepm.types';
 import { LogSeverity, OrderStatus, OrderType, PositionSide } from '../../../types';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRIGGER_TYPE, ORDER_TYPE } from '../../../exchanges/binance/binancepm.types';
 
 // {
 //   "e": "ORDER_TRADE_UPDATE",
@@ -192,6 +198,11 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
         this.handleOrderEvents([json]);
       }
 
+      if (json?.e === 'ALGO_UPDATE' && json.fs !== 'CM') {
+        this.recordMessageHandlerStats('conditional-order');
+        this.handleAlgoOrderEvents([json]);
+      }
+
       if (json?.e === 'CONDITIONAL_ORDER_TRADE_UPDATE') {
         this.recordMessageHandlerStats('conditional-order');
         this.handleConditionalOrderEvents([json]);
@@ -368,6 +379,41 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
   //     "gtd": 0
   //   }
   // }
+  // PM wraps Algo Service updates in `ao`, unlike USD-M's `o`.
+  handleAlgoOrderEvents = (events: Array<Record<string, any>>) => {
+    for (const { ao: data } of events) {
+      if (!data?.caid) continue;
+      const id = data.caid;
+      const type = ORDER_TYPE[data.o];
+      if (data.X === 'NEW' && type) {
+        const amount = parseFloat(data.q) || 0;
+        this.store.addOrUpdateOrder({
+          id,
+          status: OrderStatus.Open,
+          symbol: data.s,
+          type,
+          side: ORDER_SIDE[data.S],
+          price: parseFloat(data.tp) || parseFloat(data.p) || 0,
+          amount,
+          filled: 0,
+          remaining: amount,
+          lastUpdate: virtualClock.getCurrentTimeMs(),
+          reduceOnly: data.R || false,
+          close: data.cp || false,
+          info: data,
+          ...(type === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
+          ...(type === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
+        });
+      } else if (['CANCELED', 'CANCELLED', 'EXPIRED', 'REJECTED'].includes(data.X)) {
+        this.store.markOrdersTerminal([{ id }], OrderStatus.Canceled);
+      } else if (['TRIGGERING', 'TRIGGERED', 'FINISHED'].includes(data.X)) {
+        // Algo completion is not a trade. ORDER_TRADE_UPDATE owns actual fills.
+        this.store.updateOrderStatus({ id }, OrderStatus.Closed);
+      }
+    }
+    this.throttledFetchOrders();
+  };
+
   handleConditionalOrderEvents = (events: Array<Record<string, any>>) => {
     events.forEach(({ so: data }) => {
       if (data.os === 'PARTIALLY_FILLED' || data.os === 'FILLED') {

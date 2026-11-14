@@ -18,6 +18,15 @@ export type AsterDEXPublicSetup = Readonly<{
 
 const trimmed = (value?: string): string | undefined => (value === undefined ? undefined : rustTrim(value) || undefined);
 
+/** Delegated wallets resolve from public addresses; no origin scalar is needed. */
+export const resolveAsterDEXSignerVersion = (options: ExchangeOptions): 'v1' | 'v3' => {
+  if (!options.remoteSigner && !options.payloadSigner) return resolveAsterDEXApiVersion(options);
+  const configured = options.extra?.asterdexApiVersion;
+  if (configured === 'v1' || configured === 'v3') return configured;
+  return isAsterDEXAddress(trimmed(options.auth?.userAddress) ?? trimmed(options.applicationId))
+    && isAsterDEXAddress(trimmed(options.auth?.signerAddress) ?? trimmed(options.key)) ? 'v3' : 'v1';
+};
+
 /** TS half of AsterDEX trusted setup (RUST_ASTER_SIGNER_ADMISSION.md decisions
  * 4-5). Native setup maps identically; asterdex-signer-setup.golden.json pins both. */
 export const mapAsterDEXSignerSetup = (options: ExchangeOptions): Readonly<{
@@ -25,7 +34,7 @@ export const mapAsterDEXSignerSetup = (options: ExchangeOptions): Readonly<{
   secondarySigningFromPrimary: boolean;
   publicSetup: AsterDEXPublicSetup;
 }> => {
-  const apiVersion = resolveAsterDEXApiVersion(options);
+  const apiVersion = resolveAsterDEXSignerVersion(options);
   const { userAddress } = resolveAsterDEXV3AuthContext(options);
   if (!options.publicDataOnly && apiVersion === 'v1' && isAsterDEXAddress(trimmed(options.key))
     && isAsterDEXV3PrivateKey(options.secret) && !userAddress) {

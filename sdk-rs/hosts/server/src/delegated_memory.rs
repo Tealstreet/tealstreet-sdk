@@ -4,14 +4,20 @@ use std::ptr::NonNull;
 use std::sync::OnceLock;
 use zeroize::{Zeroize, Zeroizing};
 
-/// Created only after the caller resolves its per-venue DELEGATED flag.
+pub(crate) fn warn_locking_unavailable() {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED
+        .call_once(|| crate::state::Log::warn("DELEGATED memory locking unavailable; continuing"));
+}
+
+/// Created only after the caller checks hosted signing and origin support.
 /// Preparation precedes receiving or opening any DELEGATED key material.
 #[derive(Debug)]
 pub struct DelegatedMemory(());
 
 impl DelegatedMemory {
-    pub fn prepare(_venue: &str, delegated_enabled: bool) -> io::Result<Self> {
-        if !delegated_enabled {
+    pub fn prepare(_venue: &str, hosted_supported: bool) -> io::Result<Self> {
+        if !hosted_supported {
             return Err(io::ErrorKind::Unsupported.into());
         }
         static READY: OnceLock<Result<(), io::ErrorKind>> = OnceLock::new();
@@ -102,10 +108,7 @@ impl SecretCopy {
             // SAFETY: the mapping is alive and independently page aligned.
             let locked = unsafe { libc::mlock(raw, mapped_len) } == 0;
             if !locked {
-                static WARNED: std::sync::Once = std::sync::Once::new();
-                WARNED.call_once(|| {
-                    crate::state::Log::warn("DELEGATED memory locking unavailable; continuing")
-                });
+                warn_locking_unavailable();
             }
             Ok(Self {
                 address,

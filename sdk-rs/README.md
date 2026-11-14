@@ -6,6 +6,29 @@ patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 
 ## Crates
 
+Local worker TWAP restore ownership is optional for compatibility with existing
+JS hosts. `EngineHost.algoStart(accountName, twapOwner?)` accepts a trusted
+`{ ownerId: string, generation: number }` snapshot (nonempty owner and a safe,
+nonnegative integer generation). It calls the additive WASM entry point
+`algoStartOwned(accountName, twapOwnerJson, now, wall)`; the JSON contains exactly
+`ownerId` and `generation`. Existing three-argument WASM `algoStart` remains
+unchanged and retains the prior account-name-only restore behavior when the
+owner parameter is absent. This compatibility exception is interim; explicit
+null/invalid ownership never selects it. Bound restores require both original
+persisted tags; untagged saved rows do not resume.
+
+The native server initially binds TWAPs to the verified registry identity digest when present,
+otherwise the authenticated user, with a generation derived from that binding.
+Same-owner reconnects, resumes and signing handovers keep the current generation,
+so the approved 60-second COSIGNED resume
+window keeps running TWAPs. Fresh bindings for the same authenticated identity
+use the same initial generation across account rebuilds, restarts and box moves.
+An in-place authenticated owner change advances the binding's generation and
+drops the old owner's pending slices, even when returning to an earlier owner;
+a retired generation is never reinstated on that binding.
+Bound restores refuse pre-release-8 untagged rows with a visible error; see the
+[TWAP ownership contract](algos/twap/README.md) for the exact messages.
+
 | Crate | Purpose |
 | --- | --- |
 | `safe-cex-crypto` | Signing primitives: HMAC, Ed25519, P-256, EIP-712, Starknet SNIP-12, Lighter Poseidon2/Schnorr, zkLink |
@@ -113,6 +136,12 @@ its separate source. Test fixtures deliberately inject both sources through the
 `test-support` feature; production constructors have no implicit seeded mode.
 
 ## Account transport routing
+
+Hosted local setup captures `TrustedSignerState` after the registry consumes
+signing material. Required public wallet metadata remains in account options;
+opaque non-JSON setup facts travel with native `ServerConfig` and refuse a
+different venue. Client JSON cannot assert trusted derived-key facts. The same
+state accompanies both the admission probe and resident construction.
 
 Venues emit real URLs and logical socket roles; the core never chooses a proxy.
 `RustEngineExchange` applies the registered safe-cex transport through

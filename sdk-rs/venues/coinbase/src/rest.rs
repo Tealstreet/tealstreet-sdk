@@ -104,6 +104,7 @@ impl Coinbase {
                 scope: None,
             },
             Pending::Trading(pending) => pending.signing_role(),
+            Pending::PrivateDrb(_) => CredentialRole::SessionAuth,
         };
         let selected = self.signers.select(role).ok();
         let recipe = if public {

@@ -438,6 +438,28 @@ describe('BuyCommand', () => {
       expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 0.002, amount: 10_000 }));
     });
 
+    it('sizes suffix USD at a resolved percent limit price', async () => {
+      const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.000001;
+
+      const result = await command.execute(createMockContext(['buy', '1000$', 'at', '-20%'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 40_000, amount: 0.025 }));
+    });
+
+    it('sizes best-priced USD at the bid instead of last', async () => {
+      const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.000001;
+      exchange.store!.tickers![0].last = 82_000;
+      exchange.store!.tickers![0].bid = 60_000;
+
+      const result = await command.execute(createMockContext(['buy', '$50', 'best'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 60_000, amount: 0.000833 }));
+    });
+
     it('sizes a balance percentage at the limit price', async () => {
       const exchange = createMockExchange();
       exchange.store!.markets![0].precision.amount = 0.0001;
@@ -448,6 +470,25 @@ describe('BuyCommand', () => {
 
       expect(result.success).toBe(true);
       expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 60_000, amount: 0.0008 }));
+    });
+
+    it('sizes DOGE at the limit price before converting its 1000-DOGE ctVal', async () => {
+      const exchange = createMockExchange();
+      const market = exchange.store!.markets![0];
+      market.symbol = 'DOGEUSDT';
+      market.base = 'DOGE';
+      market.contractSize = 1_000;
+      market.precision = { amount: 0.01, price: 0.0001 };
+      exchange.store!.tickers![0].symbol = 'DOGEUSDT';
+      exchange.store!.tickers![0].last = 0.1;
+
+      const result = await command.execute(createMockContext(['buy', '$10', 'at', '0.05', 'DOGEUSDT'], exchange));
+
+      expect(result.success).toBe(true);
+      // $10 / $0.05 = 200 DOGE = 0.2 native contracts, not 0.1 at last.
+      expect(exchange.placeOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ symbol: 'DOGEUSDT', price: 0.05, amount: 0.2 }),
+      );
     });
   });
 

@@ -5,6 +5,7 @@ import type { CredentialPresence } from './construction';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { nanoid } from 'nanoid';
 
+import { resolveAsterDEXSignerVersion } from './asterdexSignerSetup';
 import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
 import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveEffectivePublicDataOnly, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
@@ -121,6 +122,10 @@ export class DelegatedSignerSetup {
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');
     const presence = { key: primary !== undefined, secret: Boolean(remoteSigner || payloadSigner) };
     const publicDataOnly = derivePublicMode(name, options, undefined, presence).publicDataOnly;
+    if (name === 'asterdex' && this.usesPayloadSigner && !publicDataOnly && resolveAsterDEXSignerVersion(options) === 'v3') {
+      const message = 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (name === 'backpack' && this.usesPayloadSigner && !publicDataOnly) {
       const message = 'Backpack requires RemoteSigner Ed25519 custody';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });

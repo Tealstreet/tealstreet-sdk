@@ -23,6 +23,7 @@ pub(crate) struct MockVenue {
     key: String,
     material: String,
     pub observed: Arc<Mutex<Observed>>,
+    admission: Option<crate::delegated::probe::venue_tests::VenueIo>,
 }
 
 impl MockVenue {
@@ -31,7 +32,20 @@ impl MockVenue {
             key,
             material,
             observed: Arc::default(),
+            admission: None,
         }
+    }
+
+    pub(crate) fn for_admission(
+        venue: &'static str,
+    ) -> (Self, Arc<Mutex<crate::delegated::probe::venue_tests::Seen>>) {
+        let seen = Arc::default();
+        let mut mock = Self::new("synthetic-key".into(), "synthetic-material".into());
+        mock.admission = Some(crate::delegated::probe::venue_tests::VenueIo {
+            venue,
+            seen: Arc::clone(&seen),
+        });
+        (mock, seen)
     }
 
     fn accepts(&self, request: &HttpRequest) -> bool {
@@ -77,9 +91,12 @@ fn answer(events: &Events, id: RequestId, body: Value) {
 impl Transport for MockVenue {
     fn prepare_http(
         &self,
-        _: HttpRequest,
-        _: safe_cex_engine::request_context::RoutingIntent,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
     ) -> HttpPrepareFuture {
+        if let Some(io) = &self.admission {
+            return io.prepare_http(request, intent);
+        }
         self.observed.lock().unwrap().preparations += 1;
         let venue = self.clone();
         Box::pin(async move { Ok(Box::new(Prepared(venue)) as Box<dyn PreparedHttp>) })
@@ -88,9 +105,12 @@ impl Transport for MockVenue {
     fn connect(
         &self,
         socket: SocketId,
-        _: String,
+        url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if let Some(io) = &self.admission {
+            return io.connect(socket, url, events);
+        }
         self.observed.lock().unwrap().sockets += 1;
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
@@ -105,6 +125,9 @@ impl Transport for MockVenue {
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
+        if let Some(io) = &self.admission {
+            return io.request(request, events);
+        }
         self.observed.lock().unwrap().requests += 1;
         let path = request.url.split('?').next().unwrap();
         let private = request

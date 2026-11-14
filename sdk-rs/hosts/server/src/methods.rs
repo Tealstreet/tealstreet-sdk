@@ -438,7 +438,7 @@ pub fn translate_delegated_action(
     open_order_symbols: &[String],
     public_only: bool,
 ) -> Result<Vec<Plan>, Refused> {
-    if public_only || !safe_cex_remote_signer::delegated_enabled(venue) {
+    if public_only || !crate::delegated::enabled(venue) {
         return Err(refused(
             "UnsupportedMethod",
             "DELEGATED methods are not enabled for this account",
@@ -971,6 +971,51 @@ mod tests {
             [Plan::Command { command, .. }] | [Plan::AfterLoad { command, .. }] => command.clone(),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn typed_full_writes_use_the_shared_hosted_venue_gate() {
+        crate::delegated::with_test_declaration(
+            json!({"venues": {
+                "bybit": {"remoteSigning":{"enabled":false}},
+                "binance": {"remoteSigning":{"enabled":true}},
+                "hyrotrader": {"remoteSigning":{"enabled":true}}
+            }}),
+            async {
+                let args = [json!("BTCUSDT"), json!(10), Value::Null];
+                let plans = translate_delegated_action(
+                    "binance",
+                    "setLeverage",
+                    &args,
+                    &caps(),
+                    &[],
+                    false,
+                )
+                .unwrap();
+                let [Plan::Command { command, .. }] = plans.as_slice() else {
+                    panic!("expected typed leverage plan")
+                };
+                assert_eq!(command, &single("setLeverage", json!(args), &caps()));
+                for (venue, public) in [
+                    ("bybit", false),
+                    ("hyrotrader", false),
+                    ("unknown", false),
+                    ("binance", true),
+                ] {
+                    let error = translate_delegated_action(
+                        venue,
+                        "setLeverage",
+                        &args,
+                        &caps(),
+                        &[],
+                        public,
+                    )
+                    .unwrap_err();
+                    assert_eq!(error.name, "UnsupportedMethod");
+                }
+            },
+        )
+        .await;
     }
 
     #[test]

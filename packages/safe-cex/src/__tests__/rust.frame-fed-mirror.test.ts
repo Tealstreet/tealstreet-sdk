@@ -227,19 +227,19 @@ describe('frame-fed main-thread mirror', () => {
       }
     });
 
-    it('forwards to the data source once a family proves to have no page engine', async () => {
+    it('refuses locally once a family proves to have no page engine', async () => {
       const fake = fakeEngine({ supported: false });
       const mirror = mirrorWith(fake);
       exchange = mirror.exchange;
 
-      await mirror.exchange.placeOrder(order);
+      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
       expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
-      expect(mirror.calls.some((method) => method.startsWith('placeOrder'))).toBe(true);
+      expect(mirror.calls).toEqual([]);
     });
   });
 
-  describe('a write that fails on its data source', () => {
+  describe('a write refused before reaching its data source', () => {
     const failingMirror = async (failure: Record<string, unknown>) => {
       const mirror = mirrorWith(fakeEngine({ supported: false }), failure);
       exchange = mirror.exchange;
@@ -249,7 +249,7 @@ describe('frame-fed main-thread mirror', () => {
       return { mirror, errors };
     };
 
-    it('reports it on the page, as a hosted server reports nothing', async () => {
+    it('reports unsupported page execution without contacting the server', async () => {
       const { mirror, errors } = await failingMirror({
         message: 'Signing timed out before dispatch',
         kind: 'timeout',
@@ -259,15 +259,17 @@ describe('frame-fed main-thread mirror', () => {
       await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
       expect(errors).toHaveLength(1);
-      expect(String(errors[0])).toContain('Signing timed out before dispatch');
+      expect(String(errors[0])).toContain('manual-write engine');
+      expect(mirror.calls).toEqual([]);
     });
 
-    it('stays quiet on one its worker already reported', async () => {
+    it('reports the local refusal once even if a worker reply would be marked reported', async () => {
       const { mirror, errors } = await failingMirror({ message: 'rejected', outcome: 'rejected', errorReported: true });
 
-      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'rejected' });
+      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
-      expect(errors).toHaveLength(0);
+      expect(errors).toHaveLength(1);
+      expect(mirror.calls).toEqual([]);
     });
   });
 
@@ -280,7 +282,7 @@ describe('frame-fed main-thread mirror', () => {
     const mirrorOnly = () =>
       new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, new DefaultStore());
 
-    it('rejects a kept engine at once when the bridge is removed, a write as unknown', async () => {
+    it('rejects the removed read bridge and refuses an unsupported page write as notSent', async () => {
       vi.useFakeTimers();
       try {
         fakeEngine({ supported: false });
@@ -289,7 +291,7 @@ describe('frame-fed main-thread mirror', () => {
         const pendingRead = exchange.callMethodInWorker('fetchHistoricalFills', { from: 0, to: 1 } as never);
         const pendingWrite = exchange.callMethodInWorker('placeOrder', order as never);
         const read = expect(pendingRead).rejects.toThrow('stopped before answering');
-        const write = expect(pendingWrite).rejects.toMatchObject({ outcome: 'unknown' });
+        const write = expect(pendingWrite).rejects.toMatchObject({ outcome: 'notSent' });
         await vi.advanceTimersByTimeAsync(0);
         exchange.off('callMethod', bridge);
         await read;
@@ -327,7 +329,7 @@ describe('frame-fed main-thread mirror', () => {
       return target;
     };
 
-    it('fails at 30 s while the account loads, and leaves a write on its long bound', async () => {
+    it('bounds the read at 30 s while refusing an unsupported page write locally', async () => {
       vi.useFakeTimers();
       try {
         fakeEngine({ supported: false });
@@ -339,7 +341,7 @@ describe('frame-fed main-thread mirror', () => {
         await vi.advanceTimersByTimeAsync(30_000);
         await refused;
         await vi.advanceTimersByTimeAsync(60_000);
-        expect(write).not.toHaveBeenCalled();
+        expect(write).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outcome: 'notSent' }));
       } finally {
         vi.useRealTimers();
       }
@@ -803,15 +805,15 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
-  it('stays a plain mirror where the family has no frame-fed engine', async () => {
+  it('refuses writes where the family has no frame-fed engine', async () => {
     const fake = fakeEngine({ supported: false });
     const mirror = mirrorWith(fake);
     exchange = mirror.exchange;
     await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(fake.started).toBe(0);
     expect(fake.constructed).toBe(0);
-    await exchange.placeOrder(order);
-    expect(mirror.calls).toContain('placeOrder');
+    await expect(exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(mirror.calls).toEqual([]);
     expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
   });
 
@@ -823,8 +825,8 @@ describe('frame-fed main-thread mirror', () => {
     exchange = mirror.exchange;
     await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(construct).not.toHaveBeenCalled();
-    await exchange.placeOrder(order);
-    expect(mirror.calls).toContain('placeOrder');
+    await expect(exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(mirror.calls).toEqual([]);
   });
 
   it('never starts an engine that does not report itself frame-fed', async () => {

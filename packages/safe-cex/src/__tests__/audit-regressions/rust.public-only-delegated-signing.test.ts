@@ -13,11 +13,42 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const venues = BETA_VENUES.filter((name) => deriveRemoteSigningPolicy(name)?.enabled);
+const publicCases: Array<{ name: ExchangeName; version?: 'v1' | 'v3' }> = venues.map((name) => ({ name }));
+publicCases.push({ name: 'asterdex', version: 'v1' }, { name: 'asterdex', version: 'v3' });
 const unusedSigners = () => ({
   remoteSigner: {
     sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn(),
   },
   payloadSigner: vi.fn(),
+});
+
+it.each<{ key?: string; publicDataOnly?: boolean }>([
+  {}, { key: '' }, { publicDataOnly: false }, { key: '', publicDataOnly: false },
+])('keyless AsterDEX V3 PayloadSigner resolves public mode for %j', (input) => {
+  const payloadSigner = vi.fn();
+  const options: ExchangeOptions = { key: '', secret: '', payloadSigner, extra: { asterdexApiVersion: 'v3' }, ...input };
+  if (input.key === undefined) Reflect.deleteProperty(options, 'key');
+  const setup = new DelegatedSignerSetup('asterdex', options);
+  try {
+    expect(setup.primaryComplete).toBe(false);
+    expect(setup.credentialPresence).toEqual({ key: false, secret: false });
+    const exchange = new RustEngineExchange('asterdex', options, new DefaultStore());
+    try {
+      expect(exchange.isPublicDataOnly).toBe(true);
+      expect(exchange.privateWebsocket).toBeUndefined();
+      expect(payloadSigner).not.toHaveBeenCalled();
+    } finally { exchange.dispose(); }
+  } finally { setup.dispose(); }
+});
+
+it('private AsterDEX V3 PayloadSigner with a wallet key retains its typed custody refusal', () => {
+  const payloadSigner = vi.fn();
+  expect(() => new RustEngineExchange('asterdex', { key: `0x${'11'.repeat(20)}`, secret: '', payloadSigner,
+    extra: { asterdexApiVersion: 'v3' } }, new DefaultStore())).toThrowError(expect.objectContaining({
+    kind: 'unsupported', outcome: 'notSent',
+    message: 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only',
+  }));
+  expect(payloadSigner).not.toHaveBeenCalled();
 });
 
 class CapturedEngine implements WasmEngineLike {
@@ -233,8 +264,9 @@ it.each(matrixVenues)('$label resolves the complete public matrix before custody
 });
 
 it('enumerates every declared venue outside the beta roster', () => {
-  // #3297 admits Bitrue; its public/private controls run in the IN matrix above.
+  // restored by #3502; #3317 dropped a live venue without a product decision.
   expect(venues).toContain('bitrue');
+  // restored by #3502; #3317 dropped a live venue without a product decision.
   expect(outsideBeta.sort()).toEqual(['bingxspot', 'polymarket', 'txflow', 'weex']);
   expect(rules.venues.hyperliquidspot).toMatchObject({ canSign: [['secret', 'remoteSigner']] });
   expect(rules.venues.hyperliquidspot).not.toHaveProperty('privateEligible');
@@ -256,12 +288,12 @@ it.each(outsideBeta)('%s remains outside beta admission in every public form', (
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it('a private Polymarket account keeps its protocol-specific custody refusal', () => {
+it('a private Polymarket account refuses at SDK admission before custody setup', () => {
   const { remoteSigner, payloadSigner } = unusedSigners();
   for (const callbacks of [{ remoteSigner }, { payloadSigner }]) {
     expect(() => new RustEngineExchange('polymarket', { key: `0x${'44'.repeat(32)}`, secret: '', ...callbacks }, new DefaultStore()))
       .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
-        message: 'Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply' }));
+        message: 'polymarket is unsupported in this build' }));
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
   expect(payloadSigner).not.toHaveBeenCalled();
@@ -281,13 +313,15 @@ it.each(['kucoin', 'kucoinspot', 'kraken'] as const)('%s constructs explicitly p
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it.each(venues)('%s public-only shared setup ignores signing configuration and confers no authority', async (name) => {
+it.each(publicCases)('$name $version public-only shared setup ignores signing configuration and confers no authority', async ({ name, version }) => {
   const { remoteSigner, payloadSigner } = unusedSigners();
   for (const callbacks of [{ payloadSigner }, { remoteSigner }, { remoteSigner, payloadSigner },
+    { remoteSigner: { sign: remoteSigner.sign } }, { payloadSigner: 'unused-invalid-callback' },
     { remoteSigner: null, payloadSigner: 'unused-invalid-callback' }]) {
     const input = {
       key: 'unused-key', secret: 'unused-material', publicDataOnly: true,
       secondary_secret: 'unused-read-material', secondary_passphrase: '', localSigner: null,
+      extra: { asterdexApiVersion: version },
       ...callbacks,
     } as unknown as ExchangeOptions;
     const setup = new DelegatedSignerSetup(name, input);
@@ -325,6 +359,23 @@ it('a disposed public-only setup cannot construct an engine', () => {
   expect(() => setup.construct(Engine as unknown as new (venue: string, json: string) => WasmEngineLike, 'kucoinspot', '{}'))
     .toThrow('disposed');
   expect(Engine).not.toHaveBeenCalled();
+});
+
+it('TxFlow inferred and explicit public setup ignores unused PayloadSigner and metadata', () => {
+  const payloadSigner = vi.fn();
+  for (const publicDataOnly of [undefined, true]) {
+    const setup = new DelegatedSignerSetup('txflow', {
+      key: '', secret: '', testnet: true, publicDataOnly, payloadSigner,
+      applicationId: publicDataOnly ? '0x1111111111111111111111111111111111111111' : undefined,
+      localSigner: { primary: { stableId: '' } },
+    });
+    try {
+      expect(setup.usesPayloadSigner).toBe(false);
+      expect(setup.primaryComplete).toBe(false);
+      expect(setup.signerAlgorithms).toEqual([]);
+    } finally { setup.dispose(); }
+  }
+  expect(payloadSigner).not.toHaveBeenCalled();
 });
 
 // Keys are normalized exactly as signer setup presents them to derivePublicMode:
@@ -393,9 +444,10 @@ const falsyCallbacks = callbackFields.flatMap((field) => [null, false, ''].map((
 
 it('covers every disabled-delegation beta venue', () => {
   expect(venues).toContain('cryptocom');
+  expect(venues).toContain('asterdex');
   expect(venues).toContain('mexc');
   expect(disabledDelegation.map(({ label }) => label).sort()).toEqual([
-    'asterdex-v1', 'asterdex-v3', 'kodiakfi', 'krakenspot',
+    'kodiakfi', 'krakenspot',
     'mode', 'what', 'woofi',
   ].sort());
 });

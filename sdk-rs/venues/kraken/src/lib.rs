@@ -804,6 +804,8 @@ impl Venue for Kraken {
             }
             return;
         }
+        let feed = msg.feed.strip_suffix("_snapshot").unwrap_or(&msg.feed);
+        cx.record_socket_topic(&["@", feed, "|", &msg.product_id]);
         match msg.feed.as_ref() {
             "ticker" => {
                 let Ok(row) = serde_json::from_str::<WsTicker>(text) else {

@@ -66,7 +66,12 @@ fn frame_fed_market_close_splits_with_the_public_market_quantity_cap() {
         .iter()
         .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
         .collect();
-    assert_eq!(quantities, vec![500.0, 500.0, 100.0]);
+    // KNOWN-ISSUE: legacy TS under-allocates (sum 1099.999 of requested 1100); kept for exact TS parity per Sam's decision
+    assert_eq!(quantities, vec![333.333, 333.333, 333.333, 100.0]);
+    assert_eq!(
+        safe_cex_engine::num::adjust(quantities.iter().sum(), 0.001),
+        1099.999
+    );
     assert!(children.iter().all(|child| child["reduceOnly"] == true));
 }
 

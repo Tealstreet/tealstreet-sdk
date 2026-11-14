@@ -50,18 +50,76 @@ EXEC continuations and native command dispatch, alongside registration and age.
 Already accepted chaser/TWAP jobs retain their existing account lifetime.
 
 The trusted `Registry::obtain_delegated` entry point consumes an already-verified
-handover pair. Admission follows the exact venue's `delegated.enabled` in construction-rules.json;
-only `bybit` is currently opted in. The account retains the existing LocalSigner provider,
+handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
+`remoteSigning` policy and a configured server origin, with the existing
+unhosted refusal preserved. There is no separate DELEGATED venue allowlist or
+`delegated.enabled` declaration. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
 modes; a refused init leaves the running account intact. Socket handover and
 private-read verification must complete before calling this entry point.
+Legacy and typed full-write method admission both use this shared eligibility.
 
-The existing Bybit opt-in also selects private COSIGNED admissions. Both modes
-share the off-loop probe, refusal classification, token/lease checks and account
-attachment. A pending COSIGNED signer belongs only to its joining connection;
-probe frames are consumed internally. Matching COSIGNED inits on an admitted
-connection and COSIGNED resumes retain their existing snapshot path.
+DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
+layouts. Guarded handover strings move into the zeroizing native options for
+that setup; only its provider, identities and required public metadata remain.
+Hyperliquid wallet addresses survive construction and resident reconfiguration.
+Opaque `TrustedSignerState` carries non-JSON setup facts through native config,
+including Paradex derived-key validation, for both the probe and resident actor.
+It cannot be claimed by client JSON or applied to a different venue. The shared
+admission/probe algorithm, lifetime checks and refusal classification are unchanged.
+
+Key-only setup keeps its private scalar in the sealed credentials' `signingKey`,
+never `InitPayload.key`. For that mapping the public init key equals `subkeyAddress`
+and the sealed public key; it remains in the unchanged HPKE context. Other
+mappings reject `signingKey` and empty signing secrets. The canonical registry
+setup validates the material before the unchanged private-startup proof. There
+is no fallback to the old scalar-in-init layout.
+
+The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
+unchanged in both modes. Other hosted venues retain their current account-label
+identity; that distinction does not gate DELEGATED or COSIGNED admission.
+
+Private COSIGNED admissions require possession proof independently of
+DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
+DELEGATED's shared probe. Both modes share refusal classification, token/lease
+checks and account attachment. A private account is never attached
+as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
+OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
+other private COSIGNED joins return the typed `proof-unavailable` init refusal.
+A pending COSIGNED signer belongs only to its joining connection; probe frames
+are consumed internally. Matching COSIGNED inits on an admitted connection and
+COSIGNED resumes retain their existing snapshot path. The exact wire names and
+rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
+
+Shared admission serializes temporary proofs by verified user, credential and
+venue/network/site scope. One proof runs with at most four waiting reservations;
+overflow uses the existing transient refusal. Labels, settings, routing and
+signing mode do not split the queue. Waiting uses the existing proof deadline
+and rechecks captured token, init and lease authority before native work. The
+active reservation remains on the engine thread through probe cleanup, including
+cancellation. Reservation counts retire under the same map lock as admission,
+so concurrent final cancellation removes idle entries even while destructor
+fields still retain queue references. No successful proof is cached.
+
+Admission refusal diagnostics use `hosted.admission_refused`, with a server-issued
+attempt ID (or null before an offer), a catalog-validated venue, refusal kind,
+stage, transient flag, classified error kind and integer venue code. The attempt
+context follows its original pending verification. Never add credential identity,
+account labels, tokens, signatures, handover bytes, raw venue messages or payloads
+to these lines. Diagnostics do not change admission or retry classification.
+
+## TWAP restore binding
+
+Native TWAP restore authority carries both the verified owner and generation.
+Identity-keyed accounts seed that binding from the registry identity digest;
+other native accounts retain their verified user binding. Label changes do not
+change identity or generation. Native identity restoration can remap matching
+persisted labels only after preserving both owner tags; missing/stale generations
+never inherit the current generation. Algo inputs capture this binding alongside
+any typed action receipt, and both guards survive deferred dispatch. Typed v1
+TWAP-state rows carry optional safe-integer `ownerGeneration` through validation
+and fingerprinting without backfill; the native restore gate remains mandatory.
 
 Settings rebuilds share the protected resident owner with the published successor.
 Retiring the replaced actor preserves that successor; explicit disposal or the last
@@ -81,10 +139,15 @@ stopped account. Owner and account-incarnation checks still isolate late cleanup
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
 amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
 advertisement exposes exactly that partial set. The existing compiled feature,
-Bybit declaration, runtime frame switch, router ledger and per-connection
-ownership/registration checks remain required. `DELEGATED_BYBIT` is the host's
+hosted venue support, runtime frame switch, router ledger and per-connection
+ownership/registration checks remain required. `DELEGATED` is the host's
 per-user feature flag, not a new box environment variable. SDK `activate` checks
-it before using the advertised partial set. Unsupported legacy method aliases
+it before using the advertised partial set. Hosts query `/account/capabilities`
+with `?exchangeName=<joined venue>` (or `/capabilities` with the same query).
+`delegatedVenueV1` must match the joined venue; the unscoped response advertises
+no actions. Unjoined handover requests must include `data.exchangeName`;
+a joined account may supply its stored venue. The init remains
+`signingMode:"delegated"` plus `sealed`, with no venue-specific mode field. Unsupported legacy method aliases
 also return `DelegatedActionUnavailable` before a native plan is produced. A
 close remains a placement with `reduceOnly: true`, using the existing outbox and
 venue enforcement. Queued-intent cancellation remains a separate router operation.
@@ -112,8 +175,8 @@ signals reconnect without wrapping the counter.
 ## DELEGATED action frames v1
 
 The additive `order.action` family dispatches amend, venue cancel, cancel-all and
-nuke on the admitted Bybit DELEGATED account. `delegatedOrderActionsV1` follows
-the existing feature/Bybit gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
+nuke on the admitted DELEGATED account, using its own venue. `delegatedOrderActionsV1` follows
+the existing feature/hosted-venue gate and `TEALSTREET_DELEGATED_ORDER_FRAMES=1` startup
 activation. Each session captures activation at creation; changes require the
 existing box drain/restart and fresh admission. Hosts also require the router's separate
 `delegatedOrderActionLedgerV1` and the two original frame/ledger flags. Requests
@@ -154,6 +217,9 @@ pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
 cannot refuse the whole action after another leg may have crossed physical IO.
 Receipt counters share the existing registration lifecycle and size bounds.
 `order.actionCancelQueued` belongs to the router and never issues a venue cancel.
+A matching live registration keeps its output and shared receipt sequence while
+replacement verification is pending. This does not admit new writes; unmatched
+or retired bindings retain their existing rejection and fallback routing.
 Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic

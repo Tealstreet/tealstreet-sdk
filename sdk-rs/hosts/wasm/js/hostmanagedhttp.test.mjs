@@ -60,6 +60,33 @@ test('pacing wait retains resource, consumes no send, rechecks readiness at fina
   r.host.dispose();
 });
 
+test('a dispatch admission wait retains its original algo owner', async () => {
+  for (const changed of [false, true]) {
+    let owner = 7, resume, sends = 0;
+    const r = rig(() => ({ bind: () => ({
+      ready: () => true,
+      admitDispatch(callback) { return new Promise((resolve) => { resume = () => { callback(); resolve(); }; }); },
+      dispatch() { sends++; return new Promise(() => {}); },
+    }) }));
+    Object.assign(r.host.engine, {
+      algoStart() {}, algoStartOwned() {}, algoRunning: () => true, algoDeadline: () => undefined,
+    });
+    r.host.algoStart('acct', { ownerId: 'A', generation: 7 }, () => owner === 7);
+    r.host.execute(prepare);
+    await tick();
+    assert.equal(typeof resume, 'function');
+    assert.equal(sends, 0);
+    if (changed) owner = 8;
+    resume();
+    await tick();
+    assert.equal(sends, changed ? 0 : 1);
+    assert.equal(r.events.filter(([kind]) => kind === 'claim').length, changed ? 0 : 1);
+    assert.equal(r.host.dead, changed);
+    if (changed) assert.equal(r.host.managedHttp.resources.size, 0);
+    r.host.dispose();
+  }
+});
+
 test('replacement hosts never route retired preparation or pacing work into the new owner', async () => {
   for (const phase of ['prepare', 'wake']) {
     let finishA, wakeA, sendsA = 0, sendsB = 0, cancelled = 0;

@@ -25,8 +25,6 @@ use std::collections::{HashMap, VecDeque};
 const BATCH_LIMIT: usize = 10;
 /// Pacing between batches, inside the per-second order limits.
 const PLACE_BATCH_DELAY_MS: f64 = 1_200.0;
-/// Inverse mode switches are one call per coin; unpaced, 10006 hit at coin 13 of 22.
-const MODE_SWITCH_DELAY_MS: f64 = 250.0;
 const CANCEL_BATCH_DELAY_MS: f64 = 1_000.0;
 const CANCEL_BATCH_LIMIT: usize = 10;
 const AGREEMENT_CODES: [i64; 2] = [110_123, 110_125];
@@ -228,7 +226,6 @@ struct Step {
 #[derive(Default)]
 struct Job {
     steps: VecDeque<Step>,
-    /// Run every step even after a failure (independent orders of one batch).
     continue_on_error: bool,
     /// A later caller's formatting refusal follows the already formatted prefix.
     deferred_error: Option<String>,
@@ -241,8 +238,6 @@ pub struct TradingState {
     /// Settles cancel-alls whose order read has landed.
     unlisted_timer: Option<safe_cex_engine::TimerId>,
     pub(crate) hyro: crate::hyro::State,
-    /// Partial stops whose cancel found them already gone (filled or triggered):
-    /// a refused replacement never puts these back.
     gone_before_cancel: std::collections::HashSet<String>,
 }
 
@@ -494,10 +489,7 @@ impl BybitLinear {
                     return Some(Ok(self.plan_cancel(&orders)));
                 }
                 if self.variant.is_spot() {
-                    let mut job = Job {
-                        continue_on_error: true,
-                        ..Job::default()
-                    };
+                    let mut job = Job::default();
                     // Spot defaults to ordinary orders; every trigger family
                     // needs its own cancel, even when absent from our snapshot.
                     for filter in ["Order", "StopOrder", "tpslOrder"] {
@@ -561,57 +553,11 @@ impl BybitLinear {
                 };
                 Ok(single("/v5/account/set-margin-mode", body, call))
             }
-            Command::SetPositionMode { hedged, symbol, .. } => {
+            Command::SetPositionMode { hedged, .. } => {
                 let hedged = *hedged;
-                if self.category == Category::Inverse {
-                    // Inverse modes switch per symbol or per base coin; a named symbol
-                    // switches alone. Every coin is tried: one refusal leaves the rest.
-                    if let Some(symbol) = symbol {
-                        let body = Body::new()
-                            .str("category", self.paths.category)
-                            .str("symbol", symbol)
-                            .int("mode", if hedged { 3 } else { 0 })
-                            .finish();
-                        return Some(Ok(single(
-                            "/v5/position/switch-mode",
-                            body,
-                            Call::PositionMode { hedged },
-                        )));
-                    }
-                    let mut coins = std::collections::BTreeSet::new();
-                    for market in cx.store.markets() {
-                        coins.insert(market.base.clone());
-                    }
-                    let mut job = Job {
-                        continue_on_error: true,
-                        ..Job::default()
-                    };
-                    for (index, coin) in coins.into_iter().enumerate() {
-                        let body = Body::new()
-                            .str("category", self.paths.category)
-                            .str("coin", &coin)
-                            .int("mode", if hedged { 3 } else { 0 })
-                            .finish();
-                        job.steps.push_back(Step {
-                            delay_ms: if index > 0 { MODE_SWITCH_DELAY_MS } else { 0.0 },
-                            requests: vec![Planned {
-                                receipts: Vec::new(),
-                                path: "/v5/position/switch-mode",
-                                body,
-                                call: Call::PositionMode { hedged },
-                            }],
-                        });
-                    }
-                    if job.steps.is_empty() {
-                        return Some(Err(
-                            "No inverse markets loaded for position-mode switch".into()
-                        ));
-                    }
-                    return Some(Ok(job));
-                }
-                // Linear modes switch per settle coin; USDT carries every perp but USDC's.
+                // Legacy TS switches linear USDT once for either account adapter.
                 let body = Body::new()
-                    .str("category", self.paths.category)
+                    .str("category", "linear")
                     .str("coin", "USDT")
                     .int("mode", if hedged { 3 } else { 0 })
                     .finish();
@@ -716,6 +662,24 @@ impl BybitLinear {
             let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
             if self.variant.is_spot() && opts.kind == OrderType::TrailingStopLoss {
                 return Err("Bybit spot has no trailing-position stops".into());
+            }
+            if self.variant.is_spot() {
+                let order_lots = self.format_lots(cx, opts)?;
+                let count = order_lots.len();
+                for (index, lot) in order_lots.into_iter().enumerate() {
+                    job.steps.push_back(Step {
+                        delay_ms: 0.0,
+                        requests: vec![Planned {
+                            receipts: lot.receipts,
+                            path: "/v5/order/create",
+                            body: lot.single.finish(),
+                            call: Call::PlaceLot {
+                                last: index + 1 == count,
+                            },
+                        }],
+                    });
+                }
+                continue;
             }
             if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts)? {
                 let body = self.position_stop(cx, opts)?;
@@ -848,8 +812,9 @@ impl BybitLinear {
         Ok(None)
     }
 
-    /// Spot uses legacy equal main lots plus remainder, with brackets on the first
-    /// main lot and remainder. Derivative splitting retains its existing rules.
+    /// Split entries with each product's legacy allocation and protection rules.
+    /// Derivatives validate the complete lot plan before dispatch; Spot preserves
+    /// its venue-first validation and protects the first main lot and remainder.
     pub(crate) fn format_lots(
         &self,
         cx: &Cx<'_, Pending>,
@@ -874,7 +839,20 @@ impl BybitLinear {
         let p_amount = market.precision.amount;
         let adjust_price = |p: f64| num::adjust(p, p_price);
         let amount = if self.category_for(&opts.symbol) == Category::Inverse {
-            opts.amount.round()
+            // reference/bybit/bybitinverse.exchange.ts:1523-1541 clamps before allocation.
+            let mut amount = opts.amount.round();
+            let minimum = if market.limits.amount.min != 0.0 {
+                market.limits.amount.min
+            } else {
+                1.0
+            };
+            if amount < minimum {
+                amount = minimum;
+            }
+            if market.limits.amount.max != 0.0 && amount > market.limits.amount.max {
+                amount = market.limits.amount.max;
+            }
+            amount
         } else {
             num::adjust(opts.amount, p_amount)
         };
@@ -963,41 +941,31 @@ impl BybitLinear {
             return Err("Order prices must be finite and positive".into());
         }
         let mut sizes = Vec::new();
-        let mut remaining = amount;
-        if remaining / max > 1000.0 {
+        let mut remainder_index = None;
+        if amount / max > 1000.0 {
             return Err("Order exceeds the safe split bound".into());
         }
-        let mut remainder_index = None;
-        if self.variant.is_spot() {
-            let count = if amount > max {
-                (amount / max).ceil()
-            } else {
-                1.0
-            };
-            let rest = if amount > max {
-                num::adjust(amount % max, p_amount)
-            } else {
-                0.0
-            };
-            let quantity = num::adjust((amount - rest) / count, p_amount);
-            let mut index = 0.0;
-            while index < count {
-                sizes.push(quantity);
-                index += 1.0;
-            }
-            if rest != 0.0 {
-                remainder_index = Some(sizes.len());
-                sizes.push(rest);
-            }
+        if !self.variant.is_spot() && amount > max && num::adjust(max, p_amount) != max {
+            return Err("Market maximum quantity is not aligned to quantity precision".into());
+        }
+        // Both TS products use equal main lots plus the rounded remainder.
+        let lots = if amount > max {
+            (amount / max).ceil() as usize
         } else {
-            if remaining > max && num::adjust(max, p_amount) != max {
-                return Err("Market maximum quantity is not aligned to quantity precision".into());
-            }
-            while max > 0.0 && remaining > max {
-                sizes.push(max);
-                remaining = num::adjust(remaining - max, p_amount);
-            }
-            sizes.push(remaining);
+            1
+        };
+        let rest = if amount > max {
+            num::adjust(amount % max, p_amount)
+        } else {
+            0.0
+        };
+        let lot_size = num::adjust((amount - rest) / lots as f64, p_amount);
+        sizes.resize(lots, lot_size);
+        if rest != 0.0 {
+            remainder_index = Some(sizes.len());
+            sizes.push(rest);
+        }
+        if !self.variant.is_spot() {
             if sizes.iter().any(|qty| *qty < market.limits.amount.min) {
                 return Err("Order split contains a lot below the market minimum".into());
             }
@@ -1007,9 +975,6 @@ impl BybitLinear {
                 return Err(
                     "Order split contains a lot outside the maximum quantity or precision".into(),
                 );
-            }
-            if num::adjust(sizes.iter().sum(), p_amount) != amount {
-                return Err("Order split quantities do not preserve the requested total".into());
             }
         }
         let lot = |qty: f64, first: bool, category: bool| {
@@ -1415,7 +1380,7 @@ impl BybitLinear {
                 ));
             }
             let (body, reference) =
-                self.trading_stop_body(cx, order, kind, price, trigger, amount, limit);
+                self.trading_stop_body(cx, order, kind, price, trigger, amount, None);
             let by = match reference {
                 "LastPrice" => StopTriggerType::LastPrice,
                 "IndexPrice" => StopTriggerType::IndexPrice,

@@ -25,6 +25,7 @@ export const SECTION: {
   UNDERLYING_TOKENS: 20;
   ACCOUNT_READ: 21;
   TICKER_OBSERVATIONS: 24;
+  MESSAGE_HANDLER_STATS: 25;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -134,6 +135,18 @@ export type MarketTable = { count: number; flags: Uint32Array } & Columns<Market
   quote(i: number): string;
   prettySymbol?(i: number): string | undefined;
 };
+export interface MessageHandlerStatsTable {
+  count: number;
+  /** False updates only the named topics; true replaces the complete snapshot. */
+  replace: boolean;
+  /** 0 public, 1 business, 2 futures, 3 private. */
+  group(i: number): number;
+  topic(i: number): string;
+  subscribed(i: number): boolean;
+  active(i: number): boolean;
+  /** NaN until the subscription first delivers data. */
+  ageMs(i: number): number;
+}
 export interface InstrumentClassificationTable {
   count: number;
   market: Uint32Array;
@@ -285,6 +298,7 @@ export class Frame {
   /** Owned copies survive source transfer; identities remain lazily decoded. */
   tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
+  messageHandlerStats(): MessageHandlerStatsTable | undefined;
   tickerObservations(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;

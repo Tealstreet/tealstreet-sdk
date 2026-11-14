@@ -232,6 +232,7 @@ fn a_rejected_key_on_an_order_is_a_rejected_auth_failure() {
         .retain(|request| request.url.contains("/v5/order/create"));
     placed(&mut h, 7);
     reply(&mut h, "/v5/order/create", fixture);
+    assert!(!h.has_request("/v5/order/create"));
     let error = command_failure(&h, 7);
     assert_eq!(
         (error.kind, error.outcome, error.venue_code.as_deref()),

@@ -1,5 +1,6 @@
 import type { DelegatedAction, DelegatedActionResult } from './delegatedActions';
 import type { DelegatedActivationCapabilities, DelegatedActivationFlags } from './delegatedActivation';
+import type { ExchangeName } from './types';
 
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 
@@ -18,6 +19,7 @@ import {
   delegatedIntentFingerprint,
   delegatedIntentTime,
 } from './delegatedOrderFrames';
+import { deriveRemoteSigningPolicy } from './exchanges/rust/construction';
 
 export type { DelegatedAction, DelegatedActionResult, DelegatedActionOutcome } from './delegatedActions';
 export { createDelegatedIntentId } from './delegatedOrderFrames';
@@ -25,6 +27,9 @@ export { createDelegatedIntentId } from './delegatedOrderFrames';
 export interface OutboxScope {
   owner: string;
   accountName: string;
+  venue: ExchangeName;
+  /** Stable through reconnect; replaced when the account's admission identity changes. */
+  accountId: string;
 }
 const delegatedNotSentBrand = Symbol('delegatedNotSent');
 const delegatedReplayBrand = Symbol('delegatedReplay');
@@ -100,7 +105,6 @@ export interface OutboxOptions extends OutboxScope {
   changed?(intent: DelegatedIntent): void;
 }
 export interface OutboxConnection extends OutboxScope {
-  venue: 'bybit';
   signingMode: 'delegated';
   ready: boolean;
   capabilities: DelegatedActivationCapabilities & {
@@ -160,12 +164,29 @@ function readNotSentEvidence(value: unknown): DelegatedNotSentEvidence | undefin
   }
 }
 
+function validBinding(value: { venue: ExchangeName; accountId: string }): boolean {
+  return (
+    typeof value.accountId === 'string' &&
+    value.accountId.length > 0 &&
+    deriveRemoteSigningPolicy(value.venue)?.enabled === true
+  );
+}
+
+function sameScope(value: unknown, expected: OutboxScope): boolean {
+  return (
+    record(value) &&
+    value.owner === expected.owner &&
+    value.accountName === expected.accountName &&
+    value.venue === expected.venue &&
+    value.accountId === expected.accountId
+  );
+}
+
 function storedEvidence(row: DelegatedIntent, value: unknown): DelegatedNotSentEvidence | undefined {
   if (
     !record(value) ||
     value.version !== 1 ||
-    value.owner !== row.owner ||
-    value.accountName !== row.accountName ||
+    !sameScope(value, row) ||
     value.intentId !== row.intentId ||
     value.seq !== row.seq ||
     value.fingerprint !== row.fingerprint
@@ -193,7 +214,11 @@ function unprovenNotSent(row: DelegatedIntent): void {
 /** Only positive evidence for this intent can construct a notSent result. */
 export function markDelegatedNotSent(row: DelegatedIntent, evidence: DelegatedNotSentEvidence): boolean {
   const proof = readNotSentEvidence(evidence);
-  if (!proof || (proof.kind === 'noHandoff' && !['queued', 'canceled', 'notSent'].includes(row.state))) {
+  if (
+    !validBinding(row) ||
+    !proof ||
+    (proof.kind === 'noHandoff' && !['queued', 'canceled', 'notSent'].includes(row.state))
+  ) {
     unprovenNotSent(row);
     return false;
   }
@@ -202,6 +227,8 @@ export function markDelegatedNotSent(row: DelegatedIntent, evidence: DelegatedNo
     version: 1,
     owner: row.owner,
     accountName: row.accountName,
+    venue: row.venue,
+    accountId: row.accountId,
     intentId: row.intentId,
     seq: row.seq,
     fingerprint: row.fingerprint,
@@ -225,7 +252,7 @@ export function markDelegatedReplayable(
   evidence: DelegatedNotSentEvidence,
 ): row is DelegatedReplayableIntent {
   const proof = readNotSentEvidence(evidence);
-  if (!proof || proof.kind !== 'noHandoff' || row.state !== 'queued') {
+  if (!validBinding(row) || !proof || proof.kind !== 'noHandoff' || row.state !== 'queued') {
     unprovenNotSent(row);
     return false;
   }
@@ -243,6 +270,8 @@ export function markDelegatedReplayable(
     version: 1,
     owner: row.owner,
     accountName: row.accountName,
+    venue: row.venue,
+    accountId: row.accountId,
     intentId: row.intentId,
     seq: row.seq,
     fingerprint: row.fingerprint,
@@ -289,103 +318,116 @@ export class DelegatedOutbox {
 
   static async open(options: OutboxOptions): Promise<DelegatedOutbox> {
     const box = new DelegatedOutbox(options);
-    const saved = await options.storage.load(box.scope);
-    const rows = Array.isArray(saved) ? saved : saved.intents;
-    if (!Array.isArray(saved)) {
-      if (saved.version !== 1 || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0)
-        throw new Error('Invalid outbox checkpoint');
-      box.sequence = saved.sequence;
-    }
-    if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
-      throw new Error('Outbox capacity exceeded');
-    for (const saved of [...rows]) {
-      const row = clone(saved);
-      if (
-        ![1, 2].includes(row.version) ||
-        row.owner !== box.scope.owner ||
-        row.accountName !== box.scope.accountName ||
-        delegatedIntentTime(row.intentId) < 0 ||
-        !Number.isSafeInteger(row.seq) ||
-        row.seq < 1 ||
-        !Number.isFinite(row.createdAt) ||
-        row.createdAt < 0 ||
-        !STATES.includes(row.state) ||
-        !row.params ||
-        typeof row.params !== 'object' ||
-        Array.isArray(row.params) ||
-        typeof row.cancelPending !== 'boolean' ||
-        (row.callerSuppliedIntentId !== undefined && row.callerSuppliedIntentId !== true) ||
-        (row.retentionExpired !== undefined && (row.retentionExpired !== true || row.state !== 'unknown')) ||
-        box.intents.has(row.intentId)
-      )
-        throw new Error('Invalid persisted intent');
-      if (
-        (row.version === 2 &&
-          (!isDelegatedAction(row.action) || Object.keys(row.params).length > 0 || row.state === 'placed')) ||
-        (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
-      )
-        throw new Error('Invalid persisted action');
-      if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
-        throw new Error('Invalid persisted action result');
-      if (
-        row.state === 'unsupported' &&
-        (!row.action ||
-          row.result !== undefined ||
-          row.cancelPending ||
-          !record(row.error) ||
-          row.error.outcome !== 'unsupported' ||
-          typeof row.error.message !== 'string' ||
-          [...row.error.message].length > 512)
-      )
-        throw new Error('Invalid persisted unsupported action');
-      const fingerprint = row.action
-        ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
-        : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
-      if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
-      box.sequence = Math.max(box.sequence, row.seq);
-      // JSON cannot carry the private runtime brand. Validate and reissue it.
-      if (row.state === 'notSent' || row.state === 'refused') {
-        const proof = storedNotSentEvidence(row);
-        if (proof) markDelegatedNotSent(row, proof);
-        else unprovenNotSent(row);
+    try {
+      const saved = await options.storage.load(box.scope);
+      const rows = Array.isArray(saved) ? saved : saved.intents;
+      if (!Array.isArray(saved)) {
+        if (saved.version !== 1 || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0)
+          throw new Error('Invalid outbox checkpoint');
+        box.sequence = saved.sequence;
       }
-      // A persisted handoff can have crossed the physical socket boundary.
-      if (row.state === 'sending' || row.state === 'acknowledged') {
-        row.state = 'unknown';
-        row.cancelPending = false;
-      }
-      // Legacy terminal labels cannot settle a still-pending router cancellation.
-      if (row.cancelPending && ['notSent', 'canceled'].includes(row.state)) unprovenNotSent(row);
-      if (row.state === 'queued') {
-        const proof = storedNoHandoffEvidence(row);
+      if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
+        throw new Error('Outbox capacity exceeded');
+      // Reject the entire load before any persistence or compaction, including
+      // legacy records whose initiating account cannot be established.
+      if (rows.some((row) => !sameScope(row, box.scope))) throw new Error('Persisted outbox scope differs');
+      for (const saved of [...rows]) {
+        const row = clone(saved);
         if (
-          row.clockEpoch !== options.clock.epoch ||
-          box.expired(row) ||
-          !proof ||
-          !markDelegatedReplayable(row, proof)
+          ![1, 2].includes(row.version) ||
+          !sameScope(row, box.scope) ||
+          delegatedIntentTime(row.intentId) < 0 ||
+          !Number.isSafeInteger(row.seq) ||
+          row.seq < 1 ||
+          !Number.isFinite(row.createdAt) ||
+          row.createdAt < 0 ||
+          !STATES.includes(row.state) ||
+          !row.params ||
+          typeof row.params !== 'object' ||
+          Array.isArray(row.params) ||
+          typeof row.cancelPending !== 'boolean' ||
+          (row.callerSuppliedIntentId !== undefined && row.callerSuppliedIntentId !== true) ||
+          (row.retentionExpired !== undefined && (row.retentionExpired !== true || row.state !== 'unknown')) ||
+          box.intents.has(row.intentId)
         )
-          unprovenNotSent(row);
+          throw new Error('Invalid persisted intent');
+        if (
+          (row.version === 2 &&
+            (!isDelegatedAction(row.action) || Object.keys(row.params).length > 0 || row.state === 'placed')) ||
+          (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
+        )
+          throw new Error('Invalid persisted action');
+        if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
+          throw new Error('Invalid persisted action result');
+        if (
+          row.state === 'unsupported' &&
+          (!row.action ||
+            row.result !== undefined ||
+            row.cancelPending ||
+            !record(row.error) ||
+            row.error.outcome !== 'unsupported' ||
+            typeof row.error.message !== 'string' ||
+            [...row.error.message].length > 512)
+        )
+          throw new Error('Invalid persisted unsupported action');
+        const fingerprint = row.action
+          ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
+          : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
+        if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
+        box.sequence = Math.max(box.sequence, row.seq);
+        // JSON cannot carry the private runtime brand. Validate and reissue it.
+        if (row.state === 'notSent' || row.state === 'refused') {
+          const proof = storedNotSentEvidence(row);
+          if (proof) markDelegatedNotSent(row, proof);
+          else unprovenNotSent(row);
+        }
+        // A persisted handoff can have crossed the physical socket boundary.
+        if (row.state === 'sending' || row.state === 'acknowledged') {
+          row.state = 'unknown';
+          row.cancelPending = false;
+        }
+        // Legacy terminal labels cannot settle a still-pending router cancellation.
+        if (row.cancelPending && ['notSent', 'canceled'].includes(row.state)) unprovenNotSent(row);
+        if (row.state === 'queued') {
+          const proof = storedNoHandoffEvidence(row);
+          if (
+            row.clockEpoch !== options.clock.epoch ||
+            box.expired(row) ||
+            !proof ||
+            !markDelegatedReplayable(row, proof)
+          )
+            unprovenNotSent(row);
+        }
+        box.intents.set(row.intentId, row);
+        await box.persist(row);
       }
-      box.intents.set(row.intentId, row);
-      await box.persist(row);
-      box.arm(row);
+      if (box.pendingCount() > MAX_PENDING) throw new Error('Outbox capacity exceeded');
+      await box.compact();
+      for (const row of box.intents.values()) box.arm(row);
+      return box;
+    } catch (error) {
+      box.close();
+      throw error;
     }
-    if (box.pendingCount() > MAX_PENDING) throw new Error('Outbox capacity exceeded');
-    await box.compact();
-    return box;
   }
 
   private constructor(private readonly options: OutboxOptions) {
-    if (!options.owner || !options.accountName || !options.clock.epoch) throw new Error('Outbox scope is required');
+    if (!options.owner || !options.accountName || !options.clock.epoch || !validBinding(options))
+      throw new Error('Outbox scope is required');
     if (typeof options.storage.compact !== 'function') throw new Error('Outbox storage requires atomic compaction');
-    this.scope = Object.freeze({ owner: options.owner, accountName: options.accountName });
+    this.scope = Object.freeze({
+      owner: options.owner,
+      accountName: options.accountName,
+      venue: options.venue,
+      accountId: options.accountId,
+    });
   }
 
   /** Explicit host admission for the place/reduce-only-close protocol slice. */
   activate(connection: OutboxConnection, flags: DelegatedActivationFlags): Readonly<OutboxConnection> {
     // Even a refused replacement retires the previous ticket and deferred work.
     if (this.connection) this.disconnect(this.connection);
-    requireDelegatedActivation(connection.capabilities, flags);
+    requireDelegatedActivation(connection.capabilities, flags, connection.venue);
     if (!connection.ready)
       throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'DELEGATED connection is not ready');
     const captured = this.connect(connection);
@@ -395,15 +437,14 @@ export class DelegatedOutbox {
 
   /** Low-level connection: the host must already have completed admission. */
   connect(connection: OutboxConnection): Readonly<OutboxConnection> {
+    if (this.connection) this.disconnect(this.connection);
     if (
       !this.active ||
-      connection.owner !== this.scope.owner ||
-      connection.accountName !== this.scope.accountName ||
-      connection.venue !== 'bybit' ||
+      !sameScope(connection, this.scope) ||
+      deriveRemoteSigningPolicy(connection.venue)?.enabled !== true ||
       connection.signingMode !== 'delegated'
     )
       throw new Error('Outbox connection scope differs');
-    if (this.connection) this.disconnect(this.connection);
     this.sent.clear();
     this.canceled.clear();
     this.outcomeSequences.clear();
@@ -803,6 +844,7 @@ export class DelegatedOutbox {
     return (
       this.active &&
       this.connection === connection &&
+      sameScope(connection, this.scope) &&
       connection.ready &&
       connection.capabilities.delegatedOrderFramesV1 === true &&
       connection.capabilities.delegatedOrderLedgerV1 === true
@@ -817,6 +859,7 @@ export class DelegatedOutbox {
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
+      !sameScope(row, connection) ||
       !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
       !this.replayable(row) ||
       this.sent.get(row.intentId) === connection
@@ -842,7 +885,11 @@ export class DelegatedOutbox {
       // its identity while waiting for storage to prepare the handoff.
       return;
     }
-    if (!(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) || !this.replayable(row))
+    if (
+      !sameScope(row, connection) ||
+      !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
+      !this.replayable(row)
+    )
       return;
     if (this.expired(row)) {
       this.expire(row);
@@ -901,13 +948,18 @@ export class DelegatedOutbox {
 
   private async sendCancellation(row: DelegatedIntent, connection: Readonly<OutboxConnection>): Promise<void> {
     if (
+      !sameScope(row, connection) ||
       !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
       !row.cancelPending ||
       this.canceled.get(row.intentId) === connection
     )
       return;
     await this.persist(row);
-    if (!(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) || !row.cancelPending)
+    if (
+      !sameScope(row, connection) ||
+      !(row.action ? this.actionCurrent(connection, row.action) : this.current(connection)) ||
+      !row.cancelPending
+    )
       return;
     if (
       connection.send(

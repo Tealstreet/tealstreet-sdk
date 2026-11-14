@@ -453,12 +453,18 @@ export interface RemoteSignerRequest {
       | 'backpack-ed25519'
       | 'orderly-ed25519'
       | 'kucoin-batch'
+      // AsterDEX: device-owned slot selection and canonical wallet statements.
+      | 'asterdex-address'
+      | 'asterdex-hmac'
+      | 'asterdex-wallet'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
       | 'grvt-order'
       | 'grvt-address'
       | 'hyperliquid-l1'
       | 'hyperliquid-address'
+      | 'txflow-agent'
+      | 'txflow-address'
       // Lighter: `toSign` is a transaction or auth statement the device re-derives
       // the signed words from; the reply concatenates the 80-byte signatures.
       | 'lighter-tx'

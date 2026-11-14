@@ -44,6 +44,7 @@ pub enum Pending {
     Identity(safe_cex_engine::selected_read::AdmittedRead),
     Account(account::Request),
     Trade(trading::Request),
+    ProtectiveReference(Box<trading::ReferenceRead>),
     History(history::Request),
     Markets {
         rows: Vec<Market>,
@@ -484,6 +485,7 @@ impl Bingx {
         if message.pong.is_some() {
             return;
         }
+        cx.record_socket_topic(&[&message.data_type]);
         if message.data_type == "market.contracts" {
             let mut update = |row: LiveTicker<'_>| {
                 let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
@@ -574,7 +576,6 @@ impl Bingx {
             }
             return;
         }
-        let Some(data) = message.data else { return };
         if let Some(rest) = message.data_type.strip_prefix("market.depth.") {
             let Some(id) = rest.strip_suffix(".step0.level100") else {
                 return;
@@ -583,7 +584,12 @@ impl Bingx {
                 return;
             };
             let symbol = m.symbol.clone();
-            let Ok(Depth { mut bids, mut asks }) = serde_json::from_str::<Depth>(data.get()) else {
+            let depth = message.depth.or_else(|| {
+                message
+                    .data
+                    .and_then(|data| serde_json::from_str::<Depth>(data.get()).ok())
+            });
+            let Some(Depth { mut bids, mut asks }) = depth else {
                 return;
             };
             if let Some(state) = self.books.get_mut(&symbol) {
@@ -601,6 +607,7 @@ impl Bingx {
                 cx.book_changed(&symbol);
             }
         } else if let Some(rest) = message.data_type.strip_prefix("market.kline.") {
+            let Some(data) = message.data else { return };
             let mut split = rest.split('.');
             let (Some(id), Some(native_interval)) = (split.next(), split.next()) else {
                 return;
@@ -674,6 +681,10 @@ impl Bingx {
             }
             Pending::History(request) => {
                 self.history.on_failed(cx, request, error);
+                return;
+            }
+            Pending::ProtectiveReference(read) => {
+                read.reject(cx, error);
                 return;
             }
             Pending::Trade(request) => {
@@ -1073,6 +1084,7 @@ impl Venue for Bingx {
             }
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
+            Pending::ProtectiveReference(read) => read.item(cx, item),
             Pending::History(request) => self.history.on_item(cx, request, item),
             Pending::Markets { rows, skipped } => {
                 if rows.len() == rows.capacity() {
@@ -1209,6 +1221,15 @@ impl Venue for Bingx {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Clock(probe) = pending {
             self.clock_response(cx, probe, response);
+            return;
+        }
+        if let Pending::ProtectiveReference(read) = pending {
+            self.trading.reference_response(
+                cx,
+                self.credentials.as_ref(),
+                *read,
+                success(response),
+            );
             return;
         }
         if sign::timestamp::refused(response.body) {
@@ -1444,6 +1465,17 @@ impl Venue for Bingx {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::ProtectiveReference(read) = pending {
+            self.note_ban(cx, &response);
+            read.reject(
+                cx,
+                &success(response).err().unwrap_or_else(|| {
+                    "public reference response did not contain the expected list".into()
+                }),
+            );
+            self.ban_wait_ms = None;
+            return;
+        }
         if sign::timestamp::refused(response.body) {
             self.resync_clock(cx);
         }

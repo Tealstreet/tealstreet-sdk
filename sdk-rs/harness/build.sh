@@ -30,8 +30,7 @@ wasm_profile_args=(--config 'profile.release.opt-level="z"'
   --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
   --config 'profile.release.package.safe-cex-engine.opt-level="z"'
   --config 'profile.release.package.safe-cex-venue-kucoin.opt-level=3')
-# One JSON throughput policy for every WASM family and the combined engine,
-# except standalone Bybit, whose size budget wins; CI gates its public decode CPU.
+# One JSON throughput policy for every WASM family and the combined engine.
 # Native Cargo profiles are unchanged; CI gates family CPU and size budgets.
 wasm_throughput_args=(--config 'profile.release.package.serde_json.opt-level=3')
 # The Cargo arguments building the family that contains a venue.
@@ -68,15 +67,20 @@ family_args() {
     # CPU gate measures that path; the venue crate keeps its size profile.
     build_args+=(--config 'profile.release.package.safe-cex-txflow-public-wire.opt-level=3')
   elif [[ $family == bitget ]]; then
-    # Engine at s: steady CPU clears the 1.10x gate with margin; z measured 1.07-1.21x.
+    # Bitget's public steady workload needs full engine throughput under the
+    # strict Rust-not-slower-than-TS bound, including its hot host frame path.
+    # Measure the family's size independently.
+    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level=3'
+      --config 'profile.release.package.safe-cex-wasm.opt-level=3')
+  elif [[ $family == bybit ]]; then
+    # Public frame processing needs the engine's throughput profile; retain the
+    # family's separate measured size budget and strict public CPU gate.
     build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level="s"')
   elif [[ $family == kucoin ]]; then
     # Derivatives pass z; Spot and combined builds keep the crate's throughput profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-kucoin.opt-level="z"')
   fi
-  if [[ $family != bybit ]]; then
-    build_args+=("${wasm_throughput_args[@]}")
-  fi
+  build_args+=("${wasm_throughput_args[@]}")
 }
 # Optimize a bound module with binaryen (behaviour-neutral; shrinks every
 # family). CI installs the pinned release (install-binaryen.sh) and sets

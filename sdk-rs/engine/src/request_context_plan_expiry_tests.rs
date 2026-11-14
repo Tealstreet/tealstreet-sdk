@@ -14,13 +14,14 @@ mod plan_expiry_cleanup {
         cleaned: Vec<usize>,
         retired_after: Vec<usize>,
         panic_cleanup: bool,
+        report_elements: bool,
     }
     impl Cleanup {
         fn failure(
             &mut self,
             cx: &mut Cx<'_, (usize, Context)>,
             pending: (usize, Context),
-            error: VenueError,
+            mut error: VenueError,
         ) {
             let (index, context) = pending;
             assert_eq!(error.kind, Some(ErrorKind::Timeout));
@@ -66,6 +67,19 @@ mod plan_expiry_cleanup {
                 cx.store.set_order_status(&id, OrderStatus::Open);
             }
             assert!(!self.panic_cleanup, "cleanup panic control");
+            if self.report_elements {
+                use crate::write_plan::{Element, ElementResult, WritePlan};
+                let mut report = WritePlan::new(vec![Element { index: 42, client_order_id: None }]);
+                let result = if error.outcome == Some(crate::Outcome::NotSent) {
+                    ElementResult::NotSent { error: Some(Box::new(error.clone())) }
+                } else {
+                    ElementResult::Unknown { error: Box::new(error.clone().outcome(crate::Outcome::Unknown)) }
+                };
+                report.record(42, result).unwrap();
+                error = report.attach(error);
+                error.kind = Some(ErrorKind::Rejected);
+                error.outcome = Some(crate::Outcome::Rejected);
+            }
             cx.fail_plan(plan, error).unwrap();
         }
     }
@@ -292,6 +306,17 @@ mod plan_expiry_cleanup {
             .collect::<Vec<_>>();
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind, Some(ErrorKind::Timeout));
+        if e.venue.report_elements {
+            use crate::write_plan::ElementResult;
+            let elements = errors[0].elements.as_ref().expect("expiry cleanup report");
+            assert_eq!(elements.len(), 1);
+            assert_eq!(elements[0].element.index, 42);
+            assert!(matches!(elements[0].result,
+                ElementResult::Unknown { .. } if released) || matches!(elements[0].result,
+                ElementResult::NotSent { .. } if !released));
+        } else {
+            assert!(errors[0].elements.is_none());
+        }
         assert_eq!(
             errors[0].outcome,
             Some(if released {
@@ -305,6 +330,89 @@ mod plan_expiry_cleanup {
         ));
         assert!(e.io.core.managed_http.is_empty());
     }
+    #[test]
+    #[cfg(feature = "plan-element-reports")]
+    fn idle_element_reports_require_the_current_issuer_generation_and_no_active_call() {
+        use crate::write_plan::{Element, ElementResult, WritePlan};
+        let (mut e, tokens) = setup(1, Phase::Released);
+        let old = e.venue.plan.clone().unwrap();
+        let (other, _) = setup(1, Phase::Preparation);
+        let foreign = other.venue.plan.clone().unwrap();
+        let mut report = WritePlan::new(vec![Element { index: 42, client_order_id: None }]);
+        report.record(42, ElementResult::Placed { order_ids: vec!["accepted-prefix".into()] }).unwrap();
+        assert_eq!(Cx { now: 0., store: &mut e.store, io: &mut e.io }
+            .retain_idle_plan_elements(&foreign, &report), Err(Error::Revoked));
+        assert_eq!(Cx { now: 0., store: &mut e.store, io: &mut e.io }
+            .retain_idle_plan_elements(&old, &report), Err(Error::State));
+        e.handle(1., Event::HttpResponse { request: tokens[0].attempt().request,
+            response: Response { status: 200, headers: "", body: "{}" } });
+        Cx { now: 1., store: &mut e.store, io: &mut e.io }
+            .retain_idle_plan_elements(&old, &report).unwrap();
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
+        e.handle(20_000., Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let error = actions.iter().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        }).unwrap();
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_eq!(error.outcome, None);
+        assert_eq!(error.elements.as_ref().unwrap().0, report.outcomes());
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted-prefix"]);
+        e.handle(21_000., Event::Command(Command::Venue {
+            command: 7, action: crate::VenueAction::FetchBalanceInfo,
+        }));
+        assert_eq!(Cx { now: 21_000., store: &mut e.store, io: &mut e.io }
+            .retain_idle_plan_elements(&old, &report), Err(Error::Revoked));
+        e.drain_actions().for_each(drop);
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
+        e.handle(41_000., Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let error = actions.iter().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        }).unwrap();
+        assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+        assert!(error.elements.is_none(), "old generation's report must not survive");
+    }
+
+    #[test]
+    #[cfg(not(feature = "plan-element-reports"))]
+    fn plan_expiry_without_element_reports_keeps_the_engine_terminal_contract() {
+        let (mut e, tokens) = setup(1, Phase::Released);
+        e.venue.report_elements = true;
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
+        e.handle(20_000., Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let error = actions.iter().find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        }).unwrap();
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert!(error.elements.is_none(), "non-adopters must not retain cleanup reports");
+        assert_eq!(e.venue.cleaned, [0]);
+        assert!(e.io.core.managed_http.is_empty());
+        assert!(actions.iter().all(|action| match action {
+            Action::Http(_) => false,
+            Action::ManagedHttp(action) => matches!(action.as_ref(), HttpAction::Cancel { .. }),
+            _ => true,
+        }), "expiry may cancel existing host work but cannot prepare or bind another request");
+        assert_eq!(tokens.len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "plan-element-reports")]
+    fn plan_expiry_keeps_passive_cleanup_elements_without_reclassifying_timeout() {
+        for phase in [Phase::Preparation, Phase::Released] {
+            let (mut e, _) = setup(1, phase);
+            e.venue.report_elements = true;
+            let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
+            e.handle(20_000., Event::TimerFired { timer });
+            assert_cleaned(&mut e, matches!(phase, Phase::Released));
+        }
+    }
+
     #[test]
     fn plan_timer_cleans_every_outstanding_phase_before_retirement() {
         for phase in [

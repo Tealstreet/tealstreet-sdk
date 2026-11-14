@@ -44,7 +44,7 @@ fn compiled_order_frames_are_not_advertised_without_runtime_opt_in() {
 fn runtime_switch_uses_the_same_executable_and_keeps_the_ledger_router_owned() {
     const EXPECT: &str = "TEALSTREET_TEST_ORDER_FRAME_CAPABILITY";
     if let Ok(expected) = std::env::var(EXPECT) {
-        let capabilities = safe_cex_exchange_server::http::capabilities_json();
+        let capabilities = safe_cex_exchange_server::http::capabilities_json_for(Some("binance"));
         let transport = &capabilities["transports"]["accountWorkerWebSocket"];
         assert_eq!(transport["delegatedOrderFramesV1"], expected == "1");
         assert_eq!(transport["delegatedOrderActionsV1"], expected == "1");

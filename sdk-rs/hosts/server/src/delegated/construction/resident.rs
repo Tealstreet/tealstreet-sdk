@@ -1,20 +1,16 @@
 //! Revocation of the existing local provider shared by an account and its engine.
-use safe_cex_crypto::signer::{LocalSigner, ProtectedBytes};
+
 use safe_cex_engine::signing::{
-    Algorithm, Capability, KeyRef, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, KeyRef, OwnedSetupExecution, ProtectedProvider, Provider, SignError,
+    SignFuture, SignRequest, SignResult, Signer,
 };
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::time::Instant;
 
-impl ProtectedBytes for crate::delegated_memory::SecretCopy {
-    fn as_bytes(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
 /// One owner controls all provider handles, without exporting signing material.
 pub struct ResidentCopy {
     signer: Arc<ResidentSigner>,
+    pub(super) state: Option<safe_cex_venues::TrustedSignerState>,
     pub(super) identities: safe_cex_engine::signing::Identities,
     #[cfg(test)]
     test_provider: Option<Provider>,
@@ -22,7 +18,7 @@ pub struct ResidentCopy {
 
 struct ResidentSigner(Mutex<State>);
 struct State {
-    signer: Option<LocalSigner>,
+    signer: Option<ProtectedProvider>,
     deadline: Option<Instant>,
 }
 
@@ -41,21 +37,22 @@ impl ResidentSigner {
 }
 
 impl State {
-    fn current(&mut self) -> Option<&LocalSigner> {
+    fn current(&mut self) -> Option<Provider> {
         if self
             .deadline
             .is_some_and(|deadline| Instant::now() >= deadline)
         {
             self.signer = None;
         }
-        self.signer.as_ref()
+        self.signer.as_ref().map(ProtectedProvider::provider)
     }
 }
 
 impl ResidentCopy {
     pub(super) fn new(
-        signer: LocalSigner,
+        signer: ProtectedProvider,
         identities: safe_cex_engine::signing::Identities,
+        state: Option<safe_cex_venues::TrustedSignerState>,
     ) -> Self {
         Self {
             signer: Arc::new(ResidentSigner(Mutex::new(State {
@@ -63,6 +60,7 @@ impl ResidentCopy {
                 deadline: None,
             }))),
             identities,
+            state,
             #[cfg(test)]
             test_provider: None,
         }
@@ -77,6 +75,7 @@ impl ResidentCopy {
                 deadline: None,
             }))),
             identities: Default::default(),
+            state: None,
             test_provider: Some(provider),
         })
     }
@@ -104,6 +103,10 @@ impl ResidentCopy {
         }
         state.deadline = None;
         true
+    }
+
+    pub fn erase(&self) {
+        self.revoke();
     }
 
     pub(crate) fn revoke(&self) {
@@ -139,9 +142,38 @@ impl Signer for ResidentSigner {
                     state
                         .current()
                         .ok_or(SignError::Unavailable)
-                        .and_then(|signer| signer.sign_now(request))
+                        .and_then(|signer| {
+                            signer
+                                .sign_ready(request)
+                                .unwrap_or(Err(SignError::Unavailable))
+                        })
                 }),
         )
+    }
+
+    fn owned_public_address_capability(&self) -> Capability {
+        self.state()
+            .and_then(|mut s| s.current())
+            .map_or(Capability::Unsupported, |p| {
+                p.owned_public_address_capability()
+            })
+    }
+    fn create_public_address_setup(
+        &self,
+        request: SignRequest,
+    ) -> Option<Box<dyn OwnedSetupExecution>> {
+        self.state()?
+            .current()?
+            .create_public_address_setup(request)
+    }
+    fn legacy_nonce_association(
+        &self,
+        request: safe_cex_engine::nonce::handoff::LegacyNonceRequest,
+    ) -> Result<safe_cex_engine::nonce::handoff::LegacyNonceProof, SignError> {
+        self.state()
+            .and_then(|mut s| s.current())
+            .ok_or(SignError::Unavailable)?
+            .legacy_nonce_association(request)
     }
 
     fn sign(&self, request: SignRequest) -> SignFuture {
@@ -156,29 +188,41 @@ impl Signer for ResidentSigner {
 mod tests {
     use super::*;
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
+    use safe_cex_engine::signing::ProtectedSigner;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
-    use zeroize::Zeroize;
 
+    // Count destruction of the protected signer, while ordinary engine handles live.
+    // Canonical crypto release tests separately assert every mapped byte is zero.
     struct ReadFault {
-        buffer: crate::delegated_memory::SecretCopy,
+        owner: ProtectedProvider,
+        releases: Arc<AtomicUsize>,
         armed: Arc<AtomicBool>,
     }
-
-    impl Zeroize for ReadFault {
-        fn zeroize(&mut self) {
-            self.buffer.zeroize();
+    impl ProtectedSigner for ReadFault {}
+    impl Drop for ReadFault {
+        fn drop(&mut self) {
+            self.owner.erase();
+            self.releases.fetch_add(2, Ordering::SeqCst);
         }
     }
-
-    impl ProtectedBytes for ReadFault {
-        fn as_bytes(&self) -> &[u8] {
+    impl Signer for ReadFault {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+            self.owner.provider().can_sign(key, algorithm)
+        }
+        fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
             assert!(
                 !self.armed.swap(false, Ordering::SeqCst),
                 "synthetic protected read fault"
             );
-            self.buffer.as_bytes()
+            self.owner.provider().sign_ready(request)
+        }
+        fn sign(&self, request: SignRequest) -> SignFuture {
+            self.owner.provider().sign(request)
         }
     }
 
@@ -215,7 +259,6 @@ mod tests {
     }
 
     fn resident_with_read_fault() -> (ResidentCopy, Arc<AtomicUsize>, Arc<AtomicBool>) {
-        let memory = crate::delegated_memory::DelegatedMemory::prepare("bybit", true).unwrap();
         let (signer, identities) = LocalSigner::from_setup(LocalSetup {
             primary: Some(LocalIdentity {
                 key: Secret::new("synthetic-key".into()),
@@ -227,23 +270,14 @@ mod tests {
         .unwrap();
         let releases = Arc::new(AtomicUsize::new(0));
         let armed = Arc::new(AtomicBool::new(false));
-        let signer = signer
-            .with_protected_storage(|bytes| {
-                let mut buffer = memory.zeroed(bytes.len()).unwrap();
-                buffer.as_bytes_mut().copy_from_slice(bytes);
-                let releases = releases.clone();
-                buffer.check_release(move |allocation| {
-                    assert!(!allocation.is_empty());
-                    assert!(allocation.iter().all(|byte| *byte == 0));
-                    releases.fetch_add(1, Ordering::SeqCst);
-                });
-                Ok(Box::new(ReadFault {
-                    buffer,
-                    armed: armed.clone(),
-                }))
-            })
-            .unwrap();
-        (ResidentCopy::new(signer, identities), releases, armed)
+        let protected = Arc::new(signer).protect().unwrap();
+        let owner = ProtectedProvider::new(Arc::new(ReadFault {
+            owner: protected,
+            releases: releases.clone(),
+            armed: armed.clone(),
+        }))
+        .unwrap();
+        (ResidentCopy::new(owner, identities, None), releases, armed)
     }
 
     fn request() -> SignRequest {

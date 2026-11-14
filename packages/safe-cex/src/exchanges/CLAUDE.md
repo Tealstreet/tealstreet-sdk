@@ -5,6 +5,10 @@ is the single source of truth for boilerplate that would otherwise be repeated
 in every per-exchange `CLAUDE.md`. **Read this first** before diving into any
 individual exchange doc.
 
+Rust page-mirror manual writes wait for the page engine or refuse locally; the
+hosted RPC remains a read/algo data source. The readiness deadline and no-fallback
+contract are documented in `packages/safe-cex/CLAUDE.md` → "Rust main-thread trading".
+
 For per-exchange specifics (endpoints, quirks, auth signing details), see
 the `CLAUDE.md` inside each exchange's directory.
 
@@ -1622,3 +1626,13 @@ whole mixed known/unknown batch before writes. Native ID-only cancel APIs may
 send the supplied identity directly. Empty requested lists remain valid no-ops.
 The family inventory and regression evidence live in
 `docs/plans/RUST_UNKNOWN_CANCEL.md`.
+
+
+Manual page writes retain the original worker-owner generation and bridge through
+internal reads, capability waits and nuke retry timers. Composite operations pass
+that admission to every later cancel/close leg; nested calls cannot recapture a
+successor owner. Unchanged-owner command payloads and ordering remain identical.
+
+The page readiness boundary reports local refusals once, including optional methods
+and the direct schedule-cancel/account-tier paths; caller rejection alone cannot
+replace the exchange error event. Already-reported command failures stay deduped.

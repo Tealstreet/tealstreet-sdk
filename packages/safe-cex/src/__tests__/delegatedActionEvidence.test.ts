@@ -20,6 +20,8 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const options: OutboxOptions = {
     owner,
     accountName: 'main',
+    venue: 'bybit',
+    accountId: 'account-A',
     storage: {
       async load(scope) {
         const intents = [...rows.values()]
@@ -51,6 +53,7 @@ function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
   const connection = (instanceId = 'registration'): OutboxConnection => ({
     owner,
     accountName: 'main',
+    accountId: 'account-A',
     venue: 'bybit',
     signingMode: 'delegated',
     ready: true,

@@ -108,6 +108,11 @@ infrastructure, production host, database or release change is included.
 
 ## Mapping and bounded behavior
 
+Compact public ticker/depth envelopes decode their rows once, borrowing native
+identifiers and reusing normalized-symbol storage. Other field orders, escapes,
+optional fields and layouts retain the general serde decoder. Private messages
+always use the general decoder; financial validation remains unchanged.
+
 Market IDs use `BASE-QUOTE`; SDK symbols concatenate base and quote. Tick/step
 sizes are native increments, leverage is one, and `isSpot=true`. Positions are
 an authoritative empty set. Free/locked currency balances are preserved; USD

@@ -682,6 +682,7 @@ impl Hyperliquid {
         let raw = frame.data.get();
         match frame.channel.as_ref() {
             "allMids" => {
+                cx.record_socket_topic(&["@allMids|||||||"]);
                 if let Ok(mids) = serde_json::from_str::<Mids>(raw) {
                     for (coin, price) in mids.mids {
                         if let (Some(symbol), Ok(mid)) = (self.symbol(&coin), price.parse::<f64>())
@@ -704,6 +705,7 @@ impl Hyperliquid {
                 }
             }
             "fastAssetCtxs" => {
+                cx.record_socket_topic(&["@fastAssetCtxs|||||||"]);
                 if let Ok(encoded) = serde_json::from_str::<&str>(raw)
                     && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded)
                     && let Ok(decoded) =
@@ -741,6 +743,7 @@ impl Hyperliquid {
             "trades" => {
                 if let Ok(rows) = serde_json::from_str::<Vec<TradeRow>>(raw) {
                     for row in rows {
+                        cx.record_socket_topic(&["@trades|", &row.coin, "||||||"]);
                         let Some(symbol) = self.symbol(&row.coin).map(str::to_owned) else {
                             continue;
                         };
@@ -766,6 +769,11 @@ impl Hyperliquid {
                     && let Some(symbol) = self.symbol(&depth.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                 {
+                    if depth.fast {
+                        cx.record_socket_topic(&["@l2Book|", &depth.coin, "||||true||"]);
+                    } else if !self.spot {
+                        cx.record_socket_topic(&["@l2Book|", &depth.coin, "||||||"]);
+                    }
                     if self.spot {
                         let Some(market) = cx.store.market(&symbol) else {
                             return;
@@ -836,6 +844,7 @@ impl Hyperliquid {
                         .as_ref()
                         .is_none_or(|(time, _)| bbo.time >= *time)
                 {
+                    cx.record_socket_topic(&["@bbo|", &bbo.coin, "||||||"]);
                     ladder.bbo = Some((bbo.time, bbo.bbo));
                     if ladder.depth_time.is_some() {
                         Self::combine(ladder);
@@ -845,6 +854,7 @@ impl Hyperliquid {
             }
             "candle" => {
                 let mut apply = |row: CandleRow<'_>| {
+                    cx.record_socket_topic(&["@candle|", &row.s, "|", &row.i, "|||||"]);
                     if let Some(symbol) = self.symbol(&row.s)
                         && let Some(interval) = Interval::parse(&row.i)
                         && self.candles.contains_key(&(symbol.to_owned(), interval))
