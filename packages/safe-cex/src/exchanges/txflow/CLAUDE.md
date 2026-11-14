@@ -121,8 +121,10 @@ orders and terminal replay fences.
 
 Supported placement is plain Limit/Market (`Gtc`, `Ioc`, `Alo`, native
 `FrontendMarket`/`bbo`) within documented size/precision limits. Serialize
-commands (at most 50 placements per command), validate whole batches before any
-write, and recheck queued intent against current state before dispatch.
+commands, validate the entire command before any write, and send physical batches
+of at most 50 placements. Resolve each executed batch's native IDs before admitting
+its successor; uncertainty stops the remaining batches. Recheck queued intent
+against current state before dispatch.
 
 Caller IDs are honored verbatim on one plain native order: nonempty, at most
 64 UTF-8 bytes, and no `0x` prefix (reserved by TxFlow for LP accounts).

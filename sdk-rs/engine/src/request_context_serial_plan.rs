@@ -29,8 +29,8 @@ pub(super) struct Serial {
     pub(super) condition: Option<(u64, f64)>,
     #[cfg(feature = "condition-waits")]
     pub(super) waits: u64,
-    /// A settle wait left no next entry: nothing more can be issued, and its
-    /// release only readies the Plan (once, at the stored time) for `done_plan`.
+    /// A settled call has no next entry. Release readies done_plan or an
+    /// explicit definitive continuation in genuine Plan-ready custody.
     #[cfg(feature = "condition-waits")]
     pub(super) settled: bool,
     #[cfg(feature = "condition-waits")]
@@ -316,6 +316,19 @@ impl<P> Cx<'_, P> {
         self.continue_serial(plan, slot, context, next, Next::Now)
     }
 
+    /// Continue a released settle wait only in this Plan's ready callback.
+    /// The retained physical leg must be definitive, including native IDs.
+    #[cfg(feature = "condition-waits")]
+    pub fn continue_settled_serial_plan(
+        &mut self,
+        plan: &Plan,
+        context: &Context,
+        next: SerialCall,
+    ) -> Result<Slot, Error> {
+        self.core()
+            .continue_settled_serial_plan(plan, context, next)
+    }
+
     /// As `continue_serial_plan`, but the next call is issued from the Plan
     /// timer's `on_http_plan_ready` after `delay_ms`. It is also the one Read
     /// failure retry: from the current Read call's own failure, Read next only.
@@ -364,6 +377,85 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
+    #[cfg(feature = "condition-waits")]
+    fn continue_settled_serial_plan(
+        &mut self,
+        plan: &Plan,
+        context: &Context,
+        next: SerialCall,
+    ) -> Result<Slot, Error> {
+        validate_call(next)?;
+        if !self
+            .io
+            .core
+            .http_plan_ready
+            .as_ref()
+            .is_some_and(|ready| ready.same_plan(plan))
+            || self.io.core.http_delivery.is_some()
+            || context.operation() != Operation::Mutation
+        {
+            return Err(Error::Revoked);
+        }
+        #[cfg(feature = "session-bearer")]
+        self.io
+            .core
+            .request_contexts
+            .validate_keyless_session(plan.owner(), &self.io.core.identities)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        let serial = body.serial.as_ref().ok_or(Error::Invalid)?;
+        if !serial.settled
+            || serial.condition.is_some()
+            || !body.schedule.is_complete()
+            || body.entries[0].credit != Credit::Released
+            || body.entries[0].call.is_some()
+        {
+            return Err(Error::State);
+        }
+        let handoff = body.handoff.as_ref().ok_or(Error::Revoked)?;
+        if !handoff.context.same_issuer(context) || handoff.context != *context {
+            return Err(Error::Revoked);
+        }
+        Serial::validate_auth(next, &body.policy.credential, serial.has_session_root())?;
+        let leg = Some(context.leg());
+        self.io
+            .core
+            .request_contexts
+            .owner_entry(plan.owner())
+            .and_then(|owner| owner.writes.as_ref())
+            .ok_or(Error::State)?
+            .validate_serial_continuation(leg)?;
+        let attempts = u64::from(next.attempts);
+        let signed = serial.signs(next, &body.policy.credential);
+        let next = self
+            .io
+            .core
+            .resolve_serial_pacing(body.policy.pacing, next)?;
+        if !self.io.core.next_id.available(1 + 3 * attempts)
+            || (signed && !self.io.core.signing.available_ids(attempts))
+        {
+            return Err(Error::Capacity);
+        }
+        let schedule = Schedule::from_single_call(CallTerms {
+            timeout_ms: next.timeout_ms,
+            attempts: next.attempts.into(),
+            retry_window: RetryWindow::FreshAttempt,
+            wait_ms: 0,
+        })?;
+        self.io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)?
+            .serial
+            .as_mut()
+            .ok_or(Error::State)?
+            .settled = false;
+        self.commit_serial_continuation(plan, context, leg, next, schedule, Next::Now)
+    }
+
     // Every check precedes the first change: a refusal leaves the current call
     // settleable exactly as it was.
     #[inline(never)]

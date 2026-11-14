@@ -52,7 +52,7 @@ allocated at dispatch, shared by the signing address; signatures are low-S.
 
 | Surface | Authoritative field/endpoint reference |
 | --- | --- |
-| Plain orders, ≤50 per command | [order.md](https://docs.txflow-testnet.xyz/api/exchange/order.md) |
+| Plain orders, ≤50 per request; serial command batches | [order.md](https://docs.txflow-testnet.xyz/api/exchange/order.md) |
 | Cancel by native ID | [cancel.md](https://docs.txflow-testnet.xyz/api/exchange/cancel.md) |
 | Amend price and total size | [modify2.md](https://docs.txflow-testnet.xyz/api/exchange/modify2.md) |
 | Leverage | [updateLeverage.md](https://docs.txflow-testnet.xyz/api/exchange/updateLeverage.md) |
@@ -70,7 +70,10 @@ reply remains uncertain. A placement's executed acknowledgement has no order
 ID: the engine retains a bounded pending-identity receipt until authoritative
 REST/WS reconciliation supplies the native IDs. No caller cloid becomes an oid.
 Automatic write replay remains disabled; a caller retry creates a new signed
-attempt and nonce. Never replay an uncertain order just because a timeout fired.
+attempt and nonce. Never replay an uncertain order just because a timeout fired. Each physical
+placement batch retains its own bounded identity receipt. Only resolved native
+IDs allow a genuine engine-ready callback to admit the next batch, preserving
+command order without replaying an uncertain batch.
 
 ## Live validation, 2026-11-08
 

@@ -376,9 +376,6 @@ impl TxFlow {
     ) -> Result<VecDeque<Step>, String> {
         // Apply the shared caller-ID contract to the entire command before
         // evaluating venue shape controls or minting any native identities.
-        if orders.len() > 50 {
-            return Err("TxFlow accepts at most 50 orders per command".into());
-        }
         let mut caller_ids = HashSet::new();
         for opts in orders {
             let Some(id) = &opts.client_order_id else {
@@ -845,17 +842,22 @@ impl TxFlow {
             }
         };
         job.effective = true;
-        if job.steps.is_empty() {
+        if pending_place {
             if let (Some(plan), Some(slot)) = (&job.custody.plan, &job.custody.slot) {
-                if pending_place {
-                    match cx.serial_plan_settle_wait(plan, slot, &request.context, 5_000) {
-                        Ok(wait) => job.custody.wait = Some(wait),
-                        Err(error) => {
-                            self.finish_trade(cx, Err(error.venue_error()));
-                            return;
-                        }
+                match cx.serial_plan_settle_wait(plan, slot, &request.context, 5_000) {
+                    Ok(wait) => job.custody.wait = Some(wait),
+                    Err(error) => {
+                        self.finish_trade(cx, Err(error.venue_error()));
+                        return;
                     }
-                } else if let Err(error) = cx.finish_plan_call(plan, slot, &request.context) {
+                }
+                if job.steps.is_empty() {
+                    job.custody.context = None;
+                }
+            }
+        } else if job.steps.is_empty() {
+            if let (Some(plan), Some(slot)) = (&job.custody.plan, &job.custody.slot) {
+                if let Err(error) = cx.finish_plan_call(plan, slot, &request.context) {
                     self.finish_trade(cx, Err(error.venue_error()));
                     return;
                 }
@@ -866,14 +868,13 @@ impl TxFlow {
                 self.finish_trade(cx, Err(unknown("TxFlow trade slot is missing")));
                 return;
             };
-            let wait = cx.serial_plan_condition_wait(
+            match cx.serial_plan_condition_wait(
                 &request.plan,
                 slot,
                 &request.context,
                 custody::call(),
                 Some(20_000),
-            );
-            match wait {
+            ) {
                 Ok(wait) => {
                     job.custody.wait = Some(wait);
                     job.custody.context = None;
@@ -948,16 +949,16 @@ impl TxFlow {
             job.waiting.clear();
         }
         if job.waiting.is_empty() {
+            if let Some(timer) = self.trading.reconcile.take() {
+                cx.clear_timer(timer);
+            }
+            self.trading.reconcile_count = 0;
             if let Some(wait) = job.custody.wait.take() {
                 if let Err(error) = cx.release_condition_wait(&wait) {
                     self.finish_trade(cx, Err(error.venue_error()));
                 }
                 return;
             }
-            if let Some(timer) = self.trading.reconcile.take() {
-                cx.clear_timer(timer);
-            }
-            self.trading.reconcile_count = 0;
             self.pump_trades(cx);
         } else if self.trading.reconcile.is_none() {
             self.trading.reconcile = Some(cx.set_timer(300.0));

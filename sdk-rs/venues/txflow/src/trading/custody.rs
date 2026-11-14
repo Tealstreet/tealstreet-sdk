@@ -206,12 +206,17 @@ impl TxFlow {
             self.finish_trade(cx, Ok(()));
             return;
         }
-        match cx.plan_slots(owner).and_then(|slots| {
-            slots
-                .into_iter()
-                .next()
-                .ok_or(safe_cex_engine::request_context::Error::State)
-        }) {
+        let next = if let Some(context) = job.custody.context.take() {
+            cx.continue_settled_serial_plan(owner, &context, call())
+        } else {
+            cx.plan_slots(owner).and_then(|slots| {
+                slots
+                    .into_iter()
+                    .next()
+                    .ok_or(safe_cex_engine::request_context::Error::State)
+            })
+        };
+        match next {
             Ok(slot) => job.custody.slot = Some(slot),
             Err(error) => {
                 self.finish_trade(cx, Err(error.venue_error()));
