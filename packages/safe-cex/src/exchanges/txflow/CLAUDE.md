@@ -213,3 +213,7 @@ Standalone agent reads/approvals/revocations use the registered transport's
 `privateProxy('txflow')` contract unless `options.fetch` explicitly overrides it.
 A configured proxy without authorization refuses before fetch; it never falls
 back to the venue. The direct transport remains direct by its declared contract.
+
+Native hosted mutations carry a canonical decimal uint64 nonce in their signing
+receipt. The production remote provider validates and echoes it unchanged;
+native apply rejects changed receipt facts before any exchange write.

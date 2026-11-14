@@ -799,6 +799,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (!record(request.receipt) || Object.entries(receipt).some(([key, value]) =>
         exchangeName === 'asterdex' && key === 'nonce' ? typeof value !== 'string'
           || !/^[1-9][0-9]{0,19}$/.test(value) || BigInt(value) > 18446744073709551615n :
+        exchangeName === 'txflow' && key === 'nonce' ? typeof value !== 'string'
+          || !/^(0|[1-9][0-9]{0,19})$/.test(value) || BigInt(value) > 18446744073709551615n :
         exchangeName === 'kraken' && key === 'nonce' ? false :
         !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER
           || (!((exchangeName === 'coinbase' || exchangeName === 'coinbasespot') && key === 'stampMs') && !Number.isInteger(value)))))) throw refused();
