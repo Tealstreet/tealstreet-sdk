@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { GATE_SUITES, expectedGateCases } from './ci-gate-suites.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { performanceFailures, performanceMetricErrors } from './performance-policy.mjs';
+import { RUST_ONLY_FAILURE } from './rust-only-oracle.mjs';
 
 // Preserve checkpoint/row/field identities. Only strip observed values and the
 // performance sample ordinal; every sample still runs and validates separately.
@@ -134,6 +135,13 @@ function assessReport(report, manifest, correctnessOnly, accepted) {
       (report.status === 'PASS') !== (report.failures.length === 0) ||
       typeof report.private !== 'boolean' || !/^[a-f0-9]{64}$/.test(report.tapeSha256 ?? ''))
     return { errors: [...errors, 'invalid strict gate report'], known: [], accepted: [], resolved: [] };
+  // Rust-only replays are private, have no TS samples, and always carry the
+  // retired-oracle failure; that failure is valid nowhere else.
+  const rustOnly = report.rustOnly === true;
+  if (Object.hasOwn(report, 'rustOnly') && !rustOnly) errors.push('invalid rust-only report flag');
+  if (rustOnly && (!report.private || report.failures.filter((failure) => failure === RUST_ONLY_FAILURE).length !== 1))
+    errors.push('invalid rust-only replay report');
+  if (!rustOnly && report.failures.includes(RUST_ONLY_FAILURE)) errors.push('retired TS oracle claimed by a paired replay');
   if (correctnessOnly !== (report.correctnessOnly === true))
     errors.push('correctness-only reports cannot substitute for measured gate evidence');
   if (correctnessOnly && (report.runs !== 0 || report.correctnessRuns !== 1 ||
@@ -160,6 +168,10 @@ function assessReport(report, manifest, correctnessOnly, accepted) {
   for (const impl of ['ts', 'rust']) {
     const samples = report.samples?.[impl];
     const correctness = report.private || correctnessOnly;
+    if (rustOnly && impl === 'ts') {
+      if (!Array.isArray(samples) || samples.length) errors.push('ts: rust-only replay reported TS samples');
+      continue;
+    }
     const expected = correctness ? report.correctnessRuns : report.runs;
     if (!Number.isSafeInteger(expected) || expected < (correctness ? 1 : 7) || !Array.isArray(samples) || samples.length !== expected) {
       errors.push(`${impl}: incomplete gate samples`);

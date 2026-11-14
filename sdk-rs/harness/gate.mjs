@@ -15,6 +15,7 @@ import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, expectedCheckpointPlan } from './tape.mjs';
 import { replayVenueOf } from './venues.mjs';
+import { RUST_ONLY_FAILURE, rustOnlyOracle, rustOnlyDifferences } from './rust-only-oracle.mjs';
 import { COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
@@ -173,16 +174,19 @@ const isPrivate =
   tapeRecords.find((record) => record.type === 'meta')?.private ??
   tapeRecords.some((record) => venue.isPrivateRecord ? venue.isPrivateRecord(record)
     : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)));
+// A retired TS oracle (meta.oracle) replays Rust alone against the tape's expected state.
+const rustOnly = rustOnlyOracle(tapeRecords, isPrivate);
+const impls = rustOnly ? ['rust'] : ['ts', 'rust'];
 let runs = values['correctness-only'] ? 0 : replayRunCount(values.runs ?? (isPrivate ? undefined : process.env.RUST_REPLAY_PUBLIC_RUNS), isPrivate);
 const correctnessRuns = values['correctness-only'] ? 1 : isPrivate ? runs : 1;
-const checkpointPlans = Object.fromEntries(['ts', 'rust'].map((impl) => [impl, expectedCheckpointPlan(tapeRecords, venue, impl)]));
+const checkpointPlans = Object.fromEntries(impls.map((impl) => [impl, expectedCheckpointPlan(tapeRecords, venue, impl)]));
 const results = { ts: [], rust: [] };
 const performanceResults = { ts: [], rust: [] };
 const metricsOf = (impl) => performanceResults[impl].map((output) => output.metrics);
 let remeasure;
 try {
 for (let run = 0; run < correctnessRuns; run++) {
-  for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
+  for (const impl of impls) results[impl].push(replay(impl, run));
 }
 if (!isPrivate && !values['correctness-only']) {
   const measure = () => {
@@ -211,6 +215,7 @@ if (!isPrivate && !values['correctness-only']) {
     ...(ciWasm ? { ciWasm: ciWasm.metadata } : {}),
     tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
     private: isPrivate, status: 'FAIL', failures: [error.message], replayFailure: error.failure,
+    ...(rustOnly ? { rustOnly: true } : {}),
     ...(values['correctness-only'] ? { correctnessOnly: true } : {}),
     coverage: { correctness: 'incomplete', performance: 'not-run' },
     ...(recorded ? {} : { measurement: { cpu: cpuObservation, sampleOrder } }),
@@ -220,7 +225,9 @@ if (!isPrivate && !values['correctness-only']) {
   process.exit(1);
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-const rawAudited = { ts: structuredClone(ts), rust: structuredClone(rust) };
+const rawAudited = rustOnly ? undefined : { ts: structuredClone(ts), rust: structuredClone(rust) };
+if (rustOnly) for (let run = 0; run < correctnessRuns; run++)
+  differences.push(...rustOnlyDifferences(results.rust[run], { tapeRecords, checkpointPlan: checkpointPlans.rust, books: values.books, run, venue: values.venue }));
 
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
@@ -288,7 +295,7 @@ const rawAudited = { ts: structuredClone(ts), rust: structuredClone(rust) };
 // WOO validates prevTs and clears invalid books during recovery; Backpack
 // preserves positions after an unqualified 404 rather than committing [].
 const { KNOWN_TS_FIXES, applyTsCorrections } = createTsFixes(values, tapeRecords);
-for (let run = 0; run < correctnessRuns; run++) {
+for (let run = 0; run < (rustOnly ? 0 : correctnessRuns); run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
 
@@ -404,8 +411,9 @@ const summary = (impl) => ({
 });
 const t = summary('ts');
 const r = summary('rust');
+const shown = rustOnly ? rust : ts;
 console.log(
-  `frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`,
+  `frames ${shown.frames}, markets ${shown.markets.length}, tickers ${shown.tickers.length}, books ${Object.keys(shown.books).length}`,
 );
 const row = (label, a, b, unit = 'ms') =>
   console.log(
@@ -420,6 +428,7 @@ row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB; idle-loaded baseline; ${isPrivate ? 0 : runs} interleaved performance pairs; required improvement 10%)`);
 console.log('(CPU includes cold implementation load and replay transport; audit snapshots, validators and baseline GC are excluded from performance runs)');
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
+if (rustOnly) console.log('(retired TS oracle: Rust replayed alone against the tape\'s expected state)');
 if (venue.family === 'orderly')
   console.log(
     `(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`,
@@ -437,7 +446,8 @@ if (venue.family === 'coinbase')
   );
 
 recorded?.finish();
-const failures = [...differences];
+// Never parity: the declared known failure keeps this strict result FAIL.
+const failures = [...differences, ...(rustOnly ? [RUST_ONLY_FAILURE] : [])];
 const warnings = [];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate && !values['correctness-only']) {
@@ -454,6 +464,7 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   ...(ciWasm ? { ciWasm: ciWasm.metadata } : {}),
   tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
+  ...(rustOnly ? { rustOnly: true } : {}),
   ...(values['correctness-only'] ? { correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } } : {}),
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
   ...(warnings.length ? { warnings } : {}), ...(remeasure ? { remeasure: { first: remeasure.first.failures, firstDifferences: remeasure.firstDifferences } } : {}),

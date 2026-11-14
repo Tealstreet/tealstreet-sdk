@@ -3224,6 +3224,50 @@ for (const [family, measured, minimumCap, sha256, venues] of [
   });
 }
 
+test('#3225 private drb CI 42367168155 retains measured headroom and the exact boundary', () => {
+  const measured = 2_022_882;
+  const minimumCap = 2_033_664;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.coinbase;
+  assert.ok(cap >= minimumCap);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
+
+test('#3225 refreshed private DRB artifacts retain 10 KiB and both Coinbase family boundaries', () => {
+  const measured = 2_222_017;
+  const minimumCap = 2_232_320;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES.coinbase;
+    assert.ok(cap >= Math.max(minimumCap, 2_231_296, 2_228_224, 2_126_848));
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
+for (const [venue, measured, required] of [
+  ['txflow', 2_148_377, 2_159_616],
+  ['weex', 2_028_106, 2_038_784],
+]) test(`#3314 merge f19209120d28: ${venue} retains fresh measured reserve`, () => {
+  assert.equal(required, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES[venue];
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+});
+
 // #3290 master refresh 78d46f0574ef, CI 43569184535, shipped family artifact 14104151569.
 test('#3290 merged BingX module retains the current measured reserve', () => {
   const measured = 2_142_207;
