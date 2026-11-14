@@ -1626,3 +1626,9 @@ whole mixed known/unknown batch before writes. Native ID-only cancel APIs may
 send the supplied identity directly. Empty requested lists remain valid no-ops.
 The family inventory and regression evidence live in
 `docs/plans/RUST_UNKNOWN_CANCEL.md`.
+
+
+Manual page writes retain the original worker-owner generation and bridge through
+internal reads, capability waits and nuke retry timers. Composite operations pass
+that admission to every later cancel/close leg; nested calls cannot recapture a
+successor owner. Unchanged-owner command payloads and ordering remain identical.

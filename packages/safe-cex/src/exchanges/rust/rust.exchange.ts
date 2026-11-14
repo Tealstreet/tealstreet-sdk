@@ -1935,6 +1935,13 @@ export class RustEngineExchange extends BaseExchange {
     };
   };
 
+  private capturePageWriteAdmission = (method: string, args: unknown[]): (() => void) => {
+    const admitted = this.isWorkerMirror ? this.captureWorkerAdmission() : undefined;
+    const assertCurrent = () => admitted?.(method, args);
+    assertCurrent();
+    return assertCurrent;
+  };
+
   private callWorkerForOwner = async (
     admitted: ((method: string, args: unknown[]) => void) | undefined, method: string, ...args: unknown[]
   ): Promise<unknown> => {
@@ -2058,13 +2065,14 @@ export class RustEngineExchange extends BaseExchange {
           return Promise.reject(notReadOnPublicData(method));
         if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
           return Reflect.apply(this.fetchPageCandles, this, args);
-        if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
+        if (!this.routesToWorker) return local(...args);
         if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
           return this.withPageWriter(method, args, () => local(...args)).catch((error: unknown) => {
             this.reportCommandError(error);
             throw error;
           });
         }
+        if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
         const admitted = this.captureWorkerAdmission();
         const viaWorker = () =>
           this.callWorkerForOwner(admitted, method, ...args).then(
@@ -2836,6 +2844,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
+    const assertCurrent = this.capturePageWriteAdmission('placeOrders', [orders]);
     const timing = claimWriteTiming('placeOrders');
     const ready = this.writeCapabilitiesFor('placeOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
@@ -2893,6 +2902,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (capabilities.stpControls) for (const order of orders) this.validateAsterStp(order.stpMode);
     for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
+    assertCurrent();
     return this.writeCommand<string[]>(timing, { op: 'placeOrders', orders });
   };
 
@@ -2942,14 +2952,17 @@ export class RustEngineExchange extends BaseExchange {
   nukePositions = async (_tries = 0) => this.runNativeNuke(false);
 
   override nukeOrders = async (): Promise<NukeResult> => {
+    const assertCurrent = this.capturePageWriteAdmission('nukeOrders', []);
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
     this.isNuking = true;
     let warning: string | undefined;
     try {
       const { placedSymbols, ...stopped } = await this.stopAlgosForNuke();
+      assertCurrent();
       warning = unseenOrdersWarning(await this.capabilitiesFor('nuke'));
-      await this.cancelNukeOrders(placedSymbols);
+      assertCurrent();
+      await this.cancelNukeOrders(assertCurrent, placedSymbols);
       return warning ? { ...stopped, warning } : stopped;
     } catch (error) {
       throw withWarning(error, warning);
@@ -2962,10 +2975,15 @@ export class RustEngineExchange extends BaseExchange {
    * Every traded symbol's cancel, then, where the venue has one, its account-wide cancel:
    * nuke means everything. Each runs whatever the other did; failures are named together.
    */
-  private cancelNukeOrders = async (placedSymbols?: string[]): Promise<void> => {
+  private cancelNukeOrders = async (assertCurrent: () => void, placedSymbols?: string[]): Promise<void> => {
     const failures: unknown[] = [];
-    await this.cancelAllOrders(await this.nukeCancelSymbols(placedSymbols)).catch((error) => failures.push(error));
-    if ((await this.capabilitiesFor('nuke')).nukeAccountCancel)
+    const symbols = await this.nukeCancelSymbols(placedSymbols);
+    assertCurrent();
+    await this.cancelAllOrders(symbols).catch((error) => failures.push(error));
+    assertCurrent();
+    const capabilities = await this.capabilitiesFor('nuke');
+    assertCurrent();
+    if (capabilities.nukeAccountCancel)
       await this.command({ op: 'cancelAccountOrders' }).catch((error) =>
         failures.push(withWarning(error, NUKE_ORDERS_MAY_REMAIN)),
       );
@@ -2996,6 +3014,7 @@ export class RustEngineExchange extends BaseExchange {
   ];
 
   private runNativeNuke = async (cancelOrders: boolean): Promise<NukeResult> => {
+    const assertCurrent = this.capturePageWriteAdmission(cancelOrders ? 'nuke' : 'nukePositions', []);
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
     this.isNuking = true;
@@ -3003,6 +3022,7 @@ export class RustEngineExchange extends BaseExchange {
     let failure: unknown;
     try {
       const { placedSymbols, ...stopped } = await this.stopAlgosForNuke();
+      assertCurrent();
       const leg = async (run: () => Promise<void>) => {
         try {
           await run();
@@ -3016,8 +3036,9 @@ export class RustEngineExchange extends BaseExchange {
         }
       };
       // Orders first: a market close otherwise fills against the user's own resting bid.
-      if (cancelOrders) await leg(() => this.cancelNukeOrders(placedSymbols));
-      await leg(() => this.closeUntilFlat());
+      if (cancelOrders) await leg(() => this.cancelNukeOrders(assertCurrent, placedSymbols));
+      assertCurrent();
+      await leg(() => this.closeUntilFlat(assertCurrent));
       const warning = cancelOrders ? unseenOrdersWarning(await this.capabilitiesFor('nuke')) : undefined;
       if (failed) {
         this.logNukeRemainder();
@@ -3054,11 +3075,14 @@ export class RustEngineExchange extends BaseExchange {
    * read, not assumed: a venue with `freshPositions` is flat only on a read issued at least
    * `NUKE_READ_SETTLE_MS` after the last close. If that read fails, no further close is sent.
    */
-  private closeUntilFlat = async (): Promise<void> => {
+  private closeUntilFlat = async (assertCurrent: () => void): Promise<void> => {
     const capabilities = await this.capabilitiesFor('nuke');
     for (let round = 0; round < NUKE_FLAT_ROUNDS; round += 1) {
-      const closed = await this.closeAllPositions();
-      if (closed || !capabilities.freshPositions) await this.settleAfterClose(capabilities.freshPositions);
+      assertCurrent();
+      const closed = await this.closeAllPositions(assertCurrent);
+      assertCurrent();
+      if (closed || !capabilities.freshPositions) await this.settleAfterClose(capabilities.freshPositions, assertCurrent);
+      assertCurrent();
       if (this.isDisposed) return;
       if (capabilities.freshPositions) {
         const { skipped, open } = await this.freshNukeRead();
@@ -3078,15 +3102,18 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** Up to the flat settle while the store shows open; before a proving read, at least the read settle. */
-  private settleAfterClose = async (provingRead: boolean): Promise<void> => {
+  private settleAfterClose = async (provingRead: boolean, assertCurrent: () => void): Promise<void> => {
     const closedAt = Date.now();
     if (provingRead) await new Promise((resolve) => setTimeout(resolve, NUKE_READ_SETTLE_MS));
+    assertCurrent();
     while (
       Date.now() < closedAt + NUKE_FLAT_SETTLE_MS &&
       !this.isDisposed &&
       (await this.positionsStillOpen()).length
     ) {
+      assertCurrent();
       await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
+      assertCurrent();
     }
   };
 
@@ -3108,15 +3135,19 @@ export class RustEngineExchange extends BaseExchange {
    * succeeded behind a lagging store is never sent again. Every close is reduce-only.
    * Resolves whether any close was attempted.
    */
-  private closeAllPositions = async (): Promise<boolean> => {
+  private closeAllPositions = async (assertCurrent: () => void): Promise<boolean> => {
     let attempted = false;
     const unusable: { symbol: string; error: unknown }[] = [];
     let failures = new Map<string, { symbol: string; error: unknown }>();
     for (let attempt = 0; attempt <= NUKE_CLOSE_RETRIES; attempt += 1) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
+      assertCurrent();
       const failedLast = failures;
       failures = new Map();
-      for (const position of await this.fetchPositions()) {
+      const positions = await this.fetchPositions();
+      assertCurrent();
+      for (const position of positions) {
+        assertCurrent();
         const key = `${position.symbol}:${position.side}`;
         if (this.isDisposed || (attempt > 0 && !failedLast.has(key))) continue;
         let order: PlaceOrderOpts | undefined;
@@ -3215,9 +3246,11 @@ export class RustEngineExchange extends BaseExchange {
    * covers them; otherwise each is cancelled with the native orders and attempted placements.
    */
   cancelAllOrders = async (alsoSymbols: string[] = []) => {
+    const assertCurrent = this.capturePageWriteAdmission('cancelAllOrders', [alsoSymbols]);
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('cancelAllOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
+    assertCurrent();
     if (capabilities.cancelAll === 'native') {
       await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       return;
@@ -3225,14 +3258,16 @@ export class RustEngineExchange extends BaseExchange {
     // Native current orders, not a JS store that can lag the engine's flush; frames can
     // lag placement ACKs, so attempted scopes stay for the account's lifetime.
     const orders = capabilities.cancelAll === 'eachOpenSymbol' ? await this.fetchOrders() : this.store.orders;
+    assertCurrent();
     await this.cancelEachSymbol(
-      new Set([...orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols, ...alsoSymbols]),
+      assertCurrent, new Set([...orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols, ...alsoSymbols]),
     );
   };
 
-  private cancelEachSymbol = async (symbols: Set<string>) => {
+  private cancelEachSymbol = async (assertCurrent: () => void, symbols: Set<string>) => {
     const failures: string[] = [];
     for (const symbol of symbols) {
+      assertCurrent();
       if (this.isDisposed) continue;
       try {
         await this.cancelSymbolOrders(symbol);
@@ -3256,10 +3291,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   setAllLeverage = async (leverage: number) => {
+    const assertCurrent = this.capturePageWriteAdmission('setAllLeverage', [leverage]);
     this.refuseWriteBeforeEngine();
     if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
       const positions = await this.fetchPositions();
+      assertCurrent();
       if (this.isDisposed) return;
       const liveSymbols = new Set(positions.map((position) => position.symbol));
       const flatSymbols = new Set(
@@ -3268,10 +3305,12 @@ export class RustEngineExchange extends BaseExchange {
           .filter((symbol) => !liveSymbols.has(symbol)),
       );
       for (const position of positions) {
+        assertCurrent();
         if (this.isDisposed) return;
         await this.setLeverage(position.symbol, leverage, position.side);
       }
       for (const symbol of flatSymbols) {
+        assertCurrent();
         if (this.isDisposed) return;
         await this.setLeverage(symbol, leverage);
       }
@@ -3308,12 +3347,14 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   changeStpMode = async (mode: AsterDEXStpMode): Promise<void> => {
+    const assertCurrent = this.capturePageWriteAdmission('changeStpMode', [mode]);
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('changeStpMode');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.stpControls) throw new Error('Self-trade prevention is unavailable for this venue');
     this.validateAsterStp('EXPIRE_TAKER');
     if (!isAsterDEXStpMode(mode)) throw new Error(`Invalid AsterDEX self-trade-prevention mode: ${String(mode)}`);
+    assertCurrent();
     await this.command({ op: 'setStpMode', mode });
   };
 
@@ -3531,12 +3572,14 @@ export class RustEngineExchange extends BaseExchange {
         return;
       }
     }
+    const assertCurrent = this.capturePageWriteAdmission('scheduleCancel', [time]);
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('scheduleCancel');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
     if (time != null && time < this.utcNow() + 5_000)
       throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
+    assertCurrent();
     await this.command({ op: 'scheduleCancel', ...(time == null ? {} : { time }) });
   };
 

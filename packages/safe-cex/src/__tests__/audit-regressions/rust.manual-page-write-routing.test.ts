@@ -97,7 +97,11 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
   return fake;
 };
 
-const mirrorWith = (fake: Fake, failure?: Record<string, unknown>) => {
+const mirrorWith = (
+  fake: Fake,
+  failure?: Record<string, unknown>,
+  pause?: (event: { requestId: string; method: string }, exchange: RustEngineExchange) => boolean,
+) => {
   void fake;
   const exchange = new RustEngineExchange(
     'bybit',
@@ -108,6 +112,7 @@ const mirrorWith = (fake: Fake, failure?: Record<string, unknown>) => {
   const orderAsks: unknown[][] = [];
   exchange.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
     calls.push(event.method);
+    if (pause?.(event, exchange)) return;
     if (event.method === 'refreshAccountOrders') orderAsks.push(event.args);
     if (failure) {
       exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: false, result: failure });
@@ -268,5 +273,90 @@ describe('manual page writes never fall back to the hosted RPC', () => {
     expect(await result).toMatchObject({ outcome: 'notSent' });
     expect(mirror.calls).toEqual([]);
     expect(fake.commands.filter(({ op }) => op === 'setLeverage')).toEqual([]);
+  });
+
+  describe.each(['ready', 'startup-wait'])('composite admission: %s', (readiness) => {
+    it.each(['setAllLeverage', 'cancelAllOrders', 'nukeOrders', 'nukePositions', 'nuke'] as const)(
+      'retains the original owner across %s internal reads',
+      async (method) => {
+        const fake = fakeEngine();
+        const module = lastModule;
+        if (!module) throw new Error('Missing synthetic module');
+        let release = () => {};
+        const startup = new Promise<WasmEngineModule>((resolve) => {
+          release = () => resolve(module);
+        });
+        if (readiness === 'startup-wait') setWasmEngineLoader(() => startup);
+        let reached = () => {};
+        const atRead = new Promise<void>((resolve) => {
+          reached = resolve;
+        });
+        let reply = () => {};
+        const paused =
+          method === 'setAllLeverage'
+            ? 'fetchPositions'
+            : method === 'cancelAllOrders'
+              ? 'fetchOrders'
+              : 'stopAccountAlgos';
+        const mirror = mirrorWith(fake, undefined, (event, current) => {
+          if (event.method !== paused) return false;
+          reply = () =>
+            current.emitter.emit('callMethod:done', {
+              requestId: event.requestId,
+              success: true,
+              result:
+                paused === 'stopAccountAlgos'
+                  ? { stoppedChasers: [], stoppedTwaps: [], placedSymbols: ['BTCUSDT'] }
+                  : [{ symbol: 'BTCUSDT', side: 'long' }],
+            });
+          reached();
+          return true;
+        });
+        exchange = mirror.exchange;
+        let generation = 1;
+        exchange.setWorkerOwner(() => ({ ownerId: 'fake-owner-A', generation }));
+        if (readiness === 'ready') await exchange.frameFedReady;
+        const pending = (method === 'setAllLeverage' ? exchange.setAllLeverage(5) : exchange[method]()).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        release();
+        await atRead;
+        generation += 2;
+        reply();
+        expect(await pending).toMatchObject({ outcome: 'notSent' });
+        expect(
+          fake.commands.filter(({ op }) =>
+            ['setLeverage', 'cancelSymbolOrders', 'cancelAccountOrders', 'placeOrders'].includes(op),
+          ),
+        ).toEqual([]);
+      },
+    );
+  });
+
+  it('keeps the same-owner bulk leverage command payloads and order', async () => {
+    const fake = fakeEngine();
+    const mirror = mirrorWith(fake, undefined, (event, current) => {
+      if (event.method !== 'fetchPositions') return false;
+      current.emitter.emit('callMethod:done', {
+        requestId: event.requestId,
+        success: true,
+        result: [
+          { symbol: 'BTCUSDT', side: 'long' },
+          { symbol: 'ETHUSDT', side: 'short' },
+        ],
+      });
+      return true;
+    });
+    exchange = mirror.exchange;
+    exchange.setWorkerOwner(() => ({ ownerId: 'fake-owner-A', generation: 1 }));
+    await exchange.frameFedReady;
+    await exchange.setAllLeverage(5);
+    expect(
+      fake.commands.filter(({ op }) => op === 'setLeverage').map(({ command: _command, ...payload }) => payload),
+    ).toEqual([
+      { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 5, side: 'long', timeoutMs: 120000 },
+      { op: 'setLeverage', symbol: 'ETHUSDT', leverage: 5, side: 'short', timeoutMs: 120000 },
+    ]);
   });
 });
