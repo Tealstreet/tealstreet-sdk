@@ -3578,3 +3578,23 @@ test('#3226 per-identity census and queued intent keep current CI reserve', () =
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
+
+// #3226 master #3225 composition7b87c02999ae, CI43603165570/job132472467519.
+// Artifact14117401283: web/Node/replay2346763B, SHA256
+// 4c1200b004b8fb86924bacdc68a0199e67a9710fa7664aae3f330124f1ac9c67.
+// Rust1.99.0, bindgen0.2.129, Binaryen132 and two required -Oz passes.
+test('#3226 causal-order composition retains the current CI reserve', () => {
+  const measured = 2_346_763;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(minimumCap, 2_357_248);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= 2_355_200, 'retain all measured parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: less than 10 KiB above current CI module`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
