@@ -1307,7 +1307,7 @@
     },
     {
       "venue": "binancepm",
-      "tapeSha256": "c37534b929ea81c1959f2eb8f585f6305f34c43a03bb7a3bb5107f7319083bda",
+      "tapeSha256": "a083f2c3b3f81d1aa7bb868ea4423b1988d003df2685f4eb736d57b7ad3d237d",
       "tape": "sdk-rs/harness/tapes/binancepm-private.jsonl",
       "diagnostics": [
         {

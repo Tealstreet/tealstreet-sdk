@@ -728,9 +728,12 @@ impl Lighter {
             .and_then(|s| s.parse::<u8>().ok());
     }
     /// Frame-fed: the data source's resolved account index, refused when it
-    /// names another account than the configured Application ID.
-    pub(crate) fn apply_account_index(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
-        if let Some(expected) = self.options.application_id.as_deref().and_then(index)
+    /// names another account than the resolved receiver or numeric Application ID.
+    pub(crate) fn apply_account_index(&mut self, cx: &mut Cx<'_, Pending>, account: u64) -> bool {
+        if let Some(expected) = self
+            .account
+            .account_index
+            .or_else(|| self.options.application_id.as_deref().and_then(index))
             && expected != account
         {
             cx.notice(
@@ -738,10 +741,11 @@ impl Lighter {
                 code::CONFIG_INVALID,
                 "Lighter data source names a different account index",
             );
-            return;
+            return false;
         }
         self.account.account_index = Some(account);
         self.release_awaiting_identity(cx, account);
+        true
     }
     pub(crate) fn lookup_candidates(&self) -> VecDeque<Lookup> {
         self.candidates(true)
@@ -1082,7 +1086,11 @@ impl Lighter {
         self.account.records.remove(id);
     }
     pub(crate) fn record_modify(&mut self, id: &str) {
-        self.protection.originals.remove(id);
+        if let Some(original) = self.protection.originals.remove(id) {
+            self.protection
+                .retired_frame_originals
+                .insert(id.into(), original);
+        }
         self.account.revision += 1;
         self.account
             .order_revision
