@@ -1204,6 +1204,12 @@ impl<T: ?Sized> SetupExecutionBounds for T {}
 /// Hosts enforce cancellation/timeout independently of the signing future settling.
 pub trait Signer: ProviderBounds {
     fn sign(&self, request: SignRequest) -> SignFuture;
+    /// Trusted native setup, before sharing this provider. Unsupported providers
+    /// refuse; there is no unprotected fallback and no material export API.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn protect(self: Arc<Self>) -> Result<ProtectedProvider, SignError> {
+        Err(SignError::Unsupported)
+    }
     /// True only when sign_ready always completes inline (normal local provider).
     fn immediate(&self) -> bool {
         false
@@ -1244,6 +1250,12 @@ pub trait Signer: ProviderBounds {
     }
 }
 pub type Provider = Arc<dyn Signer>;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "signing_protected.rs"]
+mod protected;
+#[cfg(not(target_arch = "wasm32"))]
+pub use protected::{ProtectedProvider, ProtectedSigner};
 
 /// What a provider declares it can sign for one ref; anything but
 /// `Supported` fails command admission closed.

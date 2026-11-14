@@ -10,6 +10,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
+mod material;
+use material::{Material, heap};
 mod primitives;
 pub use key_material::KeyEncoding;
 
@@ -255,23 +257,23 @@ impl DecodedIdentity {
         if !self.key.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.credential")), self.key);
+                .insert(KeyRef(format!("{slot}.credential")), heap(self.key));
         }
         if !self.secret.is_empty() {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.signing")), self.secret);
+                .insert(KeyRef(format!("{slot}.signing")), heap(self.secret));
         }
         if let Some(passphrase) = self.passphrase {
             signer
                 .keys
-                .insert(KeyRef(format!("{slot}.passphrase")), passphrase);
+                .insert(KeyRef(format!("{slot}.passphrase")), heap(passphrase));
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
                 let reference = Self::extra_ref(slot, name);
                 signer.roles.insert(reference.clone(), name);
-                signer.keys.insert(reference, bytes);
+                signer.keys.insert(reference, heap(bytes));
             }
         }
     }
@@ -284,7 +286,7 @@ pub struct LocalSigner {
     incarnation: Option<Incarnation>,
     #[cfg(feature = "schnorr")]
     lighter_principal: Option<(KeyRef, LighterPrincipal)>,
-    keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
+    keys: HashMap<KeyRef, Material>,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
     roles: HashMap<KeyRef, ExtraKey>,
@@ -310,6 +312,19 @@ impl Default for LocalSigner {
     }
 }
 impl LocalSigner {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn with_protected_storage(mut self) -> Result<Self, SignError> {
+        let mut protected = HashMap::with_capacity(self.keys.len());
+        for (reference, bytes) in std::mem::take(&mut self.keys) {
+            protected.insert(
+                reference,
+                Material::Protected(crate::protected::ProtectedSecret::copy(bytes.as_slice())?),
+            );
+        }
+        self.keys = protected;
+        self.incarnation = None;
+        Ok(self)
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -416,7 +431,7 @@ impl LocalSigner {
                 self.algorithms.remove(&reference);
             }
         }
-        self.keys.insert(reference, Zeroizing::new(bytes));
+        self.keys.insert(reference, heap(Zeroizing::new(bytes)));
     }
     pub fn from_setup(
         setup: LocalSetup,
@@ -746,7 +761,8 @@ impl LocalSigner {
             return Err(SignError::InvalidRequest);
         }
         self.redraw();
-        self.keys.insert(reference.clone(), Zeroizing::new(bytes));
+        self.keys
+            .insert(reference.clone(), heap(Zeroizing::new(bytes)));
         self.algorithms.insert(reference, algorithm);
         Ok(())
     }
@@ -1076,6 +1092,17 @@ impl safe_cex_engine::signing::OwnedSetupExecution for LocalAddressSetup {
 }
 
 impl Signer for LocalSigner {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn protect(
+        self: std::sync::Arc<Self>,
+    ) -> Result<safe_cex_engine::signing::ProtectedProvider, SignError> {
+        let signer = std::sync::Arc::try_unwrap(self).map_err(|_| SignError::InvalidRequest)?;
+        let signer = signer.with_protected_storage()?;
+        safe_cex_engine::signing::ProtectedProvider::new(std::sync::Arc::new(ProtectedLocalSigner(
+            signer,
+        )))
+    }
+
     fn incarnation(&self) -> Option<&Incarnation> {
         self.incarnation.as_ref()
     }
@@ -1137,6 +1164,42 @@ impl Signer for LocalSigner {
     fn sign(&self, request: SignRequest) -> SignFuture {
         let result = self.sign_now(&request);
         Box::pin(std::future::ready(result))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ProtectedLocalSigner(LocalSigner);
+#[cfg(not(target_arch = "wasm32"))]
+impl safe_cex_engine::signing::ProtectedSigner for ProtectedLocalSigner {
+    fn memory_locked(&self) -> bool {
+        self.0.keys.values().all(|key| match key {
+            Material::Protected(bytes) => bytes.memory_locked(),
+            Material::Heap(_) => false,
+        })
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl Signer for ProtectedLocalSigner {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(self.0.sign_now(request))
+    }
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.0.sign(request)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+    fn owned_public_address_capability(&self) -> Capability {
+        self.0.owned_public_address_capability()
+    }
+    fn create_public_address_setup(
+        &self,
+        request: SignRequest,
+    ) -> Option<Box<dyn safe_cex_engine::signing::OwnedSetupExecution>> {
+        self.0.create_public_address_setup(request)
     }
 }
 
@@ -3457,5 +3520,59 @@ mod owned_address_setup_tests {
             .insert_declared(key.clone(), vec![1; 32], Algorithm::Ed25519)
             .unwrap();
         assert!(provider.create_public_address_setup(request(key)).is_none());
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod protected_release_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    #[test]
+    fn owner_erases_all_allocations_before_engine_handles_are_dropped() {
+        for explicit in [false, true] {
+            let (signer, _) = LocalSigner::from_setup(LocalSetup {
+                primary: Some(LocalIdentity {
+                    key: Secret::new("synthetic".into()),
+                    secret: Secret::new("synthetic-secret".into()),
+                    passphrase: Some(Secret::new("synthetic-pass".into())),
+                    ..Default::default()
+                }),
+                secondary: None,
+            })
+            .unwrap();
+            let mut signer = signer.with_protected_storage().unwrap();
+            let released = Arc::new(AtomicUsize::new(0));
+            let count = signer.keys.len();
+            for bytes in signer.keys.values_mut() {
+                let Material::Protected(bytes) = bytes else {
+                    panic!("unprotected key survived")
+                };
+                let released = released.clone();
+                bytes.check_release(move |allocation| {
+                    assert!(allocation.iter().all(|b| *b == 0));
+                    released.fetch_add(1, Ordering::SeqCst);
+                });
+            }
+            let owner = safe_cex_engine::signing::ProtectedProvider::new(Arc::new(
+                ProtectedLocalSigner(signer),
+            ))
+            .unwrap();
+            let engine = owner.provider();
+            if explicit {
+                owner.erase();
+            } else {
+                drop(owner);
+            }
+            assert_eq!(released.load(Ordering::SeqCst), count);
+            assert_eq!(
+                engine.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+            drop(engine);
+            assert_eq!(released.load(Ordering::SeqCst), count);
+        }
     }
 }

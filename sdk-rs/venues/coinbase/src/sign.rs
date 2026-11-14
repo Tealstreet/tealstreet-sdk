@@ -22,6 +22,10 @@ pub struct Credentials {
 enum Signer {
     Es256(Es256SigningKey),
     Ed25519(Zeroizing<[u8; 32]>),
+    #[cfg(not(target_arch = "wasm32"))]
+    ProtectedEs256(safe_cex_crypto::es256::ProtectedEs256SigningKey),
+    #[cfg(not(target_arch = "wasm32"))]
+    ProtectedEd25519(safe_cex_crypto::protected::ProtectedSecret),
     External(safe_cex_engine::signing::Identity, JwtAlgorithm),
 }
 
@@ -104,6 +108,34 @@ struct Claims<'a> {
 }
 
 impl Credentials {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn memory_locked(&self) -> bool {
+        match &self.signer {
+            Signer::ProtectedEs256(key) => key.memory_locked(),
+            Signer::ProtectedEd25519(key) => key.memory_locked(),
+            _ => false,
+        }
+    }
+    /// Trusted provider setup only. Preserve parsing/signature behavior while
+    /// replacing installed private material with native protected allocations.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn into_protected(self) -> Result<Self, String> {
+        let signer = match self.signer {
+            Signer::Es256(key) => Signer::ProtectedEs256(key.into_protected()?),
+            Signer::Ed25519(seed) => Signer::ProtectedEd25519(
+                safe_cex_crypto::protected::ProtectedSecret::new(Zeroizing::new(seed.to_vec()))
+                    .map_err(|_| "Protected Ed25519 storage unavailable".to_owned())?,
+            ),
+            Signer::External(..) => {
+                return Err("External credentials cannot be protected locally".into());
+            }
+            protected => protected,
+        };
+        Ok(Self {
+            key: self.key,
+            signer,
+        })
+    }
     pub fn new(key: &str, secret: &str) -> Result<Self, String> {
         if key.len() > MAX_CREDENTIAL_BYTES || secret.len() > MAX_CREDENTIAL_BYTES {
             return Err("Coinbase credentials exceed the supported size".into());
@@ -179,6 +211,10 @@ impl Credentials {
         match self.signer {
             Signer::Es256(_) => JwtAlgorithm::Es256,
             Signer::Ed25519(_) => JwtAlgorithm::EdDsa,
+            #[cfg(not(target_arch = "wasm32"))]
+            Signer::ProtectedEs256(_) => JwtAlgorithm::Es256,
+            #[cfg(not(target_arch = "wasm32"))]
+            Signer::ProtectedEd25519(_) => JwtAlgorithm::EdDsa,
             Signer::External(_, algorithm) => algorithm,
         }
     }
@@ -191,6 +227,10 @@ impl Credentials {
     pub fn sign_input(&self, input: &str) -> Result<[u8; 64], String> {
         match &self.signer {
             Signer::Es256(key) => key.sign(input.as_bytes()),
+            #[cfg(not(target_arch = "wasm32"))]
+            Signer::ProtectedEs256(key) => key.sign(input.as_bytes()),
+            #[cfg(not(target_arch = "wasm32"))]
+            Signer::ProtectedEd25519(key) => key.sign_ed25519(input.as_bytes()),
             Signer::Ed25519(seed) => {
                 safe_cex_crypto::ed25519::sign(input.as_bytes(), seed.as_ref())
             }
