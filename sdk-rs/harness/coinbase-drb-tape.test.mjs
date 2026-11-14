@@ -1,11 +1,55 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { createPrivateKey, sign } from 'node:crypto';
+import { COINBASE_REPLAY } from './coinbase-protocol.mjs';
 import {
   DRB_HTTP, DRB_PRIVATE_SOCKET, coinbaseDrbIntxTape, createDrbSocketAudit, drbRequestBody, drbSocketReplies,
   isDrbWrite, isRustOnlyTape, verifyDrbRequest,
 } from './coinbase-drb-tape.mjs';
 import { rustOnlyOracle } from './rust-only-oracle.mjs';
+
+const auditAuth = (id = 1) => {
+  const nbf = Math.floor(Date.now() / 1000);
+  const part = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const unsigned = `${part({ alg: 'EdDSA', typ: 'JWT', kid: COINBASE_REPLAY.key, nonce: 'synthetic-audit-nonce' })}.${part({ sub: COINBASE_REPLAY.key, iss: 'cdp', nbf, exp: nbf + 120 })}`;
+  const key = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(COINBASE_REPLAY.secret, 'base64')]), format: 'der', type: 'pkcs8' });
+  return { jsonrpc: '2.0', id, method: 'public/auth', params: { grant_type: 'coinbase_cdp', token: `${unsigned}.${sign(null, Buffer.from(unsigned), key).toString('base64url')}` } };
+};
+const auditChannels = ['user.changes.future.USDC.100ms', 'user.portfolio.USDC', 'user.isolated.changes.future.USDC.100ms'];
+const auditSubscribe = (id = 2) => ({ jsonrpc: '2.0', id, method: 'private/subscribe', params: { channels: auditChannels } });
+
+test('drb audit requires correlated successful auth and subscription replies', () => {
+  const audit = createDrbSocketAudit();
+  const send = (message) => audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify(message), 1);
+  send(auditAuth());
+  send(auditSubscribe());
+  assert.equal(audit.ready(), false, 'writing requests is not successful authentication/subscription');
+  assert.match(audit.errors().join('\n'), /subscribed before authenticating/);
+
+  const good = createDrbSocketAudit();
+  good.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auditAuth()), 7);
+  good.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 99, result: {} }), 7);
+  good.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), 8);
+  good.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 1, result: { access_token: 'synthetic', expires_in: 900 } }), 7);
+  good.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auditSubscribe()), 7);
+  assert.equal(good.ready(), false);
+  good.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 2, result: auditChannels }), 7);
+  assert.equal(good.ready(), true);
+});
+
+test('drb audit never authenticates a rejected or invalid login', () => {
+  for (const invalid of [false, true]) {
+    const audit = createDrbSocketAudit();
+    const auth = auditAuth();
+    if (invalid) auth.params.token = 'invalid.jwt.token';
+    audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auth), 1);
+    audit.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 10000 } }), 1);
+    audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auditSubscribe()), 1);
+    audit.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 2, result: auditChannels }), 1);
+    assert.equal(audit.ready(), false);
+  }
+});
 
 // S0's closed classifier is the authority for which gateway methods are writes.
 const classified = () => {
@@ -71,5 +115,22 @@ test('the INTX tape is a deterministic Rust-only drb tape with no legacy routes'
     assert.ok(urls.every((url) => ['drb.coinbase.com', 'api.coinbase.com'].includes(url.hostname)));
     assert.ok(urls.filter((url) => url.hostname === 'api.coinbase.com').every((url) => url.pathname.startsWith('/api/v3/brokerage/portfolios')));
     assert.ok(records.filter((r) => r.type === 'http').every((r) => !isDrbWrite(r.url)), 'S2 replays reads only');
+  }
+});
+
+
+test('drb audit refuses mismatched, closed and invalid-login successful replies', () => {
+  for (const mode of ['wrong-id', 'wrong-generation', 'closed', 'invalid-jwt', 'missing-channel']) {
+    const audit = createDrbSocketAudit();
+    const auth = auditAuth();
+    if (mode === 'invalid-jwt') auth.params.token = 'invalid.jwt.token';
+    audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auth), 1);
+    if (mode === 'closed') audit.closed(DRB_PRIVATE_SOCKET, 1);
+    audit.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: mode === 'wrong-id' ? 99 : 1,
+      result: { access_token: 'synthetic', expires_in: 900 } }), mode === 'wrong-generation' ? 2 : 1);
+    audit.sent(DRB_PRIVATE_SOCKET, JSON.stringify(auditSubscribe()), 1);
+    audit.received(DRB_PRIVATE_SOCKET, JSON.stringify({ jsonrpc: '2.0', id: 2,
+      result: mode === 'missing-channel' ? auditChannels.slice(1) : auditChannels }), 1);
+    assert.equal(audit.ready(), false, mode);
   }
 });

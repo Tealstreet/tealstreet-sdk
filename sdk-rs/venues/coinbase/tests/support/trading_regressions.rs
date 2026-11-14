@@ -347,3 +347,63 @@ fn internal_market_limit_ack_and_readback_keep_the_original_market_intent() {
     );
     assert!(e.store().orders().is_empty());
 }
+
+#[test]
+fn label_capacity_does_not_block_unlabelled_operations() {
+    for command in [
+        Command::CancelOrders {
+            command: 2,
+            ids: vec!["USDC-94166".into()],
+        },
+        Command::CancelSymbolOrders {
+            command: 2,
+            symbol: SYMBOL.into(),
+        },
+        Command::FetchLeverage {
+            command: 2,
+            symbol: SYMBOL.into(),
+        },
+        Command::SetLeverage {
+            command: 2,
+            symbol: SYMBOL.into(),
+            leverage: 5.,
+            side: None,
+        },
+    ] {
+        let mut e = engine_with_labels(super::super::MAX_LABELS);
+        assert_eq!(
+            requests(&super::command(&mut e, command)).len(),
+            1,
+            "exhausted placement labels must not block risk reduction or reads"
+        );
+    }
+    let mut e = engine_with_labels(super::super::MAX_LABELS);
+    assert!(
+        requests(&fresh(&mut e, 2)).is_empty(),
+        "new labels remain bounded"
+    );
+}
+
+#[test]
+fn protective_decoder_publishes_trigger_and_execution_separately() {
+    let call = super::super::Call {
+        edit: None,
+        method: super::super::Method::Sell,
+        params: json!({}),
+        symbol: SYMBOL.into(),
+        instrument: SYMBOL.into(),
+        label: Some("fixture-entry".into()),
+        id: None,
+    };
+    for native in ["stop_limit", "take_limit"] {
+        let mut row = protective_row();
+        row["order_type"] = json!(native);
+        row["price"] = json!(59000.);
+        let order = super::super::decode_order(&call, &row).unwrap();
+        assert_eq!(order.price, 60000.);
+        assert_eq!(
+            order.extra.as_ref().unwrap().conditional_order_price,
+            Some(59000.)
+        );
+    }
+}

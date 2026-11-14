@@ -92,3 +92,12 @@ Leverage reads share one decoder; the optional null custom value uses the
 explicit native maximum, while malformed values keep uncertainty.
 The caller contract, algorithm selection and S2/S3 coordination boundary are in
 `docs/plans/callers/coinbase-hosted-signing.md` at the root.
+
+DRB account censuses merge validated post-issue stream changes by native identity,
+including terminal orders and zero-position tombstones. Changes are bounded and
+owned by that exact read; overflow refuses its snapshot without evicting evidence.
+Bearer, reconnect-gap and accepted-write fences still apply. Omitted position
+metadata may be refreshed by REST; a zero-size close retires earlier metadata.
+Queued edits retain caller field presence and resolve omitted size/price from the
+current ordinary order immediately before dispatch. Placement-label exhaustion
+must not prevent cancellations, edits or account reads.

@@ -405,3 +405,50 @@ fn auth_wait_for_account_cancel_preserves_the_callers_deadline() {
         "late authentication cannot release an expired cancellation"
     );
 }
+
+#[test]
+fn queued_edits_resolve_only_omitted_fields_against_the_latest_order() {
+    for (price, amount, latest_amount, latest_price, filled, expected) in [
+        (Some(61000.), None, 0.2, 62000., 0.025, Some((0.2, 61000.))),
+        (None, Some(0.2), 0.1, 62000., 0.025, Some((0.2, 62000.))),
+        (Some(61000.), Some(0.05), 0.1, 62000., 0.075, None),
+    ] {
+        let mut r = Rig::ready();
+        let auth = queued_command_for_refresh(
+            &mut r,
+            Command::AmendOrder {
+                command: 90,
+                id: "USDC-123".into(),
+                price,
+                amount,
+            },
+            10000,
+        );
+        let socket = r.e.venue().private_drb.socket.unwrap();
+        let mut row = order_row();
+        row["amount"] = json!(latest_amount);
+        row["price"] = json!(latest_price);
+        row["filled_amount"] = json!(filled);
+        row["last_update_timestamp"] = json!(1700000002000u64);
+        r.notification(socket, CHANNELS[0], json!({"orders":[row]}));
+        r.rpc(auth,json!({"access_token":"fixture-refreshed","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
+        r.drain_due_timers();
+        let writes: Vec<_> = r
+            .http
+            .iter()
+            .filter(|r| r.url.ends_with("private/edit"))
+            .collect();
+        if let Some((amount, price)) = expected {
+            assert_eq!(writes.len(), 1);
+            let wire: Value = serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
+            assert_eq!(wire["params"]["amount"], json!(amount));
+            assert_eq!(wire["params"]["price"], json!(price));
+        } else {
+            assert!(
+                writes.is_empty(),
+                "a newly filled quantity cannot be edited below filled"
+            );
+            assert_eq!(r.command_error(90).outcome, Some(Outcome::NotSent));
+        }
+    }
+}

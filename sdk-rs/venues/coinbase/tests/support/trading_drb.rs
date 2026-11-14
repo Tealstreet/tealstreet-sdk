@@ -17,6 +17,9 @@ fn opts() -> PlaceOrderOpts {
     .unwrap()
 }
 fn engine() -> Engine<Coinbase> {
+    engine_with_labels(0)
+}
+fn engine_with_labels(labels: usize) -> Engine<Coinbase> {
     let mut venue = Coinbase::new(Options {
         key: "organizations/test/apiKeys/trading".into(),
         secret: STANDARD.encode([7; 32]),
@@ -24,6 +27,10 @@ fn engine() -> Engine<Coinbase> {
     })
     .unwrap();
     venue.account.kind = Some(crate::ProductKind::Intx);
+    venue
+        .trading_drb
+        .used_labels
+        .extend((0..labels).map(|i| format!("reserved-{i}")));
     let mut e = safe_cex_engine::test_support::seeded_engine(venue);
     e.store_mut().set_markets(vec![Market {
         id: "BTC_USDC-PERPETUAL".into(),
@@ -419,8 +426,11 @@ fn dispatched_http_failures_are_unknown_and_never_put_the_write_back() {
         let mut e = engine();
         let r = place(&mut e, opts());
         // Even a native refusal body cannot establish a transport-level refusal.
+        let refusal = fixtures()["insufficient_margin"].clone();
+        assert_eq!(refusal["code"], json!(10009));
+        assert_eq!(refusal["message"], json!("not_enough_funds"));
         let body =
-            json!({"jsonrpc":"2.0","id":packet(&r)["id"],"error":fixtures()["reject"]}).to_string();
+            json!({"jsonrpc":"2.0","id":packet(&r)["id"],"error":fixtures()["insufficient_margin"]}).to_string();
         e.handle(
             1001.,
             Event::HttpResponse {

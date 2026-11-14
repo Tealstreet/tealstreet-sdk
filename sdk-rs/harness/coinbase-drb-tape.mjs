@@ -114,17 +114,47 @@ export const createDrbSocketAudit = () => {
       let message;
       try { message = JSON.parse(text); } catch { errors.push('Coinbase drb sent non-JSON'); return; }
       const state = get(url, generation);
-      if (!verifyDrbSocketMessage(url, message)) errors.push(`Coinbase drb invalid socket request ${message?.method}`);
+      if (state.closed || !verifyDrbSocketMessage(url, message)) {
+        errors.push(`Coinbase drb invalid socket request ${message?.method}`);
+        return;
+      }
       if (message.method?.startsWith('private/') && message.method !== 'private/subscribe')
         errors.push(`Coinbase drb unexpected socket method ${message.method}`);
-      if (message.method === 'private/subscribe' && !state.authenticated)
+      if (message.method === 'private/subscribe' && !state.authenticated) {
         errors.push('Coinbase drb subscribed before authenticating');
-      if (message.method === 'public/auth') state.authenticated = true;
-      if (message.method === 'private/subscribe') for (const channel of message.params?.channels ?? []) state.channels.add(channel);
+        return;
+      }
+      if (message.method === 'public/auth' || message.method === 'private/subscribe') {
+        if (state.pending.has(message.id)) {
+          errors.push('Coinbase drb reused a pending socket request ID');
+          return;
+        }
+        state.pending.set(message.id, { method: message.method, channels: message.params?.channels });
+      }
     },
-    received(_url, text) {
-      try { if (JSON.parse(text).error) errors.push('Coinbase drb socket returned an error'); }
-      catch { errors.push('Coinbase drb received invalid JSON'); }
+    received(url, text, generation) {
+      let message;
+      try { message = JSON.parse(text); }
+      catch { errors.push('Coinbase drb received invalid JSON'); return; }
+      const state = get(url, generation);
+      if (state.closed || message?.jsonrpc !== '2.0' || !Number.isSafeInteger(message.id)) return;
+      const pending = state.pending.get(message.id);
+      if (!pending) return;
+      state.pending.delete(message.id);
+      if (message.error) { errors.push('Coinbase drb socket returned an error'); return; }
+      if (pending.method === 'public/auth') {
+        if (typeof message.result?.access_token !== 'string' || !message.result.access_token
+            || !Number.isFinite(message.result.expires_in) || message.result.expires_in <= 0) {
+          errors.push('Coinbase drb invalid authentication acknowledgement');
+          return;
+        }
+        state.authenticated = true;
+      } else if (state.authenticated && Array.isArray(message.result) && Array.isArray(pending.channels)
+          && pending.channels.every((channel) => message.result.includes(channel))) {
+        for (const channel of pending.channels) state.channels.add(channel);
+      } else {
+        errors.push('Coinbase drb incomplete subscription acknowledgement');
+      }
     },
     ready() {
       return [...connections.values()].some((state) => !state.closed && state.url === DRB_PRIVATE_SOCKET

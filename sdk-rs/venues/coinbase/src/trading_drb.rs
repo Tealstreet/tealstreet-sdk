@@ -50,7 +50,13 @@ impl Method {
 }
 
 #[derive(Clone)]
+struct Edit {
+    price: Option<f64>,
+    amount: Option<f64>,
+}
+#[derive(Clone)]
 struct Call {
+    edit: Option<Edit>,
     method: Method,
     params: Value,
     symbol: String,
@@ -343,6 +349,7 @@ impl Coinbase {
             p["otoco_config"] = json!(legs);
         }
         Ok(Call {
+            edit: None,
             method: if o.side == OrderSide::Buy {
                 Method::Buy
             } else {
@@ -442,7 +449,7 @@ impl Coinbase {
                     if !valid_id(&id) || !seen.insert(id.clone()) { return Err(invalid("drb cancel IDs must be valid and unique")); }
                     let symbol = cx.store.order(&id).map(|o|o.symbol.clone()).unwrap_or_default();
                     let instrument = if symbol.is_empty() {String::new()} else {self.drb_trading_market(cx, &symbol)?.0};
-                    calls.push_back(Call { method: Method::Cancel, params: json!({"order_id":id}),
+                    calls.push_back(Call { edit: None, method: Method::Cancel, params: json!({"order_id":id}),
                         symbol, instrument, label: None, id: Some(id) });
                 }
             }
@@ -458,28 +465,29 @@ impl Coinbase {
                     || order.parent_id.is_some() || self.trading_drb.linkage.blocks(&id) {
                     return Err(invalid("drb edit supports ordinary limits; linked or protective order edits require native leg identity"));
                 }
+                let edit = Edit { price, amount };
                 let amount = positive(safe_cex_engine::num::adjust(positive(amount.unwrap_or(order.amount))?, m.precision.amount))?;
                 if amount <= order.filled || amount < m.limits.amount.min || amount > m.limits.amount.max { return Err(invalid("drb edit amount is outside limits or not above filled size")); }
                 let price = positive(safe_cex_engine::num::adjust(positive(price.unwrap_or(order.price))?,m.precision.price))?;
                 let mut params = json!({"order_id":id,"amount":amount,"price":price,"reduce_only":order.reduce_only,
                     "post_only":order.time_in_force == Some(TimeInForce::PostOnly)});
                 if order.time_in_force == Some(TimeInForce::PostOnly) { params["reject_post_only"] = json!(true); }
-                calls.push_back(Call { method: Method::Edit, params, symbol: order.symbol.clone(), instrument, label: None, id: Some(id) }); collect = true;
+                calls.push_back(Call { edit: Some(edit), method: Method::Edit, params, symbol: order.symbol.clone(), instrument, label: None, id: Some(id) }); collect = true;
             }
             Command::CancelSymbolOrders { symbol, .. } => {
                 let (instrument, _) = self.drb_trading_market(cx, &symbol)?;
-                calls.push_back(Call { method: Method::CancelInstrument, params: json!({"instrument_name":instrument,"type":"all"}), symbol, instrument, label: None, id: None });
+                calls.push_back(Call { edit: None, method: Method::CancelInstrument, params: json!({"instrument_name":instrument,"type":"all"}), symbol, instrument, label: None, id: None });
             }
             Command::SetLeverage { symbol, leverage, side, .. } => {
                 let (instrument, m) = self.drb_trading_market(cx, &symbol)?;
                 if side.is_some() || positive(leverage)? > m.limits.leverage.max || leverage < m.limits.leverage.min {
                     return Err(invalid("drb leverage is instrument-wide and must be within market limits"));
                 }
-                calls.push_back(Call { method: Method::SetLeverage, params: json!({"instrument_name":instrument,"leverage":leverage}), symbol, instrument, label: None, id: None });
+                calls.push_back(Call { edit: None, method: Method::SetLeverage, params: json!({"instrument_name":instrument,"leverage":leverage}), symbol, instrument, label: None, id: None });
             }
             Command::FetchLeverage { symbol, .. } => {
                 let (instrument, _) = self.drb_trading_market(cx, &symbol)?;
-                calls.push_back(Call { method: Method::GetLeverage, params: json!({"instrument_name":instrument}), symbol, instrument, label: None, id: None });
+                calls.push_back(Call { edit: None, method: Method::GetLeverage, params: json!({"instrument_name":instrument}), symbol, instrument, label: None, id: None });
             }
             Command::SetMarginType { .. } => return Err(VenueError::new("drb margin model changes are account-wide (cross/segregated SM/PM); a per-symbol isolated/cross toggle cannot express them safely").kind(ErrorKind::Unsupported)),
             Command::SetPositionMode { .. } => return Err(VenueError::new("drb exposes net positions and no hedged/one-way position-mode setter").kind(ErrorKind::Unsupported)),
@@ -501,6 +509,7 @@ impl Coinbase {
             return;
         }
         let call = Call {
+            edit: None,
             method: Method::CancelAll,
             params: json!({}),
             symbol: String::new(),
@@ -520,6 +529,48 @@ impl Coinbase {
             },
         );
     }
+    fn drb_refresh_edit(&self, cx: &Cx<'_, Pending>, call: &mut Call) -> Result<(), VenueError> {
+        let edit = call
+            .edit
+            .as_ref()
+            .ok_or_else(|| invalid("drb missing edit intent"))?;
+        let order = call
+            .id
+            .as_ref()
+            .and_then(|id| cx.store.order(id))
+            .ok_or_else(|| invalid("drb queued edit order unavailable"))?;
+        let (instrument, market) = self.drb_trading_market(cx, &call.symbol)?;
+        if order.symbol != call.symbol
+            || instrument != call.instrument
+            || !market.active
+            || market.is_read_only == Some(true)
+            || !market.precision.is_tradable()
+        {
+            return Err(invalid("drb queued edit market is not tradable"));
+        }
+        let amount = positive(safe_cex_engine::num::adjust(
+            positive(edit.amount.unwrap_or(order.amount))?,
+            market.precision.amount,
+        ))?;
+        if amount <= order.filled
+            || amount < market.limits.amount.min
+            || amount > market.limits.amount.max
+        {
+            return Err(invalid(
+                "drb queued edit amount is outside limits or not above filled size",
+            ));
+        }
+        let price = positive(safe_cex_engine::num::adjust(
+            positive(edit.price.unwrap_or(order.price))?,
+            market.precision.price,
+        ))?;
+        let post_only = order.time_in_force == Some(TimeInForce::PostOnly);
+        call.params = json!({"order_id":order.id,"amount":amount,"price":price,"reduce_only":order.reduce_only,"post_only":post_only});
+        if post_only {
+            call.params["reject_post_only"] = json!(true);
+        }
+        Ok(())
+    }
     fn drb_submit(&mut self, cx: &mut Cx<'_, Pending>, job: Job) {
         if !self.signers.has_primary()
             || self.options.public_data_only
@@ -527,7 +578,15 @@ impl Coinbase {
             || self.options.testnet
             || self.trading_drb.recovery.len() >= 256
             || self.trading_drb.waiting.len() + self.trading_drb.rpc.len() >= MAX_JOBS
-            || self.trading_drb.used_labels.len() + job.calls.len() > MAX_LABELS
+            || self.trading_drb.used_labels.len()
+                + job
+                    .calls
+                    .iter()
+                    .filter_map(|call| call.label.as_ref())
+                    .filter(|label| !self.trading_drb.used_labels.contains(*label))
+                    .collect::<HashSet<_>>()
+                    .len()
+                > MAX_LABELS
         {
             let _ = cx.fail_context(
                 &job.root,
@@ -583,7 +642,7 @@ impl Coinbase {
             self.drb_wait_deadline(cx);
             return;
         }
-        let Some(call) = job.calls.pop_front() else {
+        let Some(mut call) = job.calls.pop_front() else {
             let data = job.data.unwrap_or_else(|| {
                 if job.collect {
                     json!(job.ids).to_string()
@@ -618,6 +677,12 @@ impl Coinbase {
                 &job.root,
                 invalid("drb queued edit is no longer an ordinary reconciled limit"),
             );
+            return;
+        }
+        if call.method == Method::Edit
+            && let Err(error) = self.drb_refresh_edit(cx, &mut call)
+        {
+            let _ = cx.fail_context(&job.root, error);
             return;
         }
         // A new attempt cannot acquire the same recovery reservation. In
@@ -1343,8 +1408,6 @@ struct NativeOrder {
     reduce_only: bool,
     time_in_force: String,
     last_update_timestamp: f64,
-    trigger_price: Option<f64>,
-    trigger: Option<StopTriggerType>,
 }
 fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
     crate::drb_linkage::Linkage::default()
@@ -1385,13 +1448,12 @@ fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
         "cancelled" => OrderStatus::Canceled,
         _ => return Err(uncertain("drb native order state is unproven")),
     };
-    let price = if let Some(price) = n.price.as_f64() {
-        positive(price).map_err(|_| uncertain("drb invalid native order price"))?
-    } else if n.price == "market_price" {
-        n.trigger_price.unwrap_or(0.)
-    } else {
-        return Err(uncertain("drb invalid native order price"));
-    };
+    // Keep ACK numeric-price strictness, then share the account codec's
+    // trigger/execution projection so ACKs and later snapshots agree.
+    if let Some(price) = n.price.as_f64() {
+        positive(price).map_err(|_| uncertain("drb invalid native order price"))?;
+    }
+    let prices = crate::private_drb::wire::order_prices(value, kind).map_err(uncertain)?;
     let tif = match n.time_in_force.as_str() {
         "good_til_cancelled" => {
             if n.post_only {
@@ -1416,7 +1478,7 @@ fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
         kind,
         side,
         status,
-        price,
+        price: prices.price,
         amount: n.amount,
         filled: n.filled_amount,
         remaining: (n.amount - n.filled_amount).max(0.),
@@ -1424,10 +1486,11 @@ fn decode_order(call: &Call, value: &Value) -> Result<Order, VenueError> {
         close: None,
         time_in_force: Some(tif),
         last_update: n.last_update_timestamp,
-        trigger_type: n.trigger,
+        trigger_type: prices.trigger,
         take_profit: None,
         stop_loss: None,
         extra: Some(OrderExtra {
+            conditional_order_price: prices.execution,
             remaining_native: Some(n.amount - n.filled_amount),
             filled_in_placement_units: Some(n.filled_amount),
             ..Default::default()

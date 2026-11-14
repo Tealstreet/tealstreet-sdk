@@ -441,3 +441,109 @@ fn provider_drb_delayed_user_a_signature_cannot_authenticate_user_b() {
             .any(|a| matches!(a, Action::WsSend { .. }))
     );
 }
+
+#[test]
+fn private_auth_preparation_failure_keeps_its_typed_kind() {
+    let (mut r, _) = provider_rig(false);
+    r.select_intx();
+    r.e.prepare_dispatch(r.now);
+    let token =
+        r.e.drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    safe_cex_engine::request_context::HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.url.ends_with("/api/v2/public/auth") => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("pending auth preparation");
+    r.e.http_preparation_failed(
+        r.now,
+        token,
+        safe_cex_engine::request_context::Error::Invalid,
+        VenueError::new("synthetic provider refusal").kind(ErrorKind::AuthInvalid),
+    );
+    r.collect();
+    let diagnostic = r
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == code::REQUEST_FAILED
+                    && event.message == "synthetic provider refusal" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("venue preparation diagnostic");
+    assert!(
+        diagnostic.fields.iter().any(|(key, value)| *key == "kind"
+            && value.as_str() == Some(ErrorKind::AuthInvalid.as_str())),
+        "typed auth error must survive the private DRB preparation handler: {diagnostic:?}"
+    );
+}
+
+#[test]
+fn private_auth_preparation_refusal_promptly_settles_the_queued_command() {
+    let (r, _) = provider_rig(false);
+    let mut r = Rig::ready_with(r);
+    r.subscribe();
+    let index = r
+        .http
+        .iter()
+        .position(|r| r.url.ends_with("get_open_orders"))
+        .unwrap();
+    let read = r.http.remove(index).unwrap();
+    r.rpc_error(read, 13009, "synthetic expired session");
+    r.now += 1.;
+    r.actions.clear();
+    r.e.handle_command(
+        r.now,
+        safe_cex_engine::Command::AmendOrder {
+            command: 90,
+            id: "USDC-123".into(),
+            price: Some(61000.),
+            amount: None,
+        },
+        Some(10000),
+    )
+    .unwrap();
+    r.e.prepare_dispatch(r.now);
+    let token =
+        r.e.drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    safe_cex_engine::request_context::HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.url.ends_with("/api/v2/public/auth") => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("queued command's auth preparation");
+    r.e.http_preparation_failed(
+        r.now,
+        token,
+        safe_cex_engine::request_context::Error::Invalid,
+        VenueError::new("synthetic provider refusal").kind(ErrorKind::AuthInvalid),
+    );
+    r.collect();
+    r.drain_due_timers();
+    assert_eq!(r.command_error(90).kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(
+        r.command_error(90).outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(
+        r.http
+            .iter()
+            .all(|request| !request.url.ends_with("private/edit"))
+    );
+}

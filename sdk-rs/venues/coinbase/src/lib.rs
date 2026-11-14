@@ -270,6 +270,12 @@ impl Venue for Coinbase {
     ) {
         match pending {
             Pending::TradingDrb(request) => self.drb_trading_failed(cx, request, error),
+            Pending::PrivateDrb(request) => self.drb_private_lost(
+                cx,
+                request,
+                &error.message,
+                error.kind.unwrap_or(safe_cex_engine::ErrorKind::Network),
+            ),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }

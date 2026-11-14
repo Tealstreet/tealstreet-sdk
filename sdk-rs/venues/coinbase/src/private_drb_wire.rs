@@ -191,6 +191,41 @@ pub(crate) fn order_kind(v: &Value) -> Result<OrderType, String> {
         kind
     })
 }
+pub(crate) struct OrderPrices {
+    pub(crate) price: f64,
+    pub(crate) trigger: Option<StopTriggerType>,
+    pub(crate) execution: Option<f64>,
+}
+pub(crate) fn order_prices(v: &Value, kind: OrderType) -> Result<OrderPrices, String> {
+    let price = match v.get("price") {
+        Some(Value::String(s)) if s == "market_price" && kind != OrderType::Limit => 0.,
+        _ => unsigned(v, "price")?,
+    };
+    let conditional = matches!(
+        kind,
+        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+    );
+    let trigger_type = if conditional {
+        Some(match text(v, "trigger")? {
+            "mark_price" => StopTriggerType::MarkPrice,
+            "index_price" => StopTriggerType::IndexPrice,
+            "last_price" => StopTriggerType::LastPrice,
+            _ => return Err("drb invalid trigger".into()),
+        })
+    } else {
+        None
+    };
+    let trigger_price = if conditional {
+        unsigned(v, "trigger_price")?
+    } else {
+        price
+    };
+    Ok(OrderPrices {
+        price: trigger_price,
+        trigger: trigger_type,
+        execution: conditional.then_some(price),
+    })
+}
 pub(super) fn order(v: Value) -> Result<Order, String> {
     crate::drb_linkage::Linkage::default().observe(&v)?;
     let id = identity(&v, "order_id")?;
@@ -213,29 +248,7 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
     if updated < created {
         return Err("drb order clock precedes creation".into());
     }
-    let price = match v.get("price") {
-        Some(Value::String(s)) if s == "market_price" && kind != OrderType::Limit => 0.,
-        _ => unsigned(&v, "price")?,
-    };
-    let conditional = matches!(
-        kind,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
-    );
-    let trigger_type = if conditional {
-        Some(match text(&v, "trigger")? {
-            "mark_price" => StopTriggerType::MarkPrice,
-            "index_price" => StopTriggerType::IndexPrice,
-            "last_price" => StopTriggerType::LastPrice,
-            _ => return Err("drb invalid trigger".into()),
-        })
-    } else {
-        None
-    };
-    let trigger_price = if conditional {
-        unsigned(&v, "trigger_price")?
-    } else {
-        price
-    };
+    let prices = order_prices(&v, kind)?;
     let post = flag(&v, "post_only")?;
     let tif = match text(&v, "time_in_force")? {
         "good_til_cancelled" => Some(TimeInForce::GoodTillCancel),
@@ -262,7 +275,7 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
         symbol,
         kind,
         side,
-        price: trigger_price,
+        price: prices.price,
         amount,
         filled,
         remaining: amount - filled,
@@ -275,10 +288,10 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
             tif
         },
         last_update: updated,
-        trigger_type,
+        trigger_type: prices.trigger,
         take_profit: None,
         stop_loss: None,
-        extra: conditional.then_some(OrderExtra {
+        extra: prices.execution.map(|price| OrderExtra {
             conditional_order_price: Some(price),
             ..Default::default()
         }),
