@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(feature = "managed-sockets")]
 use crate::ControlFrame;
 use crate::engine::*;
 use crate::engine::{ExecutionHandle, Window};
