@@ -20,6 +20,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
 #[derive(Serialize)]
 struct Placement {
     market: String,
@@ -128,6 +130,21 @@ enum Kind {
         leverage: f64,
     },
 }
+impl Kind {
+    fn placement_labels(&self) -> Vec<String> {
+        match self {
+            Self::Place { expected, leg, .. } => expected
+                .iter()
+                .map(|id| {
+                    id.clone()
+                        .unwrap_or_else(|| leg.unwrap_or("entry").to_owned())
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 struct Operation {
     receipts: Vec<OrderIdentityReceipt>,
     /// The write's dispatch-time Stark step. It keeps the field name of the
@@ -149,6 +166,7 @@ struct Job {
     placement: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// A refused batch or protective child cannot resolve as a successful partial placement.
     leg_refused: bool,
     /// The cancelled stop placed again, unchanged, once its replacement is refused.
     restore: Option<Operation>,
@@ -156,27 +174,34 @@ struct Job {
     restoring: Option<(String, OrderSide, OrderType)>,
 }
 impl Job {
-    /// One failure keeps its classification; several join their text and share
-    /// an outcome only when they agree. Any Unknown leg makes the command Unknown.
+    /// Joined failures retain the first Unknown leg's diagnostics and classification.
+    /// Without an Unknown leg, an outcome is shared only when every failure agrees.
     fn failure(mut self) -> VenueError {
         let unknown = self
             .errors
             .iter()
-            .any(|e| e.outcome == Some(Outcome::Unknown));
+            .position(|e| e.outcome == Some(Outcome::Unknown));
         let mut error = if self.errors.len() == 1 {
             self.errors.pop().expect("one failure")
         } else {
             let outcome = self.errors[0].outcome;
-            let message: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
-            let error = VenueError::new(message.join_with("; "));
-            match outcome {
-                Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
-                    error.outcome(outcome)
+            let messages: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
+            let message = messages.join_with("; ");
+            if let Some(index) = unknown {
+                let mut error = self.errors.remove(index);
+                error.message = message;
+                error
+            } else {
+                let error = VenueError::new(message);
+                match outcome {
+                    Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
+                        error.outcome(outcome)
+                    }
+                    _ => error,
                 }
-                _ => error,
             }
         };
-        if unknown {
+        if unknown.is_some() {
             error.outcome = Some(Outcome::Unknown);
         } else if (self.effective || !self.results.is_empty())
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
@@ -1246,7 +1271,7 @@ impl Trading {
         } = &request.kind
         {
             let result = crate::success(response)
-                .map_err(|error| answer_failure(response.status, error))
+                .map_err(|error| write_failure(response.status, error))
                 .and_then(|()| decode_placement(response.body, expected, *batch).map_err(unproven));
             let result = match result {
                 Ok(PlacementResult {
@@ -1297,7 +1322,7 @@ impl Trading {
             Ok(Vec::new())
         } else {
             result.map_err(|error| match crate::success(response) {
-                Err(_) => answer_failure(response.status, error),
+                Err(_) => write_failure(response.status, error),
                 Ok(()) => unproven(error),
             })
         };
@@ -1370,7 +1395,9 @@ impl Trading {
         result: Result<Vec<String>, VenueError>,
         rejected: bool,
     ) {
-        if !matches!(request.kind, Kind::Quotes(_)) {
+        let kind = &request.kind;
+        let is_quotes = matches!(kind, Kind::Quotes(_));
+        if !is_quotes {
             account.bump_orders(cx);
             account.bump_positions();
         }
@@ -1383,7 +1410,7 @@ impl Trading {
         };
         match result {
             Ok(ids) => {
-                if !matches!(request.kind, Kind::Quotes(_)) {
+                if !is_quotes {
                     job.effective = true;
                 }
                 job.results.extend(ids);
@@ -1416,6 +1443,9 @@ impl Trading {
                 }
             }
             Err(mut error) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    error = ambiguous_write(error);
+                }
                 let gone_stop = match &request.kind {
                     Kind::Place {
                         replaces: Some(stop),
@@ -1462,21 +1492,39 @@ impl Trading {
                         job.errors.clear();
                     }
                 }
-                if let Kind::Place { leg, expected, .. } = &request.kind {
-                    let next_leg = match job.operations.front().map(|op| &op.kind) {
-                        Some(Kind::Place {
-                            leg: Some(next), ..
-                        }) => Some(*next),
-                        _ => None,
-                    };
-                    let message = match (leg, next_leg) {
-                        (Some(leg), Some(next)) => format!(
-                            "Paradex TP/SL {leg} placement failed: {error}; still placing the {next}"
-                        ),
-                        (Some(leg), None) => format!(
-                            "Paradex TP/SL {leg} placement failed: {error}; no other leg remains to send"
-                        ),
-                        (None, _) => {
+                if let Kind::Place {
+                    leg,
+                    expected,
+                    batch,
+                    ..
+                } = &request.kind
+                {
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    if unknown && job.placement {
+                        let unknown_labels = request.kind.placement_labels();
+                        let journal = serde_json::json!({
+                            "placed":job.results,
+                            "unknown":unknown_labels,
+                            "notSent":job.operations.iter().flat_map(|op| op.kind.placement_labels()).collect::<Vec<_>>()
+                        });
+                        error.message = format!(
+                            "{}; placed order IDs: {}; unknown placements: {}",
+                            error.message, journal["placed"], journal["unknown"]
+                        );
+                        cx.event(
+                            Level::Error,
+                            "order.outcome_unknown",
+                            error.message.clone(),
+                            vec![
+                                ("command", job.command.into()),
+                                ("outcome", "unknown".into()),
+                                ("journal", journal.to_string().into()),
+                            ],
+                        );
+                    }
+                    let message = match leg {
+                        Some(leg) => format!("Paradex TP/SL {leg} placement failed: {error}"),
+                        None => {
                             format!("Paradex placement failed for client IDs {expected:?}: {error}")
                         }
                     };
@@ -1485,22 +1533,28 @@ impl Trading {
                     } else {
                         code::ORDER_REJECTED
                     };
-                    // A failed entry orphans its children; a failed child must not skip its
-                    // sibling, or a rejected TP would leave the position without its SL.
-                    if leg.is_none() {
-                        while job
-                            .operations
-                            .front()
-                            .is_some_and(|op| matches!(op.kind, Kind::Place { leg: Some(_), .. }))
-                        {
+                    // TS awaits batch flushes outside its serial-entry catch. A bracket's
+                    // TP and SL share one try, so either failure skips its remaining children.
+                    // Sean/daxx's Unknown exception also withholds independent later entries.
+                    if *batch || error.outcome == Some(Outcome::Unknown) {
+                        job.operations.clear();
+                    } else {
+                        while job.operations.front().is_some_and(|op| {
+                            matches!(
+                                op.kind,
+                                Kind::Place {
+                                    leg: Some("take-profit" | "stop-loss"),
+                                    ..
+                                }
+                            )
+                        }) {
                             job.operations.pop_front();
                         }
-                        job.errors.push(error);
-                    } else {
-                        // A refused leg leaves the entry unprotected: the command says so.
-                        job.leg_refused = true;
-                        job.errors.push(error);
                     }
+                    if leg.is_some() || *batch {
+                        job.leg_refused = true;
+                    }
+                    job.errors.push(error);
                     // Only when the command fails on this entry does its caller name it; a toast
                     // would double that. Beside an accepted order, this line is the only report.
                     let fails_command =
@@ -1510,10 +1564,12 @@ impl Trading {
                     } else {
                         Level::Error
                     };
-                    cx.notice(level, code, message);
+                    if !unknown || !job.placement {
+                        cx.notice(level, code, message);
+                    }
                 } else {
                     job.errors.push(error);
-                    if !job.attempt_all || matches!(request.kind, Kind::Quotes(_)) {
+                    if !job.attempt_all || is_quotes {
                         job.preparing = None;
                         job.operations.clear();
                     }
@@ -2355,6 +2411,26 @@ fn answer_failure(status: u16, message: String) -> VenueError {
         400..=499 => rejected(error, ErrorKind::Rejected),
         _ => error.outcome(Outcome::Unknown),
     }
+}
+
+/// Legacy dispatched writes do not pass the engine's HTTP proof boundary.
+/// Weaken the failure before job aggregation or protective restore decisions;
+/// keep read failures and definitive native refusals unchanged.
+fn write_failure(status: u16, message: String) -> VenueError {
+    let error = answer_failure(status, message);
+    if matches!(status, 408 | 429 | 500..) {
+        ambiguous_write(error)
+    } else {
+        error
+    }
+}
+
+fn ambiguous_write(mut error: VenueError) -> VenueError {
+    error
+        .venue_message
+        .get_or_insert_with(|| error.message.into_boxed_str());
+    error.message = UNKNOWN_TEXT.into();
+    error.outcome(Outcome::Unknown)
 }
 
 #[cfg(test)]

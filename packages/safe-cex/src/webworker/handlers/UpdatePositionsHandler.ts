@@ -1,6 +1,7 @@
 import isEqual from 'lodash/isEqual';
 
 import { serializeCommandError } from '../../commandOutcome';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
@@ -13,7 +14,7 @@ export class UpdatePositionsHandler extends BaseHandler {
   handleUpdatePositions = async (requestId: string, symbols?: string[]) => {
     const now = Date.now();
     if (now - this._lastFailedRequest < 5000) {
-      logging && console.error('Failed to update positions, too soon to make another request');
+      logging && diagnosticConsole.error('Failed to update positions, too soon to make another request');
       this._ctx.postMessage({
         op: 'updatePositions:done',
         data: { requestId, success: false, reason: 'retry_too_soon' },
@@ -25,14 +26,14 @@ export class UpdatePositionsHandler extends BaseHandler {
       if (validSymbols) {
         validSymbols = validSymbols.filter((symbol) => !this._requestsInProgress.has(symbol));
         if (validSymbols.length === 0) {
-          logging && console.warn('Failed to update positions, no valid symbols to update');
+          logging && diagnosticConsole.warn('Failed to update positions, no valid symbols to update');
           this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: true } });
           return;
         }
         validSymbols.forEach((symbol) => this._requestsInProgress.add(symbol));
       } else {
         if (this._requestsInProgress.has(null)) {
-          logging && console.warn('Failed to update positions, another request is already in progress');
+          logging && diagnosticConsole.warn('Failed to update positions, another request is already in progress');
           this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: true } });
           return;
         } else {
@@ -41,12 +42,12 @@ export class UpdatePositionsHandler extends BaseHandler {
       }
 
       const isFullAccountRefresh = validSymbols === undefined;
-      logging && console.log('Updating positions', symbols);
+      logging && diagnosticConsole.log('Updating positions', symbols);
       const positions = await this._exchange.fetchPositions(symbols);
       if (this._exchange.isDisposed) return;
       if (isEqual(positions, this._exchange.store.positions)) {
         // Data unchanged - this is a success, positions are up-to-date
-        logging && console.log('Positions unchanged, data is current');
+        logging && diagnosticConsole.log('Positions unchanged, data is current');
         this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: true } });
       } else {
         if (!this._exchange.isDisposed) {
@@ -56,12 +57,12 @@ export class UpdatePositionsHandler extends BaseHandler {
             this._exchange.store.addOrUpdatePositions(positions);
           }
         }
-        logging && console.log('Updated positions', positions);
-        logging && console.log('Full positions', this._exchange.store.positions);
+        logging && diagnosticConsole.log('Updated positions', positions);
+        logging && diagnosticConsole.log('Full positions', this._exchange.store.positions);
         this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: true } });
       }
     } catch (e) {
-      console.error('Error updating positions', e);
+      diagnosticConsole.error('Error updating positions', e);
       this._lastFailedRequest = now;
       this._ctx.postMessage({
         op: 'updatePositions:done',

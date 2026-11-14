@@ -10,8 +10,9 @@ name = "exchange-server"
 path = "src/main.rs"
 
 [dependencies]
-safe-cex-crypto.workspace = true
+safe-cex-crypto = { workspace = true, features = ["admission"] }
 safe-cex-engine.workspace = true
+safe-cex-venues.workspace = true
 safe-cex-native = { workspace = true, features = ["address-nonce"] }
 safe-cex-remote-signer = { path = "../remote-signer" }
 safe-cex-algos = { path = "../../algos/runtime", features = ["product-semantics"] }
@@ -31,12 +32,25 @@ base64.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ryu-js.workspace = true
+# RFC 9180 handover. Only X25519 is enabled; use the crate's base-mode
+# implementation rather than maintaining a separate key schedule here.
+hpke = { version = "=0.13.0", default-features = false, features = ["std", "x25519"] }
+# hpke disables dalek defaults: explicitly retain secret erasure on drop.
+x25519-dalek = { version = "=2.0.1", default-features = false, features = ["static_secrets", "zeroize"] }
+zeroize.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.191"
 
 [features]
+delegated-order-frames = []
 # Test accounts and unsigned proxy tokens for the integration tests; never in the binary.
 test-support = ["safe-cex-engine/test-support"]
 
 [dev-dependencies]
+safe-cex-venue-backpack = { path = "../../venues/backpack" }
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 safe-cex-exchange-server = { path = ".", features = ["test-support"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["test-util"] }

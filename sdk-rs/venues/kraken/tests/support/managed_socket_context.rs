@@ -72,7 +72,7 @@ fn futures_public_receive_at_idle_equality_refuses() {
     receive_at_expiry(
         futures(true, PublicFeedPolicy::Direct),
         noop,
-        45_000.,
+        20_000.,
         FUTURES_PONG,
     );
 }
@@ -81,7 +81,7 @@ fn futures_private_receive_at_idle_equality_refuses() {
     receive_at_expiry(
         futures(false, PublicFeedPolicy::Direct),
         authenticate,
-        60_000.,
+        20_000.,
         FUTURES_PONG,
     );
 }
@@ -159,9 +159,9 @@ fn futures_permissive_decoded_empty_envelope_refreshes_receive() {
     let mut h = futures(false, PublicFeedPolicy::Direct);
     let socket = ready_socket(&mut h, authenticate);
     let opened = h.now;
-    h.advance(opened + 59_999.);
+    h.advance(opened + 19_999.);
     h.message(socket, "{}");
-    h.advance(opened + 60_000.);
+    h.advance(opened + 20_000.);
     assert!(!h.closed.contains(&socket));
 }
 
@@ -170,9 +170,9 @@ fn futures_malformed_envelope_does_not_refresh_receive() {
     let mut h = futures(false, PublicFeedPolicy::Direct);
     let socket = ready_socket(&mut h, authenticate);
     let opened = h.now;
-    h.advance(opened + 59_999.);
+    h.advance(opened + 19_999.);
     h.message(socket, "{malformed");
-    h.advance(opened + 60_000.);
+    h.advance(opened + 20_000.);
     assert!(h.closed.contains(&socket));
 }
 

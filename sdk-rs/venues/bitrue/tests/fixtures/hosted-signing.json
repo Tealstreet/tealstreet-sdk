@@ -1,0 +1,114 @@
+[
+  {
+    "label": "catalogue",
+    "method": "GET",
+    "url": "/fapi/v1/contracts",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v1/contracts",
+    "signature": "4780b6181fa104a123d73e96c126ca9064592bd94cbff018010d632bb5d7ffa3"
+  },
+  {
+    "label": "account",
+    "method": "GET",
+    "url": "/fapi/v2/account",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v2/account",
+    "signature": "694edd969cf2feef0407d3eb24b08c4e45921551756c96539ec0652499f74fb7"
+  },
+  {
+    "label": "orders",
+    "method": "GET",
+    "url": "/fapi/v2/openOrders?contractName=E-BTC-USDT",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v2/openOrders?contractName=E-BTC-USDT",
+    "signature": "704bced6f72d52ba6ae55756296fd3debe62de7f8c093f493652db20e20504ee"
+  },
+  {
+    "label": "leverage",
+    "method": "GET",
+    "url": "/fapi/v2/leverageBracket?contractName=E-BTC-USDT",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v2/leverageBracket?contractName=E-BTC-USDT",
+    "signature": "51200ff426948a023d622fe83db3cb60ed50465c44667a81af4ec16510024625"
+  },
+  {
+    "label": "place",
+    "method": "POST",
+    "url": "/fapi/v2/order",
+    "body": "{\"contractName\":\"E-BTC-USDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"volume\":2,\"price\":65000.1,\"clientOrderId\":\"fixture-client\"}",
+    "payload": "1700000000123POST/fapi/v2/order{\"contractName\":\"E-BTC-USDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"volume\":2,\"price\":65000.1,\"clientOrderId\":\"fixture-client\"}",
+    "signature": "8fb8c8c10cfe59a5a03a9526edb7e4bf108b0894f26348b7cf8acba9f2073e95"
+  },
+  {
+    "label": "cancel",
+    "method": "POST",
+    "url": "/fapi/v2/cancel",
+    "body": "{\"contractName\":\"E-BTC-USDT\",\"orderId\":\"fixture-order\",\"conditionOrder\":false}",
+    "payload": "1700000000123POST/fapi/v2/cancel{\"contractName\":\"E-BTC-USDT\",\"orderId\":\"fixture-order\",\"conditionOrder\":false}",
+    "signature": "b66794f90d13a3a7dc7bf975390f73135c496470f3ee6abea6b60ef8ca66808c"
+  },
+  {
+    "label": "history",
+    "method": "GET",
+    "url": "/fapi/v2/myTrades?contractName=E-BTC-USDT&limit=50&startTime=1700000000000",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v2/myTrades?contractName=E-BTC-USDT&limit=50&startTime=1700000000000",
+    "signature": "14c7ee8e270051417b789fb45522fd5396e89368df10f3d72f4924dfe3180751"
+  },
+  {
+    "label": "listen",
+    "method": "POST",
+    "url": "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey",
+    "body": null,
+    "payload": "1700000000123POST/user_stream/api/v1/listenKey",
+    "signature": "852ecabd48bed70626d5eba2500447c4cd672a8a72cf70745ae70431d0e75539"
+  },
+  {
+    "label": "keepalive",
+    "method": "PUT",
+    "url": "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey/fixture-token_1",
+    "body": null,
+    "payload": "1700000000123PUT/user_stream/api/v1/listenKey/fixture-token_1",
+    "signature": "fa6ec6ee303630a9ac516d05e9c2ab1eaadd3943550a9f7ea58023a0e7602988"
+  },
+  {
+    "label": "single-order",
+    "method": "GET",
+    "url": "/fapi/v2/order?contractName=E-BTC-USDT&orderId=fixture-order&conditionOrder=false",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v2/order?contractName=E-BTC-USDT&orderId=fixture-order&conditionOrder=false",
+    "signature": "0c1e76b992bfdbf0f49d6529dd76eda0097b310b6b7a1e3cd15a7103eadd383b"
+  },
+  {
+    "label": "set-leverage",
+    "method": "POST",
+    "url": "/fapi/v2/level_edit",
+    "body": "{\"contractName\":\"E-BTC-USDT\",\"leverage\":10}",
+    "payload": "1700000000123POST/fapi/v2/level_edit{\"contractName\":\"E-BTC-USDT\",\"leverage\":10}",
+    "signature": "22467ed710a8b20a952bd9b2c650c999afc20997672c518848278c74df91697f"
+  },
+  {
+    "label": "listen-delete",
+    "method": "DELETE",
+    "url": "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey/fixture-token_1",
+    "body": null,
+    "payload": "1700000000123DELETE/user_stream/api/v1/listenKey/fixture-token_1",
+    "signature": "65b2a48d97479980fa56378f9709c01088a7db404c8842119a8e57414b26510e"
+  },
+  {
+    "label": "absolute-account",
+    "method": "GET",
+    "url": "https://fapi.bitrue.com/fapi/v2/account",
+    "body": null,
+    "payload": "1700000000123GET/fapi/v2/account",
+    "signature": "694edd969cf2feef0407d3eb24b08c4e45921551756c96539ec0652499f74fb7"
+  },
+  {
+    "label": "listen-query",
+    "method": "PUT",
+    "url": "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey/fixture-token_1?tag=a%2Bb&flag=%2F",
+    "body": null,
+    "payload": "1700000000123PUT/user_stream/api/v1/listenKey/fixture-token_1?tag=a%2Bb&flag=%2F",
+    "signature": "0f716537ef31adc6ec9d5b1b7546e0d4b5a1ba1856c40eed42e300e91c5c1a4c"
+  }
+]

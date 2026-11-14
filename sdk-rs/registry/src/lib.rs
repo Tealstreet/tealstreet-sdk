@@ -1,6 +1,12 @@
 //! Every Rust venue, constructed by name from one options shape. Hosts (wasm,
 //! native) parse the account options once and receive the venue's engine
 //! through a [`Visit`]or; each venue's construction rules live here.
+#[cfg(feature = "dispatch-signing")]
+mod trusted_signer_state;
+#[cfg(feature = "dispatch-signing")]
+pub use trusted_signer_state::TrustedSignerState;
+#[cfg(feature = "kraken")]
+mod kraken_setup;
 #[cfg(feature = "mexc")]
 mod mexc_setup;
 #[cfg(not(any(
@@ -12,7 +18,6 @@ mod mexc_setup;
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -34,7 +39,7 @@ mod mexc_setup;
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-venues requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
@@ -46,6 +51,8 @@ pub use safe_cex_venue_kraken::sign::dispatch::Selected as kraken_selected;
 pub use safe_cex_venue_kraken::sign::hosted as kraken_hosted;
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
+#[cfg(feature = "coinbase")]
+mod coinbase_setup;
 mod construction;
 #[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
@@ -55,17 +62,22 @@ pub mod hosted_wallet;
 mod hyperliquid_setup;
 #[cfg(feature = "lighter")]
 mod lighter_setup;
+#[cfg(feature = "lighter")]
+pub use safe_cex_venue_lighter::registration as lighter_registration;
 #[cfg(feature = "paradex")]
 mod paradex_setup;
+#[cfg(any(feature = "phemex", feature = "okx"))]
+pub use construction::HelperCapabilities;
 pub use construction::{
-    BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
-    signer_setup_public_data_only,
+    BridgeConstruction, PublicMode, SetupMapping, remote_signing_policy, signer_setup_mapping,
+    signer_setup_policy, signer_setup_public_data_only,
 };
 #[cfg(feature = "bybit")]
 mod hyro;
 #[cfg(feature = "bybit")]
 pub use hyro::HyroConfig;
 
+pub use construction::beta_admitted;
 use safe_cex_engine::{Engine, ErrorKind, Level, PublicFeedPolicy, Venue, VenueError};
 #[cfg(feature = "apexomni")]
 use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
@@ -87,8 +99,6 @@ use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
-#[cfg(feature = "breakoutprop")]
-use safe_cex_venue_breakoutprop::{BreakoutProp, Options as BreakoutOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
@@ -224,6 +234,14 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
     VenueError::new(message.to_string()).kind(ErrorKind::InvalidInput)
 }
 
+/// The refusal for a venue this build does not construct, including retired
+/// names still saved on user accounts (e.g. `bitmex`). Nothing was sent.
+pub fn unsupported_venue(venue: &str) -> VenueError {
+    VenueError::new(format!("unsupported venue: {venue}"))
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent)
+}
+
 /// Engine settings every venue receives after construction.
 #[derive(Clone, Copy)]
 struct Startup {
@@ -249,22 +267,147 @@ fn finish<T: Visit, V: Venue + 'static>(
     Ok(visitor.visit(engine))
 }
 
-#[cfg(feature = "breakoutprop")]
-fn breakoutprop_rules(options: &EngineOptions) -> Result<(), VenueError> {
-    // Market data needs a DXtrade session too, so public accounts are not exempt.
-    if options.key.as_deref().is_none_or(str::is_empty)
-        || options.secret.as_deref().is_none_or(str::is_empty)
+#[cfg(feature = "polymarket")]
+fn hex_of(value: &str, digits: usize) -> bool {
+    value.len() == digits && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn resolved_public_data_only(venue: &str, options: &EngineOptions) -> bool {
+    construction::resolve(venue, options)
+        .map_or(options.public_data_only, |mode| mode.public_data_only)
+}
+
+/// The trusted host chooses admission; account JSON cannot change it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConstructionContext {
+    /// Client callers have their own SDK beta admission layer.
+    Client,
+    /// Hosted engines have no client admission layer above the registry.
+    Hosted,
+}
+
+impl ConstructionContext {
+    /// Refuse unavailable venues before host routing or signer setup.
+    pub fn validate_venue(self, venue: &str) -> Result<(), VenueError> {
+        if !supported(venue) || (self == Self::Hosted && !construction::beta_admitted(venue)) {
+            return Err(unsupported_venue(venue));
+        }
+        Ok(())
+    }
+}
+
+fn private_custody_rules(
+    context: ConstructionContext,
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+) -> Result<(), VenueError> {
+    context.validate_venue(venue)?;
+    let _ = (options, provider_ready);
+    // Preserve closed injected custody before callback/public-mode resolution.
+    #[cfg(feature = "orderly")]
+    if matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi")
+        && !construction::signer_setup_public_data_only(options)
+        && (options.signing.is_some() || provider_ready)
     {
-        return Err(invalid(
-            "BreakoutProp market data requires a legacy DXtrade username and password",
-        ));
+        return Err(
+            VenueError::new("Orderly injected private signing admission is closed")
+                .kind(ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
+    }
+    #[cfg(feature = "polymarket")]
+    if venue == "polymarket"
+        && !resolved_public_data_only(venue, options)
+        && (options.remote_signing || options.payload_signer)
+    {
+        return Err(VenueError::new("Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply")
+            .kind(ErrorKind::Unsupported)
+            .outcome(safe_cex_engine::Outcome::NotSent));
     }
     Ok(())
 }
 
-#[cfg(feature = "polymarket")]
-fn hex_of(value: &str, digits: usize) -> bool {
-    value.len() == digits && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+fn callback_rules(
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+) -> Result<(), VenueError> {
+    let (remote, payload) = options
+        .public_mode
+        .as_ref()
+        .map_or((false, false), |mode| mode.callback_intent());
+    let remote = remote || options.remote_signing;
+    let payload = payload || options.payload_signer;
+    if !(remote || payload) || construction::signer_setup_public_data_only(options) {
+        return Ok(());
+    }
+    let keyed = primary_key_present(venue, options);
+    let public = resolved_public_data_only(venue, options);
+    // TS DelegatedSignerSetup refuses these payload modes before callbacks.
+    if payload && matches!(venue, "grvt" | "kucoin" | "kucoinspot") {
+        payload_signing_rules_in_mode(venue, options, provider_ready, public)?;
+    }
+    if !provider_ready && (keyed || !public) {
+        return Err(
+            invalid("Delegated signing requires a configured callback provider")
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
+    }
+    // TS beta admission validates disabled-family callbacks before custody.
+    if !construction::bridge(venue, options).dispatch_signing
+        && !remote_signing_policy(venue).enabled
+    {
+        payload_signing_rules_in_mode(venue, options, provider_ready, public)?;
+    }
+    if !public && remote && !remote_signing_policy(venue).enabled {
+        return Err(VenueError::new(format!(
+            "Rust {venue} remote signing is unsupported in this build"
+        ))
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent));
+    }
+    Ok(())
+}
+
+fn primary_key_present(venue: &str, options: &EngineOptions) -> bool {
+    let trim = construction::signer_setup_policy(venue)
+        .primary
+        .is_some_and(|policy| policy.trim_credential == Some(true));
+    options
+        .key
+        .as_deref()
+        .is_some_and(|key| !(if trim { key.trim() } else { key }).is_empty())
+        || options
+            .signing
+            .as_ref()
+            .and_then(|ids| ids.primary.as_ref())
+            .is_some_and(|id| !id.credential.0.is_empty())
+}
+
+fn retain_delegated_public_mode(venue: &str, options: &mut EngineOptions) {
+    let callbacks = options.remote_signing
+        || options.payload_signer
+        || options.public_mode.as_ref().is_some_and(|mode| {
+            let (remote, payload) = mode.callback_intent();
+            remote || payload
+        });
+    let keyed = primary_key_present(venue, options)
+        || options
+            .signing
+            .as_ref()
+            .is_some_and(|ids| ids.primary.is_some());
+    let explicit_private_error = construction::resolve(venue, options)
+        .is_some_and(|mode| mode.explicit_private_error.is_some());
+    if callbacks && resolved_public_data_only(venue, options) && !(keyed && explicit_private_error)
+    {
+        options.public_data_only = true;
+        options.account_startup = false;
+        // Trusted setup must retain this resolution after consuming raw credentials.
+        if let Some(mode) = options.public_mode.as_mut() {
+            mode.requested = Some(true);
+        }
+    }
 }
 
 #[cfg(feature = "polymarket")]
@@ -340,7 +483,7 @@ fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
 #[cfg(feature = "asterdex")]
 const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.";
 
-/// Backpack's provider copy of the configured key and Ed25519 seed (option B).
+/// Backpack's trusted native compatibility setup; the caller consumes raw input.
 /// A probe signature refuses a malformed or non-32-byte seed before startup.
 #[cfg(feature = "backpack")]
 struct BackpackSignerSetup {
@@ -360,7 +503,7 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     });
     // Declared PublicRead keeps a valid read key signing in public-only mode,
     // with no primary ever built or probed (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md).
-    // Backpack's own provider (dual custody) applies the one shared rule.
+    // Backpack's compatibility setup applies the same declared PublicRead rule.
     let read_policy = construction::read_credentials_policy("backpack");
     let primary_allowed = !public_read_excludes_primary(read_policy, options.public_data_only);
     if options.public_data_only && read_policy != construction::ReadCredentialsPolicy::PublicRead {
@@ -479,8 +622,6 @@ fn orderly_signer(
 /// Whether this build constructs `venue`.
 pub fn supported(venue: &str) -> bool {
     match venue {
-        #[cfg(feature = "breakoutprop")]
-        "breakoutprop" => true,
         #[cfg(feature = "grvt")]
         "grvt" => true,
         #[cfg(feature = "coinbase")]
@@ -549,7 +690,6 @@ pub fn supported(venue: &str) -> bool {
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "blofin",
@@ -573,6 +713,7 @@ pub fn supported(venue: &str) -> bool {
 fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
     const DELEGATED: [&str; 9] = [
         "hyperliquid",
+        "hyperliquidspot",
         "paradex",
         "lighter",
         "lighter-robinhood",
@@ -580,7 +721,6 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
         "coinbase",
         "coinbasespot",
         "polymarket",
-        "breakoutprop",
     ];
     // Without a remote signer, missing credentials simply mean a public account.
     if options.public_data_only || !options.remote_signing || DELEGATED.contains(&venue) {
@@ -692,6 +832,14 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "coinbase")]
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        return coinbase_setup::raw(options);
+    }
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        kraken_setup::preflight(options, public_data_only)?;
+    }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
@@ -722,6 +870,31 @@ pub fn prepare_local_signer_for(
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
         payload_signing_rules(venue, options, false)?;
         return lighter_setup::native(options, signer_setup_policy_for(venue, options));
+    }
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        // Preserve native legacy validation precedence while consuming both seeds
+        // before the venue exists. JSON-capsule and external setup already own refs.
+        let setup = backpack_provider(options)?;
+        if let Some(Err(safe_cex_venue_backpack::sign::ReadCredentialsError::Configuration(
+            message,
+        ))) = setup.read_status
+        {
+            return Err(invalid(message));
+        }
+        options.backpack_read_status = setup.read_status;
+        for value in [&mut options.key, &mut options.secret] {
+            safe_cex_crypto::secrets::erase(value);
+        }
+        if let Some(mut read) = options.read_credentials.take() {
+            read.erase_secrets();
+        }
+        return Ok((
+            setup.provider.unwrap_or_else(|| {
+                std::sync::Arc::new(safe_cex_crypto::signer::LocalSigner::new())
+            }),
+            setup.identities,
+        ));
     }
     let policy = signer_setup_policy_for(venue, options);
     let read_policy = construction::read_credentials_policy(venue);
@@ -980,6 +1153,10 @@ pub fn local_signer_from_json_for(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, false);
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::json(input, false);
@@ -1011,6 +1188,33 @@ fn admit_json_setup(
         &identities,
         public_data_only,
     )?;
+    #[cfg(feature = "backpack")]
+    if venue == "backpack" {
+        // Match legacy trusted setup's seed-width refusal before startup I/O.
+        for identity in [&identities.primary, &identities.secondary]
+            .into_iter()
+            .flatten()
+        {
+            let work = safe_cex_engine::signing::SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![safe_cex_engine::signing::Operation::Sign {
+                    algorithm: safe_cex_engine::signing::Algorithm::Ed25519,
+                    key: identity
+                        .signing_ref()
+                        .map_err(|_| invalid("Invalid Backpack signer setup"))?
+                        .clone(),
+                    payload: vec![safe_cex_engine::signing::PayloadPart::Bytes {
+                        bytes: Vec::new(),
+                    }],
+                }],
+            };
+            provider
+                .sign_ready(&work)
+                .ok_or_else(|| invalid("Invalid Backpack signer setup"))?
+                .map_err(|_| invalid("Backpack Ed25519 seed must be 32 bytes"))?;
+        }
+    }
     #[cfg(feature = "apexomni")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
         return apexomni_admit(provider, identities);
@@ -1032,6 +1236,10 @@ pub fn local_signer_from_capsule(
     ),
     VenueError,
 > {
+    #[cfg(feature = "coinbase")]
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        return coinbase_setup::json(input, options);
+    }
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
         let policy = signer_setup_policy_for(venue, options);
@@ -1055,6 +1263,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "kraken")]
+    if venue == "kraken" {
+        return kraken_setup::json(input, construction::signer_setup_public_data_only(options));
+    }
     // Paradex records its key form on the options: `local_signer_from_capsule`.
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
@@ -1150,8 +1362,7 @@ fn payload_signing_rules(
     options: &EngineOptions,
     provider_ready: bool,
 ) -> Result<(), VenueError> {
-    let public = construction::resolve(venue, options)
-        .map_or(options.public_data_only, |mode| mode.public_data_only);
+    let public = resolved_public_data_only(venue, options);
     payload_signing_rules_in_mode(venue, options, provider_ready, public)
 }
 
@@ -1163,6 +1374,16 @@ fn payload_signing_rules_in_mode(
 ) -> Result<(), VenueError> {
     if !options.payload_signer || public || !supported(venue) {
         return Ok(());
+    }
+    #[cfg(feature = "asterdex")]
+    if venue == "asterdex"
+        && matches!(
+            options.asterdex.api_version,
+            Some(safe_cex_venue_asterdex::sign::Version::V3)
+        )
+    {
+        return Err(VenueError::new("AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only")
+            .kind(ErrorKind::Unsupported).outcome(safe_cex_engine::Outcome::NotSent));
     }
     // Hosted (device-key) Paradex has no Rust route in this release; its legacy
     // digest-only delegate is never constructed.
@@ -1199,13 +1420,33 @@ fn payload_signing_rules_in_mode(
         .outcome(safe_cex_engine::Outcome::NotSent))
 }
 
-/// Constructs `venue`'s engine from `options`, enforcing its construction rules.
+/// Constructs a client engine; the caller owns SDK beta admission.
 pub fn build<T: Visit>(
     venue: &str,
     options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    build_in_context(
+        ConstructionContext::Client,
+        venue,
+        options,
+        entropy,
+        visitor,
+    )
+}
+
+/// Constructs an engine under the trusted host's explicit admission context.
+pub fn build_in_context<T: Visit>(
+    context: ConstructionContext,
+    venue: &str,
+    mut options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    private_custody_rules(context, venue, &options, false)?;
+    callback_rules(venue, &options, false)?;
+    retain_delegated_public_mode(venue, &mut options);
     payload_signing_rules(venue, &options, false)?;
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
@@ -1216,8 +1457,12 @@ pub fn build<T: Visit>(
             && options.signing.is_none()
         {
             let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
+            let empty_backpack = cfg!(feature = "backpack")
+                && venue == "backpack"
+                && identities.primary.is_none()
+                && identities.secondary.is_none();
             options.signing = Some(identities);
-            Some(provider)
+            if empty_backpack { None } else { Some(provider) }
         } else {
             None
         };
@@ -1225,7 +1470,7 @@ pub fn build<T: Visit>(
     };
     #[cfg(not(feature = "dispatch-signing"))]
     let signer = None;
-    build_with_signer(venue, options, entropy, signer, visitor)
+    build_with_signer_in_context(context, venue, options, entropy, signer, visitor)
 }
 
 /// The validation result travels only for a ValidateOnly family, never with
@@ -1339,17 +1584,46 @@ pub fn frame_fed_supported(venue: &str) -> bool {
     FRAME_FED_VENUES.contains(&venue)
 }
 
-/// Generic options contain opaque references; provider owns all credentials.
+/// Constructs a client engine with an injected provider and client admission.
 pub fn build_with_signer<T: Visit>(
     venue: &str,
-    mut options: EngineOptions,
+    options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     signer: Option<safe_cex_engine::signing::Provider>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    build_with_signer_in_context(
+        ConstructionContext::Client,
+        venue,
+        options,
+        entropy,
+        signer,
+        visitor,
+    )
+}
+
+/// Generic options contain opaque references; the host chooses admission.
+pub fn build_with_signer_in_context<T: Visit>(
+    context: ConstructionContext,
+    venue: &str,
+    mut options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
+    mut signer: Option<safe_cex_engine::signing::Provider>,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    private_custody_rules(context, venue, &options, signer.is_some())?;
+    callback_rules(venue, &options, signer.is_some())?;
+    retain_delegated_public_mode(venue, &mut options);
     let _ = &signer;
     if !supported(venue) {
-        return Err(invalid(format!("unsupported venue: {venue}")));
+        return Err(unsupported_venue(venue));
+    }
+    let orderly = cfg!(feature = "orderly")
+        && matches!(venue, "orderly" | "kodiakfi" | "mode" | "what" | "woofi");
+    if orderly && construction::signer_setup_public_data_only(&options) {
+        options.public_data_only = true;
+        options.signing = None;
+        signer = None;
     }
     if (options.signing.is_some() || signer.is_some())
         && !construction::bridge(venue, &options).dispatch_signing
@@ -1386,7 +1660,6 @@ pub fn build_with_signer<T: Visit>(
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "blofin",
@@ -1450,35 +1723,6 @@ pub fn build_with_signer<T: Visit>(
         },
     };
     match venue {
-        #[cfg(feature = "breakoutprop")]
-        "breakoutprop" => {
-            breakoutprop_rules(&options)?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    BreakoutProp::new(BreakoutOptions {
-                        key: options.key.take().unwrap_or_default(),
-                        secret: options.secret.take().unwrap_or_default(),
-                        subaccount: options.subaccount.take(),
-                        public_data_only: options.public_data_only,
-                        tick_interval: if options.polling_enabled == Some(false) {
-                            f64::INFINITY
-                        } else {
-                            safe_cex_engine::engine::bounded_tick_interval(
-                                options.tick_interval.take().unwrap_or(2_000.0),
-                            )
-                        },
-                        timeout_ms: options
-                            .recv_window
-                            .unwrap_or(20_000.0)
-                            .clamp(1.0, u32::MAX as f64) as u32,
-                    }),
-                    entropy,
-                )?,
-            )
-        }
         #[cfg(feature = "grvt")]
         "grvt" => {
             let identities = options.signing.take().unwrap_or_default();
@@ -1536,23 +1780,46 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "coinbase")]
-        "coinbase" | "coinbasespot" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Coinbase::new(CoinbaseOptions {
-                    key: options.key.take().unwrap_or_default(),
-                    secret: options.secret.take().unwrap_or_default(),
+        "coinbase" | "coinbasespot" => {
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid("Coinbase signing material belongs in signer setup"));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            if options.public_data_only || identities.primary.is_none() {
+                identities = Default::default();
+                options.coinbase_signing = None;
+                options.coinbase_read_signing = None;
+            }
+            let primary = options
+                .coinbase_signing
+                .take()
+                .zip(identities.primary.clone());
+            let secondary = options
+                .coinbase_read_signing
+                .take()
+                .zip(identities.secondary.clone());
+            if identities.primary.is_some() && (primary.is_none() || signer.is_none()) {
+                return Err(invalid("Coinbase requires a bound JWT signing provider"));
+            }
+            let venue = Coinbase::with_signing(
+                CoinbaseOptions {
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
-                    read_credentials: options.read_credentials.clone(),
-                })
-                .map_err(invalid)?,
-                entropy,
-            )?,
-        ),
+                    ..Default::default()
+                },
+                primary,
+                secondary,
+            )
+            .map_err(invalid)?;
+            let mut engine = Engine::new(venue, entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "polymarket")]
         "polymarket" => {
             polymarket_rules(&options)?;
@@ -1664,21 +1931,44 @@ pub fn build_with_signer<T: Visit>(
             )
         }
         #[cfg(feature = "kraken")]
-        "kraken" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Kraken::new(KrakenOptions {
-                    read_credentials: options.read_credentials.take(),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                }),
+        "kraken" => {
+            let mut identities = options.signing.take().unwrap_or_default();
+            if options.public_data_only {
+                identities.primary = None;
+            }
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Kraken credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut engine = Engine::new(
+                Kraken::with_signing(
+                    KrakenOptions {
+                        testnet: options.testnet,
+                        public_data_only: options.public_data_only,
+                        ..Default::default()
+                    },
+                    identities.clone(),
+                ),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kraken")]
         "krakenspot" => finish(
             visitor,
@@ -1907,25 +2197,34 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "backpack")]
         "backpack" => {
-            // Transitional dual custody (RUST_BACKPACK_SIGNER_ADMISSION.md, option
-            // B): managed trading signs through this provider, while unadopted
-            // account reads and private WS auth keep the raw fields. Remove before master.
-            let setup = backpack_provider(&options)?;
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Backpack credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid(
+                    "Backpack signing refs require an installed provider",
+                ));
+            }
             let mut engine = Engine::new(
                 Backpack::new(BackpackOptions {
-                    identity: setup.identities.primary.clone(),
-                    read_identity: setup.identities.secondary.clone(),
-                    read_credentials_status: setup.read_status,
-                    read_credentials: options.read_credentials.take(),
+                    identity: identities.primary.clone(),
+                    read_identity: identities.secondary.clone(),
+                    read_credentials_status: options.backpack_read_status,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     recv_window: options.recv_window.take(),
+                    ..Default::default()
                 }),
                 entropy,
             )?;
-            engine.set_signer(setup.provider)?;
-            engine.set_identities(setup.identities)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "blofin")]
@@ -1976,6 +2275,7 @@ pub fn build_with_signer<T: Visit>(
             }
             let mut engine = Engine::new(
                 MexcFutures::new(MexcOptions {
+                    signing_policy: remote_signing_policy("mexc"),
                     recv_window: tighter_recv_window(options.recv_window),
                     public_data_only: options.public_data_only,
                     read_credentials_valid: identities.secondary.as_ref().map(|_| true),
@@ -2095,14 +2395,12 @@ pub fn build_with_signer<T: Visit>(
             {
                 return Err(invalid("Engine signing provider is required"));
             }
-            let mut engine = Engine::new(
-                Bingx::new(BingxOptions {
-                    read_credentials: identities.secondary,
-                    public_data_only: options.public_data_only,
-                    credentials: identities.primary,
-                }),
-                entropy,
-            )?;
+            let venue_options = BingxOptions {
+                read_credentials: identities.secondary,
+                public_data_only: options.public_data_only,
+                credentials: identities.primary,
+            };
+            let mut engine = Engine::new(Bingx::new(venue_options), entropy)?;
             engine.set_signer(signer)?;
             finish(visitor, policy, startup, engine)
         }
@@ -2138,22 +2436,47 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "woo")]
-        "woo" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "woo" => {
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "WOO credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            // An incomplete local primary still denotes a public-only account.
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty()
+                    && identity.signing_ref().is_ok_and(|key| !key.0.is_empty())
+            });
+            for identity in [&identities.primary, &identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 Woo::new(WooOptions {
-                    read_credentials: options.read_credentials.take(),
+                    credentials: identities.primary.clone(),
+                    read_signing: identities.secondary.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     application_id: options.application_id.take(),
+                    ..Default::default()
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -2349,7 +2672,7 @@ pub fn build_with_signer<T: Visit>(
             engine.set_signer(signer)?;
             finish(visitor, policy, startup, engine)
         }
-        other => Err(invalid(format!("unsupported venue: {other}"))),
+        other => Err(unsupported_venue(other)),
     }
 }
 
@@ -2374,7 +2697,6 @@ pub struct KucoinExtra {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -2424,6 +2746,11 @@ pub struct EngineOptions {
     /// of the material (`ReadCredentials::status`); None when no read key.
     #[serde(default)]
     pub read_credentials_valid: Option<bool>,
+    /// Trusted Backpack compatibility setup retains validation only, never material.
+    #[cfg(feature = "backpack")]
+    #[serde(skip)]
+    pub backpack_read_status:
+        Option<Result<(), safe_cex_venue_backpack::sign::ReadCredentialsError>>,
     #[cfg(feature = "blofin")]
     #[serde(default)]
     pub broker_attribution: bool,
@@ -2440,6 +2767,12 @@ pub struct EngineOptions {
     #[cfg(feature = "coinbase")]
     #[serde(default)]
     pub spot_only: bool,
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    pub coinbase_signing: Option<safe_cex_venue_coinbase::sign::Binding>,
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    pub coinbase_read_signing: Option<safe_cex_venue_coinbase::sign::Binding>,
     #[cfg(feature = "polymarket")]
     #[serde(default)]
     pub polymarket: Option<PolymarketAccountOptions>,
@@ -2464,6 +2797,7 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     pub lighter_signer_provider: Option<String>,
     #[cfg(any(
+        feature = "bingx",
         feature = "grvt",
         feature = "coinbase",
         feature = "paradex",
@@ -2497,33 +2831,6 @@ pub struct EngineOptions {
     pub key: Option<String>,
     #[serde(default)]
     pub secret: Option<String>,
-    #[cfg(any(
-        feature = "grvt",
-        feature = "coinbase",
-        feature = "binance",
-        feature = "apexomni",
-        feature = "asterdex",
-        feature = "breakoutprop",
-        feature = "kucoin",
-        feature = "kucoinspot",
-        feature = "blofin",
-        feature = "bybit",
-        feature = "cryptocom",
-        feature = "bingx",
-        feature = "mexc",
-        feature = "bitget",
-        feature = "bitrue",
-        feature = "backpack",
-        feature = "phemex",
-        feature = "weex",
-        feature = "hyperliquid",
-        feature = "txflow",
-        feature = "kraken",
-        feature = "lighter",
-        feature = "woo",
-        feature = "orderly",
-        feature = "okx"
-    ))]
     /// The caller signs remotely (a remote or payload signer) rather than with a local secret.
     #[serde(default)]
     pub remote_signing: bool,
@@ -2541,7 +2848,6 @@ pub struct EngineOptions {
     #[cfg(any(
         feature = "backpack",
         feature = "bitrue",
-        feature = "breakoutprop",
         feature = "binance",
         feature = "bybit",
         feature = "mexc"
@@ -2601,15 +2907,9 @@ pub struct EngineOptions {
     #[cfg(feature = "bybit")]
     #[serde(default)]
     pub hyrotrader: Option<HyroConfig>,
-    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
+    #[cfg(feature = "orderly")]
     #[serde(default)]
     pub tick_interval: Option<f64>,
-    #[cfg(feature = "breakoutprop")]
-    #[serde(default)]
-    pub subaccount: Option<String>,
-    #[cfg(feature = "breakoutprop")]
-    #[serde(default)]
-    pub polling_enabled: Option<bool>,
 }
 #[cfg(any(
     feature = "coinbase",
@@ -2618,7 +2918,6 @@ pub struct EngineOptions {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -2687,7 +2986,6 @@ impl EngineOptions {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",

@@ -251,6 +251,161 @@ fn live_catalogue_and_tickers_load_before_startup_deadline_without_a_key() {
 }
 
 #[test]
+fn latest_candles_accept_fractional_host_clock() {
+    for explicit_start in [false, true] {
+        for future_end in [false, true] {
+            let mut s = Replay::ready();
+            s.now += 0.5;
+            let end = s.now.floor();
+            s.command(Command::FetchCandles {
+                command: 91,
+                symbol: SYMBOL.into(),
+                interval: Interval::M1,
+                limit: Some(10),
+                from_ms: explicit_start.then_some(end - 600_000.),
+                to_ms: future_end.then_some(end + 60_000.),
+            });
+            let request = s.requests.pop().expect("latest candles must dispatch HTTP");
+            assert_eq!(request.method, safe_cex_engine::Method::Get);
+            assert!(
+                request
+                    .url
+                    .contains(&format!("end_timestamp={}", end as u64))
+            );
+            assert!(
+                request
+                    .url
+                    .contains(&format!("start_timestamp={}", (end - 600_000.) as u64))
+            );
+        }
+    }
+}
+
+#[test]
+fn latest_candles_use_corrected_protocol_utc_after_suspend() {
+    assert_corrected_candle_bounds(7_200_000., None);
+}
+
+#[test]
+fn latest_candles_explicit_end_uses_corrected_protocol_utc() {
+    assert_corrected_candle_bounds(7_200_000., Some(0.));
+}
+
+#[test]
+fn corrected_candle_bounds_clamp_future_ends_and_preserve_historical_ends() {
+    for correction in [-7_200_000., 7_200_000.] {
+        for end_offset in [None, Some(60_000.), Some(-60_000.)] {
+            assert_corrected_candle_bounds(correction, end_offset);
+        }
+    }
+}
+
+fn assert_corrected_candle_bounds(correction: f64, end_offset: Option<f64>) {
+    let mut s = Replay::ready();
+    s.now += 0.5;
+    assert!(s.engine.sync_host_time(s.now, s.now));
+    let utc = s.now + correction;
+    assert!(s.engine.sync_host_time(s.now, utc));
+    let explicit_end = end_offset.map(|offset| utc.floor() + offset);
+    let expected_end = utc.floor() + end_offset.unwrap_or_default().min(0.);
+    s.command(Command::FetchCandles {
+        command: 91,
+        symbol: SYMBOL.into(),
+        interval: Interval::M1,
+        limit: Some(10),
+        from_ms: None,
+        to_ms: explicit_end,
+    });
+    assert_eq!(
+        safe_cex_engine::test_support::dispatch_now(&s.engine),
+        s.now,
+        "scheduling stays on raw time"
+    );
+    assert_eq!(s.requests.len(), 1, "one candle read: {:?}", s.requests);
+    let request = s.requests.pop().unwrap();
+    assert_eq!(request.method, safe_cex_engine::Method::Get);
+    let query = request.url.split_once('?').unwrap().1;
+    for (name, expected) in [
+        ("end_timestamp", expected_end),
+        ("start_timestamp", expected_end - 600_000.),
+    ] {
+        let value = query
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=')?;
+                (key == name).then_some(value)
+            })
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert_eq!(
+            value, expected as u64,
+            "{name}: correction={correction}, end={explicit_end:?}"
+        );
+    }
+}
+
+#[test]
+fn initially_missing_tickers_recover_from_summary_or_stream() {
+    for malformed in [false, true] {
+        for stream in [false, true] {
+            let mut s = Replay::new();
+            let instruments = s.next();
+            s.reply(instruments);
+            let summary = s.next();
+            let index = s
+                .records
+                .iter()
+                .position(|r| r["method"] == "public/get_book_summary_by_currency")
+                .unwrap();
+            let original = s.records[index]["body"].clone();
+            let mut response: Value = serde_json::from_str(original.as_str().unwrap()).unwrap();
+            let rows = response["result"].as_array_mut().unwrap();
+            if malformed {
+                let row = rows
+                    .iter_mut()
+                    .find(|r| r["instrument_name"] == SYMBOL)
+                    .unwrap();
+                row["funding_8h"] = json!("malformed");
+            } else {
+                rows.retain(|r| r["instrument_name"] != SYMBOL);
+            }
+            s.records[index]["body"] = json!(response.to_string());
+            s.reply(summary);
+            s.collect();
+            assert!(s.engine.store().loaded().tickers);
+            assert!(s.engine.store().market(SYMBOL).is_some());
+            assert!(s.engine.store().ticker(SYMBOL).is_none());
+            let seeded = s.engine.store().tickers().len();
+            if stream {
+                s.engine.handle(
+                    s.now,
+                    Event::WsOpened {
+                        socket: s.socket.unwrap(),
+                    },
+                );
+                s.collect();
+                let update = s.frames("ticker.").pop().unwrap();
+                assert_eq!(update["params"]["data"]["instrument_name"], SYMBOL);
+                s.message(&update.to_string());
+            } else {
+                s.records[index]["body"] = original;
+                let poll = s.next();
+                s.reply(poll);
+                s.collect();
+            }
+            let recovered = s
+                .engine
+                .store()
+                .ticker(SYMBOL)
+                .expect("a valid update must recover a ticker omitted from the seed");
+            assert!(recovered.last > 0. && recovered.mark > 0.);
+            assert_eq!(s.engine.store().tickers().len(), seeded + 1);
+        }
+    }
+}
+
+#[test]
 fn live_book_snapshot_and_every_change_match_independent_reconstruction() {
     let mut s = Replay::ready();
     s.command(Command::SubscribeOrderBook {

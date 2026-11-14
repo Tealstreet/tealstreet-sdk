@@ -11,8 +11,10 @@ export const inFlightSlicePlaced = async (
   exchange: Exchange,
   symbol: string,
   inFlight: NonNullable<TwapState['inFlight']>,
+  isCurrent: () => boolean = () => true,
 ): Promise<boolean> => {
   const warn = () =>
+    isCurrent() &&
     exchange.emitter.emit(
       'error',
       `TWAP ${symbol}: a ${inFlight.size} slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.`,

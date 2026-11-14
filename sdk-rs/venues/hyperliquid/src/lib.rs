@@ -142,6 +142,7 @@ struct InfoSuccessor {
 #[derive(Default)]
 struct Connection {
     feed: Option<FeedId>,
+    feed_refused: bool,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
     private_bootstrap: socket_codec::PrivateBootstrap,
@@ -171,6 +172,7 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
+    repair_boot_sequence: u64,
     options: Options,
     /// The standalone `hyperliquidspot` venue: spot is the whole product.
     spot: bool,
@@ -219,6 +221,7 @@ impl Hyperliquid {
             Default::default(),
         );
         Self {
+            repair_boot_sequence: socket_codec::next_repair_boot_sequence(),
             options,
             spot: false,
             spot_markets,
@@ -1363,6 +1366,9 @@ impl Venue for Hyperliquid {
     ) -> Result<(), VenueError> {
         self.protective_release_veto(store, pending, release)
     }
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[trading::PACING]
     }
@@ -1385,8 +1391,8 @@ impl Venue for Hyperliquid {
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        if matches!(pending, Pending::Trade(_)) {
-            self.unproven_trade_evidence(response, evidence);
+        if let Pending::Trade(request) = pending {
+            self.unproven_trade_evidence(request, response, evidence);
         }
     }
     fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
@@ -1583,7 +1589,8 @@ impl Venue for Hyperliquid {
         cx: &mut Cx<'_, Pending>,
         topic: &SubscriptionTopic,
     ) -> Option<Result<(), String>> {
-        self.retry_refused(cx, topic)
+        self.unnamed_candle_repair(cx, topic)
+            .or_else(|| self.retry_refused(cx, topic))
     }
     fn socket_control(
         &self,

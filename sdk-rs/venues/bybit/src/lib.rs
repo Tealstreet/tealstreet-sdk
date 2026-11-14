@@ -2756,6 +2756,18 @@ impl Venue for BybitLinear {
         self.on_ordinary_plan_ready(cx, plan);
     }
 
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        self.ordinary_write_evidence(pending, evidence);
+        if let Then::Ordinary(request) = &pending.then {
+            self.ordinary_cancel_evidence(request, evidence);
+        }
+    }
+
     fn on_http_owner_retired(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
@@ -3487,6 +3499,12 @@ impl Venue for BybitLinear {
         match action {
             // The engine binds the command when the refresh is admitted.
             safe_cex_engine::VenueAction::RefreshMarkets => self.refresh_markets(cx),
+            safe_cex_engine::VenueAction::FetchClosedPnl {
+                symbol,
+                from_ms,
+                to_ms,
+                account,
+            } => self.start_closed_pnl(cx, command, symbol, from_ms, to_ms, account),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

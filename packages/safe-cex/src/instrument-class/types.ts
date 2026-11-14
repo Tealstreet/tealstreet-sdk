@@ -1,4 +1,4 @@
-import type { ExchangeName, Market } from '../types';
+import type { Market } from '../generated/Market';
 
 /**
  * What a listed contract is actually a claim on.
@@ -84,5 +84,5 @@ export type InstrumentClassVenue = 'bybit' | 'bybitdemo' | 'bybitinverse' | 'byb
 
 export type InstrumentClassRegistry = { readonly [K in InstrumentClassVenue]: VenueInstrumentClassFn };
 
-export const isInstrumentClassVenue = (exchange: ExchangeName): exchange is InstrumentClassVenue =>
+export const isInstrumentClassVenue = (exchange: string): exchange is InstrumentClassVenue =>
   exchange === 'bybit' || exchange === 'bybitdemo' || exchange === 'bybitinverse' || exchange === 'bybitspot';

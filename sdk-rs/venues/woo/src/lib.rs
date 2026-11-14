@@ -4,7 +4,9 @@ mod history;
 mod identity;
 mod seed_read;
 mod sign;
+pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
+mod split_report;
 mod trading;
 mod wire;
 
@@ -22,6 +24,8 @@ use wire::*;
 
 #[derive(Clone, Default)]
 pub struct Options {
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
+    pub read_signing: Option<safe_cex_engine::signing::Identity>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
@@ -163,6 +167,69 @@ impl Woo {
                 pending,
             ));
         }
+        if self.options.public_data_only {
+            return Err("WOO private requests require credentials".into());
+        }
+        let mut dispatch = None;
+        let request = if self.options.credentials.is_some() {
+            use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+            let slots = Slots::new(
+                self.options.credentials.clone(),
+                self.options.read_signing.clone(),
+                SlotPolicy {
+                    secondary_requires_primary: true,
+                },
+            );
+            let role = if method == Method::Get {
+                CredentialRole::Read { scope: None }
+            } else {
+                CredentialRole::Mutation
+            };
+            let (selection, identity) = slots
+                .select(role)
+                .map_err(|_| "Invalid WOO signing identity")?;
+            identity
+                .validate()
+                .map_err(|_| "Invalid WOO signing identity")?;
+            let recipe = sign::dispatch::Http::new(
+                identity.clone(),
+                self.rest,
+                method,
+                path.into(),
+                params,
+                body,
+            );
+            let (url, headers, body) = recipe.unsigned();
+            dispatch = Some((selection, recipe));
+            sign::Signed {
+                path: url,
+                headers,
+                body,
+            }
+        } else {
+            self.local_signed_wire(cx.protocol_now(), method, path, params, body)?
+        };
+        let path = request.path;
+        let url = if path.starts_with("https://") {
+            path
+        } else {
+            format!("{}{}", self.rest, path)
+        };
+        let id = cx.request(method, url, request.headers, request.body, pending);
+        if let Some((selection, recipe)) = dispatch {
+            selection.sign(cx, id, Box::new(recipe));
+        }
+        Ok(id)
+    }
+    /// Raw-options compatibility only; provider failures never enter this path.
+    fn local_signed_wire(
+        &self,
+        utc: f64,
+        method: Method,
+        path: &str,
+        params: Vec<(String, String)>,
+        body: Option<String>,
+    ) -> Result<sign::Signed, String> {
         let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
             return Err("WOO private requests require credentials".into());
         };
@@ -176,14 +243,8 @@ impl Woo {
             .filter(|_| method == Method::Get);
         let key = read.map_or(key.as_str(), |r| r.key.as_str());
         let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
-        let utc = cx.protocol_now();
         let request = sign::request(key, secret, utc, method, path, &params, body);
-        let url = if request.path.starts_with("https://") {
-            request.path
-        } else {
-            format!("{}{}", self.rest, request.path)
-        };
-        Ok(cx.request(method, url, request.headers, request.body, pending))
+        Ok(request)
     }
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
@@ -918,6 +979,22 @@ impl Venue for Woo {
             self.on_request_failed(cx, pending, &error.message);
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
+            Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
+            Pending::Identity(command) => self.identity_sign_failed(cx, command, error),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, error);
+                self.account_read_again(cx);
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        });
+    }
     fn on_http_preparation_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1109,3 +1186,6 @@ fn reread_partial<P>(
 
 #[cfg(test)]
 mod secondary_tests;
+
+#[cfg(test)]
+mod hosted_tests;

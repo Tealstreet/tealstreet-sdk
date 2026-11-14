@@ -1,12 +1,17 @@
-import type { ExchangeName, Market, OrderType } from '@tealstreet/safe-cex/src/types';
+import type { ExchangeName, Market, OrderType, PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
+import type { NativeAmountMarket } from './nativeAmountRules';
 
 import { roundToNearestMultiple, roundToNearestMultipleDown } from '@tealstreet/math/src/roundToNearestMultiple';
 import { roundCloseSize, roundMarketOrderSize as roundMarketOrderSizeToStep } from './rounding';
 import { exchangeMetadata, getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { OrderType as OrderTypes } from '@tealstreet/safe-cex/src/types';
-import { DEFAULT_AMOUNT_PRECISION, DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
+import { venueUsesBaseAmountRails } from '@tealstreet/safe-cex/src/utils/nativeAmountRules';
+import { DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
+import { assertNativeReduceAmount, nativeAmountRules } from './nativeAmountRules';
 import { ScriptValidationError } from './ScriptValidationError';
 import { shouldRoundSizeDown } from './shouldRoundSizeDown';
+
+export { venueUsesBaseAmountRails } from '@tealstreet/safe-cex/src/utils/nativeAmountRules';
 
 /**
  * Venue-correct price/size rounding — the one place `apps/web` states it.
@@ -51,28 +56,53 @@ export const assertMinimumPrice = (price: number, market: Market): void => {
   }
 };
 
-const amountStep = (market: Market): number => market.precision.amount || DEFAULT_AMOUNT_PRECISION;
-
 export const roundOrderSize = (rawSize: number, market: Market, exchangeName?: string): number =>
   shouldRoundSizeDown(market, exchangeName)
-    ? roundToNearestMultipleDown(rawSize, amountStep(market))
-    : roundToNearestMultiple(rawSize, amountStep(market));
+    ? roundToNearestMultipleDown(rawSize, nativeAmountRules(market, exchangeName).step)
+    : roundToNearestMultiple(rawSize, nativeAmountRules(market, exchangeName).step);
 
 /**
  * Plain round-to-nearest sizing with **no** `shouldRoundSizeDown` branch.
  * This is the rule `updateOrder` uses — an amend must not silently truncate
  * a resting order's size on the venues where placement rounds down.
  */
-export const roundOrderSizeToNearest = (rawSize: number, market: Market): number =>
-  roundToNearestMultiple(rawSize, amountStep(market));
+export const roundOrderSizeToNearest = (rawSize: number, market: Market, exchangeName?: string): number =>
+  roundToNearestMultiple(rawSize, nativeAmountRules(market, exchangeName).step);
 
 /**
  * Sizing rule for reduce-only market closes: round to nearest, and fall back
  * to the raw size when rounding collapses to zero so a residual position
  * smaller than one lot step can still be closed.
  */
-export const roundMarketCloseSize = (rawSize: number, market: Market): number =>
-  roundCloseSize(rawSize, amountStep(market));
+export const roundMarketCloseSize = (rawSize: number, market: Market, exchangeName?: string): number => {
+  assertNativeReduceAmount(rawSize, market, exchangeName);
+  return roundCloseSize(rawSize, nativeAmountRules(market, exchangeName).step);
+};
+
+/** Percentage intent floors partial closes; a full close retains its exact native size. */
+export const roundPercentageCloseSize = (
+  fullNative: number | null,
+  percent: number,
+  market: NativeAmountMarket,
+  exchangeName?: string,
+): number => {
+  if (fullNative === null || !Number.isFinite(fullNative) || fullNative <= 0) {
+    throw new ScriptValidationError(`Native position size is unknown or non-positive for '${market.symbol}'`);
+  }
+  if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
+    throw new ScriptValidationError(`Invalid close percentage ${percent}; expected more than 0 and at most 100`);
+  }
+  if (percent === 100) return fullNative;
+  const { step } = nativeAmountRules(market, exchangeName);
+  const requested = fullNative * (percent / 100);
+  const amount = roundToNearestMultipleDown(requested, step);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ScriptValidationError(
+      `Percentage close size ${requested} floors to 0 at native step ${step} for '${market.symbol}'`,
+    );
+  }
+  return amount;
+};
 
 /**
  * Sizing for a market order — `createMarketOrder` and the script adapter's
@@ -82,8 +112,13 @@ export const roundMarketCloseSize = (rawSize: number, market: Market): number =>
 export const roundMarketOrderSize = (
   rawSize: number,
   market: Market,
-  opts: { readonly reduceOnly?: boolean } = {},
-): number => roundMarketOrderSizeToStep(rawSize, amountStep(market), { reduceOnly: opts.reduceOnly });
+  opts: { readonly reduceOnly?: boolean; readonly exchangeName?: string } = {},
+): number => {
+  if (opts.reduceOnly) assertNativeReduceAmount(rawSize, market, opts.exchangeName);
+  return roundMarketOrderSizeToStep(rawSize, nativeAmountRules(market, opts.exchangeName).step, {
+    reduceOnly: opts.reduceOnly,
+  });
+};
 
 const STOP_LIKE_ORDER_TYPES: ReadonlySet<OrderType> = new Set([
   OrderTypes.StopLoss,
@@ -112,6 +147,20 @@ export const isStopLikeOrderType = (type: OrderType): boolean => STOP_LIKE_ORDER
  */
 export const venueSupportsInfinityStops = (exchangeName: ExchangeName): boolean =>
   getExchangeMetadata(exchangeName).supportsInfinityStops;
+
+/** Protective kinds close by nature, even when the caller omits reduceOnly. */
+export const assertCloseLikeOrderAmount = (
+  amount: number,
+  order: Pick<PlaceOrderOpts, 'type' | 'reduceOnly' | 'close'>,
+  market: NativeAmountMarket,
+  exchangeName?: string,
+): void => {
+  if (!venueUsesBaseAmountRails(exchangeName)) return;
+  const protective = isStopLikeOrderType(order.type);
+  if (!protective && !order.reduceOnly && !order.close) return;
+  if (amount === 0 && protective && venueSupportsInfinityStops(exchangeName)) return;
+  assertNativeReduceAmount(amount, market, exchangeName);
+};
 
 /**
  * Whether the venue wants reduce-only orders shrunk against what is already

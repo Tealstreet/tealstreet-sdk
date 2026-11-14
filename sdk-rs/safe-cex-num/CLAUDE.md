@@ -6,6 +6,11 @@ observations separate from body-specific non-decoder classifications. The
 numeric_output_invariant target checks native changed-bit refusals and nested
 paths; its compiling comparison fault must fail before exact restoration passes.
 
+`native_position_size` follows the nullable SDK sizing contract and returns
+`Option<f64>`: consistent native evidence wins, otherwise absent native derives;
+conflicting/unavailable evidence is None. The selection differential compares
+20,022 independently counted cases with the actual safe-cex helper.
+
 This crate hosts shared ECMAScript compatibility helpers below services and venues.
 BuiltinReference::prototype selects the actual native parent identity in the
 same retained realm. It reads metadata rather than the shadowable `__proto__`
@@ -326,7 +331,9 @@ Keep the original numeric-edge corpus and its field-identity fixtures unchanged.
 
 Shared Ticker output eligibility includes timestamp in the exhaustive ordinary
 numeric inventory. Its runtime clock value is not an info passthrough and cannot
-bypass the output check. The ticker_timestamp target observes native field bits.
+bypass the output check. The ticker_timestamp target observes native field bits
+against the retained Paradex reference. Its source inventory scans both the
+production exchange tree and the test-only reference tree.
 
 Source-corpus cardinality checks use exact totals and completed assertion counts;
 thresholds are not completeness checks. The test-only source_cardinality walker
@@ -362,8 +369,8 @@ shared string-union front guards still reject tagged maps.
 `js_date_to_iso_string` applies the existing TimeClip boundary and returns the
 native RangeError name/message for invalid dates. It renders UTC milliseconds,
 including year zero and signed six-digit extended years, without a local timezone
-adapter. The formatter is shared with websocket diagnostics and native DXtrade
-candle bounds; no venue-local calendar copy is introduced. `tests/date_iso.rs`
+adapter. The formatter is shared with websocket diagnostics; no venue-local calendar
+copy is introduced. `tests/date_iso.rs`
 compares 1,044 independently counted native bit inputs with actual JavaScript
 Date construction/toISOString, including fractional, nonfinite and clip-edge
 values. It does not implement object-to-primitive Date constructor coercion.
@@ -388,3 +395,11 @@ from the executed Node comparisons and corruption controls above.
 `sorting::stable_sort` owns the single V8 13.6 TimSort implementation, moved
 from Exchange. Generic comparator errors remain original values; infallible
 callers use Infallible. Store and native JS callers share the same algorithm.
+
+Native notional/leverage helpers preserve unknown as NaN before considering a
+zero balance; nonfinite inputs and arithmetic overflow cannot become a known
+zero or partial sum. The corresponding TypeScript helpers expose null.
+The pure policy lives in the dependency-free `safe-cex-position-math` crate,
+re-exported through `sizing` and the native-size API. Engines and algos share
+that implementation without depending on this compatibility crate or bypassing
+the AccountPort boundary to access engine internals.

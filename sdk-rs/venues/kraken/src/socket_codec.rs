@@ -7,6 +7,8 @@ use safe_cex_engine::socket_lifecycle::{
     Invalidation, LifecycleEvent, NativeTiming, SocketError, StableAnchor, TrafficPolicy,
 };
 
+const TICKER_SILENCE_MS: f64 = 30_000.;
+
 pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
     FeedPolicy {
         role: if private {
@@ -17,8 +19,8 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
         supervision: Config {
             connect_timeout_ms: if private && futures { 15_000. } else { 45_000. },
             auth_timeout_ms: (private && futures).then_some(15_000.),
-            idle_timeout_ms: if private && futures { 60_000. } else { 45_000. },
-            ping_interval_ms: (!private || !futures).then_some(15_000.),
+            idle_timeout_ms: if futures { 20_000. } else { 45_000. },
+            ping_interval_ms: (!futures).then_some(15_000.),
             backoff_cap_ms: if private && futures { 30_000. } else { 16_000. },
             ..Config::default()
         },
@@ -38,6 +40,8 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
         },
         subscription_interval_ms: 0.,
         close_floors: &[],
+        // Public data clocks are per symbol; private event feeds may be quiet
+        // indefinitely after their initial snapshots and use receive liveness.
         data_silence: None,
     }
 }
@@ -63,7 +67,7 @@ impl Kraken {
         if self.public.feed.is_none() && cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public.feed = Some(cx.register_socket_feed(policy(false, true))?);
         }
-        if self.account.feed.is_none() && self.signer.is_some() && !self.options.public_data_only {
+        if self.account.feed.is_none() && self.can_sign() && !self.options.public_data_only {
             self.account.feed = Some(cx.register_socket_feed_with_native_timing(
                 policy(true, true),
                 NativeTiming {
@@ -122,21 +126,28 @@ impl Kraken {
         };
         Some((self.public.feed?, book_interest(symbol).key.to_string()))
     }
-    fn public_interests(&self, store: &safe_cex_engine::Store) -> Vec<Interest> {
+    fn ticker_products(&self, store: &safe_cex_engine::Store) -> Vec<String> {
         let selected: Vec<_> = store
             .markets()
             .iter()
             .filter(|m| self.ticker_symbols.contains(&m.symbol))
             .map(|m| m.symbol.as_str())
             .collect();
-        let products: Vec<_> = if selected.is_empty() {
+        let products = if selected.is_empty() {
             store.markets().iter().map(|m| m.symbol.as_str()).collect()
         } else {
             selected
         };
+        products.into_iter().map(str::to_string).collect()
+    }
+    fn public_interests(&self, store: &safe_cex_engine::Store) -> Vec<Interest> {
+        let products = self.ticker_products(store);
         let mut interests = vec![];
         for batch in products.chunks(50) {
-            interests.push(futures_interest("ticker", batch));
+            interests.push(futures_interest(
+                "ticker",
+                &batch.iter().map(String::as_str).collect::<Vec<_>>(),
+            ));
         }
         let mut books: Vec<_> = self.books.keys().collect();
         books.sort();
@@ -145,12 +156,37 @@ impl Kraken {
         }
         interests
     }
-    pub(super) fn sync_public_interests(&self, cx: &mut Cx<'_, Pending>) {
-        if let Some(feed) = self.public.feed
-            && let Err(error) = cx.set_socket_interests(feed, self.public_interests(cx.store))
-        {
+    pub(super) fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(feed) = self.public.feed else { return };
+        if self.public.open {
+            let products = self.ticker_products(cx.store);
+            self.ticker_received
+                .retain(|symbol, _| products.contains(symbol));
+            for symbol in products {
+                self.ticker_received.entry(symbol).or_insert(cx.now);
+            }
+        }
+        if let Err(error) = cx.set_socket_interests(feed, self.public_interests(cx.store)) {
             self.socket_error(cx, false, error);
         }
+    }
+    pub(super) fn watch_public_tickers(&self, cx: &mut Cx<'_, Pending>) -> bool {
+        if self.public.open
+            && self
+                .ticker_received
+                .values()
+                .any(|received| cx.now >= received + TICKER_SILENCE_MS)
+            && let Some(feed) = self.public.feed
+        {
+            cx.retire_socket(
+                feed,
+                safe_cex_engine::socket_lifecycle::RetireReason::Timeout(
+                    safe_cex_engine::socket::Timeout::Silent,
+                ),
+            );
+            return true;
+        }
+        false
     }
     pub(super) fn repair_book(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         if let Some(feed) = self.public.feed
@@ -168,7 +204,7 @@ impl Kraken {
             return Control::Other;
         }
         match serde_json::from_str::<Message<'_>>(text) {
-            Ok(msg) if msg.event == "pong" => Control::Pong,
+            Ok(msg) if msg.event == "pong" || msg.feed == "heartbeat" => Control::Pong,
             Ok(_) => Control::Traffic,
             Err(_) => Control::Other,
         }
@@ -192,10 +228,6 @@ impl Kraken {
             }
             LifecycleEvent::Reconnect(feed) => {
                 self.managed_connect(cx, self.private_feed(feed)?)?
-            }
-            LifecycleEvent::Ping(epoch) => {
-                self.private_feed(epoch.feed())?;
-                cx.send(epoch.socket(), r#"{"event":"ping"}"#);
             }
             LifecycleEvent::AuthFailure { evidence, .. } => {
                 if let safe_cex_engine::socket_lifecycle::AuthEvidence::Rejected(mut error) =

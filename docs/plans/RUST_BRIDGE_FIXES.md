@@ -756,7 +756,12 @@ Rust nuke/nukePositions selects a single current native position snapshot and
 submits native-unit reduce-only market closes as one existing placeOrders
 command. Reuse the established nativePositionSize policy by moving its
 implementation into safe-cex and retaining the script-api-core export; avoid a
-reverse package dependency or a divergent sizing copy. Validate all required
+reverse package dependency or a divergent sizing copy. Native quantity takes
+precedence only when coherent with available derived evidence; absent native
+uses derived quantity, unavailable/conflicting evidence returns null, never a
+maximum. No per-field native freshness signal exists, so a disagreement beyond
+floating-point roundoff cannot establish which value is current. Close/reduce
+paths refuse unknown quantity before rounding or dispatch. Validate all required
 market/amount inputs before dispatch. Keep the native batch's accepted IDs,
 partial failures and unknown-outcome metadata unchanged. Do not automatically
 retry a close against unchanged positions: repeated Base nuke passes can place

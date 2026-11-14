@@ -47,6 +47,10 @@
       "value": "bingx"
     },
     {
+      "name": "Bingxspot",
+      "value": "bingxspot"
+    },
+    {
       "name": "Bitget",
       "value": "bitget"
     },
@@ -69,10 +73,6 @@
     {
       "name": "Blofin",
       "value": "blofin"
-    },
-    {
-      "name": "Breakoutprop",
-      "value": "breakoutprop"
     },
     {
       "name": "Bybit",

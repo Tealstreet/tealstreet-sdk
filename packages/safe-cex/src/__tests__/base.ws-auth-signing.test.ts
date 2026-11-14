@@ -35,7 +35,7 @@ const sign = (outputFormat: string, toSign: string, secret = SECRET) => {
 };
 
 describe('BaseExchange.signWsAuth output formats', () => {
-  it('signs hex as bybit/bitmex/woo/phemex do locally', async () => {
+  it('signs hex as bybit/woo/phemex do locally', async () => {
     const result = await sign('hex', 'GET/realtime1700000000');
     expect(result.wsAuthSignature).toBe('dda0c91ab082cccc37125f5adc7d4c99902bcdcd938e581b7fb76f38650d4626');
   });
@@ -79,6 +79,12 @@ describe('BaseExchange.signWsAuth output formats', () => {
     const result = await sign('coinbase-jwt', 'coinbase-websocket-jwt.user');
     expect(result.wsAuthSignature).toBeUndefined();
     expect(result.error).toContain('CoinbaseExchange');
+  });
+
+  it('requires the Rust device codec for Backpack Ed25519 instead of returning an HMAC', async () => {
+    const result = await sign('backpack-ed25519', '{"payload":"fixture"}');
+    expect(result.wsAuthSignature).toBeUndefined();
+    expect(result.error).toContain('requires the Rust engine signer');
   });
 
   it('errors instead of mis-signing an unknown output format', async () => {

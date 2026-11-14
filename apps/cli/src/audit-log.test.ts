@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, appendFileSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync, appendFileSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -16,6 +16,8 @@ async function loadFresh() {
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'audit-test-'));
   process.env.TEALSTREET_CONFIG_DIR = dir;
+  process.env.TEALSTREET_CONFIG_FILE = join(dir, 'config.json');
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ accounts: [], auth: { userId: 'test-owner' } }));
   await loadFresh();
 });
 
@@ -77,7 +79,7 @@ describe('audit-log', () => {
   it('skips malformed lines in the log', () => {
     mod.setAuditEnabled(true);
     mod.appendAuditEntry(entry({ command: 'buy 1' }));
-    appendFileSync(mod.AUDIT_LOG_PATH, 'not json\n', 'utf-8');
+    appendFileSync(mod.getAuditLogPath(), 'not json\n', 'utf-8');
     mod.appendAuditEntry(entry({ command: 'buy 2' }));
     expect(mod.readAuditTail(10).map((e) => e.command)).toEqual(['buy 1', 'buy 2']);
   });
@@ -86,7 +88,7 @@ describe('audit-log', () => {
     mod.setAuditEnabled(true);
     mod.appendAuditEntry(entry({ command: 'buy 1' }));
     mod.appendAuditEntry(entry({ command: 'buy 2' }));
-    appendFileSync(mod.AUDIT_LOG_PATH, 'garbage\ngarbage\n', 'utf-8');
+    appendFileSync(mod.getAuditLogPath(), 'garbage\ngarbage\n', 'utf-8');
     expect(mod.readAuditTail(2).map((e) => e.command)).toEqual(['buy 1', 'buy 2']);
   });
 
@@ -347,14 +349,14 @@ describe('rotation + bounded read', () => {
     mod.setAuditEnabled(true);
     for (let i = 0; i < 50; i++) mod.appendAuditEntry(entry({ command: `buy ${i}` }));
     expect(mod.readAuditTail(3).map((e) => e.command)).toEqual(['buy 47', 'buy 48', 'buy 49']);
-    expect(existsSync(mod.AUDIT_LOG_PATH + '.1')).toBe(false);
+    expect(existsSync(mod.getAuditLogPath() + '.1')).toBe(false);
   });
 
   it('rotates the live log to audit.log.1 once it passes the cap', () => {
     mod.setAuditEnabled(true);
     mod.__setMaxLogBytesForTest(200); // ~2 entries per file
     for (let i = 0; i < 20; i++) mod.appendAuditEntry(entry({ command: `buy ${i}` }));
-    expect(existsSync(mod.AUDIT_LOG_PATH + '.1')).toBe(true);
+    expect(existsSync(mod.getAuditLogPath() + '.1')).toBe(true);
   });
 
   it('still returns a correct, contiguous recent window across a rotation', () => {
@@ -375,7 +377,7 @@ describe('rotation + bounded read', () => {
     // than the requested tail, so the remainder must come from audit.log.1.
     mod.__setMaxLogBytesForTest(300);
     for (let i = 0; i < 8; i++) mod.appendAuditEntry(entry({ command: `buy ${i}` }));
-    expect(existsSync(mod.AUDIT_LOG_PATH + '.1')).toBe(true);
+    expect(existsSync(mod.getAuditLogPath() + '.1')).toBe(true);
     const tail = mod.readAuditTail(4).map((e) => e.command);
     expect(tail).toEqual(['buy 4', 'buy 5', 'buy 6', 'buy 7']);
   });
@@ -385,7 +387,7 @@ describe('rotation + bounded read', () => {
     for (let i = 0; i < 30; i++) mod.appendAuditEntry(entry({ command: `buy ${i}` }));
     // A burst of malformed/truncated lines at the very end (e.g. a crash
     // mid-write) must not shrink the tail below the requested count.
-    for (let i = 0; i < 25; i++) appendFileSync(mod.AUDIT_LOG_PATH, 'garbage line\n', 'utf-8');
+    for (let i = 0; i < 25; i++) appendFileSync(mod.getAuditLogPath(), 'garbage line\n', 'utf-8');
     expect(mod.readAuditTail(5).map((e) => e.command)).toEqual(['buy 25', 'buy 26', 'buy 27', 'buy 28', 'buy 29']);
   });
 });
