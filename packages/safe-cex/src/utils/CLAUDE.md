@@ -226,6 +226,9 @@ Completed clock-step attempts also share a realm-wide 15 s cooldown measured by
 another transport nor a further wall step bypasses it. If both registered and
 venue sources fail in this mode, the prior offset and subscribers stay unchanged;
 ordinary synchronization retains its local-UTC fallback and five-minute cadence.
+Steps inside the cooldown share one deferred resync at its boundary. A step during
+an in-flight sync retains one follow-up resync, respecting the same cooldown after
+completion. The timer rechecks monotonic elapsed time; `stop()` clears pending work.
 
 ## Files
 
