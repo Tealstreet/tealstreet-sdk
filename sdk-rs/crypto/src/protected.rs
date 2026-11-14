@@ -172,7 +172,7 @@ mod tests {
         panic!("protected mapping missing from smaps");
     }
     #[test]
-    fn protection_failure_has_no_heap_fallback() {
+    fn unavailable_locking_retains_protected_pages() {
         const CHILD: &str = "SDK_TEST_PROTECTED_MLOCK_REFUSAL";
         if std::env::var_os(CHILD).is_some() {
             let limit = libc::rlimit {
@@ -181,16 +181,16 @@ mod tests {
             };
             // SAFETY: this test-only child lowers only its own memlock limit.
             assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &limit) }, 0);
-            assert!(matches!(
-                ProtectedSecret::new(Zeroizing::new(vec![7; 32])),
-                Err(SignError::Unavailable)
-            ));
+            let secret = ProtectedSecret::new(Zeroizing::new(vec![7; 32]))
+                .expect("published best-effort locking policy keeps protected storage available");
+            assert!(!secret.locked);
+            assert_eq!(secret.as_bytes(), &[7; 32]);
             return;
         }
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "protected::tests::protection_failure_has_no_heap_fallback",
+                "protected::tests::unavailable_locking_retains_protected_pages",
                 "--nocapture",
             ])
             .env(CHILD, "1")
