@@ -48,11 +48,7 @@ fn resident_with_identity(
     inner.delegated = Some(
         prepare_delegated(
             &init,
-            DelegatedPair::new(
-                init.key.clone(),
-                "synthetic-secret".into(),
-                None,
-            ),
+            DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
         )
         .unwrap()
         .resident,
@@ -205,11 +201,7 @@ async fn admitted_reconnect_resets_retention_and_another_user_does_not() {
                     9,
                     Some(("synthetic-token".into(), u64::MAX)),
                     outbox,
-                    DelegatedPair::new(
-                        "synthetic-key".into(),
-                        "synthetic-secret".into(),
-                        None,
-                    ),
+                    DelegatedPair::new("synthetic-key".into(), "synthetic-secret".into(), None),
                 )
                 .await
                 .unwrap();
@@ -328,11 +320,7 @@ async fn fresh_verified_admission_after_resume_grace_resets_retention_but_a_pend
                     8,
                     None,
                     Arc::new(|_| true),
-                    DelegatedPair::new(
-                        "synthetic-key".into(),
-                        "synthetic-secret".into(),
-                        None,
-                    ),
+                    DelegatedPair::new("synthetic-key".into(), "synthetic-secret".into(), None),
                 )
                 .await
                 .unwrap();
@@ -708,6 +696,67 @@ async fn earlier_disconnected_alias_still_revokes_resident_and_does_not_touch_an
                 assert!(registry.holds(&other, 7));
                 registry.dispose(&other, Disposal::PageDisposed);
             }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn disconnected_alias_on_a_still_live_socket_keeps_revocation_lookup() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident(&registry, "A");
+            assert!(account.hold_label(
+                7,
+                Live {
+                    outbox: Arc::new(|_| true),
+                    token: None
+                },
+                "phone"
+            ));
+            let provider = account.delegated.as_ref().unwrap().provider();
+            registry.release_label(&account, 7, "phone", Disposal::SocketClosed);
+            assert!(registry.holds(&account, 7));
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(61)).await;
+            registry.dispose_delegated("A", "phone");
+            assert_eq!(registry.account_count(), 0);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn explicit_alias_removal_erases_even_when_the_same_socket_holds_another_label() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "A");
+            let (other, mut other_inbox) = resident(&registry, "B");
+            assert!(account.hold_label(
+                7,
+                Live {
+                    outbox: Arc::new(|_| true),
+                    token: None
+                },
+                "phone"
+            ));
+            let provider = account.delegated.as_ref().unwrap().provider();
+            registry.release_label(&account, 7, "phone", Disposal::PageDisposed);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { .. })
+            ));
+            assert!(other_inbox.try_recv().is_err());
+            assert!(registry.holds(&other, 7));
+            registry.dispose(&other, Disposal::PageDisposed);
         })
         .await;
 }
