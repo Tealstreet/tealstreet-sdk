@@ -42,3 +42,7 @@ refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
 2,158,592-byte floor retains the required 10 KiB reserve.
 WEEX in the same composition measures 2,028,105 bytes and retains a 2,038,784-byte
 floor by the same rule. Pinned profiles and remaining family/global budgets are unchanged.
+
+TxFlow construction-feature guards require dispatch signing, address/nonce setup
+and its hosted-wallet codec, with independent missing-feature refusals. The HTTP
+HMAC hosted-signing feature cannot substitute for that testnet wallet codec.
