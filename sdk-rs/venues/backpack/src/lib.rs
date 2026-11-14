@@ -883,6 +883,7 @@ impl Venue for Backpack {
                 return Err(format!("Backpack socket {}: {}", error.code, error.message));
             }
             if let Some(data) = envelope.data {
+                cx.record_socket_topic(&[&envelope.stream]);
                 self.public_message(cx, &envelope.stream, data.get())?;
             }
             Ok(())

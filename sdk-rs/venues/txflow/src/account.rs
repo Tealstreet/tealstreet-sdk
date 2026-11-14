@@ -1209,6 +1209,9 @@ impl TxFlow {
         let Ok(frame) = serde_json::from_str::<Frame<'_>>(text) else {
             return;
         };
+        if let Some(user) = self.user() {
+            cx.record_socket_topic(&["@", frame.channel, "|||", user, "||||"]);
+        }
         match frame.channel {
             "clearinghouseState" => {
                 let Ok(state) = serde_json::from_str::<State>(frame.data.get()) else {

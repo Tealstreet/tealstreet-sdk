@@ -729,3 +729,65 @@ fn catalogue_starts_ticker_hydration_before_the_socket_opens() {
     );
     assert_eq!(e.store().ticker("ETH").unwrap().last, 2333.21);
 }
+
+#[test]
+fn candle_receipts_refresh_only_the_matching_interval_subscription() {
+    let (mut e, socket) = seeded();
+    for interval in [
+        safe_cex_engine::model::Interval::M1,
+        safe_cex_engine::model::Interval::M5,
+    ] {
+        e.handle(
+            1000.,
+            Event::Command(Command::SubscribeCandles {
+                symbol: "ETH".into(),
+                interval,
+            }),
+        );
+    }
+    e.drain_actions().for_each(drop);
+    send(
+        &mut e,
+        socket,
+        2000.,
+        r#"{"channel":"candle:0:1m","type":"update/candle","candles":[{"t":1700000040000,"o":10,"h":12,"l":9,"c":11,"v":2}]}"#,
+    );
+    let frame = e.snapshot_frame(2001.);
+    let section = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::MESSAGE_HANDLER_STATS)
+        .unwrap()
+        .1;
+    let strings = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::STRINGS)
+        .unwrap()
+        .1;
+    let string_count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+    let text = |index: usize| {
+        let begin =
+            u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap()) as usize;
+        let end =
+            u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap()) as usize;
+        std::str::from_utf8(
+            &strings[4 + (string_count + 1) * 4 + begin..4 + (string_count + 1) * 4 + end],
+        )
+        .unwrap()
+    };
+    let mut candles = 0;
+    for row in section[8..].as_chunks::<24>().0 {
+        let topic = text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize);
+        if topic.contains("candle/0/") {
+            candles += 1;
+            let flags = u32::from_le_bytes(row[8..12].try_into().unwrap());
+            let age = f64::from_le_bytes(row[16..24].try_into().unwrap());
+            if topic.ends_with("/1m") {
+                assert_eq!(flags, 3);
+                assert_eq!(age, 1.);
+            } else {
+                assert!(topic.ends_with("/5m"));
+                assert_eq!(flags, 1);
+                assert!(age.is_nan());
+            }
+        }
+    }
+    assert_eq!(candles, 2);
+}

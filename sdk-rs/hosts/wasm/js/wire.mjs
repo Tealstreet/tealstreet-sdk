@@ -26,6 +26,7 @@ export const SECTION = {
   UNDERLYING_TOKENS: 20,
   ACCOUNT_READ: 21,
   TICKER_OBSERVATIONS: 24,
+  MESSAGE_HANDLER_STATS: 25,
 };
 
 export const NONE = 0xffffffff;
@@ -406,6 +407,29 @@ export class Frame {
       if (i > values.length) throw new Error('truncated ticker delta');
     }
     return values;
+  }
+
+  /** Subscription snapshot or changed rows; ages use the engine clock. */
+  messageHandlerStats() {
+    const section = this.first(SECTION.MESSAGE_HANDLER_STATS);
+    if (!section) return undefined;
+    if (section.length < 8) throw new Error('truncated message handler stats');
+    const count = this.view.getUint32(section.offset, true);
+    const mode = this.view.getUint32(section.offset + 4, true);
+    if (mode > 1) throw new Error('invalid message handler stats mode');
+    if (count > 8192 * 512 || section.length !== 8 + count * 24) throw new Error('invalid message handler stats length');
+    const at = (i) => section.offset + 8 + i * 24;
+    const group = (i) => this.view.getUint32(at(i), true);
+    const flags = (i) => this.view.getUint32(at(i) + 8, true);
+    const ageMs = (i) => this.view.getFloat64(at(i) + 16, true);
+    for (let i = 0; i < count; i++) {
+      requiredString(this, this.view.getUint32(at(i) + 4, true));
+      const age = ageMs(i);
+      if (group(i) > 3 || flags(i) > 3 || (!Number.isNaN(age) && (!Number.isFinite(age) || age < 0)) ||
+          ((flags(i) & 2) && (!(flags(i) & 1) || Number.isNaN(age)))) throw new Error('invalid message handler stats row');
+    }
+    return { count, replace: Boolean(mode), group, topic: (i) => requiredString(this, this.view.getUint32(at(i) + 4, true)),
+      subscribed: (i) => Boolean(flags(i) & 1), active: (i) => Boolean(flags(i) & 2), ageMs };
   }
 
   /** Source receipt times, independent of price changes: [row, last, mark, index]. */

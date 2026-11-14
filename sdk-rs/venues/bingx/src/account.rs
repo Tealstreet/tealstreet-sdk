@@ -1711,6 +1711,9 @@ impl Account {
         if event.pong.is_some() {
             return;
         }
+        if !event.e.is_empty() && event.e != "listenKeyExpired" {
+            cx.record_socket_topic(&[&event.e]);
+        }
         match event.e.as_ref() {
             "listenKeyExpired" => self.fresh_key(cx, credentials),
             "ACCOUNT_UPDATE" => {

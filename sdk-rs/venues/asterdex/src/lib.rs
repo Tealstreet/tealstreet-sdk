@@ -634,16 +634,21 @@ impl AsterDex {
         if let Some(frame) = FastAggregate::decode(text) {
             match frame {
                 FastAggregate::Tickers(rows) => {
+                    cx.record_socket_topic(&["!ticker@arr"]);
                     for row in rows {
                         update_ticker(cx, row);
                     }
                 }
                 FastAggregate::Marks(rows) => {
+                    cx.record_socket_topic(&["!markPrice@arr@1s"]);
                     for row in rows {
                         update_mark(cx, row);
                     }
                 }
-                FastAggregate::Depth { stream, event } => self.apply_depth(cx, &stream, event),
+                FastAggregate::Depth { stream, event } => {
+                    cx.record_socket_topic(&[&stream]);
+                    self.apply_depth(cx, &stream, event);
+                }
             }
             return;
         }
@@ -655,6 +660,9 @@ impl AsterDex {
             return;
         }
         let stream = envelope.stream.as_deref();
+        if let Some(stream) = stream {
+            cx.record_socket_topic(&[stream]);
+        }
         let body = envelope.data.map_or(text, RawValue::get);
         match stream {
             Some("!ticker@arr") => {

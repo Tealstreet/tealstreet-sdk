@@ -27,6 +27,10 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 
 const align8 = (value: number) => Math.ceil(value / 8) * 8;
 type FixtureOptions = {
+  invalidStats?: boolean;
+  orderPrice?: number;
+  positionEntry?: number;
+  bookDelta?: boolean;
   brokenBook?: boolean;
   invalidBook?: boolean;
   invalidCandle?: boolean;
@@ -49,6 +53,10 @@ type FixtureOptions = {
 
 // Independent binary sections exercise the real readers and caller recovery.
 const fixture = ({
+  invalidStats = false,
+  orderPrice = 100,
+  positionEntry = 100,
+  bookDelta = false,
   brokenBook = false,
   invalidBook = false,
   invalidCandle = false,
@@ -95,8 +103,12 @@ const fixture = ({
       secondaryMarket ? columns.flatMap((value) => [value, value]) : columns,
     );
   }
-  table(SECTION.ORDERS, [1, 3, 0xffffffff, 0xffffffff, 0, 256], [100, 1, 0, 1, 1234, NaN, NaN]);
-  table(SECTION.POSITIONS, [1, 0, 2 << 16], [100, 50, 5, 0, 0, 0.5, 80, 10, 1234, NaN, NaN], [0, 0]);
+  if (invalidStats) {
+    table(SECTION.MESSAGE_HANDLER_STATS, [0, 2], []);
+    table(SECTION.TICKERS, [1, 0], [99, 101, 100, 100, 100, 1, 2, 0, 1234, 10, 1000]);
+  }
+  table(SECTION.ORDERS, [1, 3, 0xffffffff, 0xffffffff, 0, 256], [orderPrice, 1, 0, 1, 1234, NaN, NaN]);
+  table(SECTION.POSITIONS, [1, 0, 2 << 16], [positionEntry, 50, 5, 0, 0, 0.5, 80, 10, 1234, NaN, NaN], [0, 0]);
   table(SECTION.BALANCE, [], [total - 30, 30, total, 0]);
   if (!omitSettings)
     table(SECTION.SETTINGS, settings ? [1, 0, 2] : [0], settings ? [leverage, buyLeverage, sellLeverage] : []);
@@ -108,7 +120,10 @@ const fixture = ({
     Array(fills * 2).fill(NaN),
   );
   table(SECTION.CANDLES, [1, unknownIdentity ? 999 : 0, 4], [1234, 100, 101, 99, invalidCandle ? NaN : 100, 5]);
-  if (book) table(SECTION.BOOK, [unknownIdentity ? 999 : 0, brokenBook ? 2 : 1, 0, 0], [invalidBook ? NaN : 100, 1, 1]);
+  if (book) {
+    const numbers = bookDelta ? [100, 2] : [invalidBook ? NaN : 100, 1, 1];
+    table(bookDelta ? SECTION.BOOK_DELTA : SECTION.BOOK, [unknownIdentity ? 999 : 0, brokenBook ? 2 : 1, 0, 0], numbers);
+  }
   if (loaded !== undefined) table(SECTION.STATUS, [loaded, 0], [0]);
   const encoded = strings.map((value) => new TextEncoder().encode(value));
   const stringBytes = new Uint8Array(
@@ -1676,4 +1691,23 @@ it('forwards PublicDataSource rejection observers and removes them when its prov
     source.dispose();
     vi.restoreAllMocks();
   }
+});
+
+it('invalid subscription diagnostics preserve financial peers and book identity', () => {
+  const store = new DefaultStore();
+  const applier = new FrameApplier(store);
+  applier.apply(new Frame(fixture()));
+  const bad = new Frame(fixture({ invalidStats: true, total: 99, markets: false, orderPrice: 115, positionEntry: 105, bookDelta: true }));
+  expect(() => applier.apply(bad)).toThrow('invalid message handler stats mode');
+  expect(applier.hasMarketIdentity).toBe(true);
+  expect(applier.hasAccountState).toBe(true);
+  expect(applier.hasTickerState).toBe(true);
+  expect(store.orders[0]).toMatchObject({ id: 'order-1', symbol: 'BTCUSDT', price: 115 });
+  expect(store.positions[0]).toMatchObject({ symbol: 'BTCUSDT', entryPrice: 105 });
+  expect(store.tickers[0]).toMatchObject({ symbol: 'BTCUSDT', bid: 99, ask: 101 });
+  expect(store.balance.total).toBe(99);
+  expect(applier.books(bad)[0].orderbook.bids[0]).toMatchObject({ price: 100, amount: 2, total: 2 });
+  applier.apply(new Frame(fixture({ markets: false, total: 101 })));
+  expect(applier.hasMarketIdentity).toBe(true);
+  expect(store.balance.total).toBe(101);
 });

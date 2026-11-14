@@ -761,6 +761,13 @@ impl Venue for Blofin {
             }
             return;
         }
+        cx.record_socket_topic(&[
+            "{\"channel\":\"",
+            &m.arg.channel,
+            "\",\"instId\":\"",
+            &m.arg.inst_id,
+            "\"}",
+        ]);
         match m.arg.channel.as_ref() {
             "tickers" | "funding-rate" => {
                 if let Ok(rows) =

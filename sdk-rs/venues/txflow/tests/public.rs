@@ -1327,3 +1327,82 @@ fn late_rest_seed_preserves_supplied_live_context_fields_and_seed_only_statistic
     );
     assert!(engine.store().loaded().tickers);
 }
+
+fn subscription_receipts(frame: &[u8]) -> Vec<(String, u32, f64)> {
+    use safe_cex_engine::wire::{section, sections};
+    let stats = sections(frame)
+        .find(|(kind, _)| *kind == section::MESSAGE_HANDLER_STATS)
+        .unwrap()
+        .1;
+    let strings = sections(frame)
+        .find(|(kind, _)| *kind == section::STRINGS)
+        .unwrap()
+        .1;
+    let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+    let text = |index: usize| {
+        let start =
+            u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap()) as usize;
+        let end =
+            u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap()) as usize;
+        let base = 4 + (count + 1) * 4;
+        std::str::from_utf8(&strings[base + start..base + end])
+            .unwrap()
+            .to_owned()
+    };
+    let rows: Vec<_> = stats[8..]
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .map(|row| {
+            (
+                text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize),
+                u32::from_le_bytes(row[8..12].try_into().unwrap()),
+                f64::from_le_bytes(row[16..24].try_into().unwrap()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows.len(),
+        u32::from_le_bytes(stats[..4].try_into().unwrap()) as usize
+    );
+    rows
+}
+
+#[test]
+fn subscription_receipt_matches_the_production_coin_and_instrument_ticker_key() {
+    let (mut e, _, api) = ready();
+    let receipt = |rows: &[(String, u32, f64)]| {
+        let row = rows
+            .iter()
+            .find(|(topic, _, _)| {
+                let (_, payload) = topic.split_once('.').unwrap();
+                let value: serde_json::Value = serde_json::from_str(payload).unwrap();
+                value["subscription"]["type"] == "ticker"
+            })
+            .unwrap();
+        let (_, payload) = row.0.split_once('.').unwrap();
+        let value: serde_json::Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(value["subscription"]["coin"], "BTC");
+        assert_eq!(value["subscription"]["instrumentId"], 1);
+        (row.1, row.2)
+    };
+    message(
+        &mut e,
+        api,
+        2000.,
+        r#"{"channel":"ticker","data":{"instrumentId":1,"lastPrice":"990"}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-USDC").unwrap().last, 990.);
+    let rows = subscription_receipts(e.snapshot_frame(2001.));
+    assert_eq!(receipt(&rows), (3, 1.));
+
+    message(
+        &mut e,
+        api,
+        3000.,
+        r#"{"channel":"ticker","data":{"instrumentId":9,"lastPrice":"999"}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-USDC").unwrap().last, 990.);
+    let rows = subscription_receipts(e.snapshot_frame(3001.));
+    assert_eq!(receipt(&rows), (3, 1001.));
+}
