@@ -54,8 +54,8 @@ impl DelegatedPair {
     }
 }
 
-/// The account's resident provider; material stays in the existing LocalSigner.
-/// This handle neither serializes nor makes another copy of the material.
+/// The account's shared protected provider erasure authority.
+/// Cloning this handle neither serializes nor copies the private material.
 #[derive(Clone)]
 pub struct ResidentCopy {
     protection: Option<std::sync::Arc<safe_cex_engine::signing::ProtectedProvider>>,
@@ -152,6 +152,9 @@ pub fn prepare_delegated(
     let (protection, identities) =
         safe_cex_venues::prepare_protected_local_signer_for(&init.exchange_name, &mut native)
             .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
+    if !protection.memory_locked() {
+        crate::delegated_memory::warn_locking_unavailable();
+    }
     if identities
         .primary
         .as_ref()

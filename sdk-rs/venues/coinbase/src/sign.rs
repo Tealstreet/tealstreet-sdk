@@ -108,6 +108,14 @@ struct Claims<'a> {
 }
 
 impl Credentials {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn memory_locked(&self) -> bool {
+        match &self.signer {
+            Signer::ProtectedEs256(key) => key.memory_locked(),
+            Signer::ProtectedEd25519(key) => key.memory_locked(),
+            _ => false,
+        }
+    }
     /// Trusted provider setup only. Preserve parsing/signature behavior while
     /// replacing installed private material with native protected allocations.
     #[cfg(not(target_arch = "wasm32"))]

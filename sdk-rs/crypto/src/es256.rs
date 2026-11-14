@@ -47,6 +47,9 @@ pub struct ProtectedEs256SigningKey {
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl ProtectedEs256SigningKey {
+    pub fn memory_locked(&self) -> bool {
+        self.secret.memory_locked()
+    }
     pub fn sign(&self, payload: &[u8]) -> Result<[u8; 64], String> {
         let key = SigningKey::from_slice(self.secret.as_bytes())
             .map_err(|_| "Invalid protected P-256 key".to_owned())?;

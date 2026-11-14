@@ -130,7 +130,14 @@ impl Signer for Owned {
 #[cfg(not(target_arch = "wasm32"))]
 struct ProtectedOwned(Owned);
 #[cfg(not(target_arch = "wasm32"))]
-impl safe_cex_engine::signing::ProtectedSigner for ProtectedOwned {}
+impl safe_cex_engine::signing::ProtectedSigner for ProtectedOwned {
+    fn memory_locked(&self) -> bool {
+        self.0
+            .slots
+            .iter()
+            .all(|(_, credentials)| credentials.memory_locked())
+    }
+}
 #[cfg(not(target_arch = "wasm32"))]
 impl Signer for ProtectedOwned {
     fn immediate(&self) -> bool {

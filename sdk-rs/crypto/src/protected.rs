@@ -6,8 +6,9 @@ use zeroize::{Zeroize, Zeroizing};
 #[cfg(test)]
 type ReleaseCheck = Box<dyn FnOnce(&[u8]) + Send + Sync>;
 
-/// Private material on independent, locked, nondumpable pages. Unsupported
-/// platforms or failed protection refuse setup instead of falling back to heap.
+/// Private material on independent, nondumpable pages, with best-effort locking.
+/// Unsupported platforms or failed allocation/dump protection refuse setup
+/// instead of falling back to heap. Locking status is non-secret metadata.
 ///
 /// ```compile_fail
 /// # use safe_cex_crypto::protected::ProtectedSecret;
@@ -79,14 +80,11 @@ impl ProtectedSecret {
                 before_release: None,
             };
             // SAFETY: the live independent mapping is page aligned. Keys are
-            // copied only after BOTH protections succeed; Drop handles failure.
+            // copied only after dump protection succeeds; Drop handles failure.
             if unsafe { libc::madvise(raw, mapped_len, libc::MADV_DONTDUMP) } != 0 {
                 return Err(SignError::Unavailable);
             }
-            if unsafe { libc::mlock(raw, mapped_len) } != 0 {
-                return Err(SignError::Unavailable);
-            }
-            result.locked = true;
+            result.locked = unsafe { libc::mlock(raw, mapped_len) } == 0;
             // SAFETY: exclusive borrow of a live mapping of at least bytes.len().
             unsafe { std::slice::from_raw_parts_mut(address.as_ptr(), bytes.len()) }
                 .copy_from_slice(bytes);
@@ -101,6 +99,10 @@ impl ProtectedSecret {
     pub(crate) fn as_bytes(&self) -> &[u8] {
         // SAFETY: immutable borrow bounded by this allocation's lifetime/length.
         unsafe { std::slice::from_raw_parts(self.address.as_ptr(), self.len) }
+    }
+    /// Whether setup locked this allocation. No private material is exposed.
+    pub fn memory_locked(&self) -> bool {
+        self.locked
     }
     /// Existing Ed25519 primitive; no access to the installed seed is exposed.
     pub fn sign_ed25519(&self, payload: &[u8]) -> Result<[u8; 64], String> {

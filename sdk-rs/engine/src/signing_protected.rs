@@ -5,13 +5,20 @@ use std::sync::{Mutex, MutexGuard};
 /// Explicit canonical setup opt-in. Implementations own only protected private
 /// material, erase it on drop, and never retain an alias to an unprotected key.
 /// Existing/custom Signer implementations do not opt in implicitly.
-pub trait ProtectedSigner: Signer {}
+pub trait ProtectedSigner: Signer {
+    /// Setup-time diagnostic only; locking is best-effort, protection and erasure
+    /// remain mandatory. This is not an account admission or lifetime guard.
+    fn memory_locked(&self) -> bool {
+        false
+    }
+}
 
 /// Trusted setup's owner of an already protected, immediate provider.
 /// Share this owner with `Arc` when needed; the last owner drop erases even if
 /// engine provider handles remain alive. No key read, export or replacement API.
 pub struct ProtectedProvider {
     signer: Arc<Guarded>,
+    memory_locked: bool,
 }
 
 struct Guarded(Arc<Mutex<Option<Provider>>>);
@@ -35,9 +42,14 @@ impl ProtectedProvider {
         if !provider.immediate() || Arc::strong_count(&provider) != 1 {
             return Err(SignError::InvalidRequest);
         }
+        let memory_locked = provider.memory_locked();
         Ok(Self {
             signer: Arc::new(Guarded(Arc::new(Mutex::new(Some(provider))))),
+            memory_locked,
         })
+    }
+    pub fn memory_locked(&self) -> bool {
+        self.memory_locked
     }
     pub fn provider(&self) -> Provider {
         self.signer.clone()

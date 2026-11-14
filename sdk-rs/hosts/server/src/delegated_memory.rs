@@ -4,6 +4,12 @@ use std::ptr::NonNull;
 use std::sync::OnceLock;
 use zeroize::{Zeroize, Zeroizing};
 
+pub(crate) fn warn_locking_unavailable() {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED
+        .call_once(|| crate::state::Log::warn("DELEGATED memory locking unavailable; continuing"));
+}
+
 /// Created only after the caller checks hosted signing and origin support.
 /// Preparation precedes receiving or opening any DELEGATED key material.
 #[derive(Debug)]
@@ -97,10 +103,7 @@ impl SecretCopy {
             // SAFETY: the mapping is alive and independently page aligned.
             let locked = unsafe { libc::mlock(raw, mapped_len) } == 0;
             if !locked {
-                static WARNED: std::sync::Once = std::sync::Once::new();
-                WARNED.call_once(|| {
-                    crate::state::Log::warn("DELEGATED memory locking unavailable; continuing")
-                });
+                warn_locking_unavailable();
             }
             Ok(Self {
                 address,

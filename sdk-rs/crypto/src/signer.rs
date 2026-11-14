@@ -1170,7 +1170,14 @@ impl Signer for LocalSigner {
 #[cfg(not(target_arch = "wasm32"))]
 struct ProtectedLocalSigner(LocalSigner);
 #[cfg(not(target_arch = "wasm32"))]
-impl safe_cex_engine::signing::ProtectedSigner for ProtectedLocalSigner {}
+impl safe_cex_engine::signing::ProtectedSigner for ProtectedLocalSigner {
+    fn memory_locked(&self) -> bool {
+        self.0.keys.values().all(|key| match key {
+            Material::Protected(bytes) => bytes.memory_locked(),
+            Material::Heap(_) => false,
+        })
+    }
+}
 #[cfg(not(target_arch = "wasm32"))]
 impl Signer for ProtectedLocalSigner {
     fn immediate(&self) -> bool {
