@@ -1636,3 +1636,8 @@ successor owner. Unchanged-owner command payloads and ordering remain identical.
 The page readiness boundary reports local refusals once, including optional methods
 and the direct schedule-cancel/account-tier paths; caller rejection alone cannot
 replace the exchange error event. Already-reported command failures stay deduped.
+
+Page readiness/error wrappers honor `callerReportsPlacementFailures` for placement
+methods: the web caller owns that message. They must not re-emit a ready command
+failure that `command()` deliberately leaves to its caller. Other manual refusals
+still emit their single exchange error event.
