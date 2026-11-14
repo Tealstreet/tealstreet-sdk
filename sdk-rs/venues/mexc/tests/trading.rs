@@ -2338,6 +2338,46 @@ fn protective_quantity_edit_never_cancels_with_stale_reference() {
     );
 }
 
+#[test]
+fn protective_cancel_requires_a_new_quote_after_frozen_clock_sleep() {
+    for (jump, fresh) in [
+        (0., false),
+        (7_200_000., false),
+        (-7_200_000., false),
+        (7_200_000., true),
+    ] {
+        let (mut e, _, public) = guarded_fixture();
+        let origin = 1_800_000_000_000.;
+        assert!(e.sync_host_time(1000., origin + 1000.));
+        quote(&mut e, public, 1000., "\"fairPrice\":60000");
+        // Sleep/clock correction changes protocol UTC without advancing the
+        // scheduling clock. Neither a socket close nor a new quote has landed.
+        assert!(e.sync_host_time(1000., origin + 1000. + jump));
+        if fresh {
+            quote(&mut e, public, 1000., "\"fairPrice\":60000");
+        }
+        let inspect = protective_amend(&mut e, Some(70.), 1000.);
+        inspect_reply(&mut e, &inspect, 1010., &protective_plan_row(1));
+        let actions = prepared(&mut e, 1010.);
+        let allowed = fresh || jump == 0.;
+        assert_eq!(
+            actions.iter().any(|a| matches!(a,
+            Action::Http(r) if r.url.ends_with("/planorder/cancel"))),
+            allowed,
+            "UTC jump {jump}, fresh quote {fresh}"
+        );
+        if !allowed {
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { error, .. })
+                    if error.message.contains("reference stale"))));
+            assert_eq!(
+                e.store().order("guarded").unwrap().status,
+                OrderStatus::Open
+            );
+        }
+    }
+}
+
 fn guarded_fixture() -> (
     TestEngine,
     safe_cex_engine::SocketId,

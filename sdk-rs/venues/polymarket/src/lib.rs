@@ -1371,8 +1371,8 @@ impl Venue for Polymarket {
                     symbol,
                     interval,
                     None,
-                    Some(cx.now - 60000.0),
-                    Some(cx.now),
+                    Some(cx.protocol_now() - 60000.0),
+                    Some(cx.protocol_now()),
                 );
             }
             if !self.candles.is_empty() {
@@ -1441,8 +1441,8 @@ impl Venue for Polymarket {
                         symbol,
                         interval,
                         None,
-                        Some(cx.now - 60000.0),
-                        Some(cx.now),
+                        Some(cx.protocol_now() - 60000.0),
+                        Some(cx.protocol_now()),
                     );
                 }
                 if self.candle_timer.is_none() {

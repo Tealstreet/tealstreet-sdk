@@ -80,6 +80,428 @@ fn cumulative_fills_emit_execution_deltas_and_prices_once() {
         safe_cex_engine::model::OrderStatus::Closed
     );
 }
+
+#[test]
+fn new_live_fill_survives_protocol_clock_corrections_in_both_directions() {
+    for jump in [0., 7_200_000., -7_200_000.] {
+        const START: f64 = 1_800_000_000_000.;
+        let mut h = Harness::new_at(START);
+        h.open_private();
+        h.seed();
+        h.e.take_frame(START);
+        assert!(h.e.sync_host_time(START, START));
+        let utc = START + jump;
+        let raw = START + 100.;
+        assert!(h.e.sync_host_time(raw, utc + 100.));
+        // Correcting the boundary must not turn an older terminal prefix into
+        // a live fill. Forward sleep recovery keeps the original UTC floor.
+        let session_start = START + jump.min(0.);
+        let historical = startup_execution(
+            "old-before-start",
+            1,
+            60000,
+            session_start - 1000.,
+            session_start - 500.,
+            "filled",
+        );
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &historical,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(raw)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+        let text = startup_execution(
+            "new-after-sync",
+            1,
+            60000,
+            utc,
+            utc + 50.,
+            "partially_filled",
+        );
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &text,
+            },
+        );
+        h.collect();
+        let fills = h.e.take_frame(raw).map(executions).unwrap_or_default();
+        assert_eq!(fills, [(60000., 0.001)], "UTC correction {jump}");
+        // An identical echo cannot replay the fill.
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &text,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(raw)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+}
+#[test]
+fn temporary_clock_rollback_cannot_replay_an_unseen_historical_fill() {
+    const START: f64 = 1_800_000_000_000.;
+    for rollback in [false, true] {
+        let mut h = Harness::new_at(START);
+        h.open_private();
+        h.seed();
+        h.e.take_frame(START);
+        assert!(h.e.sync_host_time(START, START));
+        if rollback {
+            let raw = START + 100.;
+            assert!(h.e.sync_host_time(raw, raw - 7_200_000.));
+            // Deliver a row older than either boundary while the temporary
+            // calibration is active, exercising the lazy execution-clock path.
+            let quiet = startup_execution(
+                "older-than-rollback",
+                1,
+                60000,
+                START - 10_800_000.,
+                START - 10_799_000.,
+                "filled",
+            );
+            h.handle(
+                raw,
+                Event::WsMessage {
+                    socket: h.private,
+                    text: &quiet,
+                },
+            );
+            h.collect();
+            assert!(
+                h.e.take_frame(raw)
+                    .map(executions)
+                    .unwrap_or_default()
+                    .is_empty()
+            );
+        }
+        let raw = START + 200.;
+        assert!(h.e.sync_host_time(raw, raw));
+        let delayed = startup_execution(
+            "unseen-before-session",
+            1,
+            60000,
+            START - 3_600_000.,
+            START - 3_599_000.,
+            "filled",
+        );
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &delayed,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(raw)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty(),
+            "temporary rollback {rollback} must not emit historical cumulative fills"
+        );
+    }
+}
+
+#[test]
+fn corrected_clock_then_frozen_sleep_preserves_proven_live_order_suffix() {
+    const START: f64 = 1_800_000_000_000.;
+    let true_start = START - 7_200_000.;
+    for (sleep, fill_after_capture) in [(false, false), (true, true), (true, false)] {
+        let mut h = Harness::new_at(START);
+        h.open_private();
+        h.seed();
+        h.e.take_frame(START);
+        assert!(h.e.sync_host_time(START, START));
+        assert!(h.e.sync_host_time(START + 100., true_start + 100.));
+        let first = startup_execution(
+            "proven-live",
+            1,
+            60000,
+            true_start + 1.,
+            true_start + 50.,
+            "partially_filled",
+        );
+        h.handle(
+            START + 100.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &first,
+            },
+        );
+        h.collect();
+        assert_eq!(
+            h.e.take_frame(START + 100.)
+                .map(executions)
+                .unwrap_or_default(),
+            [(60000., 0.001)]
+        );
+        let utc = if sleep {
+            START + 200.
+        } else {
+            true_start + 200.
+        };
+        assert!(h.e.sync_host_time(START + 200., utc));
+        let updated = if fill_after_capture {
+            START + 150.
+        } else if sleep {
+            true_start + 3_600_000. + 50.
+        } else {
+            true_start + 150.
+        };
+        // An unpriceable observation must not consume proven live quantity as
+        // a historical floor when the clock has moved past its updateTime.
+        let unpriceable = startup_execution(
+            "proven-live",
+            2,
+            0,
+            true_start + 1.,
+            updated,
+            "partially_filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &unpriceable,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+        let suffix = startup_execution(
+            "proven-live",
+            2,
+            60000,
+            true_start + 1.,
+            updated,
+            "partially_filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &suffix,
+            },
+        );
+        h.collect();
+        assert_eq!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default(),
+            [(60000., 0.001)],
+            "sleep={sleep}, fill_after_capture={fill_after_capture}"
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &suffix,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+        // Provenance belongs to this order. An unseen old terminal order must
+        // still remain historical after the same correction/sleep sequence.
+        let old = startup_execution(
+            "unseen-before-session",
+            1,
+            60000,
+            true_start - 1000.,
+            true_start - 500.,
+            "filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &old,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn authenticated_open_order_keeps_its_first_fill_after_clock_correction_and_sleep() {
+    const START: f64 = 1_800_000_000_000.;
+    let true_start = START - 7_200_000.;
+    for (sleep, fill_after_capture) in [(false, false), (true, true), (true, false)] {
+        let mut h = Harness::new_at(START);
+        h.open_private();
+        h.seed();
+        h.e.take_frame(START);
+        assert!(h.e.sync_host_time(START, START));
+        assert!(h.e.sync_host_time(START + 100., true_start + 100.));
+        let open = startup_execution(
+            "open-before-sleep",
+            0,
+            0,
+            true_start + 1.,
+            true_start + 50.,
+            "live",
+        );
+        h.handle(
+            START + 100.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &open,
+            },
+        );
+        h.collect();
+        assert!(h.e.store().order("open-before-sleep").is_some());
+        assert!(
+            h.e.take_frame(START + 100.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+        let utc = if sleep {
+            START + 200.
+        } else {
+            true_start + 200.
+        };
+        assert!(h.e.sync_host_time(START + 200., utc));
+        let updated = if fill_after_capture {
+            START + 150.
+        } else if sleep {
+            true_start + 3_600_000. + 50.
+        } else {
+            true_start + 150.
+        };
+        let fill = startup_execution(
+            "open-before-sleep",
+            1,
+            60000,
+            true_start + 1.,
+            updated,
+            "partially_filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &fill,
+            },
+        );
+        h.collect();
+        assert_eq!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default(),
+            [(60000., 0.001)],
+            "sleep={sleep}, fill_after_capture={fill_after_capture}"
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &fill,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn live_stream_without_fill_quantity_does_not_invent_a_zero_prefix() {
+    const START: f64 = 1_800_000_000_000.;
+    let true_start = START - 7_200_000.;
+    let mut h = Harness::new_at(START);
+    h.open_private();
+    h.seed();
+    h.e.take_frame(START);
+    assert!(h.e.sync_host_time(START, START));
+    assert!(h.e.sync_host_time(START + 100., true_start + 100.));
+    let open = startup_execution(
+        "live-unknown-prefix",
+        0,
+        0,
+        true_start - 1000.,
+        true_start + 50.,
+        "live",
+    )
+    .replace("\"filledSize\":\"0\",", "");
+    h.handle(
+        START + 100.,
+        Event::WsMessage {
+            socket: h.private,
+            text: &open,
+        },
+    );
+    h.collect();
+    assert!(h.e.store().order("live-unknown-prefix").is_some());
+    h.e.take_frame(START + 100.);
+    assert!(h.e.sync_host_time(START + 200., START + 200.));
+    for qty in [1, 2] {
+        let fill = startup_execution(
+            "live-unknown-prefix",
+            qty,
+            60000,
+            true_start - 1000.,
+            true_start + 3_600_000. + f64::from(qty),
+            "partially_filled",
+        );
+        h.handle(
+            START + 200.,
+            Event::WsMessage {
+                socket: h.private,
+                text: &fill,
+            },
+        );
+        h.collect();
+        let actual =
+            h.e.take_frame(START + 200.)
+                .map(executions)
+                .unwrap_or_default();
+        let expected = if qty == 1 {
+            vec![]
+        } else {
+            vec![(60000., 0.001)]
+        };
+        assert_eq!(
+            actual, expected,
+            "unknown prefix at cumulative quantity {qty}"
+        );
+    }
+}
+
 #[test]
 fn stale_rest_cannot_reopen_a_filled_order() {
     let mut h = Harness::new();
