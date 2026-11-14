@@ -3655,3 +3655,19 @@ for (const [family, measured, minimumCap, sha256, parentFloor] of [
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   });
 }
+
+// #3273 exact-head CI run 43601014849/job 132465891849, artifact 14116513084.
+// CI source 7d78dc7dc091 and head c0afb09f78af have identical tree ef945e2e1373; pinned required-Oz build.
+// Five optimized web/Node/replay copies: SHA256 0f9fa7d7b84f4cefa7f6804515cf072938c4cc23aa34cd76351d96c3fc80c4d5.
+test('#3273 exact-head CI TxFlow artifact retains measured reserve', () => {
+  const measured = 2_166_223;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.equal(venueFamily('txflow'), 'txflow');
+  assert.equal(minimumCap, 2_177_024);
+  assert.ok(cap >= 2_174_976, 'retain every historical parent floor');
+  assert.ok(cap >= minimumCap, `txflow: ${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});

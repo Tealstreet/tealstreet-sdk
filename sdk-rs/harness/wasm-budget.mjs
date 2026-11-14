@@ -907,7 +907,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI43591113196/job132437636574, artifact14113250022; source97507acf9371 (head738ee1289).
   // Optimized web/Node 2,164,428 B; SHA256 822331413210853200886da6485268b8f5bc732c4b42d486bd6ef8de507a2d1c.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
-  txflow: 2_174_976,
+  // #3273 CI run 43601014849/job 132465891849, artifact 14116513084: five copies 2,166,223 B.
+  // Source 7d78dc7dc091 has head c0afb09f78af's tree; module SHA256 pinned in the regression.
+  // Required-Oz artifact + 10 KiB rounded up to KiB; retain all historical floors.
+  txflow: 2_177_024,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
   // #3302 run 42720697962, job 129514220621: CI 1,991,705 B; local merge 06aa3a745fcc web/node 1,993,745 B.
