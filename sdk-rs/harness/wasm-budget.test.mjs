@@ -3053,3 +3053,49 @@ test('#3302 run 43517974996 retains merged-head ApeX reserve and exact boundarie
   assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
+
+
+// #3317 merge e25dc312bd2c: Rust SDK run 43545517625, source b1876cea63af.
+// All 27 family ZIP digests, manifests and equal web/Node/replay hashes verified.
+// Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; retain every parent floor.
+for (const [family, artifact, measured, minimumCap, aliases] of [
+  ["apexomni", 14093433805, 2_094_662, 2_105_344, ["apexomni"]],
+  ["asterdex", 14094386070, 2_258_086, 2_269_184, ["asterdex"]],
+  ["backpack", 14094356166, 2_042_682, 2_053_120, ["backpack"]],
+  ["binance", 14093817488, 2_272_209, 2_282_496, ["binance"]],
+  ["bingx", 14094256309, 2_131_831, 2_142_208, ["bingx"]],
+  ["bitget", 14093533458, 2_769_289, 2_780_160, ["bitget","bitgetusdc"]],
+  ["bitrue", 14094226353, 1_908_397, 1_918_976, ["bitrue"]],
+  ["bitunix", 14093428727, 1_954_918, 1_966_080, ["bitunix"]],
+  ["blofin", 14093732852, 2_065_825, 2_076_672, ["blofin"]],
+  ["bybit", 14093717922, 2_547_145, 2_557_952, ["bybit"]],
+  ["coinbase", 14094520418, 2_114_517, 2_124_800, ["coinbase"]],
+  ["cryptocom", 14093603492, 1_815_949, 1_826_816, ["cryptocom"]],
+  ["grvt", 14094296177, 2_002_596, 2_013_184, ["grvt"]],
+  ["hyperliquid", 14093254117, 2_237_152, 2_247_680, ["hyperliquid","hyperliquidspot"]],
+  ["kraken", 14093868148, 2_274_234, 2_284_544, ["kraken","krakenspot"]],
+  ["kucoin", 14093782761, 1_865_033, 1_875_968, ["kucoin"]],
+  ["kucoinspot", 14093883114, 2_477_103, 2_488_320, ["kucoinspot"]],
+  ["lighter", 14094201484, 2_160_313, 2_170_880, ["lighter","lighter-robinhood"]],
+  ["mexc", 14093863330, 1_959_030, 1_970_176, ["mexc"]],
+  ["okx", 14094291240, 2_050_864, 2_061_312, ["okx"]],
+  ["orderly", 14094391124, 1_782_494, 1_793_024, ["orderly"]],
+  ["paradex", 14094286290, 2_309_926, 2_320_384, ["paradex"]],
+  ["phemex", 14093848345, 2_137_374, 2_148_352, ["phemex"]],
+  ["polymarket", 14094421012, 1_664_056, 1_675_264, ["polymarket"]],
+  ["txflow", 14093284013, 1_927_903, 1_938_432, ["txflow"]],
+  ["weex", 14093538474, 2_023_069, 2_033_664, ["weex"]],
+  ["woo", 14094331296, 2_672_011, 2_682_880, ["woo"]],
+]) {
+  test(`#3317 CI 43545517625: ${family} artifact ${artifact} retains merged reserve`, () => {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      const cap = WASM_VENUE_OVERRIDES[venue];
+      assert.ok(cap >= minimumCap, `${venue}: ${cap} must retain ${minimumCap} bytes`);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    }
+  });
+}
