@@ -33,6 +33,11 @@ impl Registry {
             return;
         }
         let mut holders = account.holders.lock().unwrap();
+        // A nonfinal client still contributes its labels. Only clock creation
+        // waits for the last live client; revocation lookup must not forget it.
+        if !holders.disposed {
+            holders.departed_labels.extend(labels.iter().cloned());
+        }
         if holders.disposed
             || holders.retention.is_some()
             || holders.by_id.values().any(Option::is_some)
@@ -50,8 +55,10 @@ impl Registry {
                 registry.expire_delegated(&account, generation);
             }
         });
-        let labels = labels
-            .into_iter()
+        let labels = holders
+            .departed_labels
+            .iter()
+            .cloned()
             .chain(
                 holders
                     .labels

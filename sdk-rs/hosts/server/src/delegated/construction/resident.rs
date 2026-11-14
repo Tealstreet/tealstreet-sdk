@@ -16,7 +16,8 @@ pub struct ResidentCopy {
     test_provider: Option<Provider>,
 }
 
-struct ResidentSigner(Mutex<State>);
+#[derive(Clone)]
+struct ResidentSigner(Arc<Mutex<State>>);
 struct State {
     signer: Option<ProtectedProvider>,
     deadline: Option<Instant>,
@@ -41,6 +42,10 @@ impl State {
         if self
             .deadline
             .is_some_and(|deadline| Instant::now() >= deadline)
+            || self
+                .signer
+                .as_ref()
+                .is_some_and(ProtectedProvider::is_erased)
         {
             self.signer = None;
         }
@@ -55,10 +60,10 @@ impl ResidentCopy {
         state: Option<safe_cex_venues::TrustedSignerState>,
     ) -> Self {
         Self {
-            signer: Arc::new(ResidentSigner(Mutex::new(State {
+            signer: Arc::new(ResidentSigner(Arc::new(Mutex::new(State {
                 signer: Some(signer),
                 deadline: None,
-            }))),
+            })))),
             identities,
             state,
             #[cfg(test)]
@@ -70,10 +75,10 @@ impl ResidentCopy {
     #[cfg(test)]
     pub(crate) fn test_provider(provider: Provider) -> Arc<Self> {
         Arc::new(Self {
-            signer: Arc::new(ResidentSigner(Mutex::new(State {
+            signer: Arc::new(ResidentSigner(Arc::new(Mutex::new(State {
                 signer: None,
                 deadline: None,
-            }))),
+            })))),
             identities: Default::default(),
             state: None,
             test_provider: Some(provider),
@@ -162,25 +167,76 @@ impl Signer for ResidentSigner {
         &self,
         request: SignRequest,
     ) -> Option<Box<dyn OwnedSetupExecution>> {
-        self.state()?
+        let execution = self
+            .state()?
             .current()?
-            .create_public_address_setup(request)
+            .create_public_address_setup(request)?;
+        Some(Box::new(ResidentSetup {
+            execution,
+            signer: self.clone(),
+        }))
     }
     fn legacy_nonce_association(
         &self,
         request: safe_cex_engine::nonce::handoff::LegacyNonceRequest,
     ) -> Result<safe_cex_engine::nonce::handoff::LegacyNonceProof, SignError> {
-        self.state()
-            .and_then(|mut s| s.current())
+        let mut state = self.state().ok_or(SignError::Unavailable)?;
+        state
+            .current()
             .ok_or(SignError::Unavailable)?
             .legacy_nonce_association(request)
     }
 
     fn sign(&self, request: SignRequest) -> SignFuture {
-        let result = self
-            .sign_ready(&request)
-            .unwrap_or(Err(SignError::Unavailable));
-        Box::pin(std::future::ready(result))
+        // Retain the original state, not a computed signature or another account.
+        // The captured work rechecks erasure and deadline only when executed.
+        let captured = self.clone();
+        Box::pin(async move {
+            captured
+                .sign_ready(&request)
+                .unwrap_or(Err(SignError::Unavailable))
+        })
+    }
+}
+
+struct ResidentSetup {
+    execution: Box<dyn OwnedSetupExecution>,
+    signer: ResidentSigner,
+}
+impl OwnedSetupExecution for ResidentSetup {
+    fn start(&mut self) -> Result<(), SignError> {
+        let Some(mut state) = self.signer.state() else {
+            let _ = self.execution.cancel();
+            return Err(SignError::Unavailable);
+        };
+        if state.current().is_none() {
+            let _ = self.execution.cancel();
+            return Err(SignError::Unavailable);
+        }
+        self.execution.start()
+    }
+    fn cancel(&mut self) -> Result<(), SignError> {
+        self.execution.cancel()
+    }
+    fn poll_result(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<SignResult, SignError>> {
+        let Some(mut state) = self.signer.state() else {
+            let _ = self.execution.cancel();
+            return std::task::Poll::Ready(Err(SignError::Unavailable));
+        };
+        if state.current().is_none() {
+            let _ = self.execution.cancel();
+            return std::task::Poll::Ready(Err(SignError::Unavailable));
+        }
+        self.execution.poll_result(cx)
+    }
+    fn poll_joined(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), SignError>> {
+        self.execution.poll_joined(cx)
     }
 }
 

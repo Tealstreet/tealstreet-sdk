@@ -247,6 +247,8 @@ pub struct Live {
 #[derive(Default)]
 struct Holders {
     retention: Option<retention::Retention>,
+    /// Departed identity aliases remain valid for explicit revocation.
+    departed_labels: std::collections::BTreeSet<String>,
     disposed: bool,
     by_id: HashMap<u64, Option<Live>>,
     /// Live holders in init/resume order; socket IDs do not order later reinits.
@@ -376,10 +378,11 @@ impl Account {
             return true;
         }
         let holders = self.holders.lock().unwrap();
-        holders
-            .labels
-            .values()
-            .any(|labels| labels.contains_key(name))
+        holders.departed_labels.contains(name)
+            || holders
+                .labels
+                .values()
+                .any(|labels| labels.contains_key(name))
             || holders
                 .retention
                 .as_ref()
@@ -1828,15 +1831,18 @@ impl Registry {
         label: &str,
         disposal: Disposal,
     ) {
-        let still_held = {
+        let (still_held, removed) = {
             let mut holders = account.holders.lock().unwrap();
-            let remaining = if let Some(labels) = holders.labels.get_mut(&holder) {
-                labels.remove(label);
-                labels.values().find_map(Clone::clone)
+            let (remaining, removed) = if let Some(labels) = holders.labels.get_mut(&holder) {
+                let removed = labels.remove(label).is_some();
+                (labels.values().find_map(Clone::clone), removed)
             } else {
-                None
+                (None, false)
             };
-            if let Some(live) = remaining {
+            if removed && account.delegated.is_some() && !holders.disposed {
+                holders.departed_labels.insert(label.to_owned());
+            }
+            let still_held = if let Some(live) = remaining {
                 holders.by_id.insert(holder, Some(live.clone()));
                 if holders.signing == Some(holder) {
                     account.sign_through(&mut holders, holder, &live);
@@ -1844,8 +1850,16 @@ impl Registry {
                 true
             } else {
                 false
-            }
+            };
+            (still_held, removed)
         };
+        if removed
+            && account.delegated.is_some()
+            && matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned)
+        {
+            self.dispose_for(account, disposal, "account disposed", None);
+            return;
+        }
         if !still_held {
             self.release_with_labels(account, holder, disposal, vec![label.to_owned()]);
         }
