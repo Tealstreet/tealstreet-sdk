@@ -251,3 +251,35 @@ test('a failed release listing or comparison fails instead of reading as not sup
   await assert.rejects(supersededBy({ api: comparison.api, repo: REPO, sha: SHA }), /HTTP 404/);
   await assert.rejects(supersededBy({ api: comparison.api, repo: REPO, sha: 'main' }), /full commit SHA/);
 });
+
+test('an early release and its completed-workflow fallback publish the same inputs only once', async () => {
+  let published = false;
+  let tagCreated = false;
+  const { api, calls } = fakeApi({
+    [`GET ${runsPath}`]: () => ({ status: 200, json: { workflow_runs: [run({ status: published ? 'completed' : 'in_progress', conclusion: published ? 'failure' : null })] } }),
+    [`GET ${jobsPath(7)}`]: { status: 200, json: { jobs: [job('Rust / required coverage')] } },
+    [`GET /repos/${REPO}/releases?per_page=30`]: () => ({ status: 200, json: published
+      ? [{ tag_name: TAG, assets: [{ name: 'rust-beta-wasm.pin.json', browser_download_url: 'https://example.invalid/pin' }] }] : [] }),
+    [`POST /repos/${REPO}/git/refs`]: { status: 201, json: {} },
+    [`GET ${refPath}`]: () => tagCreated ? { status: 200, json: { object: { type: 'commit', sha: SHA } } } : { status: 404 },
+  });
+  const fetchImpl = async () => Response.json({ inputs: { fingerprint: 'same-inputs' } });
+  const trigger = async () => {
+    assertNotHeld('');
+    await assertCertified({ api, repo: REPO, sha: SHA, sleep: noSleep });
+    if (await publishedFingerprint({ api, repo: REPO, fingerprint: 'same-inputs', fetchImpl })) return 'no-op';
+    await assertFreshTag({ api, repo: REPO, tag: TAG });
+    // Model the tag existing immediately after its creation, before the read-back.
+    const tagApi = async (method, path, body) => {
+      const response = await api(method, path, body);
+      if (method === 'POST' && response.status === 201) tagCreated = true;
+      return response;
+    };
+    await createAndVerifyTag({ api: tagApi, repo: REPO, tag: TAG, sha: SHA });
+    published = true;
+    return 'published';
+  };
+  assert.equal(await trigger(), 'published');
+  assert.equal(await trigger(), 'no-op');
+  assert.equal(calls.filter(call => call.startsWith('POST ')).length, 1);
+});

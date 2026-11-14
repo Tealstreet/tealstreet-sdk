@@ -23,5 +23,6 @@ it('native admission matches the full SDK roster for every supported name', () =
       );
     }
   }
-  expect(refused.sort()).toEqual(['bitrue', 'orderly', 'polymarket', 'txflow', 'weex']);
+  // restored by #3502; #3317 dropped a live venue without a product decision.
+  expect(refused.sort()).toEqual(['orderly', 'polymarket', 'txflow', 'weex']);
 });

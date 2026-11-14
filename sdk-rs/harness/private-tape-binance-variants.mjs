@@ -73,9 +73,8 @@ http('GET', `${prefix}/openOrders`, null, [order()]);
 // The COIN-M algo census is separate; this tape has no conditional orders.
 if (inverse) http('GET', `${prefix}/openAlgoOrders`, {algoType:'CONDITIONAL'}, [], {impl:'rust'});
 if (!spot && !inverse) {
-  // The retained TS oracle uses the retired route; Rust uses its algo replacement.
-  http('GET', `${prefix}/conditional/openOrders`, null, [], {impl:'ts'});
-  http('GET', `${prefix}/algo/openAlgoOrders`, null, [], {impl:'rust'});
+  // Both receivers use the PM Algo Service after the retained TS migration (#3180).
+  http('GET', `${prefix}/algo/openAlgoOrders`, null, []);
 }
 if (spot) {
   const request = (id,method) => records.push({t:0,type:'ws-send',url:PRIVATE,text:JSON.stringify({id,method})});
@@ -102,7 +101,7 @@ command('cancelOrders',{ids:[inverse?'1001':'resting']});
 http('DELETE',`${prefix}/order`,{symbol:symbols[0],...(inverse?{orderId:'1001'}:{origClientOrderId:'resting'})},order({status:'CANCELED',...(spot?{origClientOrderId:'resting',clientOrderId:'cancel-resting'}:{})}));
 command('cancelSymbolOrders',{symbol:symbols[1]});
 http('DELETE',spot?`${prefix}/openOrders`:`${prefix}/allOpenOrders`,{symbol:symbols[1]},spot?[]:{code:200,msg:'success'});
-if (!spot && !inverse) http('DELETE',`${prefix}/algo/allOpenOrders`,{symbol:symbols[1]},{code:200,msg:'success'},{impl:'rust'});
+if (!spot && !inverse) http('DELETE',`${prefix}/algo/allOpenOrders`,{symbol:symbols[1]},{code:200,msg:'success'});
 const out=values.out??`sdk-rs/harness/tapes/${name}-private.jsonl`;
 mkdirSync(dirname(out),{recursive:true});records.sort((a,b)=>a.t-b.t);
 writeFileSync(out,records.map((record)=>JSON.stringify(record)).join('\n')+'\n');

@@ -56,7 +56,11 @@ migration message does not deactivate credentials. Public drb discovery and
 refresh failures retain their bounded retry handling and never emit this legacy
 INTX migration message.
 
-Deterministic coverage: `tests/intx_moved.rs` and `tests/startup_resilience.rs`.
+Authenticated drb startup suppresses this legacy notice before the terminal latch.
+Private rows use the native symbols from the drb public catalogue.
+
+Deterministic coverage: internal `tests/support/legacy_intx_moved.rs`,
+`tests/support/private_drb.rs`, and `tests/startup_resilience.rs`.
 No live credentials or private requests are needed.
 
 ## Provider JWT custody

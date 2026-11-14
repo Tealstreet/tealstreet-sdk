@@ -238,6 +238,20 @@ impl Transport {
         session: Option<&Session>,
         pending: P,
     ) -> Result<(RpcId, RequestId), String> {
+        self.http_with_signing(cx, context, method, params, session, None, pending)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn http_with_signing<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        context: &Context,
+        method: &str,
+        params: Value,
+        session: Option<&Session>,
+        step: Option<Box<dyn safe_cex_engine::SignStep>>,
+        pending: P,
+    ) -> Result<(RpcId, RequestId), String> {
         let intent = method_intent(method)?;
         if method.starts_with("private/") && session.is_none() {
             return Err("drb HTTP private request requires an engine bearer session".into());
@@ -264,15 +278,28 @@ impl Transport {
             }
         }
         let (id, body) = self.prepare(Channel::Http, method, intent, params, cx.now)?;
-        let request = match cx.request_managed_with_headers(
-            context.clone(),
-            session,
-            if chart_get { Method::Get } else { Method::Post },
-            url,
-            &[("Content-Type", "application/json")],
-            (!chart_get).then_some(body),
-            pending,
-        ) {
+        let result = if let Some(step) = step {
+            cx.request_signed_managed(
+                context.clone(),
+                session,
+                Method::Post,
+                url,
+                Some(body),
+                step,
+                pending,
+            )
+        } else {
+            cx.request_managed_with_headers(
+                context.clone(),
+                session,
+                if chart_get { Method::Get } else { Method::Post },
+                url,
+                &[("Content-Type", "application/json")],
+                (!chart_get).then_some(body),
+                pending,
+            )
+        };
+        let request = match result {
             Ok(request) => request,
             Err((_, error)) => {
                 // Admission failed before physical release. Retire correlation;
@@ -300,6 +327,27 @@ impl Transport {
         let (id, body) =
             self.prepare(Channel::WebSocket(socket), method, intent, params, cx.now)?;
         cx.send(socket, body);
+        Ok(id)
+    }
+
+    pub(crate) fn websocket_signed<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        socket: SocketId,
+        params: Value,
+        step: Box<dyn safe_cex_engine::SignStep>,
+    ) -> Result<RpcId, String> {
+        if socket == SocketId(0) {
+            return Err("drb invalid socket".into());
+        }
+        let (id, body) = self.prepare(
+            Channel::WebSocket(socket),
+            "public/auth",
+            Intent::Read,
+            params,
+            cx.now,
+        )?;
+        cx.send_signed(socket, body, step);
         Ok(id)
     }
 

@@ -15,13 +15,15 @@ const setupFeatures = {
   mexc: ['dispatch-signing'],
   lighter: ['dispatch-signing'],
   hyperliquid: ['dispatch-signing', 'address-nonce'],
+  // #3314 uses the fixed testnet wallet codec, never HTTP HMAC capture.
+  txflow: ['dispatch-signing', 'address-nonce'],
   paradex: ['dispatch-signing'],
   // Hosted V1 signing admits AsterDEX without a remoteSigning declaration.
   asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta', 'hosted-signing'],
 };
 
 // Wallet families answer remote requests through the slim hosted-wallet export.
-const walletDevices = new Set(['hyperliquid', 'lighter', 'paradex', 'grvt', 'asterdex']);
+const walletDevices = new Set(['hyperliquid', 'txflow', 'lighter', 'paradex', 'grvt', 'asterdex']);
 const remoteFeature = (rule, family) => walletDevices.has(rule.setupMapping ?? family) ? 'hosted-wallet' : 'hosted-signing';
 
 function requiredFeatures(rule, family) {
@@ -113,4 +115,20 @@ test('KuCoin Spot admits remote batch custody with its own isolated signing code
   assert.equal(rule.remoteSigning?.payloadSupported, false);
   assert.deepEqual(rule.remoteSigning, rules.venues.kucoin.remoteSigning);
   checkFeatures(features, 'kucoinspot', rule);
+});
+
+
+test('TxFlow agent setup requires its own wallet codec and refuses an HMAC substitute', () => {
+  const required = ['dispatch-signing', 'address-nonce', 'hosted-wallet'];
+  const rule = rules.venues.txflow;
+  assert.equal(rule.remoteSigning?.enabled, true);
+  assert.equal(rule.remoteSigning?.payloadSupported, false);
+  assert.equal(rule.betaAdmitted, false);
+  for (const missing of required) {
+    const graph = { txflow: required.filter(feature => feature !== missing),
+      'dispatch-signing': [], 'address-nonce': [], 'hosted-wallet': [] };
+    assert.throws(() => checkFeatures(graph, 'txflow', rule), new RegExp(missing));
+  }
+  assert.throws(() => checkFeatures({ txflow: ['dispatch-signing', 'address-nonce', 'hosted-signing'],
+    'dispatch-signing': [], 'address-nonce': [], 'hosted-signing': [] }, 'txflow', rule), /hosted-wallet/);
 });

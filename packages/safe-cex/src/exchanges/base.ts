@@ -2702,6 +2702,8 @@ export class BaseExchange implements Exchange {
       case 'kucoin-batch':
       case 'hyperliquid-l1':
       case 'hyperliquid-address':
+      case 'txflow-agent':
+      case 'txflow-address':
       case 'lighter-tx':
       case 'paradex-stark':
       case 'paradex-public':

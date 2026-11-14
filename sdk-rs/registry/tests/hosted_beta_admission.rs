@@ -74,7 +74,8 @@ fn every_compiled_name_uses_the_full_sdk_hosted_roster() {
 #[test]
 fn out_names_refuse_both_hosted_constructors_but_keep_client_codecs() {
     let mut mismatches = Vec::new();
-    for venue in ["bitrue", "orderly", "polymarket", "txflow", "weex"] {
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    for venue in ["orderly", "polymarket", "txflow", "weex"] {
         if !supported(venue) {
             continue;
         }
@@ -134,7 +135,8 @@ fn out_names_refuse_both_hosted_constructors_but_keep_client_codecs() {
             "{venue}: public codec cannot start private reads"
         );
     }
-    for venue in ["bybit", "kodiakfi", "mode", "what", "woofi"] {
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    for venue in ["bitrue", "bybit", "kodiakfi", "mode", "what", "woofi"] {
         if !supported(venue) {
             continue;
         }

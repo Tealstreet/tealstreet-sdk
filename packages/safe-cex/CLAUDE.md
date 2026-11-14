@@ -2,7 +2,9 @@
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
 Hosted construction follows that full roster for public and private accounts.
-Bitrue, Polymarket, Weex, TxFlow and the canonical `orderly` name remain OUT;
+Bitrue admission is restored by SDK #3502; #3317 dropped a live venue without
+a product decision. Its existing signing and credential-placement checks remain.
+Polymarket, Weex, TxFlow and the canonical `orderly` name remain OUT;
 KodiakFi, Mode, What and WOOFi retain their admitted Orderly-family aliases.
 Polymarket's native signing layer also refuses delegated
 custody: its private user WebSocket needs the L2 API secret, not a signature. See
@@ -13,12 +15,25 @@ and test-only replay/reference implementations remain independent dependencies.
 Historical Rust-adapter fixtures mock both beta admission entry guards through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
+Resolved public-only delegated accounts discard unused callback and private setup
+configuration before validating custody. Native registry construction retains family setup, read-key validation and
+refusal precedence before discarding unused custody. TxFlow and Hyperliquid public
+agent setup ignore unused private material; declared ValidateOnly and PublicRead
+credentials retain their separate policies.
+The WASM host derives `requiresExternalSigner` from nonempty submitted external
+refs and the provider retained after registry construction. Refs may be owned by
+the venue rather than `Engine::identities()`. Discarded public providers require
+no callback; private and retained PublicRead providers still require one. WEEX's
+native/actual-WASM retained-ref controls use trusted client refs without callback
+intent; its closed callback and Hosted beta policies remain separate refusals. TxFlow's
+landed dispatch/RemoteSigner declarations retain explicit no-PayloadSigner and
+no-beta assertions; the unmigrated provider-metadata refusal remains on Polymarket.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 AsterDEX (V1 HMAC and V3 API-wallet RemoteSigner; V1 PayloadSigner REST only;
 see `sdk-rs/venues/asterdex/README.md`),
 MEXC (RemoteSigner and REST-only PayloadSigner; see `sdk-rs/venues/mexc/README.md`),
 Kraken Futures (RemoteSigner SHA256/HMAC-SHA512 custody; see `sdk-rs/venues/kraken/README.md`),
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
+Bitget x3 (USDT, USDC, inverse), Bitrue, Bitunix (#2262), Phemex, BloFin, BingX, Crypto.com,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 Coinbase/Spot (RemoteSigner JWT and REST-only PayloadSigner; `docs/plans/callers/coinbase-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
@@ -760,7 +775,10 @@ alone do not establish it. Callers must handle typed readiness failures.
 `frameFedSupported` builds its own engine with `frameFed: true`, the account's
 key and route, and starts it only when `construction().frameFed` is true (no
 venue streams, no account reads). `frameFedReady` resolves whether it did;
-otherwise the mirror path below continues for that account. The host feeds it
+otherwise manual writes refuse locally with `unsupported/notSent`, never an RPC
+to the source. Every manual write waits within the existing startup deadline for
+this page engine, including leverage/settings and calls through `callMethodInWorker`;
+expiry returns `notSent` and cannot send when startup later finishes. The host feeds it
 the data source's SCXF frames with `ingestSourceFrame(bytes, snapshot)` (a
 delta before the first snapshot is dropped, so it asks the source for one) and
 the engine's own frames fill the UI store. Books, candles and fills still come
@@ -1025,6 +1043,27 @@ flags remain independent of this diagnostic age.
 STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an
 actual zero sample; positive legacy samples remain readable. Frame-fed engines
 and worker stores preserve null. UI callers must hide unknown latency.
+
+### Native subscription statistics
+
+See `sdk-rs/engine/SUBSCRIPTION_STATS.md` for the wire layout and lifecycle rules.
+
+Managed socket interests publish `MESSAGE_HANDLER_STATS` (SCXF section 25) at
+most once per second through the existing store flush. IDs remain stable across
+reconnects; subscription release and actual topic receipts are separate evidence.
+Pongs, adjacent topics and retired socket epochs cannot refresh a topic. Native
+ages use the engine clock; `FrameApplier` converts them to wall-clock timestamps
+only when projecting the existing `messageHandlerStats` shape. Source-frame-fed
+trading engines retain their source's diagnostics independently of held account
+state. `RustSocketHandle.messageHandlersStats` reads that same store bucket.
+
+Native parsers record borrowed topic keys, or bounded stack-built keys, at
+their existing data dispatch sites. JSON route aliases are compiled once when
+interests change. Never scan all subscriptions or parse a second data frame just
+to refresh telemetry. Private feeds without managed interest entries use one
+private-feed row, including URL subscriptions and authentication-owned streams;
+unattributable native topic variants remain without a receipt timestamp rather
+than borrowing another subscription's traffic.
 
 ## Client order ID contract
 

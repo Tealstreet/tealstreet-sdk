@@ -3854,11 +3854,11 @@ mod tests {
                     .unwrap();
                 // Unavailable hosted venues keep their typed refusal before
                 // raw or injected signing setup, including public accounts.
+                // #3502 restores Bitrue admission, so it no longer belongs in this OUT matrix.
                 for venue in [
                     "nope",
                     "bitmex",
                     "bitmextestnet",
-                    "bitrue",
                     "orderly",
                     "polymarket",
                     "txflow",

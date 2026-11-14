@@ -435,7 +435,7 @@ fn a_source_refresh_settings_re_reads_the_account_snapshot_and_writes_nothing() 
 }
 
 #[test]
-fn v1_frame_keeps_identity_and_ordinary_writes_but_never_grants_mark_freshness() {
+fn v1_frame_keeps_ordinary_writes_without_inventing_native_stop_provenance() {
     let (mut e, mut timers) = page_engine();
     e.apply_frame(NOW, &source_frame(), true).unwrap();
     e.store_mut().update_order("42", |o| {
@@ -455,7 +455,7 @@ fn v1_frame_keeps_identity_and_ordinary_writes_but_never_grants_mark_freshness()
         }),
     );
     let out = run(&mut e, &mut timers, NOW + 1000.0);
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed{command:77,error}) if error.outcome==Some(Outcome::NotSent)&&error.message.contains("reference stale"))),"{out:?}");
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed{command:77,error}) if error.outcome==Some(Outcome::NotSent)&&error.message.contains("original unavailable"))),"{out:?}");
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
     e.handle(
         NOW + 1000.0,

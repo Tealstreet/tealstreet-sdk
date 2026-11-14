@@ -877,6 +877,7 @@ impl Venue for WeexFutures {
                 if let Ok(row) = serde_json::from_str::<Rows<'_, OneOrMany<TickerUpdate>>>(text)
                     && let Some(d) = row.d.first()
                 {
+                    cx.record_socket_topic(&[&row.s, "@ticker"]);
                     cx.store.update_ticker(&row.s, |t| {
                         if let Some(v) = d.c {
                             t.last = v;
@@ -900,7 +901,10 @@ impl Venue for WeexFutures {
                 }
             }
             "depth" => match serde_json::from_str::<DepthEvent<'_>>(text) {
-                Ok(row) => self.depth(cx, row),
+                Ok(row) => {
+                    cx.record_socket_topic(&[&row.s, "@depth200"]);
+                    self.depth(cx, row);
+                }
                 Err(_) => {
                     #[derive(serde::Deserialize)]
                     struct Symbol<'a> {
@@ -914,6 +918,7 @@ impl Venue for WeexFutures {
             "kline" => {
                 if let Ok(row) = serde_json::from_str::<Rows<'_, Vec<CandleEvent<'_>>>>(text) {
                     for c in row.d {
+                        cx.record_socket_topic(&[&row.s, "@kline_", &c.i, "_LAST_PRICE"]);
                         if let Some(i) = Interval::parse(&c.i)
                             && self.candles.contains_key(&(row.s.to_string(), i))
                         {

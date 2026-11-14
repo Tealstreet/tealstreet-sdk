@@ -576,6 +576,32 @@ impl<P> Cx<'_, P> {
         self.issue_preflight_read(handle, policy, terms, false)
     }
 
+    /// Admit a public prerequisite without granting access to the declared read key.
+    /// The original read role remains intact for later authenticated prerequisites.
+    pub fn preflight_public_read_context(
+        &mut self,
+        handle: &Preflight,
+        policy: Policy,
+        terms: CallTerms,
+    ) -> Result<Context, Error> {
+        if policy.operation != Operation::Read || policy.credential.is_some() {
+            return Err(Error::Invalid);
+        }
+        self.validate_preflight_activation(handle)?;
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
+        if !state.call.is_empty() || !state.admits_handoff(self.io.core.http_delivery.as_ref()) {
+            return Err(Error::Revoked);
+        }
+        // Reuse the exact owner's bound validation under its declared role;
+        // issue the same bounded call with strictly less authority: no credential.
+        let declared = Policy {
+            credential: state.policy.read_credential.clone(),
+            ..policy.clone()
+        };
+        self.validate_preflight_read(handle, &declared, terms, false)?;
+        self.issue_preflight_read(handle, policy, terms, false)
+    }
+
     #[inline]
     pub(super) fn validate_preflight_read(
         &self,

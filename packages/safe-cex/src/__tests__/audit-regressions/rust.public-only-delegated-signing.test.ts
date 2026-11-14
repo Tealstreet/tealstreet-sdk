@@ -264,8 +264,10 @@ it.each(matrixVenues)('$label resolves the complete public matrix before custody
 });
 
 it('enumerates every declared venue outside the beta roster', () => {
-  expect(venues).not.toContain('bitrue');
-  expect(outsideBeta.sort()).toEqual(['bingxspot', 'bitrue', 'polymarket', 'txflow', 'weex']);
+  // restored by #3502; #3317 dropped a live venue without a product decision.
+  expect(venues).toContain('bitrue');
+  // restored by #3502; #3317 dropped a live venue without a product decision.
+  expect(outsideBeta.sort()).toEqual(['bingxspot', 'polymarket', 'txflow', 'weex']);
   expect(rules.venues.hyperliquidspot).toMatchObject({ canSign: [['secret', 'remoteSigner']] });
   expect(rules.venues.hyperliquidspot).not.toHaveProperty('privateEligible');
 });
@@ -357,6 +359,23 @@ it('a disposed public-only setup cannot construct an engine', () => {
   expect(() => setup.construct(Engine as unknown as new (venue: string, json: string) => WasmEngineLike, 'kucoinspot', '{}'))
     .toThrow('disposed');
   expect(Engine).not.toHaveBeenCalled();
+});
+
+it('TxFlow inferred and explicit public setup ignores unused PayloadSigner and metadata', () => {
+  const payloadSigner = vi.fn();
+  for (const publicDataOnly of [undefined, true]) {
+    const setup = new DelegatedSignerSetup('txflow', {
+      key: '', secret: '', testnet: true, publicDataOnly, payloadSigner,
+      applicationId: publicDataOnly ? '0x1111111111111111111111111111111111111111' : undefined,
+      localSigner: { primary: { stableId: '' } },
+    });
+    try {
+      expect(setup.usesPayloadSigner).toBe(false);
+      expect(setup.primaryComplete).toBe(false);
+      expect(setup.signerAlgorithms).toEqual([]);
+    } finally { setup.dispose(); }
+  }
+  expect(payloadSigner).not.toHaveBeenCalled();
 });
 
 // Keys are normalized exactly as signer setup presents them to derivePublicMode:

@@ -105,8 +105,9 @@ describe('trusted local signer setup', () => {
       .construct(Engine as never, 'binance', '{}');
     expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
   });
+  // #3314 migrates TxFlow; Polymarket retains the unmigrated provider-metadata refusal.
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('txflow', { ...options(), localSigner: {} }, new DefaultStore()))
+    expect(() => new RustEngineExchange('polymarket', { ...options(), localSigner: {} }, new DefaultStore()))
       .toThrow(/not supported/);
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {

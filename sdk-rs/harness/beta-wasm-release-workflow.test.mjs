@@ -3,9 +3,12 @@
 // is on origin/master before any SDK script runs, honours RUST_BETA_HOLD, and nothing
 // builds or publishes until those proofs (and the roster) succeeded.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 
+const rustWorkflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
 const workflow = readFileSync(new URL('../../.github/workflows/rust-beta-wasm-release.yml', import.meta.url), 'utf8');
 
 /** The text of one top-level job, from its key to the next job key. */
@@ -17,7 +20,7 @@ const job = (name) => {
   return next < 0 ? rest : rest.slice(0, next + 1);
 };
 
-test('the workflow runs only after a Rust SDK push run on master, or by hand', () => {
+test('the workflow accepts master push releases and manual cuts, with a completion fallback', () => {
   const on = workflow.slice(workflow.indexOf('\non:\n'), workflow.indexOf('\npermissions:\n'));
   assert.match(on, /^\non:\n {2}workflow_run:\n {4}workflows: \[Rust SDK\]\n {4}types: \[completed\]\n {4}branches: \[master\]\n {2}workflow_dispatch:\n/);
   for (const trigger of ['push', 'pull_request', 'pull_request_target', 'schedule', 'release']) {
@@ -78,6 +81,68 @@ test('an automatic run superseded by a newer release publishes nothing; a manual
   const published = roster.indexOf('beta-wasm-release-guard.mjs published');
   assert.ok(certified < superseded && superseded < published, 'certify, then superseded, then dedupe');
   const check = roster.slice(roster.lastIndexOf('\n', superseded - 120), published);
-  assert.match(check, /if \[ "\$\{\{ github\.event_name \}\}" = workflow_run \]; then/);
+  assert.match(check, /if \[ "\$\{\{ github\.event_name \}\}" != workflow_dispatch \]; then/);
   assert.match(check, /echo "superseded by \$superseded"\n\s+echo "publish=false" >> "\$GITHUB_OUTPUT"\n\s+exit 0/);
+});
+
+test('a landed master push calls the release directly after required coverage, without CPU dependencies', () => {
+  const release = rustWorkflow.slice(rustWorkflow.indexOf('\n  beta-wasm-release:\n'));
+  assert.match(release, /^\n  beta-wasm-release:\n/);
+  assert.match(release, /\n {4}needs: result\n/);
+  assert.match(release, /!cancelled\(\)/);
+  for (const condition of ["github.event_name == 'push'", "github.ref == 'refs/heads/master'", "needs.result.result == 'success'"])
+    assert.ok(release.includes(condition), condition);
+  assert.match(release, /uses: \.\/\.github\/workflows\/rust-beta-wasm-release\.yml/);
+  assert.match(release, /sdk_sha: \$\{\{ github\.sha \}\}/);
+  assert.match(release, /permissions:\n {6}actions: read\n {6}contents: write/);
+  assert.doesNotMatch(release, /skip_certification|needs:.*cpu/);
+  const required = rustWorkflow.slice(rustWorkflow.indexOf('\n  result:\n'), rustWorkflow.indexOf('\n  beta-wasm-release:\n'));
+  assert.match(required, /name: Rust \/ required coverage/);
+  assert.doesNotMatch(required, /needs:.*cpu|needs:.*beta-wasm/);
+});
+
+test('the reusable entry point binds the master push SHA and exposes no certification override', () => {
+  const on = workflow.slice(workflow.indexOf('\non:\n'), workflow.indexOf('\npermissions:\n'));
+  const call = on.slice(on.indexOf('\n  workflow_call:\n'));
+  assert.match(call, /^\n  workflow_call:\n {4}inputs:\n {6}sdk_sha:\n {8}required: true\n {8}type: string/);
+  assert.doesNotMatch(call, /skip_certification|tag:/);
+  const roster = job('roster');
+  assert.ok(roster.includes("github.event_name == 'push' && github.ref == 'refs/heads/master'"));
+  assert.ok(roster.includes('[ "$SDK_SHA" = "$PUSH_SHA" ]'));
+  assert.match(roster, /PUSH_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(roster, /if \[ "\$\{\{ github\.event_name \}\}" = workflow_dispatch \] && \[ "\$\{\{ inputs\.skip_certification \}\}" = true \]; then/);
+  assert.match(roster, /if \[ "\$\{\{ github\.event_name \}\}" != workflow_dispatch \]; then/, 'both automatic entry points check supersession');
+});
+
+test('the early release is eligible only for successful uncancelled master pushes, independent of CPU status', () => {
+  const release = rustWorkflow.slice(rustWorkflow.indexOf('\n  beta-wasm-release:\n'));
+  const expression = release.match(/\n {4}if: >-\n([\s\S]*?)\n {4}permissions:/)?.[1].trim()
+    .replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  assert.ok(expression);
+  const eligible = (event, ref, result, cancelled = false) => runInNewContext(expression, {
+    github: { event_name: event, ref }, needs: { result: { result }, 'cpu-certify': { result: 'failure' } },
+    cancelled: () => cancelled,
+  });
+  assert.equal(eligible('push', 'refs/heads/master', 'success'), true);
+  for (const result of ['failure', 'cancelled', 'skipped', undefined])
+    assert.equal(eligible('push', 'refs/heads/master', result), false, String(result));
+  for (const event of ['pull_request', 'pull_request_target', 'workflow_dispatch'])
+    assert.equal(eligible(event, 'refs/heads/master', 'success'), false, event);
+  assert.equal(eligible('push', 'refs/heads/feature', 'success'), false);
+  assert.equal(eligible('push', 'refs/heads/master', 'success', true), false);
+});
+
+test('the reusable source step rejects a different SHA before exposing build outputs', () => {
+  const script = job('roster').match(/run: \|\n([\s\S]*?)(?=\n {6}- uses: actions\/checkout)/)?.[1]
+    .replace(/^ {10}/gm, '').replaceAll('${{ github.event_name }}', 'push');
+  assert.ok(script);
+  const head = 'a'.repeat(40);
+  const source = (sha, tag = '') => spawnSync('bash', ['-e', '-c', script], {
+    encoding: 'utf8', env: { SDK_SHA: sha, PUSH_SHA: head, TAG: tag, GITHUB_OUTPUT: '/dev/null' },
+  });
+  assert.equal(source(head).status, 0);
+  const mismatch = source('b'.repeat(40));
+  assert.equal(mismatch.status, 1);
+  assert.match(mismatch.stdout, /sdk_sha must match the master push/);
+  assert.equal(source(head, 'rust-beta-wasm-bbbbbbbbbbb').status, 1);
 });

@@ -102,6 +102,13 @@ cancellation. Reservation counts retire under the same map lock as admission,
 so concurrent final cancellation removes idle entries even while destructor
 fields still retain queue references. No successful proof is cached.
 
+Admission refusal diagnostics use `hosted.admission_refused`, with a server-issued
+attempt ID (or null before an offer), a catalog-validated venue, refusal kind,
+stage, transient flag, classified error kind and integer venue code. The attempt
+context follows its original pending verification. Never add credential identity,
+account labels, tokens, signatures, handover bytes, raw venue messages or payloads
+to these lines. Diagnostics do not change admission or retry classification.
+
 ## TWAP restore binding
 
 Native TWAP restore authority carries both the verified owner and generation.

@@ -55,9 +55,9 @@ impl<P> Cx<'_, P> {
         })
     }
 
-    /// Settle the current call and park with no next entry, for a venue whose
-    /// proof arrives only from its stream. Release readies the Plan for
-    /// `done_plan`; expiry fails it. Bounded and one-shot per Plan.
+    /// Settle the current call and park without a next entry for deferred proof.
+    /// Release readies done_plan or definitive continuation; expiry fails.
+    /// Bounded and one-shot per call; ordinary continuation remains closed.
     pub fn serial_plan_settle_wait(
         &mut self,
         plan: &Plan,

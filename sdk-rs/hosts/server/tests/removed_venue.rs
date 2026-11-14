@@ -34,10 +34,10 @@ async fn unavailable_hosted_accounts_refuse_typed_without_disturbing_live_accoun
             page.until("frame", |d| d["accountName"] == live.account_name)
                 .await;
 
+            // restored by #3502; #3317 dropped a live venue without a product decision.
             for venue in [
                 "bitmex",
                 "bitmextestnet",
-                "bitrue",
                 "orderly",
                 "polymarket",
                 "txflow",

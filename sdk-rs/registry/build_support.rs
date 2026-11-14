@@ -57,6 +57,7 @@ enum SetupMapping {
     ApexOmni,
     Lighter,
     Hyperliquid,
+    Txflow,
     Paradex,
 }
 

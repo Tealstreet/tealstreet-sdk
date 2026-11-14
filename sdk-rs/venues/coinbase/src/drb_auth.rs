@@ -70,6 +70,14 @@ impl Session {
         *issued = issued.max(now_ms);
         Ok(json!({"grant_type":"coinbase_cdp","token":jwt.as_str()}))
     }
+    pub(crate) fn params_to_sign(&self, now_ms: f64) -> Value {
+        let mut issued = self
+            .issued_ms
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *issued = issued.max(now_ms);
+        json!({"grant_type":"coinbase_cdp","token":""})
+    }
     /// Use request-start time so network latency cannot extend token validity.
     /// Call only after Transport has correlated a successful public/auth reply.
     pub fn accept(&mut self, result: Value, started_ms: f64) -> Result<(), String> {
