@@ -287,6 +287,72 @@ fn order_history_requests_pnl_and_keeps_fractional_time_zero_pnl_and_positive_fe
     assert!(json.contains(r#""positionSide":"short""#));
     assert!(json.contains(r#""type":"limit""#));
 }
+
+// https://docs.woox.io/#get-orders and #2025-07-14 include the restricted RPI type.
+#[test]
+fn rpi_limit_history_rows_are_retained_without_accepting_unknown_types() {
+    for streamed in [false, true] {
+        for (native, status) in [("FILLED", "closed"), ("CANCELLED", "canceled")] {
+            let mut e = ready();
+            let r = query(
+                &mut e,
+                Query::OrderHistory {
+                    symbol: Some("BTCUSDT".into()),
+                    from_ms: Some(NOW - 1000.0),
+                    to_ms: Some(NOW + 1000.0),
+                    limit: Some(5),
+                },
+            );
+            let rpi = ORDER
+                .replace("IOC", "RPI")
+                .replace("FILLED", native)
+                .replace("9007199254740993", "7");
+            let invalid = ORDER
+                .replace("IOC", "UNKNOWN")
+                .replace("9007199254740993", "8");
+            let body = format!(
+                r#"{{"success":true,"rows":[{ORDER},{rpi},{invalid}],"meta":{{"total":3,"records_per_page":100,"current_page":1}}}}"#
+            );
+            if streamed {
+                e.handle(
+                    NOW + 1.0,
+                    Event::HttpStart {
+                        request: r.id,
+                        status: 200,
+                        headers: "",
+                    },
+                );
+                for data in body.as_bytes().chunks(7) {
+                    e.handle(
+                        NOW + 1.0,
+                        Event::HttpChunk {
+                            request: r.id,
+                            data,
+                        },
+                    );
+                }
+                e.handle(NOW + 1.0, Event::HttpEnd { request: r.id });
+            } else {
+                response(&mut e, &r, NOW + 1.0, &body);
+            }
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+            assert_eq!(rows.len(), 2, "RPI must not be silently skipped");
+            let rpi = rows
+                .iter()
+                .find(|row| row["id"] == "7")
+                .expect("RPI history row");
+            assert_eq!(rpi["type"], "limit");
+            assert_eq!(rpi["status"], status);
+            assert_eq!(rpi["price"], 60000.0);
+            assert_eq!(rpi["filled"], 0.01);
+            assert_eq!(rpi["createdTime"], NOW);
+            assert!(rows.iter().all(|row| row["id"] != "8"));
+            assert!(e.store().orders().is_empty());
+        }
+    }
+}
+
 #[test]
 fn short_order_page_with_venue_census_continues_to_page_two() {
     let mut e = ready();

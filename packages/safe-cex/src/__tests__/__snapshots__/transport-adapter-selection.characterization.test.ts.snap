@@ -525,6 +525,23 @@ exports[`transport adapter selection per exchange > bingx 1`] = `
 }
 `;
 
+exports[`transport adapter selection per exchange > bingxspot 1`] = `
+{
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
+}
+`;
+
 exports[`transport adapter selection per exchange > bitget 1`] = `
 {
   "private direct": {
@@ -827,59 +844,6 @@ exports[`transport adapter selection per exchange > blofin 1`] = `
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com",
-  },
-}
-`;
-
-exports[`transport adapter selection per exchange > breakoutprop 1`] = `
-{
-  "private direct": {
-    "unlimitedXHR": "default https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy+tunnel-JA": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy+tunnel-SG": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy-JA": {
-    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private proxy-SG": {
-    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "private tunnel-only": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public direct": {
-    "unlimitedXHR": "default https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy+tunnel-JA": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy+tunnel-SG": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy-JA": {
-    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public proxy-SG": {
-    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/dxsca-web",
-  },
-  "public tunnel-only": {
-    "unlimitedXHR": "how https://breakout.prosp.devexperts.com/dxsca-web",
-    "xhr": "how https://breakout.prosp.devexperts.com/dxsca-web",
   },
 }
 `;

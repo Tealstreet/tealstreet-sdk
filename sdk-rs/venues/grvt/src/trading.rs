@@ -9,9 +9,10 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
 use safe_cex_engine::{
-    BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Outcome,
-    Response, VenueError,
+    BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Level,
+    Outcome, Response, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -23,6 +24,7 @@ const CANCEL_ALL: &str = "/lite/v1/cancel_all_orders";
 const GET: &str = "/lite/v1/order";
 const OPEN: &str = "/lite/v1/open_orders";
 const LEVERAGE: &str = "/lite/v1/set_initial_leverage";
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 #[derive(Default)]
 pub(crate) struct Trading {
@@ -89,6 +91,11 @@ struct Plan {
     cancel_attempts: Vec<String>,
     /// A write step took effect, so a later refusal cannot mean nothing happened.
     effective: bool,
+    create_report: Option<CreateReport>,
+}
+struct CreateReport {
+    journal: WritePlan,
+    next_index: usize,
 }
 impl Plan {
     fn new(command: CommandId) -> Self {
@@ -102,6 +109,7 @@ impl Plan {
             scope: None,
             cancel_attempts: vec![],
             effective: false,
+            create_report: None,
         }
     }
 }
@@ -746,6 +754,17 @@ impl Grvt {
         execution: Option<(bool, f64)>,
         used: &mut HashSet<String>,
     ) -> Result<Step, VenueError> {
+        self.placement_with_maximum_check(cx, opts, parent, execution, used, true)
+    }
+    fn placement_with_maximum_check(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+        parent: Option<&str>,
+        execution: Option<(bool, f64)>,
+        used: &mut HashSet<String>,
+        enforce_maximum: bool,
+    ) -> Result<Step, VenueError> {
         if opts.stp_mode.is_some() {
             return Err("Per-order self-trade prevention is unsupported on GRVT".into());
         }
@@ -834,7 +853,9 @@ impl Grvt {
         let amount = safe_cex_engine::num::adjust(opts.amount, market.precision.amount);
         positive(amount, "rounded order amount")?;
         if amount < market.limits.amount.min
-            || (market.limits.amount.max > 0. && amount > market.limits.amount.max)
+            || (enforce_maximum
+                && market.limits.amount.max > 0.
+                && amount > market.limits.amount.max)
         {
             return Err("GRVT order amount is outside market limits".into());
         }
@@ -1079,7 +1100,16 @@ impl Grvt {
                     {
                         return Err("GRVT trigger orders cannot carry attached brackets".into());
                     }
-                    let entry = self.placement(cx, &opts, None, None, &mut used)?;
+                    // Legacy TS keeps the maximum guard for caller IDs;
+                    // replacement and put-back also stay bounded.
+                    let entry = self.placement_with_maximum_check(
+                        cx,
+                        &opts,
+                        None,
+                        None,
+                        &mut used,
+                        opts.client_order_id.is_some(),
+                    )?;
                     let Effect::Place(entry_order) = &entry.effect else {
                         unreachable!()
                     };
@@ -1121,16 +1151,37 @@ impl Grvt {
                                 bybit_slippage_tolerance_ticks: None,
                                 implied_volatility: None,
                             };
-                            plan.steps.push_back(self.placement(
+                            plan.steps.push_back(self.placement_with_maximum_check(
                                 cx,
                                 &child,
                                 Some(&parent),
                                 Some((true, 0.)),
                                 &mut used,
+                                false,
                             )?);
                         }
                     }
                 }
+                // Describe prepared native creates, including bracket children;
+                // reporting never controls the existing sequential dispatch.
+                plan.create_report = Some(CreateReport {
+                    journal: WritePlan::new(
+                        plan.steps
+                            .iter()
+                            .enumerate()
+                            .map(|(index, step)| {
+                                let Effect::Place(order) = &step.effect else {
+                                    unreachable!("new-order plans contain only creates")
+                                };
+                                Element {
+                                    index,
+                                    client_order_id: Some(order.id.clone()),
+                                }
+                            })
+                            .collect(),
+                    ),
+                    next_index: 0,
+                });
             }
             Command::CancelOrders { ids, .. } => {
                 let mut seen = HashSet::new();
@@ -1435,7 +1486,12 @@ impl Grvt {
             }),
         );
     }
-    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, plan: Plan, error: Option<VenueError>) {
+    fn trade_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut plan: Plan,
+        error: Option<VenueError>,
+    ) {
         for id in &plan.affected {
             if error.is_some()
                 && plan.scope.is_none()
@@ -1480,6 +1536,49 @@ impl Grvt {
                         "{}; reconcile GRVT cancellation identities: {attempts}",
                         error.message
                     );
+                }
+                if let Some(report) = &mut plan.create_report {
+                    let rows = report.journal.outcomes();
+                    let result =
+                        if matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent)) {
+                            ElementResult::NotSent {
+                                error: Some(Box::new(error.clone())),
+                            }
+                        } else {
+                            error.venue_message = Some(error.message.clone().into_boxed_str());
+                            error.message = UNKNOWN_TEXT.into();
+                            error.outcome = Some(Outcome::Unknown);
+                            cx.event(
+                                Level::Warn,
+                                "order.outcome_unknown",
+                                UNKNOWN_TEXT,
+                                vec![
+                                    ("command", plan.command.into()),
+                                    ("elementIndex", report.next_index.to_string().into()),
+                                    (
+                                        "clientOrderId",
+                                        rows[report.next_index]
+                                            .element
+                                            .client_order_id
+                                            .clone()
+                                            .unwrap_or_default()
+                                            .into(),
+                                    ),
+                                ],
+                            );
+                            ElementResult::Unknown {
+                                error: Box::new(error.clone()),
+                            }
+                        };
+                    report
+                        .journal
+                        .record(report.next_index, result)
+                        .expect("prepared create element");
+                    error = report.journal.attach(error.partial(
+                        &plan.created,
+                        rows.len(),
+                        report.next_index,
+                    ));
                 }
                 // A later refusal after a write took effect cannot mean nothing happened.
                 let affected =
@@ -1698,6 +1797,18 @@ impl Grvt {
                             .insert(order.id.clone(), created.id.to_string());
                     }
                     request.plan.created.push(order.id.clone());
+                    if let Some(report) = &mut request.plan.create_report {
+                        report
+                            .journal
+                            .record(
+                                report.next_index,
+                                ElementResult::Placed {
+                                    order_ids: vec![order.id.clone()],
+                                },
+                            )
+                            .expect("prepared create element");
+                        report.next_index += 1;
+                    }
                 }
                 Effect::Cancel(_) => {
                     require_ack(response.body)?;

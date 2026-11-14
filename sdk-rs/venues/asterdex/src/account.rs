@@ -22,6 +22,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub struct AccountState {
+    started: bool,
     /// listenKey upkeep session. Aster returns the active key on create and
     /// extends it on keepalive, so an extra write is harmless (repeat-safe).
     listen_key_session: Option<safe_cex_engine::request_context::Session>,
@@ -405,7 +406,8 @@ impl AsterDex {
         );
     }
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.feed.is_none() {
+        self.account.started = true;
+        if cx.private_feed_policy().streaming() && self.account.feed.is_none() {
             match cx.register_socket_feed(crate::feed_policy(SocketChannel::Private, 1_000.0)) {
                 Ok(feed) => self.account.feed = Some(feed),
                 Err(error) => crate::socket_failed(cx, error),
@@ -539,7 +541,8 @@ impl AsterDex {
             .is_some_and(|feed| cx.socket_epoch(feed).is_some())
     }
     fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.key_pending
+        if !cx.private_feed_policy().streaming()
+            || self.account.key_pending
             || self.account.key_retry.is_some()
             || self.account.feed_stopped
             || self.private_epoch(cx)
@@ -615,7 +618,7 @@ impl AsterDex {
     /// `readPositions`: wait on the next read. One already out may predate the
     /// close, so it is followed by a new read and never answers.
     pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.feed.is_none() {
+        if !self.account.started {
             let error = VenueError::new("Aster account is not loaded")
                 .kind(safe_cex_engine::ErrorKind::InvalidInput);
             fresh_positions::refuse(cx, error);
@@ -1309,6 +1312,9 @@ impl AsterDex {
             }
         } else if self.account.keepalive == Some(timer) {
             self.account.keepalive = None;
+            if !cx.private_feed_policy().streaming() {
+                return true;
+            }
             let path = self.path("listenKey");
             self.signed(
                 cx,

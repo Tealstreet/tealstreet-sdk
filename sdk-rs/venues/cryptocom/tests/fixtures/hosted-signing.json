@@ -1,0 +1,153 @@
+[
+  {
+    "method": "private/advanced/amend-order",
+    "params": {
+      "order_id": "9007199254740993",
+      "new_price": "100.1",
+      "new_quantity": "0.02"
+    },
+    "payload": "private/advanced/amend-order1610000000000replay-keynew_price100.1new_quantity0.02order_id90071992547409931610000000000",
+    "signature": "e843e03c7d69f7b5f7c425d8b2e7af13e2c2d31c2353049472d44cc1653618b2"
+  },
+  {
+    "method": "private/advanced/cancel-order",
+    "params": {
+      "order_id": "9007199254740993"
+    },
+    "payload": "private/advanced/cancel-order1610000000000replay-keyorder_id90071992547409931610000000000",
+    "signature": "903592e189d6166937fbc71ec9817059ba6c902a7f60d1dce6ae08e644ac3c65"
+  },
+  {
+    "method": "private/advanced/create-order",
+    "params": {
+      "instrument_name": "BTCUSD-PERP",
+      "quantity": "0.01",
+      "side": "SELL",
+      "type": "STOP_LIMIT",
+      "price": "100.1",
+      "exec_inst": [
+        "REDUCE_ONLY",
+        "POST_ONLY"
+      ],
+      "client_oid": "fixture-é",
+      "ref_price": "99.9",
+      "ref_price_type": "MARK_PRICE"
+    },
+    "payload": "private/advanced/create-order1610000000000replay-keyclient_oidfixture-éexec_instREDUCE_ONLYPOST_ONLYinstrument_nameBTCUSD-PERPprice100.1quantity0.01ref_price99.9ref_price_typeMARK_PRICEsideSELLtypeSTOP_LIMIT1610000000000",
+    "signature": "f376f8bc325af44b4f4ea2b1130acb000256cadd42b3060c70998dac631ebac3"
+  },
+  {
+    "method": "private/advanced/get-open-orders",
+    "params": {},
+    "payload": "private/advanced/get-open-orders1610000000000replay-key1610000000000",
+    "signature": "bca5dd2244046540ca1964d5a984490fcef53bbb29027b08e90dc3b914903036"
+  },
+  {
+    "method": "private/amend-order",
+    "params": {
+      "order_id": "9007199254740993",
+      "new_price": "100.1",
+      "new_quantity": "0.02"
+    },
+    "payload": "private/amend-order1610000000000replay-keynew_price100.1new_quantity0.02order_id90071992547409931610000000000",
+    "signature": "32c165c2a0e356ca7a1f927e7abcd6f6574d76ea1469f190412325872512cf11"
+  },
+  {
+    "method": "private/cancel-all-orders",
+    "params": {
+      "instrument_name": "BTCUSD-PERP"
+    },
+    "payload": "private/cancel-all-orders1610000000000replay-keyinstrument_nameBTCUSD-PERP1610000000000",
+    "signature": "83ced989bb8134ee437e8ff05448d89406a35a85fdf1ed9d7a5e54d00c82c3e2"
+  },
+  {
+    "method": "private/cancel-order",
+    "params": {
+      "order_id": "9007199254740993"
+    },
+    "payload": "private/cancel-order1610000000000replay-keyorder_id90071992547409931610000000000",
+    "signature": "35367ebc55d20cce1e1296310227f1ad10bad21f80f3bec70e24a41fa3ba5945"
+  },
+  {
+    "method": "private/change-account-leverage",
+    "params": {
+      "leverage": 20
+    },
+    "payload": "private/change-account-leverage1610000000000replay-keyleverage201610000000000",
+    "signature": "3b3c320d68736201092508ff7433725af459dce3e3f85beab8fa7b0d5e7b3888"
+  },
+  {
+    "method": "private/create-order",
+    "params": {
+      "instrument_name": "BTCUSD-PERP",
+      "quantity": "0.01",
+      "side": "SELL",
+      "type": "LIMIT",
+      "price": "100.1",
+      "exec_inst": [
+        "REDUCE_ONLY",
+        "POST_ONLY"
+      ],
+      "client_oid": "fixture-é"
+    },
+    "payload": "private/create-order1610000000000replay-keyclient_oidfixture-éexec_instREDUCE_ONLYPOST_ONLYinstrument_nameBTCUSD-PERPprice100.1quantity0.01sideSELLtypeLIMIT1610000000000",
+    "signature": "34dba68a79b45d1c27a133158dd8532cec2eca2d979bf98905b9ed8ad29fe790"
+  },
+  {
+    "method": "private/get-accounts",
+    "params": {},
+    "payload": "private/get-accounts1610000000000replay-key1610000000000",
+    "signature": "8c4d50b27c7a714ce304a1772d1ab498f863bdce6a9523a4572b983b61442a5f"
+  },
+  {
+    "method": "private/get-open-orders",
+    "params": {},
+    "payload": "private/get-open-orders1610000000000replay-key1610000000000",
+    "signature": "4edc3c8034ce448e4f9162007bc0155df2f834306d3b749e2e93eadb7dae3961"
+  },
+  {
+    "method": "private/get-order-history",
+    "params": {
+      "instrument_name": "BTCUSD-PERP",
+      "start_time": 1609999999000000000,
+      "end_time": 1610000000000000000,
+      "limit": 100
+    },
+    "payload": "private/get-order-history1610000000000replay-keyend_time1610000000000000000instrument_nameBTCUSD-PERPlimit100start_time16099999990000000001610000000000",
+    "signature": "2d9a7eb50ccaf062b51df803d837fa7c72f52003cf4f9b37829130606a0a8bc4"
+  },
+  {
+    "method": "private/get-positions",
+    "params": {},
+    "payload": "private/get-positions1610000000000replay-key1610000000000",
+    "signature": "503fd2f5a7e26a905bdf4d184ae3d2ff79103574d8a6acbbfe54b86349e01bde"
+  },
+  {
+    "method": "private/get-trades",
+    "params": {
+      "instrument_name": "BTCUSD-PERP",
+      "start_time": 1609999999000000000,
+      "end_time": 1610000000000000000,
+      "limit": 100
+    },
+    "payload": "private/get-trades1610000000000replay-keyend_time1610000000000000000instrument_nameBTCUSD-PERPlimit100start_time16099999990000000001610000000000",
+    "signature": "70fe3aba1cfebeaaad5897f2cc6ec70d84cce2b643d4c5896e4258d663dadb1d"
+  },
+  {
+    "method": "private/get-transactions",
+    "params": {
+      "instrument_name": "BTCUSD-PERP",
+      "start_time": 1609999999000000000,
+      "end_time": 1610000000000000000,
+      "limit": 100
+    },
+    "payload": "private/get-transactions1610000000000replay-keyend_time1610000000000000000instrument_nameBTCUSD-PERPlimit100start_time16099999990000000001610000000000",
+    "signature": "e58dc8679e5da0f748937a07b04f4dab3bfabe1a4b33ae5afed40e0bc9f53887"
+  },
+  {
+    "method": "private/user-balance",
+    "params": {},
+    "payload": "private/user-balance1610000000000replay-key1610000000000",
+    "signature": "3117455f5fd29e5476b9521f70206e1466802cc0dc4e8d04525aaafb4bfb54a4"
+  }
+]

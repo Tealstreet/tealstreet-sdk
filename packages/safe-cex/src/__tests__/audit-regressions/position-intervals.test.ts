@@ -1,3 +1,4 @@
+import type { PositionInterval } from '../../journal/position-intervals';
 import type { Execution } from '../../types';
 
 import { describe, expect, it } from 'vitest';
@@ -242,9 +243,9 @@ describe('reconstructPositionIntervals', () => {
 });
 
 describe('attributeFunding', () => {
-  const interval = {
+  const interval: PositionInterval = {
     symbol: 'DOGEUSDT',
-    positionSide: 'both' as const,
+    positionSide: 'both',
     side: PositionSide.Long,
     openedAt: 1_000,
     closedAt: 5_000,

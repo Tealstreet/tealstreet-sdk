@@ -1,5 +1,30 @@
 # Coinbase derivatives foundation (S0)
 
+## Advanced Trade create sizing
+
+New Advanced Trade creates follow the legacy TypeScript formatter: normalize
+the requested amount to the market step and send one payload, including above
+the advertised maximum. Native refusals are returned to the caller without an
+automatic resend. `KNOWN-ISSUE: TS sends above-max; venue refuses`.
+
+Reference: `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts:1659`
+(normalization), `:1772` (single request) and `:1573` (native edit maximum).
+Native edit and INTX replacement checks retain their existing bounds.
+Placement batches dispatch serially and stop on the first refusal or uncertain
+response, matching `packages/safe-cex/src/exchanges/base.ts:1111-1114` and the
+Coinbase reference's `placeOrder` at `:1612-1641`. A terminal failure preserves
+accepted prefix IDs and an indexed outcome journal: accepted rows are `placed`,
+a documented refusal is `notSent` with the venue message, and the untouched
+suffix remains `notSent`. Uncertain rows say exactly "The outcome is unknown.
+Check Open Orders", retain diagnostic text in `venueMessage` and emit an
+`order.outcome_unknown` event attributed to the command and client order ID.
+`tests/trading.rs::above_max_batch_*` pins `[1,26,1]` at max 5 / step 1,
+including both refusal envelopes and a native rate-limit Unknown response.
+`tests/trading.rs::legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal`
+pins the six above-max cases and refusal propagation.
+
+## Transport foundation
+
 `drb::Transport` is the shared HTTP/main-WebSocket JSON-RPC transport owned by
 `Coinbase::drb`. `drb_auth::Session` holds auth state for exactly one `Channel`
 (HTTP or one socket ID). The existing venue flows are migrated by the separate
@@ -37,8 +62,10 @@ Integration contract:
 - Authenticate with fresh `Session::params`, send `public/auth`, then pass its
   decoded result and request-start time to `Session::accept`. Schedule refresh
   using `refresh_at`, gate private sends with `needs_refresh`, and invalidate the
-  socket session on close and invalidate rejected credentials. Invalidation keeps
-  the authentication-start watermark, so older completions cannot revive the cache.
+  socket session on close and invalidate rejected credentials. Invalidation fences
+  the latest issued or accepted authentication start, so pending completions cannot
+  revive the cache. A fresh exchange must use a strictly later start timestamp;
+  equal starts fail closed without changing the auth API signatures.
   The HTTP session-bearer callback can use `authorization`; WS authenticates
   in-band. Refresh always exchanges a fresh CDP JWT using `coinbase_cdp`; no refresh-token grant is assumed.
 - Share one transport across streams so HTTP and WS consume the same credit
@@ -264,3 +291,20 @@ its scoped inventory replacement only changes the URL selection for drb.
 The frozen HTTP/completion and socket inventories gain no new call sites.
 
 See [the live tape and offline replay gate](tests/fixtures/drb-public.README.md).
+
+## Hosted CDP signing
+
+SDK/registry construction consumes local credentials into provider custody and
+uses the same dispatch JWT recipes as keyless RemoteSigner accounts for private
+REST and WS authentication. ES256 and the existing Ed25519 input formats retain
+their canonical claims and signature bytes. REST-only PayloadSigner can sign
+canonical JWS bytes and returns a 64-byte signature in unpadded base64url;
+private WS auth requires RemoteSigner. Wallet/agent and OAuth credentials are
+separate protocols, not CDP JWT substitutes. The signing-only DRB codec accepts
+CDP issuer claims without changing the S2/S3 session transport under development.
+Engine-owned signer slots select by request purpose: account/history reads can
+use the read key; catalogue, permission checks, amend proofs and private socket
+authentication use the primary key. A refused read key pins subsequent reads to
+the primary signer and egress through the same selection boundary.
+See `docs/plans/callers/coinbase-hosted-signing.md` at the repository root for
+wire formats, typed refusals, algorithm selection and NX integration.

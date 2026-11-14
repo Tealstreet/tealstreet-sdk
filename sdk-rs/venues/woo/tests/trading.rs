@@ -299,6 +299,118 @@ fn split_lots_preserve_every_tick_and_respect_native_maximum() {
     assert!((sum - 201.001).abs() < 1e-10);
     assert_eq!(result(&a).unwrap(), r#"["12","12","12"]"#);
 }
+
+fn allocation_engine(maximum: f64, step: f64) -> TestEngine {
+    let mut e = engine();
+    let mut markets = e.store().markets().to_vec();
+    let market = markets.iter_mut().find(|m| m.symbol == "BTCUSDT").unwrap();
+    market.precision.amount = step;
+    market.limits.amount.min = step;
+    market.limits.amount.max = maximum;
+    e.store_mut().set_markets(markets);
+    e
+}
+
+#[test]
+fn legacy_split_lots_match_ts_sequences_and_sums() {
+    // TS woo.exchange.ts:2244/2303 normalizes before woo.order-state.ts:5-19.
+    let cases: &[(f64, f64, f64, &[f64], u64)] = &[
+        (26.0, 5.0, 1.0, &[5.0, 5.0, 4.0, 4.0, 4.0, 4.0], 26),
+        (11.0, 5.0, 1.0, &[4.0, 4.0, 3.0], 11),
+        (12.0, 5.0, 1.0, &[4.0, 4.0, 4.0], 12),
+        (10.0, 5.0, 1.0, &[5.0, 5.0], 10),
+        (7.0, 3.0, 0.5, &[2.5, 2.5, 2.0], 14),
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 1 of requested 1.0004); kept for exact TS parity per Sam's decision
+        (1.0004, 0.3, 0.001, &[0.25, 0.25, 0.25, 0.25], 1000),
+        // KNOWN-ISSUE: legacy TS rounds up (sum 1.001 of requested 1.0005); kept for exact TS parity per Sam's decision
+        (1.0005, 0.3, 0.001, &[0.251, 0.25, 0.25, 0.25], 1001),
+    ];
+    for &(amount, maximum, step, expected, expected_ticks) in cases {
+        let mut e = allocation_engine(maximum, step);
+        let mut o = opts();
+        o.amount = amount;
+        let mut actions = placed(&mut e, vec![o]);
+        let mut lots = Vec::new();
+        for index in 0..expected.len() {
+            let request = req(&actions, Method::Post, "/v1/order");
+            let quantity = request
+                .body
+                .as_deref()
+                .unwrap()
+                .split('&')
+                .find_map(|part| part.strip_prefix("order_quantity="))
+                .unwrap()
+                .parse::<f64>()
+                .unwrap();
+            assert!(quantity > 0.0 && quantity <= maximum);
+            lots.push(quantity);
+            actions = reply(
+                &mut e,
+                &request,
+                1001.0 + index as f64,
+                r#"{"success":true,"order_id":12}"#,
+            );
+            if index + 1 < expected.len() {
+                actions = tick(&mut e, &actions);
+            }
+        }
+        assert_eq!(lots, expected, "{amount}/{maximum}/{step}");
+        let allocated_ticks = lots
+            .iter()
+            .map(|lot| (lot / step).round() as u64)
+            .sum::<u64>();
+        assert_eq!(allocated_ticks, expected_ticks, "{amount}/{maximum}/{step}");
+        let ids: Vec<String> = serde_json::from_str(&result(&actions).unwrap()).unwrap();
+        assert_eq!(ids.len(), expected.len());
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        );
+    }
+}
+
+#[test]
+fn legacy_sized_stop_normalizes_before_splitting() {
+    // TS woo.exchange.ts:2390/2417 uses the same normalization for sized stops.
+    // KNOWN-ISSUE: legacy TS rounds up (sum 1.001 of requested 1.0005); kept for exact TS parity per Sam's decision
+    let mut e = allocation_engine(0.3, 0.001);
+    let mut o = opts();
+    o.kind = OrderType::StopLoss;
+    o.side = OrderSide::Sell;
+    o.amount = 1.0005;
+    let mut actions = placed(&mut e, vec![o]);
+    let mut lots = Vec::new();
+    for index in 0..4 {
+        let request = req(&actions, Method::Post, "/v3/algo/order");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        lots.push(body["quantity"].as_str().unwrap().parse::<f64>().unwrap());
+        assert_eq!(body["algoType"], "STOP");
+        actions = reply(
+            &mut e,
+            &request,
+            1001.0 + f64::from(index),
+            r#"{"success":true,"data":{"rows":[{"orderId":"12"}]}}"#,
+        );
+        if index < 3 {
+            actions = tick(&mut e, &actions);
+        }
+    }
+    assert_eq!(lots, [0.251, 0.25, 0.25, 0.25]);
+    assert_eq!(
+        lots.iter()
+            .map(|lot| (lot * 1000.0).round() as u64)
+            .sum::<u64>(),
+        1001
+    );
+    assert!(result(&actions).is_ok());
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+    );
+}
 #[test]
 fn market_reads_touch_and_crosses_inside_cap_when_default_slippage_would_miss() {
     let mut e = engine();
@@ -1710,4 +1822,366 @@ fn a_refused_lot_reports_the_accepted_lot_as_partial() {
         })
         .expect("the command failed");
     assert_eq!(error.partial.unwrap().order_ids, ["1"]);
+}
+
+#[test]
+fn split_unknown_contract_ordinary() {
+    assert_split_unknown_contract(false);
+}
+
+#[test]
+fn split_unknown_contract_sized_stop() {
+    assert_split_unknown_contract(true);
+}
+
+#[test]
+fn split_definite_refusal_keeps_classification_and_emits_no_unknown() {
+    for sized_stop in [false, true] {
+        let mut e = allocation_engine(0.3, 0.001);
+        let mut order = opts();
+        order.amount = 1.;
+        if sized_stop {
+            order.kind = OrderType::StopLoss;
+            order.side = OrderSide::Sell;
+        }
+        let path = if sized_stop {
+            "/v3/algo/order"
+        } else {
+            "/v1/order"
+        };
+        let actions = placed(&mut e, vec![order]);
+        let request = req(&actions, Method::Post, path);
+        let actions = reply(
+            &mut e,
+            &request,
+            1001.,
+            r#"{"success":false,"code":-1101,"message":"too small"}"#,
+        );
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+        assert_eq!(error.venue_code.as_deref(), Some("-1101"));
+        let journal = error.elements.as_ref().unwrap();
+        assert_eq!(journal.len(), 4);
+        assert!(
+            matches!(&journal[0].result, safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) } if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+        );
+        assert!(journal[1..].iter().all(|row| matches!(
+            row.result,
+            safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+        )));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandError { .. })) || matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+    }
+}
+
+fn assert_split_unknown_contract(sized_stop: bool) {
+    use safe_cex_engine::write_plan::ElementResult;
+    use safe_cex_engine::{Outcome, UNKNOWN_OUTCOME_TEXT};
+    // KNOWN-ISSUE: legacy TS rounds up (sum 1.001 of requested 1.0005); kept for exact TS parity per Sam's decision
+    for failed_index in [1, 0, 3] {
+        for delivery in ["native", "malformed", "transport", "503"] {
+            let mut e = allocation_engine(0.3, 0.001);
+            let mut order = opts();
+            order.amount = 1.0005;
+            if sized_stop {
+                order.kind = OrderType::StopLoss;
+                order.side = OrderSide::Sell;
+            }
+            let path = if sized_stop {
+                "/v3/algo/order"
+            } else {
+                "/v1/order"
+            };
+            let mut actions = placed(&mut e, vec![order]);
+            let mut history = Vec::new();
+            let mut quantities = Vec::new();
+            let mut placed_ids = Vec::new();
+            let failed_request = loop {
+                let request = req(&actions, Method::Post, path);
+                let quantity = if sized_stop {
+                    serde_json::from_str::<serde_json::Value>(request.body.as_deref().unwrap())
+                        .unwrap()["quantity"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<f64>()
+                        .unwrap()
+                } else {
+                    request
+                        .body
+                        .as_deref()
+                        .unwrap()
+                        .split('&')
+                        .find_map(|p| p.strip_prefix("order_quantity="))
+                        .unwrap()
+                        .parse()
+                        .unwrap()
+                };
+                quantities.push(quantity);
+                history.extend(actions);
+                if placed_ids.len() == failed_index {
+                    break request;
+                }
+                let id = (12 + placed_ids.len()).to_string();
+                let body = if sized_stop {
+                    format!(r#"{{"success":true,"data":{{"rows":[{{"orderId":"{id}"}}]}}}}"#)
+                } else {
+                    format!(r#"{{"success":true,"order_id":{id}}}"#)
+                };
+                actions = reply(&mut e, &request, 1001. + placed_ids.len() as f64, &body);
+                placed_ids.push(id);
+                history.extend(actions.clone());
+                actions = tick(&mut e, &actions);
+            };
+            assert_eq!(quantities, [0.251, 0.25, 0.25, 0.25][..=failed_index]);
+            assert_eq!(
+                (quantities.iter().sum::<f64>() * 1000.).round() as u64,
+                251 + 250 * failed_index as u64
+            );
+            if delivery == "transport" {
+                e.handle(
+                    2000.,
+                    Event::HttpFailed {
+                        request: failed_request.id,
+                        error: "synthetic https://venue.test/order?signature=payload body={}",
+                    },
+                );
+            } else {
+                e.handle(2000., Event::HttpResponse {
+                    request: failed_request.id,
+                    response: Response {
+                        status: if delivery == "503" { 503 } else { 200 },
+                        headers: "",
+                        body: if delivery == "malformed" { "{}" } else { r#"{"success":false,"code":-1000,"message":"synthetic ambiguous outcome"}"# },
+                    },
+                });
+            }
+            let actions: Vec<_> = e.drain_actions().collect();
+            let errors: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1);
+            let error = errors[0];
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(
+                error
+                    .partial
+                    .as_ref()
+                    .map(|p| p.order_ids.clone())
+                    .unwrap_or_default(),
+                placed_ids
+            );
+            assert!(error.message.contains(UNKNOWN_OUTCOME_TEXT), "{error:?}");
+            let rows = error.elements.as_ref().expect("indexed split journal");
+            assert_eq!(rows.len(), 4);
+            for (index, row) in rows.iter().enumerate() {
+                assert_eq!(row.element.index, index);
+                assert_eq!(row.element.client_order_id, None);
+                match &row.result {
+                    ElementResult::Placed { order_ids } if index < failed_index => {
+                        assert_eq!(order_ids, &[placed_ids[index].clone()])
+                    }
+                    ElementResult::Unknown { error } if index == failed_index => {
+                        assert_eq!(error.outcome, Some(Outcome::Unknown))
+                    }
+                    ElementResult::NotSent { error: None } if index > failed_index => (),
+                    row => panic!("incorrect lot{index}: {row:?}"),
+                }
+            }
+            let diagnostics: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandError {
+                        command: 1,
+                        message,
+                    }) => Some(message),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(diagnostics.len(), 1);
+            assert!(diagnostics[0].contains(UNKNOWN_OUTCOME_TEXT));
+            let events: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::Event(event))
+                        if event.code == "order.outcome_unknown" =>
+                    {
+                        Some(event)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].message, UNKNOWN_OUTCOME_TEXT);
+            assert!(events[0].fields.contains(&("outcome", "unknown".into())));
+            assert!(events[0].fields.contains(&("command", "woo-1".into())));
+            assert!(
+                events[0]
+                    .fields
+                    .contains(&("placedOrderIds", placed_ids.join(",").into()))
+            );
+            assert!(
+                events[0]
+                    .fields
+                    .contains(&("unknownIndices", failed_index.to_string().into()))
+            );
+            let request_id = failed_request.id.0.to_string();
+            // ^[0-9]{1,20}$: retain the physical request ID without float conversion.
+            assert!(
+                (1..=20).contains(&request_id.len())
+                    && request_id.bytes().all(|b| b.is_ascii_digit())
+            );
+            assert!(events[0].fields.contains(&("request", request_id.into())));
+            let status = events[0]
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "status")
+                .map(|(_, value)| value.clone());
+            assert_eq!(
+                status,
+                (delivery != "transport")
+                    .then(|| if delivery == "503" { 503u32 } else { 200u32 }.into())
+            );
+            for (key, value) in &events[0].fields {
+                assert!(
+                    [
+                        "command",
+                        "outcome",
+                        "placedOrderIds",
+                        "unknownIndices",
+                        "status",
+                        "request"
+                    ]
+                    .contains(key)
+                );
+                let text = format!("{key} {value:?}").to_lowercase();
+                for forbidden in [
+                    "http",
+                    "/v1",
+                    "/v3",
+                    "?",
+                    "&",
+                    "=",
+                    "body",
+                    "payload",
+                    "signature",
+                    "fixture",
+                    "synthetic",
+                ] {
+                    assert!(!text.contains(forbidden), "unsafe field {key}");
+                }
+            }
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+            );
+            history.extend(actions);
+            e.handle(
+                3000.,
+                Event::HttpFailed {
+                    request: failed_request.id,
+                    error: "late failure",
+                },
+            );
+            response(
+                &mut e,
+                &failed_request,
+                3001.,
+                r#"{"success":true,"order_id":999}"#,
+            );
+            for timer in history.iter().filter_map(|a| match a {
+                Action::SetTimer { timer, .. } => Some(*timer),
+                _ => None,
+            }) {
+                e.handle(20000., Event::TimerFired { timer });
+            }
+            let late: Vec<_> = e.drain_actions().collect();
+            assert!(!late.iter().any(|a| matches!(a,
+                Action::Http(HttpRequest { method: Method::Post, .. }) |
+                Action::Notice(Notice::CommandFailed { command: 1, .. } | Notice::CommandError { command: 1, .. })
+            ) || matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+        }
+    }
+}
+
+#[test]
+fn confirmed_parent_cancel_is_applied_before_unknown_replacement() {
+    let mut e = positional_engine();
+    let mut o = opts();
+    o.kind = OrderType::StopLoss;
+    o.side = OrderSide::Sell;
+    o.amount = 0.0;
+    o.price = Some(58500.0);
+    let actions = placed(&mut e, vec![o]);
+    let cancel = req(&actions, Method::Delete, "/v3/algo/order/100");
+    let actions = reply(&mut e, &cancel, 1010., r#"{"success":true}"#);
+    let actions = tick(&mut e, &actions);
+    let replacement = req(&actions, Method::Post, "/v3/algo/order");
+    let actions = reply(
+        &mut e,
+        &replacement,
+        1020.,
+        r#"{"success":false,"code":-1000,"message":"ambiguous"}"#,
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let rows = error.elements.as_ref().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        &rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(
+        matches!(&rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Applied {
+            effect: safe_cex_engine::write_plan::AppliedEffect::Cancel,
+            target_order_id: Some(target), ..
+        } if target == "100"),
+        "accepted DELETE /v3/algo/order/100 was misreported: {rows:?}"
+    );
+}
+
+#[test]
+fn parent_cancel_unknown_stops_before_replacement() {
+    let mut e = positional_engine();
+    let mut o = opts();
+    o.kind = OrderType::StopLoss;
+    o.side = OrderSide::Sell;
+    o.amount = 0.0;
+    o.price = Some(58500.0);
+    let actions = placed(&mut e, vec![o]);
+    let cancel = req(&actions, Method::Delete, "/v3/algo/order/100");
+    let actions = reply(
+        &mut e,
+        &cancel,
+        1010.,
+        r#"{"success":false,"code":-1000,"message":"ambiguous"}"#,
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let rows = error.elements.as_ref().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        rows[0].result,
+        safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+    ));
+    assert!(matches!(
+        rows[1].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+    ));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+    );
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")).count(), 1);
 }

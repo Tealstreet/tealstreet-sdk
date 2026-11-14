@@ -272,6 +272,19 @@ equity, ETF, commodity and FX refuse; empty/innovation crypto pass; absent and
 new venue labels retain their unknown classification. No additional venue read
 or agreement signing occurs during preflight.
 
+## Unknown position size refuses a close
+
+`nativeCloseSize` rejects the shared helper's null result before rounding or
+placement. Position percentages use the same wrapper, so neither full nor
+percentage closes can turn unknown evidence into a guessed quantity.
+
+Position percentages for close-like commands use shared `roundPercentageCloseSize`:
+under 100% floors to the native step and refuses a zero result with size/step;
+100% preserves the full native size. Explicit notional/native amounts keep their
+separate preserve-or-refuse policy. CLI's existing over-100% close cap remains.
+Both single-position and global closes validate the requested native amount
+before capping it at the position size, so the cap cannot hide an invalid step.
+
 ## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
 
 `TradingBaseCommand.notionalToSize` (and the `%bal` path beside it) must divide
@@ -662,3 +675,25 @@ This outer-executor contract covers errors that propagate from awaited order
 calls. Commands which aggregate or log errors internally (global close, swarm,
 and fire-and-forget nuke) keep their existing result semantics; the outer
 executor cannot recover metadata those command implementations have discarded.
+
+
+## Side words and market aliases
+
+Stop `buy`/`sell`, close `long`/`short`, and bump side selectors belong to
+leading selector positions, case-insensitively. A trailing symbol such as `buy`
+after a stop price resolves to its loaded market alias, without changing side
+or falling back to the focused market. A modifier that also names a market
+(e.g. trailing `reduce`) needs an explicit scope; otherwise order commands
+refuse with `invalidInput` / `notSent`. Collision detection reads the market
+catalog independently of ticker readiness; missing tickers cannot authorize
+a write on the focused market. Use the full market symbol or the
+command's supported leading-symbol form to disambiguate.
+
+## Unknown position valuation
+
+Position presence follows contracts, independent of valuation. Position cards,
+position/margin tables and cross-account totals show `—` for unknown notional
+and derived leverage/percentages. An incomplete scope poisons its total without
+hiding a known opposite scope. `$totallongusd`, `$totalshortusd`, `$totallong`,
+`$totalshort` and `$margin` refuse when their required notionals are unknown;
+known zero and empty exposure sums remain zero.

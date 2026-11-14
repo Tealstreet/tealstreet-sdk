@@ -1,23 +1,20 @@
-import type { DisplayedPosition, ExchangeName, ExchangeOptions, StoreData, Writable } from '../../types';
+import type { DisplayedPosition, StoreData, Writable } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
+import { DefaultStore } from '../../store/store.base';
 import { PositionSide } from '../../types';
 import { DisplayedMarginPostprocessor } from './DisplayedMarginPostprocessor';
 
-const pos = (side: PositionSide, notional: number | undefined): DisplayedPosition =>
+const pos = (side: PositionSide, notional: number | null | undefined): DisplayedPosition =>
   ({ side, notional }) as DisplayedPosition;
 
 const createStore = (displayedPositions: DisplayedPosition[]): Writable<StoreData> =>
   ({ displayedPositions }) as Writable<StoreData>;
 
-const createProcessor = () => new DisplayedMarginPostprocessor('test-account', 'bybit' as ExchangeName, {} as ExchangeOptions);
+const createProcessor = () => new DisplayedMarginPostprocessor('test-account', 'bybit', { key: '', secret: '' });
 
-/**
- * Reference implementation: the exact formula the margin UI used inline before
- * the hoist (filter+reduce per side, separate total loop). The processor must
- * reproduce this byte-for-byte.
- */
+/** Original UI calculation, retained as the oracle for fully known finite inputs. */
 const oracle = (positions: DisplayedPosition[]) => {
   const longExposure = positions
     .filter((p) => p.side === PositionSide.Long)
@@ -46,10 +43,49 @@ describe('DisplayedMarginPostprocessor', () => {
     expect(store.displayedMargin).toEqual({ longExposure: 110, shortExposure: 40, totalNotional: 150 });
   });
 
-  it('uses absolute notional and treats missing notional as 0', () => {
-    const store = createStore([pos(L, -100), pos(S, undefined), pos(L, 0)]);
+  it('uses absolute known notional and retains reported zero', () => {
+    const store = createStore([pos(L, -100), pos(S, 0), pos(L, 0)]);
     createProcessor().process(store);
     expect(store.displayedMargin).toEqual({ longExposure: 100, shortExposure: 0, totalNotional: 100 });
+  });
+
+  for (const unknown of [NaN, Infinity, -Infinity, undefined, null]) {
+    for (const side of [L, S]) {
+      it(`keeps ${String(unknown)} ${side} exposure unknown, including mixed totals`, () => {
+        for (const positions of [
+          [pos(side, unknown)],
+          [pos(side, unknown), pos(side, 250)],
+          [pos(side, 250), pos(side, unknown)],
+        ]) {
+          const store = createStore(positions);
+          createProcessor().process(store);
+          expect(store.displayedMargin?.totalNotional).toBeNull();
+          expect(side === L ? store.displayedMargin?.longExposure : store.displayedMargin?.shortExposure).toBeNull();
+          expect(side === L ? store.displayedMargin?.shortExposure : store.displayedMargin?.longExposure).toBe(0);
+        }
+      });
+    }
+  }
+
+  it('preserves a complete opposite-side sum when only one side has unknown exposure', () => {
+    const store = createStore([pos(L, NaN), pos(S, 250)]);
+    createProcessor().process(store);
+    expect(store.displayedMargin?.longExposure).toBeNull();
+    expect(store.displayedMargin?.shortExposure).toBe(250);
+    expect(store.displayedMargin?.totalNotional).toBeNull();
+  });
+
+  it('keeps unknown totals null through serialization, JSON and a receiving store', () => {
+    const store = new DefaultStore();
+    store.update({ displayedPositions: [pos(L, null), pos(S, 250)] });
+    const snapshot = store.serialize();
+    createProcessor().process(snapshot);
+    store.update({ displayedMargin: snapshot.displayedMargin });
+    const serialized = store.serialize();
+    expect(serialized.displayedMargin).toEqual({ longExposure: null, shortExposure: 250, totalNotional: null });
+    const receiving = new DefaultStore();
+    receiving.update(JSON.parse(JSON.stringify(serialized)));
+    expect(receiving.displayedMargin).toEqual(serialized.displayedMargin);
   });
 
   it('counts an unknown side toward totalNotional only (matches old behavior)', () => {
@@ -65,7 +101,7 @@ describe('DisplayedMarginPostprocessor', () => {
     expect(store.displayedMargin).toEqual({ longExposure: 0, shortExposure: 0, totalNotional: 0 });
   });
 
-  // Oracle-parity battery: the processor must reproduce the old formula exactly,
+  // Finite-input parity: the processor must reproduce the old formula exactly,
   // including floating-point accumulation order, across many shapes.
   const fixtures: Array<{ name: string; positions: DisplayedPosition[] }> = [
     { name: 'empty', positions: [] },

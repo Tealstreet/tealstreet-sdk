@@ -59,6 +59,10 @@ examples come from the TS registered catalog via scripts/generate-cli-catalog.py
 its --check mode detects drift. Browser account/session/preprocess state remains
 outside this crate. Display commands do not fetch venue data.
 
+Position size and valuation arithmetic use the independent `safe-cex-position-math`
+policy crate. EXEC does not access the engine's numeric internals or depend on
+the ECMAScript compatibility crate; the AccountPort boundary remains unchanged.
+
 Chart requests bounded candles through the engine, renders the current position
 and order overlays, and uses explicit UTC time-axis labels. It creates no candle
 transport or independent subscription. Empty or malformed results refuse.

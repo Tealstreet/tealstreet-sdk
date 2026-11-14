@@ -3,7 +3,8 @@ import type { AsterDEXExchange } from './asterdex.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { Balance, LogSeverity, OrderSide, OrderStatus, PositionSide } from '../../../types';
+import type { Balance } from '../../../generated/Balance';
+import { LogSeverity, OrderSide, OrderStatus, PositionSide } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { ASTERDEX_ENDPOINTS } from '../../../exchanges/asterdex/asterdex.types';
@@ -62,7 +63,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     // BaseWebSocket.onClose is an instance arrow-function field (not a
     // prototype method), so retain the base instance handler and wrap it.
     const baseOnClose = this.onClose;
-    this.onClose = (event?: any): void => {
+    this.onClose = (event?: unknown): void => {
       this.clearListenKeyRefreshTimer();
       this.clearListenKeyWatchdogTimer();
       this.clearPositionRepairTimer();
@@ -322,7 +323,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     );
   }
 
-  private getOrderUpdateTime(orderData: any): number {
+  private getOrderUpdateTime(orderData: { T?: unknown; E?: unknown }): number {
     const eventTime = Number(orderData.T || orderData.E);
     return Number.isFinite(eventTime) && eventTime > 0 ? eventTime : virtualClock.getCurrentTimeMs();
   }
@@ -357,7 +358,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     return updates;
   }
 
-  private getPositionSide(position: any, positionAmount: number): PositionSide {
+  private getPositionSide(position: { ps?: unknown }, positionAmount: number): PositionSide {
     return position.ps === 'BOTH'
       ? positionAmount > 0
         ? PositionSide.Long
@@ -581,7 +582,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     }
   }
 
-  private handleListenKeyExpired(_data: any): void {
+  private handleListenKeyExpired(_data: unknown): void {
     this.parent.log(
       'AsterDEX private listen key expired event received, reconnecting private stream',
       LogSeverity.Warning,

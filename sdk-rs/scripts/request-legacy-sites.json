@@ -16,19 +16,6 @@
     "4fd69fe1e61d7806268e180e1316430a4f1412b5b180eee8a9d78451ac57c7d9": 1,
     "5a3ecde1bdd5b82ea5d3f97b6da8fa145ee3d7db5f208cc0f5157b22ac098f3c": 1
   },
-  "venues/breakoutprop/src/lib.rs": {
-    "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 2,
-    "a6e5e202ae627122d304a84fc991af3386b3af0c2b063603269df46cb621c442": 1,
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "5ec25581383dfb245bad7d461dd05d709edcb44ba7364f8155f1ca965621bb4b": 1,
-    "e3e2f080f0b64561a5c15c9e68e0079d0f0a4b8470dac3d45e23b81a28d2c6f1": 1
-  },
-  "venues/breakoutprop/src/trading.rs": {
-    "00d25809332a0d94366c69ef735773a6dfd0085c08be94fdbac8a23f299b3e48": 1,
-    "836d00ef1198446d8fde0e17e23ca7554316c975f03f9e2d91ff3f64a84aad98": 1,
-    "ea0ff1d0bf1689d0410b0bcc1cbbeedc2fa1bec60349440b50760648369edf0e": 1
-  },
   "venues/coinbase/src/account.rs": {
     "339bef5311673edab54f33f82bfdbbdf053c7abffec9e341f0c0449783eb9235": 1
   },
@@ -50,8 +37,6 @@
   },
   "venues/coinbase/src/rest.rs": {
     "388c9f66c40d488788f2f4a9808088e22a0425615dfd2818c9d63d58675392d1": 1,
-    "3fa81ac71523a7b891447ad724997c5c20f6a631052c8a00f4d91013552d35dd": 1,
-    "a77bee10a9c0761ddbd5fe3a58636cabc28caded9abae529ea4861b8b8634cd8": 1,
     "dcf83acae473b7e34bc8c4f078d94f2ca5fbf999114c7f8e5af43f956237699b": 1
   },
   "venues/coinbase/src/trading.rs": {

@@ -13,7 +13,7 @@ it('hydrates and updates a native orphan ticker without inventing a market', () 
     ...Object.fromEntries(TICKER_FIELDS.map((field, index) => [field, Float64Array.of(index + 1)])),
   };
   const frame = {
-    tickers: () => table, tickerDeltas: () => undefined,
+    tickers: () => table, tickerDeltas: () => undefined, tickerObservations: () => undefined,
     markets: () => undefined, orders: () => undefined, positions: () => undefined,
     balance: () => undefined, status: () => undefined, settings: () => undefined,
   } as unknown as Frame;

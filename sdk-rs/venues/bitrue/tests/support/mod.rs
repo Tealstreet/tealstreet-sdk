@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod hosted_parity;
 pub mod trading;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::{Identities, Identity, KeyRef, Provider};
@@ -67,7 +68,10 @@ impl Options {
         let (provider, ids) = LocalSigner::from_setup(LocalSetup { primary, secondary }).unwrap();
         (
             Bitrue::new(self.native(&ids)),
-            std::sync::Arc::new(provider),
+            std::sync::Arc::new(hosted_parity::Parity {
+                local: provider,
+                identities: ids.clone(),
+            }),
             ids,
         )
     }

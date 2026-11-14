@@ -412,8 +412,8 @@ fn writes_of(actions: &[Action], path: &str) -> usize {
         .count()
 }
 
-/// Control 9 (a): a command arriving inside the amend fallback (after its
-/// cancel is sent, and again before its replacement) is refused by the lock.
+/// Control 9 (a): the lock refuses a competing command while the fallback
+/// cancellation or replacement is awaiting its acknowledgement.
 #[test]
 fn the_order_lock_holds_across_the_amend_fallback() {
     let (mut e, _) = startup();
@@ -455,10 +455,8 @@ fn the_order_lock_holds_across_the_amend_fallback() {
         r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
     );
     assert!(
-        http(&actions)
-            .iter()
-            .any(|r| r.url.contains("get_order_detail")),
-        "the final-state read precedes any replacement"
+        post(&http(&actions), "place_order").is_some(),
+        "TS places directly after cancellation"
     );
     e.handle(
         5.0,
@@ -589,16 +587,6 @@ fn a_lost_fallback_replacement_fences_cancel_all() {
         3.0,
         &cancel,
         r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
-    );
-    let detail = http(&actions)
-        .into_iter()
-        .find(|r| r.url.contains("get_order_detail"))
-        .expect("the final-state read");
-    let actions = answer(
-        &mut e,
-        4.0,
-        &detail,
-        r#"{"code":0,"data":{"orderId":"one","symbol":"BTCUSDT","status":"CANCELED","qty":"3","tradeQty":"1"}}"#,
     );
     let replacement = post(&http(&actions), "place_order").expect("the replacement");
     e.handle(

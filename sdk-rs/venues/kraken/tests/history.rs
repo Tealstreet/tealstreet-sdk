@@ -258,6 +258,88 @@ fn ledger_transfers_preserve_account_rows_and_filter_native_income_type() {
     assert_eq!(rows[0]["category"], "commission");
 }
 #[test]
+fn ledger_null_contract_retains_account_transfer_and_following_trade_rows() {
+    // Synthetic row: contract/execution and optional economics are nullable in AccountLogEntry.
+    // https://docs.kraken.com/api-reference/account-history/get-account-log
+    let transfer = include_str!("fixtures/account-log-null-contract.json").trim();
+    for bootstrap in [ready, ready_provider] {
+        let (mut e, _) = bootstrap();
+        let r = query(&mut e, income());
+        let trade = ledger("trade", "2023-11-14T22:13:19.999Z");
+        reply(
+            &mut e,
+            &r,
+            200,
+            &format!(r#"{{"logs":[{transfer},{trade}]}}"#),
+        );
+        let rows = result(&mut e).expect("nullable contract must not fail the history page");
+        let rows = rows.as_array().unwrap();
+        assert_eq!(rows.len(), 5, "one transfer plus four trade income records");
+        assert_eq!(
+            rows.iter()
+                .find(|row| row["tranId"] == "fixture-transfer:transfer")
+                .expect("account transfer must not be silently dropped"),
+            &json!({
+                "symbol":"", "incomeType":"cross-exchange transfer", "income":5.0,
+                "asset":"USD", "timestamp":NOW - 1.0,
+                "tranId":"fixture-transfer:transfer", "category":"transfer"
+            })
+        );
+        for (suffix, amount) in [
+            ("pnl", 2.5),
+            ("funding", -0.125),
+            ("fee", -0.2),
+            ("liquidation", -0.1),
+        ] {
+            let row = rows
+                .iter()
+                .find(|row| row["tranId"] == format!("trade:{suffix}"))
+                .unwrap();
+            assert_eq!(row["symbol"], "PF_XBTUSD");
+            assert_eq!(row["income"], amount);
+            assert_eq!(row["tradeId"], "18446744073709551615");
+        }
+    }
+}
+#[test]
+fn ledger_null_contract_matches_missing_and_empty_contracts() {
+    let mut expected = None;
+    for contract in [None, Some(Value::Null), Some(json!(""))] {
+        let (mut e, _) = ready();
+        let r = query(&mut e, income());
+        let mut row: Value =
+            serde_json::from_str(include_str!("fixtures/account-log-null-contract.json")).unwrap();
+        row.as_object_mut().unwrap().remove("contract");
+        if let Some(contract) = contract {
+            row["contract"] = contract;
+        }
+        answer(&mut e, &r, "logs", vec![row]);
+        let rows = result(&mut e).expect("contract-less account income must complete");
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        if let Some(expected) = &expected {
+            assert_eq!(&rows, expected);
+        } else {
+            expected = Some(rows);
+        }
+    }
+}
+#[test]
+fn ledger_nonnullable_string_fields_still_reject_null() {
+    for field in ["asset", "booking_uid", "date", "info"] {
+        let (mut e, _) = ready();
+        let r = query(&mut e, income());
+        let mut row = ledger("trade", "2023-11-14T22:13:19.999Z");
+        row[field] = Value::Null;
+        answer(&mut e, &r, "logs", vec![row]);
+        assert!(
+            result(&mut e)
+                .expect_err(field)
+                .contains("Kraken history failed"),
+            "documented nonnullable {field} must remain invalid"
+        );
+    }
+}
+#[test]
 fn saturated_descending_ledger_returns_the_newest_page_marked_truncated() {
     let (mut e, _) = ready();
     let r = query(&mut e, income());

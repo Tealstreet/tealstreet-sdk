@@ -1,26 +1,32 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { dirname } from 'path';
 import type { ExchangeAccountConfig } from '@tealstreet/cli-core';
 
 import type { FooterSegment } from './footer-segments';
-import { BRAND, brandEnv } from './brand';
+import {
+  authOwner,
+  getStorageDir,
+  getStoragePath,
+  getStorageOwner,
+  getStorageEpoch,
+  selectStorageOwner,
+} from './storage-context';
 
 // Re-export the canonical type for convenience
 export type { ExchangeAccountConfig };
 // Alias for backwards compatibility
 export type AccountConfig = ExchangeAccountConfig;
 
-const CONFIG_DIR = join(homedir(), BRAND.configDirName);
-// Support custom config file via environment variable (used by Electron desktop app)
-const CONFIG_FILE = brandEnv('CONFIG_FILE') || join(CONFIG_DIR, 'config.json');
-
 export function getConfigFilePath(): string {
-  return CONFIG_FILE;
+  return getStoragePath('config.json');
 }
-
 export function getConfigDirForFile(): string {
-  return dirname(CONFIG_FILE);
+  return dirname(getConfigFilePath());
+}
+const loadedSessions = new WeakMap<Config, number>();
+function remember(config: Config): Config {
+  loadedSessions.set(config, getStorageEpoch());
+  return config;
 }
 
 export interface AuthConfig {
@@ -54,7 +60,7 @@ export interface Config {
 }
 
 export function getConfigDir(): string {
-  return CONFIG_DIR;
+  return getStorageDir();
 }
 
 // config.json holds exchange API keys and the auth token: owner-only.
@@ -62,23 +68,40 @@ const PRIVATE_DIR_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 
 export function loadConfig(): Config {
+  const CONFIG_FILE = getConfigFilePath();
   const configDir = getConfigDirForFile();
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true, mode: PRIVATE_DIR_MODE });
   }
 
   if (!existsSync(CONFIG_FILE)) {
-    return { accounts: [] };
+    return remember({ accounts: [] });
   }
 
   try {
-    return JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
+    const config: Config = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
+    return remember(config);
   } catch {
-    return { accounts: [] };
+    return remember({ accounts: [] });
   }
 }
 
 export function saveConfig(config: Config): void {
+  const currentOwner = getStorageOwner();
+  if (loadedSessions.has(config) && loadedSessions.get(config) !== getStorageEpoch()) {
+    throw new Error('Cannot save config from a previous CLI login.');
+  }
+  const nextOwner = authOwner(config.auth);
+  if (nextOwner && nextOwner !== currentOwner) {
+    // Auth is the only value transferred by login. Never relabel A's accounts
+    // and defaults as B's merely because the callback supplied a new token.
+    selectStorageOwner(nextOwner);
+    const ownConfig = loadConfig();
+    ownConfig.auth = config.auth;
+    saveConfig(ownConfig);
+    return;
+  }
+  const CONFIG_FILE = getConfigFilePath();
   const configDir = getConfigDirForFile();
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true, mode: PRIVATE_DIR_MODE });
@@ -86,6 +109,7 @@ export function saveConfig(config: Config): void {
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: PRIVATE_FILE_MODE });
   // `mode` applies only when the file is created; tighten configs written before.
   chmodSync(CONFIG_FILE, PRIVATE_FILE_MODE);
+  if (currentOwner && !config.auth) selectStorageOwner(null);
 }
 
 // Tombstone retention: accounts deleted via the listener mutate path keep

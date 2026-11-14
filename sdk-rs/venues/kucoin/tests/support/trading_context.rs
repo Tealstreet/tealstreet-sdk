@@ -131,8 +131,8 @@ fn a_nonfinite_entry_refuses_before_native_queue_or_signing() {
 }
 
 #[test]
-fn native_400005_resends_once_at_every_ruled_status_with_fresh_signing() {
-    for status in [200, 401, 408, 500, 503, 599] {
+fn native_400005_resends_once_on_definitive_refusal_with_fresh_signing() {
+    for status in [200, 401] {
         let mut h = Harness::new();
         h.command(cancel());
         let first = h.take("/api/v1/orders/one");

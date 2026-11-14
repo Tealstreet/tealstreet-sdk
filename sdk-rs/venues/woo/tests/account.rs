@@ -293,6 +293,57 @@ fn startup_auth_snapshot_settings_and_exact_ids() {
     );
     assert!(e.store().loaded().orders);
 }
+
+// https://docs.woox.io/#get-orders documents RPI alongside ordinary limit types.
+#[test]
+fn rpi_limit_orders_are_visible_in_the_initial_account_census() {
+    for native in ["LIMIT", "RPI"] {
+        let (mut e, _, mut reads, _) = established_stream();
+        response(&mut e, &take(&mut reads, "accountinfo"), 30.0, INFO);
+        reads.extend(requests(&mut e));
+        response(&mut e, &take(&mut reads, "/v3/positions"), 40.0, POS);
+        let row = ORDER.replace("LIMIT", native);
+        response(&mut e, &take(&mut reads, "/v1/orders?"), 50.0, &page(&row));
+        response(
+            &mut e,
+            &take(&mut reads, "/v3/algo/orders?"),
+            60.0,
+            &algos(""),
+        );
+        assert!(e.store().loaded().orders);
+        let order = e.store().order("9007199254740993").expect(native);
+        assert_eq!(order.kind, safe_cex_engine::model::OrderType::Limit);
+        assert_eq!(order.status, OrderStatus::Open);
+        assert_eq!(order.price, 59000.0);
+        assert_eq!(order.amount, 0.02);
+        assert_eq!(order.filled, 0.005);
+        assert!((order.remaining - 0.015).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn rpi_limit_stream_rows_need_no_previously_known_order_type() {
+    for native in ["LIMIT", "RPI"] {
+        let (mut e, socket, mut reads, _) = established_stream();
+        load(&mut e, &mut reads);
+        let row = ORDER
+            .replace("LIMIT", native)
+            .replace("9007199254740993", "9007199254740994");
+        ws(
+            &mut e,
+            socket,
+            70.0,
+            &format!(r#"{{"topic":"executionreport","data":{row}}}"#),
+        );
+        let order = e.store().order("9007199254740994").expect(native);
+        assert_eq!(order.kind, safe_cex_engine::model::OrderType::Limit);
+        assert_eq!(order.status, OrderStatus::Open);
+        assert_eq!(order.price, 59000.0);
+        assert_eq!(order.filled, 0.005);
+        assert!((order.remaining - 0.015).abs() < 1e-12);
+    }
+}
+
 #[test]
 fn failed_algo_snapshot_preserves_complete_known_orders() {
     let (mut e, socket, mut reads, _) = start();

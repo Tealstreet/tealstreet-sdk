@@ -18,7 +18,6 @@ import { createAPI as createBitgetAPI } from '../reference/bitget/bitget.api';
 import { createAPI as createBitrueAPI } from '../reference/bitrue/bitrue.api';
 import { createAPI as createBitunixAPI } from '../reference/bitunix/bitunix.api';
 import { createAPI as createBlofinAPI } from '../reference/blofin/blofin.api';
-import { createAPI as createBreakoutAPI } from '../reference/breakoutprop/breakoutprop.api';
 import { createAPI as createBybitAPI } from '../reference/bybit/bybit.api';
 import { createAPI as createCoinbaseAPI } from '../reference/coinbase/coinbase.api';
 import { createAPI as createGrvtAPI, createTradingAPI as createGrvtTradingAPI } from '../reference/grvt/grvt.api';
@@ -174,11 +173,6 @@ const venues: Record<string, Venue> = {
   kucoinspot: {
     create: () => createKucoinSpotAPI(publicOnly, exchange),
     write: ['post', '/api/v1/hf/orders'],
-    read: ['get', '/a'],
-  },
-  breakoutprop: {
-    create: () => createBreakoutAPI(publicOnly, exchange),
-    write: ['post', '/orders'],
     read: ['get', '/a'],
   },
   paradex: { create: () => createParadexAPI(publicOnly, exchange), write: ['post', '/orders'] },

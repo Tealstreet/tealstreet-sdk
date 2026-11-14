@@ -4,6 +4,8 @@ use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
 };
+#[path = "trading/pulled_unknown.rs"]
+mod pulled_unknown;
 mod support;
 use safe_cex_venue_weex::WeexFutures;
 use serde_json::{Value, json};
@@ -105,6 +107,129 @@ fn opts(id: &str) -> PlaceOrderOpts {
         bybit_slippage_tolerance_ticks: None,
         implied_volatility: None,
     }
+}
+
+#[test]
+fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
+    use safe_cex_engine::Outcome;
+    for (status, text) in [
+        (429, "{}"),
+        (429, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+        (200, r#"{"code":"429","msg":"Too many requests"}"#),
+        (408, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+        (500, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+        (503, r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#),
+    ] {
+        for operation in ["create", "amend", "amend-replacement", "cancel", "setting"] {
+            for protective in [false, true] {
+                if protective && matches!(operation, "setting" | "amend-replacement") {
+                    continue;
+                }
+                let mut e = engine();
+                let kind = if protective {
+                    OrderType::StopLoss
+                } else {
+                    OrderType::Limit
+                };
+                e.store_mut().upsert_order(order("1", kind));
+                let mut input = opts(if protective { "" } else { "ambiguity" });
+                input.kind = kind;
+                input.side = OrderSide::Sell;
+                input.price = Some(if protective { 58000.0 } else { 60000.0 });
+                input.reduce_only = Some(protective);
+                let cmd = match operation {
+                    "create" => Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![input],
+                    },
+                    "cancel" => Command::CancelOrders {
+                        command: 1,
+                        ids: vec!["1".into()],
+                    },
+                    "setting" => Command::SetLeverage {
+                        command: 1,
+                        symbol: "BTCUSDT".into(),
+                        leverage: 30.0,
+                        side: None,
+                    },
+                    _ => Command::AmendOrder {
+                        command: 1,
+                        id: "1".into(),
+                        price: Some(60000.0),
+                        amount: None,
+                    },
+                };
+                let actions = command(&mut e, cmd);
+                let mut requests = writes(&actions);
+                assert_eq!(requests.len(), 1, "{operation} protective={protective}");
+                let mut request = requests.pop().unwrap();
+                if operation == "amend-replacement" {
+                    let actions =
+                        response(&mut e, &request, json!([{"orderId":"1","success":true}]));
+                    let mut requests = writes(&actions);
+                    assert_eq!(requests.len(), 1, "replacement protective={protective}");
+                    request = requests.pop().unwrap();
+                }
+                e.handle(
+                    1002.0,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: Response {
+                            status,
+                            headers: "",
+                            body: text,
+                        },
+                    },
+                );
+                let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1002.0);
+                let error = failure(&actions);
+                assert_eq!(
+                    error.outcome,
+                    Some(Outcome::Unknown),
+                    "{operation} protective={protective} {status}: {error:?}"
+                );
+                assert_eq!(error.protection, None);
+                assert!(
+                    error.message.to_lowercase().contains("unknown"),
+                    "{operation} {status}: {error:?}"
+                );
+                assert!(
+                    error.message.contains("Check Open Orders"),
+                    "{operation} {status}: {error:?}"
+                );
+                assert!(!error.message.contains("refused"), "{error:?}");
+                assert!(!error.message.contains("no stop"), "{error:?}");
+                assert!(writes(&actions).is_empty(), "no resend or put-back");
+            }
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguity_native_rate_row_says_unknown() {
+    let mut e = engine();
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts("rate-row")],
+        },
+    );
+    let request = writes(&actions).pop().unwrap();
+    let client = body(&request)["batchOrders"][0]["newClientOrderId"].clone();
+    let actions = response(
+        &mut e,
+        &request,
+        json!([{"clientOrderId":client,"success":false,"errorCode":"429","errorMessage":"Too many requests"}]),
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.to_lowercase().contains("unknown"),
+        "{error:?}"
+    );
+    assert!(error.message.contains("Check Open Orders"), "{error:?}");
+    assert!(writes(&actions).is_empty());
 }
 fn order(id: &str, kind: OrderType) -> Order {
     Order {
@@ -265,6 +390,136 @@ fn regular_batches_are_five_sequential_and_correlated_by_echoed_id() {
             .iter()
             .all(|o| o.status == OrderStatus::Open)
     );
+}
+
+#[test]
+fn oversized_orders_send_one_ts_rounded_payload_and_surface_native_refusal() {
+    // TS weex.exchange.ts:1041,1112,926-943 sends one rounded quantity; :1006-1013 throws refusal.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses
+    for (amount, max, step, expected) in [
+        (26.0, 5.0, 1.0, "26"),
+        (11.0, 5.0, 1.0, "11"),
+        (12.0, 5.0, 1.0, "12"),
+        (10.0, 5.0, 1.0, "10"),
+        (7.0, 3.0, 0.5, "7"),
+        (1.0005, 0.3, 0.001, "1.001"),
+    ] {
+        let mut e = engine();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = step;
+            market.limits.amount.max = max;
+        });
+        let mut input = opts("");
+        input.amount = amount;
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![input],
+            },
+        );
+        let requests = writes(&actions);
+        assert_eq!(requests.len(), 1, "amount={amount}, max={max}: {actions:?}");
+        let request = &requests[0];
+        assert!(request.url.ends_with("/capi/v3/batchOrders"));
+        let payload = body(request);
+        let rows = payload["batchOrders"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["quantity"], expected);
+        let sum: f64 = rows
+            .iter()
+            .map(|row| row["quantity"].as_str().unwrap().parse::<f64>().unwrap())
+            .sum();
+        assert_eq!(sum, expected.parse::<f64>().unwrap());
+        let mut expected_payload = json!({
+            "symbol":"BTCUSDT", "side":"BUY", "positionSide":"LONG", "type":"LIMIT",
+            "timeInForce":"GTC", "quantity":expected, "price":"69000"
+        });
+        expected_payload["newClientOrderId"] = rows[0]["newClientOrderId"].clone();
+        assert_eq!(rows[0], expected_payload);
+        let actions = response(
+            &mut e,
+            request,
+            json!([{
+                "clientOrderId":rows[0]["newClientOrderId"], "success":false,
+                "errorCode":"42002", "errorMessage":"Quantity exceeds maximum size"
+            }]),
+        );
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("Quantity exceeds maximum size")
+        );
+        assert!(
+            writes(&actions).is_empty(),
+            "no split or retry after native refusal"
+        );
+        assert_eq!(
+            failure(&actions).outcome,
+            Some(safe_cex_engine::Outcome::Rejected)
+        );
+        assert!(e.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn oversized_unbatched_orders_keep_one_payload_per_ts_endpoint() {
+    // TS weex.exchange.ts:558-575,1041,1058,1086,1112 sends one payload for each kind.
+    // KNOWN-ISSUE: TS sends above-max; venue refuses
+    for (kind, endpoint) in [
+        (OrderType::Market, "/capi/v3/order"),
+        (OrderType::Conditional, "/capi/v3/algoOrder"),
+        (OrderType::StopLoss, "/capi/v3/placeTpSlOrder"),
+        (OrderType::TakeProfit, "/capi/v3/placeTpSlOrder"),
+    ] {
+        let mut e = engine();
+        e.store_mut().update_markets(|market| {
+            market.precision.amount = 1.0;
+            market.limits.amount.max = 5.0;
+        });
+        let mut input = opts("");
+        input.kind = kind;
+        input.amount = 26.0;
+        input.reduce_only = Some(kind != OrderType::Conditional);
+        input.trigger_price = (kind == OrderType::Conditional).then_some(68000.0);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![input],
+            },
+        );
+        let requests = writes(&actions);
+        assert_eq!(requests.len(), 1, "{kind:?}: {actions:?}");
+        let request = &requests[0];
+        assert!(request.url.ends_with(endpoint));
+        let payload = body(request);
+        assert_eq!(payload["quantity"], "26");
+        assert!(payload.get("batchOrders").is_none());
+        let quantities = [payload["quantity"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()];
+        assert_eq!(quantities, [26.0]);
+        let sum: f64 = quantities.iter().sum();
+        assert_eq!(sum, 26.0);
+        let client = payload
+            .get("newClientOrderId")
+            .unwrap_or(&payload["clientAlgoId"]);
+        let actions = response(
+            &mut e,
+            request,
+            json!({"clientOrderId":client, "success":false,
+                "errorCode":"42002", "errorMessage":"Quantity exceeds maximum size"}),
+        );
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("Quantity exceeds maximum size")
+        );
+        assert!(writes(&actions).is_empty());
+    }
 }
 #[test]
 fn every_caller_id_is_preflighted_before_any_write() {
@@ -1785,7 +2040,7 @@ fn weex_unknown_or_rejected_targeted_mode_does_not_emit_other_symbol_writes() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_native_text_with_unknown_guidance() {
     use safe_cex_engine::{ErrorKind, Outcome};
     for (status, body, kind, outcome) in [
         (
@@ -1835,7 +2090,10 @@ fn write_failures_are_classified_without_changing_their_text() {
                 "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
         } else {
-            assert_eq!(error.message, format!("HTTP {status}: {body}"));
+            assert_eq!(
+                error.message,
+                format!("HTTP {status}: {body}. The outcome is unknown. Check Open Orders")
+            );
         }
         assert_eq!(
             (error.kind, error.outcome),

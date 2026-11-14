@@ -270,18 +270,20 @@ test('books preserve section order, empty sides and shared transferred row views
 function positionFrame(withIds) {
   const strings = stringFrame(['BTCUSDC', 'BTCUSDC:isolated']).buffer;
   const prefix = (strings.byteLength + 7) & ~7;
-  const count = 2, data = 24, length = data + 9 * count * 8 + (withIds ? 8 : 0);
+  const count = 2, data = 24, length = data + (withIds ? 11 : 9) * count * 8 + (withIds ? 16 : 0);
   const buffer = new ArrayBuffer(prefix + 8 + length + 24);
   new Uint8Array(buffer).set(new Uint8Array(strings));
   const view = new DataView(buffer);
   view.setUint16(6, 3, true);
   view.setUint32(20, prefix - 24, true);
   view.setUint16(prefix, SECTION.POSITIONS, true);
+  view.setUint16(prefix + 2, withIds ? 2 : 0, true);
   view.setUint32(prefix + 4, length, true);
   view.setUint32(prefix + 8, count, true);
   if (withIds) {
-    view.setUint32(prefix + 8 + data + 144, 0, true);
-    view.setUint32(prefix + 8 + data + 148, 1, true);
+    for (let i = 0; i < count; i++) view.setFloat64(prefix + 8 + data + count * 48 + i * 8, 80, true);
+    view.setUint32(prefix + 8 + data + 176, 0, true);
+    view.setUint32(prefix + 8 + data + 180, 1, true);
   }
   const status = prefix + 8 + length;
   view.setUint16(status, SECTION.STATUS, true);
@@ -296,9 +298,72 @@ test('position IDs survive transfer and legacy frames never read the next sectio
   assert.equal(frame.positions().id(1), 'BTCUSDC:isolated');
   assert.equal(frame.status().loaded, 31);
   const legacy = positionFrame(false);
-  assert.equal(legacy.positions().id(0), undefined);
-  assert.equal(legacy.positions().id(1), undefined);
+  assert.throws(() => legacy.positions(), /unsupported POSITIONS revision/);
   assert.equal(legacy.status().loaded, 31);
+});
+
+test('Position revision two decodes null and absence but refuses invalid native display values', () => {
+  const frame = positionFrame(true);
+  const start = frame.first(SECTION.POSITIONS).offset + 24;
+  const view = new DataView(frame.buffer);
+  view.setFloat64(start + 6 * 16, NaN, true);
+  view.setFloat64(start + 4 * 16, NaN, true);
+  assert.equal(frame.positions().liquidationPrice[0], null);
+  assert.equal(frame.positions().realizedPnl[0], undefined);
+  for (const [column, bit, key] of [[9, 24, 'contractsNative'], [10, 25, 'unrealizedPnlNative']]) {
+    for (const value of [NaN, Infinity, -Infinity]) {
+      const badNative = positionFrame(true);
+      const section = badNative.first(SECTION.POSITIONS);
+      const nativeView = new DataView(badNative.buffer);
+      nativeView.setUint32(section.offset + 12, 1 << bit, true);
+      nativeView.setFloat64(section.offset + 24 + column * 16, value, true);
+      assert.throws(() => badNative.positions(), new RegExp(`invalid Position ${key}`));
+      nativeView.setUint32(section.offset + 12, 0, true);
+      assert.equal(badNative.positions()[key][0], undefined);
+    }
+  }
+  for (const [column, value] of [[2, Infinity], [3, NaN], [4, Infinity], [6, 0], [6, -1], [6, Infinity]]) {
+    const bad = positionFrame(true);
+    new DataView(bad.buffer).setFloat64(bad.first(SECTION.POSITIONS).offset + 24 + column * 16, value, true);
+    assert.throws(() => bad.positions(), /invalid Position/);
+  }
+});
+
+test('Position numeric matrix matches Rust ingress for all eleven columns and presence states', () => {
+  // Keep this acceptance table in sync with position_frame_numeric_matrix_matches_js_decoder.
+  const values = [1, 0, -0, -1, NaN, Infinity, -Infinity];
+  const raw = [true, true, true, true, true, true, true];
+  const finite = [true, true, true, true, false, false, false];
+  const optional = [true, true, true, true, true, false, false];
+  const liquidation = [true, false, false, false, true, false, false];
+  const fields = [
+    ['entryPrice', raw], ['notional', raw], ['leverage', finite],
+    ['unrealizedPnl', finite], ['realizedPnl', optional], ['contracts', raw],
+    ['liquidationPrice', liquidation], ['marginSize', optional],
+    ['lastUpdate', optional], ['contractsNative', finite], ['unrealizedPnlNative', finite],
+  ];
+  for (const presence of [0, 3]) {
+    fields.forEach(([key, allowed], column) => {
+      values.forEach((value, index) => {
+        const frame = positionFrame(true);
+        const section = frame.first(SECTION.POSITIONS);
+        const view = new DataView(frame.buffer);
+        view.setUint32(section.offset + 12, presence << 24, true);
+        view.setFloat64(section.offset + 24 + column * 16, value, true);
+        const accepted = allowed[index] || (column >= 9 && presence === 0);
+        const label = `${key}=${value}, presence=${presence}`;
+        if (accepted) {
+          const decoded = frame.positions()[key][0];
+          const expected = column >= 9 && presence === 0 ? undefined
+            : Number.isNaN(value) && column === 6 ? null
+            : Number.isNaN(value) && [4, 7, 8].includes(column) ? undefined : value;
+          assert.equal(decoded, expected, label);
+        } else {
+          assert.throws(() => frame.positions(), { message: `invalid Position ${key}` }, label);
+        }
+      });
+    });
+  }
 });
 
 function balanceFrame(coins, currencies) {
@@ -586,12 +651,12 @@ test('frame envelope refuses truncated section headers, payloads and trailing by
 
 const revisedTable = (kind, count = 2) => {
   const data = Math.ceil((4 + count * ({ [SECTION.MARKETS]: 20, [SECTION.TICKERS]: 4, [SECTION.ORDERS]: 20, [SECTION.POSITIONS]: 8, [SECTION.SETTINGS]: 8, [SECTION.FILLS]: 12 }[kind])) / 8) * 8;
-  const bytes = { [SECTION.MARKETS]: 84, [SECTION.TICKERS]: 104, [SECTION.ORDERS]: 96, [SECTION.POSITIONS]: 80, [SECTION.SETTINGS]: 28, [SECTION.FILLS]: 20 }[kind];
-  return { kind, revision: 1, length: data + count * bytes,
+  const bytes = { [SECTION.MARKETS]: 84, [SECTION.TICKERS]: 104, [SECTION.ORDERS]: 96, [SECTION.POSITIONS]: 96, [SECTION.SETTINGS]: 28, [SECTION.FILLS]: 20 }[kind];
+  return { kind, revision: kind === SECTION.POSITIONS ? 2 : 1, length: data + count * bytes,
     write(view, offset) {
       view.setUint32(offset, count, true);
       for (let i = 0; i < count; i++) {
-        const symbols = { [SECTION.MARKETS]: 80, [SECTION.TICKERS]: 96, [SECTION.ORDERS]: 92, [SECTION.POSITIONS]: 76, [SECTION.SETTINGS]: 24, [SECTION.FILLS]: 16 }[kind];
+        const symbols = { [SECTION.MARKETS]: 80, [SECTION.TICKERS]: 96, [SECTION.ORDERS]: 92, [SECTION.POSITIONS]: 92, [SECTION.SETTINGS]: 24, [SECTION.FILLS]: 16 }[kind];
         view.setUint32(offset + data + count * symbols + i * 4, i, true);
         if (kind === SECTION.TICKERS) {
           view.setFloat64(offset + data + count * 88 + i * 8, 100 + i, true);
@@ -604,7 +669,10 @@ const revisedTable = (kind, count = 2) => {
           view.setFloat64(offset + data + count * 80 + i * 8, 101 + i, true);
           view.setUint32(offset + data + count * 88 + i * 4, i ? 0xffff : 1 | (3 << 8), true);
         }
-        if (kind === SECTION.POSITIONS) view.setUint32(offset + data + count * 72 + i * 4, i, true);
+        if (kind === SECTION.POSITIONS) {
+          view.setFloat64(offset + data + count * 48 + i * 8, 80, true);
+          view.setUint32(offset + data + count * 88 + i * 4, i, true);
+        }
       }
     },
   };
@@ -624,7 +692,7 @@ test('writer-required references reject NONE while preserving explicit empty str
   };
   add(revisedTable(SECTION.MARKETS, 1), 'markets', { id: 4, symbol: 8, base: 12, quote: 16 });
   add(revisedTable(SECTION.ORDERS, 1), 'orders', { id: 4, symbol: 116 });
-  add(revisedTable(SECTION.POSITIONS, 1), 'positions', { id: 88, symbol: 92 });
+  add(revisedTable(SECTION.POSITIONS, 1), 'positions', { id: 104, symbol: 108 });
   add(revisedTable(SECTION.SETTINGS, 1), 'settings', { symbol: 40 });
   add(revisedTable(SECTION.FILLS, 1), 'fills', { orderId: 4, symbol: 32 });
   const metadata = (kind, length) => ({ kind, length,
@@ -681,7 +749,7 @@ test('optional NONE references remain absent independently of required identitie
   assert.equal(products.underlying(0), '');
   for (const field of ['settleAsset', 'premiumAsset', 'style', 'settlement']) assert.equal(products[field](0), undefined);
   const legacy = positionFrame(false);
-  assert.equal(legacy.positions().id(0), undefined);
+  assert.throws(() => legacy.positions(), /unsupported POSITIONS revision/);
 });
 
 test('revision one preserves pretty symbols, independent order fields and orphan symbols', () => {
@@ -724,12 +792,12 @@ test('revised table extensions cannot borrow bytes from a later section', () => 
     const original = numericFrame([table]);
     const section = original.sections[0];
     for (const count of [0, 2]) {
-      const bad = numericFrame([{ kind, revision: 1, length: count ? table.length - 8 : 0,
+      const bad = numericFrame([{ kind, revision: table.revision, length: count ? table.length - 8 : 0,
         write(view, offset) { if (count) view.setUint32(offset, 2, true); } },
       { kind: SECTION.STATUS, length: 512, write() {} }]);
       assert.throws(() => bad[reader](), /truncated/, `${reader} truncated extension`);
     }
-    assert.equal(section.revision, 1);
+    assert.equal(section.revision, table.revision);
   }
 });
 
@@ -867,7 +935,7 @@ test('legacy ticker tables omit mid-price and delta revisions bound their masks 
 test('legacy tables and metadata cannot borrow required fields from a following section', () => {
   const readers = new Map([[SECTION.MARKETS, 'markets'], [SECTION.TICKERS, 'tickers'], [SECTION.ORDERS, 'orders'], [SECTION.POSITIONS, 'positions'], [SECTION.SETTINGS, 'settings'], [SECTION.FILLS, 'fills'], [SECTION.CANDLES, 'candles'], [SECTION.BALANCE, 'balance'], [SECTION.STATUS, 'status'], [SECTION.PREDICTION_MARKETS, 'predictionMarkets'], [SECTION.PREDICTION_HOLDINGS, 'predictionHoldings'], [SECTION.INSTRUMENT_CLASSIFICATIONS, 'instrumentClassifications'], [SECTION.DERIVATIVE_PRODUCTS, 'derivativeProducts'], [SECTION.POSITION_GREEKS, 'positionGreeks']]);
   for (const [kind, reader] of readers) {
-    const frame = numericFrame([{ kind, length: 8, write(view, offset) { view.setUint32(offset, 3, true); } },
+    const frame = numericFrame([{ kind, revision: kind === SECTION.POSITIONS ? 2 : 0, length: 8, write(view, offset) { view.setUint32(offset, 3, true); } },
       { kind: 4000, length: 1024, write() {} }]);
     assert.throws(() => frame[reader](), /truncated/i, reader);
   }

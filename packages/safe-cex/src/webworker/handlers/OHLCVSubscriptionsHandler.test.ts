@@ -88,6 +88,7 @@ describe('OHLCVSubscriptionsHandler', () => {
         expect(mockListenOHLCV).toHaveBeenCalledWith(
           { subId: 'sub-1', symbol: 'BTCUSDT', interval: '1h' },
           expect.any(Function),
+          expect.any(Function),
         );
       });
 
@@ -97,6 +98,7 @@ describe('OHLCVSubscriptionsHandler', () => {
         handler.handle({ op: 'subscribeOHLCV', data: { subId: 'a', symbol: 'BTCUSDT', interval: '1h', reset: true } });
         expect(mockListenOHLCV).toHaveBeenCalledWith(
           { subId: 'a', symbol: 'BTCUSDT', interval: '1h' },
+          expect.any(Function),
           expect.any(Function),
         );
         handler.handle({ op: 'subscribeOHLCV', data: { subId: 'b', symbol: 'BTCUSDT', interval: '1h', reset: true } });

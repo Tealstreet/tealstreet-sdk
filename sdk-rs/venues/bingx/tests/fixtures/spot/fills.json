@@ -1,0 +1,21 @@
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "fills": [
+      {
+        "symbol": "BTC-USDT",
+        "id": 36767057,
+        "orderId": 1745362930595004416,
+        "price": "46820.155",
+        "qty": "0.1430254",
+        "quoteQty": "6696.471396937",
+        "commission": -4.6483255e-05,
+        "commissionAsset": "BTC",
+        "time": 1704961925000,
+        "isBuyer": true,
+        "isMaker": false
+      }
+    ]
+  }
+}

@@ -24,7 +24,7 @@ const setup = (max = 100) => {
         active: true,
         precision: { amount: 0.001, price: 0.1 },
         limits: { amount: { min: 0.001, max }, leverage: { min: 1, max: 100 } },
-      } as Market,
+      } satisfies Market,
     ],
   });
   const exchange = new TestHyroExchange('hyrotrader', { key: 'key', secret: 'secret' }, store);

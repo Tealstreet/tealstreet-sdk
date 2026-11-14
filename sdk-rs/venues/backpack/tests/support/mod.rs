@@ -2,6 +2,7 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_backpack::{Backpack, Options};
 pub type Driver = Engine<Backpack>;
+pub mod hosted_parity;
 pub mod managed;
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
 pub fn jittered(actual: f64, nominal: f64) -> bool {
@@ -122,7 +123,11 @@ fn ready_snapshot(
         secret: Some(secret),
         recv_window: auth_window.map(|w| w.0),
     }));
-    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_signer(Some(std::sync::Arc::new(hosted_parity::Parity {
+        local: provider,
+        ids: identities.clone(),
+    })))
+    .unwrap();
     e.set_identities(identities).unwrap();
     e.start(1000.0);
     let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
@@ -236,7 +241,10 @@ pub fn configured_account(mut options: Options) -> Driver {
     options.read_identity = identities.secondary.clone();
     let mut engine = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
     engine
-        .set_signer(Some(std::sync::Arc::new(provider)))
+        .set_signer(Some(std::sync::Arc::new(hosted_parity::Parity {
+            local: provider,
+            ids: identities.clone(),
+        })))
         .unwrap();
     engine.set_identities(identities).unwrap();
     engine

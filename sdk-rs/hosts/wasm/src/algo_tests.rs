@@ -228,6 +228,159 @@ fn placements(commands: &RefCell<Vec<Command>>) -> Vec<CommandId> {
 
 const BUY_ONE: &str = r#"{"symbol":"BTCUSDT","size":1,"side":"buy","maxAttempts":10,"delay":0}"#;
 
+fn saved_twap() -> Value {
+    serde_json::json!({"id":"saved", "options": {
+        "accountName":"acct", "activeMarket":{"symbol":"BTCUSDT"}, "size":1,
+        "duration":0.5, "ordersCount":2, "side":"buy", "randomnessPercentage":0
+    }, "state": {
+        "accountName":"acct", "activeMarket":{"symbol":"BTCUSDT"}, "size":1,
+        "ordersSizes":[0.5], "side":"buy", "status":"running", "ordersCount":2,
+        "ordersExecuted":1, "nextOrderAt": WALL + 100.0
+    }})
+}
+
+#[test]
+fn legacy_algo_start_resumes_untagged_saved_twaps_without_backfilling_owner() {
+    let (mut engine, commands) = engine();
+    engine.algo_start("acct", 0.0, WALL).unwrap();
+    engine
+        .algo_op(
+            "twap:state",
+            &serde_json::json!([saved_twap()]).to_string(),
+            0.0,
+            WALL,
+        )
+        .unwrap();
+    let rows = emits(&mut engine);
+    let saved = rows
+        .iter()
+        .find(|row| row["op"] == "twap:stateUpdate")
+        .expect("saved TWAP adopted");
+    assert!(saved["data"]["saved"].get("ownerId").is_none());
+    assert!(saved["data"]["saved"].get("ownerGeneration").is_none());
+    engine.algo_advance(101.0, WALL + 101.0);
+    assert_eq!(placements(&commands).len(), 1);
+}
+
+#[test]
+fn bound_algo_start_resumes_only_the_original_owner_and_generation() {
+    for case in ["same", "foreign", "stale", "untagged"] {
+        let (mut source, source_commands) = engine();
+        source
+            .algo_start_owned("acct", r#"{"ownerId":"A","generation":7}"#, 0.0, WALL)
+            .unwrap();
+        let options = saved_twap()["options"].clone();
+        source
+            .algo_op("twap:start", &options.to_string(), 0.0, WALL)
+            .unwrap();
+        assert_eq!(placements(&source_commands).len(), 1);
+        let rows = emits(&mut source);
+        let state = rows
+            .iter()
+            .rev()
+            .find(|row| row["op"] == "twap:stateUpdate")
+            .unwrap();
+        let (id, state) = state["data"].as_object().unwrap().iter().next().unwrap();
+        assert_eq!(state["ownerId"], "A");
+        assert_eq!(state["ownerGeneration"], 7);
+        let mut row = state.clone();
+        row["id"] = Value::from(id.clone());
+        if case == "untagged" {
+            row.as_object_mut().unwrap().remove("ownerId");
+            row.as_object_mut().unwrap().remove("ownerGeneration");
+        }
+        source.algo_dispose(0.0, WALL, Some("owner retired".into()));
+        let (mut target, commands) = engine();
+        target
+            .algo_start_owned(
+                "acct",
+                &serde_json::json!({"ownerId":if case == "foreign" { "B" } else { "A" }, "generation":if case == "stale" { 8 } else { 7 }}).to_string(),
+                0.0,
+                WALL,
+            )
+            .unwrap();
+        target
+            .algo_op(
+                "twap:state",
+                &serde_json::json!([row]).to_string(),
+                0.0,
+                WALL,
+            )
+            .unwrap();
+        let rows = emits(&mut target);
+        if case != "same" {
+            assert!(
+                rows.iter().any(|row| row["op"] == "error"
+                    && row["data"].as_str().is_some_and(|message| message
+                        .contains("persisted TWAP owner or generation does not match"))),
+                "{case}: {rows:?}"
+            );
+        }
+        target.algo_advance(15_001.0, WALL + 15_001.0);
+        assert_eq!(
+            placements(&commands).len(),
+            usize::from(case == "same"),
+            "{case}"
+        );
+        assert_eq!(
+            placements(&source_commands).len(),
+            1,
+            "retired A must stay stopped"
+        );
+    }
+}
+
+#[test]
+fn an_unowned_start_runs_algos_and_refuses_every_restore_visibly() {
+    let (mut source, _) = engine();
+    source
+        .algo_start_owned("acct", r#"{"ownerId":"A","generation":7}"#, 0.0, WALL)
+        .unwrap();
+    let options = saved_twap()["options"].clone();
+    source
+        .algo_op("twap:start", &options.to_string(), 0.0, WALL)
+        .unwrap();
+    let rows = emits(&mut source);
+    let state = rows
+        .iter()
+        .rev()
+        .find(|row| row["op"] == "twap:stateUpdate")
+        .unwrap();
+    let (id, state) = state["data"].as_object().unwrap().iter().next().unwrap();
+    let mut row = state.clone();
+    row["id"] = Value::from(id.clone());
+    source.algo_dispose(0.0, WALL, Some("owner retired".into()));
+    // The host's owner hook has no owner yet: the account still starts its algos.
+    let (mut target, commands) = engine();
+    target.algo_start_unowned("acct", 0.0, WALL).unwrap();
+    target
+        .algo_op(
+            "twap:state",
+            &serde_json::json!([row]).to_string(),
+            0.0,
+            WALL,
+        )
+        .unwrap();
+    let rows = emits(&mut target);
+    assert!(
+        rows.iter().any(|row| row["op"] == "error"
+            && row["data"]
+                .as_str()
+                .is_some_and(|message| message.contains("current TWAP owner is unavailable"))),
+        "{rows:?}"
+    );
+    target.algo_advance(15_001.0, WALL + 15_001.0);
+    assert!(
+        placements(&commands).is_empty(),
+        "no slice before an owner exists"
+    );
+    // New algo work still runs while the owner is unavailable.
+    target
+        .algo_op("twap:start", &options.to_string(), 0.0, WALL + 15_001.0)
+        .unwrap();
+    assert_eq!(placements(&commands).len(), 1);
+}
+
 #[test]
 fn a_chase_places_through_the_engine_and_completes_on_its_fill() {
     let (mut engine, commands) = engine();

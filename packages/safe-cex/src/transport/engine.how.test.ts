@@ -93,7 +93,6 @@ describe('engine through the real HOW package', () => {
     ['bybit', { tealstreetTunnel: true, proxyRegion: 'JA' }, TOKYO_HOW_EGRESS],
     ['bybit', { tealstreetTunnel: true, proxyRegion: 'SG' }, SINGAPORE_HOW_EGRESS],
     ['okx', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
-    ['breakoutprop', { tealstreetTunnel: true }, TOKYO_HOW_EGRESS],
     ['kodiakfi', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
     ['mode', { tealstreetTunnel: true, testnet: true }, SINGAPORE_HOW_EGRESS],
     ['what', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
@@ -116,8 +115,7 @@ describe('engine through the real HOW package', () => {
     const body = ' {"id":900719925474099312345, "price":1.2300}\n';
     const headers = {
       'Content-Type': 'application/json',
-      [exchange === 'breakoutprop' ? 'Authorization' : orderly ? 'orderly-signature' : 'X-Venue-Signature']:
-        exchange === 'breakoutprop' ? 'DXAPI documented-session' : 'signed',
+      [orderly ? 'orderly-signature' : 'X-Venue-Signature']: 'signed',
     };
     const response = await route.request({
       method: 'POST',

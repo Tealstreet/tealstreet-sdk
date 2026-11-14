@@ -1,6 +1,6 @@
 // REST for a tunnel account while this realm's tunnel is unreachable on 8443 and 443:
 // new requests take the HTTP proxy (same fleet egress), prepared ones keep the tunnel.
-import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { TunnelProxyFallbackNotice } from './engine';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,11 @@ import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 const tunnels = vi.hoisted(() => [] as Array<Array<Record<string, any>>>);
 // false: the tunnel socket cannot open, so a preparation waits in readiness.
 const tunnelSocket = vi.hoisted(() => ({ open: true }));
-const tunnelReply = vi.hoisted(() => ({ data: '{"via":"tunnel"}', headers: {} as Record<string, string> }));
+const tunnelReply = vi.hoisted(() => ({
+  status: 200,
+  data: '{"via":"tunnel"}',
+  headers: {} as Record<string, string>,
+}));
 
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
   HOWWebSocket: class {
@@ -48,7 +52,11 @@ vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
     send(message: Record<string, any>) {
       this.sent.push(message);
       queueMicrotask(() => {
-        this.listeners.get(`sub:${message.nonce}`)?.({ status: 200, data_raw: tunnelReply.data, headers: tunnelReply.headers });
+        this.listeners.get(`sub:${message.nonce}`)?.({
+          status: tunnelReply.status,
+          data_raw: tunnelReply.data,
+          headers: tunnelReply.headers,
+        });
         this.listeners.delete(`sub:${message.nonce}`);
       });
     }
@@ -67,7 +75,7 @@ vi.mock('../accessToken', () => ({
 const PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/';
 const proxied = { status: 200, headers: '', body: new TextEncoder().encode('{"via":"proxy"}') };
 
-const rawTransport = () => {
+const rawTransport = (reply: HttpResponse = proxied) => {
   const dispatched: Array<{ url: string; headers: Record<string, string>; body?: unknown }> = [];
   const raw: Transport = {
     now: () => 0,
@@ -76,14 +84,14 @@ const rawTransport = () => {
     connect: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
     request: vi.fn(async (request) => {
       dispatched.push(request);
-      return proxied;
+      return reply;
     }),
     prepareHttp: vi.fn((prepare) => ({
       bind: (network: any) => ({
         ready: () => true,
         dispatch: async () => {
           dispatched.push({ ...network, url: network.url ?? prepare.url });
-          return proxied;
+          return reply;
         },
         cancel: () => undefined,
       }),
@@ -94,7 +102,12 @@ const rawTransport = () => {
 };
 
 const tunnelSent = () => tunnels.flat().filter((frame) => frame.type === 'rpc.http');
-const body = async (response: { body: unknown }) => new TextDecoder().decode(response.body as Uint8Array);
+const body = async (response: HttpResponse) => {
+  if (response.body instanceof Uint8Array) return new TextDecoder().decode(response.body);
+  let text = '';
+  for await (const chunk of response.body) text += new TextDecoder().decode(chunk);
+  return text;
+};
 
 /** Two failed 8443 handshakes move the lane to 443; two more there make the tunnel unreachable. */
 const tunnelGoesDown = () => {
@@ -117,6 +130,7 @@ const bybitTunnel = (raw: Transport, notices: TunnelProxyFallbackNotice[] = []) 
 
 beforeEach(() => {
   tunnelSocket.open = true;
+  tunnelReply.status = 200;
   tunnelReply.data = '{"via":"tunnel"}';
   tunnelReply.headers = {};
   resetTunnelLane(true);
@@ -128,13 +142,139 @@ afterEach(() => {
 });
 
 describe('REST while the tunnel is unreachable', () => {
+  const replies = [
+    { status: 429, text: '', limited: true },
+    { status: 429, text: '<html>Too many requests</html>', limited: true },
+    { status: 429, text: '{"retCode":10001}', limited: true },
+    { status: 429, text: '{"retCode":10006}', limited: true },
+    { status: 200, text: '{"retCode":10006}', limited: true },
+    { status: 200, text: '{"retCode":10001}', limited: false },
+    { status: 503, text: 'unavailable', limited: false },
+  ];
+  const cases = replies.flatMap((reply) =>
+    [false, true].flatMap((managed) =>
+      ['tunnel', 'buffered fallback', 'streamed fallback'].map((via) => ({ ...reply, managed, via })),
+    ),
+  );
+  it.each(cases)(
+    'observes $status/$text via $via (managed=$managed) exactly once',
+    async ({ status, text, limited, managed, via }) => {
+      tunnelReply.status = status;
+      tunnelReply.data = text;
+      const bytes = new TextEncoder().encode(text);
+      const { raw, dispatched } = rawTransport({
+        status,
+        headers: '',
+        body:
+          via === 'streamed fallback'
+            ? (async function* () {
+                yield bytes.subarray(0, 10);
+                yield bytes.subarray(10);
+              })()
+            : bytes,
+      });
+      const report = vi.fn();
+      const route = createEngineTransport(
+        'bybit',
+        { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
+        raw,
+        undefined,
+        undefined,
+        undefined,
+        report,
+      );
+      const packet = {
+        request: 1,
+        method: 'GET',
+        url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1',
+        headers: {},
+        intent: 'public' as const,
+      };
+      try {
+        if (via !== 'tunnel') tunnelGoesDown();
+        const reply = managed
+          ? await (await route.prepareHttp!(packet)).bind(packet).dispatch()
+          : await route.request(packet);
+        expect(reply.status).toBe(status);
+        expect(await body(reply)).toBe(text);
+        if (limited)
+          expect(report).toHaveBeenCalledExactlyOnceWith({
+            retCode: status === 429 ? undefined : 10006,
+            httpStatus: status === 429 ? 429 : undefined,
+            egress: 'unknown',
+            target: 'unknown',
+          });
+        else expect(report).not.toHaveBeenCalled();
+        expect(tunnelSent()).toHaveLength(via === 'tunnel' ? 1 : 0);
+        expect(dispatched).toHaveLength(via === 'tunnel' ? 0 : 1);
+      } finally {
+        route.dispose!();
+      }
+    },
+  );
+
+  it('reports public 10006 on the HTTP proxy fallback without reissuing the read', async () => {
+    const text = '{"retCode":10006,"retMsg":"Too many visits"}';
+    const { raw, dispatched } = rawTransport({
+      status: 200,
+      headers: 'x-tealstreet-egress: proxy-02\nx-bapi-limit-status: 0',
+      body: new TextEncoder().encode(text),
+    });
+    const report = vi.fn();
+    const route = createEngineTransport(
+      'bybit',
+      { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
+      raw,
+      undefined,
+      undefined,
+      undefined,
+      report,
+    );
+    tunnelGoesDown();
+    const packet = {
+      request: 1,
+      method: 'GET',
+      url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1',
+      headers: {},
+      intent: 'public' as const,
+    };
+    try {
+      const reply = await (await route.prepareHttp!(packet)).bind(packet).dispatch();
+      expect(await body(reply)).toBe(text);
+      expect(report).toHaveBeenCalledExactlyOnceWith({
+        retCode: 10006,
+        egress: 'proxy-02',
+        target: 'unknown',
+        remaining: '0',
+      });
+      expect(dispatched.map((request) => request.url)).toEqual([`${PROXY}${packet.url}`]);
+      expect(tunnelSent()).toHaveLength(0);
+    } finally {
+      route.dispose!();
+    }
+  });
+
   it('captures 10006 headers after genuine managed HOW bind and dispatch, excluding private intent', async () => {
     tunnelReply.data = '{"retCode":10006,"retMsg":"Too many visits"}';
     tunnelReply.headers = { 'x-tealstreet-egress': 'node-a', 'x-bapi-limit-status': '0' };
     const report = vi.fn();
     const { raw } = rawTransport();
-    const route = createEngineTransport('bybitinverse', { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true }, raw, undefined, undefined, undefined, report);
-    const packet = { request: 1, method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=inverse&symbol=BTCUSD&interval=1', headers: {}, intent: 'public' as const };
+    const route = createEngineTransport(
+      'bybitinverse',
+      { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
+      raw,
+      undefined,
+      undefined,
+      undefined,
+      report,
+    );
+    const packet = {
+      request: 1,
+      method: 'GET',
+      url: 'https://api.bybit.com/v5/market/kline?category=inverse&symbol=BTCUSD&interval=1',
+      headers: {},
+      intent: 'public' as const,
+    };
     try {
       const bound = (await route.prepareHttp!(packet)).bind(packet);
       expect(report).not.toHaveBeenCalled();
@@ -142,11 +282,18 @@ describe('REST while the tunnel is unreachable', () => {
       const response = await bound.dispatch();
       expect(await body(response)).toBe(tunnelReply.data);
       expect(report).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ egress: 'node-a', remaining: '0' }));
-      const privatePacket = { ...packet, request: 2, intent: 'primary' as const, headers: { 'X-BAPI-API-KEY': 'private' } };
+      const privatePacket = {
+        ...packet,
+        request: 2,
+        intent: 'primary' as const,
+        headers: { 'X-BAPI-API-KEY': 'private' },
+      };
       await (await route.prepareHttp!(privatePacket)).bind(privatePacket).dispatch();
       expect(report).toHaveBeenCalledTimes(1);
       expect(tunnelSent()).toHaveLength(2);
-    } finally { route.dispose!(); }
+    } finally {
+      route.dispose!();
+    }
   });
 
   it('stays on the tunnel while the tunnel is reachable', async () => {

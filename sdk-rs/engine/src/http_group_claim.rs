@@ -122,7 +122,11 @@ impl<V: Venue> Engine<V> {
                 .get(&request)
                 .expect("checked member");
             let result = managed
-                .validate(&self.io.core.request_contexts, now)
+                .validate_send(
+                    &self.io.core.request_contexts,
+                    now,
+                    self.io.core.signing.provider_floor(),
+                )
                 .and_then(|()| {
                     managed
                         .lifecycle

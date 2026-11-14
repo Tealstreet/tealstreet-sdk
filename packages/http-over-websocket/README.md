@@ -35,3 +35,18 @@ outcome unknown and is never an instruction to replay the write.
 Run `yarn test` here; the JSON fixtures in `src/requestBudget.fixtures.json` also
 serve the Rust parity tests. Rust's `sdk-rs/scripts/check-bans.sh` remains the CI
 gate against unbounded native socket opens/writes.
+
+## Relay keepalive and reconnect diagnostics
+
+HOW keeps its existing 5-second RPC heartbeat and 25-second pong silence
+recovery. After the relay handshake, Node/Bun sockets use native WebSocket
+ping/pong every 15 seconds, with a 45-second receive silence deadline checked
+on timers and ingress. Cleanup removes both the timer and pong listener.
+Browsers retain the venue heartbeat; relay RPC is never injected into the
+upstream application stream.
+
+Routine reconnect diagnostics use info output. The CLI retains them in
+`cli.log` only; repeated failures, exhausted retries and authentication errors
+remain visible. URL providers are never printed, and resolved URL diagnostics
+omit queries, credentials and fragments. Socket debug output omits outgoing
+frames and protocols.

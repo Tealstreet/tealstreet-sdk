@@ -1,4 +1,5 @@
-import type { ExchangeAccountConfig, ExchangeName } from '../types';
+import type { ExchangeAccountConfig } from '../generated/ExchangeAccountConfig';
+import type { ExchangeName } from '../types';
 
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { normalizeBybitSiteId } from '../exchanges/bybit/bybit.site';
@@ -158,8 +159,9 @@ export function buildExchangeAccountConfig(input: ExchangeAccountCredentialInput
   };
 
   const schema = getExchangeAccountCredentialSchema(exchange);
-  const missingFields = ['name', ...(schema?.requiredFields || [])].filter((field) => {
-    const value = account[field as keyof ExchangeAccountConfig];
+  const requiredFields: (keyof ExchangeAccountConfig)[] = ['name', ...(schema?.requiredFields || [])];
+  const missingFields = requiredFields.filter((field) => {
+    const value = account[field];
     return typeof value === 'string' ? !value.trim() : !value;
   });
 

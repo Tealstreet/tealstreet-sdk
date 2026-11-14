@@ -85,6 +85,10 @@ def modes():
         features = resolved.pop()
         closures[family] = features
         grouped.setdefault(features, []).append(family)
+    if 'plan-element-reports' not in closures['bybit']:
+        raise RuntimeError('Bybit must retain passive Plan element reports')
+    if 'plan-element-reports' in closures['kucoinspot']:
+        raise RuntimeError('KuCoin Spot must not link Bybit-only Plan element reporting')
     if not any('http-plans' in flags for flags in closures.values()):
         raise RuntimeError('expected at least one Plan-enabled family closure')
     return closures, grouped

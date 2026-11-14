@@ -517,6 +517,22 @@ describe('place_stop_loss', () => {
 });
 
 describe('amend_order', () => {
+  it('refuses a size amend when the native remaining size is unknown', () => {
+    const result = resolve(plan({ kind: 'amend_order', account: 'binance-main', orderId: 'o1', amount: 5 }), {
+      orders: [{ ...context().orders[0], filled: 4, remaining: 6, nativeRemaining: null }],
+    });
+    expect(result.commands).toEqual([]);
+    expect(result.rejections[0].reason).toMatch(/native remaining size is unknown/);
+  });
+
+  it('still allows a price amend when the native remaining size is unknown', () => {
+    const result = resolve(plan({ kind: 'amend_order', account: 'binance-main', orderId: 'o1', price: 58_000 }), {
+      orders: [{ ...context().orders[0], nativeRemaining: null }],
+    });
+    expect(result.rejections).toEqual([]);
+    expect(result.commands[0].args).toEqual(['o1', { update: { price: 58_000 } }, 'binance-main']);
+  });
+
   it('sends exactly one of price or amount, keyed by id', () => {
     const result = resolve(plan({ kind: 'amend_order', account: 'binance-main', orderId: 'o1', price: 57_999.96 }));
     expect(result.commands[0].args).toEqual(['o1', { update: { price: 58_000 } }, 'binance-main']);
@@ -870,4 +886,23 @@ describe('user overrides', () => {
     ]);
     expect(result.commands.map((command) => (command.args[0] as { amount: number }).amount)).toEqual([0.3, 30, 12]);
   });
+});
+
+describe('unknown native position quantity', () => {
+  it.each(['close_positions', 'reduce_positions'] as const)(
+    'refuses %s without guessing or using the fast path',
+    (kind) => {
+      const positions = context().positions.map((p) => ({ ...p, nativeContracts: null }));
+      const result = resolve(
+        plan({
+          kind,
+          scope: { symbols: ['BTCUSDT'] },
+          ...(kind === 'reduce_positions' ? { percent: 30 } : {}),
+        } as OemsIntent),
+        { positions },
+      );
+      expect(result.commands).toEqual([]);
+      expect(result.rejections[0].reason).toMatch(/unknown/i);
+    },
+  );
 });

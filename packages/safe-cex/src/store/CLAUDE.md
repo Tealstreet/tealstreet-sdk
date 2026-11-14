@@ -12,14 +12,22 @@ For MEXC, BloFin, KuCoin futures, Coinbase and the OKX family,
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic
 retains its native-volume contract. Use decimal-safe division here: a base fill
-of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. Position frames also
-restore `extra.contractsNative` for native-volume venues, which copier closes
-consume as their placement quantity. `SETTINGS` optionally carries
+of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. Position revision-2
+frames carry Rust-computed `extra.contractsNative` for native-volume venues,
+which copier closes consume as their placement quantity. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
-single representative leverage value when applying frames. `POSITIONS` may append
-string references for venue-defined position IDs; preserve these when present
-so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
-frames still derive identity from symbol and position mode.
+single representative leverage value when applying frames. `POSITIONS` revision 2
+requires exact native position ID and symbol references,
+so simultaneous Cross and Isolated rows stay distinct. Older Position sections
+are refused; no host identity fallback remains.
+
+Position `liquidationPrice` is a finite positive price or `null` when unknown,
+including through serialization and worker snapshots. Rust normalizes unknown
+thresholds to the binary NaN/null encoding and display leverage/PnL to finite
+numbers. The wire decoder validates this contract; the frame applier does not
+coerce numbers. Authoritative replacement snapshots remove omitted positions;
+the store no longer fabricates retained closed rows. Stub and pending chaser
+positions use `null` for an unknown liquidation price.
 
 Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
 `prettySymbol`, bracket trigger types, conditional prices, remaining notionals,
@@ -47,10 +55,12 @@ Apply failures request a bounded local engine snapshot or worker snapshot RPC;
 snapshots contain no executions, so deliver valid original FILLS once. Listener
 failures are distinct from protocol failures and do not trigger snapshot loops.
 
-FILLS revision 2 carries optional native execution IDs and the existing financial
-columns. Event `id` uses that ID when present, falling back to `orderId`; order
-attribution always uses the separate `orderId`. Legacy revision-1 frames remain
-readable both with and without the optional #1430 financial tails.
+FILLS revision 2 carries the native-computed public event ID and financial
+columns. Rust selects a reported execution ID or the order ID; the decoder
+requires that explicit result and a native symbol, including before MARKETS.
+Order attribution keeps the separate `orderId`. NaN is the binary absent-value
+sentinel; reported zero survives. Replace producer and reader together: legacy
+frames without an explicit event ID are refused rather than repaired in JS.
 
 Initial Rust SDK readiness requires successfully decoded catalogue and account
 sections as well as native STATUS flags. A failed section revokes its decoded
@@ -70,7 +80,8 @@ indexes. Keep those ticker rows without synthesizing markets or filtering them.
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths
 must not depend on postprocessors happening to reconstruct a field after
-serialization.
+serialization. Unknown displayed-margin sides and totals remain explicit `null`
+through serialization; only an absent entire margin record uses unloaded defaults.
 
 **A field added to `store.stub.ts` MUST also be added to `serialize()`.**
 `apps/web`'s IndexedDB warm-boot cache validates snapshots with
@@ -321,12 +332,13 @@ frame cannot detach future delta state. Forwarding workers call
 
 ## Rust frame native units
 
-`FrameApplier` preserves inverse sizing metadata across the worker bridge.
+The native Position writer computes inverse sizing metadata before the worker bridge;
+`FrameApplier` only copies the provided values.
 For Bybit/Bitget inverse, position `notional` is the native quote-contract
-size, so the applier also publishes it as `extra.contractsNative`. Binance
-COIN-M uses fixed USD contract sizes: its worker and main appliers divide
-notional by market `contractSize` for native contract counts, and multiply exact
-order leaves by `contractSize` for `remainingNotional`; `extra.unrealizedPnlNative`
+size, which Rust also publishes as `extra.contractsNative`. Binance COIN-M uses
+fixed USD contract sizes: Rust divides notional by market `contractSize` for
+native position contract counts. The order appliers still multiply exact order
+leaves by `contractSize` for `remainingNotional`; `extra.unrealizedPnlNative`
 keeps the native PnL. Copier closes consume the native size rather than the
 rounded base-coin `contracts` field.
 
@@ -393,3 +405,89 @@ retains exact `filledInPlacementUnits` after native leaves. Inverse fills cannot
 be reconstructed by dividing base fills by a quote contract multiplier. OKX
 reports USD-normalized position PnL, so its frame consumer does not label that
 number as native coin PnL.
+
+Position enum-word bits 24 and 25 declare the presence of native contracts and
+native PnL columns. A present non-finite native size is rejected, never treated
+as absent (which could select an unsafe base-unit fallback).
+
+## Store type ownership
+
+`defaultStore` is the Rust-generated `initialStoreData`; constructors clone it
+before mutation. Generated defaults are unloaded host state, never evidence of
+a successful venue read. `storeFrames.ts` decodes STATUS and finite native
+SETTINGS without number repair. Rust `store_output` applies the legacy scalar
+fallback and omits unusable rails before writing SETTINGS; zero is preserved.
+The Store runtime still owns update IDs, including worker-side edits. Worker
+snapshots must carry those IDs unchanged; native frames do not invent a second
+counter domain. Serialization and late snapshot tests cover that boundary.
+
+Market decoding lives in `marketFrames.ts`, using the generated Market contract.
+The native `market_output` module owns optional numeric display policy and
+contract-count labels. NaN encodes absence; zero limits and zero option terms
+remain published values. The frame reader refuses invalid optional infinities.
+
+## NX Position nullability gate
+
+`yarn check:nx-position` compiles the actual FrameApplier dependency graph with
+NX web's strict language options and the SDK workspace's module resolution.
+It also rejects the old reader's five unsafe nullable/optional numeric uses.
+The normal package typecheck includes this gate. Import reader implementations
+with their declarations: a declarations-only overlay onto the old NX reader
+is not a valid Position cutover. Native null liquidation prices remain unknown
+through apply and serialization; optional numeric columns are narrowed before
+use, preserving absence and reported zero.
+The null regression also runs `DisplayedPositionsPostprocessor`, transfers its
+snapshot to a receiving store, and checks the `displayedPositions` getter used
+by the web's Open Positions selector. Raw `positions` alone does not cover that
+derived display path.
+
+## Book and candle type ownership
+
+`market_data.rs` owns Candle, OrderBook and OrderBookOrders, re-exported through
+the Rust root and TS facade. `BookFrames` and `readCandleFrame` decode the native
+output directly; FrameApplier delegates to them and preserves other model readers.
+Full books retain native totals, deltas reconstruct totals from absolute amounts,
+and malformed or unresolved rows require recovery. Retained book baselines copy
+source arrays so transferred buffers and consumer mutations cannot corrupt them.
+The generator consumes Rust mutability tags, then removes those internal tags
+from public declarations; book levels remain mutable and candle fields readonly.
+The separate Store publisher applies the same filter after choosing field
+modifiers, so mutable leverage fields and update counters retain their shape
+without exposing the internal tags.
+
+### Full position refreshes retain closed-symbol settings
+
+`addOrUpdatePositionsFull` merges matching supplied rows into existing objects,
+then removes every omitted ID, including on an empty full refresh. A zero-size
+row explicitly supplied by a producer is preserved; the store does not infer
+closure from size alone. `createEmptyPositionFrom` now projects only
+`PositionSettings` (id, symbol, side, reported leverage and optional margin/mode),
+never a Position or numeric exposure defaults. The generated
+`StoreData.positionSettings` map retains those values by exact position ID,
+separately for hedge sides and simultaneous margin modes. It is serialized for
+workers/late subscribers and cleared by reset. Reopening an ID retains its
+omitted optional settings without restoring financial fields. Writer context
+prefers live margin settings, then confirmed fetched settings, then this cache.
+Single and batched incremental inserts restore omitted settings by exact ID too;
+incoming fields, including explicit unknown values, take precedence. They do
+not copy settings between hedge legs or restore old exposure values.
+Native frame application through `update({ positions })` retains its existing
+replacement contract and independent SETTINGS/fetchedLeverage rails.
+
+`setAllLeverage` and account-wide writer context include cached symbols even
+when no position remains. Leverage work retains its captured exchange and
+disposal guard across awaits.
+The Rust override preserves a separate write for each live hedge leg and adds
+one symbol-wide write per settings-only symbol, without repeating live symbols.
+Disposal during the native read or any write drops all remaining queued work.
+
+Consumers needing flat-symbol settings must read `positionSettings` (or the
+existing authoritative `fetchedLeverage` rails), not expect a closed row in
+`positions`. Position and DisplayedPosition numeric types are unchanged.
+
+### Balance frame updates retain omitted fields
+
+`FrameApplier` merges published Balance fields into the previous balance, as in
+the legacy reader. Omitted coins, currencies and info retain their prior values;
+explicit empty maps replace them. Direct `store.update({ balance })` still
+replaces the complete balance. The generated reader does not fabricate maps.

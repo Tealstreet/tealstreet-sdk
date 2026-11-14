@@ -17,6 +17,8 @@ const SPOT_META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},
 struct Step {
     sent: Vec<String>,
     warnings: Vec<String>,
+    events: Vec<safe_cex_engine::log::LogEvent>,
+    other_io: usize,
 }
 
 fn step(engine: &mut Engine<Hyperliquid>, now: f64, command: Option<Command>) -> Step {
@@ -27,11 +29,16 @@ fn step(engine: &mut Engine<Hyperliquid>, now: f64, command: Option<Command>) ->
     for action in prepared_now(engine) {
         match action {
             Action::WsSend { text, .. } => step.sent.push(text),
-            Action::Notice(Notice::Event(event))
-                if event.code == code::SUBSCRIPTION_REJECTED && event.level == Level::Warn =>
-            {
-                step.warnings.push(event.message)
+            Action::Notice(Notice::Event(event)) => {
+                if event.code == code::SUBSCRIPTION_REJECTED && event.level == Level::Warn {
+                    step.warnings.push(event.message.clone());
+                }
+                step.events.push(event);
             }
+            Action::Http(_)
+            | Action::WsConnect { .. }
+            | Action::WsClose { .. }
+            | Action::SetTimer { .. } => step.other_io += 1,
             _ => {}
         }
     }
@@ -40,6 +47,9 @@ fn step(engine: &mut Engine<Hyperliquid>, now: f64, command: Option<Command>) ->
 
 /// A public-data engine with its socket open and fixed topics flushed.
 fn open(spot: bool) -> Engine<Hyperliquid> {
+    open_with_meta(spot, support::META).0
+}
+fn open_with_meta(spot: bool, meta: &str) -> (Engine<Hyperliquid>, safe_cex_engine::SocketId) {
     let options = Options {
         public_data_only: true,
         ..Options::default()
@@ -55,7 +65,7 @@ fn open(spot: bool) -> Engine<Hyperliquid> {
             match action {
                 Action::Http(request) => {
                     let body = match support::kind(&request).as_str() {
-                        "metaAndAssetCtxs" => support::META,
+                        "metaAndAssetCtxs" => meta,
                         "spotMetaAndAssetCtxs" => SPOT_META,
                         "perpDexs" => "[null]",
                         other => panic!("unexpected public read {other}"),
@@ -78,7 +88,7 @@ fn open(spot: bool) -> Engine<Hyperliquid> {
                     assert_eq!(channel, Some(SocketChannel::Public));
                     engine.handle(1000.0, Event::WsOpened { socket });
                     step(&mut engine, 1000.0, None);
-                    return engine;
+                    return (engine, socket);
                 }
                 _ => {}
             }
@@ -229,4 +239,366 @@ fn repairing_an_unsubscribed_topic_sends_nothing_and_warns() {
         );
         assert!(warning.ends_with("is not subscribed"), "{warning}");
     }
+}
+
+const REPAIR_META: &str = r#"[{"universe":[{"name":"HYPE","szDecimals":5,"maxLeverage":50},{"name":"DOGE","szDecimals":4,"maxLeverage":50}]},[{"midPx":"100","markPx":"100","oraclePx":"100","prevDayPx":"90"},{"midPx":"200","markPx":"200","oraclePx":"200"}]]"#;
+const UI_INTERVALS: [Interval; 14] = [
+    Interval::M1,
+    Interval::M3,
+    Interval::M5,
+    Interval::M15,
+    Interval::M30,
+    Interval::H1,
+    Interval::H2,
+    Interval::H4,
+    Interval::H8,
+    Interval::H12,
+    Interval::D1,
+    Interval::D3,
+    Interval::W1,
+    Interval::Mo1,
+];
+fn candle_key(coin: &str, interval: Interval) -> String {
+    format!(
+        r#"{{"method":"subscribe","subscription":{{"type":"candle","coin":"{coin}","interval":"{}"}}}}"#,
+        interval.as_str()
+    )
+}
+fn repair_candle(
+    engine: &mut Engine<Hyperliquid>,
+    now: f64,
+    symbol: &str,
+    interval: Interval,
+) -> Step {
+    step(
+        engine,
+        now,
+        Some(Command::RepairSubscription(SubscriptionTopic::Candles {
+            symbol: symbol.into(),
+            interval,
+        })),
+    )
+}
+#[test]
+fn every_ui_interval_repairs_hype_and_doge_with_the_original_native_key() {
+    for (symbol, coin) in [("HYPE-PERP", "HYPE"), ("DOGE-PERP", "DOGE")] {
+        for interval in UI_INTERVALS {
+            let (mut e, _) = open_with_meta(false, REPAIR_META);
+            let key = candle_key(coin, interval);
+            let subscribed = step(
+                &mut e,
+                2000.,
+                Some(Command::SubscribeCandles {
+                    symbol: symbol.into(),
+                    interval,
+                }),
+            );
+            let trades = format!(
+                r#"{{"method":"subscribe","subscription":{{"type":"trades","coin":"{coin}"}}}}"#
+            );
+            assert_eq!(subscribed.sent, vec![key.clone(), trades.clone()]);
+            let repaired = repair_candle(&mut e, 2001., symbol, interval);
+            assert!(repaired.warnings.is_empty(), "{:?}", repaired.warnings);
+            assert_eq!(repaired.sent, vec![unsubscribe_frame(&key), key.clone()]);
+            let released = step(
+                &mut e,
+                2002.,
+                Some(Command::UnsubscribeCandles {
+                    symbol: symbol.into(),
+                    interval,
+                }),
+            );
+            let mut expected = vec![unsubscribe_frame(&key), unsubscribe_frame(&trades)];
+            expected.sort();
+            let mut released = released.sent;
+            released.sort();
+            assert_eq!(released, expected);
+        }
+    }
+}
+fn pending_bootstrap() -> (Engine<Hyperliquid>, safe_cex_engine::RequestId) {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    // A cached native catalogue is known before this instance's first metadata
+    // response registers its feed. Do not restore the old wait-for-perpDexs path:
+    // master now starts the feed with the first catalogue.
+    let (cached, _) = open_with_meta(false, REPAIR_META);
+    e.store_mut().set_markets(cached.store().markets().to_vec());
+    e.set_log_level(Level::Debug);
+    e.start(1000.);
+    let meta = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if support::kind(&r) == "metaAndAssetCtxs" => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
+    (e, meta)
+}
+#[test]
+fn known_candles_defer_before_feed_start_then_deliver_without_reset_or_new_timer() {
+    let (mut e, meta) = pending_bootstrap();
+    for (symbol, interval) in [("HYPE-PERP", Interval::H4), ("DOGE-PERP", Interval::D1)] {
+        step(
+            &mut e,
+            1000.,
+            Some(Command::SubscribeCandles {
+                symbol: symbol.into(),
+                interval,
+            }),
+        );
+        let deferred = repair_candle(&mut e, 1000., symbol, interval);
+        assert!(deferred.warnings.is_empty(), "{:?}", deferred.warnings);
+        assert!(deferred.sent.is_empty());
+        assert_eq!(deferred.other_io, 0);
+        let note = deferred
+            .events
+            .iter()
+            .find(|event| event.code == "subscription.deferred")
+            .unwrap();
+        assert_eq!(note.level, Level::Debug);
+        for field in [
+            "feed-not-started",
+            "engineBoot=",
+            "symbolKnown=true",
+            "catalogueSize=2",
+            "discovery=pending",
+        ] {
+            assert!(note.message.contains(field), "{}", note.message);
+        }
+    }
+    e.handle(
+        1000.,
+        Event::HttpResponse {
+            request: meta,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: REPAIR_META,
+            },
+        },
+    );
+    let socket = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1000., Event::WsOpened { socket });
+    let sent = step(&mut e, 1000., None).sent;
+    assert!(sent.contains(&candle_key("HYPE", Interval::H4)));
+    assert!(sent.contains(&candle_key("DOGE", Interval::D1)));
+    e.take_frame(1000.);
+    e.handle(1001.,Event::WsMessage{socket,text:r#"{"channel":"candle","data":{"t":0,"T":14400000,"s":"HYPE","i":"4h","o":"100","c":"101","h":"102","l":"99","v":"10","n":2}}"#});
+    assert!(e.take_market_frame(1001.).is_some());
+    for (symbol, interval) in [("HYPE-PERP", Interval::H4), ("DOGE-PERP", Interval::D1)] {
+        let released = step(
+            &mut e,
+            1002.,
+            Some(Command::UnsubscribeCandles {
+                symbol: symbol.into(),
+                interval,
+            }),
+        );
+        assert_eq!(
+            released.sent.len(),
+            2,
+            "one unsubscribe releases the candle and its companion trades stream"
+        );
+    }
+}
+fn unknown_market_boot(e: &mut Engine<Hyperliquid>, now: f64) -> String {
+    let refused = repair_candle(e, now, "MISSING-PERP", Interval::D1);
+    assert!(refused.sent.is_empty());
+    assert_eq!(refused.other_io, 0);
+    assert_eq!(refused.warnings.len(), 1);
+    let message = &refused.warnings[0];
+    for field in [
+        "unknown-market",
+        "engineBoot=",
+        "symbolKnown=false",
+        "catalogueSize=2",
+        "discovery=",
+    ] {
+        assert!(message.contains(field), "{message}");
+    }
+    message
+        .split("engineBoot=")
+        .nth(1)
+        .unwrap()
+        .split(',')
+        .next()
+        .unwrap()
+        .to_string()
+}
+#[test]
+fn unknown_market_stays_visible_and_identifies_the_native_engine_and_catalogue() {
+    let (mut a, _) = open_with_meta(false, REPAIR_META);
+    let (mut b, _) = open_with_meta(false, REPAIR_META);
+    let boot = unknown_market_boot(&mut a, 2000.);
+    assert_eq!(unknown_market_boot(&mut a, 2001.), boot);
+    assert_ne!(unknown_market_boot(&mut b, 2000.), boot);
+    let (mut pending, _) = pending_bootstrap();
+    unknown_market_boot(&mut pending, 1000.);
+}
+#[test]
+fn book_resub_and_mid_session_timeframe_switch_keep_the_registered_feed() {
+    let (mut e, _) = open_with_meta(false, REPAIR_META);
+    let boot = unknown_market_boot(&mut e, 2000.);
+    for subscribe in [true, false, true] {
+        let command = if subscribe {
+            Command::SubscribeOrderBook {
+                symbol: "HYPE-PERP".into(),
+            }
+        } else {
+            Command::UnsubscribeOrderBook {
+                symbol: "HYPE-PERP".into(),
+            }
+        };
+        step(&mut e, 2001., Some(command));
+    }
+    let book = step(
+        &mut e,
+        2002.,
+        Some(Command::RepairSubscription(SubscriptionTopic::OrderBook {
+            symbol: "HYPE-PERP".into(),
+        })),
+    );
+    assert!(book.warnings.is_empty());
+    assert_eq!(book.sent.len(), 4);
+    assert_eq!(book.other_io, 0);
+    step(
+        &mut e,
+        2003.,
+        Some(Command::SubscribeCandles {
+            symbol: "HYPE-PERP".into(),
+            interval: Interval::H4,
+        }),
+    );
+    step(
+        &mut e,
+        2004.,
+        Some(Command::UnsubscribeCandles {
+            symbol: "HYPE-PERP".into(),
+            interval: Interval::H4,
+        }),
+    );
+    step(
+        &mut e,
+        2005.,
+        Some(Command::SubscribeCandles {
+            symbol: "HYPE-PERP".into(),
+            interval: Interval::H4,
+        }),
+    );
+    let repaired = repair_candle(&mut e, 2006., "HYPE-PERP", Interval::H4);
+    assert!(repaired.warnings.is_empty());
+    assert_eq!(repaired.other_io, 0);
+    let key = candle_key("HYPE", Interval::H4);
+    assert_eq!(repaired.sent, vec![unsubscribe_frame(&key), key]);
+    assert_eq!(unknown_market_boot(&mut e, 2007.), boot);
+}
+#[test]
+fn transport_reconnect_keeps_feed_identity_and_candle_repair_recovers() {
+    let (mut e, socket) = open_with_meta(false, REPAIR_META);
+    let boot = unknown_market_boot(&mut e, 2000.);
+    step(
+        &mut e,
+        2001.,
+        Some(Command::SubscribeCandles {
+            symbol: "HYPE-PERP".into(),
+            interval: Interval::H4,
+        }),
+    );
+    e.handle(2002., Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let replacement = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(replacement, socket);
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let opened = step(&mut e, at, None);
+    assert!(opened.sent.contains(&candle_key("HYPE", Interval::H4)));
+    step(
+        &mut e,
+        at + 1.,
+        Some(Command::SubscribeCandles {
+            symbol: "DOGE-PERP".into(),
+            interval: Interval::D1,
+        }),
+    );
+    let repaired = repair_candle(&mut e, at + 2., "DOGE-PERP", Interval::D1);
+    assert!(repaired.warnings.is_empty());
+    assert_eq!(repaired.other_io, 0);
+    let key = candle_key("DOGE", Interval::D1);
+    assert_eq!(repaired.sent, vec![unsubscribe_frame(&key), key]);
+    assert_eq!(unknown_market_boot(&mut e, at + 3.), boot);
+}
+
+#[test]
+fn first_catalogue_registers_the_feed_before_hip3_discovery_finishes() {
+    let (mut e, meta) = pending_bootstrap();
+    e.handle(
+        1000.,
+        Event::HttpResponse {
+            request: meta,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: REPAIR_META,
+            },
+        },
+    );
+    let actions = prepared_now(&mut e);
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(r) if support::kind(r) == "perpDexs"))
+    );
+    let socket = actions
+        .into_iter()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("first catalogue opens the socket without waiting for perpDexs");
+    e.handle(1000., Event::WsOpened { socket });
+    step(&mut e, 1000., None);
+    step(
+        &mut e,
+        1001.,
+        Some(Command::SubscribeCandles {
+            symbol: "HYPE-PERP".into(),
+            interval: Interval::H4,
+        }),
+    );
+    let repaired = repair_candle(&mut e, 1002., "HYPE-PERP", Interval::H4);
+    let key = candle_key("HYPE", Interval::H4);
+    assert_eq!(repaired.sent, vec![unsubscribe_frame(&key), key]);
+    assert!(repaired.warnings.is_empty());
+    assert!(
+        !repaired
+            .events
+            .iter()
+            .any(|event| event.code == code::SUBSCRIPTION_DEFERRED)
+    );
 }

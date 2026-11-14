@@ -90,7 +90,7 @@ function cpuOnlyErrors(value, paired) {
   if (errors.length) return errors;
   const report = value.report, source = value.execution?.measuredCheckoutSha;
   if (paired !== undefined && !hasPairedBitgetSteady(paired, report, source)) return ['unissued or mismatched paired steady certificate'];
-  const calculated = performanceFailures(report.samples.ts, report.samples.rust).sort();
+  const calculated = performanceFailures(report.samples.ts, report.samples.rust, report.venue).sort();
   // Exact generated failures, not a performance-prefix allowlist. Memory never
   // becomes an averaged objective and declarations cannot excuse correctness.
   const cpuFailures = calculated.filter((failure) => objectives(report).some(({ label }) => failure.startsWith(`performance ${label}:`)));
@@ -106,7 +106,7 @@ function cpuOnlyErrors(value, paired) {
 export function splitCpuErrors(value, errors, paired) {
   if (cpuOnlyErrors(value, paired).length) return { kept: errors, deferred: [] };
   const report = value.report;
-  const cpu = new Set(performanceFailures(report.samples.ts, report.samples.rust)
+  const cpu = new Set(performanceFailures(report.samples.ts, report.samples.rust, report.venue)
     .filter((failure) => objectives(report).some(({ label }) => failure.startsWith(`performance ${label}:`)))
     .map((failure) => `${report.venue}: unexpected ${failure}`));
   return { kept: errors.filter((error) => !cpu.has(error)), deferred: errors.filter((error) => cpu.has(error)) };

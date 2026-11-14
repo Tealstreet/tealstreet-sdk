@@ -1,4 +1,4 @@
-import type { ExchangeAccountConfig } from '../types';
+import type { ExchangeAccountConfig } from '../generated/ExchangeAccountConfig';
 
 import { buildExchangeAccountConfig } from './buildExchangeAccountConfig';
 
@@ -8,14 +8,20 @@ export interface ParseImportResult {
   error?: string;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+type AccountValidationResult =
+  | { ok: true; account: ExchangeAccountConfig }
+  | { ok: false; error: string };
+
 /**
  * Backwards-compat: legacy account payloads use a `secret` field instead of
  * `apiSecret`. Mutates the account in place to populate `apiSecret` from
  * `secret` when missing.
  */
 function applyApiSecretBackwardCompat(account: unknown): void {
-  if (typeof account !== 'object' || account === null) return;
-  const obj = account as Record<string, unknown>;
+  if (!isRecord(account)) return;
+  const obj = account;
   if (!obj.apiSecret && obj.secret) {
     obj.apiSecret = obj.secret;
   }
@@ -37,13 +43,13 @@ function applyApiSecretBackwardCompat(account: unknown): void {
  */
 export function parseImportAccountData(rawData: string): ParseImportResult {
   try {
-    const parsed = JSON.parse(rawData);
+    const parsed: unknown = JSON.parse(rawData);
 
     // Handle single account object
     if (typeof parsed === 'object' && !Array.isArray(parsed)) {
       applyApiSecretBackwardCompat(parsed);
       const result = validateAccount(parsed, 1);
-      if (result.error) {
+      if (!result.ok) {
         return { isValid: false, error: result.error };
       }
       return { isValid: true, data: result.account };
@@ -58,16 +64,17 @@ export function parseImportAccountData(rawData: string): ParseImportResult {
         };
       }
 
+      const accounts: ExchangeAccountConfig[] = [];
       for (let i = 0; i < parsed.length; i++) {
         applyApiSecretBackwardCompat(parsed[i]);
         const result = validateAccount(parsed[i], i + 1);
-        if (result.error) {
+        if (!result.ok) {
           return { isValid: false, error: result.error };
         }
-        parsed[i] = result.account;
+        accounts.push(result.account);
       }
 
-      return { isValid: true, data: parsed as ExchangeAccountConfig[] };
+      return { isValid: true, data: accounts };
     }
 
     return {
@@ -86,12 +93,12 @@ export function parseImportAccountData(rawData: string): ParseImportResult {
  * Validates a single account object
  * Returns error message if invalid, undefined if valid
  */
-function validateAccount(account: unknown, index: number): { account?: ExchangeAccountConfig; error?: string } {
-  if (typeof account !== 'object' || account === null) {
-    return { error: `Account #${index} is not a valid object` };
+function validateAccount(account: unknown, index: number): AccountValidationResult {
+  if (!isRecord(account)) {
+    return { ok: false, error: `Account #${index} is not a valid object` };
   }
 
-  const obj = account as Record<string, unknown>;
+  const obj = account;
   const missingFields: string[] = [];
 
   // Check for required fields - name and exchange are always required
@@ -100,16 +107,19 @@ function validateAccount(account: unknown, index: number): { account?: ExchangeA
 
   if (missingFields.length > 0) {
     return {
+      ok: false,
       error: `Account #${index} missing fields: ${missingFields.join(', ')}`,
     };
   }
 
   try {
     return {
+      ok: true,
       account: buildExchangeAccountConfig(obj as unknown as Parameters<typeof buildExchangeAccountConfig>[0]),
     };
   } catch (error) {
     return {
+      ok: false,
       error: `Account #${index} ${error instanceof Error ? error.message : String(error)}`,
     };
   }

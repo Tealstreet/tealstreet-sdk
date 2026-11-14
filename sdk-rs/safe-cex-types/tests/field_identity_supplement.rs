@@ -168,7 +168,9 @@ fn decoded_nested_and_history_models_pin_native_field_identity() {
     let position: Position = serde_json::from_value(json!({"id":"position-id","symbol":"position-symbol","side":"long","entryPrice":11,"notional":23,"leverage":37,"unrealizedPnl":41,"contracts":53,"liquidationPrice":67,"realizedPnl":79,"marginSize":83,"lastUpdate":97})).unwrap();
     assert_eq!(position.id, "position-id");
     assert_eq!(position.symbol, "position-symbol");
-    numbers!(position; entry_price=11, notional=23, leverage=37, unrealized_pnl=41, contracts=53, liquidation_price=67);
+    numbers!(position; entry_price=11, leverage=37, unrealized_pnl=41, contracts=53);
+    assert_eq!(position.notional.unwrap().to_bits(), 23.0_f64.to_bits());
+    assert_eq!(position.liquidation_price, Some(67.0));
     assert_eq!(position.realized_pnl, Some(79.0));
     assert_eq!(position.margin_size, Some(83.0));
     assert_eq!(position.last_update, Some(97.0));
@@ -331,7 +333,7 @@ fn decoded_task_snapshots_use_distinct_dimensions_and_one_hot_flags() {
             margin.short_exposure,
             margin.total_notional
         ),
-        (11.0, 23.0, 37.0),
+        (Some(11.0), Some(23.0), Some(37.0)),
         "FIELD-IDENTITY DisplayedMargin dimensions"
     );
 }

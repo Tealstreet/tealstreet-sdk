@@ -41,11 +41,16 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [
         "src/lib.rs",
+        "src/execution.rs",
+        "src/position.rs",
+        "src/market_data.rs",
+        "src/history.rs",
+        "src/options.rs",
+        "src/order.rs",
         "src/store_model.rs",
         "src/extra_model.rs",
         "src/accounts.rs",
         "src/gateway.rs",
-        "../safe-cex-store/src/contract.rs",
     ] {
         let file = syn::parse_file(&std::fs::read_to_string(root.join(relative)).unwrap()).unwrap();
         let parent_types: BTreeSet<_> = file

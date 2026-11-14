@@ -1,6 +1,8 @@
 //! Sans-I/O exchange engine core. See docs/plans/RUST_REWRITE.md.
 pub mod backoff;
 pub mod book;
+pub mod book_output;
+pub mod candle_output;
 pub mod capabilities;
 pub mod classify;
 pub mod command;
@@ -16,10 +18,14 @@ pub mod execution_group;
 pub mod fence;
 pub mod fresh_positions;
 pub mod history;
+pub mod history_output;
 mod id_map;
 pub(crate) use id_map::IdMap;
+mod balance_output;
+mod fill_output;
 pub mod json;
 pub mod log;
+mod market_output;
 #[cfg(feature = "metadata-freshness")]
 pub mod metadata;
 pub mod model;
@@ -27,9 +33,11 @@ pub mod nonce;
 pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
+mod order_output;
 pub mod order_read_cover;
 pub mod paging;
 mod placement_acks;
+mod position_output;
 pub mod protective_amend;
 mod protocol_clock;
 pub mod public_feed;
@@ -48,6 +56,7 @@ mod signing_dispatch;
 pub mod signing_headers;
 pub mod signing_policy;
 mod signing_release;
+mod store_output;
 pub mod text;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub use signing_release::{SigningRelease, StampFloor};
@@ -67,6 +76,7 @@ pub mod test_support;
 pub mod time;
 pub mod url;
 pub mod wire;
+pub mod write_plan;
 
 pub use capabilities::{
     AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,
@@ -75,10 +85,12 @@ pub use capabilities::{
 pub use credentials::{READ_CREDENTIALS_INVALID, ReadCredentials};
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
-    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpReadClass, HttpRelease,
-    HttpRequest, MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
-    ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SigningTarget, SocketChannel,
-    SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId, Venue, VenueAction,
+    DEFAULT_COMMAND_WAIT_MS, Engine, EngineUnknownOutcome, Event, Fill, FillFinancials,
+    HttpReadClass, HttpRelease, HttpRequest, MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice,
+    PollTimerBounds, Query, ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response,
+    SigningTarget, SocketChannel, SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId,
+    UNKNOWN_HTTP_OUTCOME_TEXT, UNKNOWN_OUTCOME_TEXT, UnknownOutcomeTelemetry, Venue, VenueAction,
+    WebSocketCommit, WebSocketHandoff, WebSocketWrite, WebSocketWriteBinding,
     unsupported_venue_action,
 };
 pub use error::{

@@ -183,7 +183,7 @@ function assessReport(report, manifest, correctnessOnly, accepted) {
   const protectedFailure = /baseline is invalid|invalid (?:cpuMs|steadyCpuMs|processCpuMs)|incomplete replay workload|workload differs|checkpoint snapshots missing|invalid tape boundary|empty public seed|requested book .* is missing|fixer modified Rust|fixer changed undeclared/;
   if (!report.private && !correctnessOnly) {
     if (report.requiredImprovement !== 0.10) errors.push('performance improvement contract differs from 10%');
-    if (!errors.length) for (const missing of performanceFailures(report.samples.ts, report.samples.rust))
+    if (!errors.length) for (const missing of performanceFailures(report.samples.ts, report.samples.rust, report.venue))
       if (!report.failures.includes(missing)) errors.push(`strict report omitted ${missing}`);
   }
   const known = [];

@@ -1,3 +1,10 @@
+import {
+  getStorageEpoch,
+  assertStorageSession,
+  captureStorageSession,
+  isStorageSessionCurrent,
+  onStorageOwnerChange,
+} from './storage-context';
 import { warnAboutClockSkew } from './clock-skew-warning';
 import chalk from 'chalk';
 import { terminalText } from './console-glyphs';
@@ -28,10 +35,19 @@ import type { ExchangeManager } from './exchange-manager';
 import { getAdapterContext } from './listener/adapter-context';
 import { logAccountRoute } from './account-log';
 // Static import for token management - must match what safe-cex uses internally
-import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src/accessToken';
+import {
+  setProxyToken,
+  setTokenRefreshFunction,
+  setContextualProxyTokenProvider,
+} from '@tealstreet/safe-cex/src/accessToken';
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
-import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
-import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
+import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
+import { chaserOrderManagerInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
+import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
+import {
+  defaultProxyRegion,
+  resolveAccountTransport,
+} from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
 import { BRAND } from './brand';
 
 // Default timeout for exchange operations (30 seconds)
@@ -72,15 +88,25 @@ const getCreateExchangeFromAccount = async () => {
 export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
   let exchangeManager: ExchangeManager | null = null;
   let captureBuffer: string[] | null = null;
+  onStorageOwnerChange(() => {
+    captureBuffer = null;
+  });
   let getReadlineRef: (() => import('readline').Interface | null) | null = null;
   let isInMonitorRef: (() => boolean) | null = null;
 
   // Wire the proxy-token refresh function once, regardless of account flags.
-  // Many exchanges (BitMEX, Bitget, etc.) force the HOW tunnel via metadata
+  // Many exchanges (Bitget, KuCoin, etc.) force the HOW tunnel via metadata
   // even when the user hasn't set tealstreetTunnel on their account, and the
   // HOW adapter polls getProxyToken() globally. Setting this once here means
   // HOW always sees the freshest token from config; login() also primes the
-  // in-memory cache so any in-flight retries pick up the new token immediately.
+  // in-memory cache; old-session requests remain fenced when the owner changes.
+  setContextualProxyTokenProvider(() => {
+    const epoch = getStorageEpoch();
+    return () => {
+      assertStorageSession(epoch);
+      return getProxyTokenFromConfig() || '';
+    };
+  });
   setTokenRefreshFunction(async () => getProxyTokenFromConfig() || '');
   const initialToken = getProxyTokenFromConfig();
   if (initialToken) {
@@ -206,10 +232,14 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
     // Exchange management
     async createExchange(account: ExchangeAccountConfig): Promise<ExchangeLike> {
+      const ownerEpoch = getStorageEpoch();
+      // Removed or unsupported venues (saved bitmex, breakoutprop) refuse typed
+      // before any transport or login work, so only that account fails.
+      assertBetaVenue(account.exchange);
       // Use safe-cex's single source of truth for transport resolution instead of
       // re-deriving it: tunnel/proxy may be forced on by metadata (enforceWsTunnel /
       // requiresCors) even when the user didn't enable it on the account.
-      const metadata = getExchangeMetadata(account.exchange as ExchangeName);
+      const metadata = getExchangeMetadata(account.exchange);
       const transport = resolveAccountTransport(account, metadata);
       const requiresAuth = Boolean(transport.tealstreetProxy || transport.tealstreetTunnel);
       const resolvedProxyRegion = account.proxyRegion || defaultProxyRegion(metadata);
@@ -243,18 +273,39 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       // Use the shared createExchangeFromAccount which handles all account fields
       // including tealstreetProxy, tealstreetTunnel, proxyRegion, etc.
       const createExchangeFromAccount = await getCreateExchangeFromAccount();
+      assertStorageSession(ownerEpoch);
       const exchange = await createExchangeFromAccount(account);
+      try {
+        assertStorageSession(ownerEpoch);
+      } catch (error) {
+        exchange.dispose();
+        throw error;
+      }
       exchange.on('clock-advice', warnAboutClockSkew);
-      return exchange as ExchangeLike;
+      return exchange;
     },
 
     async startExchange(exchange: ExchangeLike): Promise<void> {
+      const session = captureStorageSession();
       if (exchange.start) {
         // Add timeout to prevent hanging on network issues. The timer is
         // cleared once the race settles — left armed it keeps the event loop
         // alive for its full duration after the work is done, which is the
         // class of leak that made one-shot commands hang.
-        const startPromise = exchange.start();
+        let disposed = false;
+        const disposeIfStale = () => {
+          if (!disposed && !session.isCurrent()) {
+            disposed = true;
+            exchange.dispose?.();
+          }
+        };
+        const startPromise = (async () => {
+          try {
+            await exchange.start?.();
+          } finally {
+            disposeIfStale();
+          }
+        })();
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
@@ -264,6 +315,10 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
         try {
           await Promise.race([startPromise, timeoutPromise]);
+          session.assertCurrent();
+        } catch (error) {
+          disposeIfStale();
+          throw error;
         } finally {
           if (timeoutId) clearTimeout(timeoutId);
         }
@@ -271,6 +326,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     async stopExchange(exchange: ExchangeLike): Promise<void> {
+      chaserOrderManagerInstance.cleanupExchange(exchange as Exchange);
       if (exchange.dispose) {
         exchange.dispose();
       }
@@ -293,6 +349,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     // listener's cmd:exec handler), print* methods route into the context's
     // sink instead so output streams as WS frames.
     print(lines: string[]): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) {
         for (const line of lines) ctx.printSink('print', line);
@@ -302,6 +359,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     printError(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('error', message);
       outputError(chalk.red(message));
@@ -311,12 +369,14 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     printSuccess(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('success', message);
       output(chalk.green(message));
     },
 
     printWarning(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('warn', message);
       outputWarn(chalk.yellow(message));
@@ -324,6 +384,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
     },
 
     printInfo(message: string): void {
+      if (!isStorageSessionCurrent()) return;
       const ctx = getAdapterContext();
       if (ctx?.printSink) return ctx.printSink('info', message);
       output(chalk.gray(message));
@@ -333,10 +394,13 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
      * Start capturing output - returns function to stop and get captured output
      */
     startCapture(): () => string {
-      captureBuffer = [];
+      const ownerSession = captureStorageSession();
+      const buffer: string[] = [];
+      captureBuffer = buffer;
       return () => {
-        const result = (captureBuffer || []).join('\n');
-        captureBuffer = null;
+        if (!ownerSession.isCurrent()) return '';
+        const result = buffer.join('\n');
+        if (captureBuffer === buffer) captureBuffer = null;
         return result;
       };
     },

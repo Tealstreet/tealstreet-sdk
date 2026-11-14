@@ -136,6 +136,117 @@ fn spot_recovers_once_with_the_original_selected_identity() {
     );
 }
 
+fn slow_time_probe<V: Venue>(make: impl FnOnce(safe_cex_venue_kucoin::Options) -> V) {
+    let mut h = H::new(make);
+    h.ask(20_000);
+    let first = h.take("/user");
+    h.reply(&first, 400, SKEW);
+    let clock = h.take("/timestamp");
+    assert_eq!(clock.timeout_ms, Some(20_000));
+    h.now += 6_000.;
+    h.reply(&clock, 200, TIME);
+    let replay = h.take("/user");
+    assert_eq!(replay.url, first.url);
+    assert_eq!(header(&replay, "KC-API-KEY"), "read-key");
+    assert_eq!(replay.timeout_ms, Some(14_000));
+    h.reply(
+        &replay,
+        200,
+        r#"{"code":"200000","data":{"userId":"user"}}"#,
+    );
+    assert_eq!(h.terminals(), 1);
+    assert!(h.actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 71, .. })
+    )));
+    assert!(
+        !h.actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+}
+
+#[test]
+fn futures_clock_recovery_waits_for_the_legacy_read_budget_without_renewing_the_root() {
+    slow_time_probe(Kucoin::new);
+}
+
+#[cfg(feature = "spot")]
+#[test]
+fn spot_clock_recovery_waits_for_the_legacy_read_budget_without_renewing_the_root() {
+    slow_time_probe(safe_cex_venue_kucoin::spot::KucoinSpot::new);
+}
+
+#[test]
+fn background_order_books_can_recover_from_a_time_probe_slower_than_five_seconds() {
+    for path in ["/api/v1/orders?", "/api/v1/stopOrders?"] {
+        let mut h = futures_snapshot();
+        let first = h.take(path);
+        assert_eq!(first.timeout_ms, Some(20_000));
+        h.actions.clear();
+        h.reply(&first, 400, SKEW);
+        let clock = h.take("/timestamp");
+        assert_eq!(clock.timeout_ms, Some(20_000));
+        assert!(clock.headers.iter().all(|(key, _)| !key.starts_with("KC-")));
+        h.now += 6_000.;
+        h.reply(&clock, 200, TIME);
+        let replay = h.take(path);
+        assert_eq!(replay.url, first.url);
+        assert_eq!(header(&replay, "KC-API-KEY"), "read-key");
+        h.reply(&replay, 400, SKEW);
+        assert!(!h.e.store().loaded().orders);
+        assert!(
+            !h.actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+}
+
+#[test]
+fn failed_order_book_time_probe_reports_the_original_read_without_restarting_recovery() {
+    for path in ["/api/v1/orders?", "/api/v1/stopOrders?"] {
+        let mut h = futures_snapshot();
+        let first = h.take(path);
+        h.actions.clear();
+        h.reply(&first, 400, SKEW);
+        let clock = h.take("/timestamp");
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: clock.id,
+                error: "untrusted transport text",
+            },
+        );
+        h.collect();
+        let failures = h
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::REQUEST_FAILED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].message.contains(path));
+        assert!(
+            failures[0]
+                .message
+                .contains("source=transport signError=false HTTP=none")
+        );
+        assert!(!failures[0].message.contains("untrusted transport text"));
+        assert!(
+            !h.actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+}
+
 #[test]
 fn expired_probe_cannot_calibrate_or_resend() {
     let mut h = H::new(Kucoin::new);
@@ -143,6 +254,7 @@ fn expired_probe_cannot_calibrate_or_resend() {
     let first = h.take("/user");
     h.reply(&first, 400, SKEW);
     let clock = h.take("/timestamp");
+    assert_eq!(clock.timeout_ms, Some(200));
     h.now = 1200.;
     h.reply(&clock, 200, TIME);
     assert_eq!(h.terminals(), 1);
@@ -222,6 +334,7 @@ fn a_failed_or_hung_probe_terminates_the_read_once() {
     let first = h.take("/user");
     h.reply(&first, 400, SKEW);
     let clock = h.take("/timestamp");
+    assert_eq!(clock.timeout_ms, Some(20_000));
     let (timer, at) = h
         .actions
         .iter()
@@ -232,8 +345,8 @@ fn a_failed_or_hung_probe_terminates_the_read_once() {
                 None
             }
         })
-        .find(|(_, at)| *at == 6000.)
-        .expect("five second clock leg deadline");
+        .find(|(_, at)| *at == 21_000.)
+        .expect("original twenty second read deadline");
     h.now = at;
     h.e.handle(h.now, Event::TimerFired { timer });
     h.collect();

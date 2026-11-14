@@ -1,0 +1,78 @@
+[
+  {
+    "label": "read",
+    "method": "GET",
+    "path": "/api/v1/private/order/list/open_orders",
+    "params": [
+      [
+        "symbol",
+        "BTC_USDT"
+      ],
+      [
+        "page_num",
+        "1"
+      ],
+      [
+        "note",
+        "é/+%"
+      ]
+    ],
+    "body": null,
+    "payload": "replay-key1700000000000note=%C3%A9%2F%2B%25&page_num=1&symbol=BTC_USDT",
+    "signature": "fba82b3c9d948c8fe304800190300990a22121518a147616ea7d0d3275852af7"
+  },
+  {
+    "label": "embedded-query",
+    "method": "GET",
+    "path": "/api/v1/private/account/assets?currency=USDT",
+    "params": [],
+    "body": null,
+    "payload": "replay-key1700000000000currency=USDT",
+    "signature": "2795228897fd9fc0160121468ffdd806709514302bbc027f1fa68a5d47831835"
+  },
+  {
+    "label": "cancel",
+    "method": "POST",
+    "path": "/api/v1/private/order/cancel",
+    "params": [],
+    "body": "[\"739113577038255616\"]",
+    "payload": "replay-key1700000000000[\"739113577038255616\"]",
+    "signature": "59e9ebb06b0e27069eec29158b3682a9f279f1e3790b0fa09a403d4965270557"
+  },
+  {
+    "label": "batch",
+    "method": "POST",
+    "path": "/api/v1/private/order/submit_batch",
+    "params": [],
+    "body": "[{\"symbol\":\"BTC_USDT\",\"vol\":1,\"price\":\"60000\"},{\"symbol\":\"BTC_USDT\",\"vol\":2}]",
+    "payload": "replay-key1700000000000[{\"symbol\":\"BTC_USDT\",\"vol\":1,\"price\":\"60000\"},{\"symbol\":\"BTC_USDT\",\"vol\":2}]",
+    "signature": "0eafaad20177605d3556757f6745e66f03f61110cb3ae4b361ba776ca07f7e34"
+  },
+  {
+    "label": "replayed-body",
+    "method": "POST",
+    "path": "/api/v1/private/planorder/place/v2",
+    "params": [],
+    "body": "{ \"symbol\": \"BTC_USDT\", \"note\": \"é/+%\" }",
+    "payload": "replay-key1700000000000{ \"symbol\": \"BTC_USDT\", \"note\": \"é/+%\" }",
+    "signature": "c95361f559e2c4c4408b27b6d45f23871ea1811e24a38c73170c033dcbf5a7f1"
+  },
+  {
+    "label": "mode",
+    "method": "POST",
+    "path": "/api/v1/private/position/change_position_mode",
+    "params": [],
+    "body": "{\"positionMode\":1}",
+    "payload": "replay-key1700000000000{\"positionMode\":1}",
+    "signature": "9125067865a559d26133922ef4f66d550a7bf0c32da89b11e2abd973dcd0c075"
+  },
+  {
+    "label": "empty-read",
+    "method": "GET",
+    "path": "/api/v1/private/account/assets",
+    "params": [],
+    "body": null,
+    "payload": "replay-key1700000000000",
+    "signature": "c23b432e349eadccde6dc390d35a619956897eabcb81515e7012a550b12c7967"
+  }
+]

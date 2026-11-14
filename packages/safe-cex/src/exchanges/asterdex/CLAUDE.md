@@ -54,6 +54,12 @@ Version is resolved in `resolveAsterDEXApiVersion()` using this order:
 
 ### V3 (Wallet / Agent Model)
 
+Rust RemoteSigner supports V1 and V3 without an origin private key. V3 hosted
+version resolution uses public main-wallet/API-wallet addresses. The device
+derives each digest from a closed account-bound statement; nonce address setup
+and secondary read agents retain device custody. V1 PayloadSigner is REST-only;
+V3 requires RemoteSigner. See `sdk-rs/venues/asterdex/README.md` for the protocol.
+
 - Header: `X-MBX-APIKEY`
 - Standard signed params include `recvWindow`, `timestamp`, plus:
   - `user`
@@ -542,7 +548,7 @@ the dedicated Aster clock uses the same REST constant.
 
 ## Known Quirks / Implementation Notes
 
-- **BaseWebSocket lifecycle handlers are instance arrow fields — `getPrototypeOf`-based super calls silently no-op.** `BaseWebSocket.onClose` is a class-field arrow function (an instance property), not a prototype method, so `Object.getPrototypeOf(Object.getPrototypeOf(this)).onClose` is `undefined` and a guarded call skips the base reconnect logic entirely. This bug shipped: both AsterDEX WS classes used that trick in their `onClose` overrides, so sockets were permanently dead after any disconnect. The fix (and the required pattern, matching `bitmex.ws-private.ts`) is to retain the base instance handler in the constructor — `const baseOnClose = this.onClose; this.onClose = (event) => { ...asterdex cleanup...; baseOnClose(event); }`. `dispose()` IS a regular prototype method, so `super.dispose()` works from the arrow-field overrides.
+- **BaseWebSocket lifecycle handlers are instance arrow fields — `getPrototypeOf`-based super calls silently no-op.** `BaseWebSocket.onClose` is a class-field arrow function (an instance property), not a prototype method, so `Object.getPrototypeOf(Object.getPrototypeOf(this)).onClose` is `undefined` and a guarded call skips the base reconnect logic entirely. This bug shipped: both AsterDEX WS classes used that trick in their `onClose` overrides, so sockets were permanently dead after any disconnect. The fix (and the required pattern) is to retain the base instance handler in the constructor — `const baseOnClose = this.onClose; this.onClose = (event) => { ...asterdex cleanup...; baseOnClose(event); }`. `dispose()` IS a regular prototype method, so `super.dispose()` works from the arrow-field overrides.
 - **Update order not supported**: AsterDEX has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one.
 - **Bracket orders**: TP/SL attached to entry orders are placed sequentially as separate orders (non-atomic).
 - **Close-position TP/SL**: `amount=0` uses `closePosition='true'` instead of `quantity`, and omits `reduceOnly`.

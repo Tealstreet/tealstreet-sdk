@@ -25,7 +25,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Managed socket core size | Step 1 (handoff capability) plan amendment and originals; source after review | Before changing socket capability reachability, Pending storage or Driver scheduling to reduce adoption size. | [RUST_MANAGED_SOCKET_CORE_SHRINK.md](RUST_MANAGED_SOCKET_CORE_SHRINK.md) |
 | Paradex command candle Read custody | Local source; scoped controls pass, source review pending | Before changing command candle fallback, caller deadlines or its two terminal inventory prunes. | [RUST_PARADEX_CANDLE_COMMAND_CONTEXT.md](RUST_PARADEX_CANDLE_COMMAND_CONTEXT.md) |
 | Request-context inventory precision | Implementation and rebaseline; review pending | Before changing `check-request-context.py`, its manifests, or what counts as a legacy `Cx` call. | [RUST_REQUEST_CONTEXT_PRECISION.md](RUST_REQUEST_CONTEXT_PRECISION.md) |
-| BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | WEEX public discovery and ticker-seed custody | Source/native review CLEAR; local checks and paired/current sizes PASS; frozen-head CI pending | Before managing Markets, Daily and BookTickers or changing their publication/retirement order. | [RUST_WEEX_PUBLIC_SEED_CONTEXT.md](RUST_WEEX_PUBLIC_SEED_CONTEXT.md) |
 | WEEX candle query Read custody | Draft source; scoped controls pass | Before managing candle HTTP/completions or interpreting caller deadline and streamed failure changes. | [RUST_WEEX_CANDLE_CONTEXT.md](RUST_WEEX_CANDLE_CONTEXT.md) |
@@ -88,7 +87,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bybit signing | Active dispatch signer adoption | Before Bybit REST/probe/private WS authentication or credential setup changes. | [RUST_BYBIT_DISPATCH_SIGNER.md](RUST_BYBIT_DISPATCH_SIGNER.md) |
 | Integer protocol wire stamps | Active shared clock correction | Before formatting outbound timestamps or adopting dispatch signing recipes. | [RUST_PROTOCOL_WIRE_STAMP.md](RUST_PROTOCOL_WIRE_STAMP.md) |
 | Shared signer prerequisites | Active engine/provider plan; non-HMAC schema extension in progress | Before family signing migrations, credential decoding, extra signing refs, new provider algorithms, nonce entropy, WS upgrades or signing receipts. | [RUST_SIGNER_PREREQUISITES.md](RUST_SIGNER_PREREQUISITES.md) |
-| Non-HMAC signer migrations | Active family adoption plan; shared provider prerequisites first | Before migrating ApeX, Aster, Bitunix, Crypto.com, Orderly, Backpack, Coinbase, Hyperliquid, TxFlow, GRVT, Polymarket, Paradex, Lighter or BreakoutProp signing, or adding provider algorithms. | [RUST_SIGNER_NON_HMAC_MIGRATIONS.md](RUST_SIGNER_NON_HMAC_MIGRATIONS.md) |
+| Non-HMAC signer migrations | Active family adoption plan; shared provider prerequisites first | Before migrating ApeX, Aster, Bitunix, Crypto.com, Orderly, Backpack, Coinbase, Hyperliquid, TxFlow, GRVT, Polymarket, Paradex, Lighter signing, or adding provider algorithms. | [RUST_SIGNER_NON_HMAC_MIGRATIONS.md](RUST_SIGNER_NON_HMAC_MIGRATIONS.md) |
 | Coinbase signer recipe | Active plan; recipe and provider keypair support, conversion owned by codex-hcmq3f | Before changing Coinbase JWT signing, its dispatch recipe, or the provider's Ed25519 keypair form. | [RUST_COINBASE_SIGNER_RECIPE.md](RUST_COINBASE_SIGNER_RECIPE.md) |
 | Remote signing wire v2 and credential import | Plan; Sam-decided P8/P6b, independently reviewed | Before extending sign-req/sign-res, keyless non-HMAC remote signing, browser signOperation, or importing derived credentials (Polymarket L2) into the provider. | [RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md](RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md) |
 | Read scheduling | Active engine standardization plan | Before changing read coalescing, starvation bounds, shared pauses or startup retry policy. | [RUST_READ_SCHEDULER.md](RUST_READ_SCHEDULER.md) |
@@ -129,7 +128,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bitunix position reconciliation during continuous WS notifications | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_BITUNIX_POSITION_READ_PROGRESS.md](RUST_BITUNIX_POSITION_READ_PROGRESS.md) |
 | Bitunix secondary GET identity and egress | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_BITUNIX_SECONDARY_READS.md](RUST_BITUNIX_SECONDARY_READS.md) |
 | BloFin Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [BLOFIN_RUST_PORT.md](BLOFIN_RUST_PORT.md) |
-| BreakoutProp Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md) |
 | Browser module readiness | Merged measurement contract | Chrome worker measurements and provenance; threshold proposal requires landing baselines. | [RUST_BROWSER_COLD_START.md](RUST_BROWSER_COLD_START.md) |
 | Bybit linear port checkpoint | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [BYBIT_PORT.md](BYBIT_PORT.md) |
 | Bybit variants port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [BYBIT_VARIANTS_PORT.md](BYBIT_VARIANTS_PORT.md) |
@@ -281,7 +279,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Orderly broker family RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_ORDERLY_REQUEST_CONTEXT.md](RUST_ORDERLY_REQUEST_CONTEXT.md) |
 | TxFlow testnet perpetuals RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_TXFLOW_REQUEST_CONTEXT.md](RUST_TXFLOW_REQUEST_CONTEXT.md) |
 | Polymarket CLOB V2 RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_POLYMARKET_REQUEST_CONTEXT.md](RUST_POLYMARKET_REQUEST_CONTEXT.md) |
-| BreakoutProp legacy DXtrade RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_BREAKOUTPROP_REQUEST_CONTEXT.md](RUST_BREAKOUTPROP_REQUEST_CONTEXT.md) |
 | ApeX Omni RequestContext adoption | Inventory and phased migration plan | Before migrating ApeX HTTP/completion sites or pruning its legacy inventory. | [RUST_APEXOMNI_REQUEST_CONTEXT.md](RUST_APEXOMNI_REQUEST_CONTEXT.md) |
 | BloFin managed requests | Inventory and phased adoption plan | Before BloFin HTTP/completion migration; exact legacy map, caller effects and shared API dependencies. | [RUST_BLOFIN_REQUEST_CONTEXT.md](RUST_BLOFIN_REQUEST_CONTEXT.md) |
 | BloFin private read funnel | Plan and original controls | Before managing BloFin history, closed-position or account reads, or pruning their ten request fingerprints. | [RUST_BLOFIN_READ_FUNNEL.md](RUST_BLOFIN_READ_FUNNEL.md) |
@@ -521,3 +518,15 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Lighter remaining request and signing funnel | Source reviewed; composed correctness qualification in progress | Before changing private reads, tier mutation, transaction admission, nonce retry or eager signing. | [RUST_LIGHTER_REMAINING_FUNNEL.md](RUST_LIGHTER_REMAINING_FUNNEL.md) |
 
 | BingX managed public/private sockets | Venue-only implementation and production-binding qualification | Before changing BingX socket epochs, listen-key recovery, interests or order-read epoch publication. | [RUST_BINGX_MANAGED_SOCKETS.md](RUST_BINGX_MANAGED_SOCKETS.md) |
+
+## Retired venue history
+
+BreakoutProp was removed from the SDK on 2026-11-07. Its retained plans and
+references elsewhere in migration history describe the former implementation,
+not the current venue roster:
+
+- [Rust port](RUST_BREAKOUTPROP.md)
+- [Options refusal](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md)
+- [Request context](RUST_BREAKOUTPROP_REQUEST_CONTEXT.md)
+- [Local command context](RUST_BREAKOUT_LOCAL_COMMAND_CONTEXT.md)
+- [Protective edits](callers/breakoutprop-protective-edits.md)

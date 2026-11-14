@@ -60,7 +60,10 @@ const HYROTRADER_SIMULATOR_PUBLIC_WS_URL = normalizeConfiguredOrigin(
 const HYROTRADER_SIMULATOR_PRIVATE_WS_URL = normalizeConfiguredOrigin(
   process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL,
 );
-const HYROTRADER_PROD_REST_ORIGIN = normalizeConfiguredOrigin(process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL);
+export const HYROTRADER_DEFAULT_PROD_REST_ORIGIN = 'https://sim-tealstreet.hyro.site';
+const HYROTRADER_PROD_REST_ORIGIN =
+  normalizeConfiguredOrigin(process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL) ||
+  HYROTRADER_DEFAULT_PROD_REST_ORIGIN;
 const HYROTRADER_PROD_PUBLIC_WS_URL = normalizeConfiguredOrigin(process.env.NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL);
 const HYROTRADER_PROD_PRIVATE_WS_URL = normalizeConfiguredOrigin(
   process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL,

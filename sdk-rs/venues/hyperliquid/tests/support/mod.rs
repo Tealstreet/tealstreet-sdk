@@ -443,3 +443,74 @@ pub fn answer_order_status(e: &mut Engine<Hyperliquid>, r: &HttpRequest) {
     },"status":"open"}}).to_string();
     reply(e, r, 200, &reply_body);
 }
+
+pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub fn assert_unknown_publication(
+    error: &serde_json::Value,
+    events: &[safe_cex_engine::log::LogEvent],
+    command: safe_cex_engine::CommandId,
+) {
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.code == "order.outcome_unknown")
+            .count(),
+        1,
+        "Unknown telemetry must be emitted: {events:?}"
+    );
+    let standard = ENGINE_UNKNOWN_TEXT;
+    assert_eq!(error["outcome"], "unknown");
+    assert!(
+        error["message"]
+            .as_str()
+            .expect("terminal message")
+            .contains(standard),
+        "{error}"
+    );
+    let elements = error["elements"].as_array().expect("published journal");
+    let unknown: Vec<_> = elements
+        .iter()
+        .filter(|row| row["status"] == "unknown")
+        .collect();
+    assert!(!unknown.is_empty(), "Unknown element must remain explicit");
+    for row in &unknown {
+        assert!(
+            row["error"]["message"]
+                .as_str()
+                .expect("element message")
+                .contains(standard),
+            "{row}"
+        );
+    }
+    let placed = elements
+        .iter()
+        .filter(|row| row["status"] == "placed")
+        .flat_map(|row| row["orderIds"].as_array().expect("native IDs"))
+        .map(|id| id.as_str().expect("native ID"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let indices = unknown
+        .iter()
+        .map(|row| row["index"].as_u64().expect("logical index").to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let emitted: Vec<_> = events
+        .iter()
+        .filter(|event| event.code == "order.outcome_unknown")
+        .collect();
+    assert_eq!(emitted.len(), 1, "one Unknown telemetry event: {events:?}");
+    let event = emitted[0];
+    assert!(event.message.contains(standard), "{event:?}");
+    let field = |key| {
+        event
+            .fields
+            .iter()
+            .find(|(name, _)| *name == key)
+            .and_then(|(_, value)| value.as_str())
+    };
+    assert_eq!(field("command"), Some(command.to_string().as_str()));
+    assert_eq!(field("outcome"), Some("unknown"));
+    assert_eq!(field("placedOrderIds"), Some(placed.as_str()));
+    assert_eq!(field("unknownIndices"), Some(indices.as_str()));
+}

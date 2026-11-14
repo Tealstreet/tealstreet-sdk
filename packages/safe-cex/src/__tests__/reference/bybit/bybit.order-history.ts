@@ -1,7 +1,7 @@
 import type { HistoricalOrder } from '../../../types';
 
 import { ORDER_SIDE, ORDER_STATUS, ORDER_TYPE } from '../../../exchanges/bybit/bybit.types';
-import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../../types';
+import { OrderStatus, OrderType, PositionSide } from '../../../types';
 
 // Bybit Tech Bot API announcement, effective 2026-11-12: these statuses
 // disappear from unfiltered history but remain available with an explicit filter.
@@ -48,7 +48,7 @@ const POSITION_SIDE_BY_IDX: Record<string, PositionSide | 'both'> = {
   '2': PositionSide.Short,
 };
 
-export const mapBybitHistoricalOrder = (row: Record<string, any>): HistoricalOrder | null => {
+export const mapBybitHistoricalOrder = (row: Record<string, unknown>): HistoricalOrder | null => {
   const id = String(row.orderId ?? '');
   const symbol = String(row.symbol ?? '');
   const createdTime = parseInt(String(row.createdTime ?? '0'), 10);
@@ -67,7 +67,7 @@ export const mapBybitHistoricalOrder = (row: Record<string, any>): HistoricalOrd
   return {
     id,
     symbol,
-    side: side as OrderSide,
+    side,
     type,
     // Unknown statuses map to Closed rather than being dropped: a historical order is by
     // definition no longer working, and dropping it would understate order activity.

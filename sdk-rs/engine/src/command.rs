@@ -155,6 +155,13 @@ enum CommandIn {
         from: Option<f64>,
         to: Option<f64>,
     },
+    FetchClosedPnl {
+        command: u32,
+        account: String,
+        symbol: Option<String>,
+        from: Option<f64>,
+        to: Option<f64>,
+    },
     FetchLeverage {
         command: u32,
         symbol: String,
@@ -255,6 +262,7 @@ enum Op {
     ReadPositions,
     CancelAccountOrders,
     FetchClosedPositions,
+    FetchClosedPnl,
     FetchLeverage,
     FetchMaxLeverage,
     FetchFills,
@@ -515,6 +523,19 @@ struct CancelAccountOrdersIn {
 #[serde(expecting = "struct variant CommandIn::FetchClosedPositions with 4 elements")]
 struct FetchClosedPositionsIn {
     command: u32,
+    #[serde(default)]
+    symbol: Option<String>,
+    #[serde(default)]
+    from: Option<f64>,
+    #[serde(default)]
+    to: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchClosedPnl with 5 elements")]
+struct FetchClosedPnlIn {
+    command: u32,
+    account: String,
     #[serde(default)]
     symbol: Option<String>,
     #[serde(default)]
@@ -843,6 +864,22 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
                 to,
             }
         }
+        Op::FetchClosedPnl => {
+            let FetchClosedPnlIn {
+                command,
+                account,
+                symbol,
+                from,
+                to,
+            } = payload(json)?;
+            CommandIn::FetchClosedPnl {
+                command,
+                account,
+                symbol,
+                from,
+                to,
+            }
+        }
         Op::FetchLeverage => {
             let FetchLeverageIn { command, symbol } = payload(json)?;
             CommandIn::FetchLeverage { command, symbol }
@@ -1101,6 +1138,21 @@ impl From<CommandIn> for Command {
             } => Self::Venue {
                 command,
                 action: crate::VenueAction::FetchClosedPositions {
+                    symbol,
+                    from_ms: from,
+                    to_ms: to,
+                },
+            },
+            CommandIn::FetchClosedPnl {
+                command,
+                account,
+                symbol,
+                from,
+                to,
+            } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchClosedPnl {
+                    account,
                     symbol,
                     from_ms: from,
                     to_ms: to,

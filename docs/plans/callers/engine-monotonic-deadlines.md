@@ -10,7 +10,12 @@ The default transport now anchors epoch-shaped time once after clock startup,
 then advances it only by `performance.now()` differences. Browser workers wait
 up to 30 s for their first page-provided time push; absence refuses clock startup
 explicitly instead of anchoring the engine to an unknown machine-clock offset.
-The page still owns time polling; no new venue/network requests are added.
+The page still owns routine time polling. A detected wall-versus-monotonic
+discontinuity also queues a one-off server-time resync, including in browser
+workers, to replace the cached server offset after a user adjusts the local
+clock. Concurrent resyncs in a realm share the clock's in-flight request.
+The resync starts in a microtask so even synchronous Node clock notifications
+cannot reenter Rust during a clock read or physical HTTP handoff.
 
 Host time pushes call `Engine::sync_host_time(raw_now, utc_now)` through the
 WASM host. This updates only the per-engine protocol-clock fallback and signing

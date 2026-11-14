@@ -1,12 +1,11 @@
+import { getStorageDir, onStorageOwnerChange, assertStorageSession, isRecord } from '../storage-context';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 import crypto from 'crypto';
-import { BRAND } from '../brand';
 
-const DIR = join(homedir(), BRAND.configDirName);
-const LISTENER_FILE = join(DIR, 'listener.json');
-const TRUSTED_FILE = join(DIR, 'trusted-clients.json');
+const DIR = () => getStorageDir();
+const LISTENER_FILE = () => join(DIR(), 'listener.json');
+const TRUSTED_FILE = () => join(DIR(), 'trusted-clients.json');
 
 const CLIENT_ID_MAX = 64;
 
@@ -21,15 +20,10 @@ interface TrustedFile {
   clients: TrustedClient[];
 }
 
-interface ListenerFile {
-  listenerId: string;
-  createdAt: number;
-}
-
 let cachedListenerId: string | null = null;
 
 function ensureDir(): void {
-  if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
+  if (!existsSync(DIR())) mkdirSync(DIR(), { recursive: true });
 }
 
 function atomicWrite(path: string, contents: string): void {
@@ -49,11 +43,12 @@ function atomicWrite(path: string, contents: string): void {
 }
 
 export function getListenerId(): string {
+  assertStorageSession();
   if (cachedListenerId) return cachedListenerId;
-  if (existsSync(LISTENER_FILE)) {
+  if (existsSync(LISTENER_FILE())) {
     try {
-      const parsed = JSON.parse(readFileSync(LISTENER_FILE, 'utf-8')) as ListenerFile;
-      if (typeof parsed.listenerId === 'string' && parsed.listenerId.length > 0) {
+      const parsed: unknown = JSON.parse(readFileSync(LISTENER_FILE(), 'utf-8'));
+      if (isRecord(parsed) && typeof parsed.listenerId === 'string' && parsed.listenerId.length > 0) {
         cachedListenerId = parsed.listenerId;
         return cachedListenerId;
       }
@@ -62,24 +57,32 @@ export function getListenerId(): string {
     }
   }
   const id = crypto.randomUUID();
-  atomicWrite(LISTENER_FILE, JSON.stringify({ listenerId: id, createdAt: Date.now() }, null, 2));
+  atomicWrite(LISTENER_FILE(), JSON.stringify({ listenerId: id, createdAt: Date.now() }, null, 2));
   cachedListenerId = id;
   return id;
 }
 
 export function loadTrustedClients(): TrustedFile {
-  if (!existsSync(TRUSTED_FILE)) return { clients: [] };
+  if (!existsSync(TRUSTED_FILE())) return { clients: [] };
   try {
-    const parsed = JSON.parse(readFileSync(TRUSTED_FILE, 'utf-8')) as TrustedFile;
-    if (!Array.isArray(parsed.clients)) return { clients: [] };
-    return parsed;
+    const parsed: unknown = JSON.parse(readFileSync(TRUSTED_FILE(), 'utf-8'));
+    if (!isRecord(parsed) || !Array.isArray(parsed.clients)) return { clients: [] };
+    const clients = parsed.clients.filter(
+      (client): client is TrustedClient =>
+        isRecord(client) &&
+        isValidClientId(client.clientId) &&
+        typeof client.label === 'string' &&
+        typeof client.origin === 'string' &&
+        typeof client.approvedAt === 'number',
+    );
+    return { clients };
   } catch {
     return { clients: [] };
   }
 }
 
 function saveTrustedClients(state: TrustedFile): void {
-  atomicWrite(TRUSTED_FILE, JSON.stringify(state, null, 2));
+  atomicWrite(TRUSTED_FILE(), JSON.stringify(state, null, 2));
 }
 
 function isValidClientId(id: unknown): id is string {
@@ -131,3 +134,7 @@ export function removeAllTrustedClients(): number {
   saveTrustedClients(state);
   return n;
 }
+
+onStorageOwnerChange(() => {
+  cachedListenerId = null;
+});

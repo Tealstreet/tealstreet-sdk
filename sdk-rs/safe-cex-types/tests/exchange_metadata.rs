@@ -101,3 +101,106 @@ fn full_metadata_native_fields_unified_mobile_and_domains() {
         serde_json::from_value(oracle["groups"].clone()).unwrap();
     assert_eq!(domains.into_iter().collect::<Vec<_>>(), expected_groups);
 }
+
+#[test]
+fn bingx_spot_metadata_and_symbol_conversion_stay_separate_and_disabled() {
+    let spot: ExchangeName = serde_json::from_str("\"bingxspot\"").unwrap();
+    assert_eq!(serde_json::to_value(&spot).unwrap(), "bingxspot");
+    let metadata = get_exchange_metadata("bingxspot", false).unwrap();
+    assert!(!metadata.enabled);
+    assert!(!metadata.enabled_in_dev);
+    assert_eq!(metadata.enable_in_preview, Some(false));
+    assert_eq!(
+        safe_cex_types::symbol_converter::to_binance("BTCUSDT", &spot),
+        "BTCUSDT"
+    );
+    assert_eq!(
+        safe_cex_types::symbol_converter::from_binance("BTCUSDT", &spot),
+        "BTCUSDT"
+    );
+}
+
+#[test]
+fn bitget_tpsl_context_matches_live_source_and_keeps_static_metadata_conservative() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/bitget_metadata_oracle.cjs"
+        ))
+        .env(
+            "SAFE_CEX_TYPESCRIPT_PATH",
+            std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").to_owned()
+            }),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 96);
+    for case in cases {
+        let exchange = case["exchange"].as_str().unwrap();
+        let options = &case["options"];
+        let native = get_exchange_metadata_with_options(
+            exchange,
+            ExchangeMetadataOptions {
+                is_unified: options["isUnified"].as_bool().unwrap(),
+                bitget_account_mode: options["bitgetAccountMode"].as_str(),
+                tpsl_order_path: options["tpslOrderPath"].as_str(),
+            },
+        )
+        .unwrap();
+        identity::assert_exchange_metadata_native(&native, &case["metadata"]);
+        let expected: ExchangeMetadata = serde_json::from_value(case["metadata"].clone()).unwrap();
+        assert_eq!(native, expected, "{exchange}: {options}");
+    }
+    // A path-specific resolution must never advertise choices on the static table.
+    let table = exchange_metadata();
+    for exchange in ["bitget", "bitgetusdc", "bitgetinverse"] {
+        let metadata = &table[exchange];
+        assert!(metadata.supported_tpsl_trigger_types.is_empty());
+        assert_eq!(metadata.default_tp_trigger_type, None);
+        assert_eq!(metadata.default_sl_trigger_type, None);
+        assert_eq!(get_exchange_metadata(exchange, true).unwrap(), *metadata);
+    }
+}
+
+#[test]
+fn bitget_context_does_not_change_other_venues_or_unknown_name_refusals() {
+    for exchange in exchange_metadata().keys() {
+        if matches!(exchange.as_str(), "bitget" | "bitgetusdc" | "bitgetinverse") {
+            continue;
+        }
+        for is_unified in [false, true] {
+            let metadata = get_exchange_metadata_with_options(
+                exchange,
+                ExchangeMetadataOptions {
+                    is_unified,
+                    bitget_account_mode: Some("uta"),
+                    tpsl_order_path: Some("position"),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                metadata,
+                get_exchange_metadata(exchange, is_unified).unwrap()
+            );
+        }
+    }
+    assert_eq!(
+        get_exchange_metadata_with_options(
+            "unknown",
+            ExchangeMetadataOptions {
+                bitget_account_mode: Some("uta"),
+                tpsl_order_path: Some("position"),
+                ..ExchangeMetadataOptions::default()
+            }
+        )
+        .unwrap_err(),
+        "Unknown exchange metadata: unknown"
+    );
+}

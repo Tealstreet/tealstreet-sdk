@@ -1,8 +1,10 @@
 import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 
-import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const endpoints = vi.hoisted(() => ({
@@ -53,13 +55,43 @@ afterEach(() => {
 });
 
 describe('HyroTrader Rust startup configuration', () => {
+  it('refuses explicit production with missing livenet instead of loading the simulator', async () => {
+    configure('simulator');
+    const io = vi.fn(() => { throw new Error('Unconfigured production must not send requests'); });
+    const transport = vi.fn((): Transport => ({
+      now: () => 0, request: io, connect: io, setTimeout: vi.fn(), clearTimeout: vi.fn(),
+    }));
+    setRustEngineTransport(transport);
+    try {
+      const exchange = create({ extra: { hyrotraderMode: 'production' } });
+      exchange.emitter.on('error', vi.fn());
+      await expect(exchange.start()).rejects.toMatchObject({
+        message: 'HyroTrader production URLs are not configured in this build.',
+        kind: 'invalidInput', outcome: 'notSent',
+      });
+      expect(loader).not.toHaveBeenCalled();
+      expect(transport).not.toHaveBeenCalled();
+      expect(io).not.toHaveBeenCalled();
+    } finally { setRustEngineTransport(nativeTransport); }
+  });
+
+  it('uses configured production testnet without requiring production livenet', async () => {
+    configure('production');
+    configure('simulator');
+    endpoints.productionRest.livenet = '';
+    endpoints.simulatorRest.testnet = '';
+    const exchange = create({ testnet: true, extra: { hyrotraderMode: 'production' } });
+    await expect(exchange.start()).rejects.toBe(loaderFailure);
+    expect(loader).toHaveBeenCalledOnce();
+  });
+
   it.each([false, true])('emits a typed unconfigured-build error before loading wasm (testnet=%s)', async (testnet) => {
     const exchange = create({ testnet });
     const reported = vi.fn();
     exchange.emitter.on('error', reported);
     const started = exchange.start();
     await expect(started).rejects.toMatchObject({
-      message: 'HyroTrader simulator URLs are not configured in this build.',
+      message: 'HyroTrader production URLs are not configured in this build.',
       kind: 'invalidInput',
       outcome: 'notSent',
       errorReported: true,
@@ -67,7 +99,7 @@ describe('HyroTrader Rust startup configuration', () => {
     expect(exchange.start()).toBe(started);
     expect(reported).toHaveBeenCalledOnce();
     expect(reported).toHaveBeenCalledWith(
-      'HyroTrader simulator URLs are not configured in this build.',
+      'HyroTrader production URLs are not configured in this build.',
       expect.objectContaining({ classified: expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }) }),
     );
     expect(loader).not.toHaveBeenCalled();
@@ -110,7 +142,7 @@ describe('HyroTrader Rust startup configuration', () => {
     'preserves configured %s selection and the loader failure',
     async (mode) => {
       configure(mode);
-      const exchange = create();
+      const exchange = create({ extra: { hyrotraderMode: mode === 'simulator' ? 'demo' : 'production' } });
       await expect(exchange.start()).rejects.toBe(loaderFailure);
       expect(loader).toHaveBeenCalledOnce();
       expect(loader).toHaveBeenCalledWith('hyrotrader');

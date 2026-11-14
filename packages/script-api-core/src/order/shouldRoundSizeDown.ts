@@ -19,4 +19,4 @@ import { ExchangeName, Market } from '@tealstreet/safe-cex/src/types';
 const ROUND_DOWN_SPOT_VENUES: ReadonlySet<string> = new Set<ExchangeName>(['hyperliquid', 'hyperliquidspot']);
 
 export const shouldRoundSizeDown = (market: Pick<Market, 'isSpot'>, exchangeName?: string): boolean =>
-  Boolean(market?.isSpot) && Boolean(exchangeName) && ROUND_DOWN_SPOT_VENUES.has(exchangeName as string);
+  Boolean(market?.isSpot) && typeof exchangeName === 'string' && exchangeName !== '' && ROUND_DOWN_SPOT_VENUES.has(exchangeName);

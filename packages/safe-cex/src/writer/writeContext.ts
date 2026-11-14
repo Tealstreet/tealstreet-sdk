@@ -1,10 +1,12 @@
-import type { Order, Position } from '../types';
+import type { Order, Position, StoreData } from '../types';
 import type { ContextOrder, ContextPosition, SymbolSettings, WriteContext, WriterCommand } from './writerRpc';
 
 /** The store a write's caller keeps current from its frames; the writer has none. */
 export type WriteContextStore = {
   readonly orders: readonly Order[];
   readonly positions: readonly Position[];
+  readonly positionSettings?: StoreData['positionSettings'];
+  readonly fetchedLeverage?: StoreData['fetchedLeverage'];
   readonly options: { readonly isHedged: boolean };
 };
 
@@ -27,7 +29,10 @@ const contextPosition = (position: Position): ContextPosition => ({
 });
 
 const symbolSettings = (store: WriteContextStore, symbol: string): SymbolSettings => {
-  const marginType = store.positions.find((position) => position.symbol === symbol)?.marginType;
+  const marginType =
+    store.positions.find((position) => position.symbol === symbol)?.marginType ??
+    store.fetchedLeverage?.[symbol]?.marginType ??
+    Object.values(store.positionSettings ?? {}).find((settings) => settings.symbol === symbol)?.marginType;
   return { hedged: store.options.isHedged, ...(marginType !== undefined && { marginMode: marginType }) };
 };
 
@@ -72,7 +77,13 @@ export const buildWriteContext = (store: WriteContextStore, command: WriterComma
   // An amend by id names no symbol; the order it names does.
   const named = store.orders.filter((order) => ids.has(order.id)).map((order) => order.symbol);
   const symbols = accountWide
-    ? [...new Set([...store.positions, ...store.orders].map((row) => row.symbol))]
+    ? [
+        ...new Set(
+          [...store.positions, ...store.orders, ...Object.values(store.positionSettings ?? {})].map(
+            (row) => row.symbol,
+          ),
+        ),
+      ]
     : [...new Set([...symbolsOf(command), ...named])];
   const orders = store.orders.filter(
     (order) =>

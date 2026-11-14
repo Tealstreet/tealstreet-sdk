@@ -60,6 +60,9 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
       (m) => m.BingxExchange,
     ),
 
+  // Native-only characterization; the real registry and beta gates still refuse.
+  bingxspot: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
+
   // Bitget
   bitget: () =>
     import(/* webpackChunkName: "exchange-bitget" */ './bitget/bitget.exchange').then(
@@ -94,12 +97,6 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
   blofin: () =>
     import(/* webpackChunkName: "exchange-blofin" */ './blofin/blofin.exchange').then(
       (m) => m.BlofinExchange,
-    ),
-
-  // Breakoutprop
-  breakoutprop: () =>
-    import(/* webpackChunkName: "exchange-breakoutprop" */ './breakoutprop/breakoutprop.exchange').then(
-      (m) => m.BreakoutpropExchange,
     ),
 
   // Bybit
@@ -246,7 +243,6 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
   kodiakfi: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   mode: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
-
 
 
   // TxFlow testnet

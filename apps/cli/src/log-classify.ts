@@ -30,6 +30,9 @@ export type ConsoleMethod = 'log' | 'warn' | 'error';
 export const OPERATIONAL_PATTERNS: readonly RegExp[] = [
   /^\[trackLastReceived\]/,
   /^\[BaseReconnectingWebSocket\]/,
+  /^\[ReconnectingWebSocket\]/,
+  /^RWS>/,
+  /^\[HOWWebSocket\]/,
   /^onClose\(\) called/,
   /^onClose handler called/,
   /^setting reconnecting/,

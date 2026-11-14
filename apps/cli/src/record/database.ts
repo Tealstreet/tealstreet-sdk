@@ -5,20 +5,20 @@
  * Uses Bun's built-in SQLite for zero-dependency operation.
  */
 
+/**
+ * Market Data Database
+ *
+ * SQLite wrapper for storing and querying market data snapshots.
+ * Uses Bun's built-in SQLite for zero-dependency operation.
+ */
 import { Database } from 'bun:sqlite';
 import { join } from 'path';
-import { existsSync, mkdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, statSync, linkSync, unlinkSync, chmodSync } from 'fs';
+import { randomUUID } from 'node:crypto';
+import { getOwnedLegacyDatabase, onStorageOwnerChange, assertStorageSession } from '../storage-context';
 import { getConfigDir } from '../config';
 import { runMigrations } from './migrations';
-import type {
-  DataType,
-  RecordingConfig,
-  OrderbookSnapshot,
-  HistoryQuery,
-  DatabaseStats,
-  TypeSpecificConfig,
-  formatBytes,
-} from './types';
+import type { DataType, RecordingConfig, OrderbookSnapshot, HistoryQuery, DatabaseStats } from './types';
 import { formatBytes as formatBytesUtil } from './types';
 
 const DB_FILENAME = 'market-data.db';
@@ -36,6 +36,7 @@ export function getDatabasePath(): string {
  * Initialize database connection and run migrations
  */
 export function initDatabase(): Database {
+  assertStorageSession();
   if (db) {
     return db;
   }
@@ -46,6 +47,25 @@ export function initDatabase(): Database {
   }
 
   const dbPath = getDatabasePath();
+  const legacy = getOwnedLegacyDatabase();
+  if (!existsSync(dbPath) && legacy && existsSync(legacy)) {
+    // SQLite supplies a consistent snapshot, including committed WAL pages.
+    // Copying the database/WAL files separately can silently lose recordings.
+    const temp = `${dbPath}.${randomUUID()}.tmp`;
+    const source = new Database(legacy, { readonly: true });
+    try {
+      source.exec(`VACUUM INTO '${temp.replaceAll("'", "''")}'`);
+      chmodSync(temp, 0o600);
+      try {
+        linkSync(temp, dbPath);
+      } catch (error) {
+        if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'EEXIST')) throw error;
+      }
+    } finally {
+      source.close();
+      if (existsSync(temp)) unlinkSync(temp);
+    }
+  }
   db = new Database(dbPath);
 
   // Enable WAL mode for better concurrent access
@@ -61,6 +81,7 @@ export function initDatabase(): Database {
  * Get the database instance (initializes if needed)
  */
 export function getDatabase(): Database {
+  assertStorageSession();
   if (!db) {
     return initDatabase();
   }
@@ -90,7 +111,7 @@ export function getRecordings(): RecordingConfig[] {
     .query(
       `SELECT id, data_type, exchange, symbol, interval_ms, retention_days, config, active, created_at
        FROM recording_config
-       ORDER BY created_at DESC`
+       ORDER BY created_at DESC`,
     )
     .all() as {
     id: number;
@@ -133,7 +154,7 @@ export function getRecording(dataType: DataType, exchange: string, symbol: strin
     .query(
       `SELECT id, data_type, exchange, symbol, interval_ms, retention_days, config, active, created_at
        FROM recording_config
-       WHERE data_type = ? AND exchange = ? AND symbol = ?`
+       WHERE data_type = ? AND exchange = ? AND symbol = ?`,
     )
     .get(dataType, exchange, symbol) as {
     id: number;
@@ -177,7 +198,7 @@ export function upsertRecording(config: Omit<RecordingConfig, 'id' | 'createdAt'
          interval_ms = excluded.interval_ms,
          retention_days = excluded.retention_days,
          config = excluded.config,
-         active = excluded.active`
+         active = excluded.active`,
     )
     .run(
       config.dataType,
@@ -186,7 +207,7 @@ export function upsertRecording(config: Omit<RecordingConfig, 'id' | 'createdAt'
       config.intervalMs,
       config.retentionDays,
       configJson,
-      config.active ? 1 : 0
+      config.active ? 1 : 0,
     );
 }
 
@@ -222,13 +243,13 @@ export function insertOrderbookSnapshot(
   symbol: string,
   timestamp: number,
   bids: [number, number][],
-  asks: [number, number][]
+  asks: [number, number][],
 ): void {
   const database = getDatabase();
   database
     .query(
       `INSERT INTO orderbook_snapshots (exchange, symbol, timestamp, bids, asks)
-       VALUES (?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?)`,
     )
     .run(exchange, symbol, timestamp, JSON.stringify(bids), JSON.stringify(asks));
 }
@@ -247,7 +268,7 @@ export function queryOrderbookSnapshots(query: HistoryQuery): OrderbookSnapshot[
        FROM orderbook_snapshots
        WHERE exchange = ? AND symbol = ? AND timestamp >= ? AND timestamp <= ?
        ORDER BY timestamp ASC
-       LIMIT ? OFFSET ?`
+       LIMIT ? OFFSET ?`,
     )
     .all(query.exchange, query.symbol, query.from, query.to, limit, offset) as {
     id: number;
@@ -280,7 +301,7 @@ export function countOrderbookSnapshots(exchange: string, symbol: string, from?:
     const result = database
       .query(
         `SELECT COUNT(*) as count FROM orderbook_snapshots
-         WHERE exchange = ? AND symbol = ? AND timestamp >= ? AND timestamp <= ?`
+         WHERE exchange = ? AND symbol = ? AND timestamp >= ? AND timestamp <= ?`,
       )
       .get(exchange, symbol, from, to) as { count: number };
     return result.count;
@@ -300,7 +321,7 @@ export function getLastOrderbookTimestamp(exchange: string, symbol: string): num
   const result = database
     .query(
       `SELECT MAX(timestamp) as timestamp FROM orderbook_snapshots
-       WHERE exchange = ? AND symbol = ?`
+       WHERE exchange = ? AND symbol = ?`,
     )
     .get(exchange, symbol) as { timestamp: number | null };
   return result.timestamp;
@@ -318,9 +339,7 @@ export function cleanupOldData(dataType: DataType, cutoffTimestamp: number): num
 
   switch (dataType) {
     case 'orderbook': {
-      const result = database
-        .query(`DELETE FROM orderbook_snapshots WHERE timestamp < ?`)
-        .run(cutoffTimestamp);
+      const result = database.query(`DELETE FROM orderbook_snapshots WHERE timestamp < ?`).run(cutoffTimestamp);
       return result.changes;
     }
     // Future: add cases for 'trades', 'funding', etc.
@@ -366,13 +385,11 @@ export function getDatabaseStats(): DatabaseStats {
   }
 
   // Get orderbook stats
-  const orderbookCount = database
-    .query(`SELECT COUNT(*) as count FROM orderbook_snapshots`)
-    .get() as { count: number };
+  const orderbookCount = database.query(`SELECT COUNT(*) as count FROM orderbook_snapshots`).get() as { count: number };
 
-  const orderbookExchanges = database
-    .query(`SELECT DISTINCT exchange FROM orderbook_snapshots`)
-    .all() as { exchange: string }[];
+  const orderbookExchanges = database.query(`SELECT DISTINCT exchange FROM orderbook_snapshots`).all() as {
+    exchange: string;
+  }[];
 
   return {
     totalSnapshots: orderbookCount.count,
@@ -385,3 +402,5 @@ export function getDatabaseStats(): DatabaseStats {
     },
   };
 }
+
+onStorageOwnerChange(closeDatabase);

@@ -627,7 +627,8 @@ impl Lighter {
         if !quote.is_finite() || quote < 0.0 {
             return Err("Invalid Lighter execution notional".into());
         }
-        if matches!(request.read, Read::Trades) {
+        let read = &request.read;
+        if matches!(read, Read::Trades) {
             request
                 .owner
                 .admit(cx, request.leg.as_ref().unwrap())
@@ -944,7 +945,8 @@ impl Lighter {
             );
             return;
         }
-        if request.stage == Stage::Trades && matches!(request.read, Read::Income(IncomeKind::All)) {
+        let read = &request.read;
+        if request.stage == Stage::Trades && matches!(read, Read::Income(IncomeKind::All)) {
             request.stage = Stage::Funding;
             request.stage_start = request.owner.accepted_len();
             if !request.owner.restart_stage() {

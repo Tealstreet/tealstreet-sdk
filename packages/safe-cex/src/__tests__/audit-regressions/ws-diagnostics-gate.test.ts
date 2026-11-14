@@ -125,11 +125,6 @@ describe('WebSocket diagnostics gate', () => {
       ['bybit-key', '0123456789abcdef0123456789abcdef01234567'],
     ],
     [
-      'bitmex auth args',
-      { op: 'authKeyExpires', args: ['bitmex-key', 1234567890, 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'] },
-      ['bitmex-key', 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'],
-    ],
-    [
       'okx login args',
       { op: 'login', args: [{ apiKey: 'okx-key', passphrase: 'okx-pass', sign: 'okx-sign' }] },
       ['okx-key', 'okx-pass', 'okx-sign'],

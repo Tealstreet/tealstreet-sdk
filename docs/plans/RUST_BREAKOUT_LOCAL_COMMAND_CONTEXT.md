@@ -1,5 +1,8 @@
 # Breakout immediate local command custody
 
+Historical record: this venue was retired from the SDK on 2026-11-07.
+The implementation paths and validation commands below describe the former adapter.
+
 Plan first, 2026-10-24. Owner codex-hcmq3f. Fresh branch
 `feat/rust-breakout-local-command-context` starts at actual
 `db6fa45bbb7cbbfdfeb0aa40d3dd93caac9c9e0b`. The overseer approved seven

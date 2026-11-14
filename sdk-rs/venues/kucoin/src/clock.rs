@@ -194,7 +194,9 @@ pub fn respond<P>(
         let _ = cx.finish_http_context(&read.leg);
         read.retried = true;
         read.clock = true;
-        read.leg = match cx.http_leg_context(&read.root, policy(5_000)) {
+        // Use the KuCoin TS client's 20 s read budget for relay recovery.
+        // The original root still caps recovery and its single GET replay.
+        read.leg = match cx.http_leg_context(&read.root, policy(20_000)) {
             Ok(leg) => leg,
             Err(error) => return Delivery::Failed(wrap(read), error.venue_error()),
         };

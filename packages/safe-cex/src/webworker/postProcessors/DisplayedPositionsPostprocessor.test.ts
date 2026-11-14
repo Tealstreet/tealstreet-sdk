@@ -41,8 +41,9 @@ const createTicker = (overrides?: Partial<Ticker>): Ticker =>
     last: 110,
     mark: 110,
     index: 110,
+    percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
     ...overrides,
-  }) as Ticker;
+  });
 
 const createPosition = (overrides?: Partial<Position>): Position =>
   ({
@@ -256,6 +257,7 @@ describe('DisplayedPositionsPostprocessor', () => {
       side: PositionSide.Long,
       isFakePosition: true,
       chaserSize: 4,
+      liquidationPrice: null,
     });
     expect(store.displayedPositions.find((position) => position.id === 'fake-chaser-eth-chaser')).toMatchObject({
       id: 'fake-chaser-eth-chaser',
@@ -263,6 +265,7 @@ describe('DisplayedPositionsPostprocessor', () => {
       side: PositionSide.Short,
       isFakePosition: true,
       chaserSize: 2,
+      liquidationPrice: null,
       hasActiveChaser: true,
       hasFullStop: false,
       hasFullTP: false,

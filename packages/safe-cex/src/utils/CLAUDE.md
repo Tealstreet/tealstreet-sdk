@@ -18,7 +18,6 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | asterdex, bitunix, phemex, weex       | `{B}{Q}`           | `BTCUSDT`        | USDT          | Concatenated, WEEX Contract V3 `symbol`                  |
 | bingx                                 | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT` but symbol is concat                |
 | apexomni                              | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT`                                     |
-| breakoutprop                          | `{B}USD`           | `BTCUSD`         | USD           | Quote hardcoded to 'USD'                                 |
 | blofin                                | `{B}{Q}`           | `BTCUSDC`        | USDC          | API id is `BTC-USDC`                                     |
 | okx                                   | `{B}{Q}`           | `ACTUSDT`        | USDT          | API id `ACT-USDT-SWAP`, normalized                       |
 | woo                                   | `{B}{Q}`           | `BCHUSDT`        | USDT          |                                                          |
@@ -217,8 +216,32 @@ accuracy, so the edge `/api/time` clock is plenty. Generic clock sync starts
 immediately, then runs every 300 seconds; do not shorten it without a new
 drift measurement.
 
+The default Rust transport requests `syncClientServerTime({ afterClockStep: true })`
+after detecting a wall-versus-monotonic discontinuity. This refreshes the cached
+offset promptly, including a one-off request in a browser worker. Ordinary worker
+startup and periodic sync still preserve page-pushed offsets without network I/O.
+Overlapping requests share the existing in-flight synchronization.
+Completed clock-step attempts also share a realm-wide 15 s cooldown measured by
+`performance.now()`, including Node notifications and failed attempts. Neither
+another transport nor a further wall step bypasses it. If both registered and
+venue sources fail in this mode, the prior offset and subscribers stay unchanged;
+ordinary synchronization retains its local-UTC fallback and five-minute cadence.
+Steps inside the cooldown share one deferred resync at its boundary. A step during
+an in-flight sync retains one follow-up resync, respecting the same cooldown after
+completion. The timer rechecks monotonic elapsed time; `stop()` clears pending work.
+
 ## Files
 
+- `diagnosticRedaction.ts` — detached copies for console, log events, telemetry
+  and retained diagnostics. Never use it to transform live command or market
+  messages; ordinary IDs and timestamps remain diagnostic context. Complete
+  prefixed JSON is parsed before escape decoding and reserialized after redaction;
+  truncated auth text uses the same operation fields/namespaces as structured
+  frames. Header tuples require two strings and a valid HTTP header name, so
+  ordinary error argument arrays retain startup classification and phase metadata.
+  Copied Error name/message/stack/cause remain non-enumerable; explicit diagnostic
+  text formatting includes their redacted values. Plain JSON/key enumeration
+  retains native Error behavior. The shared diagnostic marker is `[REDACTED]`.
 - `httpFailure.ts` — `getHttpFailure` / `appendHttpFailure` / `describeHttpFailure`.
   The HOW adapter resolves non-2xx tunnel frames without axios' `settle()`, so a
   venue interceptor's SUCCESS handler receives the failure with its status
@@ -312,7 +335,16 @@ updates. Other TS pollers continue reading the multiplier at their next tick.
 
 `nativePositionSize.ts` is the shared sizing leaf for SDK bulk closes and the
 existing script-api-core re-export. It converts base contracts for linear
-markets and quote notional for inverse markets, retaining the existing maximum
-of derived size and `extra.contractsNative`. Missing/zero contract size defaults
-to one. Rounding and input validation belong to the caller; do not add a reverse
-dependency on script-api-core.
+markets and quote notional for inverse markets. Coherent native evidence wins;
+without native evidence it uses the derived quantity. Conflicting or unavailable
+evidence returns null, which close/reduce callers must refuse. There is no
+per-field freshness marker, so disagreement beyond roundoff cannot select a
+newer value. Missing/zero contract size still defaults to one; rounding belongs
+to the caller. Do not add a reverse dependency on script-api-core.
+
+## Unknown position valuation
+
+`leverage.ts` returns null when a required notional is null or nonfinite,
+including after JSON transport. An incomplete scope cannot publish a partial
+total. PnL percentages require a known nonzero valuation; sizing still uses
+`nativePositionSize` and its independent native-quantity evidence.

@@ -1,3 +1,5 @@
+import { diagnosticText, redactDiagnosticData } from './utils/diagnosticRedaction';
+
 /**
  * Where safe-cex reports errors and product events. Nothing is sent unless the host
  * registers a sink with `setTelemetrySink`; the SDK never ships telemetry itself.
@@ -19,9 +21,9 @@ export const setTelemetrySink = (next: TelemetrySink): void => {
 };
 
 export const reportEvent = (name: string, data: Record<string, unknown>): void => {
-  sink.event?.(name, data);
+  sink.event?.(diagnosticText(name), redactDiagnosticData(data));
 };
 
 export const reportException = (error: unknown, context: TelemetryContext): void => {
-  sink.captureException?.(error, context);
+  sink.captureException?.(redactDiagnosticData(error), redactDiagnosticData(context));
 };

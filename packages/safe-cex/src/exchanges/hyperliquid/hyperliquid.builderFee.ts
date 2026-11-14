@@ -10,6 +10,8 @@
 
 import { ethers } from 'ethers';
 
+import { reportEvent } from '../../telemetry';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import {
   builderFeeRateFromTenthsBps,
   getBuilderAddress,
@@ -18,7 +20,6 @@ import {
   TEALSTREET_BUILDER_ADDRESS_TESTNET,
   TEALSTREET_BUILDER_FEE,
 } from './hyperliquid.constants';
-import { reportEvent } from '../../telemetry';
 import { BASE_URLS, BuilderFeeApprovalResult, BuilderFeeCheckResult, Signature } from './hyperliquid.types';
 
 // Re-export for public API
@@ -89,7 +90,10 @@ const ARBITRUM_SEPOLIA_CHAIN = {
  * @param testnet - Whether to switch to testnet (Arbitrum Sepolia) or mainnet (Arbitrum One)
  * @returns True if the network was switched successfully, false otherwise
  */
-async function switchToCorrectNetwork(testnet: boolean): Promise<{ success: boolean; error?: string }> {
+async function switchToCorrectNetwork(
+  testnet: boolean,
+  assertCurrent: () => void,
+): Promise<{ success: boolean; error?: string }> {
   if (typeof window === 'undefined' || !window.ethereum) {
     return { success: false, error: 'No Ethereum wallet detected' };
   }
@@ -99,28 +103,34 @@ async function switchToCorrectNetwork(testnet: boolean): Promise<{ success: bool
 
   // Helper to try switching
   const trySwitch = async (): Promise<boolean> => {
+    assertCurrent();
     try {
       await window!.ethereum!.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: targetChainId }],
       });
-      return true;
     } catch {
+      assertCurrent();
       return false;
     }
+    assertCurrent();
+    return true;
   };
 
   // Helper to try adding chain
   const tryAddChain = async (): Promise<boolean> => {
+    assertCurrent();
     try {
       await window!.ethereum!.request({
         method: 'wallet_addEthereumChain',
         params: [targetChain],
       });
-      return true;
     } catch {
+      assertCurrent();
       return false;
     }
+    assertCurrent();
+    return true;
   };
 
   // First attempt: try switching directly
@@ -211,7 +221,7 @@ export async function checkBuilderFeeApproved(
       maxFeeRateTenthsBps: feeValueTenthsBps,
     };
   } catch (error) {
-    console.error('Failed to check builder fee approval:', error);
+    diagnosticConsole.error('Failed to check builder fee approval:', error);
     return {
       approved: false,
       error: error instanceof Error ? error.message : 'Failed to reach Hyperliquid',
@@ -341,6 +351,14 @@ export function createBuilderInfo(
   };
 }
 
+export type BuilderFeeApprovalGuard = {
+  /** Bound to the initiating host owner/session; throw synchronously if it is stale. */
+  assertCurrent?: () => void;
+  signal?: AbortSignal;
+};
+
+const BUILDER_FEE_OWNER_CHANGED = 'Builder fee approval cancelled-for-owner-change';
+
 /**
  * Full flow to approve builder fee (for use in browser with wallet connection)
  *
@@ -355,6 +373,7 @@ export function createBuilderInfo(
  * @param testnet - Whether to use testnet
  * @param builderAddress - The builder address to approve (defaults to Tealstreet based on network)
  * @param maxFeeRate - The maximum fee rate (defaults to 0.01%)
+ * @param guard - Optional initiating-owner assertion/cancellation, checked between wallet steps
  * @returns The result of the approval process
  */
 export async function approveBuilderFeeWithBrowserWallet(
@@ -362,8 +381,19 @@ export async function approveBuilderFeeWithBrowserWallet(
   testnet: boolean = false,
   builderAddress?: string,
   maxFeeRate: string = DEFAULT_BUILDER_FEE_RATE,
+  guard?: BuilderFeeApprovalGuard,
 ): Promise<BuilderFeeApprovalResult> {
   const builder = builderAddress ?? getBuilderAddress(testnet);
+  const { assertCurrent: assertOwnerCurrent, signal } = guard ?? {};
+  let provider: ethers.BrowserProvider | undefined;
+  const assertCurrent = () => {
+    try {
+      assertOwnerCurrent?.();
+    } catch {
+      throw new Error(BUILDER_FEE_OWNER_CHANGED);
+    }
+    if (signal?.aborted) throw new Error(BUILDER_FEE_OWNER_CHANGED);
+  };
   // Check for window.ethereum (browser wallet)
   if (typeof window === 'undefined' || !window.ethereum) {
     return {
@@ -373,8 +403,10 @@ export async function approveBuilderFeeWithBrowserWallet(
   }
 
   try {
+    assertCurrent();
     // Switch to the correct network before signing
-    const networkResult = await switchToCorrectNetwork(testnet);
+    const networkResult = await switchToCorrectNetwork(testnet, assertCurrent);
+    assertCurrent();
     if (!networkResult.success) {
       return {
         success: false,
@@ -383,10 +415,26 @@ export async function approveBuilderFeeWithBrowserWallet(
     }
 
     // Create provider and get signer
-    const provider = new ethers.BrowserProvider(window!.ethereum!);
+    const wallet = window!.ethereum!;
+    // Ethers can defer another wallet mutation inside getSigner/signTypedData.
+    const guardedWallet: EthereumProvider = {
+      request: async (args) => {
+        assertCurrent();
+        try {
+          return await wallet.request(args);
+        } finally {
+          assertCurrent();
+        }
+      },
+    };
+    provider = new ethers.BrowserProvider(guard ? guardedWallet : wallet);
+    assertCurrent();
     await provider.send('eth_requestAccounts', []);
+    assertCurrent();
     const signer = await provider.getSigner();
+    assertCurrent();
     const address = await signer.getAddress();
+    assertCurrent();
 
     // Verify address matches
     if (address.toLowerCase() !== expectedAddress.toLowerCase()) {
@@ -397,10 +445,13 @@ export async function approveBuilderFeeWithBrowserWallet(
     }
 
     // Sign the approval
+    assertCurrent();
     const { signature, nonce } = await signBuilderFeeApproval(signer, builder, maxFeeRate, testnet);
 
     // Submit to Hyperliquid
+    assertCurrent();
     const result = await submitBuilderFeeApproval(builder, maxFeeRate, nonce, signature, testnet);
+    assertCurrent();
 
     if (result.success) {
       reportEvent('hyperliquid.builder-fee-approved', { wallet: address, testnet });
@@ -408,6 +459,11 @@ export async function approveBuilderFeeWithBrowserWallet(
 
     return result;
   } catch (error) {
+    try {
+      assertCurrent();
+    } catch {
+      return { success: false, message: BUILDER_FEE_OWNER_CHANGED };
+    }
     // Handle user rejection
     if (error instanceof Error && error.message.includes('user rejected')) {
       return {
@@ -420,5 +476,7 @@ export async function approveBuilderFeeWithBrowserWallet(
       success: false,
       message: error instanceof Error ? error.message : 'Failed to approve builder fee',
     };
+  } finally {
+    if (guard) provider?.destroy();
   }
 }

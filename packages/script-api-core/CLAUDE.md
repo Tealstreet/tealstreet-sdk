@@ -329,7 +329,28 @@ old web adapter. They differ by `market.contractSize`, so a bare
 `DOGE-USDT-SWAP` and a fraction of the position on a Bybit inverse market. It
 goes through `nativePositionSize` now (the SDK utility re-exported from
 `src/order/positionSizing.ts`), and `createCoreAdapter.test.ts` pins
-both halves — the fallback converts, an explicit `amount` does not.
+both halves — the fallback converts, an explicit `amount` does not. The shared
+helper returns null for conflicting or unavailable size evidence; a default
+close refuses it before rounding or submission. Never replace unknown with zero
+or a maximum of native and derived quantities.
 
 `resolveOemsPlan` only routed to this verb when `contractSize === 1 && !isInverse`,
 which is the shape of a workaround for a bug nobody had written down.
+
+
+## Percentage closes
+
+`ClosePositionOpts.percent` is mutually exclusive with explicit native `amount`.
+This additive contract starts at Core API 1.4.0; newly stamped scripts require
+that version, so the load gate refuses them on a 1.3.3 runtime before dispatch.
+`roundPercentageCloseSize` floors a known native quantity below 100%, refusing
+zero with a visible size/step error; 100% keeps the full native size. CoreAdapter
+and CLI share the rule, and MCP delegates its close tool to CoreAdapter. Explicit
+amounts and amendments keep preserve-or-refuse; unknown native sizes refuse.
+
+## Combined exposure requires complete valuation
+
+`getCombinedBalance` refuses when any included position has null or nonfinite
+notional, or exposure overflows. Its numeric summary never substitutes zero
+or publishes a partial sum. Position reads preserve unknown valuation; native
+close sizing continues through the SDK sizing helper.

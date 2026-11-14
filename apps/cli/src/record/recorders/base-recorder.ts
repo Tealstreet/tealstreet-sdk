@@ -1,3 +1,4 @@
+import { captureStorageSession, isStorageSessionCurrent } from '../../storage-context';
 /**
  * Base Recorder
  *
@@ -5,8 +6,14 @@
  * Provides common functionality for interval checking, cleanup scheduling, and status tracking.
  */
 
+/**
+ * Base Recorder
+ *
+ * Abstract base class for all data recorders.
+ * Provides common functionality for interval checking, cleanup scheduling, and status tracking.
+ */
 import type { DataType, RecorderStatus, RecordingOptions } from '../types';
-import { cleanupOldData, upsertRecording, deactivateRecording, getLastOrderbookTimestamp } from '../database';
+import { cleanupOldData, upsertRecording, deactivateRecording } from '../database';
 import { logger } from '../../logger';
 
 /**
@@ -21,6 +28,8 @@ export abstract class BaseRecorder {
   protected retentionDays: number;
   protected levels: number;
 
+  protected readonly ownerSession = captureStorageSession();
+  protected readonly ownerEpoch = this.ownerSession.epoch;
   protected lastRecordTime = 0;
   protected snapshotCount = 0;
   protected cleanupInterval?: NodeJS.Timeout;
@@ -84,9 +93,12 @@ export abstract class BaseRecorder {
    */
   protected scheduleCleanup(): void {
     // Run cleanup every hour
-    this.cleanupInterval = setInterval(() => {
-      this.runCleanup();
-    }, 60 * 60 * 1000);
+    this.cleanupInterval = setInterval(
+      () => {
+        this.runCleanup();
+      },
+      60 * 60 * 1000,
+    );
 
     // Also run cleanup immediately on start
     this.runCleanup();
@@ -106,6 +118,7 @@ export abstract class BaseRecorder {
    * Run cleanup to delete old data
    */
   protected runCleanup(): void {
+    if (!isStorageSessionCurrent(this.ownerEpoch)) return;
     const retentionMs = this.retentionDays * 24 * 60 * 60 * 1000;
     const cutoff = Date.now() - retentionMs;
     const deleted = cleanupOldData(this.dataType, cutoff);
@@ -118,6 +131,7 @@ export abstract class BaseRecorder {
    * Save recording configuration to database
    */
   protected saveConfig(active: boolean): void {
+    if (!isStorageSessionCurrent(this.ownerEpoch)) return;
     upsertRecording({
       dataType: this.dataType,
       exchange: this.exchange,
@@ -133,6 +147,7 @@ export abstract class BaseRecorder {
    * Mark recording as inactive in database
    */
   protected deactivateConfig(): void {
+    if (!isStorageSessionCurrent(this.ownerEpoch)) return;
     deactivateRecording(this.dataType, this.exchange, this.symbol);
   }
 
@@ -140,6 +155,7 @@ export abstract class BaseRecorder {
    * Log a message with recorder context
    */
   protected log(message: string): void {
+    if (!this.ownerSession.isCurrent()) return;
     logger.info(`[${this.dataType}:${this.exchange}:${this.symbol}] ${message}`);
   }
 
@@ -147,6 +163,7 @@ export abstract class BaseRecorder {
    * Log an error with recorder context
    */
   protected logError(message: string, error?: Error): void {
+    if (!this.ownerSession.isCurrent()) return;
     logger.error(`[${this.dataType}:${this.exchange}:${this.symbol}] ${message}`, error?.stack);
   }
 }

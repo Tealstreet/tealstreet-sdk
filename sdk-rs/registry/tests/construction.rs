@@ -1,4 +1,4 @@
-use safe_cex_engine::{Engine, ErrorKind, Venue, VenueError};
+use safe_cex_engine::{Engine, ErrorKind, Outcome, Venue, VenueError};
 use safe_cex_venues::{EngineOptions, Visit, build};
 
 struct Accept;
@@ -26,7 +26,23 @@ fn rejected(venue: &str, options: &str) -> String {
 
 #[test]
 fn unknown_venues_are_refused_by_name() {
-    assert_eq!(rejected("nope", "{}"), "unsupported venue: nope");
+    // Retired venues stay saved on user accounts; they must refuse, typed, before any I/O.
+    for venue in ["nope", "bitmex", "bitmextestnet"] {
+        for options in [
+            "{}",
+            r#"{"publicDataOnly":true}"#,
+            r#"{"key":"k","secret":"s"}"#,
+        ] {
+            let error = construct(venue, options).expect_err("construction is refused");
+            assert_eq!(
+                error.kind,
+                Some(ErrorKind::Unsupported),
+                "{venue} {options}"
+            );
+            assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue} {options}");
+            assert_eq!(error.message, format!("unsupported venue: {venue}"));
+        }
+    }
 }
 
 #[test]
@@ -177,24 +193,6 @@ const WALLET: &str = "0x1111111111111111111111111111111111111111";
 const PRIVATE_KEY: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
 #[test]
-fn breakoutprop_needs_dxtrade_credentials_even_for_market_data() {
-    let message = "BreakoutProp market data requires a legacy DXtrade username and password";
-    for options in [
-        r#"{"publicDataOnly":true}"#,
-        r#"{"key":"user"}"#,
-        r#"{"key":"user","secret":""}"#,
-        r#"{"secret":"password"}"#,
-    ] {
-        assert_eq!(rejected("breakoutprop", options), message, "{options}");
-    }
-    construct(
-        "breakoutprop",
-        r#"{"publicDataOnly":true,"key":"user","secret":"password"}"#,
-    )
-    .unwrap();
-}
-
-#[test]
 fn polymarket_private_accounts_need_a_wallet_key_and_coherent_l2_credentials() {
     let account =
         |polymarket: &str| format!(r#"{{"key":"{PRIVATE_KEY}","polymarket":{polymarket}}}"#);
@@ -317,7 +315,7 @@ fn asterdex_v1_with_wallet_keys_needs_the_main_wallet() {
 
 #[test]
 fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
-    let message = "Rust engine private accounts require a local API key and secret; remote signing is unsupported";
+    let message = "Delegated signing requires a configured callback provider";
     for venue in [
         "binance",
         "bybit",
@@ -327,68 +325,30 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         "hyperliquidspot",
         "kraken",
         "bitunix",
-    ] {
-        for options in [
-            r#"{"remoteSigning":true}"#,
-            r#"{"remoteSigning":true,"key":"k"}"#,
-            r#"{"remoteSigning":true,"key":"","secret":"s"}"#,
-        ] {
-            let expected = if venue == "hyperliquidspot"
-                && options == r#"{"remoteSigning":true,"key":"","secret":"s"}"# {
-                "Invalid Hyperliquid local signer setup"
-            } else {
-                message
-            };
-            assert_eq!(rejected(venue, options), expected, "{venue} {options}");
-        }
-        // Incomplete credentials without a remote signer build a public account, as before
-        // (Orderly's own rules still apply to its private accounts).
-        if venue != "orderly" {
-            construct(venue, r#"{"key":"k"}"#).unwrap();
-        }
-    }
-    // Delegated and derived signers have their own rules.
-    for venue in [
         "hyperliquid",
         "paradex",
         "lighter",
         "coinbase",
-        "polymarket",
-        "breakoutprop",
-    ] {
-        assert_ne!(
-            construct(venue, r#"{"remoteSigning":true}"#)
-                .err()
-                .map(|error| error.message),
-            Some(message.into()),
-            "{venue}"
-        );
-    }
-    // AsterDEX V3 signs with the auth wallet key; setup resolves V3 from its shape.
-    let wallet = "0x1111111111111111111111111111111111111111";
-    construct(
         "asterdex",
-        &format!(
-            r#"{{"remoteSigning":true,"key":"{wallet}","applicationId":"{wallet}","asterdex":{{"privateKey":"0x{}"}}}}"#,
-            "12".repeat(32)
-        ),
-    )
-    .unwrap();
-    // A wallet key that is not V3-shaped resolves V1, which has no secret to sign with.
-    assert_eq!(
-        rejected(
-            "asterdex",
-            r#"{"remoteSigning":true,"key":"k","asterdex":{"privateKey":"p"}}"#
-        ),
-        message
-    );
-    assert_eq!(
-        rejected(
-            "asterdex",
-            r#"{"remoteSigning":true,"key":"k","secret":"  "}"#
-        ),
-        message
-    );
+    ] {
+        for input in [
+            r#"{"remoteSigning":true}"#,
+            r#"{"remoteSigning":true,"key":"k"}"#,
+            r#"{"remoteSigning":true,"key":"","secret":"s"}"#,
+        ] {
+            let error = construct(venue, input).expect_err("no callback provider");
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput), "{venue}");
+            assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
+            assert_eq!(error.message, message, "{venue}");
+        }
+        if venue != "orderly" && venue != "paradex" {
+            construct(
+                venue,
+                r#"{"key":"k","publicDataOnly":true,"remoteSigning":true}"#,
+            )
+            .unwrap();
+        }
+    }
 }
 
 #[test]
@@ -486,7 +446,7 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
             "asterdex",
             r#"{"key":"k","publicMode":{"payloadSigner":true}}"#
         ),
-        (false, true)
+        (true, false)
     );
     // Lighter's remote signer signs its statements, so it is a signing credential.
     assert_eq!(
@@ -520,7 +480,26 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
 
 #[test]
 fn native_payload_refusal_preserves_classification_with_or_without_local_credentials() {
-    use safe_cex_engine::Outcome;
+    // A configured provider reaches the V3 custody refusal, past callback validation.
+    let v3 = safe_cex_venues::build_with_signer(
+        "asterdex",
+        serde_json::from_str(
+            r#"{"key":"public-wallet","payloadSigner":true,"asterdex":{"apiVersion":"v3"}}"#,
+        )
+        .unwrap(),
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(std::sync::Arc::new(
+            safe_cex_crypto::signer::LocalSigner::new(),
+        )),
+        Accept,
+    )
+    .unwrap_err();
+    assert_eq!(v3.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(v3.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        v3.message,
+        "AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only"
+    );
     for venue in [
         "binance",
         "binancepm",
@@ -536,19 +515,20 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
     ] {
         for local in ["", "local"] {
             let error = construct(venue, &format!(r#"{{"key":"key","secret":"{local}","remoteSigning":true,"payloadSigner":true}}"#)).unwrap_err();
-            assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
+            assert_eq!(
+                error.kind,
+                Some(if venue == "polymarket" {
+                    ErrorKind::Unsupported
+                } else {
+                    ErrorKind::InvalidInput
+                }),
+                "{venue}"
+            );
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
-            let policy = safe_cex_venues::remote_signing_policy(venue);
-            let expected = if policy.enabled && !policy.payload_supported {
-                format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
-            } else if policy.enabled {
-                format!(
-                    "Rust {venue} payloadSigner requires a configured injected signing provider"
-                )
+            let expected = if venue == "polymarket" {
+                "Polymarket hosted/delegated signing is unsupported: the user WebSocket requires the API secret, which a signature-only provider cannot supply".to_owned()
             } else {
-                format!(
-                    "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
-                )
+                "Delegated signing requires a configured callback provider".to_owned()
             };
             assert_eq!(error.message, expected);
         }
@@ -556,11 +536,11 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
     // Hosted (device-key) Paradex has no Rust route in this release: refuse
     // typed before any signing, never a legacy digest-only delegate.
     let error = construct("paradex", r#"{"key":"public-subkey","paradexAddress":"0x1","subkeyAddress":"0x2","payloadSigner":true}"#).unwrap_err();
-    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(
         error.message,
-        "Rust paradex delegated signing is unsupported in this build; configure the account's local Stark key or remove payloadSigner"
+        "Delegated signing requires a configured callback provider"
     );
     construct("paradex", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
     construct("binance", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
@@ -568,18 +548,32 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
         // Explicit shared intent overrides the legacy boolean in either direction.
         construct(venue, r#"{"publicDataOnly":false,"payloadSigner":true,"publicMode":{"requested":true,"payloadSigner":true}}"#).unwrap();
         let error = construct(venue, r#"{"key":"key","secret":"unused","publicDataOnly":true,"payloadSigner":true,"publicMode":{"requested":false,"payloadSigner":true}}"#).unwrap_err();
-        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
-    // Aster and Lighter payload-only SDK accounts retain their public fallback.
+    // A keyless callback retains the public fallback; a keyed missing callback refuses.
     for venue in ["asterdex", "lighter"] {
-        construct(venue, r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap();
+        let error = construct(venue, r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
+    // Aster V1 PayloadSigner is private and needs an injected provider.
+    let aster = construct(
+        "asterdex",
+        r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true}}"#,
+    )
+    .unwrap_err();
+    assert_eq!(aster.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(aster.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        aster.message,
+        "Delegated signing requires a configured callback provider"
+    );
 }
 
 #[cfg(feature = "bybit")]
 #[test]
-fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
+fn hyro_raw_config_preserves_network_and_refuses_environment_fallback() {
     use safe_cex_venues::HyroConfig;
     let config = |mode, production_rest: &str| {
         serde_json::json!({
@@ -601,8 +595,11 @@ fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
         (None, "https://prod.example", true, "prod-test"),
         (Some("demo"), "https://prod.example", false, "sim"),
         (Some("demo"), "https://prod.example", true, "sim-test"),
-        (None, "", false, "sim"),
-        (None, "", true, "sim-test"),
+        (Some("production"), "https://prod.example", false, "prod"),
+        (Some("production"), "", true, "prod-test"),
+        (Some("demo"), "", false, "sim"),
+        (Some("demo"), "", true, "sim-test"),
+        (None, "", true, "prod-test"),
     ] {
         let raw = config(mode, prod);
         let selected = serde_json::from_value::<HyroConfig>(raw.clone())
@@ -624,6 +621,42 @@ fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
                 .to_string(),
         )
         .unwrap();
+    }
+    for mode in [None, Some("production")] {
+        let raw = config(mode, "");
+        let error = serde_json::from_value::<HyroConfig>(raw.clone())
+            .unwrap()
+            .resolve(false)
+            .err()
+            .expect("explicit production must refuse missing livenet");
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert_eq!(
+            rejected(
+                "hyrotrader",
+                &serde_json::json!({
+                    "publicDataOnly":true,"hyrotrader":raw
+                })
+                .to_string()
+            ),
+            "HyroTrader REST/public/private URLs are not configured"
+        );
+    }
+    for testnet in [false, true] {
+        for field in ["rest", "publicWs", "privateWs"] {
+            let mut raw = config(Some("production"), "https://prod.example");
+            raw["production"][field][if testnet { "testnet" } else { "livenet" }] = "".into();
+            let error = construct(
+                "hyrotrader",
+                &serde_json::json!({
+                    "publicDataOnly":true,"testnet":testnet,"hyrotrader":raw
+                })
+                .to_string(),
+            )
+            .expect_err("missing selected production endpoint must refuse before I/O");
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+        }
     }
     let mut incomplete = config(None, "https://prod.example");
     incomplete["production"]["publicWs"]["livenet"] = "".into();
@@ -681,13 +714,20 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
         (None, true, false),
     ] {
         let raw = serde_json::json!({"key":"key","secret":"secret","bybitSiteId":site,"remoteSigning":remote});
-        let options: EngineOptions = serde_json::from_value(raw).unwrap();
-        let actions = build(
-            "bybit",
-            options,
-            Some(safe_cex_engine::test_support::seeded_entropy(17)),
-            RejectFee,
-        )
+        let mut options: EngineOptions = serde_json::from_value(raw).unwrap();
+        let entropy = Some(safe_cex_engine::test_support::seeded_entropy(17));
+        let actions = if remote {
+            let (provider, ids) = safe_cex_venues::local_signer_from_json(
+                r#"{"primary":{"key":"key","secret":"secret"}}"#.into(),
+            )
+            .unwrap();
+            options.key = None;
+            options.secret = None;
+            options.signing = Some(ids);
+            safe_cex_venues::build_with_signer("bybit", options, entropy, Some(provider), RejectFee)
+        } else {
+            build("bybit", options, entropy, RejectFee)
+        }
         .unwrap();
         let probe = |url: &str| url == "https://api-demo.bybit.com/v5/user/query-api";
         assert_eq!(
@@ -768,15 +808,11 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
     for (venue, expected) in [
         (
             "hyperliquid",
-            "Hyperliquid requires its primary signing provider",
+            "Delegated signing requires a configured callback provider",
         ),
         (
             "hyperliquidspot",
-            "Hyperliquid requires its primary signing provider",
-        ),
-        (
-            "orderly",
-            "Injected signing is not supported for this venue yet",
+            "Delegated signing requires a configured callback provider",
         ),
     ] {
         assert_eq!(
@@ -787,6 +823,24 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
             expected
         );
     }
+    let error = construct(
+        "orderly",
+        r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#,
+    ).expect_err("Orderly private injection stays closed");
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Orderly injected private signing admission is closed"
+    );
+    // Without injected custody, the callback provider is still validated first.
+    assert_eq!(
+        rejected(
+            "orderly",
+            r#"{"key":"configured-key","remoteSigning":true,"publicMode":{"requested":false}}"#,
+        ),
+        "Delegated signing requires a configured callback provider",
+    );
 }
 
 #[test]

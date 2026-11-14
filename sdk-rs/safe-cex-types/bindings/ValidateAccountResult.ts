@@ -2,13 +2,9 @@
 import type { Balance } from "./Balance";
 export type ValidateAccountResult = {
     /**
-     * @ts-mutable
      * Static string projection of a declaration the runtime violates: truthy numeric/object errors survive.
      * See parity/manifest/types.ts.toml::ValidateAccountResult (ts-bug: validation-error-value).
      */
     error: string;
-    /**
-     * @ts-mutable
-     */
     balance?: Balance;
 };

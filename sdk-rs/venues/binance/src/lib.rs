@@ -28,7 +28,8 @@ use safe_cex_engine::socket_lifecycle::{
     TrafficPolicy,
 };
 use safe_cex_engine::{
-    Command, Cx, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue, num,
+    Command, Cx, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+    VenueError, num,
 };
 use sign::{Credentials, Query};
 use std::cell::{Cell, RefCell};
@@ -1362,9 +1363,13 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn observe_unproven_http_response(
         &mut self,
         now: f64,
+        _: f64,
         pending: &Pending,
         response: Response<'_>,
     ) {
