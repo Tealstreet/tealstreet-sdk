@@ -1030,14 +1030,24 @@ only when their public topics are direct; separate sockets remain independent.
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
 CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
 `store.socketHealth` through the shared `summarizeSocketHealth`, on socket
-changes and every 5 s, never through the TS watchdog. A private socket is healthy
-for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
+changes and every 5 s, never through the TS watchdog. Channel health uses a
+60 s silence threshold. Reconnecting closes only
 open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
 `auth.rejected` events raise `authFailureStreak`; a private stream delivering
 again resets it. Private `privateLastMessage` retains the last received frame's
 page-clock timestamp while the socket is uninitialized or reconnecting; a feed
 that has never received a frame still has no timestamp. Health/initialization
 flags remain independent of this diagnostic age.
+
+The existing five-second health check also retires an OPEN, initialized channel
+whose last frame is at least 60 s old on the wall clock. Laptop sleep can pause
+`performance.now()` while wall-clock health ages, so native supervisor deadlines
+alone can leave that stale connection in place after JavaScript resumes. The
+check uses the existing engine reconnect path, retaining its epochs, uncertainty
+and retry policy. Fresh traffic, uninitialized replacements and connects in
+flight are left alone. It neither moves command deadlines nor retries writes,
+rebuilds the engine or reloads the chart. Its self-rescheduling timeout keeps one
+handle and stops on disposal. Regression: `rust.socket-health.test.ts`.
 
 `store.latency` is nullable: null means no measurement, including on reset.
 STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an

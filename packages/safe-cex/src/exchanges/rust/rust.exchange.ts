@@ -154,7 +154,7 @@ import {
   rustPublicFeedIdentity,
   serveInProcessPublicData,
 } from './publicFeed';
-import { RustSocketHandle } from './rustSockets';
+import { RUST_SOCKET_STALE_MS, RustSocketHandle } from './rustSockets';
 import { failedPrivateReadKind, startupDiagnosticTags } from './startupDiagnostics';
 
 /** The public registry and direct construction share the same beta policy. */
@@ -635,6 +635,7 @@ export class RustEngineExchange extends BaseExchange {
   private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
+  private socketHealthTimer?: ReturnType<typeof setTimeout>;
   private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
@@ -2252,8 +2253,7 @@ export class RustEngineExchange extends BaseExchange {
         this.host?.flush();
       }, STORE_FLUSH_MS * multiplier),
     );
-    // Staleness has no socket event of its own; re-derive health on a slow clock.
-    this.flushTimers.push(setInterval(this.syncSocketHealthToStore, SOCKET_HEALTH_SYNC_MS));
+    this.scheduleSocketHealthCheck();
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
@@ -2639,7 +2639,32 @@ export class RustEngineExchange extends BaseExchange {
     return this.host;
   }
 
-  /** Engine sockets replace the TS watchdog: venues own their reconnect policy. */
+  private scheduleSocketHealthCheck = () => {
+    if (this.isDisposed || this.socketHealthTimer !== undefined) return;
+    this.socketHealthTimer = setTimeout(() => {
+      this.socketHealthTimer = undefined;
+      try {
+        // performance.now() can pause in laptop sleep while wall-clock health ages.
+        // Retire a stale OPEN channel through its engine; do not move command deadlines.
+        const now = Date.now();
+        for (const socket of this.getAllSockets()) {
+          if (this.isDisposed) return;
+          if (
+            socket?.isConnected &&
+            socket.isInitialized &&
+            socket.lastReceived > 0 &&
+            now - socket.lastReceived >= RUST_SOCKET_STALE_MS
+          ) socket.reconnect();
+        }
+        this.syncSocketHealthToStore();
+      } finally {
+        this.scheduleSocketHealthCheck();
+      }
+    }, SOCKET_HEALTH_SYNC_MS);
+    this.socketHealthTimer.unref?.();
+  };
+
+  /** Publish engine socket observations; the engine still owns reconnection. */
   override syncSocketHealthToStore = () => {
     if (this.isDisposed) return;
     const shared = this.sharedPublicFeed
@@ -4077,6 +4102,8 @@ export class RustEngineExchange extends BaseExchange {
     this.feedCandleListeners.clear();
     this.stopPollingConfig?.();
     this.stopPollingConfig = undefined;
+    clearTimeout(this.socketHealthTimer);
+    this.socketHealthTimer = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
     const host = this.host;

@@ -26,8 +26,12 @@ afterEach(() => {
  * A venue with one public and one private socket that reopens a socket the
  * moment the engine reports it closed, like every engine venue's reconnect.
  */
-const setup = async (singleSocket?: 'keyed' | 'public') => {
-  const venue = singleSocket ? 'hyperliquid' : 'bybit';
+const setup = async (
+  singleSocket?: 'keyed' | 'public',
+  venueOverride?: 'blofin' | 'okx' | 'bybit',
+  now = () => Date.now(),
+) => {
+  const venue = venueOverride ?? (singleSocket ? 'hyperliquid' : 'bybit');
   const sockets: FakeSocket[] = [];
   const engineCloses: Array<[number, number]> = [];
   let nextSocket = 1;
@@ -87,7 +91,7 @@ const setup = async (singleSocket?: 'keyed' | 'public') => {
     } as unknown as WasmEngineModule['WasmEngine'],
   }));
   setRustEngineTransport(() => ({
-    now: () => Date.now(),
+    now,
     connect: (url, handlers) => {
       const socket: FakeSocket = { url, handlers, closed: false };
       sockets.push(socket);
@@ -107,11 +111,13 @@ const setup = async (singleSocket?: 'keyed' | 'public') => {
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
   const exchange = new RustEngineExchange(
     venue,
-    singleSocket === 'public' ? { key: '', secret: '', publicDataOnly: true } : { key: 'k', secret: 's' },
+    singleSocket === 'public' ? { key: '', secret: '', publicDataOnly: true } : { key: 'k', secret: 's', passphrase: 'fixture' },
     store,
   );
   exchanges.push(exchange);
-  await exchange.start();
+  const started = exchange.start();
+  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(500);
+  await started;
   const live = (channel: string) => sockets.filter((s) => s.url.includes(`/${channel}/`) && !s.closed).at(-1)!;
   const deliver = (channel: string, text = '{}') => {
     const socket = live(channel);
@@ -198,6 +204,57 @@ describe('Rust engine socket health (cutover B5)', () => {
     exchange.syncSocketHealthToStore();
     // cli-core's stale-stream gate blocks on exactly this pair.
     expect(store.socketHealth).toMatchObject({ privateInitialized: true, privateHealthy: false });
+  });
+
+  it.each(['blofin', 'okx', 'bybit'] as const)(
+    'the first runnable health check after sleep retires %s stale sockets despite a paused engine clock',
+    async (venue) => {
+      vi.useFakeTimers({ now: 1_800_000_000_000 });
+      const engineNow = Date.now();
+      const { exchange, sockets, engineCloses, deliver, store } = await setup(undefined, venue, () => engineNow);
+      deliver('public');
+      deliver('private');
+      // No socket close callback or native supervisor deadline runs while the laptop sleeps.
+      vi.setSystemTime(Date.now() + 101_012);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(engineCloses.sort()).toEqual([[1, 1006], [2, 1006]]);
+      expect(sockets.slice(0, 2).every((socket) => socket.closed)).toBe(true);
+      expect(sockets).toHaveLength(4);
+      // Aggregate health defaults true without initialized sockets; readiness remains false.
+      expect(store.socketHealth?.privateInitialized).toBe(false);
+      expect(exchange.privateWebsocket?.isHealthy).toBe(false);
+      deliver('private');
+      expect(store.socketHealth).toMatchObject({ privateHealthy: true, privateInitialized: true });
+    },
+  );
+
+  it('wake health recovery leaves a freshly delivering private channel alone', async () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    const { engineCloses, deliver, live } = await setup();
+    deliver('public');
+    deliver('private');
+    vi.setSystemTime(Date.now() + 101_012);
+    deliver('private');
+    const privateSocket = live('private');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(engineCloses).toEqual([[1, 1006]]);
+    expect(privateSocket.closed).toBe(false);
+  });
+
+  it('wake health recovery preserves an uninitialized replacement and stops on disposal', async () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    const { exchange, engineCloses, deliver, live } = await setup();
+    deliver('private');
+    vi.setSystemTime(Date.now() + 101_012);
+    live('private').handlers.onClose(1006);
+    const replacement = live('private');
+    replacement.handlers.onOpen();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(engineCloses).toEqual([[2, 1006]]);
+    expect(replacement.closed).toBe(false);
+    exchange.dispose();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(engineCloses).toEqual([[2, 1006]]);
   });
 
   it('reconnect closes every open engine socket and the venue reopens it', async () => {
