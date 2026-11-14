@@ -28,6 +28,8 @@ use wire::*;
 
 pub const REST_URL: &str = "https://rpc.txflow-testnet.xyz";
 pub const API_VERSION: &str = "2026-08-16";
+const TICKER_CACHE_ENTRIES: usize = 128;
+const TICKER_CACHE_FRAME_BYTES: usize = 512;
 #[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
@@ -125,6 +127,7 @@ pub struct TxFlow {
     pub(crate) instruments: BTreeMap<u32, Instrument>,
     /// Every instrument's decimal index still resolves to its own name in `coins`.
     numeric_coins_exact: bool,
+    ticker_frames: HashMap<String, TickerRow>,
     historical_assets: HashMap<String, Option<u32>>,
     historical_coins: HashMap<String, String>,
     node: Connection,
@@ -157,6 +160,7 @@ impl TxFlow {
             coins: Default::default(),
             instruments: Default::default(),
             numeric_coins_exact: false,
+            ticker_frames: Default::default(),
             historical_assets: Default::default(),
             historical_coins: Default::default(),
             node: Default::default(),
@@ -487,8 +491,17 @@ impl TxFlow {
         }
     }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
-        let Ok(frame) = PublicFrame::decode(text) else {
-            return false;
+        let cached = (text.len() <= TICKER_CACHE_FRAME_BYTES)
+            .then(|| self.ticker_frames.get(text))
+            .flatten()
+            .copied();
+        let (frame, cache_hit) = if let Some(row) = cached {
+            (PublicFrame::Ticker(row), true)
+        } else {
+            let Ok(frame) = PublicFrame::decode(text) else {
+                return false;
+            };
+            (frame, false)
         };
         // Errors are transport controls even when this mixed socket owns no public feed.
         if cx.public_feed_policy() != PublicFeedPolicy::Direct
@@ -508,6 +521,13 @@ impl TxFlow {
             PublicFrame::Context(row) => self.context_row(cx, row),
             PublicFrame::Ticker(row) => {
                 if let Some(instrument) = self.instruments.get(&row.instrument_id) {
+                    if !cache_hit
+                        && text.len() <= TICKER_CACHE_FRAME_BYTES
+                        && self.ticker_frames.len()
+                            < self.instruments.len().min(TICKER_CACHE_ENTRIES)
+                    {
+                        self.ticker_frames.insert(text.to_owned(), row);
+                    }
                     let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
                     if let Some(index) = Self::cached_ticker(cx, instrument) {
@@ -1028,6 +1048,13 @@ impl Venue for TxFlow {
                 self.assets = assets;
                 self.coins = coins;
                 self.instruments = instruments;
+                self.ticker_frames = HashMap::with_capacity(
+                    if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+                        self.instruments.len().min(TICKER_CACHE_ENTRIES)
+                    } else {
+                        0
+                    },
+                );
                 self.catalogue_partial = skipped;
                 self.ticker_queue = ticker_queue;
                 self.ticker_seeded.clear();

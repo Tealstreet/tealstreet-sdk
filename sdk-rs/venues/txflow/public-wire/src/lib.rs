@@ -49,6 +49,9 @@ pub struct ErrorCode<'a> {
 }
 impl<'a> PublicFrame<'a> {
     pub fn decode(text: &'a str) -> Result<Self, serde_json::Error> {
+        if text == r#"{"method":"PONG"}"# {
+            return Ok(Self::Other);
+        }
         // Channel-first market frames decode their payload without scanning it twice.
         serde_json::from_str(text).or_else(|_| {
             let frame: Envelope<'_> = serde_json::from_str(text)?;
@@ -86,7 +89,7 @@ impl<'a> PublicFrame<'a> {
         })
     }
 }
-#[derive(Default, Deserialize)]
+#[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Context {
     #[serde(default, deserialize_with = "optional_number")]
@@ -121,7 +124,7 @@ pub struct Contexts<'a> {
     #[serde(borrow)]
     pub ctxs: Vec<ContextFrame<'a>>,
 }
-#[derive(Default, Deserialize)]
+#[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TickerRow {
     #[serde(default)]
@@ -191,6 +194,28 @@ impl CandleRow<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pong_control_does_not_hide_a_payload_or_rate_limit_error() {
+        assert!(matches!(
+            PublicFrame::decode(r#"{"method":"PONG"}"#).unwrap(),
+            PublicFrame::Other
+        ));
+        assert!(matches!(
+            PublicFrame::decode(
+                r#"{"channel":"ticker","method":"PONG","data":{"instrumentId":1,"lastPrice":"42"}}"#
+            )
+            .unwrap(),
+            PublicFrame::Ticker(_)
+        ));
+        let PublicFrame::Error(error) = PublicFrame::decode(
+            r#"{"channel":"error","method":"PONG","data":{"code":"RISK_RATE_LIMITED"}}"#,
+        )
+        .unwrap() else {
+            panic!("rate limit");
+        };
+        assert_eq!(error.code.as_deref(), Some("RISK_RATE_LIMITED"));
+    }
 
     #[test]
     fn public_decimal_forms_keep_finite_and_null_contracts() {

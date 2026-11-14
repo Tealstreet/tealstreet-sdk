@@ -297,7 +297,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,157,930 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes; measured + 10 KiB.
   // Round up to KiB and retain both parent floors; SHA256 pinned in the budget regression.
-  bingx: 2_168_832,
+  // #3273 second merge 73b97124a92d + 829f80ec68cb: optimized web/Node 2,159,071 B.
+  // Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes; build.sh --venue bingx.
+  // Measured + 10 KiB rounded up; retain both parent floors and all CI evidence.
+  bingx: 2_169_856,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   // #3426 run 43187677592, job 131079474589, artifact 13930235036, CI source b3c4cf6212e6.
@@ -646,7 +649,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,178,874 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two -Oz; +10 KiB rounds to 2,189,312 B.
   // Preserve the larger 2,190,336 B parent/CI floor, including both shared aliases.
-  lighter: 2_190_336,
+  // #3273 second merge: master 829f80ec68cb, run 43588166333, artifact 14111990891.
+  // Optimized web/Node/replay 2,181,366 B; pinned tools, two required -Oz passes.
+  // Measured + 10 KiB rounded up; retain both parent floors and all prior provenance.
+  lighter: 2_192_384,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
@@ -669,7 +675,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3501 merge 12b1102ecc65 + c3eaaf96d355: optimized local web/Node 2,178,874 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two -Oz; +10 KiB rounds to 2,189,312 B.
   // Preserve the larger 2,190,336 B parent/CI floor, including both shared aliases.
-  'lighter-robinhood': 2_190_336,
+  // #3273 second merge: master 829f80ec68cb, run 43588166333, artifact 14111990891.
+  // Optimized web/Node/replay 2,181,366 B; pinned tools, two required -Oz passes.
+  // Measured + 10 KiB rounded up; retain both parent floors and all prior provenance.
+  'lighter-robinhood': 2_192_384,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
@@ -742,7 +751,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Retain historical floors; 11,221 B reserve; shares paradex family.
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14094286290: web/Node/replay 2,309,926 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
-  paradex: 2_321_408,
+  // #3273 second merge: master 829f80ec68cb, run 43588166333, artifact 14112065076.
+  // Optimized web/Node/replay 2,311,211 B; pinned tools, two required -Oz passes.
+  // Measured + 10 KiB rounded up; retain both parent floors and all prior provenance.
+  paradex: 2_322_432,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,104,206 B + 10 KiB, rounded up.
@@ -789,6 +801,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Local build.sh --venue txflow (Binaryen 132): c5c8a213f6a5 2,121,037 B; e2da53cc9f26 2,120,966 B + 10 KiB, rounded up.
   // #3438 merged-head local build.sh --venue txflow: web/node 1,928,662 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
+  // #3273 run 43563376371, artifact 14101234552: web/Node/replay 1,929,688 B.
+  // Source d420622af083 has merge 18f33911d's tree; module SHA256 9837c6740453f75f8370a643a38e137dffcf7aed43a461c542a872fee706f23d.
+  // Measured + 10 KiB, rounded up to KiB; retain historical floors and overflow refusal.
+  // #3273 merge babeb9fb7769 + 4c199abd5d2b: optimized web/Node 1,944,289 B.
+  // build.sh --venue txflow; Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes.
+  // Measured + 10 KiB rounded up to KiB; retain both parent floors and historical evidence.
   // #3314 merge 9bb43250830d: optimized web/Node 2,147,684 B; SHA256 51d351b7ae0e7fcd244447101618ed26006cbf57c276cc06d6f6b00f967a5bd1.
   // build.sh --venue txflow; Rust1.99.0, bindgen0.2.129, Binaryen132 twice -Oz; +10 KiB rounded to KiB.
   // #3314 refusal fix e959e2a7dc2e: optimized web/Node 2,147,758 B; SHA256 1cb8da3ed26c7486315d8020848de440ce8670fb25ea45fa0fa5e1145e9f88e5.
@@ -802,7 +820,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SHA256 1116e8b87828ad20a34dd72178a0341a745239e06da4d23430028f08f1facf50; +10 KiB rounded up.
   // #3314 merge ebeb0b38c973: web/Node 2,149,614 B; standard pinned profile, floor unchanged.
   // SHA256 3202ae232b063f33298378e52424c590ec9e6c5be1b7657738e4cf138b5512dd.
-  txflow: 2_160_640,
+  // #3273 second merge 73b97124a92d + 829f80ec68cb: optimized web/Node 2,151,457 B.
+  // Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes; build.sh --venue txflow.
+  // Measured + 10 KiB rounded up; retain both parent floors and all CI evidence.
+  txflow: 2_162_688,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
   // #3302 run 42720697962, job 129514220621: CI 1,991,705 B; local merge 06aa3a745fcc web/node 1,993,745 B.
