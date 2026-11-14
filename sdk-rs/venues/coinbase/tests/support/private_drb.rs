@@ -1390,3 +1390,87 @@ fn bounded_overlay_never_evicts_terminal_evidence_and_fresh_reads_recover() {
         );
     }
 }
+
+#[test]
+fn post_reconnect_census_removes_gap_cancellations_during_other_instrument_updates() {
+    let mut r = Rig::ready();
+    let mut markets = r.e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETH_USDC-PERPETUAL".into();
+    eth.symbol = "ETH_USDC-PERPETUAL".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    r.e.store_mut().set_markets(markets);
+    let old = r.subscribe();
+    let pre_gap = r.poll_requests();
+    r.actions.clear();
+    r.e.handle(
+        r.now,
+        Event::WsClosed {
+            socket: old,
+            code: 1006,
+        },
+    );
+    r.collect();
+    // The venue cancels BTC's order while disconnected. There is deliberately
+    // no cancellation notification; only the post-gap census can remove it.
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().status,
+        OrderStatus::Open
+    );
+    for request in pre_gap {
+        let result = if request.url.ends_with("get_open_orders") {
+            json!([order_row()])
+        } else if request.url.ends_with("get_positions") {
+            json!([position_row()])
+        } else {
+            account_row()
+        };
+        r.rpc(request, result);
+    }
+    r.collect();
+    for _ in 0..30 {
+        if r.e.venue().private_drb.socket.is_some() {
+            break;
+        }
+        r.timers.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (at, timer) = r.timers.remove(0);
+        r.now = r.now.max(at);
+        r.e.handle(r.now, Event::TimerFired { timer });
+        r.collect();
+    }
+    let new = r.subscribe();
+    assert_ne!(
+        new, old,
+        "use a genuinely reauthenticated replacement socket"
+    );
+    for round in 0..2u64 {
+        let held = r.poll_requests();
+        // Keep ETH active in every held census window. A section-wide revision
+        // gate would repeatedly discard BTC's authoritative removal.
+        for update in 0..3u64 {
+            let mut eth = order_row();
+            eth["order_id"] = json!("USDC-456");
+            eth["instrument_name"] = json!("ETH_USDC-PERPETUAL");
+            eth["last_update_timestamp"] = json!(1700000004000u64 + round * 1000 + update);
+            r.notification(new, CHANNELS[0], json!({"orders":[eth]}));
+        }
+        for request in held {
+            let result = if request.url.ends_with("get_account_summary") {
+                account_row()
+            } else {
+                json!([])
+            };
+            r.rpc(request, result);
+        }
+        r.collect();
+        assert!(
+            r.e.store().order("USDC-123").is_none(),
+            "BTC cancellation during the gap must reconcile despite ETH traffic (round {round})"
+        );
+        assert_eq!(
+            r.e.store().order("USDC-456").unwrap().symbol,
+            "ETH_USDC-PERPETUAL"
+        );
+    }
+}
