@@ -775,6 +775,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3314 review fix on 2c37c0e6af2d: optimized web/Node 2,148,376 B, same pinned build profile.
   // SHA256 888bf4cf3f33ac17d1ea9ea36f8f465bc1a9311834ae8b7139aae3e31e9b68b5; +10 KiB rounded up.
   // Shipping source blobs agent.rs 5f488114066a85edd346a794e65e21a9be24c73c, custody.rs c797973d96bff5488427d5f37e3899dc5c1f36fc.
+  // #3314 merge f19209120d28: optimized web/Node 2,148,377 B, same pinned profile; floor unchanged.
+  // SHA256 5fb03b431f7078b66798009c986ba6596c2318f53d9b9aad6b42ea30e6cbdec7.
   txflow: 2_159_616,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
@@ -825,6 +827,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Preserve both parent floors and all provenance above.
   // #3314 composed f6830c3f2466: optimized web/Node 2,028,105 B; SHA256 6e0f61345400027da6944a6e1d5fe80b77e976c159062493e68d785c2c25d204.
   // build.sh --venue weex; Rust1.99.0, bindgen0.2.129, Binaryen132 twice -Oz; +10 KiB rounded to KiB.
+  // #3314 merge f19209120d28: optimized web/Node 2,028,106 B, same pinned profile; floor unchanged.
+  // SHA256 e1b634371ee73283337879de3082d97b0d05ae33e5b6c09e0cf43c58631879f2.
   weex: 2_038_784,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.

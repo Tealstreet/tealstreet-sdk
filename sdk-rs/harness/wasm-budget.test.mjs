@@ -3240,3 +3240,16 @@ for (const [family, measured, minimumCap, sha256, venues] of [
     }
   });
 }
+
+
+for (const [venue, measured, required] of [
+  ['txflow', 2_148_377, 2_159_616],
+  ['weex', 2_028_106, 2_038_784],
+]) test(`#3314 merge f19209120d28: ${venue} retains fresh measured reserve`, () => {
+  assert.equal(required, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES[venue];
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+});

@@ -46,7 +46,9 @@ owner-bound disposable agent approval before writes. Replay identity equates onl
 absent and explicit default `signatureChainId:2511`; economic action fields and
 nondefault chain values stay exact. Signing validation remains independent.
 WEEX in the same composition measures 2,028,105 bytes and retains a 2,038,784-byte
-floor by the same rule. Pinned profiles and remaining family/global budgets are unchanged.
+floor by the same rule. Merge f19209120d28 measures one byte more in each
+family (2,148,377 and 2,028,106 bytes), retaining those floors and 10 KiB reserves.
+Pinned profiles and remaining family/global budgets are unchanged.
 
 TxFlow construction-feature guards require dispatch signing, address/nonce setup
 and its hosted-wallet codec, with independent missing-feature refusals. The HTTP
