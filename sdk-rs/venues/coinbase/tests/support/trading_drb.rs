@@ -102,7 +102,34 @@ fn reply(e: &mut Engine<Coinbase>, r: &HttpRequest, result: Value) -> Vec<Action
             },
         },
     );
-    prepared_now(e)
+    // A real host runs due timers after the HTTP callback. Auth continuations
+    // use that turn so a background read cannot lend command completion rights.
+    let now = safe_cex_engine::test_support::dispatch_now(e);
+    let mut actions = prepared_now(e);
+    for _ in 0..100 {
+        let due: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { at_ms, timer } if *at_ms <= now => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        if due.is_empty() {
+            return actions;
+        }
+        // Only inspect newly emitted timers on the following turn.
+        let mut next = vec![];
+        for timer in due {
+            e.handle(now, Event::TimerFired { timer });
+            next.extend(prepared_now(e));
+        }
+        actions.retain(|action| {
+            !matches!(action,
+            Action::SetTimer { at_ms, .. } if *at_ms <= now)
+        });
+        actions.extend(next);
+    }
+    panic!("due trading callbacks did not settle")
 }
 fn command(e: &mut Engine<Coinbase>, c: Command) -> Vec<Action> {
     e.handle(

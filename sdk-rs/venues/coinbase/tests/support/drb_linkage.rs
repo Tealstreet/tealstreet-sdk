@@ -195,7 +195,7 @@ fn linkage_discovered_while_auth_is_pending_refuses_the_queued_amendment() {
     linked["last_update_timestamp"] = json!(1700000002000u64);
     r.notification(socket, CHANNELS[0], json!({"orders":[linked]}));
     r.rpc(auth,json!({"access_token":"fixture-refreshed","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
-    r.collect();
+    r.drain_due_timers();
     assert!(
         r.http
             .iter()
@@ -259,7 +259,7 @@ fn uncertainty_learned_during_auth_refuses_a_queued_amendment_on_the_instrument(
     );
     r.collect();
     r.rpc(auth,json!({"access_token":"fixture-refreshed","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
-    r.collect();
+    r.drain_due_timers();
     assert!(
         r.http
             .iter()
@@ -267,4 +267,114 @@ fn uncertainty_learned_during_auth_refuses_a_queued_amendment_on_the_instrument(
         "auth wait must not bypass newly learned instrument uncertainty"
     );
     assert_eq!(r.command_error(90).outcome, Some(Outcome::NotSent));
+}
+
+fn queued_edit_for_refresh(r: &mut Rig, wait: u32) -> HttpRequest {
+    r.subscribe();
+    let index = r
+        .http
+        .iter()
+        .position(|request| request.url.ends_with("get_open_orders"))
+        .unwrap();
+    let read = r.http.remove(index).unwrap();
+    r.rpc_error(read, 13009, "synthetic expired session");
+    r.now += 1.;
+    r.actions.clear();
+    r.e.handle_command(
+        r.now,
+        Command::AmendOrder {
+            command: 90,
+            id: "USDC-123".into(),
+            price: Some(61000.),
+            amount: None,
+        },
+        Some(wait),
+    )
+    .unwrap();
+    r.collect();
+    let index = r
+        .http
+        .iter()
+        .position(|request| request.url.ends_with("public/auth"))
+        .unwrap();
+    r.http.remove(index).unwrap()
+}
+
+#[test]
+fn auth_refusal_settles_queued_command_once_without_borrowing_the_read_owner() {
+    let mut r = Rig::ready();
+    let auth = queued_edit_for_refresh(&mut r, 10000);
+    r.rpc_error(auth, 10000, "synthetic authorization_required");
+    r.drain_due_timers();
+    let error = r.command_error(90);
+    assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert!(
+        r.http
+            .iter()
+            .all(|request| !request.url.ends_with("private/edit"))
+    );
+    r.drain_due_timers();
+    assert_eq!(
+        r.actions
+            .iter()
+            .filter(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 90, .. })
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn auth_wake_cannot_reattribute_an_expired_root_to_a_reused_command_id() {
+    let mut r = Rig::ready();
+    let auth = queued_edit_for_refresh(&mut r, 5);
+    r.now += 5.;
+    r.drain_due_timers();
+    assert_eq!(r.command_error(90).kind, Some(ErrorKind::Timeout));
+    r.actions.clear();
+    r.e.handle_command(
+        r.now,
+        Command::AmendOrder {
+            command: 90,
+            id: "USDC-123".into(),
+            price: Some(62000.),
+            amount: None,
+        },
+        Some(10000),
+    )
+    .unwrap();
+    r.collect();
+    r.rpc(auth,json!({"access_token":"fixture-refreshed","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
+    r.drain_due_timers();
+    assert!(!r.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 90, .. })
+    )));
+    let writes: Vec<_> = r
+        .http
+        .iter()
+        .filter(|request| request.url.ends_with("private/edit"))
+        .collect();
+    assert_eq!(writes.len(), 1, "only the replacement command may write");
+    let request = writes[0].clone();
+    let packet: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(packet["params"]["price"], json!(62000.));
+    let mut row = order_row();
+    row["price"] = json!(62000.);
+    row["last_update_timestamp"] = json!(1700000002000u64);
+    r.rpc(request, json!({"order":row}));
+    r.drain_due_timers();
+    assert_eq!(
+        r.actions
+            .iter()
+            .filter(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandDone { command: 90, .. })
+            ))
+            .count(),
+        1
+    );
 }

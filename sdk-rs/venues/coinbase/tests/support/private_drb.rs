@@ -789,6 +789,20 @@ impl Rig {
         );
         self.collect();
     }
+    // Match a host turn: drain due callbacks after an HTTP completion. Retained
+    // commands may settle on a timer rather than borrow another HTTP owner.
+    fn drain_due_timers(&mut self) {
+        self.collect();
+        for _ in 0..100 {
+            let Some(index) = self.timers.iter().position(|(at, _)| *at <= self.now) else {
+                return;
+            };
+            let (_, timer) = self.timers.remove(index);
+            self.e.handle(self.now, Event::TimerFired { timer });
+            self.collect();
+        }
+        panic!("due timers did not settle");
+    }
     fn command_error(&self, id: u32) -> &VenueError {
         self.actions
             .iter()

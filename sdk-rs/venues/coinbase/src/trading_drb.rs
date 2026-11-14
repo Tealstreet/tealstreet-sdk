@@ -69,6 +69,7 @@ impl Call {
 }
 struct Job {
     root: Context,
+    auth_error: Option<VenueError>,
     calls: VecDeque<Call>,
     ids: Vec<String>,
     collect: bool,
@@ -94,6 +95,7 @@ pub(crate) struct Trading {
     expiry_timer: Option<TimerId>,
     recovery_timer: Option<TimerId>,
     waiting_timer: Option<TimerId>,
+    wake_timer: Option<TimerId>,
     waiting: VecDeque<Job>,
     rpc: BTreeMap<u64, (drb::RpcId, f64)>,
     used_labels: HashSet<String>,
@@ -384,6 +386,7 @@ impl Coinbase {
                 cx,
                 Job {
                     root,
+                    auth_error: None,
                     calls,
                     ids: vec![],
                     collect,
@@ -491,6 +494,7 @@ impl Coinbase {
             cx,
             Job {
                 root,
+                auth_error: None,
                 calls: VecDeque::from([call]),
                 ids: vec![],
                 collect: false,
@@ -528,22 +532,24 @@ impl Coinbase {
         }
     }
     pub(crate) fn drb_trading_auth_failed(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
-        if let Some(timer) = self.trading_drb.waiting_timer.take() {
-            cx.clear_timer(timer);
+        for job in &mut self.trading_drb.waiting {
+            if job.auth_error.is_none() {
+                job.auth_error = Some(error.clone());
+            }
         }
-        for job in self.trading_drb.waiting.drain(..) {
-            let _ = cx.fail_context(&job.root, error.clone());
-        }
+        self.drb_wake_waiters(cx);
     }
     pub(crate) fn drb_trading_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(timer) = self.trading_drb.waiting_timer.take() {
-            cx.clear_timer(timer);
-        }
-        let waiting = std::mem::take(&mut self.trading_drb.waiting);
-        for job in waiting {
-            self.drb_next(cx, job);
-        }
+        self.drb_wake_waiters(cx);
         self.drb_reconcile(cx);
+    }
+    fn drb_wake_waiters(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Auth completes under a background HTTP owner. Resume retained command
+        // roots on their own timer turn; that callback cannot lend completion
+        // authority or silently swallow a refusal of a queued command.
+        if !self.trading_drb.waiting.is_empty() && self.trading_drb.wake_timer.is_none() {
+            self.trading_drb.wake_timer = Some(cx.set_timer(0.));
+        }
     }
     fn drb_next(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job) {
         if cx.validate_http_context(&job.root).is_err() {
@@ -669,6 +675,19 @@ impl Coinbase {
         }
     }
     pub(crate) fn drb_trading_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.trading_drb.wake_timer == Some(timer) {
+            self.trading_drb.wake_timer = None;
+            let waiting = std::mem::take(&mut self.trading_drb.waiting);
+            for mut job in waiting {
+                if let Some(error) = job.auth_error.take() {
+                    let _ = cx.fail_context(&job.root, error);
+                } else {
+                    self.drb_next(cx, job);
+                }
+            }
+            self.drb_wait_deadline(cx);
+            return true;
+        }
         if self.trading_drb.waiting_timer == Some(timer) {
             self.trading_drb.waiting_timer = None;
             let waiting = std::mem::take(&mut self.trading_drb.waiting);
