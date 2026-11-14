@@ -26,7 +26,7 @@ Private GET reads in both markets recover once from the native `400002`
 timestamp refusal. They fetch public `/api/v1/timestamp` from their own REST
 origin, calibrate the engine's protocol clock at receipt, then sign the exact
 same path and query with the original selected identity. Normal startup adds no
-clock request. The probe has a five-second cap; it and the resend remain under
+clock request. The probe has a twenty-second cap; it and the resend remain under
 the original read root and caller deadline. Invalid time, expiry, transport
 failure, an HTTP failure on the resend, or a second timestamp refusal ends that
 attempt without reopening outer retries. Existing periodic
