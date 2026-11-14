@@ -2884,3 +2884,18 @@ test('#3302 run 43517974996 retains merged-head ApeX reserve and exact boundarie
   assert.equal(wasmBudgetError(cap, 'venue', 'apexomni'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'apexomni'), /exceeds/);
 });
+
+// #3499 head 22149d1131cb, run 43550434029, job 132311748258, artifact 14095922408.
+// CI test merge e4514ec78d69 has the identical tree; optimized web/Node/replay
+// SHA256 d69ef94f3c4beee62d2de9192d101670a0c8f6e21b1dbaff99fee7ad2de2fada.
+test('#3499 BingX public-reference preflight retains measured 10 KiB reserve', () => {
+  const measured = 2_135_090;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.equal(minimumCap, 2_146_304);
+  assert.ok(cap >= 2_142_208, 'retain the historical #3438 cap floor');
+  assert.ok(cap >= minimumCap, `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
