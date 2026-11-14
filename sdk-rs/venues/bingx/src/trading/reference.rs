@@ -46,7 +46,7 @@ impl ReferenceRead {
         }
     }
 
-    pub(crate) fn fail(&self, cx: &mut Cx<'_, Pending>, cause: &str) {
+    pub(crate) fn reject(&self, cx: &mut Cx<'_, Pending>, cause: &str) {
         let mut error = not_sent(format!(
             "Your {} stop was not changed: reference stale ({cause})",
             self.job
@@ -134,7 +134,7 @@ impl Trading {
         ) {
             Ok(request) => cx.stream_response(request, ArrayAt::EnvelopeField("data")),
             Err((Pending::ProtectiveReference(read), error)) => {
-                read.fail(cx, &error.venue_error().message)
+                read.reject(cx, &error.venue_error().message)
             }
             Err(_) => unreachable!("protective pending"),
         }
@@ -157,13 +157,13 @@ impl Trading {
             return;
         }
         if let Err(error) = accepted {
-            read.fail(cx, &error);
+            read.reject(cx, &error);
             return;
         }
         let Some((value, at)) = read.quote.filter(|(_, at)| {
             !read.invalid && cx.now.is_finite() && (0.0..=5_000.0).contains(&(cx.now - at))
         }) else {
-            read.fail(cx, "missing, invalid or delayed public reference");
+            read.reject(cx, "missing, invalid or delayed public reference");
             return;
         };
         let guard = read.job.guard.as_ref().expect("protective read");

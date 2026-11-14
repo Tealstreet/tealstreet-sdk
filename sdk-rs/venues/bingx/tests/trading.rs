@@ -175,7 +175,7 @@ impl Venue for TestVenue {
                 self.trading
                     .on_sign_failed(cx, Some(&self.credentials), request, error)
             }
-            Pending::ProtectiveReference(read) => read.fail(cx, &error.message),
+            Pending::ProtectiveReference(read) => read.reject(cx, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -184,7 +184,7 @@ impl Venue for TestVenue {
                 self.trading
                     .on_failed(cx, Some(&self.credentials), request, error)
             }
-            Pending::ProtectiveReference(read) => read.fail(cx, error),
+            Pending::ProtectiveReference(read) => read.reject(cx, error),
         }
     }
     fn on_sign_error(
@@ -198,7 +198,7 @@ impl Venue for TestVenue {
                 self.trading
                     .on_sign_failed(cx, Some(&self.credentials), request, error)
             }
-            Pending::ProtectiveReference(read) => read.fail(cx, &error.message),
+            Pending::ProtectiveReference(read) => read.reject(cx, &error.message),
         }
     }
     fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}

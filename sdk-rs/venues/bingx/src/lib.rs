@@ -683,7 +683,7 @@ impl Bingx {
                 return;
             }
             Pending::ProtectiveReference(read) => {
-                read.fail(cx, error);
+                read.reject(cx, error);
                 return;
             }
             Pending::Trade(request) => {
@@ -1466,7 +1466,7 @@ impl Venue for Bingx {
     ) {
         if let Pending::ProtectiveReference(read) = pending {
             self.note_ban(cx, &response);
-            read.fail(
+            read.reject(
                 cx,
                 &success(response).err().unwrap_or_else(|| {
                     "public reference response did not contain the expected list".into()
