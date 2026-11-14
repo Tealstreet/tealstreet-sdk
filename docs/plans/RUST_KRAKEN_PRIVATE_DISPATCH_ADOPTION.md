@@ -148,7 +148,7 @@ preservation receipts; uufub4 dispatch review plus setup/HMAC/socket fit for the
 changed surfaces. One freeze push and one PR-triggered run; READY to 8x5tm1 only
 when green and reviewed, then exact-tree GO and guarded head-matched landing.
 
-## Beta hardening refresh on master
+## Historical beta hardening refresh (2026-10-27)
 
 The 2026-10-27 assignment starts from `origin/master`; #2300 landed at
 `97cfa6d90a1`. The remaining request inventory is 14 distinct path/fingerprint
@@ -178,11 +178,33 @@ provider assertions remain gated behind those first preparation assertions.
 The initial two token-fixture bootstrap failures and a corrected wrapper trait
 signature are excluded from behavioral RED evidence.
 
-Nonce continuity is still a shared prerequisite. `reserve_kraken_legacy` and
-dispatch reservations share storage but use different subject keys; there is no
-landed association, legacy-issuance fence, actual-owner join or atomic import of
-reserved and released maxima. The nonce owner independently confirmed this on
-the master base. No secret digest becomes `stable_id`, and a nonce-bearing work
-receipt without its genuine claim is explicitly refused by dispatch. The
-production path is retained while that shared prerequisite is assigned. These
-originals authorize no new namespace or partial private activation.
+At that historical base, nonce continuity was still a shared prerequisite:
+legacy and dispatch reservations used different subject keys, without the
+association, issuance fence, owner join or atomic high-water import needed for
+takeover. That status is superseded by the shared support described below.
+No secret digest becomes `stable_id`, and a nonce-bearing work receipt without
+its genuine claim is explicitly refused by dispatch. These originals authorize
+no new namespace or partial private activation.
+
+## Refresh on master c3eaaf96d355 (2026-11-14)
+
+The shared engine now implements association, legacy issuance fencing, owner
+registration and atomic import of reserved and released high-water maxima in
+`nonce_handoff_core.rs`, behind the opt-in `nonce-handoff` feature. Its controls
+in `nonce_handoff_tests.rs` cover retained owners, owner joins and fenced legacy
+issuance. Landed shared support does not itself establish venue integration or
+activate a new construction path.
+
+Futures accounts constructed with `Kraken::with_signing` already use managed
+preparation for both ordinary and streamed private HTTP. The originals in
+`dispatch_signer_adoption.rs` deliberately use `Kraken::new` and
+`KrakenSpot::new`: attaching a provider to their engine does not change that
+constructor selection. Their preparation failures describe those retained
+native-constructor paths; they are not evidence that the managed-custody
+Futures path bypasses preparation. Spot's native constructor remains separate.
+
+This PR adds only the three native path originals and repairs the token probe's
+managed-socket delegation. Existing assertions remain unchanged. The originals
+stay behind `private-adoption-originals`; any failing opt-in controls must be
+reported separately from the default Kraken suite. This refresh changes no
+production source, feature, inventory, generated output or WASM size budget.
