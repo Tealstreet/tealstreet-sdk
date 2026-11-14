@@ -53,3 +53,7 @@ Pinned profiles and remaining family/global budgets are unchanged.
 TxFlow construction-feature guards require dispatch signing, address/nonce setup
 and its hosted-wallet codec, with independent missing-feature refusals. The HTTP
 HMAC hosted-signing feature cannot substitute for that testnet wallet codec.
+
+The #3314 serial-placement fix at1c2a4f8232c4 measures optimized web/Node
+2,149,614 bytes. Its2,160,640-byte floor retains11,026 bytes using the same
+pinned profile and10KiB reserve rule; older measured floors remain retained.

@@ -3253,3 +3253,15 @@ for (const [venue, measured, required] of [
   assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
+
+
+test('#3314 serial placement source1c2a4f8232c4 retains measured TxFlow reserve', () => {
+  const measured = 2_149_614;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_160_640);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});

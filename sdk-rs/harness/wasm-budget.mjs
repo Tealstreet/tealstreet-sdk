@@ -777,7 +777,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Shipping source blobs agent.rs 5f488114066a85edd346a794e65e21a9be24c73c, custody.rs c797973d96bff5488427d5f37e3899dc5c1f36fc.
   // #3314 merge f19209120d28: optimized web/Node 2,148,377 B, same pinned profile; floor unchanged.
   // SHA256 5fb03b431f7078b66798009c986ba6596c2318f53d9b9aad6b42ea30e6cbdec7.
-  txflow: 2_159_616,
+  // #3314 serial placement source 1c2a4f8232c4: optimized web/Node 2,149,614 B, same pinned profile.
+  // SHA256 1116e8b87828ad20a34dd72178a0341a745239e06da4d23430028f08f1facf50; +10 KiB rounded up.
+  txflow: 2_160_640,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
   // #3302 run 42720697962, job 129514220621: CI 1,991,705 B; local merge 06aa3a745fcc web/node 1,993,745 B.

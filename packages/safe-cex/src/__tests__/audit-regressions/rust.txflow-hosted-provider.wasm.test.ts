@@ -48,10 +48,11 @@ async function origin(tamperReceipt = false) {
         sent.push(request);
         const { type: _type, ...action } = request.action;
         expect(ethers.recoverAddress(agentDigest(actionHash(action, null, request.nonce)), request.signature)).toBe(AGENT);
-        openOrders = request.action.orders.map((order: { c: string }, index: number) => ({
-          asset: 1, oid: 9001 + index, side: 'B', orderType: 'Limit', limitPx: '100', origSz: '0.01', sz: '0.01',
+        const offset = openOrders.length;
+        openOrders = [...openOrders, ...request.action.orders.map((order: { c: string }, index: number) => ({
+          asset: 1, oid: 9001 + offset + index, side: 'B', orderType: 'Limit', limitPx: '100', origSz: '0.01', sz: '0.01',
           timestamp: Date.now(), isTrigger: false, reduceOnly: false, cloid: order.c, state: 'Open', tif: 'GTC', children: [],
-        }));
+        }))];
         return { status: 200, headers: '', body: new TextEncoder().encode(JSON.stringify({
           status: 'ok', code: 0, confirm: 'executed', data: { type: 'PlaceOrder', data: { statuses: ['success'] } },
         })) };
@@ -115,5 +116,22 @@ it('native apply refuses a device result whose echoed nonce receipt was changed'
     expect(fixture.sign.mock.calls.filter(([request]) => request.wsAuth?.outputFormat === 'txflow-agent')).toHaveLength(1);
     expect(fixture.sent).toHaveLength(0);
     expect(await done).toBeInstanceOf(Error);
+  } finally { fixture.dispose(); }
+});
+
+
+it('native hosted 51-order placement signs separate bounded batches and returns all native IDs', async () => {
+  const fixture = await origin();
+  try {
+    const orders = Array.from({ length: 51 }, (_, index) => ({ symbol: 'BTC-USDC', type: 'limit', side: 'buy',
+      amount: 0.01, price: 100, clientOrderId: `hosted-batch-${index}` }));
+    const done = fixture.host.command({ op: 'placeOrders', orders }).then(value => ({ value }), error => ({ error }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fixture.sent.map(body => (body.action as { orders: unknown[] }).orders.length)).toEqual([50, 1]);
+    expect(fixture.sign.mock.calls.filter(([request]) => request.wsAuth?.outputFormat === 'txflow-agent')).toHaveLength(2);
+    expect(await done).toEqual({ value: Array.from({ length: 51 }, (_, index) => String(9001 + index)) });
+    const receipts = fixture.work.filter(request => request.receipt.nonce !== undefined);
+    expect(receipts).toHaveLength(2);
+    expect(BigInt(receipts[1].receipt.nonce!)).toBeGreaterThan(BigInt(receipts[0].receipt.nonce!));
   } finally { fixture.dispose(); }
 });
