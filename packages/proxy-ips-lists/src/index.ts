@@ -1,6 +1,5 @@
 // Vultr Tokyo reserved egresses, pinned to infra/tofu/proxy-fleet/proxies.tf by web tests.
-// Master's transport metadata uses this pool; whitelist.ts also displays legacy
-// AWS pools and extras for rollback and whitelabels until the legacy app retires.
+// Master's transport metadata and user-facing whitelist copy both use this pool.
 export const privateProxyIpsVultrTokyo = [
   '167.179.112.217',
   '45.63.121.235',
@@ -13,7 +12,7 @@ export const privateProxyIpsVultrTokyo = [
   '108.61.247.61',
 ];
 
-// The AWS pools below are what legacy-master users whitelist until AWS_EXIT.md 3f.
+// Retired AWS pools, retained only for historical legacy metadata projection tests.
 export const privateProxyIpsSingapore = [
   '13.215.143.179',
   '54.169.98.78',

@@ -34,6 +34,7 @@ const EXCHANGE_NAMES = [
   'binancespot',
   'binancepm',
   'bingx',
+  'bingxspot',
   'bitget',
   'bitgetinverse',
   'bitgetusdc',

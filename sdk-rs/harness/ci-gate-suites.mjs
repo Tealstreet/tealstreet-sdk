@@ -75,6 +75,8 @@ const suiteCases = (suite) => {
     for (const algorithm of ['ES256', 'EdDSA']) cases.push(privateCase('coinbasespot', `coinbasespot-spot-${algorithm}`));
   } else if (suite === 'asterdex') {
     cases.push(privateCase('asterdex', 'asterdex-v3'));
+  } else if (suite === 'bingx') {
+    cases.push(publicCase('bingxspot', 'BTCUSDT'), privateCase('bingxspot'));
   } else if (suite === 'lighter' || suite === 'lighter-robinhood') {
     cases.push(privateCase(suite, 'lighter-testnet'));
   } else if (suite === 'bitget') {

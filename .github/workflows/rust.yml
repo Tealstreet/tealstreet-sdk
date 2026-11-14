@@ -359,6 +359,17 @@ jobs:
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
             command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
+          # Run the feature-gated integration suites independently of workspace
+          # feature unification. The managed-flow suite also needs address-nonce.
+          - check: crypto-admission
+            command: |
+              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features admission,address-nonce,ed25519,secp256k1,stark,schnorr --test admission --test starknet_verify --test stark_public_seal --test scalar_only_managed_flow -j2
+              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --no-default-features --doc -j2
+          # The default workspace does not enable the opt-in order frame protocol.
+          - check: delegated-order-frames
+            command: |
+              cargo clippy --locked -p safe-cex-exchange-server --features delegated-order-frames --all-targets -j2 -- -D warnings
+              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-exchange-server --features delegated-order-frames --lib --tests -j2 -- --test-threads=2
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
@@ -615,6 +626,24 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+      - name: Prove the shipped BingX engine keeps Spot fixture exports absent
+        if: matrix.family == 'bingx'
+        run: corepack yarn -s node --test sdk-rs/harness/bingxspot-admission.integration.mjs
+      - name: Build the nondefault BingX Spot fixture engine after shipped checks
+        if: matrix.family == 'bingx'
+        run: |
+          corepack yarn rust:build-wasm --venue bingx --bingx-spot-replay
+          BINGX_SPOT_FIXTURE=1 corepack yarn -s node --test sdk-rs/harness/bingxspot-admission.integration.mjs
+          corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue bingxspot --archive sdk-rs/hosts/wasm/pkg/ci-bingxspot
+      - name: Retain the separate BingX Spot fixture engine
+        if: matrix.family == 'bingx'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-bingxspot-fixture
+          path: sdk-rs/hosts/wasm/pkg/ci-bingxspot/
+          retention-days: 3
+          if-no-files-found: error
+
       - name: Prove the shared operation channel through actual Kraken WASM engines
         if: matrix.family == 'kraken'
         env:
@@ -820,6 +849,12 @@ jobs:
           path: sdk-rs/hosts/wasm/pkg/
       - name: Verify the same-run matching family capsule
         run: node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --verify sdk-rs/hosts/wasm/pkg/ci-replay
+      - name: Download the separate BingX Spot fixture engine
+        if: matrix.venue == 'bingx'
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-bingxspot-fixture
+          path: sdk-rs/hosts/wasm/pkg/ci-bingxspot/
       - uses: actions/cache@v6
         with:
           path: |
@@ -845,6 +880,14 @@ jobs:
       - name: OKX EEA X-Perps public books (correctness)
         if: matrix.venue == 'okx'
         run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
+      - name: BingX Spot public and private correctness against its independent oracle
+        if: matrix.venue == 'bingx'
+        env:
+          RUST_REPLAY_CI_WASM: sdk-rs/hosts/wasm/pkg/ci-bingxspot
+        run: |
+          corepack yarn rust:private-tape-bingxspot
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/fixtures/bingxspot-public.jsonl.gz --books BTCUSDT
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/tapes/bingxspot-private.jsonl --books ''
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
@@ -1158,8 +1201,11 @@ jobs:
       - name: Install pinned Bun for standalone CLI loader proof
         if: matrix.venue == 'binance'
         run: |
+          # Yarn's global bin can also contain Node; preserve setup-node's priority.
+          node_bin="$(dirname "$(node -p process.execPath)")"
           corepack yarn -s global add bun@1.4.3
           corepack yarn -s global bin >> "$GITHUB_PATH"
+          printf '%s\n' "$node_bin" >> "$GITHUB_PATH"
       - name: Rust consumer startup and packaged loaders
         if: matrix.venue == 'binance'
         run: |
@@ -1180,12 +1226,24 @@ jobs:
       - name: Build the venue wasm engine
         if: inputs.replay_artifact != 'combined'
         run: corepack yarn rust:build-wasm --venue ${{ matrix.venue }}
-      - name: Archive the matching CI replay engine
-        if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
         if: inputs.replay_artifact != 'combined'
         run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
+      - name: Build the nondefault BingX Spot measurement engine
+        if: matrix.venue == 'bingx'
+        run: |
+          if [ '${{ inputs.replay_artifact }}' = combined ]; then
+            corepack yarn rust:build-wasm --bingx-spot-replay
+          else
+            corepack yarn rust:build-wasm --venue bingx --bingx-spot-replay
+          fi
+      # Family identity must seal the measured variant, after any fixture rebuild.
+      - name: Archive the matching CI replay engine
+        if: inputs.replay_artifact != 'combined'
+        run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
+      - name: Generate the BingX Spot private fixture before sealing
+        if: matrix.venue == 'bingx'
+        run: corepack yarn rust:private-tape-bingxspot
       - name: Replay request normalization
         run: corepack yarn rust:test-harness
       - name: Credentialed lifecycle runner (scripted transport only)
@@ -1197,12 +1255,23 @@ jobs:
       - name: Generate Binance Options public CPU input before sealing
         if: matrix.venue == 'binance'
         run: corepack yarn rust:private-tape-binanceoptions --public
+      - name: Assert Node 22 before sealing CPU inputs
+        run: |
+          node --version
+          which -a node
+          command -v node
+          measurement_node_version="$(corepack yarn -s node --version)"
+          printf 'CPU measurement Node: %s\n' "$measurement_node_version"
+          if [[ ! "$measurement_node_version" =~ ^v22\.[0-9]+\.[0-9]+$ ]]; then
+            printf '::error::CPU measurement requires Node v22; found %s\n' "${measurement_node_version:-<empty>}"
+            exit 1
+          fi
       - name: Seal approved CPU measurement inputs
         id: cpu_prepare
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
+          corepack yarn -s node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
           --out '${{ runner.temp }}/cpu-runtime-first' --mode '${{ inputs.replay_artifact == 'combined' && 'combined' || 'family' }}'
       - name: Public data (correctness, CPU and memory)
         run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 16
@@ -1212,6 +1281,11 @@ jobs:
       - name: OKX EEA X-Perps public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
         run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 16
+      - name: BingX Spot public CPU and private correctness against its independent oracle
+        if: matrix.venue == 'bingx'
+        run: |
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/fixtures/bingxspot-public.jsonl.gz --books BTCUSDT --runs 16
+          corepack yarn -s rust:gate:record --venue bingxspot --tape sdk-rs/harness/tapes/bingxspot-private.jsonl --books '' --runs "$PRIVATE_REPLAY_RUNS"
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
@@ -1342,7 +1416,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
+          corepack yarn -s node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
       - name: Retain CPU runtime capsule
         if: always()
         uses: actions/upload-artifact@v7
@@ -1384,9 +1458,9 @@ jobs:
   bitget-paired:
     name: Rust / Bitget counterbalanced steady CPU
     needs: selection
-    if: needs.selection.outputs.replayRequired == 'true'
+    if: needs.selection.outputs.replayRequired == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: .
@@ -1431,9 +1505,9 @@ jobs:
       - name: Public counterbalanced Bitget steady CPU
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/bitget-paired-ci.mjs --out '${{ runner.temp }}/bitget-paired-steady'
+        run: node sdk-rs/harness/bitget-paired-run.mjs --out '${{ runner.temp }}/bitget-paired-steady'
       - name: Retain counterbalanced Bitget steady evidence
-        if: always()
+        if: success() || failure()
         uses: actions/upload-artifact@v7
         with:
           name: bitget-paired-steady

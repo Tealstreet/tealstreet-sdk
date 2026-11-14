@@ -191,32 +191,52 @@ export function authenticateArtifactExecution(input) {
   return receipt;
 }
 
-/** This failure-only upload proves an oracle refusal, never a CPU certificate. */
-export function authenticateBitgetOracleRefusalArtifact({ artifact, artifactBytes, run, job, logBytes, expectedCheckoutSha }) {
+const bitgetFailedUploads = new WeakSet();
+const oracleRefusalMessage = 'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available';
+function bitgetFailureKind(message) {
+  if (message === oracleRefusalMessage) return 'oracle';
+  const tip = /^Bitget paired steady: complete tip rejected \(Rust\/TS=([^,]+), q=([^)]+)\); anchor cannot rescue it$/.exec(message);
+  const anchor = /^Bitget paired steady: complete anchor rejected \(Rust\/TS=([^,]+), q=([^)]+)\)$/.exec(message);
+  const match = tip ?? anchor;
+  return match && match.slice(1).every(value => Number.isFinite(Number(value)) && Number(value) > 0 && String(Number(value)) === value) ? 'cpu' : null;
+}
+
+/** Authenticate a failure upload, never permission to certify. CPU payloads
+ * still require full raw-cohort revalidation and a recomputed rejection. */
+export function authenticateBitgetPairedFailureArtifact({ artifact, artifactBytes, run, job, logBytes, expectedCheckoutSha }) {
   const name = 'Rust / Bitget counterbalanced steady CPU';
   const stepName = 'Retain counterbalanced Bitget steady evidence';
   validateRun(run, CPU_WORKFLOW_ID);
   validateJob(job, run, name);
-  check(run.run_attempt === 1 && job.run_attempt === 1 && job.conclusion === 'failure', 'oracle refusal requires failed original Bitget job');
+  check(run.run_attempt === 1 && job.run_attempt === 1 && job.conclusion === 'failure', 'paired verdict requires failed original Bitget job');
   artifactIdentity(artifact, run, 'bitget-paired-steady');
   uploaded(artifact, job, logBytes, stepName);
   const failed = job.steps?.filter(step => step.conclusion === 'failure');
   const measured = job.steps?.filter(step => step.name === 'Public counterbalanced Bitget steady CPU');
   check(failed?.length === 1 && measured?.length === 1 && failed[0] === measured[0] &&
     job.steps.every(step => step.status === 'completed' && ['success', 'failure', 'skipped'].includes(step.conclusion)),
-  'oracle refusal must be the only failed terminal step');
+  'paired verdict must be the only failed terminal step');
   const start = instant(failed[0].started_at), end = instant(failed[0].completed_at) + 1000;
-  check(instant(job.started_at) <= start && start < end && end <= instant(job.completed_at) + 1000, 'refusal step outside physical job');
-  const message = 'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available';
-  const lines = logLines(logBytes).filter(line => line.text === message);
+  check(instant(job.started_at) <= start && start < end && end <= instant(job.completed_at) + 1000, 'paired verdict step outside physical job');
+  const lines = logLines(logBytes).filter(line => bitgetFailureKind(line.text) !== null);
   check(lines.length === 1 && lines[0].at !== null && lines[0].at >= start && lines[0].at < end, 'missing exact refusal inside failed step');
   const checkout = loggedCheckout(job, logBytes);
   check(gitId(expectedCheckoutSha) && checkout === expectedCheckoutSha &&
-    (run.event === 'pull_request' || checkout === run.head_sha), 'oracle refusal checkout differs');
+    (run.event === 'pull_request' || checkout === run.head_sha), 'paired verdict checkout differs');
   const raw = bytes(artifactBytes);
-  check(raw.length === artifact.size_in_bytes && `sha256:${sha(raw)}` === artifact.digest, 'oracle refusal ZIP digest/length mismatch');
-  return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id,
-    attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha: checkout, logSha256: sha(bytes(logBytes)) };
+  check(raw.length === artifact.size_in_bytes && `sha256:${sha(raw)}` === artifact.digest, 'paired verdict ZIP digest/length mismatch');
+  const receipt = Object.freeze({ schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id,
+    attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha: checkout, logSha256: sha(bytes(logBytes)),
+    kind: bitgetFailureKind(lines[0].text), message: lines[0].text });
+  bitgetFailedUploads.add(receipt);
+  return receipt;
+}
+
+/** The existing oracle path must never accept a CPU rejection as its refusal. */
+export function authenticateBitgetOracleRefusalArtifact(input) {
+  const receipt = authenticateBitgetPairedFailureArtifact(input);
+  check(receipt.kind === 'oracle', 'expected exact oracle refusal');
+  return receipt;
 }
 
 export function formatMeasurementMarker(kind, key, at) {
@@ -226,10 +246,13 @@ export function formatMeasurementMarker(kind, key, at) {
 }
 
 /** Bind a case's payload clock window to literal markers in its physical log. */
-export function authenticateMeasurementWindow({ execution, key, job, logBytes }) {
+export function authenticateMeasurementWindow({ execution, key, job, logBytes, failureReceipt }) {
   check(hash(key) && execution && job && (/^Rust \/ (?:replay measurement|CPU remeasurement) \([a-z0-9-]+\)$/.test(job.name) ||
     job.name === 'Rust / Bitget counterbalanced steady CPU'), 'invalid physical measurement job/key');
-  check(integer(job.id) && integer(job.run_id) && integer(job.runner_id) && job.run_attempt === 1 && job.status === 'completed' && job.conclusion === 'success' && execution.attempt === 1 && execution.runId === String(job.run_id) && execution.jobId === String(job.id) && execution.runnerId === String(job.runner_id), 'measurement execution identity differs from API job');
+  const rejected = bitgetFailedUploads.has(failureReceipt) && failureReceipt.kind === 'cpu' &&
+    failureReceipt.jobId === job.id && failureReceipt.runId === job.run_id && failureReceipt.runnerId === job.runner_id &&
+    failureReceipt.measuredCheckoutSha === execution.measuredCheckoutSha && failureReceipt.logSha256 === sha(bytes(logBytes));
+  check(integer(job.id) && integer(job.run_id) && integer(job.runner_id) && job.run_attempt === 1 && job.status === 'completed' && (job.conclusion === 'success' || (job.conclusion === 'failure' && rejected)) && execution.attempt === 1 && execution.runId === String(job.run_id) && execution.jobId === String(job.id) && execution.runnerId === String(job.runner_id), 'measurement execution identity differs from API job');
   const start = instant(execution.startedAt), end = instant(execution.completedAt);
   check(start < end && execution.measuredCheckoutSha === loggedCheckout(job, logBytes), 'measurement time/source differs from physical checkout');
   const lines = logLines(logBytes), markers = ['BEGIN', 'END'].map((kind) => lines.map((line, index) => ({ ...line, index })).filter((line) => line.text === `CPU_CASE_${kind} ${key} ${kind === 'BEGIN' ? execution.startedAt : execution.completedAt}`));
@@ -240,8 +263,12 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
   // Actions may buffer BEGIN until after execution ends; receipt clocks bound
   // delivery, while the exact payload timestamps above order the execution.
   check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= finish.at && end <= finish.at, 'public case marker ordering/time differs');
-  const candidates = (job.steps ?? []).filter((step) => /public/i.test(step.name ?? '') && step.status === 'completed' && step.conclusion === 'success').filter((step) => {
-    const window = successfulStep(job, step.name);
+  const candidates = (job.steps ?? []).filter((step) => /public/i.test(step.name ?? '') && step.status === 'completed' &&
+    (step.conclusion === 'success' || (rejected && step.conclusion === 'failure' && step.name === 'Public counterbalanced Bitget steady CPU'))).filter((step) => {
+    const window = step.conclusion === 'success' ? successfulStep(job, step.name)
+      : { start: instant(step.started_at), end: instant(step.completed_at) + 1000 };
+    check(instant(job.started_at) <= window.start && window.start < window.end && window.end <= instant(job.completed_at) + 1000,
+      'measurement step outside physical job');
     return [start, end, begin.at, finish.at].every((at) => at >= window.start && at < window.end);
   });
   check(candidates.length === 1, 'case markers are outside one unique successful public step');

@@ -1,11 +1,41 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { normalizeAccount } from './comparison-policy.mjs';
+import { captureRustFill, normalizeAccount, projectFill } from './comparison-policy.mjs';
 import { snapshotCoverageErrors, compareSnapshots } from './snapshot-compare.mjs';
 
 const source = () => ({ hedged: false, balance: null, orders: [{}], positions: [{}], settings: [{}], fills: [{}] });
 const normalize = (account, extra = {}) => normalizeAccount(account, { rust: 'fixture', ...extra }, 'ts');
 const snapshot = (account) => ({ markets: [], tickers: [], books: {}, account });
+
+test('revision-2 public fill IDs do not fabricate native execution metadata from an order fallback', () => {
+  const rows = {
+    market: [0, 0], side: [0, 0], rows: [100, 1, 100, 1],
+    orderId: () => 'order', fillId: i => i === 0 ? 'order' : 'execution',
+  };
+  const fallback = projectFill(captureRustFill(rows, 0), 'coinbase', 'rust');
+  assert.equal(fallback.id, 'order');
+  assert.equal(fallback.executionId, null);
+  const native = projectFill(captureRustFill(rows, 1), 'coinbase', 'rust');
+  assert.equal(native.id, 'order');
+  assert.equal(native.executionId, 'execution');
+  assert.notDeepEqual(native, fallback);
+});
+
+test('legacy unknown liquidation sentinels compare with the public nullable contract', () => {
+  for (const value of [0, -1, NaN, Infinity, -Infinity, null, undefined]) {
+    const account = source();
+    account.positions[0].liquidationPrice = value;
+    assert.equal(normalize(account).positions[0].liquidationPrice, null);
+  }
+  const account = source();
+  account.positions[0].liquidationPrice = 50;
+  assert.equal(normalize(account).positions[0].liquidationPrice, 50);
+  const different = structuredClone(account);
+  different.positions[0].liquidationPrice = 51;
+  assert.notDeepEqual(normalize(account), normalize(different));
+  account.positions[0].liquidationPrice = 0;
+  assert.equal(normalizeAccount(account, { rust: 'fixture' }, 'rust').positions[0].liquidationPrice, 0);
+});
 
 test('normalized missing row values survive JSON as explicit unavailable evidence', () => {
   for (const extra of [{}, { independentLeverage: true }, { inverseNativeAmounts: true }, { coinNativeAmounts: true }]) {

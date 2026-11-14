@@ -1,15 +1,8 @@
 import { PositionSide, StoreData, Writable } from '../../types';
 import { BasePostprocessor } from './BasePostprocessor';
 
-/**
- * Derives per-account margin aggregation from the post-processed positions so
- * the margin UI reads it off the store instead of recomputing per render.
- *
- * Runs after DisplayedPositionsPostprocessor and aggregates over
- * `store.displayedPositions` with the exact formula the margin UI used inline
- * (`Math.abs(notional || 0)` summed in array order, per side and overall). The
- * single pass preserves array order, so the long/short/total sums are
- * floating-point identical to the previous filter+reduce + total loop.
+/** Aggregates displayed exposures in source order after position processing.
+ * Unknown notional makes the affected side and total unknown.
  */
 export class DisplayedMarginPostprocessor extends BasePostprocessor {
   process(store: Writable<StoreData>): void {
@@ -20,7 +13,8 @@ export class DisplayedMarginPostprocessor extends BasePostprocessor {
     let totalNotional = 0;
 
     for (let i = 0; i < positions.length; i++) {
-      const notional = Math.abs(positions[i].notional || 0);
+      const value = positions[i].notional;
+      const notional = typeof value === 'number' && Number.isFinite(value) ? Math.abs(value) : NaN;
       totalNotional += notional;
       if (positions[i].side === PositionSide.Long) {
         longExposure += notional;
@@ -29,6 +23,10 @@ export class DisplayedMarginPostprocessor extends BasePostprocessor {
       }
     }
 
-    store.displayedMargin = { longExposure, shortExposure, totalNotional };
+    store.displayedMargin = {
+      longExposure: Number.isFinite(longExposure) ? longExposure : null,
+      shortExposure: Number.isFinite(shortExposure) ? shortExposure : null,
+      totalNotional: Number.isFinite(totalNotional) ? totalNotional : null,
+    };
   }
 }

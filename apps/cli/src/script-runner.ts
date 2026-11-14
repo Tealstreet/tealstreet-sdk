@@ -20,6 +20,7 @@
  * zero cli-core dep). The shim is the host's gluing point.
  */
 import type { PreprocessStore } from '@tealstreet/cli-core';
+import { captureStorageSession } from './storage-context';
 import {
   CLI_API_VERSION,
   CORE_API_VERSION,
@@ -119,6 +120,7 @@ export const runScriptFromHostWithAdapter = async (
   inner: RunScriptFromHostInnerDeps,
   options: RunScriptFromHostOptions,
 ): Promise<RunScriptResult> => {
+  const ownerSession = captureStorageSession();
   const { record, rawArgs, invokedFrom, loopSymbol, retry, capture } = options;
 
   // 1. Idempotent gate — fires only on retry. The throw matches the
@@ -146,6 +148,7 @@ export const runScriptFromHostWithAdapter = async (
   };
 
   const result = await runScript(record, rawArgs, ctx);
+  ownerSession.assertCurrent();
 
   // 2. Capture-writeback per SPEC §7.4. Only applies when the chain
   //    step opted in via `captureTo: …` and the script returned

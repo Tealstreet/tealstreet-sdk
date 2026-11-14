@@ -339,3 +339,94 @@ fn unprotected_replacement_surfaces_symbol_in_error_result_and_one_error_notice(
     assert_eq!(notices[0].1, json!(message));
     assert_eq!(p.calls.len(), 2);
 }
+
+fn inverse_notional_port() -> Port {
+    let mut p = port();
+    p.store["venue"] = json!("bybitinverse");
+    p.store["markets"][0]["symbol"] = json!("BTCUSD");
+    p.store["markets"][0]["isInverse"] = json!(true);
+    p.store["markets"][0]["contractSize"] = json!(1.0);
+    p.store["markets"][0]["precision"]["amount"] = json!(1.0);
+    p.store["positions"][0]["symbol"] = json!("BTCUSD");
+    p.store["tickers"][0]["symbol"] = json!("BTCUSD");
+    p
+}
+fn inverse_notional_request(command: &str) -> Value {
+    json!({"symbol":"BTCUSD","command":command,"reqId":"r"})
+}
+
+#[test]
+fn unknown_notional_inverse_close_refuses_before_size_coercion() {
+    let mut p = inverse_notional_port();
+    p.store["positions"][0]["notional"] = Value::Null;
+    Exec::default().handle(&inverse_notional_request("close"), &mut p);
+    assert!(p.calls.is_empty());
+    assert_eq!(result(&p)["success"], false);
+    assert!(
+        result(&p)["error"].as_str().unwrap().contains("unknown"),
+        "{}",
+        result(&p)
+    );
+}
+
+#[test]
+fn unknown_notional_percentage_size_refuses_before_arithmetic() {
+    let mut p = inverse_notional_port();
+    p.store["positions"][0]["notional"] = Value::Null;
+    Exec::default().handle(&inverse_notional_request("sell 50%pos reduce"), &mut p);
+    assert!(p.calls.is_empty());
+    assert_eq!(result(&p)["success"], false);
+    assert!(
+        result(&p)["error"].as_str().unwrap().contains("unknown"),
+        "{}",
+        result(&p)
+    );
+}
+
+#[test]
+fn unknown_notional_can_use_an_independently_known_native_quantity() {
+    for (command, amount) in [("close", 20.0), ("sell 50%pos reduce", 10.0)] {
+        let mut p = inverse_notional_port();
+        p.store["positions"][0]["notional"] = Value::Null;
+        p.store["positions"][0]["extra"] = json!({"contractsNative":20.0});
+        Exec::default().handle(&inverse_notional_request(command), &mut p);
+        assert_eq!(p.calls.len(), 1, "{command}: {:?}", p.events);
+        assert_eq!(p.calls[0].2[0]["amount"], amount);
+    }
+}
+
+#[test]
+fn conflicting_notional_and_native_quantity_cannot_choose_the_larger_guess() {
+    for command in ["close", "sell 50%pos reduce"] {
+        let mut p = inverse_notional_port();
+        p.store["positions"][0]["notional"] = json!(10.0);
+        p.store["positions"][0]["extra"] = json!({"contractsNative":20.0});
+        Exec::default().handle(&inverse_notional_request(command), &mut p);
+        assert!(p.calls.is_empty(), "{command}: {:?}", p.calls);
+        assert_eq!(result(&p)["success"], false);
+    }
+}
+
+#[test]
+fn explicit_unknown_native_quantity_cannot_fall_back_to_base_size() {
+    for command in ["close", "sell 50%pos reduce"] {
+        let mut p = port();
+        p.store["positions"][0]["extra"] = json!({"contractsNative":null});
+        Exec::default().handle(&req(command), &mut p);
+        assert!(p.calls.is_empty(), "{command}: {:?}", p.calls);
+        assert_eq!(result(&p)["success"], false);
+        assert!(result(&p)["error"].as_str().unwrap().contains("unknown"));
+    }
+}
+
+#[test]
+fn explicit_unknown_contract_size_cannot_assume_one() {
+    for command in ["close", "sell 50%pos reduce"] {
+        let mut p = port();
+        p.store["markets"][0]["contractSize"] = Value::Null;
+        Exec::default().handle(&req(command), &mut p);
+        assert!(p.calls.is_empty(), "{command}: {:?}", p.calls);
+        assert_eq!(result(&p)["success"], false);
+        assert!(result(&p)["error"].as_str().unwrap().contains("unknown"));
+    }
+}

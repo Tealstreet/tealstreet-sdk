@@ -100,7 +100,7 @@ impl KucoinSpot {
             return Err("invalid KuCoin Spot order amount or price".into());
         }
         let amount = adjust(o.amount, m.precision.amount);
-        if amount <= 0.0 || amount > m.limits.amount.max {
+        if amount <= 0.0 {
             return Err("KuCoin Spot order exceeds native size limits".into());
         }
         let client_oid = client_oid(o.client_order_id.as_deref(), || {
@@ -236,11 +236,27 @@ impl KucoinSpot {
         job: Job,
         mut error: VenueError,
     ) {
+        if error.outcome == Some(Outcome::Unknown) {
+            error.message = "The outcome is unknown. Check Open Orders".into();
+            error.presents = true;
+        }
         if (job.effective || !job.ids.is_empty())
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
         {
             error.outcome = None;
         }
+        if !job.ids.is_empty() {
+            let mut ids = job.ids;
+            if let Some(partial) = &error.partial {
+                for id in &partial.order_ids {
+                    if !ids.contains(id) {
+                        ids.push(id.clone());
+                    }
+                }
+            }
+            error = error.partial_ids(&ids);
+        }
+        cx.command_error(job.command, &error.message);
         cx.fail(job.command, error);
     }
     pub(super) fn trade(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

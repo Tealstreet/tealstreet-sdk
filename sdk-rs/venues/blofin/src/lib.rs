@@ -514,6 +514,30 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn observe_unproven_http_response(
+        &mut self,
+        _: f64,
+        _: f64,
+        pending: &Pending,
+        _: Response<'_>,
+    ) {
+        if let Pending::Trade(request) = pending {
+            self.observe_unproven_trade(request);
+        }
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            self.capture_trade_write_plan(request, evidence);
+        }
+    }
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -611,6 +635,7 @@ impl Venue for Blofin {
     /// An uncertain or absent-order seal: a fresh order snapshot reports
     /// through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_retired_trade(cx);
         self.reconcile_uncertain_orders(cx);
     }
     fn refreshes_orders(&self) -> bool {
@@ -1114,6 +1139,12 @@ impl Venue for Blofin {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            safe_cex_engine::VenueAction::FetchClosedPnl {
+                symbol,
+                from_ms,
+                to_ms,
+                account,
+            } => self.start_closed_pnl(cx, command, symbol, from_ms, to_ms, account),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

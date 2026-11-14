@@ -48983,11 +48983,10 @@
           ]
         },
         {
-          "divergence": "Per-symbol leverage/margin settings or readiness differs between implementations.",
+          "divergence": "TS retains last-reported leverage 10 while Rust has confirmed 20. At checkpoint 14 exposure is empty: the retained PositionSettings still reports 10 until the later refresh. Only leverage differs; symbol, margin type and settings cardinality must agree.",
           "keys": [
             "checkpoint 13 account.settings[0].leverage",
-            "checkpoint 14 account.settings.length",
-            "checkpoint 14 account.settings[0]"
+            "checkpoint 14 account.settings[0].leverage"
           ]
         },
         {

@@ -18,15 +18,17 @@ it('preserves inverse native quantities and collateral after worker frame hydrat
     }),
     orders: () => ({ count: 1, market: Uint32Array.of(0), enums: Uint32Array.of(0),
       id: () => 'one', clientOrderId: () => undefined, parentId: () => undefined,
+      remainingNative: Float64Array.of(900),
       ...cols({ price: 50000, amount: 1000, filled: 100, remaining: 0.018, lastUpdate: 1, takeProfit: NaN, stopLoss: NaN }),
     }),
     positions: () => ({ count: 1, market: Uint32Array.of(0), enums: Uint32Array.of(0),
-      id: () => undefined,
+      id: () => 'BTCUSD', symbol: () => 'BTCUSD',
+      contractsNative: [1000], unrealizedPnlNative: [0.002],
       ...cols({ entryPrice: 40000, notional: 1000, leverage: 10, unrealizedPnl: 0.002, realizedPnl: 0,
         contracts: 0.02, liquidationPrice: 20000, marginSize: 0.01, lastUpdate: 1 }),
     }),
     balance: () => ({ total: 4900, used: 1000, free: 4000, upnl: 100, coins }),
-    tickers: () => undefined, tickerDeltas: () => undefined, status: () => undefined, settings: () => undefined,
+    tickers: () => undefined, tickerDeltas: () => undefined, tickerObservations: () => undefined, status: () => undefined, settings: () => undefined,
   } as unknown as Frame;
   const store = new DefaultStore();
   new FrameApplier(store).apply(frame);
@@ -36,17 +38,19 @@ it('preserves inverse native quantities and collateral after worker frame hydrat
     extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 } });
   expect(store.balance.coins).toEqual(coins);
   const originalOrders = frame.orders();
-  frame.orders = () => ({ ...originalOrders!, remainingNative: Float64Array.of(777) });
+  if (!originalOrders) throw new Error('Expected Order fixture');
+  frame.orders = () => ({ ...originalOrders, remainingNative: Float64Array.of(777), remainingNotional: Float64Array.of(777) });
   new FrameApplier(store).apply(frame);
   expect(store.orders[0].extra).toEqual({ remainingNative: 777, remainingNotional: 777 });
-  const originalBalance = frame.balance()!;
+  const originalBalance = frame.balance();
+  if (!originalBalance) throw new Error('Expected Balance fixture');
   frame.balance = () => ({ total: 5000, used: 1000, free: 4000, upnl: 0 });
   new FrameApplier(store).apply(frame);
   expect(store.balance.coins).toEqual(coins);
   frame.balance = () => ({ ...originalBalance, coins: {} });
   new FrameApplier(store).apply(frame);
   expect(store.balance.coins).toEqual({});
-  frame.orders = () => ({ ...originalOrders!, enums: Uint32Array.of((5 << 8) | (2 << 28)) });
+  frame.orders = () => ({ ...originalOrders, enums: Uint32Array.of((5 << 8) | (2 << 28)), slTriggerType: () => 'last_price' });
   new FrameApplier(store).apply(frame);
   expect(store.orders[0].slTriggerType).toBe('last_price');
 });

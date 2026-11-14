@@ -195,6 +195,7 @@ enum BadResult {
     Unchanged,
     Receipt,
     Headers,
+    InvalidHeaders,
     Count,
     Mac,
     Crlf,
@@ -231,6 +232,9 @@ impl Signer for CorruptProvider {
             BadResult::Headers => result
                 .headers
                 .push(("X-Provider".into(), "untrusted".into())),
+            BadResult::InvalidHeaders => result
+                .headers
+                .push(("X-Provider".into(), "invalid\r\nvalue".into())),
             BadResult::Count => result.values.push(vec![1]),
             BadResult::Mac => result.values[1].truncate(31),
             BadResult::Crlf => result.values[0] = b"provider-key\r\n".to_vec(),
@@ -245,6 +249,7 @@ fn malformed_provider_results_cannot_release_identity_or_leak_material() {
         BadResult::Unchanged,
         BadResult::Receipt,
         BadResult::Headers,
+        BadResult::InvalidHeaders,
         BadResult::Count,
         BadResult::Mac,
         BadResult::Crlf,
@@ -259,8 +264,16 @@ fn malformed_provider_results_cannot_release_identity_or_leak_material() {
         })))
         .unwrap();
         let actions = ask(&mut e, NOW);
-        if matches!(bad, BadResult::Unchanged) {
+        if matches!(bad, BadResult::Unchanged | BadResult::Headers) {
             let request = http(&actions, "private/get-accounts");
+            if matches!(bad, BadResult::Headers) {
+                assert!(
+                    request
+                        .signer_headers
+                        .iter()
+                        .any(|(name, value)| name == "X-Provider" && value == "untrusted")
+                );
+            }
             let delivered = respond(&mut e, NOW, &request, 200, IDENTITY);
             assert_eq!(
                 terminals(&delivered),
@@ -294,6 +307,7 @@ fn malformed_provider_results_cannot_release_ws_auth() {
         BadResult::Unchanged,
         BadResult::Receipt,
         BadResult::Headers,
+        BadResult::InvalidHeaders,
         BadResult::Count,
         BadResult::Mac,
         BadResult::Crlf,
@@ -1429,14 +1443,49 @@ fn fail_released_write(h: &mut Harness, request: &HttpRequest, timeout: bool) {
     }
 }
 
+const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+fn assert_unknown_batch_stop(h: &mut Harness, placed: &[&str]) {
+    let terminal = terminals(&h.actions);
+    assert_eq!(
+        terminal.len(),
+        1,
+        "one journal-projected host failure event"
+    );
+    let error = terminal[0]
+        .as_ref()
+        .expect_err("uncertainty cannot complete successfully");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error.message.contains(ENGINE_UNKNOWN_TEXT),
+        "{}",
+        error.message
+    );
+    let ids = error
+        .partial
+        .as_ref()
+        .map(|p| p.order_ids.iter().map(String::as_str).collect::<Vec<_>>())
+        .unwrap_or_default();
+    assert_eq!(ids, placed);
+    only_reconcile_read(&h.actions);
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 20.))
+    );
+    pace(h);
+    only_reconcile_read(&h.actions);
+    assert_eq!(terminals(&h.actions).len(), 1);
+}
+
 #[test]
-fn independent_unproven_http_failure_continues_without_reusing_the_failed_call() {
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:630-636
+fn independent_unproven_http_failure_stops_without_reusing_the_failed_call() {
     let mut h = Harness::new();
     h.load();
     h.actions.clear();
     h.event(Event::Command(Command::PlaceOrders {
         command: OWNER,
-        orders: vec![placement("unproven"), placement("accepted")],
+        orders: vec![placement("unproven"), placement("unsent")],
     }));
     let first = h.http("private/create-order");
     h.actions.clear();
@@ -1448,76 +1497,36 @@ fn independent_unproven_http_failure_continues_without_reusing_the_failed_call()
             body: r#"{"code":40101,"message":"bad signature"}"#,
         },
     });
-    assert!(terminals(&h.actions).is_empty());
-    no_private_http(&h.actions);
-    pace(&mut h);
-    let sibling = h.http("private/create-order");
-    assert_ne!(first.id, sibling.id);
-    assert!(sibling.body.as_ref().unwrap().contains("accepted"));
-    h.respond(
-        &sibling,
-        r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
-    );
-    pace(&mut h);
-    let terminal = terminals(&h.actions);
-    assert_eq!(terminal.len(), 1);
-    let error = terminal[0]
-        .as_ref()
-        .expect_err("unproven first row stays failed");
-    assert_eq!(
-        error.partial.as_ref().unwrap().order_ids,
-        ["9007199254740993"]
-    );
+    assert_unknown_batch_stop(&mut h, &[]);
 }
 
 #[test]
-fn independent_released_write_failure_waits_20ms_before_the_native_sibling() {
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:630-636
+fn independent_released_write_failure_stops_before_the_native_sibling() {
     for timeout in [false, true] {
         let mut h = Harness::new();
         h.load();
         h.actions.clear();
         h.event(Event::Command(Command::PlaceOrders {
             command: OWNER,
-            orders: vec![placement("failed"), placement("accepted")],
+            orders: vec![placement("failed"), placement("unsent")],
         }));
         let first = h.http("private/create-order");
         fail_released_write(&mut h, &first, timeout);
-        assert!(terminals(&h.actions).is_empty());
-        no_private_http(&h.actions);
-        let timer = physical_timer(&h.actions, h.now + 20.);
-        h.now += 19.;
-        h.event(Event::TimerFired { timer });
-        no_private_http(&h.actions);
-        h.now += 1.;
-        h.event(Event::TimerFired { timer });
-        let sibling = h.http("private/create-order");
-        assert_ne!(first.id, sibling.id);
-        h.respond(
-            &sibling,
-            r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
-        );
-        pace(&mut h);
-        let terminal = terminals(&h.actions);
-        assert_eq!(terminal.len(), 1);
-        let error = terminal[0]
-            .as_ref()
-            .expect_err("the failed row stays failed");
-        assert_eq!(
-            error.partial.as_ref().unwrap().order_ids,
-            ["9007199254740993"]
-        );
+        assert_unknown_batch_stop(&mut h, &[]);
     }
 }
 
 #[test]
-fn independent_failure_keeps_earlier_ids_and_later_sibling_ids_in_order() {
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:630-636
+fn independent_unknown_keeps_earlier_ids_and_never_releases_later_sibling() {
     for timeout in [false, true] {
         let mut h = Harness::new();
         h.load();
         h.actions.clear();
         h.event(Event::Command(Command::PlaceOrders {
             command: OWNER,
-            orders: vec![placement("one"), placement("failed"), placement("three")],
+            orders: vec![placement("one"), placement("unknown"), placement("unsent")],
         }));
         h.reply(
             "private/create-order",
@@ -1526,28 +1535,13 @@ fn independent_failure_keeps_earlier_ids_and_later_sibling_ids_in_order() {
         pace(&mut h);
         let second = h.http("private/create-order");
         fail_released_write(&mut h, &second, timeout);
-        assert!(terminals(&h.actions).is_empty());
-        no_private_http(&h.actions);
-        pace(&mut h);
-        h.reply(
-            "private/create-order",
-            r#"{"code":0,"result":{"order_id":9007199254740995}}"#,
-        );
-        pace(&mut h);
-        let terminal = terminals(&h.actions);
-        assert_eq!(terminal.len(), 1);
-        let error = terminal[0]
-            .as_ref()
-            .expect_err("the middle failure stays in the journal");
-        assert_eq!(
-            error.partial.as_ref().unwrap().order_ids,
-            ["9007199254740993", "9007199254740995"]
-        );
+        assert_unknown_batch_stop(&mut h, &["9007199254740993"]);
     }
 }
 
 #[test]
-fn independent_all_released_failures_emit_one_failure_and_no_success() {
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/cryptocom/cryptocom.exchange.ts:630-636
+fn independent_first_unknown_emits_one_failure_and_no_success() {
     for timeout in [false, true] {
         let mut h = Harness::new();
         h.load();
@@ -1558,19 +1552,7 @@ fn independent_all_released_failures_emit_one_failure_and_no_success() {
         }));
         let first = h.http("private/create-order");
         fail_released_write(&mut h, &first, timeout);
-        assert!(terminals(&h.actions).is_empty());
-        pace(&mut h);
-        let second = h.http("private/create-order");
-        fail_released_write(&mut h, &second, timeout);
-        assert!(terminals(&h.actions).is_empty());
-        pace(&mut h);
-        let terminal = terminals(&h.actions);
-        assert_eq!(terminal.len(), 1);
-        assert_eq!(
-            terminal[0].as_ref().unwrap_err().outcome,
-            Some(Outcome::Unknown)
-        );
-        only_reconcile_read(&h.actions);
+        assert_unknown_batch_stop(&mut h, &[]);
     }
 }
 

@@ -98,7 +98,8 @@ describe('parseImportAccountData', () => {
 
       expect(result.isValid).toBe(true);
       expect(Array.isArray(result.data)).toBe(true);
-      expect((result.data as unknown[]).length).toBe(2);
+      if (!Array.isArray(result.data)) throw new Error('Expected imported accounts');
+      expect(result.data.length).toBe(2);
     });
   });
 
@@ -196,7 +197,8 @@ describe('parseImportAccountData', () => {
 
       expect(result.isValid).toBe(true);
       expect(result.error).toBeUndefined();
-      expect((result.data as any).apiSecret).toBe('legacy-secret-value');
+      if (!result.data || Array.isArray(result.data)) throw new Error('Expected one imported account');
+      expect(result.data.apiSecret).toBe('legacy-secret-value');
     });
 
     it('does not overwrite an existing apiSecret with secret', () => {
@@ -211,7 +213,8 @@ describe('parseImportAccountData', () => {
       const result = parseImportAccountData(input);
 
       expect(result.isValid).toBe(true);
-      expect((result.data as any).apiSecret).toBe('real-secret');
+      if (!result.data || Array.isArray(result.data)) throw new Error('Expected one imported account');
+      expect(result.data.apiSecret).toBe('real-secret');
     });
 
     it('treats "secret" as "apiSecret" for each entry in an array', () => {
@@ -233,7 +236,8 @@ describe('parseImportAccountData', () => {
       const result = parseImportAccountData(input);
 
       expect(result.isValid).toBe(true);
-      const accounts = result.data as any[];
+      if (!Array.isArray(result.data)) throw new Error('Expected imported accounts');
+      const accounts = result.data;
       expect(accounts[0].apiSecret).toBe('s1');
       expect(accounts[1].apiSecret).toBe('s2');
     });

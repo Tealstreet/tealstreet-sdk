@@ -21,6 +21,7 @@
  *    the alt buffer takes over and re-established on return.
  */
 import chalk from 'chalk';
+import { captureStorageSession, isStorageSessionCurrent, onStorageOwnerChange } from './storage-context';
 
 import type { LogCategory } from './log-classify';
 import { addResizeListener, reserveTop, resumeRegion, suspendRegion } from './scroll-region';
@@ -137,6 +138,7 @@ function teardownRegion(): void {
  */
 export function enableStatusLine(): void {
   if (enabled || !isTty()) return;
+  const ownerSession = captureStorageSession();
   enabled = true;
   establishRegion();
 
@@ -144,7 +146,7 @@ export function enableStatusLine(): void {
   // (including the too-short reset). We only redraw the bar's content at the
   // new width after a resize; it fires after the region is re-applied.
   removeResizeListener = addResizeListener(() => {
-    if (!enabled || suspended) return;
+    if (!enabled || suspended || !ownerSession.isCurrent()) return;
     drawStatus(false);
   });
 }
@@ -191,12 +193,22 @@ export function resumeStatusLine(): void {
  * suspended, or non-TTY. Resets the auto-dim timer.
  */
 export function setStatus(text: string, category: LogCategory): void {
+  if (!isStorageSessionCurrent()) return;
   if (!enabled || !isTty() || !NOTABLE.has(category)) return;
+  const ownerSession = captureStorageSession();
   current = { text, category };
   drawStatus(false);
   if (dimTimer) clearTimeout(dimTimer);
   dimTimer = setTimeout(() => {
+    if (!ownerSession.isCurrent()) return;
     drawStatus(true);
     dimTimer = null;
   }, DIM_AFTER_MS);
 }
+
+onStorageOwnerChange(() => {
+  const restart = enabled;
+  disableStatusLine();
+  current = null;
+  if (restart) enableStatusLine();
+});

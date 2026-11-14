@@ -129,3 +129,15 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 # Public reviewer names in historical Lighter plan prose; no credential material.
 # Exact commit/path/rule/line only.
 94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7
+
+# Synthetic Coinbase hosted-signing CDP name in already-pushed history, PR #3301.
+7e157be6d6d3916000c253cee778ea3ab09838b0:packages/safe-cex/src/__tests__/audit-regressions/rust.coinbase-hosted-signing.test.ts:generic-api-key:12
+# Synthetic Coinbase hosted-provider CDP name in already-pushed history, PR #3301.
+7e157be6d6d3916000c253cee778ea3ab09838b0:packages/safe-cex/src/__tests__/audit-regressions/rust.coinbase-hosted-provider.wasm.test.ts:generic-api-key:15
+# Synthetic Kraken WASM fixture: base64 of literal test input read-secret, PR #3304.
+4b78349affff8025ae51d120d62fd5275ebb3fd5:packages/safe-cex/src/__tests__/audit-regressions/rust.kraken-hosted-provider.wasm.test.ts:generic-api-key:70
+# Synthetic Kraken WASM fixture: base64 of literal test input read-secret, PR #3304.
+c231996640e10820a0e8d777b51eb0c52e12789d:packages/safe-cex/src/__tests__/audit-regressions/rust.kraken-hosted-provider.wasm.test.ts:generic-api-key:69
+
+# Synthetic Crypto.com WS replay HMAC, independently recomputed from literal test inputs; PR #3298.
+e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-regressions/rust.cryptocom-hosted-signing.test.ts:generic-api-key:175

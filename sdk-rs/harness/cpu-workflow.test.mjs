@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { GATE_SUITES } from './ci-gate-suites.mjs';
 
@@ -9,6 +12,31 @@ const job = (text, name) => {
   assert(match, `missing ${name}`);
   return match[1];
 };
+
+test('Bitget bounded collection leaves time to publish original-attempt evidence', () => {
+  // #3317: master 93ce5a61df moved collection into bitget-paired-run.mjs.
+  // Master 589038b822 adds two measured witnesses within an 80/90-minute bound;
+  // retain its exact deadline and ten-minute evidence-publication reserve.
+  const runner = readFileSync(new URL('./bitget-paired-run.mjs', import.meta.url), 'utf8');
+  const deadline = /timeoutMs = (\d+) \* 60_000/.exec(runner);
+  assert.ok(deadline, 'the collector needs an explicit bounded deadline');
+  const collectionMinutes = Number(deadline[1]);
+  assert.equal(collectionMinutes, 80);
+  const verify = text => {
+    const paired = job(text, 'bitget-paired');
+    const timeout = /^    timeout-minutes: (\d+)$/m.exec(paired);
+    assert.ok(timeout, 'the physical producer needs a bounded job window');
+    assert.equal(Number(timeout[1]), 90);
+    assert.ok(Number(timeout[1]) - collectionMinutes >= 10,
+      'the collector must leave an evidence-publication reserve');
+    assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
+    assert.doesNotMatch(paired, /continue-on-error|gh run rerun|retries|retry:/);
+  };
+  verify(source);
+  const deadlineRegression = source.replace(job(source, 'bitget-paired'),
+    job(source, 'bitget-paired').replace(/timeout-minutes: \d+/, 'timeout-minutes: 80'));
+  assert.throws(() => verify(deadlineRegression));
+});
 function verifyWorkflow(text) {
   const first = job(text, 'gate'), plan = job(text, 'cpu-plan'), certify = job(text, 'cpu-certify'), final = job(text, 'cpu-final');
   // One in-job re-measure (Sam, 2026-11-07): no separate remeasurement runner or runtime handoff.
@@ -59,19 +87,39 @@ function verifyWorkflow(text) {
 
 test('all required suite names certify unconditionally, with no separate remeasurement runner', () => verifyWorkflow(source));
 
-test('Bitget paired producer is mandatory, bounded, source-selected and independently certified', () => {
-  const paired = job(source, 'bitget-paired');
+function verifyBitgetProducer(text) {
+  const paired = job(text, 'bitget-paired');
   assert.match(paired, /name: Rust \/ Bitget counterbalanced steady CPU/);
-  verifyWorkflow(source);
+  verifyWorkflow(text);
+  // Two measured witnesses now include identical master builds; retain a hard
+  // deadline with ten minutes beyond the collector's eighty-minute budget.
+  assert.match(paired, /^    timeout-minutes: 90$/m);
   assert.match(paired, /CARGO_BUILD_JOBS: 4/);
   assert.match(paired, /node-version: 22/);
   assert.match(paired, /Public counterbalanced Bitget steady CPU/);
-  assert.match(paired, /bitget-paired-ci\.mjs --out/);
+  assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
   assert.match(paired, /name: bitget-paired-steady/);
-  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: always\(\)/);
+  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: success\(\) \|\| failure\(\)/);
   assert.doesNotMatch(paired, /--baseline|--candidate|--tolerance|--threshold|continue-on-error|workflow_dispatch:/);
-  assert.match(job(source, 'cpu-plan'), /needs: \[selection, gate, bitget-paired\]/);
-  assert.match(job(source, 'cpu-certify'), /needs: \[selection, gate, bitget-paired, cpu-plan\]/);
+  assert.match(job(text, 'cpu-plan'), /needs: \[selection, gate, bitget-paired\]/);
+  assert.match(job(text, 'cpu-certify'), /needs: \[selection, gate, bitget-paired, cpu-plan\]/);
+}
+
+test('Bitget paired producer is mandatory, bounded, source-selected and independently certified', () => verifyBitgetProducer(source));
+
+test('Bitget workflow guard rejects a bypassed deadline or canceled/missing failure evidence', () => {
+  verifyBitgetProducer(source);
+  for (const [before, after] of [
+    ['bitget-paired-run.mjs --out', 'bitget-paired-ci.mjs --out'],
+    ['if: success() || failure()', 'if: always()'],
+    ['if: success() || failure()', 'if: success()'],
+    ['timeout-minutes: 90', 'timeout-minutes: 120'],
+    ['run: node sdk-rs/harness/bitget-paired-run.mjs', 'continue-on-error: true\n        run: node sdk-rs/harness/bitget-paired-run.mjs'],
+  ]) {
+    const paired = job(source, 'bitget-paired'), changed = paired.replace(before, after);
+    assert.notEqual(changed, paired, `mutation must apply: ${before}`);
+    assert.throws(() => verifyBitgetProducer(source.replace(paired, changed)), before);
+  }
 });
 
 test('workflow controls reject skipped final checks, a revived second runner and suite/local bypasses', () => {
@@ -116,4 +164,92 @@ test('A/A diagnostics are explicit dispatch-only and cannot supply certification
 test('Binance replay measurement has 45 minutes while other matrix venues retain 30', () => {
   const first = job(source, 'gate');
   assert.match(first, /^    timeout-minutes: \$\{\{ matrix\.venue == 'binance' && 45 \|\| 30 \}\}$/m);
+});
+
+function measurementNodeCheck(text) {
+  const first = job(text, 'gate');
+  const marker = '      - name: Assert Node 22 before sealing CPU inputs\n';
+  const start = first.indexOf(marker);
+  assert(start >= 0, 'CPU seal needs an explicit Node version check');
+  const end = first.indexOf('      - name:', start + marker.length);
+  assert.equal(first.slice(end).split('\n')[0], '      - name: Seal approved CPU measurement inputs');
+  const step = first.slice(start, end);
+  assert.doesNotMatch(step, /\n        if:/, 'every measurement runner must check its Node version');
+  return step.split('        run: |\n')[1].split('\n').filter(Boolean).map(line => line.slice(10)).join('\n');
+}
+
+test('measurement seal and collection use the same Yarn Node as replay, after explicit diagnostics', () => {
+  const first = job(source, 'gate');
+  const script = measurementNodeCheck(source);
+  for (const diagnostic of ['node --version', 'which -a node', 'command -v node', 'corepack yarn -s node --version'])
+    assert(script.includes(diagnostic), `missing diagnostic: ${diagnostic}`);
+  for (const command of ['prepare', 'collect']) {
+    assert.match(first, new RegExp(`corepack yarn -s node sdk-rs/harness/cpu-ci\\.mjs --command ${command} --suite`));
+    assert.doesNotMatch(first, new RegExp(`^ +node sdk-rs/harness/cpu-ci\\.mjs --command ${command}`, 'm'));
+  }
+});
+
+for (const version of ['v22.23.4', 'v24.22.2', '']) {
+  test(`measurement Node assertion checks Yarn's runtime (${version || 'empty'}), not the bare Node`, t => {
+    const directory = mkdtempSync(join(tmpdir(), 'cpu-node-pin-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    writeFileSync(join(directory, 'node'), '#!/bin/sh\nprintf "v24.22.2\\n"\n');
+    writeFileSync(join(directory, 'corepack'), '#!/bin/sh\n[ "$*" = "yarn -s node --version" ] || exit 99\nprintf "%s\\n" "$CPU_TEST_NODE_VERSION"\n');
+    for (const executable of ['node', 'corepack']) chmodSync(join(directory, executable), 0o755);
+    const run = spawnSync('bash', ['-e', '-c', measurementNodeCheck(source)], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, CPU_TEST_NODE_VERSION: version },
+    });
+    assert.equal(run.status, version.startsWith('v22.') ? 0 : 1, run.stderr);
+    assert(run.stdout.includes('v24.22.2'), 'bare Node diagnostic is retained even when Yarn uses 22');
+    assert(run.stdout.includes(join(directory, 'node')), 'resolved bare Node paths are visible');
+    assert(run.stdout.includes(`CPU measurement Node: ${version}`));
+    if (!version.startsWith('v22.')) assert(run.stdout.includes(`::error::CPU measurement requires Node v22; found ${version || '<empty>'}`));
+  });
+}
+
+test('Bun PATH export preserves setup Node for the actual sealing assertion', t => {
+  const first = job(source, 'gate');
+  const start = first.indexOf('      - name: Install pinned Bun for standalone CLI loader proof\n');
+  assert(start >= 0);
+  const end = first.indexOf('      - name:', start + 1);
+  const install = first.slice(start, end).split('        run: |\n')[1]
+    .split('\n').filter(Boolean).map(line => line.slice(10)).join('\n');
+  const directory = mkdtempSync(join(tmpdir(), 'cpu-bun-node-path-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const pinned = join(directory, 'node22'), globalBin = join(directory, 'global');
+  for (const path of [pinned, globalBin]) mkdirSync(path);
+  const executables = [
+    [join(pinned, 'node'), '#!/bin/sh\ncase "$1" in --version) printf "v22.23.4\\n";; -p) printf "%s\\n" "$CPU_TEST_PINNED_NODE";; *) exit 99;; esac\n'],
+    [join(globalBin, 'node'), '#!/bin/sh\nprintf "v24.22.2\\n"\n'],
+    [join(globalBin, 'bun'), '#!/bin/sh\nprintf "1.4.3\\n"\n'],
+    [join(pinned, 'corepack'), `#!/bin/sh
+case "$*" in
+  'yarn -s global add bun@1.4.3') exit 0;;
+  'yarn -s global bin') printf '%s\\n' "$CPU_TEST_GLOBAL_BIN";;
+  'yarn -s node --version') exec node --version;;
+  *) exit 99;;
+esac
+`],
+  ];
+  for (const [path, contents] of executables) { writeFileSync(path, contents); chmodSync(path, 0o755); }
+  const env = { ...process.env, PATH: `${pinned}:${process.env.PATH}`,
+    GITHUB_PATH: join(directory, 'github-path'), CPU_TEST_GLOBAL_BIN: globalBin, CPU_TEST_PINNED_NODE: join(pinned, 'node') };
+  const installed = spawnSync('bash', ['-e', '-c', install], { encoding: 'utf8', env });
+  assert.equal(installed.status, 0, installed.stderr);
+  const paths = readFileSync(env.GITHUB_PATH, 'utf8').trim().split('\n');
+  assert(paths.includes(globalBin), 'Bun global bin remains available to CLI loader checks');
+  // The runner prepends GITHUB_PATH entries to each following step, last entry first.
+  const nextEnv = entries => ({ ...env, PATH: `${[...entries].reverse().join(':')}:${env.PATH}` });
+  const check = entries => spawnSync('bash', ['-e', '-c', measurementNodeCheck(source)], {
+    encoding: 'utf8', env: nextEnv(entries),
+  });
+  const bun = spawnSync('bun', ['--version'], { encoding: 'utf8', env: nextEnv(paths) });
+  assert.equal(bun.status, 0, bun.stderr);
+  assert.equal(bun.stdout.trim(), '1.4.3');
+  const replay = check(paths);
+  assert.equal(replay.status, 0, replay.stdout + replay.stderr);
+  assert.match(replay.stdout, /CPU measurement Node: v22\.23\.4/);
+  const withoutPin = check(paths.filter(path => path !== pinned));
+  assert.equal(withoutPin.status, 1, withoutPin.stdout + withoutPin.stderr);
+  assert.match(withoutPin.stdout, /requires Node v22; found v24\.22\.2/);
 });

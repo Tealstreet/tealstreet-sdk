@@ -8,6 +8,7 @@ import { tryParseJson } from './tryParseJson';
 export const signHttpCapture = async (
   xhr: AxiosInstance,
   request: RemoteSignerRequest,
+  options: { preserveSerializedBody?: boolean } = {},
 ): Promise<RemoteSignerResponse> => {
   let captured: any = null;
 
@@ -18,7 +19,7 @@ export const signHttpCapture = async (
     url: request.config!.url,
     baseURL: request.config!.baseURL,
     params: tryParseJson(request.config!.params),
-    data: tryParseJson(request.config!.data),
+    data: options.preserveSerializedBody ? request.config!.data : tryParseJson(request.config!.data),
     headers: request.config!.headers,
     // Nothing leaves the browser here — the adapter below short-circuits with
     // a synthetic 200. Interceptors still run, so telemetry must be able to

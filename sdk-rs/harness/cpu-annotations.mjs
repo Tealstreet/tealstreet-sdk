@@ -1,13 +1,16 @@
 // CPU warnings never block; they are surfaced as GitHub annotations and in the step summary.
 import { appendFileSync } from 'node:fs';
-import { CPU_SLOWER } from './performance-policy.mjs';
+import { CPU_FIELDS, CPU_SLOWER, performanceObjectives } from './performance-policy.mjs';
 
 const escape = (text) => text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
 
-/** The annotation lines and step-summary rows for one gate report. */
-export function cpuAnnotations({ venue, tape, failures, warnings, remeasure }) {
+/** Exact CPU observations, annotation lines and step-summary rows for one gate report. */
+export function cpuAnnotations({ venue, tape, failures, warnings, remeasure, samples }) {
   const slower = failures.filter((failure) => failure.includes(`: ${CPU_SLOWER} (`));
   const lines = [
+    ...(samples ? performanceObjectives(samples.ts, samples.rust).filter(({ field }) => CPU_FIELDS.includes(field))
+      .map(({ field, reference, candidate }) => `CPU_METRICS ${JSON.stringify({ venue, tape, field,
+        tsMs: reference, rustMs: candidate, rustTsRatio: candidate / reference })}`) : []),
     ...warnings.map((warning) => `::warning title=CPU ${venue}::${escape(`${tape}: ${warning}`)}`),
     ...slower.map(
       (failure) =>

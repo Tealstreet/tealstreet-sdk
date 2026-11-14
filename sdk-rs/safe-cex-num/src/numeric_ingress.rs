@@ -11,6 +11,7 @@ mod eligibility;
 mod output;
 mod passthrough;
 pub use passthrough::{JsNumberPassthrough, js_deserialize_passthrough};
+mod options_output;
 mod position_record_output;
 mod shared_output;
 pub use eligibility::JsNumberOutput;

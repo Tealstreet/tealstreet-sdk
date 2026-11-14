@@ -1,0 +1,23 @@
+{
+  "oracle": "Independent ethers TypedDataEncoder and SigningKey; synthetic scalar ordinal 1; GRVT browser statement schema",
+  "vectors": [
+    {
+      "testnet": false,
+      "statement": "{\"subaccount\":\"9007199254740993\",\"testnet\":false,\"assetId\":\"0000000000000000000000000000000000000000000000000000000000030501\",\"amount\":\"1001000000\",\"price\":\"50000100000000\",\"buying\":true,\"market\":false,\"tif\":1,\"postOnly\":false,\"reduceOnly\":false,\"nonce\":0,\"expiration\":\"1700003600000000000\"}",
+      "digest": "874d7a6372892c4cb5aaf7ea88578f6d267209f5ddd3beffee162d0f74458c8a",
+      "commitment": "3876ded517fcb17d2bbd3b382c08a9a4a5d114adf36474750348d271a2fa0eb6",
+      "address": "7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "signature": "99aa388fda517f440f5ef4311e2d3665b04cb47313a75e4c5651d5f45f9263f026770180a0ae519c72756876026a0030d32956db2ae7e31bf9ee0d6ed91eb06800",
+      "wire": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf99aa388fda517f440f5ef4311e2d3665b04cb47313a75e4c5651d5f45f9263f026770180a0ae519c72756876026a0030d32956db2ae7e31bf9ee0d6ed91eb06800"
+    },
+    {
+      "testnet": true,
+      "statement": "{\"subaccount\":\"9007199254740993\",\"testnet\":true,\"assetId\":\"0000000000000000000000000000000000000000000000000000000000030501\",\"amount\":\"1001000000\",\"price\":\"50000100000000\",\"buying\":true,\"market\":false,\"tif\":1,\"postOnly\":false,\"reduceOnly\":true,\"nonce\":4294967295,\"expiration\":\"1700003600000000000\"}",
+      "digest": "109694e85ada1c95c9f8c34f5f468ffbd4fdebbc617d60d9e6e79183b2562978",
+      "commitment": "b9a7afaddef56d734be7cf9c3974308ef90a5f724f1fe0c2ccb1851ac63807a6",
+      "address": "7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "signature": "f356140948170d23300c49a62202d9559757378169ec1f2ce7c593944a3154a66557ac48fbd1ec9552ba69c66d4f46d266209e19faf69f4e60acff6f1c7c19f701",
+      "wire": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdff356140948170d23300c49a62202d9559757378169ec1f2ce7c593944a3154a66557ac48fbd1ec9552ba69c66d4f46d266209e19faf69f4e60acff6f1c7c19f701"
+    }
+  ]
+}

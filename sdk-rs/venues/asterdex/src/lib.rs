@@ -643,6 +643,7 @@ impl AsterDex {
                         update_mark(cx, row);
                     }
                 }
+                FastAggregate::Depth { stream, event } => self.apply_depth(cx, &stream, event),
             }
             return;
         }
@@ -710,6 +711,10 @@ impl AsterDex {
         let Ok(event) = serde_json::from_str::<PartialDepth>(body) else {
             return;
         };
+        self.apply_depth(cx, stream, event);
+    }
+
+    fn apply_depth(&mut self, cx: &mut Cx<'_, Pending>, stream: &str, event: PartialDepth<'_>) {
         let symbol = stream
             .split('@')
             .next()
@@ -1440,6 +1445,32 @@ impl Venue for AsterDex {
         self.on_trade_preflight_ready(cx, preflight);
     }
 
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::write_failure_text)
+    }
+
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        self.trade_unproven_evidence(pending, evidence);
+    }
+
+    fn discard_unproven_http_command(&mut self, owner: safe_cex_engine::request_context::Owner) {
+        self.discard_trade_owner(owner);
+    }
+
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
+            Pending::Signed(request) if request.plan_write() => {
+                self.on_signed_failed(cx, request, error)
+            }
+            pending => self.on_sign_failed(cx, pending, &error.message),
+        });
+    }
+
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Signed(req) => self.on_signed_failed(cx, req, error),
@@ -1482,7 +1513,13 @@ impl Venue for AsterDex {
             Pending::Signed(req) => self.on_signed_response(cx, req, Err(error)),
             Pending::Clock(req) => self.on_clock_response(cx, req, Err(error)),
             Pending::Account(req) => self.on_account_response(cx, req, Err(error)),
-            Pending::Trade(req) => self.on_trade_response(cx, req, Err(error), None, false),
+            Pending::Trade(req) => self.on_trade_response(
+                cx,
+                req,
+                Err(VenueError::new(error).outcome(safe_cex_engine::Outcome::NotSent)),
+                None,
+                false,
+            ),
             Pending::History(req) => self.on_history_response(cx, req, Err(error)),
             Pending::OpenInterest {
                 initial, single, ..

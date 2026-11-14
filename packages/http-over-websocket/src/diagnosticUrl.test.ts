@@ -110,3 +110,20 @@ it('bounds base64 inspection and preserves harmless printable and binary tokens'
   const oversized = 'A'.repeat(4097);
   expect(stripDiagnosticUrlQueries(oversized)).not.toContain(oversized);
 });
+
+describe('credentials after diagnostic labels', () => {
+  it.each(['apiKey', 'token', 'Authorization'])('removes %s material without dropping ordinary context', (key) => {
+    const material = 'SYNTHETIC_REVIEW_3436_ONLY';
+    for (const prefix of ['request failed: ', 'request failed:', 'connection: request failed: ', 'Error: ']) {
+      const safe = stripDiagnosticUrlQueries(`${prefix}${key}="${material}" status=503`);
+      expect(safe).not.toContain(material);
+      expect(safe).toContain(prefix);
+      expect(safe).toContain('status=503');
+    }
+  });
+
+  it('retains nonsecret assignments after repeated labels', () => {
+    const message = 'request failed: peer replied: status=503 symbol=BTCUSDT';
+    expect(stripDiagnosticUrlQueries(message)).toBe(message);
+  });
+});

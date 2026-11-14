@@ -8,6 +8,10 @@ use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use std::collections::BTreeMap;
 
+// The broker header is outside the HMAC preimage on both MEXC APIs.
+// https://www.mexc.com/api-docs/broker/broker-faq
+const BROKER_CODE: &str = "TEAL";
+
 #[cfg(test)]
 pub struct Credentials {
     pub key: String,
@@ -47,6 +51,7 @@ impl Credentials {
             ("Signature", self.signature(now, payload)),
             ("Recv-Window", window.to_string()),
             ("Content-Type", "application/json".into()),
+            ("source", BROKER_CODE.into()),
         ]
     }
 }

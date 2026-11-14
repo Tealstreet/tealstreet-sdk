@@ -370,7 +370,7 @@ fn terminal(s: &str) -> Option<OrderStatus> {
 }
 fn order_type(s: &str) -> Option<OrderType> {
     match s {
-        "LIMIT" | "POST_ONLY" | "IOC" | "FOK" => Some(OrderType::Limit),
+        "LIMIT" | "POST_ONLY" | "IOC" | "FOK" | "RPI" => Some(OrderType::Limit),
         "MARKET" | "ASK" | "BID" => Some(OrderType::Market),
         "STOP" | "STOP_LOSS" => Some(OrderType::StopLoss),
         "TAKE_PROFIT" => Some(OrderType::TakeProfit),

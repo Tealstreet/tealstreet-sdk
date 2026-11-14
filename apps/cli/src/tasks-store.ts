@@ -1,10 +1,9 @@
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { BRAND } from './brand';
 
-const CONFIG_DIR = path.join(os.homedir(), BRAND.configDirName);
-export const TASKS_FILE = path.join(CONFIG_DIR, 'tasks.json');
+import { getStorageDir, getStoragePath } from './storage-context';
+
+const CONFIG_DIR = () => getStorageDir();
+export const getTasksFilePath = () => getStoragePath('tasks.json');
 
 export interface PersistedTask {
   id: string;
@@ -24,15 +23,15 @@ interface TasksFile {
 }
 
 function ensureConfigDir(): void {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  if (!fs.existsSync(CONFIG_DIR())) {
+    fs.mkdirSync(CONFIG_DIR(), { recursive: true });
   }
 }
 
 export function loadTasks(): PersistedTask[] {
   try {
-    if (fs.existsSync(TASKS_FILE)) {
-      const content = fs.readFileSync(TASKS_FILE, 'utf-8');
+    if (fs.existsSync(getTasksFilePath())) {
+      const content = fs.readFileSync(getTasksFilePath(), 'utf-8');
       const data = JSON.parse(content) as TasksFile;
       return data.tasks || [];
     }
@@ -48,7 +47,7 @@ export function saveTasks(tasks: PersistedTask[]): void {
     version: 1,
     tasks,
   };
-  fs.writeFileSync(TASKS_FILE, JSON.stringify(data, null, 2));
+  fs.writeFileSync(getTasksFilePath(), JSON.stringify(data, null, 2));
 }
 
 export function upsertTask(task: PersistedTask): void {

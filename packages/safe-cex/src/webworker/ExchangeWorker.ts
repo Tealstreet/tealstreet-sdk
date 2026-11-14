@@ -4,6 +4,8 @@ import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
 import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { TwapOwner, TwapWorkerContext } from './twap/TwapOwner';
+import { captureTwapOwner } from './twap/TwapOwner';
 
 import throttle from 'lodash/throttle';
 
@@ -12,9 +14,11 @@ import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandO
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
+import { snapshotDelegatedSigningOptions } from '../exchanges/rust/delegatedSigningSnapshot';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { unsupportedVenueError } from '../unsupportedVenue';
+import { diagnosticConsole, diagnosticText, redactDiagnosticData } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
@@ -104,7 +108,8 @@ export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
   private readonly _accountName: string;
   private readonly _options: ExchangeOptions;
-  private readonly _ctx: Worker;
+  private readonly _ctx: TwapWorkerContext;
+  private readonly _twapOwner: TwapOwner | null | undefined;
   private readonly _settings: AppSettingsWorkerType;
   private readonly _metadata: ExchangeMetadataWorkerType;
   private readonly _sessionKey: string;
@@ -167,7 +172,7 @@ export class ExchangeWorker {
   private _sentryReportCooldowns = new Map<string, { lastReportedAt: number; suppressedCount: number }>();
 
   constructor(
-    ctx: Worker,
+    ctx: TwapWorkerContext,
     accountName: string,
     exchangeName: ExchangeName,
     options: ExchangeOptions,
@@ -179,9 +184,11 @@ export class ExchangeWorker {
     this._exchangeName = exchangeName;
     this._accountName = accountName;
     // The worker owns the account's engine; a forwarded mirror flag would stop it from running one.
+    options = snapshotDelegatedSigningOptions(exchangeName, options);
     const { workerMirror: _workerMirror, ...ownedOptions } = options;
     this._options = ownedOptions;
     this._ctx = ctx;
+    this._twapOwner = captureTwapOwner(ctx.getTwapOwner && (() => ctx.getTwapOwner!()));
     this._settings = settings;
     this._metadata = metadata;
     this._sessionKey = sessionKey;
@@ -201,7 +208,7 @@ export class ExchangeWorker {
     this._ctx.postMessage({
       op: 'log',
       data: [
-        JSON.stringify({
+        diagnosticText({
           level,
           message,
           context: { exchange: this._exchangeName, account: this._accountName, ...context },
@@ -258,40 +265,42 @@ export class ExchangeWorker {
           };
 
     try {
-      this._ctx.postMessage({
-        op: 'error',
-        data: [
-          message,
-          {
-            sendToSentry: effectiveSendToSentry,
-            suppressConsoleLog,
-            classified: classifiedError(error),
-            sentryData: {
-              error: serializableError,
-              tags: {
-                source: 'webworker',
-                module: 'ExchangeWorker',
-                exchange: this._exchangeName,
-                account: this._accountName,
-                // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
-                ...exchangeErrorTags(error),
-                tunnel_port: tunnelLanePort(),
-                ...splitExtra.sentryTags,
-                ...workerSentryControl.tags,
-              },
-              extra: {
-                ...splitExtra.extra,
-                ...splitExtra.sentryExtra,
-                ...workerSentryControl.extra,
-                ...(suppressedRepeatedReports > 0 ? { suppressedRepeatedReports } : {}),
+      this._ctx.postMessage(
+        redactDiagnosticData({
+          op: 'error',
+          data: [
+            message,
+            {
+              sendToSentry: effectiveSendToSentry,
+              suppressConsoleLog,
+              classified: classifiedError(error),
+              sentryData: {
+                error: serializableError,
+                tags: {
+                  source: 'webworker',
+                  module: 'ExchangeWorker',
+                  exchange: this._exchangeName,
+                  account: this._accountName,
+                  // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
+                  ...exchangeErrorTags(error),
+                  tunnel_port: tunnelLanePort(),
+                  ...splitExtra.sentryTags,
+                  ...workerSentryControl.tags,
+                },
+                extra: {
+                  ...splitExtra.extra,
+                  ...splitExtra.sentryExtra,
+                  ...workerSentryControl.extra,
+                  ...(suppressedRepeatedReports > 0 ? { suppressedRepeatedReports } : {}),
+                },
               },
             },
-          },
-        ],
-      });
+          ],
+        }),
+      );
     } catch (e) {
       // Fallback if postMessage fails
-      console.error('[ExchangeWorker] Failed to send error to main thread:', message, error, e);
+      diagnosticConsole.error('[ExchangeWorker] Failed to send error to main thread:', message, error, e);
     }
   }
 
@@ -313,7 +322,7 @@ export class ExchangeWorker {
 
     bufferedMessages.forEach((payload, index) => {
       try {
-        this.handlePayload(payload);
+        this._dispatchBufferedMessage(payload);
       } catch (error) {
         this.logError(`Failed to process buffered message ${index + 1}/${bufferCount} ` + String(error), error, {
           payloadOp: payload.op,
@@ -327,7 +336,15 @@ export class ExchangeWorker {
   private _flushBufferedCalls() {
     const calls = this._messageBuffer.filter((payload) => payload.op === 'callMethod');
     this._messageBuffer = this._messageBuffer.filter((payload) => payload.op !== 'callMethod');
-    calls.forEach((payload) => this.handlePayload(payload));
+    calls.forEach((payload) => this._dispatchBufferedMessage(payload));
+  }
+
+  private _dispatchBufferedMessage(payload: StoreWorkerPayload) {
+    if (!this._twapOwnerCurrent()) {
+      this._rejectUndispatched(payload, 'Account owner changed before this operation was sent; nothing was sent.');
+      return;
+    }
+    this.handlePayload(payload);
   }
 
   /**
@@ -376,6 +393,12 @@ export class ExchangeWorker {
         return false;
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
+      if (this._exchange instanceof RustEngineExchange && (this._twapOwner !== undefined || this._ctx.getTwapOwner)) {
+        this._exchange.setTwapOwnerProvider(
+          () => captureTwapOwner(() => this._ctx.getTwapOwner?.() ?? null) ?? null,
+          this._twapOwner ?? null,
+        );
+      }
       if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
       if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation, true);
       // A recovered exchange keeps forwarding where main asked for this account's frames.
@@ -402,7 +425,7 @@ export class ExchangeWorker {
         startupTimeout = setTimeout(() => {
           this._startTimedOut = isRust;
           const answered = (this._exchange as { lastReadFailure?: string } | undefined)?.lastReadFailure;
-          this._startAnswer = answered;
+          this._startAnswer = answered === undefined ? undefined : diagnosticText(answered);
           const error = new Error(
             `Exchange start timed out after ${startTimeoutMs / 1000}s${answered ? `; ${answered}` : ''}`,
           );
@@ -418,9 +441,15 @@ export class ExchangeWorker {
       });
 
       const result = await Promise.race([startPromise, timeoutPromise, cancelledPromise]);
-      if (result === 'cancelled' || startupToken !== this._startupToken || this._exchange?.isDisposed) {
+      if (result === 'cancelled' || startupToken !== this._startupToken) {
         return false;
       }
+
+      if (!this._twapOwnerCurrent()) {
+        this.dispose();
+        return false;
+      }
+      if (this._exchange?.isDisposed) return false;
 
       // The engine's Rust algos run this account's chasers, TWAPs and CLI;
       // start them before the buffered ops that drive them.
@@ -436,6 +465,11 @@ export class ExchangeWorker {
       this._started = true;
       return true;
     } catch (e) {
+      // Command fencing can retire the adapter before startup resolves or rejects.
+      if (!this._twapOwnerCurrent()) {
+        this.dispose();
+        return false;
+      }
       if (
         // Only the worker's own stop is quiet. An exchange that disposed itself because its
         // start failed (a refused key) must report it, or nothing downstream can react.
@@ -446,7 +480,7 @@ export class ExchangeWorker {
           isErrorReported(e) &&
           !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
       ) {
-        console.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
+        diagnosticConsole.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
         return false;
       }
       const detail = e instanceof Error && e.message ? `: ${e.message}` : '';
@@ -904,6 +938,7 @@ export class ExchangeWorker {
       }
       return;
     }
+    if (!this._stopped && !this._twapOwnerCurrent()) this.dispose();
     if (this._stopped) {
       this._rejectUndispatched(payload);
       return;
@@ -1152,6 +1187,13 @@ export class ExchangeWorker {
     this._ctx.postMessage({ op: 'store', data: unavailable });
   }
 
+  private _twapOwnerCurrent(): boolean {
+    const owner = this._twapOwner;
+    const current = captureTwapOwner(this._ctx.getTwapOwner && (() => this._ctx.getTwapOwner!()));
+    if (owner === undefined || owner === null) return current === owner;
+    return !!current && current.ownerId === owner.ownerId && current.generation === owner.generation;
+  }
+
   private _handleEngineDead(error: Error) {
     // Startup belongs to store.webworker's !started cleanup. Never race it by
     // scheduling a replacement before that initial start has returned.
@@ -1165,7 +1207,8 @@ export class ExchangeWorker {
       this._invalidateReadiness();
       return;
     }
-    const cannotRecover = this._recoveryAttempted || this._options.publicFeed?.mode === 'shared';
+    const ownerCurrent = this._twapOwnerCurrent();
+    const cannotRecover = !ownerCurrent || this._recoveryAttempted || this._options.publicFeed?.mode === 'shared';
     this._started = false;
     this._recovering = true;
     this._activeTickerSymbols = [...(this._exchange?.getActiveTickerSymbols() ?? [])];
@@ -1191,7 +1234,9 @@ export class ExchangeWorker {
       this._stopped = true;
       this._recovering = false;
       const message =
-        this._options.publicFeed?.mode === 'shared'
+        !ownerCurrent
+          ? 'TWAP owner changed; reinitialize the account worker.'
+          : this._options.publicFeed?.mode === 'shared'
           ? 'Rust shared public feed requires a fresh provider attachment and account init after engine failure.'
           : 'Rust engine recovery exhausted; reinitialize the account to retry.';
       this._ctx.postMessage({ op: 'warning', data: [message] });
@@ -1262,6 +1307,11 @@ export class ExchangeWorker {
 
   private async _recoverEngine(token: number) {
     if (token !== this._startupToken || this._stopped) return;
+    if (!this._twapOwnerCurrent()) {
+      this.dispose();
+      this._ctx.postMessage({ op: 'warning', data: ['TWAP owner changed; reinitialize the account worker.'] });
+      return;
+    }
     const previousUpdateIds = this._recoveryUpdateIds ?? this._store.serialize().updateIds;
     this._store = new DefaultStore();
     this._store.update({
@@ -1281,6 +1331,11 @@ export class ExchangeWorker {
     this._ctx.postMessage({ op: 'store', data: this._sanitizeForPostMessage(this._store.serialize()) });
     const started = await this.start();
     if (token !== this._startupToken || this._stopped) return;
+    if (!this._twapOwnerCurrent()) {
+      this.dispose();
+      this._ctx.postMessage({ op: 'warning', data: ['TWAP owner changed; reinitialize the account worker.'] });
+      return;
+    }
     if (!started && this.retryTimedOutStart()) return;
     if (!started || this._exchange?.isDisposed) {
       this.dispose();
@@ -1325,7 +1380,9 @@ export class ExchangeWorker {
                 this._forwardLateReply(args[0], generation);
               }
             }
-          : Reflect.get(target, property),
+          : property === 'getTwapOwner' && target.getTwapOwner
+            ? () => (generation === this._generation && !this._stopped ? (target.getTwapOwner?.() ?? null) : null)
+            : Reflect.get(target, property),
     });
     this._handlers = this._handlerClasses.map(
       (Handler) =>
@@ -1386,6 +1443,7 @@ export class ExchangeWorker {
       'grafana-pws-sub',
       'grafana-http-request',
       'grafana-http-response',
+      'ws-diagnostic',
     ];
     logEvents.forEach((event) => {
       this._exchange!.on(event, (...args: any[]) => {
@@ -1414,7 +1472,7 @@ export class ExchangeWorker {
       this._ctx.postMessage({
         op: 'deactivate-status',
         data: true,
-        refusal: refusal ?? 'The exchange refused this key.',
+        refusal: diagnosticText(refusal ?? 'The exchange refused this key.'),
       });
     });
   }

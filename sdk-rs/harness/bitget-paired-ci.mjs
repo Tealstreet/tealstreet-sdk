@@ -8,7 +8,8 @@ import { BitgetOracleChanged, collectBitgetOracle } from './bitget-paired-oracle
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, BITGET_MEASUREMENT_FILES, BITGET_CUMULATIVE_ANCHOR,
-  readBitgetSteadyCertificate, bitgetPairedAuthority } from './bitget-paired-steady.mjs';
+  readBitgetSteadyCertificate, bitgetPairedAuthority, BitgetTipRejected, BitgetAnchorRejected, bitgetCpuRejectionRecord,
+  assessBitgetPairedSteady, bitgetBaselineObservation } from './bitget-paired-steady.mjs';
 
 const insist = (ok, message) => { if (!ok) throw new Error(`Bitget paired CI: ${message}`); };
 const git = (root, ...args) => {
@@ -136,14 +137,28 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
       } finally {
         git(root, 'checkout', '--detach', authority.candidate);
       }
-      return readBitgetPairedEvidence(resolve(directory, 'records'));
+      const evidence = readBitgetPairedEvidence(resolve(directory, 'records'));
+      // Persist the landed master ratio as soon as the tip completes, even if
+      // the subsequent anchor fails or reaches the collection deadline.
+      if (name === 'tip' && authority.pullNumber === null) {
+        const tip = assessBitgetPairedSteady({ authority, evidence, manifest: declarations });
+        insist(tip.valid, tip.errors.join('\n'));
+        const observation = bitgetBaselineObservation(authority, tip.certificate);
+        write(resolve(destination, 'baseline-observation.json'), observation);
+        console.log(JSON.stringify({ bitgetMasterBaseline: observation }));
+        if (env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,
+          `### Bitget master steady CPU\n\nRun ${observation.runId}; master ${observation.masterSource}; Rust/TS **${observation.masterRustTsRatio}**; parent ${observation.baselineSource}: ${observation.baselineRustTsRatio}. Noise allowance: ${observation.steadyNoise}.\n`, { flag: 'a' });
+      }
+      return evidence;
     } });
   } catch (error) {
-    if (!(error instanceof BitgetOracleChanged)) throw error;
+    if (!(error instanceof BitgetOracleChanged) && !(error instanceof BitgetTipRejected) && !(error instanceof BitgetAnchorRejected)) throw error;
     const current = await selectBitgetPair({ reader, runId, root });
     insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during oracle collection');
-    const result = { valid: false, disposition: error.disposition, certified: false, certificate: null,
-      errors: [error.message], oracle: error.receipt };
+    const result = error instanceof BitgetOracleChanged
+      ? { valid: false, disposition: error.disposition, certified: false, certificate: null,
+        errors: [error.message], oracle: error.receipt }
+      : bitgetCpuRejectionRecord(error);
     write(resolve(destination, 'steady-assessment.json'), result);
     console.error(error.message);
     return result;
@@ -156,6 +171,8 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
     ? { disposition: certificate.disposition, steadyAccepted: true, moduleHashes: certificate.moduleHashes,
       otherObjectivesRemainUnchanged: true }
     : { tipQ: certificate.tip.q, anchorQ: certificate.anchor.q, tolerance: certificate.tolerance,
+      tipRatios: certificate.tip.pooled, anchorRatios: certificate.anchor.pooled,
+      steadyFailRatio: certificate.tip.steadyFailRatio, steadyNoise: certificate.tip.steadyNoise,
       steadyAccepted: certificate.steadyAccepted, readinessByCpuModel: certificate.readinessByCpuModel,
       otherObjectivesRemainUnchanged: true }));
   insist(result.certificate.steadyAccepted, 'counterbalanced non-regression bound exceeded');
@@ -170,5 +187,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   mkdirSync(dirname(destination), { recursive: true });
   const reader = createGithubReader({ repository: process.env.GITHUB_REPOSITORY, token: process.env.GITHUB_TOKEN });
   const result = await collectBitgetPair({ reader, runId: Number(process.env.GITHUB_RUN_ID), root, destination });
-  if (result.disposition === 'NOT-CERTIFIED') process.exitCode = 1;
+  if (result.disposition === 'NOT-CERTIFIED' || result.disposition === 'REJECTED') process.exitCode = 1;
 }

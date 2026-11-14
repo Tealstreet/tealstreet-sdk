@@ -89,19 +89,24 @@ function closed(value, required, optional = []) {
   return object(value) && required.every((key) => Object.hasOwn(value, key))
     && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 }
-function token(value, prefix, count) {
-  if (typeof value !== 'string' || value.length > 80) return;
+function token(value, kind) {
+  if (typeof value !== 'string' || value.length > 103) return;
   const words = value.split(':');
-  if (words.shift() !== prefix || words.length !== count
+  const prefix = words.shift();
+  if (prefix !== `${kind}1` && prefix !== `${kind}2`) return;
+  const offset = prefix === `${kind}2` ? 1 : 0;
+  if ((!offset && value.length > 80) || words.length !== (kind === 'p' ? 3 : 4) + offset
     || words.some((word) => !/^(?:0|[1-9][0-9]*)$/.test(word) || word.length > 20)) return;
   const values = words.map((word) => BigInt(word));
   if (values.some((part) => part > 0xffff_ffff_ffff_ffffn)
-    || values[0] === 0n || values[0] > 0xffff_ffffn || values[1] === 0n
-    || (prefix === 'r1' && values[3] === 0n)) return;
-  return words;
+    || (offset && values[0] === 0n)
+    || values[offset] === 0n || values[offset] > 0xffff_ffffn || values[offset + 1] === 0n
+    || (kind === 'r' && values[offset + 3] === 0n)) return;
+  return { version: prefix.slice(1), issuer: offset ? words[0] : undefined,
+    request: words[offset], generation: words[offset + 1] };
 }
 function managedHttp(action) {
-  const preparation = token(action.preparation, 'p1', 3);
+  const preparation = token(action.preparation, 'p');
   if (!preparation) return false;
   if (action.phase === 'cancel') {
     return closed(action, ['op', 'phase', 'preparation'], ['signing'])
@@ -113,14 +118,15 @@ function managedHttp(action) {
       || !['public', 'primary', 'secondary'].includes(action.intent)) return false;
   } else if (action.phase === 'bind') {
     if (!closed(action, ['op', 'phase', 'preparation', 'permit', 'packet'])) return false;
-    const permit = token(action.permit, 'r1', 4);
-    // Resource id and preparation sequence are different counters. Only the
-    // physical request and attempt generation must match across these tokens.
-    if (!permit || permit[0] !== preparation[0] || permit[1] !== preparation[1]) return false;
+    const permit = token(action.permit, 'r');
+    // Resource id and preparation sequence are different counters. The pair
+    // must share its wire version, lifecycle issuer, request and generation.
+    if (!permit || permit.version !== preparation.version || permit.issuer !== preparation.issuer
+      || permit.request !== preparation.request || permit.generation !== preparation.generation) return false;
   } else return false;
   const packet = action.packet;
   return closed(packet, ['request', 'method', 'url', 'headers'], ['route', 'timeoutMs', 'body'])
-    && u32(packet.request) && String(packet.request) === preparation[0]
+    && u32(packet.request) && String(packet.request) === preparation.request
     && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(packet.method)
     && typeof packet.url === 'string' && headers(packet.headers)
     && (!Object.hasOwn(packet, 'route') || ['primary', 'direct', 'publicCors'].includes(packet.route))

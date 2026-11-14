@@ -6,6 +6,9 @@ export type PublicTrade = {
     readonly price: number;
     readonly qty: number;
     readonly quoteQty?: number;
+    /**
+     * Milliseconds.
+     */
     readonly timestamp: number;
     readonly side: OrderSide;
 };

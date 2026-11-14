@@ -531,3 +531,80 @@ fn malformed_hyro_endpoints_are_rejected_before_io() {
         assert!(h.requests.is_empty() && h.sockets.is_empty());
     }
 }
+
+#[test]
+fn hyro_v1_public_subscribe_and_unsubscribe_batches_stay_within_ten_topics() {
+    use safe_cex_engine::socket_lifecycle::Interest;
+    use safe_cex_engine::{SubscriptionTopic, Venue};
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", INSTRUMENTS, TICKERS, true);
+    let venue = h.engine.venue();
+    let (feed, _) = venue
+        .subscription_interest(
+            h.engine.store(),
+            &SubscriptionTopic::Candles {
+                symbol: "BTCUSDT".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+            },
+        )
+        .unwrap();
+    let interests: Vec<_> = (0..33)
+        .map(|i| Interest::from_wire_args(format!("tickers.S{i}USDT")))
+        .collect();
+    for subscribe in [true, false] {
+        let mut lengths = Vec::new();
+        venue
+            .encode_socket_interests(
+                h.engine.store(),
+                feed,
+                subscribe,
+                &interests,
+                &mut |batch| {
+                    #[derive(serde::Deserialize)]
+                    struct Frame {
+                        op: String,
+                        args: Vec<String>,
+                    }
+                    let sent: Frame = serde_json::from_str(&batch.text).unwrap();
+                    assert_eq!(
+                        sent.op,
+                        if subscribe {
+                            "subscribe"
+                        } else {
+                            "unsubscribe"
+                        }
+                    );
+                    assert_eq!(sent.args.len(), batch.covered_keys.len());
+                    lengths.push(sent.args.len());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(lengths, [10, 10, 10, 3]);
+    }
+}
+
+#[test]
+fn hyro_v1_configured_simulator_hosts_override_bybit_demo_and_testnet() {
+    for testnet in [false, true] {
+        let mut options = public_options(Variant::Hyrotrader);
+        options.testnet = testnet;
+        options.endpoints = Some(Endpoints {
+            rest: "http://simulator.invalid:8012/".into(),
+            public_ws: "ws://simulator.invalid:8012/v5/public/linear".into(),
+            private_ws: "ws://simulator.invalid:8012/v5/private".into(),
+        });
+        let mut h = Harness::started(options);
+        assert!(
+            h.requests
+                .iter()
+                .all(|request| request.url.starts_with("http://simulator.invalid:8012/v5/"))
+        );
+        load(&mut h, "linear", INSTRUMENTS, TICKERS, true);
+        assert!(
+            h.sockets
+                .iter()
+                .all(|(_, url)| url.starts_with("ws://simulator.invalid:8012/"))
+        );
+    }
+}

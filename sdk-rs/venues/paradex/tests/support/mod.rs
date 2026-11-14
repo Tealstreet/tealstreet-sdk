@@ -4,6 +4,7 @@ use safe_cex_engine::{
     SocketId, TimerId,
 };
 use safe_cex_venue_paradex::{Options, Paradex};
+pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 pub const MARKETS: &str = r#"{"results":[{"symbol":"BTC-USD-PERP","base_currency":"BTC","quote_currency":"USD","asset_kind":"PERP","order_size_increment":"0.00001","price_tick_size":"0.1","min_notional":"10","max_order_size":"100","delta1_cross_margin_params":{"imf_base":"0.02"}},{"symbol":"ETH-USD-PERP","base_currency":"ETH","quote_currency":"USD","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.01","min_notional":"10","max_order_size":"1000","initial_margin_fraction":"0.05"},{"symbol":"BTC-USD-250101-100000-C","asset_kind":"OPTION"},{"symbol":"USDC-USD-SPOT","asset_kind":"SPOT"},{"symbol":"OLD-USD-PERP","asset_kind":"PERP","status":"INACTIVE"}]}"#;
 pub const TICKERS: &str = r#"{"results":[{"symbol":"BTC-USD-PERP","bid":"99","ask":"101","last_traded_price":"100","mark_price":"100.5","underlying_price":"100.2","price_change_rate_24h":"0.02","funding_rate":"0.0001","volume_24h":"200","open_interest":"50"},{"symbol":"ETH-USD-PERP","bid":"9","ask":"11","last_traded_price":"10","mark_price":"10.5","volume_24h":"20"},{"symbol":"BTC-USD-250101-100000-C","last_traded_price":"4"}]}"#;
 /// The synthetic Stark key the private fixtures sign with; never a real key.

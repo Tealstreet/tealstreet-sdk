@@ -10,6 +10,10 @@ use safe_cex_engine::signing::{Algorithm, PayloadPart};
 #[path = "hosted_signing/grvt.rs"]
 mod grvt;
 
+#[cfg(feature = "asterdex")]
+#[path = "hosted_signing/asterdex.rs"]
+mod asterdex;
+
 /// The signed-in account a device signs for, captured at construction.
 #[derive(Clone, Debug, Default)]
 pub struct Account {
@@ -22,11 +26,14 @@ pub struct Account {
     /// Paradex: the account address this device's Stark key signs for.
     pub paradex_address: Option<String>,
     pub grvt_trading_account_id: Option<String>,
+    pub asterdex_v3: bool,
+    pub asterdex_user_address: Option<String>,
 }
 
 pub fn admitted(venue: &str) -> bool {
     (cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot"))
         || (cfg!(feature = "grvt") && venue == "grvt")
+        || (cfg!(feature = "asterdex") && venue == "asterdex")
         || lighter(venue)
         || (cfg!(feature = "paradex") && venue == "paradex")
 }
@@ -191,8 +198,8 @@ fn lighter_sign(
     ))
 }
 
-/// Answer one remote ws-auth wallet request with `0x` hex: `hyperliquid-address`
-/// returns the agent address, `hyperliquid-l1` returns `r || s || v` (v 27/28).
+/// Answer a remote wallet request: wallet formats use hex, Aster request
+/// formats return a JSON credential/signature batch.
 /// `now_ms` is the device's protocol clock, for families whose statements expire.
 pub fn sign(
     venue: &str,
@@ -205,6 +212,17 @@ pub fn sign(
 ) -> Result<String, SignError> {
     if !admitted(venue) {
         return Err(SignError::Unsupported);
+    }
+    #[cfg(feature = "asterdex")]
+    if venue == "asterdex" {
+        return asterdex::sign(
+            identities,
+            account,
+            provider,
+            to_sign,
+            output_format,
+            now_ms,
+        );
     }
     #[cfg(feature = "grvt")]
     if venue == "grvt" {

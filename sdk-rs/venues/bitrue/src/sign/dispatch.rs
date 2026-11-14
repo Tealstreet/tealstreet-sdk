@@ -9,6 +9,14 @@ pub const HEADERS: &[(&str, &str)] = &[
     ("Content-Type", "application/json"),
     ("X-Referer", "Tealstreet"),
 ];
+const PROTECTED_HEADERS: &[&str] = &[
+    "X-CH-APIKEY",
+    "X-CH-SIGN",
+    "X-CH-TS",
+    "recvWindow",
+    "Content-Type",
+    "X-Referer",
+];
 
 pub struct Http {
     identity: Identity,
@@ -116,11 +124,7 @@ impl SignStep for Http {
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         self.attest(outbound)?;
         let receipt = self.receipt.take().ok_or(SignError::InvalidRequest)?;
-        if result.receipt != receipt
-            || result.values.len() != 2
-            || result.values[1].len() != 32
-            || !result.headers.is_empty()
-        {
+        if result.receipt != receipt || result.values.len() != 2 || result.values[1].len() != 32 {
             return Err(SignError::InvalidResult);
         }
         let key = std::str::from_utf8(&result.values[0])
@@ -147,5 +151,11 @@ impl SignStep for Http {
 
     fn freshness_ms(&self) -> f64 {
         5_000.
+    }
+
+    fn result_header_policy(&self) -> safe_cex_engine::signing_headers::ResultHeaderPolicy {
+        safe_cex_engine::signing_headers::ResultHeaderPolicy::Http {
+            protected: PROTECTED_HEADERS,
+        }
     }
 }

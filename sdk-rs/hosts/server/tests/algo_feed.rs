@@ -237,6 +237,7 @@ async fn an_algo_host_whose_feed_gives_up_leaves_the_account_running() {
                 Default::default(),
                 Default::default(),
                 Default::default(),
+                std::sync::Arc::new(safe_cex_exchange_server::twap_owner::Binding::new("")),
                 inbox,
             ));
             // Drop the host's feed over and over, its rejoined clients included.

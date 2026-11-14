@@ -112,14 +112,45 @@ fn kind(row: &NativeRow) -> Option<u8> {
             .filter(|n| matches!(n, 0 | 2 | 3 | 4 | 5)),
         Scalar::Text(s) => match s.to_ascii_lowercase().as_str() {
             "0" | "limit" => Some(0),
-            "2" | "stop_loss" => Some(2),
-            "3" | "stop_loss_limit" => Some(3),
-            "4" | "take_profit" => Some(4),
-            "5" | "take_profit_limit" => Some(5),
+            "2" | "stop_loss" | "stop-loss" => Some(2),
+            "3" | "stop_loss_limit" | "stop-loss-limit" => Some(3),
+            "4" | "take_profit" | "take-profit" => Some(4),
+            "5" | "take_profit_limit" | "take-profit-limit" => Some(5),
             _ => None,
         },
         _ => None,
     }
+}
+fn time_in_force(row: &NativeRow) -> Option<u64> {
+    let value = row.time_in_force.as_ref()?;
+    match value {
+        Scalar::Text(text) => match text.as_str() {
+            "immediate-or-cancel" => Some(0),
+            "good-till-time" => Some(1),
+            "post-only" => Some(2),
+            _ => value.integer(),
+        },
+        _ => value.integer(),
+    }
+}
+fn canceled(status: &str) -> bool {
+    matches!(
+        status,
+        "canceled"
+            | "cancelled"
+            | "canceled-post-only"
+            | "canceled-reduce-only"
+            | "canceled-position-not-allowed"
+            | "canceled-margin-not-allowed"
+            | "canceled-too-much-slippage"
+            | "canceled-not-enough-liquidity"
+            | "canceled-self-trade"
+            | "canceled-expired"
+            | "canceled-oco"
+            | "canceled-child"
+            | "canceled-liquidation"
+            | "canceled-invalid-balance"
+    )
 }
 #[derive(Deserialize)]
 struct Envelope {
@@ -217,7 +248,7 @@ impl Original {
         if client == 0 || client > MAX_CLIENT_INDEX {
             return None;
         }
-        let tif = integer(row, "time_in_force")?;
+        let tif = time_in_force(row)?;
         if tif > 2 {
             return None;
         }
@@ -410,7 +441,7 @@ pub(super) fn terminal_proof(body: &str, old: &Original) -> bool {
         && integer(row, "market_index").or_else(|| integer(row, "market_id"))
             == Some(old.native.market_id as u64)
         && integer(row, "client_order_index") == Some(old.client)
-        && matches!(Some(row.status.as_str()), Some("canceled" | "cancelled"))
+        && canceled(&row.status)
         && number(row, "filled_base_amount") == Some(0.0)
         && row
             .filled_quote_amount
@@ -522,7 +553,7 @@ pub(super) fn restored_proof(body: &str, edit: &Edit, client: &str) -> bool {
             .filled_quote_amount
             .as_ref()
             .is_none_or(|n| n.number() == Some(0.0))
-        && integer(row, "time_in_force") == Some(native.time_in_force as u64)
+        && time_in_force(row) == Some(native.time_in_force as u64)
         && integer(row, "order_expiry") == native.order_expiry
         && number(row, "trigger_price")
             == Some(if native.order_type == 0 {

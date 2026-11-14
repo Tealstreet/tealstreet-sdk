@@ -449,7 +449,7 @@ type TickerRow = NonNullable<FeedUpdate['tickers']>[number];
 const tickerRow = (ticker: Ticker, observations = true): TickerRow => {
   const row: TickerRow = {
     symbol: ticker.symbol,
-    midPrice: Number.isFinite(ticker.midPrice) ? ticker.midPrice! : null,
+    midPrice: typeof ticker.midPrice === 'number' && Number.isFinite(ticker.midPrice) ? ticker.midPrice : null,
   };
   for (const field of tickerFields) if (Number.isFinite(ticker[field])) row[field] = ticker[field];
   if (observations && ticker.observedAt) row.observedAt = [...ticker.observedAt];

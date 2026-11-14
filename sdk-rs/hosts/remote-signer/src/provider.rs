@@ -1,6 +1,7 @@
 //! The Rust twin of packages/safe-cex/src/exchanges/rust/remoteSignerProvider.ts:
 //! engine sign work becomes today's ws-auth `RemoteSignerRequest`, so the
 //! browser's existing signing host answers it unchanged.
+mod orderly;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -29,28 +30,38 @@ pub const FATAL_MIN_STREAK: std::time::Duration = std::time::Duration::from_mill
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Family {
     Hmac,
+    Backpack,
+    Kucoin,
     DoubleSha256,
     Hyperliquid,
+    Grvt,
     Lighter,
     Paradex,
+    Orderly,
 }
 impl Family {
     pub(crate) fn of(venue: &str) -> Self {
         match venue {
+            "backpack" => Self::Backpack,
+            "kucoin" | "kucoinspot" => Self::Kucoin,
             "bitunix" => Self::DoubleSha256,
             "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
+            "grvt" => Self::Grvt,
             "lighter" | "lighter-robinhood" => Self::Lighter,
             "paradex" => Self::Paradex,
+            "kodiakfi" | "mode" | "what" | "woofi" => Self::Orderly,
             _ => Self::Hmac,
         }
     }
     fn algorithm(self) -> Algorithm {
         match self {
-            Self::Hmac => Algorithm::HmacSha256,
+            Self::Hmac | Self::Kucoin => Algorithm::HmacSha256,
+            Self::Backpack => Algorithm::Ed25519,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
-            Self::Hyperliquid => Algorithm::Secp256k1Digest,
+            Self::Hyperliquid | Self::Grvt => Algorithm::Secp256k1Digest,
             Self::Lighter => Algorithm::SchnorrDigest,
             Self::Paradex => Algorithm::StarkDigest,
+            Self::Orderly => Algorithm::Ed25519,
         }
     }
 }
@@ -60,7 +71,9 @@ pub(crate) struct Owned {
     pub credential: KeyRef,
     pub signing: KeyRef,
     pub public: Vec<u8>,
-    pub passphrase: Option<(KeyRef, Vec<u8>)>,
+    pub passphrase: Option<KeyRef>,
+    pub passphrase_value: Option<Vec<u8>>,
+    pub broker: Option<KeyRef>,
 }
 
 #[derive(Default)]
@@ -355,6 +368,11 @@ impl Inner {
         request.insert("id".into(), id.clone().into());
         request.insert("type".into(), "ws-auth".into());
         request.insert("exchangeName".into(), exchange_name.into());
+        if self.venue == "bybit" && crate::supports_remote_signing(&self.venue) {
+            let key_id =
+                std::str::from_utf8(&self.primary.public).map_err(|_| SignError::Refused)?;
+            request.insert("keyId".into(), key_id.into());
+        }
         if let Some(name) = &self.account_name {
             request.insert("accountName".into(), name.clone().into());
         }
@@ -447,6 +465,9 @@ impl Inner {
         self: Arc<Self>,
         request: SignRequest,
     ) -> Result<SignResult, SignError> {
+        if self.family == Family::Orderly {
+            return self.sign_orderly(&request).await;
+        }
         let receipt = request.receipt;
         if request.operations.is_empty() || request.operations.len() > MAX_OPERATIONS {
             return refused();
@@ -454,12 +475,72 @@ impl Inner {
         let operations = request.operations;
         let values = match self.family {
             Family::Hyperliquid => self.sign_wallet(&operations).await?,
+            Family::Grvt => self.sign_grvt(&operations).await?,
             Family::Lighter => self.sign_lighter(&operations).await?,
             Family::Paradex => self.sign_stark(&operations).await?,
             Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
             Family::Hmac => self.sign_hmac(&operations, receipt).await?,
+            Family::Orderly => return refused(),
+            Family::Kucoin => self.sign_kucoin(&operations).await?,
+            Family::Backpack => self.sign_backpack(&operations).await?,
         };
         Ok(SignResult::new(values, receipt))
+    }
+
+    async fn sign_backpack(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: signing,
+                payload,
+            },
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential || !self.owns_signing(signing) {
+            return refused();
+        }
+        let payload = utf8(single_bytes(payload, MAX_PAYLOAD)?)?;
+        if payload.is_empty() {
+            return refused();
+        }
+        let descriptor = json!({ "slot": "primary", "payload": payload }).to_string();
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        self.device(descriptor, "backpack-ed25519", |value| {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Answer {
+                credential: String,
+                signature: String,
+            }
+            let output: Answer = serde_json::from_str(value.as_str().ok_or(SignError::Refused)?)
+                .map_err(|_| SignError::Refused)?;
+            if output.credential.as_bytes() != primary.public || output.signature.len() != 88 {
+                return refused();
+            }
+            let signature = base64::engine::general_purpose::STANDARD
+                .decode(&output.signature)
+                .map_err(|_| SignError::Refused)?;
+            if signature.len() != 64
+                || base64::engine::general_purpose::STANDARD.encode(&signature) != output.signature
+            {
+                return refused();
+            }
+            Ok(vec![primary.public.clone(), signature])
+        })
+        .await
     }
 
     /// Every keyed operation names the primary signing ref.
@@ -508,6 +589,36 @@ impl Inner {
                     .device(utf8(&preimage)?, "hyperliquid-l1", |v| prefixed(v, 65))
                     .await?;
                 Ok(vec![sha256(&preimage), bound, signature])
+            }
+            _ => refused(),
+        }
+    }
+
+    // GRVT login presents its API credential; orders bind one statement, address
+    // and signature atomically. The engine verifies the returned signing proof.
+    async fn sign_grvt(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        match operations {
+            [Operation::Present { key }] if *key == self.primary.credential => {
+                Ok(vec![self.primary.public.clone()])
+            }
+            [
+                Operation::Sha256 { payload: statement },
+                Operation::PublicAddress { key: address },
+                Operation::Sign {
+                    algorithm: Algorithm::Secp256k1Digest,
+                    key,
+                    payload,
+                },
+            ] if address == key && self.owns_signing(key) => {
+                let preimage = single_bytes(statement, MAX_PAYLOAD)?;
+                if single_bytes(payload, 32)?.len() != 32 {
+                    return refused();
+                }
+                let joined = self
+                    .device(utf8(preimage)?, "grvt-order", |value| prefixed(value, 85))
+                    .await?;
+                let (address, signature) = joined.split_at(20);
+                Ok(vec![sha256(preimage), address.to_vec(), signature.to_vec()])
             }
             _ => refused(),
         }
@@ -632,6 +743,97 @@ impl Inner {
         Ok(vec![sha256(&preimage), outer, credential.clone()])
     }
 
+    async fn sign_kucoin(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing,
+                payload,
+            },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: passphrase_signing,
+                payload: passphrase_payload,
+            },
+            broker @ ..,
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential
+            || !self.owns_signing(signing)
+            || passphrase_signing != signing
+            || !matches!(passphrase_payload.as_slice(), [PayloadPart::Credential { key }] if primary.passphrase.as_ref() == Some(key))
+        {
+            return refused();
+        }
+        let payload = utf8(single_bytes(payload, MAX_PAYLOAD)?)?;
+        if payload.is_empty() {
+            return refused();
+        }
+        let mut descriptor = json!({ "slot": "primary", "payload": payload });
+        match broker {
+            [] => {}
+            [
+                Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key,
+                    payload,
+                },
+            ] if primary.broker.as_ref() == Some(key) => {
+                let [
+                    PayloadPart::Bytes { bytes },
+                    PayloadPart::Credential { key },
+                ] = payload.as_slice()
+                else {
+                    return refused();
+                };
+                if *key != primary.credential || bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
+                    return refused();
+                }
+                descriptor["brokerPrefix"] = utf8(bytes)?.into();
+            }
+            _ => return refused(),
+        }
+        let descriptor = descriptor.to_string();
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        let public = utf8(&primary.public)?;
+        self.device(descriptor, "kucoin-batch", |value| {
+            let output: Value = serde_json::from_str(value.as_str().ok_or(SignError::Refused)?)
+                .map_err(|_| SignError::Refused)?;
+            let output = output.as_object().ok_or(SignError::Refused)?;
+            if output.len() != 2
+                || output.get("credential").and_then(Value::as_str) != Some(public.as_str())
+            {
+                return refused();
+            }
+            let macs = output
+                .get("macs")
+                .and_then(Value::as_array)
+                .ok_or(SignError::Refused)?;
+            if macs.len() != operations.len() - 1 {
+                return refused();
+            }
+            let mut values = vec![primary.public.clone()];
+            for value in macs {
+                values.push(mac(value, Encoding::Base64)?);
+            }
+            Ok(values)
+        })
+        .await
+    }
+
     async fn sign_hmac(
         &self,
         operations: &[Operation],
@@ -655,8 +857,8 @@ impl Inner {
                     let material = if *key == primary.credential {
                         &primary.public
                     } else {
-                        match &primary.passphrase {
-                            Some((passphrase, value)) if passphrase == key => {
+                        match (&primary.passphrase, &primary.passphrase_value) {
+                            (Some(passphrase), Some(value)) if passphrase == key => {
                                 presents_passphrase = true;
                                 value
                             }
@@ -764,13 +966,28 @@ pub struct RemoteProvider {
     pub(crate) inner: Arc<Inner>,
 }
 
+/// Public accounts retain neither identities nor a device link.
+pub(crate) struct PublicProvider;
+
+impl Signer for PublicProvider {
+    fn sign(&self, _request: SignRequest) -> SignFuture {
+        Box::pin(async { Err(SignError::Refused) })
+    }
+
+    fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
+        Capability::Unsupported
+    }
+}
+
 impl Signer for RemoteProvider {
     fn sign(&self, request: SignRequest) -> SignFuture {
         Box::pin(self.inner.clone().sign(request))
     }
 
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
-        if self.inner.owns_signing(key) && algorithm == self.inner.family.algorithm() {
+        if (self.inner.owns_signing(key) || self.inner.primary.broker.as_ref() == Some(key))
+            && algorithm == self.inner.family.algorithm()
+        {
             Capability::Supported
         } else {
             Capability::Unsupported

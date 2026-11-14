@@ -237,9 +237,9 @@ fn exhausted_content_keeps_utf8_markers_and_all_native_outcomes() {
     let mut bytes = 0;
     for (_, error) in writes.rejections() {
         for text in [
-            &error.message,
-            error.venue_code.as_ref().unwrap(),
-            error.venue_message.as_ref().unwrap(),
+            error.message.as_str(),
+            error.venue_code.as_deref().unwrap(),
+            error.venue_message.as_deref().unwrap(),
         ] {
             assert!(text.len() <= 4_096);
             assert!(text.ends_with("[truncated]"));
@@ -1250,5 +1250,65 @@ fn later_unproven_write_replaces_known_partial_refusal_words() {
             );
             assert_eq!(writes.fail(VenueError::new("fallback")).unwrap(), error);
         }
+    }
+}
+
+#[test]
+fn prior_refusal_preserves_a_later_unproven_rate_limit_cooldown() {
+    for known_partial in [false, true] {
+        let mut writes = CommandWrites::new(3).unwrap();
+        released(&mut writes, 1);
+        writes
+            .result(RequestId(1), accepted(vec!["original-cancel".into()]))
+            .unwrap();
+        released(&mut writes, 2);
+        let refused = VenueError::new("replacement refused")
+            .kind(crate::ErrorKind::Rejected)
+            .outcome(Outcome::Rejected);
+        writes
+            .result(
+                RequestId(2),
+                if known_partial {
+                    WriteResult::KnownPartial(refused)
+                } else {
+                    WriteResult::Rejected(refused)
+                },
+            )
+            .unwrap();
+        released(&mut writes, 3);
+        writes
+            .unproven_result(RequestId(3), 429, |evidence| {
+                evidence.retry_after_ms(Some(30_000.));
+            })
+            .unwrap();
+        let error = writes.fail(VenueError::new("fallback")).unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.message, UNKNOWN_AFTER_REFUSAL);
+        assert_eq!(error.kind, Some(crate::ErrorKind::RateLimited));
+        assert_eq!(error.retry_after_ms, Some(30_000.));
+        assert_eq!(error.partial.unwrap().order_ids, ["original-cancel"]);
+    }
+}
+
+#[test]
+fn unknown_siblings_keep_the_longest_reconciliation_pause() {
+    for (first, second, expected) in [
+        (Some(3_000.), Some(30_000.), Some(30_000.)),
+        (Some(3_000.), None, None),
+        (Some(30_000.), None, Some(30_000.)),
+    ] {
+        let mut writes = CommandWrites::new(2).unwrap();
+        for (id, delay) in [(1, first), (2, second)] {
+            released(&mut writes, id);
+            writes
+                .unproven_result(RequestId(id), 429, |evidence| {
+                    evidence.retry_after_ms(delay);
+                })
+                .unwrap();
+        }
+        let error = writes.fail(VenueError::new("fallback")).unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.kind, Some(crate::ErrorKind::RateLimited));
+        assert_eq!(error.retry_after_ms, expected);
     }
 }

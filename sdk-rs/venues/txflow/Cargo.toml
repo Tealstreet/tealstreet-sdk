@@ -8,6 +8,7 @@ publish.workspace = true
 safe-cex-engine = { workspace = true, features = ["order-locks", "managed-sockets"] }
 safe-cex-crypto.workspace = true
 safe-cex-venue-hyperliquid.workspace = true
+safe-cex-txflow-public-wire = { path = "public-wire" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 

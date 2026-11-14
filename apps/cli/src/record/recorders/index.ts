@@ -1,3 +1,4 @@
+import { captureStorageSession, onStorageOwnerChange } from '../../storage-context';
 /**
  * Recorder Factory
  *
@@ -37,9 +38,8 @@ export function createRecorder(options: RecordingOptions): BaseRecorder {
  * If a recorder with the same key is already running, it will be stopped and replaced.
  * Returns { recorder, replaced: boolean }
  */
-export async function startRecorder(
-  options: RecordingOptions
-): Promise<{ recorder: BaseRecorder; replaced: boolean }> {
+export async function startRecorder(options: RecordingOptions): Promise<{ recorder: BaseRecorder; replaced: boolean }> {
+  const ownerSession = captureStorageSession();
   const key = getRecorderKey(options.dataType, options.exchange, options.symbol);
   let replaced = false;
 
@@ -47,6 +47,7 @@ export async function startRecorder(
   const existing = activeRecorders.get(key);
   if (existing && existing.isRunning()) {
     await existing.stop();
+    ownerSession.assertCurrent();
     activeRecorders.delete(key);
     replaced = true;
   }
@@ -54,6 +55,12 @@ export async function startRecorder(
   // Create and start new recorder
   const recorder = createRecorder(options);
   await recorder.start();
+  try {
+    ownerSession.assertCurrent();
+  } catch (error) {
+    await recorder.stop();
+    throw error;
+  }
 
   // Add to active recorders
   activeRecorders.set(key, recorder);
@@ -65,6 +72,7 @@ export async function startRecorder(
  * Stop a specific recorder
  */
 export async function stopRecorder(dataType: DataType, exchange: string, symbol: string): Promise<boolean> {
+  const ownerSession = captureStorageSession();
   const key = getRecorderKey(dataType, exchange, symbol);
   const recorder = activeRecorders.get(key);
 
@@ -73,7 +81,8 @@ export async function stopRecorder(dataType: DataType, exchange: string, symbol:
   }
 
   await recorder.stop();
-  activeRecorders.delete(key);
+  ownerSession.assertCurrent();
+  if (activeRecorders.get(key) === recorder) activeRecorders.delete(key);
   return true;
 }
 
@@ -81,12 +90,14 @@ export async function stopRecorder(dataType: DataType, exchange: string, symbol:
  * Stop all recorders for an exchange
  */
 export async function stopExchangeRecorders(exchange: string): Promise<number> {
+  const ownerSession = captureStorageSession();
   let stopped = 0;
 
   for (const [key, recorder] of activeRecorders.entries()) {
     if (key.includes(`:${exchange}:`)) {
       await recorder.stop();
-      activeRecorders.delete(key);
+      ownerSession.assertCurrent();
+      if (activeRecorders.get(key) === recorder) activeRecorders.delete(key);
       stopped++;
     }
   }
@@ -98,15 +109,10 @@ export async function stopExchangeRecorders(exchange: string): Promise<number> {
  * Stop all active recorders
  */
 export async function stopAllRecorders(): Promise<number> {
-  let stopped = 0;
-
-  for (const [key, recorder] of activeRecorders.entries()) {
-    await recorder.stop();
-    activeRecorders.delete(key);
-    stopped++;
-  }
-
-  return stopped;
+  const recorders = Array.from(activeRecorders.values());
+  activeRecorders.clear();
+  await Promise.allSettled(recorders.map((recorder) => recorder.stop()));
+  return recorders.length;
 }
 
 /**
@@ -135,3 +141,7 @@ export function isRecorderRunning(dataType: DataType, exchange: string, symbol: 
 // Re-export types and classes
 export { BaseRecorder } from './base-recorder';
 export { OrderbookRecorder } from './orderbook';
+
+onStorageOwnerChange(() => {
+  void stopAllRecorders();
+});

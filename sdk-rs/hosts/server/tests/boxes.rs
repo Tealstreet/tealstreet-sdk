@@ -135,6 +135,19 @@ async fn assert_one_box(boxes: &[&TestBox]) {
     assert!(both.is_empty(), "held or parked on two boxes: {both:?}");
 }
 
+fn sole_identity(holdings: &BTreeMap<(String, String), Held>, user: &str) -> (String, String) {
+    assert_eq!(holdings.len(), 1, "one identity on this box");
+    let key = holdings.keys().next().unwrap();
+    assert_eq!(key.0, user);
+    assert_eq!(key.1.len(), 64);
+    assert!(
+        key.1
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+    key.clone()
+}
+
 fn init() -> InitPayload {
     InitPayload {
         account_name: "acct".into(),
@@ -302,7 +315,7 @@ async fn a_box_killed_mid_chase_leaves_nothing_and_the_other_box_reports_no_chas
     );
     assert_eq!(algos(&b.address).await, json!({"chases": 0, "twaps": 0}));
     let held = b.holdings().await;
-    let mine = &held[&("u1".to_owned(), "acct".to_owned())];
+    let mine = &held[&sole_identity(&held, "u1")];
     assert_eq!((mine.chases, mine.twaps), (0, 0));
     assert_eq!(mine.signing, mine.live.first().copied());
     assert_one_box(&[&b]).await;
@@ -322,8 +335,8 @@ async fn a_reconnect_race_parks_on_one_box_while_live_on_the_other_and_the_parke
     let grace = Duration::from_secs(2);
     let (a, b) = (TestBox::start(grace), TestBox::start(grace));
     let (page, _) = chasing_page(&a, "u1").await;
+    let key = sole_identity(&a.holdings().await, "u1");
     page.close().await;
-    let key = ("u1".to_owned(), "acct".to_owned());
     // The chase count is the algo host's 250ms recount, so wait for it rather than a fixed sleep.
     let mut on_a = None;
     for _ in 0..40 {

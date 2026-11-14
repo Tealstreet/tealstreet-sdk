@@ -89,11 +89,13 @@ Commands that do not need the venue — `alias`, `simulation`, `fatfinger`,
 
 ## "HyroTrader production REST URL is not configured"
 
-This is not an API-key rejection. It means the standalone CLI does not
-know which HyroTrader production host to call yet.
+This is not an API-key rejection. Current CLI builds default to
+`https://sim-tealstreet.hyro.site`, so you should normally see this only on an
+older build or when a custom environment clears the configured Hyro endpoints.
 
-Set the HyroTrader production REST origin in the same shell that launches
-the CLI, then reconnect:
+Update the CLI first. If HyroTrader or Tealstreet gave you a different
+challenge REST origin, set it in the same shell that launches the CLI, then
+reconnect:
 
 ```bash
 export NEXT_PUBLIC_HYROTRADER_PROD_REST_URL="https://<hyro-production-origin>"

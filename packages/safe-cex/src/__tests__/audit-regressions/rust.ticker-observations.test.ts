@@ -29,7 +29,8 @@ it('a real observation-only frame reaches MessagePort consumers with source time
   const store = new DefaultStore();
   store.update({
     markets: [{ id: 'BTC', symbol: 'BTC-PERP', contractSize: 1 }] as Market[],
-    tickers: [{ id: 'BTC', symbol: 'BTC-PERP', mark: 100, last: 99, index: 98 }] as Ticker[],
+    tickers: [{ id: 'BTC', symbol: 'BTC-PERP', bid: 0, ask: 0, mark: 100, last: 99, index: 98,
+      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 }],
     loaded: { markets: true, tickers: true, balance: false, orders: false, positions: false },
   });
   const source = new RustEngineExchange('hyperliquid', { key: '', secret: '', publicDataOnly: true }, store);
@@ -82,7 +83,9 @@ it('a real observation-only frame reaches MessagePort consumers with source time
 
 it('worker object snapshots retain observation provenance without dating their arrival', () => {
   const store = new DefaultStore();
-  const row = { id: 'BTC', symbol: 'BTC-PERP', last: 99, mark: 100, observedAt: [1000, 8500, null] } as Ticker;
+  const row: Ticker = { id: 'BTC', symbol: 'BTC-PERP', bid: 0, ask: 0, last: 99, mark: 100, index: 0,
+    percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+    observedAt: [1000, 8500, null] };
   store.update({ tickers: [row] });
   const identity = store.tickers[0];
   store.update({ tickers: [{ ...row, observedAt: [1000, 9000, null] }] }, true);

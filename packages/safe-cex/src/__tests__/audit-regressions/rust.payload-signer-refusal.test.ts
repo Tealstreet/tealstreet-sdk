@@ -9,6 +9,7 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import * as betaPolicy from '../../exchanges/rust/betaVenues';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import {
   runsOnRustEngine,
@@ -71,8 +72,6 @@ const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
 // generic local-credential guard, so before this refusal they started unsigned.
 it.each([
   'txflow',
-  'coinbase',
-  'coinbasespot',
   'polymarket',
   'binance',
   'bybit',
@@ -147,18 +146,8 @@ it('reports the structured refusal through start and validateAccount', async () 
   running.push(txflow);
   await expect(txflow.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
 
-  const coinbase = new RustEngineExchange(
-    'coinbase',
-    { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
-    new DefaultStore(),
-  );
-  running.push(coinbase);
-  await expect(coinbase.validateAccount()).resolves.toMatchObject({
-    kind: 'unsupported',
-    error: expect.stringContaining('Rust coinbase delegated signing is unsupported in this build'),
-  });
-  expect(construct).toHaveBeenCalledTimes(2);
-  expect(transport).toHaveBeenCalledTimes(2);
+  expect(construct).toHaveBeenCalledTimes(1);
+  expect(transport).toHaveBeenCalledTimes(1);
   expect(io).not.toHaveBeenCalled();
 });
 
@@ -180,27 +169,37 @@ describe('factory and worker loaders', () => {
   const signed = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions =>
     ({ key: 'k', secret: '', payloadSigner, engine: 'rust', ...extra }) as ExchangeOptions;
 
-  it('createExchange builds Rust venues for declared Bybit and Binance payload signers', async () => {
+  it('createExchange builds Rust venues for admitted Bybit and Binance payload signers', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     for (const name of ['bybit', 'binance'] as const) {
-      const exchange = await createExchange(name, signed());
-      try {
-        expect(exchange, name).toBeInstanceOf(RustEngineExchange);
-      } finally {
-        exchange.dispose();
+      for (const options of [signed(), signed({ engine: undefined })]) {
+        const exchange = await createExchange(name, options);
+        try {
+          expect(exchange, name).toBeInstanceOf(RustEngineExchange);
+        } finally {
+          exchange.dispose();
+        }
       }
     }
   }, 60_000);
 
   it('OUT names refuse without constructing a hosted TS class', async () => {
+    // This case exercises admission itself; the other cases exercise native codecs below it.
+    const actual = await vi.importActual<typeof import('../../exchanges/rust/betaVenues')>('../../exchanges/rust/betaVenues');
+    vi.spyOn(betaPolicy, 'assertBetaVenue').mockImplementation(actual.assertBetaVenue);
+    vi.spyOn(betaPolicy, 'assertBetaAccount').mockImplementation(actual.assertBetaAccount);
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
-    // Coinbase is beta-admitted; native delegated-signing refusal is covered above.
-    for (const name of ['bitrue'] as const) {
+    // Codec support does not admit an OUT venue, regardless of signer mode.
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    for (const name of ['polymarket'] as const) {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {
-        recordEngine(name, true);
+        const { construct, transport, io } = recordEngine(name, true);
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+        expect(construct).not.toHaveBeenCalled();
+        expect(transport).not.toHaveBeenCalled();
+        expect(io).not.toHaveBeenCalled();
       }
     }
   }, 60_000);

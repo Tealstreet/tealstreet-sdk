@@ -13,6 +13,10 @@ language.
 
 ## Chain operators
 
+A chain belongs to the login that started it. Switching users during a sleep,
+wait, retry, script or `;` barrier cancels its remaining steps, even if you switch
+back before the wait finishes. Already submitted orders still need reconciliation.
+
 ```text
 buy $100 ; cancel  ; close
 buy $100 & cancel

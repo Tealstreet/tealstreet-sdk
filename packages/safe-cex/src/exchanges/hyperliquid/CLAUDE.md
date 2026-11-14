@@ -325,6 +325,18 @@ that arrived in a URL.
 
 **Flow**: On startup, check if user has approved builder fee via `maxBuilderFee` info type (`fetchBuilderFeeApproval`). If approved, include `builder` field in all order actions. Approval requires EIP-712 signing from the main wallet via `approveBuilderFeeWithBrowserWallet()`.
 
+The browser helper accepts an optional fifth `BuilderFeeApprovalGuard` argument:
+`{ assertCurrent?: () => void, signal?: AbortSignal }`. Hosts bind the synchronous
+assertion to the initiating owner/session, including pre-account flows, and throw
+or abort its signal when that binding is stale. Checks precede every deferred
+wallet mutation (including add-chain/switch retries), signing and submission.
+The guarded EIP-1193 provider also checks ethers' internal deferred requests and
+is destroyed when the attempt settles, stopping its pending startup retries.
+Stale work returns `success: false` with `Builder fee approval cancelled-for-owner-change`.
+Omitting the guard preserves legacy behavior. A change while a submission is already in
+flight cannot undo that send; the final check suppresses its stale success and
+telemetry. Hosts must still guard their own result handling and polling.
+
 **Builder addresses** (from `hyperliquid.constants.ts`):
 
 - Mainnet: `0xea629e1e8534B82f704A818643F2DAF38cB7Fd4d`

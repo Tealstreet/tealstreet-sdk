@@ -38,6 +38,13 @@ def logged(command, log, allowed=(0,)):
     return result.returncode
 
 
+def skip_unchanged(authority, byte_identical):
+    # Only PRs may elide measurement. Master push/nightly always observes the
+    # current baseline, even when both independent packages are identical.
+    return (authority['witness'] == 'tip' and
+            authority['pullNumber'] is not None and byte_identical)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--baseline', required=True)
 parser.add_argument('--candidate', required=True)
@@ -160,10 +167,11 @@ insist(archive_names == sorted(p.name for p in (result_root / 'candidate/node').
 plan['archiveMetadata'] = {arm: json.loads((result_root / arm / 'node/build.json').read_text())
                            for arm in refs}
 write_json(result_root / 'plan.json', plan)
-# Only independently built WASM and glue bytes can skip both CPU witnesses.
-if authority['witness'] == 'tip' and all(
+# Master is always observed, including identical independently built bytes.
+# The JS verifier independently rejects unmeasured master evidence.
+if skip_unchanged(authority, all(
         sha(result_root / 'baseline/node' / name) == sha(result_root / 'candidate/node' / name)
-        for name in ('safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js')):
+        for name in ('safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js'))):
     plan['disposition'] = 'unchanged-bytes'
     write_json(result_root / 'plan.json', plan)
     print('unchanged bytes, not measured', flush=True)

@@ -99,25 +99,28 @@ fn bybit_ticks_on_final_batch_member_prevents_every_http_request() {
 }
 
 #[test]
-fn splits_conserve_step_units_and_each_size_stays_below_maximum() {
+fn splits_match_legacy_ts_rounding_and_keep_distinct_native_identities() {
+    // TS: packages/safe-cex/src/__tests__/reference/bitrue/bitrue.exchange.ts:1180-1196.
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 0.026 of requested 0.025); kept for parity per Sam.
     let mut h = Harness::new();
     h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.025,"price":2000}]"#);
-    let mut units = 0;
+    let mut quantities = vec![];
     let mut ids = std::collections::HashSet::new();
-    for id in 1..=3 {
+    for (id, expected) in (1..=4).zip([0.007, 0.007, 0.007, 0.005]) {
         let request = h.take(Method::Post, "/fapi/v2/order");
         let row = body(&request);
         let amount = row["volume"].as_str().unwrap().parse::<f64>().unwrap();
         assert!(amount <= 0.01);
-        units += (amount / 0.001).round() as i32;
+        assert_eq!(amount, expected);
+        quantities.push(amount);
         assert!(ids.insert(row["clientOrderId"].as_str().unwrap().to_owned()));
         h.reply(
             request,
             &format!(r#"{{"code":"0","data":{{"orderId":{id}}}}}"#),
         );
     }
-    assert_eq!(units, 25);
-    assert_eq!(h.result(), Some(r#"["1","2","3"]"#));
+    assert!((quantities.iter().sum::<f64>() - 0.026).abs() < 1e-12);
+    assert_eq!(h.result(), Some(r#"["1","2","3","4"]"#));
 }
 #[test]
 fn protective_orders_require_a_position_and_opposite_side() {
@@ -876,10 +879,12 @@ fn placement_receipts(h: &Harness, request: &HttpRequest) -> Vec<OrderIdentityRe
 
 #[test]
 fn receipts_cover_final_split_parents_and_embedded_children_before_each_write() {
+    // TS :1180-1196 yields four parents for 0.025/0.01/0.001, including its tail.
+    // KNOWN-ISSUE: legacy TS over-allocates (sum 0.026 of requested 0.025); kept for parity per Sam.
     let mut h = Harness::new();
     h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.025,"price":2000,"stopLoss":1800,"takeProfit":2200}]"#);
     let mut ids = std::collections::HashSet::new();
-    for index in 0..3 {
+    for index in 0..4 {
         let request = h.take(Method::Post, "/fapi/v2/order");
         let receipts = placement_receipts(&h, &request);
         assert_eq!(receipts.len(), 3);
@@ -891,7 +896,7 @@ fn receipts_cover_final_split_parents_and_embedded_children_before_each_write() 
             &format!(r#"{{"code":"0","data":{{"orderId":"parent-{index}"}}}}"#),
         );
     }
-    assert_eq!(ids.len(), 9);
+    assert_eq!(ids.len(), 12);
 }
 
 #[test]

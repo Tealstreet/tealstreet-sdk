@@ -32,6 +32,7 @@ struct Grant {
 }
 struct Active {
     root: RepairRoot,
+    generation: u64,
     candidate: Repair,
     previous: OrderStatus,
     stream_time: f64,
@@ -252,7 +253,7 @@ impl Backpack {
         }
     }
     pub(crate) fn start_repairs(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !cx.now.is_finite() {
+        if !cx.now.is_finite() || !self.repairs.active.is_empty() {
             return;
         }
         for i in 0..self.repairs.grants.len() {
@@ -286,6 +287,7 @@ impl Backpack {
                         continue;
                     }
                 };
+            let generation = grant.subject.generation;
             let candidate = grant.candidate.take().expect("candidate checked");
             let stream_time = self.order_stream_time(&candidate.old_id);
             cx.store.invalidate_order_snapshots();
@@ -293,6 +295,7 @@ impl Backpack {
                 .set_order_status(&candidate.old_id, OrderStatus::Canceling);
             self.repairs.active.push(Active {
                 root: root.clone(),
+                generation,
                 candidate,
                 previous,
                 stream_time,
@@ -306,6 +309,7 @@ impl Backpack {
                     stage: Stage::Cancel,
                 },
             );
+            return;
         }
     }
     pub(crate) fn repair_stream(&mut self, id: &str, symbol: &str, fill: f64, terminal: bool) {
@@ -557,6 +561,22 @@ impl Backpack {
                 }
             }
             Stage::Place => {
+                cx.event(
+                    Level::Info,
+                    "backpack.repair.placed",
+                    "Backpack trigger repair placed",
+                    vec![
+                        ("orderId", id.into()),
+                        (
+                            "targetOrderId",
+                            self.repairs.active[index].candidate.old_id.clone().into(),
+                        ),
+                        (
+                            "actionGeneration",
+                            self.repairs.active[index].generation.to_string().into(),
+                        ),
+                    ],
+                );
                 let mapped = serde_json::from_str::<crate::wire::OrderRow<'_>>(response.body)
                     .ok()
                     .and_then(|row| account::order(row, cx.store).ok());
@@ -599,6 +619,33 @@ impl Backpack {
                     fact.cancel == Effect::Unknown || fact.place == Some(Effect::Unknown);
             }
         }
+        if subjects
+            .iter()
+            .any(|fact| fact.cancel == Effect::Unknown || fact.place == Some(Effect::Unknown))
+        {
+            for grant in &mut self.repairs.grants {
+                if grant.subject.generation == active.generation {
+                    grant.candidate = None;
+                }
+            }
+            for fact in subjects {
+                cx.event(
+                    Level::Warn,
+                    "backpack.repair.unknown",
+                    crate::trading::UNKNOWN_TEXT,
+                    vec![
+                        ("targetOrderId", fact.key.clone().into()),
+                        ("actionGeneration", active.generation.to_string().into()),
+                        ("cancelOutcome", format!("{:?}", fact.cancel).into()),
+                        (
+                            "placeOutcome",
+                            format!("{:?}", fact.place.unwrap_or(Effect::NotSent)).into(),
+                        ),
+                    ],
+                );
+            }
+            return;
+        }
         if !cx.now.is_finite() {
             return;
         }
@@ -619,6 +666,7 @@ impl Backpack {
             }
             cx.notice(Level::Warn, code::ORDER_REJECTED, MANUAL);
         }
+        self.start_repairs(cx);
         self.repair_refresh(cx);
     }
 }

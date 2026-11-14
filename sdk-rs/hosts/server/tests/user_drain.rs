@@ -155,7 +155,11 @@ async fn capped_drain_lists_parked_jobs_blocks_starts_and_cancel_keeps_them_runn
         assert!(started["drainId"].is_string(), "{started}");
         tokio::time::sleep(Duration::from_millis(20)).await;
         for op in ["chaser:start", "twap:start", "twap:resume", "twap:state", "exec"] {
-            page.op("acct", op, chase.clone()).await;
+            let mut data = chase.clone();
+            if op == "twap:start" {
+                data["accountName"] = "acct".into();
+            }
+            page.op("acct", op, data).await;
             let refused = page.until("error", |_| true).await;
             assert_eq!(refused["data"][0]["name"], "ServerDraining", "{refused}");
             assert_eq!(refused["data"][0]["outcome"], "notSent", "{refused}");
@@ -323,6 +327,12 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
         renewed.users[0].not_after = renewed.issued_at + 45_000;
         app.registry.router_leases.accept(&renewed).unwrap();
         let _fresh = testing::trading_account(&app.registry, "target", &init);
+        let holdings = testing::holdings(&app.registry);
+        assert_eq!(holdings.len(), 1);
+        let (owner_user, owner_id) = holdings.keys().next().unwrap();
+        assert_eq!(owner_user, "target");
+        assert_eq!(owner_id.len(), 64);
+        assert_eq!(_fresh.twap_owner.snapshot().owner_id,*owner_id);
         let mut returned = Page::open(&address, &token("target"), None).await;
         returned.init(&init).await;
         returned.until("error", |d| d["data"][1]["forceToast"] == true).await;
@@ -336,7 +346,10 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
         let state = json!({"accountName":"acct","activeMarket":market,"size":0.1,"ordersSizes":[0.01,0.01,0.01],
             "side":"buy","status":"running","ordersCount":10,"ordersExecuted":7,"nextOrderAt":now+60_000,
             "origin":"web","createdAt":now-180_000,"startedAt":now-180_000});
-        returned.op("acct", "twap:state", json!([{"id":"parked-twap","options":options,"state":state}])).await;
+        // A valid current-binding row still receives the router's pause protection.
+        let owner = _fresh.twap_owner.snapshot();
+        returned.op("acct", "twap:state", json!([{"id":"parked-twap","ownerId":owner.owner_id,
+            "ownerGeneration":owner.generation,"options":options,"state":state}])).await;
         let store = returned.until("store", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| !rows.is_empty())).await;
         assert_eq!(store["data"]["activeTWAPs"][0]["status"], "paused");
         assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"], 7);

@@ -1113,10 +1113,11 @@ fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
     let error = failure(&h, 7);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error.message.contains("cancellation rejected"),
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
         "{}",
         error.message
     );
+    assert!(!error.message.contains("rejected"));
     assert!(
         h.e.store().order(&ids[3]).is_some(),
         "an unproven row is not removed"
@@ -1335,7 +1336,118 @@ fn zero_protection_and_price_fields_read_as_unset() {
 }
 
 #[test]
-fn a_code_zero_row_is_accepted_whatever_its_text_says() {
+fn accepted_settings_prefix_is_applied_without_a_created_order_id() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut h = hedged_isolated();
+    h.requests.clear();
+    command(
+        &mut h,
+        Command::SetLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+            side: None,
+        },
+    );
+    reply(
+        &mut h,
+        "set-leverage",
+        200,
+        r#"{"code":"0","data":{"leverage":"30"}}"#,
+    );
+    reply(
+        &mut h,
+        "set-leverage",
+        200,
+        r#"{"code":"110006","msg":"Leverage cannot be adjusted"}"#,
+    );
+    let error = failure(&h, 7);
+    let elements = error.elements.as_ref().expect("complete settings effects");
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(
+        &elements[0].result,
+        ElementResult::Applied {
+            effect: AppliedEffect::Settings,
+            target_order_id: None,
+            ..
+        }
+    ));
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn mixed_cancel_outcomes_reference_targets_without_placing_them() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut h = seeded();
+    for id in ["12", "13", "14"] {
+        seed_order(&mut h, id, "");
+    }
+    h.requests.clear();
+    command(
+        &mut h,
+        Command::CancelOrders {
+            command: 7,
+            ids: vec!["12".into(), "13".into(), "14".into()],
+        },
+    );
+    reply(
+        &mut h,
+        "cancel-batch-orders",
+        200,
+        r#"{"code":"2","data":[{"orderId":"14","code":"0"},{"orderId":"13","code":"103003","msg":"refused"},{"orderId":"12","code":"0"}]}"#,
+    );
+    let error = failure(&h, 7);
+    let elements = error
+        .elements
+        .as_ref()
+        .expect("complete cancellation outcomes");
+    assert_eq!(elements.len(), 3);
+    for (index, expected) in [(0, "12"), (2, "14")] {
+        assert_eq!(
+            elements[index].result,
+            ElementResult::Applied {
+                effect: AppliedEffect::Cancel,
+                target_order_id: Some(expected.into()),
+                position_key: None
+            }
+        );
+    }
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty()),
+        "cancel target IDs must not be reported as newly placed"
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_code_zero_row_retains_acceptance_when_legacy_message_policy_stops() {
     let mut h = seeded();
     command(&mut h, place(860, 1.0));
     reply(
@@ -1344,7 +1456,11 @@ fn a_code_zero_row_is_accepted_whatever_its_text_says() {
         200,
         r#"{"code":"0","msg":"","data":[{"orderId":"9","code":"0","msg":"Order placed successfully"}]}"#,
     );
-    assert_eq!(succeeded(&h, 860), r#"["9"]"#);
+    // TS:2254 stops on this message; code 0 still proves the order was placed.
+    let error = failure(&h, 860);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["9"]);
+    assert!(matches!(&error.elements.as_ref().unwrap()[0].result,
+        safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["9"]));
 }
 
 // Live, 5 of 5: a partly filled order's cancel reads partially_canceled, and the replacement was lost.

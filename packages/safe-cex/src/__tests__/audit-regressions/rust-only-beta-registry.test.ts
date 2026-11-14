@@ -69,6 +69,7 @@ const expected = [
   'what',
   'woofi',
   'backpack',
+  'bitrue',
 ];
 const out = Object.keys(exchangeMetadata).filter((name) => !expected.includes(name)) as ExchangeName[];
 const unsupported = { kind: 'unsupported', outcome: 'notSent' };
@@ -77,19 +78,29 @@ beforeEach(() => {
   vi.mocked(virtualClock.start).mockClear();
 });
 describe('Rust-only beta construction', () => {
+  it('admits the live Bitrue venue before loading an engine', () => {
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(BETA_VENUES).toContain('bitrue');
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(() => assertBetaAccount('bitrue', { key: '', secret: '', publicDataOnly: true })).not.toThrow();
+  });
   it('has exactly the declared IN names', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
     // Robinhood now uses the same beta runtime as Lighter.
-    expect(new Set(BETA_VENUES).size).toBe(43);
-    expect(out).toEqual(expect.arrayContaining(['bitrue', 'polymarket']));
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(new Set(BETA_VENUES).size).toBe(44);
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(out).not.toContain('bitrue');
+    expect(out).toContain('polymarket');
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
     for (const name of BETA_VENUES) {
       expect(await exchangeRegistry[name]()).toBe(state.Rust);
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
-    expect(state.calls).toHaveLength(43);
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(state.calls).toHaveLength(44);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {
@@ -197,7 +208,7 @@ describe('Rust-only beta construction', () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
     // Hyperliquid's, Lighter's and Paradex's structured remote signing is pinned in
     // their rust.*-remote-signing.wasm.test.ts.
-    const localOnly = ['kraken', 'krakenspot', 'apexomni', 'cryptocom', 'asterdex'] as const;
+    const localOnly = ['krakenspot'] as const;
     // #2262 enables Bitunix through the shared policy, without a beta override.
     const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
       ? localOnly

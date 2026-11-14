@@ -226,3 +226,62 @@ test('the CPU public roster includes generated public tapes and no private case'
   assert.ok(binance.every((item) => !item.endsWith('-private.jsonl')));
   assert.equal(binance.length, 5);
 });
+
+function certificationProcess(t, refusals) {
+  const directory = realpathSync(mkdtempSync(resolve(tmpdir(), 'cpu-certification-result-')));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const output = resolve(directory, 'github-output'), destination = resolve(directory, 'certificates');
+  const script = `
+    import { certifyAll } from ${JSON.stringify(new URL('./cpu-ci.mjs', import.meta.url).href)};
+    const refusals = ${JSON.stringify(refusals ?? null)};
+    const context = { runId: 123, checkoutSha: 'c'.repeat(40), env: { GITHUB_OUTPUT: ${JSON.stringify(output)} },
+      reader: { getRun: async () => ({ run_attempt: 1 }), listJobs: async () => [], listArtifacts: async () => [] } };
+    const certify = refusals === null ? undefined : async suite => {
+      if (Object.hasOwn(refusals, suite)) throw new Error(refusals[suite]);
+      return { suite };
+    };
+    await certifyAll(context, ${JSON.stringify(destination)}, certify);
+  `;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+  const results = JSON.parse(readFileSync(resolve(destination, 'results.json'), 'utf8'));
+  assert.deepEqual(JSON.parse(readFileSync(output, 'utf8').trim().slice('results='.length)), results);
+  return { child, results };
+}
+
+test('missing cpu-plan fails certification itself after retaining every suite refusal and Actions output', t => {
+  const { child, results } = certificationProcess(t);
+  assert.equal(results.certified, false);
+  assert.equal(results.runId, 123);
+  assert.equal(results.checkoutSha, 'c'.repeat(40));
+  assert.deepEqual(Object.keys(results.suites), GATE_SUITES);
+  for (const suite of GATE_SUITES) {
+    assert.equal(results.suites[suite], false);
+    assert.match(results.reasons[suite], /missing\/duplicate exact artifact cpu-plan/);
+  }
+  assert.equal(child.status, 1, 'uncertified results must not conclude SUCCESS');
+  for (const suite of GATE_SUITES)
+    assert.ok(child.stdout.includes(`title=CPU certification ${suite}::`), suite);
+  assert.match(child.stderr, /not certified for suites:/);
+});
+
+test('partial certification fails at source, names each failed suite and retains successful siblings', t => {
+  const { child, results } = certificationProcess(t, {
+    binance: 'missing first evidence', bitget: 'counterbalanced bound exceeded\nsecond line%\r',
+  });
+  assert.equal(results.certified, false);
+  for (const suite of GATE_SUITES)
+    assert.equal(results.suites[suite], !['binance', 'bitget'].includes(suite));
+  assert.equal(child.status, 1, 'one refused suite must fail the coordinator');
+  assert.match(child.stdout, /title=CPU certification binance::missing first evidence/);
+  assert.match(child.stdout, /title=CPU certification bitget::counterbalanced bound exceeded%0Asecond line%25%0D/);
+  assert.match(child.stderr, /not certified for suites: binance, bitget/);
+});
+
+test('complete certification still succeeds and publishes its complete same-run output', t => {
+  const { child, results } = certificationProcess(t, {});
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(results.certified, true);
+  assert.deepEqual(results.reasons, {});
+  assert.ok(Object.values(results.suites).every(value => value === true));
+  assert.doesNotMatch(child.stdout, /::error/);
+});

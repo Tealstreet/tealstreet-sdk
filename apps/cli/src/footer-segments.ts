@@ -12,15 +12,17 @@
  * (PositionCommand.ts / MonitorCommand.ts).
  */
 import chalk from 'chalk';
+import { calculatePositionPnlPercent } from '@tealstreet/safe-cex/src/utils/positionPnlPercent';
 import { G } from './console-glyphs';
 
 export type FooterConnection = 'connected' | 'connecting' | 'auth-failed' | 'failed' | 'disconnected' | 'unknown';
 
 export interface FooterPosition {
   side: 'long' | 'short';
-  contracts: number;
+  /** Base size with its asset, formatted by the snapshot builder (e.g. `240 DOGE`). */
+  size: string;
   entryPrice: number;
-  notional: number;
+  notional: number | null;
   unrealizedPnl: number;
 }
 
@@ -170,9 +172,8 @@ export function renderSegment(seg: FooterSegment, state: FooterState): string {
     case 'pnl': {
       const pos = state.position;
       if (!pos) return '';
-      const pct =
-        pos.entryPrice > 0 && pos.notional !== 0 ? (pos.unrealizedPnl / Math.abs(pos.notional)) * 100 : undefined;
-      const body = `uPnL ${fmtSignedUsd(pos.unrealizedPnl)}${pct != null ? ` (${fmtSignedPct(pct)})` : ''}`;
+      const pct = calculatePositionPnlPercent(pos.notional, pos.unrealizedPnl);
+      const body = `uPnL ${fmtSignedUsd(pos.unrealizedPnl)} (${pct === null ? '—' : fmtSignedPct(pct)})`;
       return chalk.hex(pnlColor(pos.unrealizedPnl))(body);
     }
 
@@ -185,7 +186,7 @@ export function renderSegment(seg: FooterSegment, state: FooterState): string {
       if (!pos) return '';
       const color = pos.side === 'long' ? POS_GREEN : POS_RED;
       const tag = pos.side === 'long' ? 'LONG' : 'SHORT';
-      return chalk.hex(color)(`${tag} ${pos.contracts} @ ${fmtPrice(pos.entryPrice)}`);
+      return chalk.hex(color)(`${tag} ${pos.size} @ ${fmtPrice(pos.entryPrice)}`);
     }
 
     case 'mark':

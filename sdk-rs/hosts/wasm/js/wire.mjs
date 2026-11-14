@@ -89,7 +89,7 @@ export const REJECT_REASON = [undefined, 'PostOnly', 'InsufficientBalance', 'Red
 
 export const POSITION_COLUMNS = [
   'entryPrice', 'notional', 'leverage', 'unrealizedPnl', 'realizedPnl',
-  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate',
+  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate', 'contractsNative', 'unrealizedPnlNative',
 ];
 export const POSITION_SIDE = ['long', 'short'];
 export const MARGIN_TYPE = [undefined, 'isolated', 'cross'];
@@ -211,7 +211,7 @@ export class Frame {
       if (offset + 8 > buffer.byteLength) throw new Error('truncated frame section header');
       const kind = header.getUint16(offset, true);
       const revision = header.getUint16(offset + 2, true);
-      if (KNOWN_SECTIONS.has(kind) && revision > (kind === SECTION.FILLS ? 2 : REVISED_SECTIONS.has(kind) ? 1 : 0)) {
+      if (KNOWN_SECTIONS.has(kind) && revision > ((kind === SECTION.FILLS || kind === SECTION.POSITIONS) ? 2 : REVISED_SECTIONS.has(kind) ? 1 : 0)) {
         throw new Error(`unsupported section ${kind} revision ${revision}`);
       }
       const length = header.getUint32(offset + 4, true);
@@ -508,19 +508,44 @@ export class Frame {
   positions() {
     const section = this.first(SECTION.POSITIONS);
     if (!section) return undefined;
+    if (section.revision !== 2) throw new Error('unsupported POSITIONS revision; expected 2');
     const { buffer } = this;
     const count = rowCount(this, section);
-    requireEnd(section, align8(section.offset + 4 + count * 8) + count * POSITION_COLUMNS.length * 8 + (section.revision === 1 ? count * 8 : 0));
-    const market = new Uint32Array(buffer, section.offset + 4, count);
-    const enums = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const data = align8(section.offset + 4 + count * 8);
     const idsAt = data + count * 8 * POSITION_COLUMNS.length;
-    const ids = idsAt + count * 4 <= section.offset + section.length
-      ? new Uint32Array(buffer, idsAt, count) : undefined;
-    const symbols = section.revision === 1 ? new Uint32Array(buffer, idsAt + count * 4, count) : undefined;
-    return { count, market, enums, ...columns(buffer, data, count, POSITION_COLUMNS),
-      ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
-      id: (i) => ids ? requiredString(this, ids[i]) : undefined };
+    requireEnd(section, idsAt + count * 8);
+    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const enums = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
+    const ids = new Uint32Array(buffer, idsAt, count);
+    const symbols = new Uint32Array(buffer, idsAt + count * 4, count);
+    const values = columns(buffer, data, count, POSITION_COLUMNS);
+    // NaN is the packed encoding for a nullable/optional number. Display policy
+    // (finite/positive/zero) belongs to the native producer, not this decoder.
+    const optional = key => Array.from(values[key], value => {
+      if (Number.isNaN(value)) return undefined;
+      if (!Number.isFinite(value)) throw new Error(`invalid Position ${key}`);
+      return value;
+    });
+    const native = (key, bit) => Array.from(values[key], (value, i) => {
+      if (!(enums[i] & (1 << bit))) return undefined;
+      if (!Number.isFinite(value)) throw new Error(`invalid Position ${key}`);
+      return value;
+    });
+    for (const key of ['leverage', 'unrealizedPnl']) {
+      if (values[key].some(value => !Number.isFinite(value))) throw new Error(`invalid Position ${key}`);
+    }
+    const liquidationPrice = Array.from(values.liquidationPrice, value => {
+      if (Number.isNaN(value)) return null;
+      if (!Number.isFinite(value) || value <= 0) throw new Error('invalid Position liquidationPrice');
+      return value;
+    });
+    return { count, market, enums, ...values,
+      liquidationPrice,
+      realizedPnl: optional('realizedPnl'), marginSize: optional('marginSize'),
+      lastUpdate: optional('lastUpdate'), contractsNative: native('contractsNative', 24),
+      unrealizedPnlNative: native('unrealizedPnlNative', 25),
+      symbol: i => requiredString(this, symbols[i]),
+      id: i => requiredString(this, ids[i]) };
   }
 
   balance() {

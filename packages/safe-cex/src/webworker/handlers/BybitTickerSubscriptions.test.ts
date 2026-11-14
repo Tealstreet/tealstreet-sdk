@@ -6,6 +6,12 @@ import { BybitSpotExchange } from '../../__tests__/reference/bybit/bybitspot.exc
 import { DefaultStore } from '../../store/store.base';
 import { Market } from '../../types';
 
+const market = (symbol: string, quote: string): Market => ({
+  id: symbol, symbol, base: '', quote, active: true,
+  precision: { amount: 1, price: 1 },
+  limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
+});
+
 const makeOptions = (activeTickerSymbols: string[] = []) => ({
   key: '',
   secret: '',
@@ -33,9 +39,9 @@ describe('Bybit ticker subscription symbol filtering', () => {
   it('filters Bybit linear symbols to active ticker hints', () => {
     const store = new DefaultStore();
     seedMarkets(store, [
-      { symbol: 'BTCUSDT', quote: 'USDT' } as Market,
-      { symbol: 'ETHUSDT', quote: 'USDT' } as Market,
-      { symbol: 'BTCUSD', quote: 'USD' } as Market,
+      market('BTCUSDT', 'USDT'),
+      market('ETHUSDT', 'USDT'),
+      market('BTCUSD', 'USD'),
     ]);
 
     const exchange = new BybitExchange('bybit', makeOptions(['BTCUSDT']), store);
@@ -46,8 +52,8 @@ describe('Bybit ticker subscription symbol filtering', () => {
   it('falls back to full category list when hints do not match any Bybit symbols', () => {
     const store = new DefaultStore();
     seedMarkets(store, [
-      { symbol: 'BTCUSDT', quote: 'USDT' } as Market,
-      { symbol: 'ETHUSDT', quote: 'USDT' } as Market,
+      market('BTCUSDT', 'USDT'),
+      market('ETHUSDT', 'USDT'),
     ]);
 
     const exchange = new BybitExchange('bybit', makeOptions(['NOT_REAL']), store);
@@ -58,8 +64,8 @@ describe('Bybit ticker subscription symbol filtering', () => {
   it('filters Bybit spot symbols to active ticker hints', () => {
     const store = new DefaultStore();
     seedMarkets(store, [
-      { symbol: 'BTCUSDT', quote: 'USDT' } as Market,
-      { symbol: 'ETHUSDT', quote: 'USDT' } as Market,
+      market('BTCUSDT', 'USDT'),
+      market('ETHUSDT', 'USDT'),
     ]);
 
     const exchange = new BybitSpotExchange('bybitspot', makeOptions(['ETHUSDT']), store);
@@ -70,9 +76,9 @@ describe('Bybit ticker subscription symbol filtering', () => {
   it('filters Bybit inverse symbols to active ticker hints', () => {
     const store = new DefaultStore();
     seedMarkets(store, [
-      { symbol: 'BTCUSD', quote: 'USD' } as Market,
-      { symbol: 'ETHUSD', quote: 'USD' } as Market,
-      { symbol: 'BTCUSDT', quote: 'USDT' } as Market,
+      market('BTCUSD', 'USD'),
+      market('ETHUSD', 'USD'),
+      market('BTCUSDT', 'USDT'),
     ]);
 
     const exchange = new BybitInverseExchange('bybitinverse', makeOptions(['ETHUSD']), store);
@@ -83,8 +89,8 @@ describe('Bybit ticker subscription symbol filtering', () => {
   it('Bybit linear does not dynamically update ticker topics (subscribes to all on connect)', () => {
     const store = new DefaultStore();
     seedMarkets(store, [
-      { symbol: 'BTCUSDT', quote: 'USDT' } as Market,
-      { symbol: 'ETHUSDT', quote: 'USDT' } as Market,
+      market('BTCUSDT', 'USDT'),
+      market('ETHUSDT', 'USDT'),
     ]);
     const exchange = new BybitExchange('bybit', makeOptions(['BTCUSDT']), store);
     const ws = exchange.publicWebsocket;
@@ -103,8 +109,8 @@ describe('Bybit ticker subscription symbol filtering', () => {
   it('adds Bybit spot ticker topics at runtime', () => {
     const store = new DefaultStore();
     seedMarkets(store, [
-      { symbol: 'BTCUSDT', quote: 'USDT' } as Market,
-      { symbol: 'ETHUSDT', quote: 'USDT' } as Market,
+      market('BTCUSDT', 'USDT'),
+      market('ETHUSDT', 'USDT'),
     ]);
     const exchange = new BybitSpotExchange('bybitspot', makeOptions(['BTCUSDT']), store);
     const ws = exchange.publicWebsocket;
@@ -121,7 +127,7 @@ describe('Bybit ticker subscription symbol filtering', () => {
 
   it('adds Bybit inverse ticker topics at runtime', () => {
     const store = new DefaultStore();
-    seedMarkets(store, [{ symbol: 'BTCUSD', quote: 'USD' } as Market, { symbol: 'ETHUSD', quote: 'USD' } as Market]);
+    seedMarkets(store, [market('BTCUSD', 'USD'), market('ETHUSD', 'USD')]);
     const exchange = new BybitInverseExchange('bybitinverse', makeOptions(['BTCUSD']), store);
     const ws = exchange.publicInverseWebsocket;
     ws.topics.tickers = ['tickers.BTCUSD'];
@@ -138,8 +144,8 @@ describe('Bybit ticker subscription symbol filtering', () => {
   it('Bybit linear ignores setActiveTickerSymbols while disconnected', () => {
     const store = new DefaultStore();
     seedMarkets(store, [
-      { symbol: 'BTCUSDT', quote: 'USDT' } as Market,
-      { symbol: 'ETHUSDT', quote: 'USDT' } as Market,
+      market('BTCUSDT', 'USDT'),
+      market('ETHUSDT', 'USDT'),
     ]);
     const exchange = new BybitExchange('bybit', makeOptions(['BTCUSDT']), store);
     const ws = exchange.publicWebsocket;

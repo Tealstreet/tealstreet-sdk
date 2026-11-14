@@ -20,6 +20,7 @@ const betaVenues = Object.freeze({
   bitget: { family: 'bitget' },
   bitgetinverse: { family: 'bitget' },
   bitgetusdc: { family: 'bitget' },
+  bitrue: { family: 'bitrue' },
   bitunix: { family: 'bitunix' },
   blofin: { family: 'blofin' },
   bybit: { family: 'bybit' },

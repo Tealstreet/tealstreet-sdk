@@ -4,6 +4,7 @@ members = [
     "algos/*",
     "crypto",
     "engine",
+    "position-math",
     "hosts/candle-server",
     "hosts/native",
     "hosts/remote-signer",
@@ -16,6 +17,7 @@ members = [
     "safe-cex-num",
     "safe-cex-types",
     "venues/*",
+    "venues/txflow/public-wire",
 ]
 # A bare `cargo build|test` never unifies the candle-cache serde_json features
 # into the port; those crates build only with `-p`.
@@ -28,6 +30,7 @@ default-members = [
     "hosts/wasm",
     "registry",
     "venues/*",
+    "venues/txflow/public-wire",
 ]
 
 [workspace.package]
@@ -53,6 +56,7 @@ js-sys = "0.3.106"
 # Internal
 safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
+safe-cex-position-math = { path = "position-math" }
 safe-cex-venues = { path = "registry", default-features = false }
 safe-cex-venue-binance = { path = "venues/binance" }
 safe-cex-venue-bitrue = { path = "venues/bitrue" }
@@ -108,6 +112,10 @@ all = { level = "deny", priority = -1 }
 
 [profile.dev]
 debug = "line-tables-only"
+
+# Native fixtures sign thousands of JWTs; debug curve arithmetic dominates test time.
+[profile.test.package.curve25519-dalek]
+opt-level = 3
 
 [profile.release]
 lto = "fat"

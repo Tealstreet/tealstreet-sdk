@@ -7,7 +7,7 @@ import { fixOrderly } from './known-ts-fixes-orderly.mjs';
 import { fixBitrue } from './known-ts-fixes-bitrue.mjs';
 import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { fixPositionMargins } from './margin-expectation.mjs';
-import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { replayVenueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { withMexcMiniTickerSubscription } from './mexc-mini-subscription.mjs';
 import { expectedKucoinRequests } from './kucoin-request-contracts.mjs';
@@ -22,7 +22,7 @@ const instrumentRows = tapeRecords
 const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 
 
-  const venue = venueOf(values.venue);
+  const venue = replayVenueOf(values.venue);
 const KNOWN_TS_FIXES = {
   // KuCoin Spot: emit each native execution once even across replay, preserve
   // newer private state across stale REST snapshots, and retain good orders

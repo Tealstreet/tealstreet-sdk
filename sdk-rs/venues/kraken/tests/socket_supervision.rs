@@ -329,23 +329,565 @@ fn spot_private_flapping_socket_backs_off_although_each_token_subscribes() {
 }
 
 #[test]
-fn futures_public_pings_every_fifteen_seconds_and_silence_retires_at_forty_five() {
+fn futures_public_uses_heartbeat_and_silence_retires_at_twenty_seconds() {
     pings_and_idle_timeout(
         futures(true, PublicFeedPolicy::Direct),
         noop,
-        15_000.0,
-        45_000.0,
+        f64::INFINITY,
+        20_000.0,
     );
 }
 
 #[test]
-fn futures_private_sends_no_ping_and_silence_retires_at_sixty() {
+fn futures_private_uses_heartbeat_and_silence_retires_at_twenty_seconds() {
     pings_and_idle_timeout(
         futures(false, PublicFeedPolicy::Direct),
         authenticate,
         f64::INFINITY,
-        60_000.0,
+        20_000.0,
     );
+}
+
+#[test]
+fn futures_subscribe_to_heartbeat_on_every_open_before_private_auth() {
+    for public in [true, false] {
+        let mut h = futures(public, PublicFeedPolicy::Direct);
+        for _ in 0..2 {
+            let socket = h.open();
+            assert!(
+                h.sent.iter().any(|(s, text)| *s == socket
+                    && text == r#"{"event":"subscribe","feed":"heartbeat"}"#)
+            );
+            let delay = h.close(socket);
+            h.wait(delay);
+        }
+    }
+}
+
+#[test]
+fn futures_heartbeat_and_expected_payloads_keep_public_and_private_sockets_alive() {
+    for public in [true, false] {
+        let mut h = futures(public, PublicFeedPolicy::Direct);
+        let socket = h.open();
+        if !public {
+            authenticate(&mut h, socket);
+        }
+        for _ in 0..12 {
+            h.wait(10_000.);
+            h.message(socket, r#"{"feed":"heartbeat","time":1700000000000}"#);
+            if public {
+                ticker(&mut h, socket, "PF_XBTUSD");
+                ticker(&mut h, socket, "PF_ETHUSD");
+            }
+        }
+        assert!(!h.closed.contains(&socket));
+        assert_eq!(h.pings(socket), 0, "Futures rejects JSON event:ping");
+    }
+}
+
+#[derive(Debug)]
+struct Recovery {
+    first_frame_ms: f64,
+    data_ms: f64,
+    redial_ms: f64,
+}
+
+fn initial_private_payloads(h: &mut H<Kraken>, socket: SocketId) {
+    for text in [
+        r#"{"feed":"fills_snapshot","fills":[]}"#,
+        r#"{"feed":"open_orders_snapshot","orders":[]}"#,
+        r#"{"feed":"open_positions_snapshot","positions":[]}"#,
+    ] {
+        h.message(socket, text);
+    }
+}
+
+fn quiet_window_execution(simulate_gap: bool) -> (u32, u32, f64, f64) {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    let before = h.sent.len();
+    for _ in 0..30 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    let unsubscribed = h.sent[before..].iter().any(|(s, text)| {
+        *s == socket
+            && text.contains(r#""event":"unsubscribe""#)
+            && text.contains(r#""feed":"fills""#)
+    });
+    h.message(socket, &format!(r#"{{"feed":"open_orders","order":{{"instrument":"PF_XBTUSD","order_id":"quiet-order","qty":2,"filled":0,"type":"limit","direction":0,"limit_price":100,"last_update_time":{}}}}}"#, h.now));
+    h.now += 1.;
+    let fill = format!(
+        r#"{{"fill_id":"quiet-window-fill","order_id":"quiet-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"remaining_order_qty":1.5,"time":{}}}"#,
+        h.now
+    );
+    // The venue sends an execution during an unsubscribe gap in the replacement
+    // snapshot; an uninterrupted subscription receives the same execution live.
+    let feed = if simulate_gap && unsubscribed {
+        "fills_snapshot"
+    } else {
+        "fills"
+    };
+    h.message(socket, &format!(r#"{{"feed":"{feed}","fills":[{fill}]}}"#));
+    let first = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    let order = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .find(|order| order.id == "quiet-order")
+        .unwrap();
+    let progress = (order.filled, order.remaining);
+    h.message(socket, &format!(r#"{{"feed":"fills","fills":[{fill}]}}"#));
+    let duplicate = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    (first, duplicate, progress.0, progress.1)
+}
+
+#[test]
+fn futures_execution_during_the_quiet_probe_window_is_not_lost() {
+    let (first, duplicate, filled, remaining) = quiet_window_execution(true);
+    assert_eq!(first, 1, "a quiet-window execution must emit once");
+    assert_eq!(duplicate, 0, "a replay must not emit twice");
+    assert_eq!(filled, 0.5);
+    assert_eq!(remaining, 1.5);
+}
+
+#[test]
+fn futures_live_execution_control_at_the_quiet_window_emits_once() {
+    assert_eq!(quiet_window_execution(false), (1, 0, 0.5, 1.5));
+}
+
+fn reconnect_execution_delivery(snapshot_first: bool) -> (u32, u32, f64) {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let old = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, old);
+    h.wait(10_000.);
+    heartbeat(&mut h, old);
+    let last_live = h.now;
+    let _ = h.engine.take_frame(h.now);
+    h.wait(20_000.);
+    assert!(h.closed.contains(&old));
+    let executed_at = h.now + 1.;
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(old, replacement);
+    h.message(
+        replacement,
+        r#"{"event":"challenge","message":"fresh-execution-recovery"}"#,
+    );
+    for feed in ["fills", "open_orders", "open_positions"] {
+        h.message(
+            replacement,
+            &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+        );
+    }
+    assert!(executed_at > last_live && executed_at < h.now);
+    h.message(replacement, &format!(r#"{{"feed":"open_orders_snapshot","orders":[{{"instrument":"PF_XBTUSD","order_id":"reconnect-order","qty":1.5,"filled":0.5,"type":"limit","direction":0,"limit_price":100,"last_update_time":{executed_at}}}]}}"#));
+    let _ = h.engine.take_frame(h.now);
+    let fill = format!(
+        r#"{{"fill_id":"new-offline-execution","order_id":"reconnect-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"remaining_order_qty":1.5,"time":{executed_at}}}"#
+    );
+    let feed = if snapshot_first {
+        "fills_snapshot"
+    } else {
+        "fills"
+    };
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"{feed}","fills":[{fill}]}}"#),
+    );
+    let first = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    h.now += 1.;
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills","fills":[{fill}]}}"#),
+    );
+    let replay = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    let remaining = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .find(|order| order.id == "reconnect-order")
+        .unwrap()
+        .remaining;
+    println!(
+        "RECONNECT snapshot_first={snapshot_first} first={first} replay={replay} remaining={remaining}"
+    );
+    (first, replay, remaining)
+}
+
+#[test]
+fn futures_reconnect_snapshot_execution_emits_once() {
+    assert_eq!(reconnect_execution_delivery(true), (1, 0, 1.5));
+}
+
+#[test]
+fn futures_reconnect_live_execution_control_emits_once() {
+    assert_eq!(reconnect_execution_delivery(false), (1, 0, 1.5));
+}
+
+fn review_reconnect_boundary(offset: f64) -> (u32, u32) {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let old = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, old);
+    h.wait(100.);
+    let emitted_at = h.now;
+    let emitted = format!(
+        r#"{{"fill_id":"review-earlier","order_id":"review-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"time":{emitted_at}}}"#
+    );
+    h.message(old, &format!(r#"{{"feed":"fills","fills":[{emitted}]}}"#));
+    assert_eq!(h.engine.take_frame(h.now).map_or(0, support::fill_count), 1);
+    h.wait(20_000.);
+    assert!(h.closed.contains(&old));
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(old, replacement);
+    authenticate(&mut h, replacement);
+    let _ = h.engine.take_frame(h.now);
+    let time = emitted_at + offset;
+    assert!(time > support::NOW);
+    let unseen = format!(
+        r#"{{"fill_id":"review-unseen","order_id":"review-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"time":{time}}}"#
+    );
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{emitted},{unseen}]}}"#),
+    );
+    let first = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{unseen},{emitted}]}}"#),
+    );
+    assert_eq!(
+        h.engine.take_frame(h.now).map_or(0, support::fill_count),
+        0,
+        "snapshot replay must not re-emit either execution"
+    );
+    h.now += 1.;
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills","fills":[{emitted},{unseen}]}}"#),
+    );
+    let replay = h.engine.take_frame(h.now).map_or(0, support::fill_count);
+    println!("REVIEW offset={offset} snapshot_first={first} live_replay={replay}");
+    (first, replay)
+}
+
+#[test]
+fn review_reconnect_unseen_same_timestamp() {
+    assert_eq!(review_reconnect_boundary(0.), (1, 0));
+}
+
+#[test]
+fn review_reconnect_unseen_older_timestamp() {
+    assert_eq!(review_reconnect_boundary(-1.), (1, 0));
+}
+
+#[test]
+fn review_reconnect_unseen_newer_timestamp_control() {
+    assert_eq!(review_reconnect_boundary(1.), (1, 0));
+}
+
+#[test]
+fn futures_reconnect_recovers_if_the_initial_fill_snapshot_never_arrived() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let old = ready_socket(&mut h, authenticate);
+    // The socket dies before it can establish startup fill history.
+    h.wait(20_000.);
+    assert!(h.closed.contains(&old));
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(old, replacement);
+    authenticate(&mut h, replacement);
+    let _ = h.engine.take_frame(h.now);
+    let fill = r#"{"fill_id":"missed-startup","order_id":"new-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true}"#;
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills_snapshot","fills":[{fill}]}}"#),
+    );
+    assert_eq!(h.engine.take_frame(h.now).map_or(0, support::fill_count), 1);
+    h.message(
+        replacement,
+        &format!(r#"{{"feed":"fills","fills":[{fill}]}}"#),
+    );
+    assert_eq!(h.engine.take_frame(h.now).map_or(0, support::fill_count), 0);
+}
+
+fn ticker(h: &mut H<Kraken>, socket: SocketId, symbol: &str) {
+    h.message(
+        socket,
+        &format!(r#"{{"feed":"ticker","product_id":"{symbol}","last":125}}"#),
+    );
+}
+
+fn heartbeat(h: &mut H<Kraken>, socket: SocketId) {
+    h.message(socket, r#"{"feed":"heartbeat","time":1700000000000}"#);
+}
+
+#[test]
+fn futures_stalled_ticker_recovers_despite_heartbeat_and_another_live_symbol() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    ticker(&mut h, socket, "PF_XBTUSD");
+    ticker(&mut h, socket, "PF_ETHUSD");
+    for _ in 0..3 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_ETHUSD");
+    }
+    assert!(
+        h.closed.contains(&socket),
+        "a busy sibling and heartbeat cannot mask XBT ticker silence"
+    );
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(replacement, socket);
+    assert!(h.sent.iter().any(|(s, text)| *s == replacement
+        && text.contains(r#""feed":"ticker""#)
+        && text.contains("PF_XBTUSD")));
+    ticker(&mut h, replacement, "PF_XBTUSD");
+}
+
+#[test]
+fn futures_only_live_subscribed_tickers_refresh_their_deadlines() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into()],
+    }));
+    for _ in 0..18 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_XBTUSD");
+    }
+    assert!(
+        !h.closed.contains(&socket),
+        "unsubscribed ETH cannot expire active XBT"
+    );
+    h.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into(), "PF_ETHUSD".into()],
+    }));
+    for _ in 0..2 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_XBTUSD");
+    }
+    assert!(
+        !h.closed.contains(&socket),
+        "new ETH interest gets its own first-payload window"
+    );
+    h.wait(10_000.);
+    heartbeat(&mut h, socket);
+    assert!(
+        h.closed.contains(&socket),
+        "a subscribed ticker that never starts must expire"
+    );
+}
+
+#[test]
+fn futures_empty_ticker_envelopes_do_not_prove_data_progress() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into()],
+    }));
+    ticker(&mut h, socket, "PF_XBTUSD");
+    for _ in 0..3 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        h.message(socket, r#"{"feed":"ticker","product_id":"PF_XBTUSD"}"#);
+    }
+    assert!(h.closed.contains(&socket));
+}
+
+#[test]
+fn futures_book_silence_repairs_while_tickers_and_heartbeat_are_live() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "PF_XBTUSD".into(),
+    }));
+    h.message(socket, r#"{"feed":"book_snapshot","product_id":"PF_XBTUSD","seq":1,"bids":[{"price":99,"qty":2}],"asks":[]}"#);
+    let before = h.sent.len();
+    for _ in 0..13 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+        ticker(&mut h, socket, "PF_XBTUSD");
+        ticker(&mut h, socket, "PF_ETHUSD");
+    }
+    assert!(!h.closed.contains(&socket));
+    for event in ["unsubscribe", "subscribe"] {
+        assert!(h.sent[before..].iter().any(|(s, text)| *s == socket
+            && text.contains(&format!(r#""event":"{event}""#))
+            && text.contains(r#""feed":"book""#)));
+    }
+}
+
+#[test]
+fn futures_quiet_private_feeds_keep_their_live_subscriptions() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    let before = h.sent.len();
+    for _ in 0..180 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    assert!(
+        !h.closed.contains(&socket),
+        "quiet private feeds must not cause a reconnect"
+    );
+    assert_eq!(
+        h.sent.len(),
+        before,
+        "quiet private feeds must not unsubscribe or resubscribe"
+    );
+}
+
+#[test]
+fn futures_quiet_private_socket_still_recovers_when_heartbeats_stop() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    initial_private_payloads(&mut h, socket);
+    for _ in 0..30 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    assert!(!h.closed.contains(&socket));
+    h.wait(20_000.);
+    assert!(h.closed.contains(&socket));
+    h.wait(1_000.);
+    let replacement = h.open();
+    assert_ne!(replacement, socket);
+    authenticate(&mut h, replacement);
+    for feed in ["fills", "open_orders", "open_positions"] {
+        assert!(h.sent.iter().any(|(s, text)| *s == replacement
+            && text.contains(r#""event":"subscribe""#)
+            && text.contains(&format!(r#""feed":"{feed}""#))));
+    }
+}
+
+#[test]
+fn futures_late_ticker_after_a_timer_jump_cannot_rescue_an_expired_feed() {
+    let mut h = futures(true, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    for _ in 0..2 {
+        h.wait(10_000.);
+        heartbeat(&mut h, socket);
+    }
+    h.now += 10_000.;
+    ticker(&mut h, socket, "PF_XBTUSD");
+    assert!(
+        h.closed.contains(&socket),
+        "a late ticker must not reset the expired data clock before its callback"
+    );
+}
+
+fn wake_recovery(public: bool, sleep_ms: f64) -> Recovery {
+    let mut h = futures(public, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    if public {
+        h.event(Event::Command(Command::SubscribeOrderBook {
+            symbol: "PF_XBTUSD".into(),
+        }));
+    } else {
+        authenticate(&mut h, socket);
+        initial_private_payloads(&mut h, socket);
+    }
+    h.message(socket, r#"{"feed":"heartbeat","time":1700000000000}"#);
+    let sockets = h.sockets.len();
+    // Timers do not run while asleep. Deliver overdue callbacks at the new time.
+    h.now += sleep_ms;
+    let wake = h.now;
+    h.advance(wake);
+    while h.sockets.len() == sockets {
+        let next = h
+            .timers
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp)
+            .unwrap();
+        assert!(next < wake + 65_000., "recovery must remain bounded");
+        h.advance(next);
+    }
+    assert!(h.closed.contains(&socket));
+    let redial_ms = h.now - wake;
+    h.wait(50.); // Simulated websocket handshake.
+    let replacement = h.open();
+    assert_ne!(replacement, socket);
+    h.wait(50.); // Simulated first server response.
+    let first_frame_ms = h.now - wake;
+    if public {
+        for feed in ["ticker", "book"] {
+            assert!(
+                h.sent
+                    .iter()
+                    .any(|(s, text)| *s == replacement
+                        && text.contains(&format!(r#""feed":"{feed}""#))),
+                "public interest must be replayed: {feed}"
+            );
+        }
+        h.message(
+            replacement,
+            r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":125}"#,
+        );
+        assert_eq!(h.engine.store().tickers()[0].last, 125.);
+    } else {
+        assert!(
+            h.sent
+                .iter()
+                .any(|(s, text)| *s == replacement && text.contains(r#""event":"challenge""#))
+        );
+        h.message(
+            replacement,
+            r#"{"event":"challenge","message":"fresh-wake-challenge"}"#,
+        );
+        h.wait(50.); // Challenge signing/subscription round trip.
+        for feed in ["fills", "open_orders", "open_positions"] {
+            assert!(h.sent.iter().any(|(s, text)| *s == replacement
+                && text.contains(&format!(r#""feed":"{feed}""#))
+                && text.contains("fresh-wake-challenge")));
+            h.message(
+                replacement,
+                &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+            );
+        }
+        h.wait(50.); // Initial account payloads, without an account reload.
+        initial_private_payloads(&mut h, replacement);
+    }
+    Recovery {
+        first_frame_ms,
+        data_ms: h.now - wake,
+        redial_ms,
+    }
+}
+
+#[test]
+fn futures_wake_recovery_measurement() {
+    for sleep_ms in [35_000., 14_400_000.] {
+        for public in [true, false] {
+            let recovery = wake_recovery(public, sleep_ms);
+            println!(
+                "WAKE sleep_ms={sleep_ms} channel={} {recovery:?}",
+                if public { "public" } else { "private" }
+            );
+            assert!(recovery.first_frame_ms >= recovery.redial_ms);
+            assert!(recovery.data_ms >= recovery.first_frame_ms);
+        }
+    }
+}
+
+#[test]
+fn futures_idle_recovery_finishes_within_five_seconds_of_wake() {
+    for public in [true, false] {
+        let recovery = wake_recovery(public, 35_000.);
+        assert!(
+            recovery.data_ms < 5_000.,
+            "wake recovery: public={public} {recovery:?}"
+        );
+    }
 }
 
 #[test]
@@ -378,7 +920,15 @@ fn never_opened_sockets_expire_at_their_connect_deadline() {
 
 #[test]
 fn stable_traffic_resets_backoff_on_every_socket() {
-    stable_traffic_resets_backoff(futures(true, PublicFeedPolicy::Direct), noop, FUTURES_PONG);
+    let mut public = futures(true, PublicFeedPolicy::Direct);
+    public.event(Event::Command(Command::SetTickerSymbols {
+        symbols: vec!["PF_XBTUSD".into()],
+    }));
+    stable_traffic_resets_backoff(
+        public,
+        noop,
+        r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":125}"#,
+    );
     stable_traffic_resets_backoff(
         futures(false, PublicFeedPolicy::Direct),
         authenticate,

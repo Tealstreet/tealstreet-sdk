@@ -90,8 +90,6 @@ describe('utils.ts', () => {
       utils.dumpLogQueue();
       await vi.advanceTimersByTimeAsync(0);
       expect(uploadedLines()).toEqual([
-        'auth0|one username="Old" [test-session-key-123]: Before rename',
-        'disrupt:auth0|two username="New" [test-session-key-123]: After switch',
         ' [test-session-key-123]: After logout',
       ]);
     });

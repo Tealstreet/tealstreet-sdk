@@ -68,7 +68,7 @@ const toNumber = (value: unknown) => {
 };
 
 export const mapWooHistoricalOrder = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   resolveSymbol: (marketId: string) => string | undefined,
 ): HistoricalOrder | null => {
   const id = String(row.order_id ?? '');

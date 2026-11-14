@@ -1,10 +1,15 @@
 //! CLOB V2 writes: preflight whole batches, serialize exact signed bodies, never retry writes.
+//! Dispatched HTTP 429/408/5xx remain Unknown, including cancel-and-replace legs;
+//! the caller must Check Open Orders, and native diagnostics cannot prove refusal.
 //! Oracle: official clob-client-v2 v1.1.0 src/types/ordersV2.ts and client.ts.
 use crate::account::OrderRow;
 use crate::sign::{self, OrderSigning};
 use crate::{Pending, Polymarket, encode, success};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, UNKNOWN_OUTCOME_TEXT, VenueError,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -73,6 +78,28 @@ struct Job {
     effective: bool,
     /// An amend's symbol: its replacement's refusal leaves the order gone.
     replaces: Option<String>,
+    writes: Option<WritePlan>,
+    next_write: usize,
+    pending_write: Option<usize>,
+    unknown_request: Option<String>,
+}
+impl Job {
+    // Optional reporting never authorizes, blocks or repeats a native write.
+    fn record(&mut self, cx: &mut Cx<'_, Pending>, result: ElementResult) {
+        let Some(index) = self.pending_write.take() else {
+            return;
+        };
+        if let Some(writes) = &mut self.writes
+            && writes.record(index, result).is_err()
+        {
+            self.writes = None;
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                safe_cex_engine::log::code::REQUEST_FAILED,
+                "Polymarket write outcome reporting is unavailable",
+            );
+        }
+    }
 }
 #[derive(Default)]
 pub struct Trading {
@@ -110,8 +137,8 @@ struct Envelope<'a> {
 #[serde(rename_all = "camelCase")]
 struct PlacementAck<'a> {
     success: bool,
-    #[serde(rename = "orderID")]
-    order_id: &'a str,
+    #[serde(default, rename = "orderID")]
+    order_id: Option<&'a str>,
     #[serde(default)]
     error_msg: &'a str,
     #[serde(default)]
@@ -121,6 +148,41 @@ struct PlacementAck<'a> {
 struct CancelAck {
     canceled: Vec<String>,
     not_canceled: HashMap<String, String>,
+}
+
+fn decimal_size(amount: f64, precision: f64) -> Result<f64, String> {
+    let digits = if precision.is_nan() {
+        0.0
+    } else {
+        precision.trunc()
+    };
+    if !(0.0..=100.0).contains(&digits) {
+        return Err("Invalid Polymarket amount decimal precision".into());
+    }
+    let digits = digits as usize;
+    let bits = amount.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32;
+    let significand = (bits & ((1u64 << 52) - 1)) | if exponent == 0 { 0 } else { 1u64 << 52 };
+    let exponent = if exponent == 0 {
+        -1074
+    } else {
+        exponent - 1075
+    };
+    // Formatting rounds binary floats exactly but uses ties-to-even. TS toFixed
+    // chooses the larger positive value at exact ties; powers of five are odd,
+    // so the reduced binary exponent identifies decimal midpoints without scaling.
+    let midpoint = exponent + significand.trailing_zeros() as i32 + digits as i32 == -1;
+    let round = |amount: f64| {
+        format!("{amount:.digits$}")
+            .parse::<f64>()
+            .map_err(|_| "Invalid Polymarket rounded amount".to_owned())
+    };
+    let rounded = round(amount)?;
+    if midpoint && rounded < amount {
+        round(amount.next_up())
+    } else {
+        Ok(rounded)
+    }
 }
 
 impl Polymarket {
@@ -170,15 +232,16 @@ impl Polymarket {
         let price = options.price.ok_or("Polymarket limit price is required")?;
         if !options.amount.is_finite()
             || options.amount <= 0.0
-            || options.amount > market.limits.amount.max
             || !price.is_finite()
             || !(0.0..=1.0).contains(&price)
         {
             return Err("Polymarket order amount is outside market limits".into());
         }
         let price = safe_cex_engine::num::adjust(price, metadata.tick_size);
-        let size = safe_cex_engine::num::adjust(options.amount, 0.01);
-        if size < market.limits.amount.min || size > market.limits.amount.max {
+        // Legacy TS polymarket.exchange.ts:660 rounds decimal digits and sends one order,
+        // including above-max sizes; the venue owns that refusal.
+        let size = decimal_size(options.amount, market.precision.amount)?;
+        if size <= 0.0 || size < market.limits.amount.min {
             return Err("Polymarket rounded amount is outside market limits".into());
         }
         let side = u8::from(options.side == OrderSide::Sell);
@@ -324,25 +387,83 @@ impl Polymarket {
         command: CommandId,
         result: Result<String, VenueError>,
     ) {
-        if let Some(job) = self.trading.jobs.remove(&command) {
-            for id in job.locks {
-                self.trading.locked.remove(&id);
+        if let Some(mut job) = self.trading.jobs.remove(&command) {
+            for id in &job.locks {
+                self.trading.locked.remove(id);
             }
-            if let Some(scope) = job.scope {
-                self.trading.scopes.remove(&scope);
+            if let Some(scope) = &job.scope {
+                self.trading.scopes.remove(scope);
             }
             match result {
                 Ok(result) => cx.done(command, result),
                 Err(mut error) => {
+                    let pending = job.pending_write;
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    job.record(
+                        cx,
+                        if unknown {
+                            ElementResult::Unknown {
+                                error: Box::new(error.clone()),
+                            }
+                        } else {
+                            ElementResult::NotSent {
+                                error: Some(Box::new(error.clone())),
+                            }
+                        },
+                    );
+                    if unknown {
+                        cx.command_error(command, UNKNOWN_OUTCOME_TEXT);
+                        let mut fields = vec![
+                            ("command", command.into()),
+                            ("placedCount", (job.ids.len() as f64).into()),
+                            (
+                                "unknownRequest",
+                                job.unknown_request
+                                    .clone()
+                                    .unwrap_or_else(|| "replacement state read".into())
+                                    .into(),
+                            ),
+                        ];
+                        if let Some(index) = pending {
+                            fields.push(("elementIndex", (index as f64).into()));
+                        }
+                        cx.event(
+                            safe_cex_engine::Level::Warn,
+                            "order.outcome_unknown",
+                            UNKNOWN_OUTCOME_TEXT,
+                            fields,
+                        );
+                    }
                     // A later refusal after a step took effect cannot mean nothing happened.
                     if (job.effective || !job.ids.is_empty())
                         && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
                     {
                         error.outcome = None;
                     }
+                    if let Some(writes) = &job.writes {
+                        error = writes.attach(error);
+                    }
                     cx.fail(command, error.partial(&job.ids, job.total, job.ids.len()));
                 }
             }
+        }
+    }
+    fn reporting_write(&mut self, command: CommandId, identity: String) {
+        if let Some(job) = self.trading.jobs.get_mut(&command) {
+            job.pending_write = Some(job.next_write);
+            job.next_write += 1;
+            job.unknown_request = Some(identity);
+        }
+    }
+    fn reporting_applied(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        result: ElementResult,
+    ) {
+        if let Some(job) = self.trading.jobs.get_mut(&command) {
+            job.record(cx, result);
+            job.unknown_request = None;
         }
     }
     fn trading_next(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
@@ -359,6 +480,7 @@ impl Polymarket {
             self.trading_finish(cx, command, result);
             return;
         };
+        self.reporting_write(command, format!("place {}", placement.options.symbol));
         // Market tick/activation may change while an earlier batch element is in flight.
         let result = self.prepare(cx, placement.options).and_then(|placement| {
             let body = self.placement_body(cx, &placement)?;
@@ -408,6 +530,12 @@ impl Polymarket {
         if let Some(s) = &scope {
             self.trading.scopes.insert(s.clone());
         }
+        let elements = (0..queue.len().max(1))
+            .map(|index| Element {
+                index,
+                client_order_id: None,
+            })
+            .collect();
         self.trading.jobs.insert(
             command,
             Job {
@@ -419,6 +547,10 @@ impl Polymarket {
                 scope,
                 effective: false,
                 replaces: None,
+                writes: Some(WritePlan::new(elements)),
+                next_write: 0,
+                pending_write: None,
+                unknown_request: None,
             },
         );
         Ok(())
@@ -480,6 +612,7 @@ impl Polymarket {
                         return Ok(());
                     }
                     let body = serde_json::to_string(&ids).map_err(|e| e.to_string())?;
+                    self.reporting_write(command, format!("cancel {}", ids.join(",")));
                     self.signed_request(
                         cx,
                         Method::Delete,
@@ -507,6 +640,7 @@ impl Polymarket {
                             HashSet::new(),
                             Some(String::new()),
                         )?;
+                        self.reporting_write(command, "cancel all".into());
                         self.signed_request(
                             cx,
                             Method::Delete,
@@ -545,6 +679,7 @@ impl Polymarket {
                     }
                     let body = serde_json::to_string(&Scope { asset_id: &token })
                         .map_err(|e| e.to_string())?;
+                    self.reporting_write(command, format!("cancel {symbol}"));
                     self.signed_request(
                         cx,
                         Method::Delete,
@@ -605,6 +740,14 @@ impl Polymarket {
                     )?;
                     if let Some(job) = self.trading.jobs.get_mut(&command) {
                         job.replaces = Some(old.symbol.clone());
+                        job.writes = Some(WritePlan::new(
+                            (0..2)
+                                .map(|index| Element {
+                                    index,
+                                    client_order_id: None,
+                                })
+                                .collect(),
+                        ));
                     }
                     #[derive(Serialize)]
                     struct Cancel<'a> {
@@ -614,6 +757,7 @@ impl Polymarket {
                     let body =
                         serde_json::to_string(&Cancel { id: &id }).map_err(|e| e.to_string())?;
                     let filled = old.filled.max(self.account_filled(&id));
+                    self.reporting_write(command, format!("cancel {id}"));
                     self.signed_request(
                         cx,
                         Method::Delete,
@@ -669,6 +813,7 @@ impl Polymarket {
     ) {
         let command = request.command();
         let placing = matches!(request, Request::Place { .. });
+        let write = !matches!(request, Request::ReplaceRead { .. });
         if !self.trading.jobs.contains_key(&command) {
             return;
         }
@@ -682,24 +827,37 @@ impl Polymarket {
                     let ack: PlacementAck = serde_json::from_str(response.body).map_err(|e| {
                         format!("Invalid Polymarket placement acknowledgement: {e}")
                     })?;
-                    if !ack.success
-                        || ack.order_id.is_empty()
-                        || !ack.error_msg.is_empty()
-                        || !["", "live", "matched", "delayed", "unmatched"].contains(&ack.status)
-                    {
+                    if !ack.success {
                         refused = true;
                         return Err(format!("Polymarket placement rejected: {}", ack.error_msg));
                     }
+                    let order_id = ack.order_id.unwrap_or_default();
+                    if order_id.is_empty()
+                        || !ack.error_msg.is_empty()
+                        || !["", "live", "matched", "delayed", "unmatched"].contains(&ack.status)
+                    {
+                        return Err(format!(
+                            "Invalid Polymarket placement acknowledgement: unproven order identity/status ({})",
+                            ack.error_msg
+                        ));
+                    }
+                    self.reporting_applied(
+                        cx,
+                        command,
+                        ElementResult::Placed {
+                            order_ids: vec![order_id.into()],
+                        },
+                    );
                     if ack.status == "matched" {
                         // "matched" also acknowledges a partially crossing GTC order.
                         // Its remaining quantity requires authoritative order details;
                         // it is never proof that the order is fully filled/terminal.
                         self.account_refresh(cx);
-                    } else if cx.store.order(ack.order_id).is_none() {
+                    } else if cx.store.order(order_id).is_none() {
                         self.account_placed(
                             cx,
                             Order {
-                                id: ack.order_id.into(),
+                                id: order_id.into(),
                                 parent_id: None,
                                 status: OrderStatus::Open,
                                 symbol: placement.options.symbol,
@@ -726,7 +884,7 @@ impl Polymarket {
                         .get_mut(&command)
                         .expect("active job")
                         .ids
-                        .push(ack.order_id.into());
+                        .push(order_id.into());
                     self.trading_next(cx, command);
                 }
                 Request::Cancel { scope, .. } => {
@@ -764,6 +922,18 @@ impl Polymarket {
                             ack.not_canceled
                         ));
                     }
+                    self.reporting_applied(
+                        cx,
+                        command,
+                        ElementResult::Applied {
+                            effect: AppliedEffect::Cancel,
+                            target_order_id: match &scope {
+                                CancelScope::Ids(ids) if ids.len() == 1 => Some(ids[0].clone()),
+                                _ => None,
+                            },
+                            position_key: None,
+                        },
+                    );
                     self.trading_finish(cx, command, Ok("[]".into()));
                 }
                 Request::ReplaceCancel {
@@ -775,6 +945,15 @@ impl Polymarket {
                     {
                         return Err("Polymarket replacement cancellation was not confirmed".into());
                     }
+                    self.reporting_applied(
+                        cx,
+                        command,
+                        ElementResult::Applied {
+                            effect: AppliedEffect::Cancel,
+                            target_order_id: Some(replacement.old.id.clone()),
+                            position_key: None,
+                        },
+                    );
                     replacement.filled = replacement
                         .filled
                         .max(self.account_filled(&replacement.old.id))
@@ -865,12 +1044,16 @@ impl Polymarket {
             }
             Err(error) => {
                 let error = if !(200..300).contains(&response.status) {
-                    http_failure(response.status, error)
+                    if write {
+                        write_failure(response.status, error)
+                    } else {
+                        http_failure(response.status, error)
+                    }
                 } else if before_send {
                     not_sent(error)
                 } else if refused {
                     // An explicit refusal; its messages are not a documented code table.
-                    VenueError::new(error)
+                    VenueError::new(error).outcome(Outcome::Rejected)
                 } else {
                     // A 2xx answer that does not prove what happened.
                     VenueError::new(error).outcome(Outcome::Unknown)
@@ -893,13 +1076,16 @@ impl Polymarket {
         let error = self.note_replacement_lost(request.command(), placing, error);
         self.trading_finish(cx, request.command(), Err(error));
     }
-    /// An amend's replacement failed after its cancel landed: the order no longer rests.
+    /// Normalize uncertainty before describing an amend whose cancel already landed.
     fn note_replacement_lost(
         &self,
         command: CommandId,
         placing: bool,
         mut error: VenueError,
     ) -> VenueError {
+        if error.outcome == Some(Outcome::Unknown) {
+            error = ambiguous_write(error);
+        }
         if placing
             && let Some(job) = self.trading.jobs.get(&command)
             && job.ids.is_empty()
@@ -932,6 +1118,27 @@ pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
             .outcome(Outcome::Rejected),
         _ => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
     }
+}
+
+/// A dispatched write may have executed despite a rate limit or server error.
+/// Retain the native diagnostic separately so it cannot claim definitive refusal
+/// or that a canceled order's replacement is absent. Account reads still use
+/// `http_failure` directly.
+fn write_failure(status: u16, message: String) -> VenueError {
+    let error = http_failure(status, message);
+    if matches!(status, 408 | 429 | 500..) {
+        ambiguous_write(error)
+    } else {
+        error
+    }
+}
+
+fn ambiguous_write(mut error: VenueError) -> VenueError {
+    error
+        .venue_message
+        .get_or_insert_with(|| error.message.into_boxed_str());
+    error.message = UNKNOWN_OUTCOME_TEXT.into();
+    error.outcome(Outcome::Unknown)
 }
 
 /// Refused before any request was sent.

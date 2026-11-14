@@ -166,8 +166,9 @@ describe('delegated signer SDK runtime admission', () => {
   it('keeps unrelated families closed and rejects malformed admitted providers synchronously', () => {
     expect(runsOnRustEngine('bybit', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
     expect(runsOnRustEngine('bitunix', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
-    // Unmigrated control family: Bitrue (Bitunix gained hosted signing in P7; MEXC, WOO and GRVT joined the beta).
-    expect(runsOnRustEngine('bitrue', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(false);
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(runsOnRustEngine('bitrue', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
+    expect(runsOnRustEngine('weex', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(false);
     let error: unknown;
     try {
       setup('binance', { remoteSigner: {} as RemoteSigner });

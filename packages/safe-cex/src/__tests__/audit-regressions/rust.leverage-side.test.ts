@@ -16,6 +16,102 @@ describe('Rust leverage command side boundary', () => {
   const exchanges: RustEngineExchange[] = [];
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
+  it.each([false, true])(
+    'includes settings-only symbols without duplicating live hedge writes (live=%s)',
+    async (live) => {
+      const store = new DefaultStore();
+      const closed = [
+        { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
+        { id: 'ETH-short', symbol: 'ETHUSDT', side: PositionSide.Short, leverage: 7 },
+      ] as Position[];
+      const positions = live
+        ? ([
+            { id: 'BTC-long', symbol: 'BTCUSDT', side: PositionSide.Long, leverage: 3 },
+            { id: 'BTC-short', symbol: 'BTCUSDT', side: PositionSide.Short, leverage: 4 },
+          ] as Position[])
+        : [];
+      store.addOrUpdatePositionsFull([...closed, ...positions]);
+      store.addOrUpdatePositionsFull(positions);
+      const exchange = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
+      exchanges.push(exchange);
+      const command = vi.fn().mockResolvedValue(null);
+      Object.defineProperty(exchange, 'command', { value: command });
+      Object.defineProperty(exchange, 'fetchPositions', { value: async () => store.positions });
+      await exchange.setAllLeverage(8);
+      expect(command.mock.calls.map(([body]) => body)).toEqual([
+        ...positions.map(({ symbol, side }) => ({ op: 'setLeverage', symbol, side, leverage: 8 })),
+        { op: 'setLeverage', symbol: 'ETHUSDT', leverage: 8 },
+      ]);
+      expect(store.positions).toEqual(positions);
+    },
+  );
+
+  it('keeps the account-wide capability on its single native write path', async () => {
+    const store = new DefaultStore();
+    store.addOrUpdatePositionsFull([
+      { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
+    ] as Position[]);
+    store.addOrUpdatePositionsFull([]);
+    const exchange = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
+    exchanges.push(exchange);
+    adoptEngineCapabilities(exchange, { accountLeverage: true });
+    const command = vi.fn().mockResolvedValue(null);
+    const fetchPositions = vi.spyOn(exchange, 'fetchPositions');
+    Object.defineProperty(exchange, 'command', { value: command });
+    await exchange.setAllLeverage(8);
+    expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'setLeverage', symbol: '', leverage: 8 });
+    expect(fetchPositions).not.toHaveBeenCalled();
+  });
+
+  it.each(['read', 'write'] as const)(
+    'drops queued settings writes when login switches during the %s await',
+    async (stage) => {
+      const store = new DefaultStore();
+      store.addOrUpdatePositionsFull([
+        { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
+        { id: 'SOL-long', symbol: 'SOLUSDT', side: PositionSide.Long, leverage: 7 },
+      ] as Position[]);
+      store.addOrUpdatePositionsFull([]);
+      const ownerA = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
+      exchanges.push(ownerA);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const read = vi.fn(async () => {
+        if (stage === 'read') await held;
+        return store.positions;
+      });
+      const commandA = vi.fn(async () => {
+        if (stage === 'write') await held;
+        return null;
+      });
+      Object.defineProperty(ownerA, 'command', { value: commandA });
+      Object.defineProperty(ownerA, 'fetchPositions', { value: read });
+      const pending = ownerA.setAllLeverage(8);
+      await vi.waitFor(() => expect(stage === 'read' ? read : commandA).toHaveBeenCalledOnce());
+      ownerA.dispose();
+      store.reset();
+      store.addOrUpdatePositionsFull([
+        { id: 'XRP-long', symbol: 'XRPUSDT', side: PositionSide.Long, leverage: 3 },
+      ] as Position[]);
+      store.addOrUpdatePositionsFull([]);
+      const ownerB = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
+      exchanges.push(ownerB);
+      const commandB = vi.fn();
+      Object.defineProperty(ownerB, 'command', { value: commandB });
+      release();
+      await pending;
+      expect(commandA).toHaveBeenCalledTimes(stage === 'read' ? 0 : 1);
+      if (stage === 'write')
+        expect(commandA).toHaveBeenCalledWith({ op: 'setLeverage', symbol: 'ETHUSDT', leverage: 8 });
+      expect(commandB).not.toHaveBeenCalled();
+      expect(Object.keys(ownerB.store.positionSettings)).toEqual(['XRP-long']);
+      expect(ownerB.store.positionSettings['XRP-long'].leverage).toBe(3);
+      expect(ownerB.store.positions).toEqual([]);
+    },
+  );
+
   // Venues answering leverage reads from their published rails. BingX, WEEX and
   // Bitget read the venue; their crates test per-leg reads and write fencing.
   const independentVenues: ExchangeName[] = ['mexc', 'phemex'];

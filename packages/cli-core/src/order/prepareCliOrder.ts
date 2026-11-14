@@ -4,7 +4,7 @@ import type { ExchangeName, PlaceOrderOpts } from '@tealstreet/safe-cex/src/type
 import { tradfiPreflightMessage } from '@tealstreet/safe-cex/src/instrument-class/describe';
 import { classifyMarket } from '@tealstreet/safe-cex/src/instrument-class/resolve';
 import { assertMinimumPrice, roundOrderPrice } from '@tealstreet/script-api-core/src/order/orderPricing';
-import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
+import { nativePositionSize, type NativeSizeInputs } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { clampReduceOnlyOrder, prepareOrder } from '@tealstreet/script-api-core/src/order/prepareOrder';
 import { ScriptValidationError } from '@tealstreet/script-api-core/src/order/ScriptValidationError';
 
@@ -77,8 +77,8 @@ export const prepareCliOrders = <T extends { symbol: string; type: PlaceOrderOpt
 ): PlaceOrderOpts[] => orders.map((order) => prepareCliOrder(exchange, order));
 
 /**
- * Round an amend's price to the venue tick. `bump` and `move` shift a resting
- * order's price by an offset and send the result raw.
+ * Round and validate a price for amends and order-price notional sizing.
+ * `bump` and `move` shift a resting order's price by an offset and send the result raw.
  *
  * Deliberately price-only: `roundOrderSizeToNearest` is the amend SIZE rule
  * and neither command touches size, so pulling it in here would invite a
@@ -125,11 +125,13 @@ export const prepareCliAmendPrice = (exchange: ExchangeLike, symbol: string, pri
  * The missing-`contractSize` fallback inside `nativePositionSize` is different
  * and stays: there IS a market there, and one-to-one is the rule.
  */
-export const nativeCloseSize = (
-  exchange: ExchangeLike,
-  position: { symbol: string; contracts: number; notional?: number; extra?: { contractsNative?: number } },
-): number => {
+export const nativeCloseSize = (exchange: ExchangeLike, position: NativeSizeInputs & { symbol: string }): number => {
   const market = exchange.store?.markets?.find((m) => m.symbol === position.symbol);
   if (!market) throw new ScriptValidationError(`Market not found for ${position.symbol}`);
-  return nativePositionSize(position, market);
+  const amount = nativePositionSize(position, market);
+  if (amount === null)
+    throw new ScriptValidationError(
+      `Native position size is unknown for ${position.symbol}; refresh the position before closing`,
+    );
+  return amount;
 };
