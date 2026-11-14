@@ -1,7 +1,6 @@
 //! Trusted DELEGATED account construction; socket handover is a separate step.
 use crate::accounts::{engine_options, routing_plan};
 use crate::envelope::InitPayload;
-use safe_cex_engine::signing::Provider;
 use serde_json::json;
 use zeroize::Zeroizing;
 
