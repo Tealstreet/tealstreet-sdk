@@ -83,8 +83,11 @@ impl Signer for Capture {
 }
 
 fn provider_rig(read_key: bool) -> (Rig, Arc<Capture>) {
+    provider_rig_for(read_key, "primary")
+}
+fn provider_rig_for(read_key: bool, user: &str) -> (Rig, Arc<Capture>) {
     let mut setup: safe_cex_venues::EngineOptions = serde_json::from_str("{}").unwrap();
-    setup.key = Some(["organizations", "provider-test", "apiKeys", "primary"].join("/"));
+    setup.key = Some(["organizations", "provider-test", "apiKeys", user].join("/"));
     setup.secret = Some(STANDARD.encode([7; 32]));
     if read_key {
         setup.read_credentials = Some(
@@ -368,4 +371,73 @@ fn provider_drb_retired_socket_signature_cannot_authenticate_its_replacement() {
             serde_json::from_str::<Value>(text).unwrap()["method"] == "public/auth",
         _ => false,
     }));
+}
+
+#[test]
+fn provider_drb_delayed_user_a_signature_cannot_authenticate_user_b() {
+    fn pending(r: &mut Rig, signer: &Capture) -> (safe_cex_engine::RequestId, SignRequest) {
+        signer.deferred.store(true, Ordering::Relaxed);
+        r.e.handle(
+            r.now,
+            Event::WsOpened {
+                socket: r.private_socket(),
+            },
+        );
+        r.collect();
+        r.actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::Sign { attempt, work, .. } if work.context.host == "drb.coinbase.com" => {
+                    Some((*attempt, work.clone()))
+                }
+                _ => None,
+            })
+            .unwrap()
+    }
+    let (a, signer_a) = provider_rig_for(false, "user-a");
+    let mut a = Rig::ready_with(a);
+    let (_, work_a) = pending(&mut a, &signer_a);
+    let socket_a = a.private_socket();
+    a.e.handle(
+        a.now,
+        Event::WsClosed {
+            socket: socket_a,
+            code: 1006,
+        },
+    );
+    a.collect();
+    let (b, signer_b) = provider_rig_for(false, "user-b");
+    let mut b = Rig::ready_with(b);
+    let (attempt_b, _) = pending(&mut b, &signer_b);
+    b.e.handle(
+        b.now,
+        Event::Signed {
+            attempt: attempt_b,
+            result: signer_a.run(&work_a),
+        },
+    );
+    b.collect();
+    assert!(
+        !b.actions.iter().any(|a| matches!(a, Action::WsSend { .. })),
+        "cross-user delayed signing must not authenticate the active user"
+    );
+    // A fresh B engine accepts only B's own signing result after the switch.
+    let (fresh_b, fresh_signer) = provider_rig_for(false, "user-b");
+    let mut fresh_b = Rig::ready_with(fresh_b);
+    let (attempt, work) = pending(&mut fresh_b, &fresh_signer);
+    fresh_b.e.handle(
+        fresh_b.now,
+        Event::Signed {
+            attempt,
+            result: fresh_signer.run(&work),
+        },
+    );
+    fresh_b.collect();
+    assert!(
+        fresh_b
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
 }
