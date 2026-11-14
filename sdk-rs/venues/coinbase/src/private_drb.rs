@@ -20,7 +20,7 @@ use safe_cex_engine::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use wire::{position, summary};
+use wire::{order, position, summary};
 
 const CHANNELS: [&str; 3] = [
     "user.changes.future.USDC.100ms",
