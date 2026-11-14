@@ -112,6 +112,26 @@ fn policy(operation: Operation) -> Policy {
         retry: RetryPolicy::Never,
     }
 }
+fn command_root(cx: &mut Cx<'_, Pending>, operation: Operation) -> Option<Context> {
+    // Capture the genuine caller's remaining wait once, before authentication.
+    // Child legs preserve this deadline; neither auth nor a timer renews it.
+    let timeout_ms = match cx.command_wait() {
+        Some(safe_cex_engine::CommandWait::Remaining(ms)) => ms.min(drb::REQUEST_TIMEOUT_MS),
+        Some(safe_cex_engine::CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(operation);
+            return None;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(operation);
+            return None;
+        }
+    };
+    cx.admit_http_command(Policy {
+        timeout_ms,
+        ..policy(operation)
+    })
+    .ok()
+}
 fn invalid(message: impl Into<String>) -> VenueError {
     VenueError::new(message)
         .kind(ErrorKind::InvalidInput)
@@ -377,7 +397,7 @@ impl Coinbase {
         } else {
             Operation::Mutation
         };
-        let Ok(root) = cx.admit_http_command(policy(operation)) else {
+        let Some(root) = command_root(cx, operation) else {
             return None;
         };
         let result = self.drb_calls(cx, command);
@@ -470,7 +490,7 @@ impl Coinbase {
         Ok((calls, collect))
     }
     pub(crate) fn drb_cancel_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        let Ok(root) = cx.admit_http_command(policy(Operation::Mutation)) else {
+        let Some(root) = command_root(cx, Operation::Mutation) else {
             return;
         };
         if self.account.kind == Some(crate::ProductKind::Cfm)

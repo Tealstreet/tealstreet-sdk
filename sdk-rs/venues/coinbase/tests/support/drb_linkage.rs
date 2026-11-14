@@ -270,6 +270,18 @@ fn uncertainty_learned_during_auth_refuses_a_queued_amendment_on_the_instrument(
 }
 
 fn queued_edit_for_refresh(r: &mut Rig, wait: u32) -> HttpRequest {
+    queued_command_for_refresh(
+        r,
+        Command::AmendOrder {
+            command: 90,
+            id: "USDC-123".into(),
+            price: Some(61000.),
+            amount: None,
+        },
+        wait,
+    )
+}
+fn queued_command_for_refresh(r: &mut Rig, command: Command, wait: u32) -> HttpRequest {
     r.subscribe();
     let index = r
         .http
@@ -280,17 +292,7 @@ fn queued_edit_for_refresh(r: &mut Rig, wait: u32) -> HttpRequest {
     r.rpc_error(read, 13009, "synthetic expired session");
     r.now += 1.;
     r.actions.clear();
-    r.e.handle_command(
-        r.now,
-        Command::AmendOrder {
-            command: 90,
-            id: "USDC-123".into(),
-            price: Some(61000.),
-            amount: None,
-        },
-        Some(wait),
-    )
-    .unwrap();
+    r.e.handle_command(r.now, command, Some(wait)).unwrap();
     r.collect();
     let index = r
         .http
@@ -376,5 +378,30 @@ fn auth_wake_cannot_reattribute_an_expired_root_to_a_reused_command_id() {
             ))
             .count(),
         1
+    );
+}
+
+#[test]
+fn auth_wait_for_account_cancel_preserves_the_callers_deadline() {
+    let mut r = Rig::ready();
+    let auth = queued_command_for_refresh(
+        &mut r,
+        Command::Venue {
+            command: 91,
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
+        },
+        5,
+    );
+    r.now += 5.;
+    r.drain_due_timers();
+    assert_eq!(r.command_error(91).kind, Some(ErrorKind::Timeout));
+    assert_eq!(r.command_error(91).outcome, Some(Outcome::NotSent));
+    r.rpc(auth,json!({"access_token":"fixture-refreshed","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
+    r.drain_due_timers();
+    assert!(
+        r.http
+            .iter()
+            .all(|request| !request.url.ends_with("private/cancel_all")),
+        "late authentication cannot release an expired cancellation"
     );
 }
