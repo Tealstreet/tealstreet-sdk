@@ -2095,9 +2095,9 @@ export class RustEngineExchange extends BaseExchange {
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
               method === 'updateOrder' ? decodeWorkerOrderIds(result) : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
-              // Never passed through `command` here, and the hosted server marks no failure as
-              // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
-              if (FRAME_FED_WRITES.has(method)) this.reportCommandError(error);
+              // Mirrors report in withPageWriter, which honors caller-owned placement errors.
+              // A LOCAL worker's marked failure is not reported twice by other forwarders.
+              if (FRAME_FED_WRITES.has(method) && !this.isWorkerMirror) this.reportCommandError(error);
               throw error;
             },
           );

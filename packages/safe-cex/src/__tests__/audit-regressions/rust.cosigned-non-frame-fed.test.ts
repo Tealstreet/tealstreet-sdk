@@ -229,4 +229,21 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     await expect(exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '1m' })).resolves.toEqual([]);
     expect(calls.map(({ method }) => method)).toEqual(['fetchOHLCV', 'fetchOHLCV']);
   });
+
+  it.each([false, true])('preserves caller-owned hosted placement error reporting (callerReports=%s)', async (callerReportsPlacementFailures) => {
+    const fake = fakeModule('mexc', false);
+    setWasmEngineLoader(async () => fake.module);
+    const { exchange, calls, bridge } = mirror('mexc', { callerReportsPlacementFailures });
+    const errors: unknown[] = [];
+    exchange.on('error', (error: unknown) => errors.push(error));
+    exchange.off('callMethod', bridge);
+    exchange.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: false,
+        result: { message: 'synthetic uncertain placement', outcome: 'unknown' } });
+    });
+    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'unknown' });
+    expect(errors).toHaveLength(callerReportsPlacementFailures ? 0 : 1);
+    expect(calls).toEqual([{ method: 'placeOrder', args: [placed] }]);
+  });
 });
