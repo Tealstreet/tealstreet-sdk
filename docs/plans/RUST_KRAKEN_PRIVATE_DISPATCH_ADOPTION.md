@@ -147,3 +147,64 @@ required workspace compatibility check, fmt/full bans/ratchets/selection and
 preservation receipts; uufub4 dispatch review plus setup/HMAC/socket fit for the
 changed surfaces. One freeze push and one PR-triggered run; READY to 8x5tm1 only
 when green and reviewed, then exact-tree GO and guarded head-matched landing.
+
+## Historical beta hardening refresh (2026-10-27)
+
+The 2026-10-27 assignment starts from `origin/master`; #2300 landed at
+`97cfa6d90a1`. The remaining request inventory is 14 distinct path/fingerprint
+rows and 16 occurrences across five source files: account (2), history (5),
+Spot account (4), Spot trading (2), and Futures trading (3). These numbers count
+occurrences; the two account helpers and Spot private sender are three physical
+funnels. No inventory entry is removed by an original test or a fixture repair.
+
+The request cutover is first, followed by remaining credential/signing custody
+and `order_read_epoch` adoption. All share this venue lane, with one open PR at
+a time. Hosted signing remains post-beta. Native execution does not establish
+browser or credentialed live-smoke readiness.
+
+The existing preparation originals reach ordinary Futures account requests,
+streamed account requests and Spot private POSTs. Three additional originals
+drive actual Futures placement, Spot placement and Futures order history into
+the same host boundary. Each requires an unsigned managed preparation and no
+provider work while preparation is held. The native token probe now delegates
+the real managed-socket callbacks and the static `managed_sockets()` opt-in, so
+its existing live/closed token assertions reach the actual token request rather
+than failing during bootstrap.
+
+On unchanged production at this base, the opt-in target has 16 assertion REDs
+and 13 native GREENs, with no ignored tests. Six REDs specifically prove private
+HTTP escapes before preparation. The added authentication-header and held-
+provider assertions remain gated behind those first preparation assertions.
+The initial two token-fixture bootstrap failures and a corrected wrapper trait
+signature are excluded from behavioral RED evidence.
+
+At that historical base, nonce continuity was still a shared prerequisite:
+legacy and dispatch reservations used different subject keys, without the
+association, issuance fence, owner join or atomic high-water import needed for
+takeover. That status is superseded by the shared support described below.
+No secret digest becomes `stable_id`, and a nonce-bearing work receipt without
+its genuine claim is explicitly refused by dispatch. These originals authorize
+no new namespace or partial private activation.
+
+## Refresh on master c3eaaf96d355 (2026-11-14)
+
+The shared engine now implements association, legacy issuance fencing, owner
+registration and atomic import of reserved and released high-water maxima in
+`nonce_handoff_core.rs`, behind the opt-in `nonce-handoff` feature. Its controls
+in `nonce_handoff_tests.rs` cover retained owners, owner joins and fenced legacy
+issuance. Landed shared support does not itself establish venue integration or
+activate a new construction path.
+
+Futures accounts constructed with `Kraken::with_signing` already use managed
+preparation for both ordinary and streamed private HTTP. The originals in
+`dispatch_signer_adoption.rs` deliberately use `Kraken::new` and
+`KrakenSpot::new`: attaching a provider to their engine does not change that
+constructor selection. Their preparation failures describe those retained
+native-constructor paths; they are not evidence that the managed-custody
+Futures path bypasses preparation. Spot's native constructor remains separate.
+
+This PR adds only the three native path originals and repairs the token probe's
+managed-socket delegation. Existing assertions remain unchanged. The originals
+stay behind `private-adoption-originals`; any failing opt-in controls must be
+reported separately from the default Kraken suite. This refresh changes no
+production source, feature, inventory, generated output or WASM size budget.
