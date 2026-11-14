@@ -310,6 +310,17 @@ Agent wallets are limited-permission wallets that can trade on behalf of the mai
 
 Agent name format: `"Tealstreet XXXX"` (15 chars, max 16 chars, random alphanumeric suffix). Reference: `hyperliquid.agent.ts:generateAgentWalletName`.
 
+`createAgentWalletWithBrowserWallet(address, testnet, agentName?, assertOwnerCurrent?)`
+accepts a backward-compatible host assertion as its fourth argument. Capture the
+initiating owner and operation lifetime before calling; throw synchronously after
+login/profile replacement, logout, unmount or owner-generation change. The helper
+checks every wallet deferral, fallback chain request and ethers-internal provider
+request, then checks again before approval submission and before returning agent
+credentials. Retirement returns `success:false` with
+`Agent wallet creation cancelled-for-owner-change`; a request already submitted
+is not retracted. Guarded providers are destroyed at completion. Omission keeps
+the existing three-argument flow and successful approval/signature bytes.
+
 ### Builder Fees
 
 Builder fees (builder codes) allow Tealstreet to receive a portion of trading

@@ -18,3 +18,21 @@ queue; engine-owned HTTP failures retain engine journal/telemetry. This is the a
 stop-after-UNKNOWN parity exception; uncertain placements are never replayed.
 Acknowledged group legs remain uncertain until individually observed, including
 when a later write fails.
+
+Protective edits use a genuine MARK receipt no older than five seconds. Missing
+or stale proof triggers one unsigned exchangeStats preflight read under the
+initiating owner, bounded to 20 seconds with no retry. Only an accepted target
+market MARK row grants proof; Last, Index, frame arrival and delayed envelope
+completion cannot renew it. Every final send, including replacement, nonce
+retry and put-back, retains the same pure veto with no I/O inside it.
+
+Frame state v2 adds the source's exact validated standalone native parameters;
+receivers validate them against the ingested order without importing any MARK
+receipt. Empty provenance still exports the existing 11-byte v1 form; new readers
+accept both versions. A v1 source grants no protective-edit provenance. Deploy
+matching source and receiver builds to use v2; older readers reject the new
+version. See [protective edits](../../../../docs/plans/callers/lighter-protective-edits.md).
+
+A resolved frame receiver cannot rebind its account, including address selectors.
+Each protective edit retains its initiating account through the public read and
+final sends; foreign metadata retires pending edit bindings, even if A returns.

@@ -3,10 +3,10 @@ import type { Order } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../reference/binance/binance.exchange';
-import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 
 // Cancellation is terminal only for the rows still live when its reply arrives.
 // https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Cancel-Order
@@ -82,7 +82,12 @@ for (const profile of ['binance', 'binancepm'] as const) {
         await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
         store.updateOrder({ id: original.id }, { filled: 3, remaining: 0 });
         store.updateOrderStatus(original, OrderStatus.Closed);
-        resolve({ data: { orderId: original.id, status: 'CANCELED' } });
+        resolve({
+          data:
+            profile === 'binancepm' && type === OrderType.StopLoss
+              ? { complete: true }
+              : { orderId: original.id, status: 'CANCELED' },
+        });
         await pending;
         expect(store.orders.find((row) => row.id === original.id)).toMatchObject({
           status: OrderStatus.Closed,
@@ -105,7 +110,11 @@ for (const profile of ['binance', 'binancepm'] as const) {
       const pending = exchange.cancelSymbolOrders('BTCUSDT');
       await vi.waitFor(() => expect(replies.length).toBe(profile === 'binance' ? 2 : 1));
       store.addOrUpdateOrders([later]);
-      for (const reply of replies) reply({ data: { code: 200 } });
+      // USD-M dispatches both families together; PM sends them in sequence.
+      for (let i = 0; i < 2; i++) {
+        await vi.waitFor(() => expect(replies.length).toBeGreaterThan(i));
+        replies[i]({ data: { code: 200 } });
+      }
       await pending;
       expect(store.orders.find((row) => row.id === original.id)?.status).toBe(OrderStatus.Canceled);
       expect(store.orders.find((row) => row.id === later.id)?.status).toBe(OrderStatus.Open);

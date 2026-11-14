@@ -1,6 +1,8 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 pub(crate) mod protection;
+mod reference;
 use crate::{Lighter, Pending, sign};
+pub use reference::ReferenceRead;
 use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy, Slot};
@@ -68,6 +70,7 @@ struct Job {
     amend_filled: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    reference_checked: bool,
     /// Every grouped-order leg this job prepared; held against cancel/amend.
     group_legs: Vec<String>,
     /// Legs of acknowledged groups that the stream or a snapshot must prove.
@@ -163,6 +166,7 @@ struct Prepared {
 }
 pub enum Request {
     Approval,
+    Reference(Box<ReferenceRead>),
     Nonce,
     CancelProof,
     RestoreProof,
@@ -607,12 +611,6 @@ impl Lighter {
                 if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit)
                     || old.reduce_only
                 {
-                    if cx.frame_fed()
-                        && matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit)
-                    {
-                        refuse(cx, not_sent("Lighter stop not changed: reference stale"));
-                        return;
-                    }
                     let Some(original) = self
                         .protection
                         .originals
@@ -657,13 +655,15 @@ impl Lighter {
                         );
                         return;
                     }
-                    if let Err(error) =
-                        self.protective_reference(cx.store, &orders[0].order, cx.now)
+                    if !self.protective_needs_reference(cx.store, &orders[0].order, cx.now)
+                        && let Err(error) =
+                            self.protective_reference(cx.store, &orders[0].order, cx.now)
                     {
                         refuse(cx, error);
                         return;
                     }
                     protection = Some(protection::Edit {
+                        account_index: self.account.account_index,
                         original,
                         replacement: orders[0].order.clone(),
                         canceled: false,
@@ -796,6 +796,7 @@ impl Lighter {
             protection,
             amend_filled: false,
             effective: false,
+            reference_checked: false,
             group_legs,
             group_accepted: Vec::new(),
             group_seen: HashSet::new(),
@@ -832,6 +833,20 @@ impl Lighter {
             })
     }
 
+    pub(crate) fn invalidate_protective_account(&mut self) {
+        for job in self
+            .trading
+            .active
+            .iter_mut()
+            .chain(self.trading.queue.iter_mut())
+        {
+            if let Some(edit) = &mut job.protection {
+                // A later matching frame cannot revive this edit's retired binding.
+                edit.account_index = None;
+            }
+        }
+    }
+
     pub(crate) fn trade_kick(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.trading.inflight
             || self.trading.timer.is_some()
@@ -866,11 +881,24 @@ impl Lighter {
             self.trade_wake_next(cx);
             return;
         }
+        if let Err(error) = self.protective_account_veto() {
+            self.trade_finish(cx, error);
+            return;
+        }
         if self.account.identity.is_none() {
             self.trade_finish(
                 cx,
                 not_sent("Lighter signer unavailable; execution is disabled"),
             );
+            return;
+        }
+        if job.plan.is_none()
+            && !job.reference_checked
+            && job.protection.as_ref().is_some_and(|edit| {
+                self.protective_needs_reference(cx.store, &edit.replacement, cx.now)
+            })
+        {
+            self.trade_reference_start(cx);
             return;
         }
         if matches!(
@@ -1280,6 +1308,10 @@ impl Lighter {
         request: Request,
         response: Response<'_>,
     ) {
+        if let Request::Reference(read) = request {
+            self.trade_reference_response(cx, *read, response);
+            return;
+        }
         let Some(context) = self
             .trading
             .active
@@ -1326,6 +1358,7 @@ impl Lighter {
             return;
         }
         match request {
+            Request::Reference(_) => unreachable!("handled reference response"),
             Request::Approval => {
                 if response.status < 300
                     && let Ok(approval) = serde_json::from_str::<ApprovalReply>(response.body)
@@ -1744,11 +1777,16 @@ impl Lighter {
     }
 
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        if let Request::Reference(read) = request {
+            self.trade_reference_rejected(cx, &read, not_sent(error));
+            return;
+        }
         if self.trading.active.is_none() {
             return;
         }
         self.trading.inflight = false;
         match request {
+            Request::Reference(_) => unreachable!("handled reference failure"),
             Request::Approval => {
                 self.trade_finish(cx, not_sent(error).kind(ErrorKind::Network));
             }
@@ -2762,6 +2800,10 @@ impl Lighter {
         request: Request,
         error: VenueError,
     ) {
+        if let Request::Reference(read) = request {
+            self.trade_reference_rejected(cx, &read, error.outcome(Outcome::NotSent));
+            return;
+        }
         if self.trading.active.is_none() {
             return;
         }
