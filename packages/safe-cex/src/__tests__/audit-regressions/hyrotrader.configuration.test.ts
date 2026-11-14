@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Transform the real constructor graph during setup; load() still re-evaluates
@@ -29,6 +32,14 @@ afterEach(() => {
 });
 
 describe('HyroTrader build-time configuration', () => {
+  // SDK #3487 moved the default; beta setup must name the same endpoint.
+  it('documents the configured default challenge origin in the Rust beta setup', async () => {
+    const { HYROTRADER_DEFAULT_PROD_REST_ORIGIN } = await load();
+    const setup = readFileSync(resolve(__dirname, '../../../../../sdk-rs/venues/bybit/README.md'), 'utf8');
+    const documentedOrigin = setup.match(/default production\/challenge REST to\s+`([^`]+)`/)?.[1];
+    expect(documentedOrigin).toBe(HYROTRADER_DEFAULT_PROD_REST_ORIGIN);
+  });
+
   it('derives secure socket URLs from the configured REST origin for both networks', async () => {
     const { HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } = await load(' https://simulator.test/// ');
     expect(HYROTRADER_SIMULATOR_URL).toEqual({ livenet: 'https://simulator.test', testnet: 'https://simulator.test' });

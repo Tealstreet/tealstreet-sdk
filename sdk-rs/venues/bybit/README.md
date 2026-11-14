@@ -8,7 +8,7 @@ server-held credential lifecycle are outside v1.
 
 Keep the simulator address in deployment/local environment configuration. Never
 commit the deployment IP or credentials. The browser SDK reads these public
-**origin-only** variables:
+endpoint variables:
 
 - `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`
 - `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL`
@@ -20,7 +20,7 @@ commit the deployment IP or credentials. The browser SDK reads these public
 Public/private WS overrides are optional when the deployment uses the matching
 `/v5/public/linear` and `/v5/private` paths on the REST authority; the SDK derives
 those URLs. Ordinary browser accounts default production/challenge REST to
-`https://sim-bybit.hyro.trade`; `NEXT_PUBLIC_HYROTRADER_PROD_*` values override
+`https://sim-tealstreet.hyro.site`; `NEXT_PUBLIC_HYROTRADER_PROD_*` values override
 that default. Explicit demo accounts still need their separate simulator map.
 All three final URLs must be present and valid before native startup.
 The `NEXT_PUBLIC_*` origins are browser-visible; real challenge keys and secrets
@@ -70,9 +70,11 @@ and WS-origin configuration. A Tealstreet TLS relay is a separate, conditional
 proposal, not enabled by this SDK change. TLS to a relay does not encrypt a plain
 HTTP/WS relay-to-simulator hop.
 
-Hyro must confirm the exact REST/public-WS/private-WS deployment endpoints, TLS
-plan, allowed Tealstreet origins and challenge credentials. A credentialed beta
-smoke pass must cover validation, snapshots, chart/orderbook hydration,
+The default challenge deployment uses HTTPS and REST-derived WSS URLs. Before
+expanding beta, verify authenticated REST CORS and private-WS Origin acceptance
+from each app origin with provisioned challenge keys. Overrides and the separate
+demo deployment require their own browser-safe route. A credentialed beta smoke
+pass must cover validation, snapshots, chart/orderbook hydration,
 market/limit/conditional orders, chase/cancel-replace races, close, leverage,
 TP/SL/trailing and reconnect. Synthetic tests do not certify that live contract.
 The SDK emits opt-in `ws-diagnostic` events for Hyro and every Rust venue:
