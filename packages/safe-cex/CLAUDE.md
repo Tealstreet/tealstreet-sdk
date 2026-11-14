@@ -775,7 +775,10 @@ alone do not establish it. Callers must handle typed readiness failures.
 `frameFedSupported` builds its own engine with `frameFed: true`, the account's
 key and route, and starts it only when `construction().frameFed` is true (no
 venue streams, no account reads). `frameFedReady` resolves whether it did;
-otherwise the mirror path below continues for that account. The host feeds it
+otherwise manual writes refuse locally with `unsupported/notSent`, never an RPC
+to the source. Every manual write waits within the existing startup deadline for
+this page engine, including leverage/settings and calls through `callMethodInWorker`;
+expiry returns `notSent` and cannot send when startup later finishes. The host feeds it
 the data source's SCXF frames with `ingestSourceFrame(bytes, snapshot)` (a
 delta before the first snapshot is dropped, so it asks the source for one) and
 the engine's own frames fill the UI store. Books, candles and fills still come

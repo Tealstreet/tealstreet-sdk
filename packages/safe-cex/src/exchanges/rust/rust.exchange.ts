@@ -423,13 +423,6 @@ const notReadOnPublicData = (what: string): ExchangeError => {
 const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook', 'readPositions'] as const;
 
 /** A frame-fed mirror signs and sends these itself; everything else still goes to the account's data source. */
-/** Placements that wait for the page engine on a mirror instead of taking the source's slower leg. */
-const PAGE_ENGINE_PLACEMENTS: ReadonlySet<string> = new Set([
-  'placeOrder',
-  'placeOrders',
-  'placeOrderWithClientOrderId',
-]);
-
 const FRAME_FED_WRITES: ReadonlySet<string> = new Set([
   'placeOrder',
   'placeOrders',
@@ -841,12 +834,16 @@ export class RustEngineExchange extends BaseExchange {
     if (capabilities.fillsByOrderId && !this.isWorkerMirror) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
+        const change = async () => {
+          await this.command<null>({ op: 'setAccountTier', tier });
+          this.writeLighterTier(tier);
+        };
         if (this.routesToWorker && !this.frameFed) {
+          if (this.isWorkerMirror) return this.withPageWriter('changeAccountTier', [tier], change);
           await this.callWorker('changeAccountTier', tier);
           return;
         }
-        await this.command<null>({ op: 'setAccountTier', tier });
-        this.writeLighterTier(tier);
+        await change();
       };
       this.fetchAccountTier = async () => {
         if (this.routesToWorker) return (await this.callWorker('fetchAccountTier')) as LighterAccountTier | undefined;
@@ -1042,8 +1039,10 @@ export class RustEngineExchange extends BaseExchange {
     const viaWorker = this.callMethodInWorker;
     const members = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
     this.callMethodInWorker = ((method: string, ...args: unknown[]) =>
-      this.frameFed && FRAME_FED_WRITES.has(method)
-        ? members[method](...args)
+      this.isWorkerMirror && FRAME_FED_WRITES.has(method)
+        ? typeof members[method] === 'function'
+          ? members[method](...args)
+          : Promise.reject(this.pageWriterUnavailable(method))
         : method === 'fetchOHLCV'
           ? this.callCandleWorker(viaWorker, args)
           : (viaWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args)) as typeof viaWorker;
@@ -1216,7 +1215,7 @@ export class RustEngineExchange extends BaseExchange {
       await this.ensureSigningHost();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.log(`${this.name} manual writes stay on the account's data source: ${reason}`, LogSeverity.Warning);
+      this.log(`${this.name} manual writes are unavailable until the page engine is ready: ${reason}`, LogSeverity.Warning);
       return false;
     }
     const host = this.host;
@@ -1966,7 +1965,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /**
-   * A placement clicked while the page engine loads. Past the bound it is refused,
+   * A manual write clicked while the page engine loads. Past the bound it is refused,
    * and the rejection and the continuation that sends are exclusive: nothing goes
    * out after the user was told it failed.
    */
@@ -1984,6 +1983,20 @@ export class RustEngineExchange extends BaseExchange {
       };
       this.frameFedReady.then(settled, settled);
     });
+
+  private pageWriterUnavailable = (method: string): ExchangeError => {
+    const message = `${this.name} ${method} was not sent: this page cannot run the account's manual-write engine. Reconnect to retry.`;
+    return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+  };
+
+  private withPageWriter = async <T>(method: string, args: unknown[], send: () => Promise<T>): Promise<T> => {
+    const admitted = this.captureWorkerAdmission();
+    if (!this.frameFedSettled) await this.untilFrameFedSettled(method);
+    admitted?.(method, args);
+    if (this.isDisposed) throw this.workerOwnerChanged(method, args);
+    if (!this.frameFed) throw this.pageWriterUnavailable(method);
+    return send();
+  };
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
   private untilWorkerBridge = async (assertCurrent?: () => void): Promise<() => boolean> => {
@@ -2046,6 +2059,12 @@ export class RustEngineExchange extends BaseExchange {
         if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
           return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
+        if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
+          return this.withPageWriter(method, args, () => local(...args)).catch((error: unknown) => {
+            this.reportCommandError(error);
+            throw error;
+          });
+        }
         const admitted = this.captureWorkerAdmission();
         const viaWorker = () =>
           this.callWorkerForOwner(admitted, method, ...args).then(
@@ -2059,17 +2078,7 @@ export class RustEngineExchange extends BaseExchange {
               throw error;
             },
           );
-        if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
-        return this.untilFrameFedSettled(method).then(
-          () => {
-            admitted?.(method, args);
-            return this.frameFed ? local(...args) : viaWorker();
-          },
-          (error: unknown) => {
-            this.reportCommandError(error);
-            throw error;
-          },
-        );
+        return viaWorker();
       };
       const forwarded = FRAME_FED_WRITES.has(method)
         ? (...args: Args[M]) => this.trackWrite(() => route(...args))
@@ -3516,8 +3525,11 @@ export class RustEngineExchange extends BaseExchange {
         throw new Error('Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds');
     }
     if (this.routesToWorker && !this.frameFed) {
-      await this.callWorker('scheduleCancel', time);
-      return;
+      if (this.isWorkerMirror) return this.withPageWriter('scheduleCancel', [time], () => this.scheduleCancel(time));
+      else {
+        await this.callWorker('scheduleCancel', time);
+        return;
+      }
     }
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('scheduleCancel');

@@ -5,6 +5,10 @@ is the single source of truth for boilerplate that would otherwise be repeated
 in every per-exchange `CLAUDE.md`. **Read this first** before diving into any
 individual exchange doc.
 
+Rust page-mirror manual writes wait for the page engine or refuse locally; the
+hosted RPC remains a read/algo data source. The readiness deadline and no-fallback
+contract are documented in `packages/safe-cex/CLAUDE.md` → "Rust main-thread trading".
+
 For per-exchange specifics (endpoints, quirks, auth signing details), see
 the `CLAUDE.md` inside each exchange's directory.
 
