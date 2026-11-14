@@ -3118,3 +3118,22 @@ for (const venue of ['lighter', 'lighter-robinhood']) {
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
+
+// #3501 run 43559467764/job 132340062664, artifact 14100190688 (CI merge bd10840552fe).
+// All five optimized web/Node/replay modules measured 2,179,692 B, SHA256
+// a010cf7ae0beec4410505d5ecfa2ca86e4b907c26b4591136d6a08ee6a8cd65b.
+for (const venue of ['lighter', 'lighter-robinhood']) {
+  test(`Lighter CI composition: ${venue} retains measured 10 KiB reserve`, () => {
+    const measured = 2_179_692;
+    const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(minimumCap, 2_190_336);
+    assert.equal(venueFamily(venue), 'lighter');
+    assert.equal(cap, WASM_VENUE_OVERRIDES.lighter);
+    assert.ok(cap >= 2_189_312, 'retain all historical parent floors');
+    assert.ok(cap >= minimumCap, `${venue}: ${cap} leaves less than 10 KiB above ${measured}`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
