@@ -167,8 +167,12 @@ impl Trading {
             return;
         };
         let guard = read.job.guard.as_ref().expect("protective read");
-        // Prefer a genuine live receipt which arrived while this read was in flight.
-        if guard.needs_reference(cx.store, &self.references, cx.now) {
+        // A Store mismatch cannot authorize an older row over a newer receipt.
+        if !self
+            .references
+            .get(&guard.order.symbol)
+            .is_some_and(|r| r.received_after(read.source, at))
+        {
             cx.store
                 .update_ticker(&guard.order.symbol, |ticker| match read.source {
                     StopTriggerType::LastPrice => ticker.last = value,

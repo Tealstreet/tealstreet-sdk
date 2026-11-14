@@ -255,3 +255,100 @@ fn order_fill_or_position_change_while_reading_cannot_rebuild_the_edit() {
         assert_eq!(h.failures[0].1.outcome, Some(Outcome::NotSent));
     }
 }
+
+fn two_order_page(working_type: &str) -> Harness {
+    let rows: Vec<_> = [(ORDER_ID, "59000"), ("8389765519993909001", "58000")].into_iter()
+        .map(|(id, price)| serde_json::json!({"orderId":id,"symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL",
+            "status":"NEW","origQty":"0.1","executedQty":"0","stopPrice":price,"positionSide":"BOTH",
+            "reduceOnly":true,"workingType":working_type})).collect();
+    let source = Harness::ready_with_orders(
+        &serde_json::json!({"code":0,"data":{"orders":rows}}).to_string(),
+    );
+    let mut store = Store::default();
+    store.set_markets(source.engine.store().markets().to_vec());
+    store.set_tickers(source.engine.store().tickers().to_vec());
+    store.set_orders(source.engine.store().orders().to_vec());
+    store.set_positions(source.engine.store().positions().to_vec());
+    let pending = store.take_pending();
+    let mut writer = wire::FrameWriter::new(Vec::new(), source.now);
+    store.write(&pending, &mut writer);
+    writer.venue_state(&source.engine.venue().export_venue_state().unwrap());
+    let mut h = Harness::unstarted_with_mode(|provider| provider, true);
+    h.respond("/quote/contracts", 200, MARKETS);
+    h.engine.apply_frame(h.now, &writer.finish(), true).unwrap();
+    h.collect();
+    h
+}
+
+#[test]
+fn fix_round_older_public_reply_never_overwrites_a_newer_receipt_after_a_frame() {
+    for (working_type, path, old, newer, field) in [
+        (
+            "CONTRACT_PRICE",
+            "/quote/ticker",
+            DAILY,
+            DAILY.replace("60000", "59000"),
+            "last",
+        ),
+        (
+            "MARK_PRICE",
+            "/quote/premiumIndex",
+            PREMIUM,
+            PREMIUM.replace("60001", "59000"),
+            "mark",
+        ),
+    ] {
+        for frame in 0..3 {
+            let mut h = two_order_page(working_type);
+            amend(&mut h, false);
+            let a = h.take(path);
+            h.event(Event::HttpStart {
+                request: a.id,
+                status: 200,
+                headers: "",
+            });
+            h.event(Event::HttpChunk {
+                request: a.id,
+                data: old.as_bytes(),
+            });
+            h.now += 1.;
+            h.event(Event::Command(Command::AmendOrder {
+                command: 901,
+                id: "8389765519993909001".into(),
+                price: Some(59100.),
+                amount: None,
+            }));
+            let b = h.take(path);
+            h.reply(b.id, 200, &newer);
+            assert!(
+                h.failures
+                    .iter()
+                    .any(|(id, error)| *id == 901 && error.outcome == Some(Outcome::NotSent))
+            );
+            assert!(h.requests.is_empty(), "B's crossed edit cannot write");
+            h.now += 1.;
+            if frame != 0 {
+                let mut source = Store::default();
+                let mut tickers = h.engine.store().tickers().to_vec();
+                if field == "last" {
+                    tickers[0].last = 60000.;
+                } else {
+                    tickers[0].mark = 60001.;
+                }
+                source.set_tickers(tickers);
+                let pending = source.take_pending();
+                let mut writer = wire::FrameWriter::new(Vec::new(), h.now);
+                source.write(&pending, &mut writer);
+                if frame == 2 {
+                    writer.venue_state(&h.engine.venue().export_venue_state().unwrap());
+                }
+                h.engine
+                    .apply_frame(h.now, &writer.finish(), false)
+                    .unwrap();
+            }
+            h.event(Event::HttpEnd { request: a.id });
+            refused(&h);
+            assert!(h.requests.is_empty(), "{working_type} frame={frame}");
+        }
+    }
+}

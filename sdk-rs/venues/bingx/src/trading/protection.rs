@@ -5,7 +5,7 @@ use safe_cex_engine::store::Store;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default)]
-pub struct References([Option<(f64, f64)>; 2]);
+pub struct References([Option<(f64, f64)>; 2], [Option<f64>; 2]);
 impl References {
     fn slot(source: StopTriggerType) -> Option<usize> {
         match source {
@@ -16,9 +16,24 @@ impl References {
     }
     fn observe(&mut self, source: StopTriggerType, value: f64, now: f64) {
         if let Some(slot) = Self::slot(source) {
-            self.0[slot] =
-                (value.is_finite() && value > 0.0 && now.is_finite()).then_some((value, now));
+            if !now.is_finite() {
+                self.0[slot] = None;
+                return;
+            }
+            if self.1[slot].is_some_and(|seen| now < seen) {
+                return;
+            }
+            self.1[slot] = Some(now);
+            self.0[slot] = (value.is_finite() && value > 0.0).then_some((value, now));
         }
+    }
+    pub(super) fn received_after(&self, source: StopTriggerType, at: f64) -> bool {
+        Self::slot(source)
+            .and_then(|slot| self.1[slot])
+            .is_some_and(|seen| seen > at)
+    }
+    pub(super) fn invalidate(&mut self) {
+        self.0 = [None; 2];
     }
     fn get(&self, source: StopTriggerType, now: f64) -> Option<f64> {
         let (value, at) = self.0[Self::slot(source)?]?;

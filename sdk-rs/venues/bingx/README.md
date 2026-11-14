@@ -104,3 +104,5 @@ Claims, re-signs and restores still use the same pure veto. Only the veto is
 I/O-free; re-signs and restores retain their existing server-time reads and writes.
 See [protective edits](../../../../docs/plans/callers/bingx-protective-edits.md)
 for the native classes, proof requirements and frame-state version contract.
+The genuine <=5 s per-source proof is intentionally stricter than legacy TS,
+which optionally checked Store Mark without a receipt-age gate.

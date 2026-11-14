@@ -31,6 +31,11 @@ Receipts come from actual Daily Last, Premium Mark and Live trade/fair-price
 messages, including unchanged values. Delayed seed publication cannot re-date
 an earlier field, and a Live row without tradePrice cannot renew Last. REST row
 receipts become usable only after the whole response envelope is accepted.
+Receipt times are monotonic per symbol/source; a ticker mismatch or frame reset
+cannot let an older pending reply replace newer evidence. Frame resets invalidate
+proof without discarding the clocks that fence earlier reads.
+The <=5 s genuine proof intentionally remains stricter than legacy TS
+replaceTriggerOrderPrice, which optionally checked Store Mark without an age gate.
 
 Remaining supported shapes use guarded serial cancel/create. A target-matching
 terminal cancellation with explicit zero execution is required before creating;
