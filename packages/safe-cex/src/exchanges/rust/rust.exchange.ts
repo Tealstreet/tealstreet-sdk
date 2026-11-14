@@ -507,6 +507,7 @@ const NUKE_ALGO_STOP_GRACE_MS = 1_000;
 const MAX_QUEUED_ALGO_OPS = 100;
 
 type AlgoRows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
+type WorkerAdmission = ((method: string, args: unknown[]) => void) | undefined;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -521,6 +522,7 @@ const SOCKET_HEALTH_SYNC_MS = 5_000;
 const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
 
 export class RustEngineExchange extends BaseExchange {
+  private readonly sourceWorkerCall: typeof this.callMethodInWorker;
   private workerOwnerSource?: () => { ownerId: string; generation: number } | undefined;
 
   /** Optional owner fencing; hosts without a binding retain legacy bridge dispatch behavior. */
@@ -669,6 +671,7 @@ export class RustEngineExchange extends BaseExchange {
   readonly frameFedReady: Promise<boolean>;
   private frameFed = false;
   private frameFedSettled = false;
+  private pageWriteSupported?: boolean;
   private frameFedEngine = false;
   private sourceBaseline = false;
   /** Recent (source write time - arrival) samples, and the offset last handed to the engine. */
@@ -1037,6 +1040,8 @@ export class RustEngineExchange extends BaseExchange {
     this.frameFedReady.then(frameFedSettled, frameFedSettled);
     // Hosts that write through `callMethodInWorker` reach the frame-fed engine too.
     const viaWorker = this.callMethodInWorker;
+    // Source dispatch must not re-enter the mirror's manual-write router.
+    this.sourceWorkerCall = viaWorker;
     const members = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
     this.callMethodInWorker = ((method: string, ...args: unknown[]) =>
       this.isWorkerMirror && FRAME_FED_WRITES.has(method)
@@ -1211,7 +1216,8 @@ export class RustEngineExchange extends BaseExchange {
     try {
       // Asked before any engine exists: a family without it builds nothing on main.
       const wasm = await loadWasmEngine(this.name);
-      if (!frameFedSupported(wasm, this.name) || this.isDisposed) return false;
+      this.pageWriteSupported = wasm.WasmEngine.frameFedSupported?.(this.name);
+      if (this.pageWriteSupported !== true || this.isDisposed) return false;
       await this.ensureSigningHost();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1911,7 +1917,7 @@ export class RustEngineExchange extends BaseExchange {
     }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
   };
 
-  private captureWorkerAdmission = (): ((method: string, args: unknown[]) => void) | undefined => {
+  private captureWorkerAdmission = (): WorkerAdmission => {
     const source = this.workerOwnerSource;
     if (!source) return undefined;
     const readOwner = () => {
@@ -1943,7 +1949,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private callWorkerForOwner = async (
-    admitted: ((method: string, args: unknown[]) => void) | undefined, method: string, ...args: unknown[]
+    admitted: WorkerAdmission, method: string, ...args: unknown[]
   ): Promise<unknown> => {
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
@@ -1953,7 +1959,9 @@ export class RustEngineExchange extends BaseExchange {
     if (admitted && (this.isDisposed || !bridgeIsCurrent())) {
       throw this.workerOwnerChanged(method, args);
     }
-    const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    const workerCall = this.isWorkerMirror && FRAME_FED_WRITES.has(method)
+      ? this.sourceWorkerCall : this.callMethodInWorker;
+    const call = () => (workerCall as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
   };
 
@@ -1992,17 +2000,25 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   private pageWriterUnavailable = (method: string): ExchangeError => {
-    const message = `${this.name} ${method} was not sent: this page cannot run the account's manual-write engine. Reconnect to retry.`;
+    const message = `${this.name} ${method} was not sent: this page cannot run the account's manual-write engine. Turn cloud off to use this device.`;
     return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   };
 
-  private withPageWriter = async <T>(method: string, args: unknown[], send: () => Promise<T>): Promise<T> => {
+  private withPageWriter = async <T>(
+    method: string, args: unknown[], send: () => Promise<T>, sendHosted?: (admitted: WorkerAdmission) => Promise<T>,
+  ): Promise<T> => {
     try {
       const admitted = this.captureWorkerAdmission();
       if (!this.frameFedSettled) await this.untilFrameFedSettled(method);
       admitted?.(method, args);
       if (this.isDisposed) throw this.workerOwnerChanged(method, args);
-      if (!this.frameFed) throw this.pageWriterUnavailable(method);
+      if (!this.frameFed) {
+        // Only a structurally unsupported COSIGNED venue uses its existing source writer.
+        // A missing module/capability or a failed supported page engine must never reroute.
+        if (this.options.signingMode === 'cosigned' && this.pageWriteSupported === false && sendHosted)
+          return await sendHosted(admitted);
+        throw this.pageWriterUnavailable(method);
+      }
       return await send();
     } catch (error) {
       const callerReports = this.options.callerReportsPlacementFailures &&
@@ -2073,24 +2089,23 @@ export class RustEngineExchange extends BaseExchange {
         if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
           return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker) return local(...args);
-        if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
-          return this.withPageWriter(method, args, () => local(...args));
-        }
-        if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
-        const admitted = this.captureWorkerAdmission();
-        const viaWorker = () =>
+        const viaWorker = (admitted: WorkerAdmission) =>
           this.callWorkerForOwner(admitted, method, ...args).then(
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
               method === 'updateOrder' ? decodeWorkerOrderIds(result) : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
-              // Never passed through `command` here, and the hosted server marks no failure as
-              // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
-              if (FRAME_FED_WRITES.has(method)) this.reportCommandError(error);
+              // Mirrors report in withPageWriter, which honors caller-owned placement errors.
+              // A LOCAL worker's marked failure is not reported twice by other forwarders.
+              if (FRAME_FED_WRITES.has(method) && !this.isWorkerMirror) this.reportCommandError(error);
               throw error;
             },
           );
-        return viaWorker();
+        if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
+          return this.withPageWriter(method, args, () => local(...args), viaWorker);
+        }
+        if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
+        return viaWorker(this.captureWorkerAdmission());
       };
       const forwarded = FRAME_FED_WRITES.has(method)
         ? (...args: Args[M]) => this.trackWrite(() => route(...args))

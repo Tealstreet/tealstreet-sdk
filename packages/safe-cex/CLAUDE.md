@@ -775,8 +775,16 @@ alone do not establish it. Callers must handle typed readiness failures.
 `frameFedSupported` builds its own engine with `frameFed: true`, the account's
 key and route, and starts it only when `construction().frameFed` is true (no
 venue streams, no account reads). `frameFedReady` resolves whether it did;
-otherwise manual writes refuse locally with `unsupported/notSent`, never an RPC
-to the source. Every manual write waits within the existing startup deadline for
+otherwise manual writes refuse locally with `unsupported/notSent`. The sole
+exception is an explicitly COSIGNED worker mirror (`signingMode: 'cosigned'`)
+whose loaded module explicitly reports `frameFedSupported(venue) === false`:
+it uses the existing hosted `callMethod` writer, including protective amendments.
+The host must supply its actual transport mode, including legacy accounts and
+reused mirrors; absent/LOCAL/DELEGATED modes never opt into this route. A missing
+module/capability or a failed supported page engine never falls back. No failed
+or Unknown write is retried or sent through a second writer. Both routes retain
+the initiating owner and bridge admission across readiness waits; #3513's
+page-engine preflight remains unchanged. Every manual write waits within the existing startup deadline for
 this page engine, including leverage/settings and calls through `callMethodInWorker`;
 expiry returns `notSent` and cannot send when startup later finishes. The host feeds it
 the data source's SCXF frames with `ingestSourceFrame(bytes, snapshot)` (a
