@@ -36,3 +36,7 @@ normal factories still refuse Spot. Shipped family size checks run before the fi
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
+
+TxFlow agent refresh #3314 at merge 9bb43250830d measures optimized web/Node
+2,147,684 bytes; its 2,158,592-byte floor retains the required 10 KiB reserve.
+The pinned harness profiles and all other family/global budgets are unchanged.

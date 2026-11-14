@@ -3132,3 +3132,15 @@ for (const [family, artifact, measured, minimumCap, aliases] of [
     }
   });
 }
+
+
+test('#3314 refreshed merge 9bb43250830d retains measured TxFlow reserve', () => {
+  const measured = 2_147_684;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_158_592);
+  const cap = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(cap >= required);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
+});
