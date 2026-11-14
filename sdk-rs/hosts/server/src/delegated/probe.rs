@@ -57,17 +57,63 @@ impl ProbeOutcome {
     }
 }
 
+/// Closed host-owned labels; no error text or client data can become a stage.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RefusalStage {
+    Unverified,
+    PrivateRead,
+    PrivateStartup,
+    Options,
+    Authority,
+    Construction,
+    ProbeJoin,
+    ProbeClosed,
+    SignerSetup,
+    ProbeTimeout,
+    AccountAttach,
+    Authentication,
+    VenuePolicy,
+    PublicAccount,
+    SigningMode,
+    Capacity,
+    Permit,
+    MissingHandover,
+    HandoverAttempt,
+    HandoverOpen,
+    KeyOffer,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
     pub transient: bool,
+    pub stage: RefusalStage,
+    pub error_kind: Option<ErrorKind>,
+    pub venue_code: Option<i64>,
 }
 impl ProbeRefusal {
-    pub const INVALID: Self = Self { transient: false };
-    pub const TRANSIENT: Self = Self { transient: true };
+    pub const INVALID: Self = Self {
+        transient: false,
+        stage: RefusalStage::Unverified,
+        error_kind: None,
+        venue_code: None,
+    };
+    pub const TRANSIENT: Self = Self {
+        transient: true,
+        ..Self::INVALID
+    };
+
+    pub(crate) fn at(mut self, stage: RefusalStage) -> Self {
+        self.stage = stage;
+        self
+    }
 
     fn classified(kind: ErrorKind) -> Self {
         Self {
             transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
+            stage: RefusalStage::PrivateRead,
+            error_kind: Some(kind),
+            venue_code: None,
         }
     }
 }
@@ -91,8 +137,8 @@ pub(crate) async fn run<T: Transport + 'static>(
     config: ServerConfig,
     allowed: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<(), ProbeRefusal> {
-    let options: safe_cex_venues::EngineOptions =
-        serde_json::from_str(options_json).map_err(|_| ProbeRefusal::INVALID)?;
+    let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+        .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Options))?;
     if options.frame_fed
         || options
             .construction(venue)
@@ -105,10 +151,10 @@ pub(crate) async fn run<T: Transport + 'static>(
                 .is_none_or(|identity| identity.signing_ref().is_err())
         })
     {
-        return Err(ProbeRefusal::INVALID);
+        return Err(ProbeRefusal::INVALID.at(RefusalStage::Options));
     }
     if !allowed() {
-        return Err(ProbeRefusal::TRANSIENT);
+        return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::Authority));
     }
     let (handle, task) = safe_cex_native::spawn_venue_account(
         venue,
@@ -117,26 +163,26 @@ pub(crate) async fn run<T: Transport + 'static>(
         Some(provider),
         config,
     )
-    .map_err(|_| ProbeRefusal::INVALID)?;
+    .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Construction))?;
     let mut actor = ProbeActor { handle, task };
     let result = async {
         let mut link = actor
             .handle
             .join(0, true)
             .await
-            .map_err(|_| ProbeRefusal::TRANSIENT)?;
+            .map_err(|_| ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeJoin))?;
         let mut tick = tokio::time::interval(Duration::from_millis(20));
         loop {
             tokio::select! {
                 biased;
                 frame = link.outgoing.recv() => {
-                    let Some(frame) = frame else { return Err(ProbeRefusal::TRANSIENT); };
+                    let Some(frame) = frame else { return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeClosed)); };
                     if let Outgoing::Text(text) = frame
                         && let Some(refusal) = notice_refusal(&text)
                     { return Err(refusal); }
                 }
                 _ = tick.tick() => {
-                    if !allowed() { return Err(ProbeRefusal::TRANSIENT); }
+                    if !allowed() { return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::Authority)); }
                     let loaded = actor.handle.read(|store| {
                         let loaded = store.loaded();
                         loaded.markets && loaded.balance && loaded.orders && loaded.positions
@@ -144,10 +190,10 @@ pub(crate) async fn run<T: Transport + 'static>(
                     match loaded {
                         Some(true) => return classify(Ok(())).into_result(),
                         Some(false) => {},
-                        None => return Err(ProbeRefusal::TRANSIENT),
+                        None => return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeClosed)),
                     }
                 }
-                _ = link.canceled.changed() => return Err(ProbeRefusal::TRANSIENT),
+                _ = link.canceled.changed() => return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeClosed)),
             }
         }
     }
@@ -181,8 +227,23 @@ fn notice_refusal(text: &str) -> Option<ProbeRefusal> {
     .into_iter()
     .find(|value| kind.as_str() == Some(value.as_str()));
     match classified {
-        Some(kind) => Some(ProbeRefusal::classified(kind)),
-        None if notice["type"] == "startupFailed" => Some(ProbeRefusal::TRANSIENT),
+        Some(kind) => {
+            let fields = if notice["type"] == "startupFailed" {
+                &notice["detail"]
+            } else {
+                &notice["fields"]
+            };
+            let mut refusal = ProbeRefusal::classified(kind);
+            // Venue error codes are otherwise arbitrary strings. Retain only an
+            // integer, never text that could contain a credential or payload.
+            refusal.venue_code = fields["venueCode"]
+                .as_str()
+                .and_then(|code| code.parse::<i64>().ok());
+            Some(refusal)
+        }
+        None if notice["type"] == "startupFailed" => {
+            Some(ProbeRefusal::TRANSIENT.at(RefusalStage::PrivateStartup))
+        }
         None => None,
     }
 }
@@ -299,6 +360,46 @@ mod tests {
             r#"{"type":"startupFailed","detail":{"kind":"futureKind"}}"#,
         ] {
             assert!(notice_refusal(notice).unwrap().transient);
+        }
+    }
+
+    #[test]
+    fn classified_bybit_probe_refusals_retain_only_numeric_venue_codes() {
+        for (kind, code, transient) in [
+            ("authInvalid", "10003", false),
+            ("authPermission", "10010", false),
+            ("rateLimited", "10006", true),
+            ("timeout", "10002", true),
+        ] {
+            for startup in [true, false] {
+                let fields = serde_json::json!({
+                    "kind":kind, "venueCode":code,
+                    "message":"synthetic-secret", "venueMessage":"synthetic-secret",
+                });
+                let notice = if startup {
+                    serde_json::json!({"type":"startupFailed", "detail":fields})
+                } else {
+                    serde_json::json!({"type":"event", "fields":fields})
+                };
+                let refusal = notice_refusal(&notice.to_string()).unwrap();
+                assert_eq!(refusal.transient, transient);
+                assert_eq!(refusal.error_kind.unwrap().as_str(), kind);
+                assert_eq!(refusal.venue_code, Some(code.parse().unwrap()));
+                assert!(!format!("{refusal:?}").contains("synthetic-secret"));
+            }
+        }
+        for code in [
+            "synthetic-secret",
+            "10010 synthetic-secret",
+            "9999999999999999999999999999",
+        ] {
+            let notice = serde_json::json!({"type":"startupFailed", "detail":{
+                "kind":"authInvalid", "venueCode":code, "message":"synthetic-secret",
+            }});
+            let refusal = notice_refusal(&notice.to_string()).unwrap();
+            assert!(!refusal.transient);
+            assert_eq!(refusal.venue_code, None);
+            assert!(!format!("{refusal:?}").contains("synthetic-secret"));
         }
     }
 

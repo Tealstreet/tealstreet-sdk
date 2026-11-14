@@ -1,5 +1,8 @@
 use super::*;
-use crate::delegated::{Credentials, probe::ProbeRefusal};
+use crate::delegated::{
+    Credentials,
+    probe::{ProbeRefusal, RefusalStage},
+};
 
 #[cfg(test)]
 #[path = "admission_deadline_tests.rs"]
@@ -142,7 +145,7 @@ impl Registry {
             let (plan, options, provider, mode) = match (candidate, link.as_ref()) {
                 (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
                     let prepared = prepare_delegated(init, candidate.pair())
-                        .map_err(|_| ProbeRefusal::INVALID)?;
+                        .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::SignerSetup))?;
                     prepared.resident.configure(&mut config);
                     (
                         prepared.plan,
@@ -233,7 +236,7 @@ impl Registry {
             ));
         tokio::time::timeout(timeout, work)
             .await
-            .map_err(|_| ProbeRefusal::TRANSIENT)??;
+            .map_err(|_| ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeTimeout))??;
         permit.check(user, init)?;
         Ok(permit)
     }
