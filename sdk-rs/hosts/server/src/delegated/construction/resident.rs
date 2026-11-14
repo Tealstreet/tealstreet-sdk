@@ -430,4 +430,42 @@ mod tests {
             );
         }
     }
+    #[tokio::test(start_paused = true)]
+    async fn captured_wallet_setup_rechecks_retention_at_start_and_result() {
+        for started in [false, true] {
+            let key = KeyRef("synthetic-wallet".into());
+            let mut signer = LocalSigner::new();
+            signer
+                .insert_declared(key.clone(), vec![1; 32], Algorithm::Secp256k1Digest)
+                .unwrap();
+            let resident = ResidentCopy::new(
+                Arc::new(signer).protect().unwrap(),
+                Default::default(),
+                None,
+            );
+            let provider = resident.provider();
+            let mut setup = provider
+                .create_public_address_setup(SignRequest {
+                    receipt: Default::default(),
+                    context: Default::default(),
+                    operations: vec![safe_cex_engine::signing::Operation::PublicAddress { key }],
+                })
+                .unwrap();
+            resident.retain_until(Instant::now() + Duration::from_secs(48 * 60 * 60));
+            if started {
+                setup.start().unwrap();
+            }
+            tokio::time::advance(Duration::from_secs(48 * 60 * 60)).await;
+            if !started {
+                assert_eq!(setup.start(), Err(SignError::Unavailable));
+            }
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            assert_eq!(
+                setup.poll_result(&mut cx),
+                std::task::Poll::Ready(Err(SignError::Unavailable))
+            );
+            assert_eq!(setup.poll_joined(&mut cx), std::task::Poll::Ready(Ok(())));
+            assert!(!resident.admit());
+        }
+    }
 }
