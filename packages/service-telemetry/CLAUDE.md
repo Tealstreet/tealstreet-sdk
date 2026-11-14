@@ -110,6 +110,10 @@ rule needs 16+ chars with a letter AND a digit or it eats `ECONNREFUSED`,
 `JSON.stringify` throw — a throw inside an `unhandledRejection` handler
 re-enters as an uncaught exception, which is the key that pages.
 
+The original error crosses the shared diagnostic copier before whitespace/ID
+normalization and clipping. Parser provenance survives in the resulting stable
+bucket; ordinary status codes and connection conditions remain distinct.
+
 ## Adding a service
 
 Declare the dep, add the DSN to the Worker's `Env` type **and** its `envVars`

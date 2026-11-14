@@ -101,3 +101,54 @@ describe('parser provenance across alert fingerprints', () => {
     expect(context).toMatchObject({ fingerprint: [key], extra: { alert_key: key } });
   });
 });
+
+
+describe('parser fingerprints before normalization', () => {
+  const wrapped = (kind: string, marker: string) => {
+    let parser: unknown;
+    if (kind === 'native newline') {
+      try { JSON.parse(marker + '\n'); } catch (error) { parser = error; }
+    } else if (kind === 'multiline') parser = new SyntaxError(`FAKE parser ${marker}\nsecond line`);
+    else if (kind === 'clipped') parser = new SyntaxError(`FAKE parser ${marker} ${'ordinary context '.repeat(20)}`);
+    else parser = new SyntaxError(`FAKE parser ${marker} request Ab1Cd2Ef3Gh4Ij5Kl6Mn`);
+    if (!(parser instanceof SyntaxError)) throw new Error('Expected synthetic parser failure');
+    return new Error(parser.message, { cause: parser });
+  };
+
+  it.each(['native newline', 'multiline', 'clipped', 'volatile token'])(
+    'keeps %s parser excerpts out of the original bucket and final event', (kind) => {
+      const marker = 'Q7!s9';
+      const error = wrapped(kind, marker);
+      const original = error.message;
+      const key = alertKey('unhandled-rejection', error);
+      captureAlert({ key, message: error.message, error, detail: { reason: error.message }, level: 'error', severity: 'low' });
+      expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+      const call = vi.mocked(Sentry.captureException).mock.calls[0];
+      if (!call || !(call[0] instanceof Error)) throw new Error('Missing exception capture');
+      const context = call[1];
+      if (!context || typeof context !== 'object' || !('fingerprint' in context)) throw new Error('Missing context');
+      expect(key).not.toContain(marker);
+      expect(JSON.stringify(context)).not.toContain(marker);
+      const final = hooks().beforeSend({
+        type: undefined, ...context,
+        exception: { values: [{ type: call[0].name, value: call[0].message }] },
+      }, {});
+      expect(final).toMatchObject({ fingerprint: context.fingerprint });
+      expect(JSON.stringify(final)).not.toContain(marker);
+      expect(error.message).toBe(original);
+      expect(error.cause).toBeInstanceOf(SyntaxError);
+    },
+  );
+
+  it('uses one stable bucket for different real newline-parser excerpts', () => {
+    const keys = [];
+    for (const marker of ['Q7!s9', 'R8!t2']) {
+      const error = wrapped('native newline', marker);
+      const key = alertKey('unhandled-rejection', error);
+      keys.push(key);
+      captureAlert({ key, message: error.message, error, level: 'error', severity: 'low' });
+    }
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+    expect(keys[0]).toBe(keys[1]);
+  });
+});
