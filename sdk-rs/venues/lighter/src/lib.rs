@@ -1,4 +1,5 @@
 //! Lighter perpetuals: deterministic public streams and engine-owned recovery.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod history;
 mod identity;
@@ -1215,7 +1216,7 @@ impl Venue for Lighter {
             return;
         };
         if frame.kind == "ping" {
-            cx.send(socket, r#"{"type":"pong"}"#);
+            cx.send(socket, ControlFrame::heartbeat(r#"{"type":"pong"}"#));
             return;
         }
         if let Some(error) = frame.error {
@@ -1362,7 +1363,10 @@ impl Venue for Lighter {
                 }
             }
             LifecycleEvent::Ping(epoch) => match channel {
-                Channel::Public => cx.send(epoch.socket(), r#"{"type":"ping"}"#),
+                Channel::Public => cx.send(
+                    epoch.socket(),
+                    ControlFrame::heartbeat(r#"{"type":"ping"}"#),
+                ),
                 Channel::Private => {
                     let stream = &mut self.account.connection.stream;
                     stream.ping_skipped = stream.read_only && !stream.ping_skipped;

@@ -2689,13 +2689,13 @@ impl<V: Venue> Engine<V> {
         let managed = &self.io.core.managed_http[&request];
         #[cfg(not(target_arch = "wasm32"))]
         let timeout_message = format!(
-            "HTTP request timed out ({})",
+            "Request timed out ({})",
             managed.lifecycle.timeout_diagnostic(now)
         );
         #[cfg(not(target_arch = "wasm32"))]
         let timeout_text = timeout_message.as_str();
         #[cfg(target_arch = "wasm32")]
-        let timeout_text = "HTTP request timed out";
+        let timeout_text = "Request timed out";
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Timeout);
             self.handle_event_with_read_timeout(
@@ -4354,8 +4354,12 @@ mod tests {
                 store: &mut engine.store,
                 io: &mut engine.io,
             };
-            cx.send_signed(socket, "auth".into(), Box::new(WsRecipe));
-            cx.send(socket, "subscription");
+            cx.send_signed(
+                socket,
+                ControlFrame::authentication("auth"),
+                Box::new(WsRecipe),
+            );
+            cx.send(socket, ControlFrame::subscription("subscription"));
             let context = cx
                 .http_context(
                     Scope::Background,

@@ -1,6 +1,7 @@
 //! Orderly limits each public socket to one hundred topics. Keep funding on
 //! dedicated ninety-topic shards so books and candles retain the main socket.
 use crate::{Connection, Orderly, Pending, wire::Envelope};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::socket::{Tick as SocketTick, Timeout};
@@ -74,7 +75,7 @@ impl Orderly {
         connection.open = true;
         connection.ping_at = cx.now;
         connection.supervisor.opened(cx);
-        cx.send(socket, "{\"event\":\"ping\"}");
+        cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
         #[derive(Serialize)]
         struct Subscription<'a> {
             event: &'a str,
@@ -83,11 +84,13 @@ impl Orderly {
         for native in &shard.natives {
             cx.send(
                 socket,
-                serde_json::to_string(&Subscription {
-                    event: "subscribe",
-                    topic: format!("{native}@estfundingrate"),
-                })
-                .unwrap(),
+                ControlFrame::subscription(
+                    serde_json::to_string(&Subscription {
+                        event: "subscribe",
+                        topic: format!("{native}@estfundingrate"),
+                    })
+                    .unwrap(),
+                ),
             );
         }
         true
@@ -116,7 +119,7 @@ impl Orderly {
             connection.supervisor.received(cx.now);
             match env.event.as_ref() {
                 "ping" => {
-                    cx.send(socket, "{\"event\":\"pong\"}");
+                    cx.send(socket, ControlFrame::heartbeat("{\"event\":\"pong\"}"));
                     return Ok(());
                 }
                 "pong" => return Ok(()),
@@ -193,7 +196,7 @@ impl Orderly {
             SocketTick::Ping => {
                 if let Some(socket) = connection.socket {
                     connection.ping_at = cx.now;
-                    cx.send(socket, "{\"event\":\"ping\"}");
+                    cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
                 }
             }
             SocketTick::TimedOut(timeout) => {

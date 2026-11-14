@@ -1,5 +1,6 @@
 //! Market discovery and one quote socket with reference-counted consumers.
 use crate::{ApexOmni, Pending, public_wire as wire};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
@@ -687,7 +688,10 @@ impl ApexOmni {
         if message.op == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"op":"pong","args":["{}"]}}"#, cx.protocol_now() as u64),
+                ControlFrame::heartbeat(format!(
+                    r#"{{"op":"pong","args":["{}"]}}"#,
+                    cx.protocol_now() as u64
+                )),
             );
             return true;
         }

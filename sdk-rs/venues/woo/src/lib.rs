@@ -1,4 +1,5 @@
 //! WOO perpetuals on the active legacy-public/V1/V3 protocol.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod history;
 mod identity;
@@ -745,7 +746,7 @@ impl Venue for Woo {
                 );
             }
             match msg.event.as_ref() {
-                "ping" => cx.send(socket, r#"{"event":"pong"}"#),
+                "ping" => cx.send(socket, ControlFrame::heartbeat(r#"{"event":"pong"}"#)),
                 "pong" => cx
                     .store
                     .set_latency((cx.now - self.public.ping_at).max(0.0)),

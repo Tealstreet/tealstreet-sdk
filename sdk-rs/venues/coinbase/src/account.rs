@@ -1,4 +1,5 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
@@ -1031,7 +1032,7 @@ impl Coinbase {
             {
                 cx.send_signed(
                     socket,
-                    String::new(),
+                    ControlFrame::authentication(String::new()),
                     Box::new(crate::sign::WsSubscribe::new(
                         identity.clone(),
                         c.key(),
@@ -1051,12 +1052,14 @@ impl Coinbase {
             match signed {
                 Ok(jwt) => cx.send(
                     socket,
-                    serde_json::to_string(&Sub {
-                        kind: "subscribe",
-                        channel,
-                        jwt,
-                    })
-                    .unwrap(),
+                    ControlFrame::subscription(
+                        serde_json::to_string(&Sub {
+                            kind: "subscribe",
+                            channel,
+                            jwt,
+                        })
+                        .unwrap(),
+                    ),
                 ),
                 Err(e) => {
                     cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e);

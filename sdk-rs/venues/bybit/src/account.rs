@@ -5,6 +5,7 @@ use crate::sign::Query;
 use crate::venue_state::category_code;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, RowRepeat, RowReports, row_skipped};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
@@ -1452,7 +1453,7 @@ impl BybitLinear {
             self.account.handshake = Some("subscribe");
             self.account.handshake_timer = Some(cx.set_timer(10_000.0));
             if let Some(socket) = self.private.socket {
-                cx.send(socket, format!(r#"{{"op":"subscribe","req_id":"hyro-{}-subscribe","args":["order","position"]}}"#, self.account.session_version));
+                cx.send(socket, ControlFrame::subscription(format!(r#"{{"op":"subscribe","req_id":"hyro-{}-subscribe","args":["order","position"]}}"#, self.account.session_version)));
             }
         } else {
             self.account.handshake = None;
@@ -2143,7 +2144,7 @@ impl BybitLinear {
                 .then(|| format!("hyro-{}-auth", self.account.session_version));
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(crate::sign::WsAuth::new(
                     credentials.clone(),
                     request_id,
@@ -2390,7 +2391,7 @@ impl BybitLinear {
                 if let Some(socket) = self.private.socket {
                     cx.send(
                         socket,
-                        if self.variant.is_spot() { r#"{"op":"subscribe","args":["order.spot","execution.spot","wallet"]}"# } else if self.category == Category::Inverse { r#"{"op":"subscribe","args":["order.inverse","execution.inverse","position.inverse","wallet"]}"# } else { r#"{"op":"subscribe","args":["order","execution","position","wallet"]}"# },
+                        ControlFrame::subscription(if self.variant.is_spot() { r#"{"op":"subscribe","args":["order.spot","execution.spot","wallet"]}"# } else if self.category == Category::Inverse { r#"{"op":"subscribe","args":["order.inverse","execution.inverse","position.inverse","wallet"]}"# } else { r#"{"op":"subscribe","args":["order","execution","position","wallet"]}"# }),
                     );
                 }
             }

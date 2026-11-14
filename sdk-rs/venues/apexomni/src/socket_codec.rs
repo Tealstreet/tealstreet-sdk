@@ -1,5 +1,6 @@
 //! Native wire projection under engine-owned feed and epoch custody.
 use crate::{ApexOmni, Pending, private_wire};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::log::code;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -227,7 +228,7 @@ impl ApexOmni {
                     self.account_close(cx, epoch.socket());
                 }
                 LifecycleEvent::Ping(epoch) => {
-                    cx.send(epoch.socket(), r#"{"op":"ping"}"#);
+                    cx.send(epoch.socket(), ControlFrame::heartbeat(r#"{"op":"ping"}"#));
                     self.account.ping_at = cx.now;
                 }
                 LifecycleEvent::Reconnect(_) => self.connect_private(cx)?,
@@ -259,7 +260,7 @@ impl ApexOmni {
             }
             LifecycleEvent::Reconnect(_) => self.connect_feed(cx, false)?,
             LifecycleEvent::Ping(epoch) => {
-                cx.send(epoch.socket(), r#"{"op":"ping"}"#);
+                cx.send(epoch.socket(), ControlFrame::heartbeat(r#"{"op":"ping"}"#));
                 self.public.ping_at = cx.now;
             }
             LifecycleEvent::InterestsRefused {

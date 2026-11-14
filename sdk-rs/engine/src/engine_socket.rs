@@ -2718,7 +2718,11 @@ mod tests {
                     store: &mut e.store,
                     io: &mut e.io,
                 };
-                cx.send_signed(socket, "native-auth".into(), Box::new(Step));
+                cx.send_signed(
+                    socket,
+                    ControlFrame::authentication("native-auth"),
+                    Box::new(Step),
+                );
             }
             let attempt = e
                 .drain_actions()

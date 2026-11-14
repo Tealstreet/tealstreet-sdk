@@ -1,5 +1,6 @@
 //! Spot token and subscriptions are scoped to the engine's physical epoch.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::socket_lifecycle::{
     Control, EncodedBatch, FeedId, Interest, LifecycleEvent, SocketError,
 };
@@ -232,7 +233,10 @@ impl KrakenSpot {
             }
             LifecycleEvent::Ping(epoch) => {
                 self.private_feed(epoch.feed())?;
-                cx.send(epoch.socket(), r#"{"method":"ping"}"#);
+                cx.send(
+                    epoch.socket(),
+                    ControlFrame::heartbeat(r#"{"method":"ping"}"#),
+                );
             }
             LifecycleEvent::InterestsRefused { feed, error, .. } => {
                 self.socket_error(cx, self.private_feed(feed)?, error)

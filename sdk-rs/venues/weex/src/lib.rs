@@ -1,4 +1,5 @@
 //! WEEX Contract V3 USDT perpetual futures on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod account_wire;
 mod depth_query;
@@ -861,7 +862,10 @@ impl Venue for WeexFutures {
         if message.event == "ping" {
             let id = self.public.next_id;
             self.public.next_id += 1;
-            cx.send(socket, format!(r#"{{"method":"PONG","id":{id}}}"#));
+            cx.send(
+                socket,
+                ControlFrame::heartbeat(format!(r#"{{"method":"PONG","id":{id}}}"#)),
+            );
             return;
         }
         if message.result == Some(false) {

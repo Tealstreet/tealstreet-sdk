@@ -89,19 +89,22 @@ fn http(
         .unwrap()
     });
     let context = if let Some(session) = &session {
-        cx.session_context(
-            session,
-            policy(if method == "private/buy" {
-                Operation::Mutation
-            } else {
-                Operation::Read
-            }),
-        )
+        cx.session_context(session, policy(Operation::Mutation))
     } else {
         cx.http_context(Scope::Background, policy(Operation::Read))
     }
     .map_err(|e| e.to_string())?;
     t.http(cx, &context, method, params, session.as_ref(), pending)
+}
+// Mutation and general-query credit oracles use the managed HTTP path;
+// the socket helper now accepts only typed control operations.
+fn http_rpc(
+    t: &mut Transport,
+    cx: &mut Cx<'_, ()>,
+    method: &str,
+    params: Value,
+) -> Result<RpcId, String> {
+    http(t, cx, method, params, Some("Bearer fixture"), ()).map(|(id, _)| id)
 }
 fn send(t: &mut Transport) -> RpcId {
     let mut id = 0;
@@ -171,7 +174,7 @@ fn http_and_websocket_use_single_rpc_envelopes_and_unique_ids() {
             t.websocket(
                 cx,
                 SocketId(7),
-                "public/subscribe",
+                ControlMethod::PublicSubscribe,
                 json!({"channels":["ticker.BTC_USDC-PERPETUAL.raw"]}),
             )
             .unwrap(),
@@ -266,7 +269,7 @@ fn invalid_requests_are_never_released() {
             t.websocket(
                 cx,
                 SocketId(1),
-                "public/test",
+                ControlMethod::Test,
                 json!({"x":"a".repeat(MAX_FRAME_BYTES)})
             )
             .is_err()
@@ -355,9 +358,9 @@ fn timeouts_transport_loss_and_server_errors_are_unknown_and_retired() {
     );
     assert!(t.expire(40_000.).is_empty());
     run(1000., |cx| {
-        t.websocket(cx, SocketId(7), "private/buy", json!({}))
+        t.websocket(cx, SocketId(7), ControlMethod::PrivateSubscribe, json!({}))
             .unwrap();
-        t.websocket(cx, SocketId(8), "public/test", json!({}))
+        t.websocket(cx, SocketId(8), ControlMethod::Test, json!({}))
             .unwrap();
     });
     let lost = t.disconnected(SocketId(7));
@@ -386,40 +389,36 @@ fn credit_pools_span_http_and_ws_and_refill_without_retrying_requests() {
                 )
                 .unwrap();
             } else {
-                t.websocket(cx, SocketId(1), "private/sell", json!({}))
-                    .unwrap();
+                http_rpc(&mut t, cx, "private/sell", json!({})).unwrap();
             }
         }
-        assert!(
-            t.websocket(cx, SocketId(1), "private/buy", json!({}))
-                .is_err()
-        );
+        assert!(http_rpc(&mut t, cx, "private/buy", json!({})).is_err());
         // General query credits are separate from matching-engine credits.
         http(&mut t, cx, "public/test", json!({}), None, ()).unwrap();
     });
     run(1199., |cx| {
-        assert!(
-            t.websocket(cx, SocketId(1), "private/buy", json!({}))
-                .is_err()
-        )
+        assert!(http_rpc(&mut t, cx, "private/buy", json!({})).is_err())
     });
     run(1200., |cx| {
-        t.websocket(cx, SocketId(1), "private/buy", json!({}))
-            .unwrap();
+        http_rpc(&mut t, cx, "private/buy", json!({})).unwrap();
     });
     let mut t = Transport::default();
     run(1000., |cx| {
-        for _ in 0..10 {
-            t.websocket(cx, SocketId(1), "public/subscribe", json!({}))
-                .unwrap();
+        for i in 0..10 {
+            if i % 2 == 0 {
+                t.websocket(cx, SocketId(1), ControlMethod::PublicSubscribe, json!({}))
+                    .unwrap();
+            } else {
+                http_rpc(&mut t, cx, "public/subscribe", json!({})).unwrap();
+            }
         }
         assert!(
-            t.websocket(cx, SocketId(1), "private/subscribe", json!({}))
+            t.websocket(cx, SocketId(1), ControlMethod::PrivateSubscribe, json!({}))
                 .is_err()
         );
     });
     run(1300., |cx| {
-        t.websocket(cx, SocketId(1), "public/subscribe", json!({}))
+        t.websocket(cx, SocketId(1), ControlMethod::PublicSubscribe, json!({}))
             .unwrap();
     });
     for (method, burst) in [
@@ -429,12 +428,12 @@ fn credit_pools_span_http_and_ws_and_refill_without_retrying_requests() {
         let mut t = Transport::default();
         run(1000., |cx| {
             for _ in 0..burst {
-                t.websocket(cx, SocketId(1), method, json!({})).unwrap();
+                http_rpc(&mut t, cx, method, json!({})).unwrap();
             }
-            assert!(t.websocket(cx, SocketId(1), method, json!({})).is_err());
+            assert!(http_rpc(&mut t, cx, method, json!({})).is_err());
         });
         run(2000., |cx| {
-            t.websocket(cx, SocketId(1), method, json!({})).unwrap();
+            http_rpc(&mut t, cx, method, json!({})).unwrap();
         });
     }
 }
@@ -605,20 +604,13 @@ fn delayed_rate_limit_response_starts_cooldown_at_receipt_and_late_acks_are_unkn
     )
     .unwrap_err();
     run(2000., |cx| {
-        assert!(
-            t.websocket(cx, SocketId(1), "private/buy", json!({}))
-                .is_err()
-        )
+        assert!(http_rpc(&mut t, cx, "private/buy", json!({})).is_err())
     });
     run(2199., |cx| {
-        assert!(
-            t.websocket(cx, SocketId(1), "private/buy", json!({}))
-                .is_err()
-        )
+        assert!(http_rpc(&mut t, cx, "private/buy", json!({})).is_err())
     });
     run(2200., |cx| {
-        t.websocket(cx, SocketId(1), "private/buy", json!({}))
-            .unwrap();
+        http_rpc(&mut t, cx, "private/buy", json!({})).unwrap();
     });
     let mut t = Transport::default();
     let id = send(&mut t);
@@ -663,25 +655,18 @@ fn matching_limit_updates_do_not_reset_used_credits_and_position_moves_obey_week
     let mut t = Transport::default();
     run(1000., |cx| {
         for _ in 0..20 {
-            t.websocket(cx, SocketId(1), "private/buy", json!({}))
-                .unwrap();
+            http_rpc(&mut t, cx, "private/buy", json!({})).unwrap();
         }
         t.set_matching_limits(10., 30.).unwrap();
-        assert!(
-            t.websocket(cx, SocketId(1), "private/buy", json!({}))
-                .is_err()
-        );
+        assert!(http_rpc(&mut t, cx, "private/buy", json!({})).is_err());
     });
     run(1100., |cx| {
-        t.websocket(cx, SocketId(1), "private/buy", json!({}))
-            .unwrap();
+        http_rpc(&mut t, cx, "private/buy", json!({})).unwrap();
     });
     let mut t = Transport::default();
     for i in 0..100 {
         run(1000. + f64::from(i) * 10_000., |cx| {
-            let id = t
-                .websocket(cx, SocketId(1), "private/move_positions", json!({}))
-                .unwrap();
+            let id = http_rpc(&mut t, cx, "private/move_positions", json!({})).unwrap();
             t.response(
                 id,
                 200,
@@ -691,14 +676,10 @@ fn matching_limit_updates_do_not_reset_used_credits_and_position_moves_obey_week
         });
     }
     run(1_001_000., |cx| {
-        assert!(
-            t.websocket(cx, SocketId(1), "private/move_positions", json!({}))
-                .is_err()
-        )
+        assert!(http_rpc(&mut t, cx, "private/move_positions", json!({})).is_err())
     });
     run(1000. + 168. * 60. * 60. * 1000., |cx| {
-        t.websocket(cx, SocketId(1), "private/move_positions", json!({}))
-            .unwrap();
+        http_rpc(&mut t, cx, "private/move_positions", json!({})).unwrap();
     });
 }
 
@@ -1068,17 +1049,13 @@ fn unknown_methods_are_rejected_on_both_transports_before_admission() {
                     "unknown {method} admitted under {operation:?}"
                 );
             }
-            assert!(
-                transport
-                    .websocket(cx, SocketId(7), method, json!({}))
-                    .is_err(),
-                "unknown {method} admitted over WS"
-            );
-            // Rejection consumes no RPC ID: three rejected attempts above
+            // String methods are rejected by the WS type boundary (see the
+            // ControlMethod compile-fail doctest).
+            // Rejection consumes no RPC ID: two rejected attempts above
             // precede this first send.
             assert_eq!(
                 transport
-                    .websocket(cx, SocketId(7), "public/subscribe", json!({}))
+                    .websocket(cx, SocketId(7), ControlMethod::PublicSubscribe, json!({}))
                     .unwrap(),
                 1
             );

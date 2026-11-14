@@ -2,6 +2,7 @@
 //! succeed. Private events and acknowledged writes invalidate older snapshots.
 use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::credential_selection::CredentialRole;
@@ -371,7 +372,10 @@ impl WeexFutures {
         self.account.next_id += 1;
         cx.send(
             socket,
-            format!(r#"{{"method":"PING","id":{}}}"#, self.account.next_id),
+            ControlFrame::heartbeat(format!(
+                r#"{{"method":"PING","id":{}}}"#,
+                self.account.next_id
+            )),
         );
     }
     fn account_cycle(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -927,7 +931,7 @@ impl WeexFutures {
             return false;
         }
         self.account.next_id += 1;
-        cx.send(socket,format!(r#"{{"method":"SUBSCRIBE","params":["account","positions","orders","fill"],"id":{}}}"#,self.account.next_id));
+        cx.send(socket,ControlFrame::subscription(format!(r#"{{"method":"SUBSCRIBE","params":["account","positions","orders","fill"],"id":{}}}"#,self.account.next_id)));
         self.refresh_account(cx);
         true
     }
@@ -958,7 +962,10 @@ impl WeexFutures {
             self.account.next_id += 1;
             cx.send(
                 socket,
-                format!(r#"{{"method":"PONG","id":{}}}"#, self.account.next_id),
+                ControlFrame::heartbeat(format!(
+                    r#"{{"method":"PONG","id":{}}}"#,
+                    self.account.next_id
+                )),
             );
             return true;
         }

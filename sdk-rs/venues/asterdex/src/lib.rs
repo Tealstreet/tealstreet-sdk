@@ -1,4 +1,5 @@
 //! Aster perpetuals: typed public streams and versioned REST on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 #[cfg(test)]
 #[path = "../tests/support/fixture.rs"]
@@ -541,12 +542,13 @@ impl AsterDex {
                 // Sent before the engine replays the subscriptions, as legacy did.
                 cx.send(
                     epoch.socket(),
-                    "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}",
+                    ControlFrame::subscription("{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}"),
                 );
             }
-            LifecycleEvent::Ping(epoch) => {
-                cx.send(epoch.socket(), r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#)
-            }
+            LifecycleEvent::Ping(epoch) => cx.send(
+                epoch.socket(),
+                ControlFrame::subscription(r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#),
+            ),
             LifecycleEvent::Reconnect(_) => self.ensure_public_feed(cx),
             LifecycleEvent::Retired { .. } => {
                 self.public.socket = None;

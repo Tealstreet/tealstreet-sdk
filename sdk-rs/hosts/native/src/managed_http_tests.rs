@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::request_context::{
     Context, HttpRelease, Operation, Pacing, Policy, RetryPolicy, Scope,
 };
@@ -105,7 +106,7 @@ impl Venue for Probe {
         if matches!(command, Command::FetchLeverage { symbol, .. } if symbol == "fatal-resource") {
             cx.send(
                 SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1),
-                "unsafe",
+                ControlFrame::subscription("unsafe"),
             );
         }
     }

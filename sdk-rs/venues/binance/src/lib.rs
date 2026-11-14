@@ -1,4 +1,5 @@
 //! Binance market and account families on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod candles;
 mod history;
@@ -565,8 +566,14 @@ impl BinanceFutures {
         };
         match channel {
             Channel::Private if self.is_spot() => self.ping_spot_account(cx),
-            Channel::Private => cx.send(socket, "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}"),
-            _ => cx.send(socket, "{\"id\":0,\"method\":\"LIST_SUBSCRIPTIONS\"}"),
+            Channel::Private => cx.send(
+                socket,
+                ControlFrame::subscription("{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}"),
+            ),
+            _ => cx.send(
+                socket,
+                ControlFrame::subscription("{\"id\":0,\"method\":\"LIST_SUBSCRIPTIONS\"}"),
+            ),
         }
     }
 

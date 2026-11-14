@@ -1,4 +1,5 @@
 //! JWT singleflight, private socket recovery and fenced account snapshots.
+use safe_cex_engine::ControlFrame;
 #[path = "account_state.rs"]
 mod state;
 use crate::{
@@ -788,15 +789,17 @@ impl Account {
         self.auth_rpc = Some(id);
         cx.send(
             self.socket.expect("open socket"),
-            serde_json::to_string(&Rpc {
-                jsonrpc: "2.0",
-                method: "auth",
-                params: Params {
-                    bearer: self.token.as_deref().expect("JWT"),
-                },
-                id,
-            })
-            .expect("serializable auth"),
+            ControlFrame::authentication(
+                serde_json::to_string(&Rpc {
+                    jsonrpc: "2.0",
+                    method: "auth",
+                    params: Params {
+                        bearer: self.token.as_deref().expect("JWT"),
+                    },
+                    id,
+                })
+                .expect("serializable auth"),
+            ),
         );
     }
     fn rpc(&mut self) -> u64 {
@@ -820,13 +823,15 @@ impl Account {
         self.subscriptions.insert(id, channel.to_owned());
         cx.send(
             self.socket.expect("authenticated socket"),
-            serde_json::to_string(&Rpc {
-                jsonrpc: "2.0",
-                method: "subscribe",
-                params: Params { channel },
-                id,
-            })
-            .expect("serializable channel"),
+            ControlFrame::subscription(
+                serde_json::to_string(&Rpc {
+                    jsonrpc: "2.0",
+                    method: "subscribe",
+                    params: Params { channel },
+                    id,
+                })
+                .expect("serializable channel"),
+            ),
         );
     }
     pub fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {

@@ -1,5 +1,6 @@
 //! Native topic projection and wire encoding; the shared core owns transport.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, Control, ControlPolicy, DataSilence, EncodedBatch, Epoch, FeedPolicy,
     Interest, Invalidation, LifecycleEvent, RetireReason, TrafficPolicy,
@@ -853,7 +854,10 @@ impl Hyperliquid {
                     ladder.book.clear();
                 }
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "{\"method\":\"ping\"}"),
+            LifecycleEvent::Ping(epoch) => cx.send(
+                epoch.socket(),
+                ControlFrame::heartbeat("{\"method\":\"ping\"}"),
+            ),
             LifecycleEvent::Reconnect(_) => self.managed_connect(cx)?,
             LifecycleEvent::InterestsRefused { feed, error, .. } => {
                 if error != SocketError::Capacity || self.connection.feed != Some(feed) {

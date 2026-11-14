@@ -188,7 +188,7 @@ fn assert_unknown_stop(h: &Harness) {
         error
             .message
             .contains("outcome is unknown. Check Open Orders")
-            || error.message == "HTTP response does not prove the write outcome",
+            || error.message == "Response does not prove the write outcome",
         "{}",
         error.message
     );

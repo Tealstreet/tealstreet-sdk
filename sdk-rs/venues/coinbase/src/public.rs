@@ -1,4 +1,5 @@
 use crate::{Coinbase, Pending, ProductKind, wire::*};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -381,12 +382,14 @@ impl Coinbase {
         }
         cx.send(
             self.public.socket.unwrap(),
-            serde_json::to_string(&Sub {
-                r#type: if add { "subscribe" } else { "unsubscribe" },
-                product_ids: symbols,
-                channel,
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Sub {
+                    r#type: if add { "subscribe" } else { "unsubscribe" },
+                    product_ids: symbols,
+                    channel,
+                })
+                .unwrap(),
+            ),
         );
     }
     /// The level2 frame every book subscribe, unsubscribe and repair sends.

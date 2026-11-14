@@ -4797,7 +4797,7 @@ fn ordinary_replacement_text_matches_master() {
         let expected = if status == 200 {
             "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
         } else {
-            "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
         };
         assert_eq!(error.message, expected);
         assert_eq!(error.legacy_text(), expected);

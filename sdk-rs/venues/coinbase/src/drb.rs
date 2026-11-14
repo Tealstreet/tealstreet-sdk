@@ -1,7 +1,7 @@
 //! Shared JSON-RPC transport for the Coinbase derivatives gateway.
 //! Consumers own their pending contexts and forward replies/loss to this transport.
 use safe_cex_engine::{
-    Cx, ErrorKind, Method, RequestId, Response, SocketId,
+    ControlFrame, Cx, ErrorKind, Method, RequestId, Response, SocketId,
     classify::{self, CodeTable, Intent, Key, Native, NativeCode, Released, Row, Verdict},
     request_context::{Context, Operation, Session},
 };
@@ -17,6 +17,63 @@ pub const REQUEST_TIMEOUT_MS: u32 = 30_000;
 const MAX_PENDING: usize = 256;
 const MAX_RPC_ID: u64 = (1 << 53) - 1;
 pub type RpcId = u64;
+
+/// The DRB socket control vocabulary. General queries use managed HTTP; socket
+/// mutations must use `Cx::websocket_write` and `Cx::send_websocket_write`.
+/// A method string cannot grant control-send authority.
+///
+/// ```compile_fail,E0308
+/// use safe_cex_engine::{Cx, SocketId};
+/// use safe_cex_venue_coinbase::drb::Transport;
+/// fn order<P>(transport: &mut Transport, cx: &mut Cx<'_, P>) {
+///     transport.websocket(cx, SocketId(1), "private/buy", serde_json::json!({}));
+/// }
+/// ```
+#[derive(Clone, Copy)]
+pub enum ControlMethod {
+    PublicSubscribe,
+    PublicUnsubscribe,
+    PublicUnsubscribeAll,
+    PrivateSubscribe,
+    PrivateUnsubscribe,
+    PrivateUnsubscribeAll,
+    Authenticate,
+    SetHeartbeat,
+    DisableHeartbeat,
+    Test,
+}
+
+impl ControlMethod {
+    fn method(self) -> &'static str {
+        match self {
+            Self::PublicSubscribe => "public/subscribe",
+            Self::PublicUnsubscribe => "public/unsubscribe",
+            Self::PublicUnsubscribeAll => "public/unsubscribe_all",
+            Self::PrivateSubscribe => "private/subscribe",
+            Self::PrivateUnsubscribe => "private/unsubscribe",
+            Self::PrivateUnsubscribeAll => "private/unsubscribe_all",
+            Self::Authenticate => "public/auth",
+            Self::SetHeartbeat => "public/set_heartbeat",
+            Self::DisableHeartbeat => "public/disable_heartbeat",
+            Self::Test => "public/test",
+        }
+    }
+
+    fn frame(self, text: String) -> ControlFrame {
+        match self {
+            Self::Authenticate => ControlFrame::authentication(text),
+            Self::SetHeartbeat | Self::DisableHeartbeat | Self::Test => {
+                ControlFrame::heartbeat(text)
+            }
+            Self::PublicSubscribe
+            | Self::PublicUnsubscribe
+            | Self::PublicUnsubscribeAll
+            | Self::PrivateSubscribe
+            | Self::PrivateUnsubscribe
+            | Self::PrivateUnsubscribeAll => ControlFrame::subscription(text),
+        }
+    }
+}
 
 /// HTTP bearer sessions and authenticated main WebSocket sessions are distinct.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -285,21 +342,26 @@ impl Transport {
         Ok((id, request))
     }
 
-    /// Caller must gate private methods on its Session and use the main WS host.
+    /// Send only typed socket control. Caller must gate private subscriptions
+    /// on its Session and use the main WS host.
     pub fn websocket<P>(
         &mut self,
         cx: &mut Cx<'_, P>,
         socket: SocketId,
-        method: &str,
+        method: ControlMethod,
         params: Value,
     ) -> Result<RpcId, String> {
         if socket == SocketId(0) {
             return Err("drb invalid socket".into());
         }
-        let intent = method_intent(method)?;
-        let (id, body) =
-            self.prepare(Channel::WebSocket(socket), method, intent, params, cx.now)?;
-        cx.send(socket, body);
+        let (id, body) = self.prepare(
+            Channel::WebSocket(socket),
+            method.method(),
+            Intent::Read,
+            params,
+            cx.now,
+        )?;
+        cx.send(socket, method.frame(body));
         Ok(id)
     }
 

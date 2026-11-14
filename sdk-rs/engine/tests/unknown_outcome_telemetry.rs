@@ -266,7 +266,7 @@ fn absent_callback_preserves_existing_error_and_actions() {
     let error = failure(&actions);
     assert_eq!(
         error.message,
-        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+        "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
     );
     assert_eq!(error.kind, Some(ErrorKind::VenueUnavailable));
     assert_eq!(error.outcome, Some(Outcome::Unknown));

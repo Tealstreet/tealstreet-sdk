@@ -2,6 +2,8 @@
 //! embedding application; clients can neither create accounts nor set credentials.
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
+#[cfg(test)]
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::command::HostInput;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::{Command, Event, Level, Notice, SubscriptionTopic, Value, Venue, VenueError};
@@ -2378,7 +2380,7 @@ mod tests {
             if matches!(&command, Command::FetchLeverage {symbol, ..} if symbol == "fatal") {
                 cx.send(
                     SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1),
-                    "unsafe",
+                    ControlFrame::subscription("unsafe"),
                 );
                 return;
             }

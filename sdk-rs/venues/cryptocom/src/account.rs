@@ -1,6 +1,7 @@
 use crate::sign::Params;
 use crate::wire::{Envelope, Message};
 use crate::{Cryptocom, Pending, Skipped, quoted};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::fresh_positions::FreshPositions;
@@ -985,7 +986,7 @@ impl Cryptocom {
             };
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(crate::sign::Envelope::ws_auth(identity.clone(), url)),
             );
         }
@@ -1006,13 +1007,13 @@ impl Cryptocom {
             ];
             cx.send(
                 socket,
-                format!(
+                ControlFrame::subscription(format!(
                     "{{\"id\":{},\"method\":{},\"params\":{{\"channels\":{}}},\"nonce\":{}}}",
                     self.message_id,
                     quoted("subscribe"),
                     serde_json::to_string(&channels).unwrap(),
                     cx.protocol_now() as u64
-                ),
+                )),
             );
             self.reconcile(cx);
         }

@@ -1,5 +1,6 @@
 //! `Venue::repair_subscription`: a venue that owns its sockets answers
 //! `Command::RepairSubscription` itself; only refusals are visible.
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::log::code;
@@ -24,7 +25,10 @@ impl Venue for Owner {
     ) -> Option<Result<(), String>> {
         self.repairs.push(topic.clone());
         if let Some(Ok(())) = self.answer {
-            cx.send(SocketId(1), format!("repaired {topic}"));
+            cx.send(
+                SocketId(1),
+                ControlFrame::subscription(format!("repaired {topic}")),
+            );
         }
         self.answer.clone()
     }

@@ -1,6 +1,7 @@
 //! Authenticated account snapshots and monotonic execution reconciliation.
 use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowKeys, RowRepeat, RowReports};
@@ -753,7 +754,7 @@ impl Woo {
         if let Some(identity) = &self.options.credentials {
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(crate::sign::dispatch::WsAuth::new(identity.clone(), socket)),
             );
             return true;
@@ -761,7 +762,7 @@ impl Woo {
         let Some(text) = crate::sign::websocket_auth(&self.options, cx.protocol_now()) else {
             return true;
         };
-        cx.send(socket, text);
+        cx.send(socket, ControlFrame::authentication(text));
         true
     }
     /// Events before the subscriptions were never delivered, the first open included.
@@ -1911,7 +1912,7 @@ impl Woo {
         };
         match msg.event.as_ref() {
             "ping" => {
-                cx.send(socket, r#"{"event":"pong"}"#);
+                cx.send(socket, ControlFrame::heartbeat(r#"{"event":"pong"}"#));
                 return true;
             }
             "pong" => return true,

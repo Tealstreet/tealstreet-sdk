@@ -9,6 +9,7 @@ pub(crate) mod nonce_handoff_core;
 pub use address_nonce_setup::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
 pub use address_nonce_setup::{AddressSetupSlots, SetupRetirement};
 
+pub use crate::ControlFrame;
 use crate::book::{Book, BookSide};
 use crate::capabilities::{AccountLookup, Capabilities};
 use crate::error::{ErrorKind, VenueError};
@@ -2809,10 +2810,10 @@ impl<P> Cx<'_, P> {
         self.stage_signed(index, outbound, step);
     }
 
-    /// Control traffic only (subscriptions, authentication and heartbeats).
+    /// Send explicitly typed control traffic (subscriptions, authentication and heartbeats).
     /// Order and setting mutations must use `websocket_write` and
     /// `send_websocket_write`, including when the wire protocol signs them.
-    pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
+    pub fn send(&mut self, socket: SocketId, frame: ControlFrame) {
         if !self.managed_send_allowed(socket) {
             return;
         }
@@ -2822,7 +2823,7 @@ impl<P> Cx<'_, P> {
         self.io.opaque_entry_activity();
         let action = Action::WsSend {
             socket,
-            text: text.into(),
+            text: frame.into_text(),
         };
         if self.io.core.signing.has_socket(socket) {
             if self.io.core.signing.hold(action.clone()).is_err() {
@@ -2952,12 +2953,24 @@ impl<P> Cx<'_, P> {
 
     /// WS authentication uses the same deadline/freshness/generation service.
     /// Mutations use `send_websocket_write` with a signing recipe instead.
-    pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
+    pub fn send_signed(
+        &mut self,
+        socket: SocketId,
+        frame: ControlFrame,
+        step: Box<dyn crate::SignStep>,
+    ) {
         if !self.managed_send_allowed(socket) {
             return;
         }
         let index = self.io.core.actions.len();
-        self.stage_signed(index, Action::WsSend { socket, text }, step);
+        self.stage_signed(
+            index,
+            Action::WsSend {
+                socket,
+                text: frame.into_text(),
+            },
+            step,
+        );
     }
 
     #[inline]

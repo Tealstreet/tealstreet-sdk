@@ -1,5 +1,6 @@
 //! Original timing controls; the explicit progress mapping changes at API adoption.
 #![cfg(feature = "managed-sockets")]
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -95,7 +96,10 @@ impl Venue for Native {
                 self.challenge = false;
                 self.acks = 0;
                 if self.waiting_challenge {
-                    cx.send(epoch.socket(), "key-challenge");
+                    cx.send(
+                        epoch.socket(),
+                        ControlFrame::authentication("key-challenge"),
+                    );
                 }
             }
             LifecycleEvent::Ready { .. } => self.ready += 1,
@@ -139,9 +143,13 @@ impl Venue for Native {
             self.challenge = true;
             self.accepted_challenges += 1;
             if self.signed_auth {
-                cx.send_signed(socket, "auth-subscription".into(), Box::new(AuthRecipe));
+                cx.send_signed(
+                    socket,
+                    ControlFrame::authentication("auth-subscription"),
+                    Box::new(AuthRecipe),
+                );
             } else {
-                cx.send(socket, "auth-subscription");
+                cx.send(socket, ControlFrame::authentication("auth-subscription"));
             }
         }
         if text == "ack" && self.challenge {

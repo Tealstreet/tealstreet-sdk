@@ -1,4 +1,5 @@
 //! Bitget perpetual futures: a deterministic, sans-I/O venue engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod book;
 mod history;
@@ -503,7 +504,9 @@ impl BitgetFutures {
                 .collect();
             cx.send(
                 socket,
-                serde_json::to_string(&Subscription { op, args }).expect("subscription"),
+                ControlFrame::subscription(
+                    serde_json::to_string(&Subscription { op, args }).expect("subscription"),
+                ),
             );
         }
     }
@@ -1003,7 +1006,7 @@ impl Venue for BitgetFutures {
             self.account.login_answered = false;
             self.account.supervisor.opened(cx);
             self.private_open(cx, socket);
-            cx.send(socket, "ping");
+            cx.send(socket, ControlFrame::heartbeat("ping"));
             return;
         }
         connection.supervisor.opened(cx);
@@ -1027,7 +1030,7 @@ impl Venue for BitgetFutures {
             );
         }
         self.send_topics(cx, socket, "subscribe", &topics);
-        cx.send(socket, "ping");
+        cx.send(socket, ControlFrame::heartbeat("ping"));
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(index) = self.channel(socket) else {
@@ -1486,7 +1489,7 @@ impl Venue for BitgetFutures {
                 Tick::Reconnect => self.open_feed(cx, index),
                 Tick::Ping => {
                     if let Some(socket) = self.sockets[index].socket {
-                        cx.send(socket, "ping");
+                        cx.send(socket, ControlFrame::heartbeat("ping"));
                         self.sockets[index].ping_at = cx.now;
                     }
                 }

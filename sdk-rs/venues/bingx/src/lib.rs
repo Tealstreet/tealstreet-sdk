@@ -1,4 +1,5 @@
 //! BingX stablecoin-margined perpetual swaps on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 pub mod account;
 pub mod account_wire;
 mod clock;
@@ -468,7 +469,7 @@ impl Bingx {
             return;
         };
         if text == "Ping" {
-            cx.send(socket, "Pong");
+            cx.send(socket, ControlFrame::heartbeat("Pong"));
             return;
         }
         if text == "Pong" {
@@ -478,7 +479,7 @@ impl Bingx {
             return;
         };
         if message.ping.is_some() {
-            cx.send(socket, "Pong");
+            cx.send(socket, ControlFrame::heartbeat("Pong"));
             return;
         }
         if message.pong.is_some() {

@@ -1,5 +1,6 @@
 //! Native wire codecs attached to the engine's two independent socket epochs.
 use crate::{Pending, WeexFutures};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Interest,
@@ -317,7 +318,10 @@ impl WeexFutures {
                 if Some(epoch.feed()) == self.sockets.public {
                     let id = self.public.next_id;
                     self.public.next_id += 1;
-                    cx.send(epoch.socket(), format!(r#"{{"method":"PING","id":{id}}}"#));
+                    cx.send(
+                        epoch.socket(),
+                        ControlFrame::heartbeat(format!(r#"{{"method":"PING","id":{id}}}"#)),
+                    );
                 } else if Some(epoch.feed()) == self.sockets.private {
                     self.account_ping(cx, epoch.socket());
                 }

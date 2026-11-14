@@ -1,4 +1,5 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod clock;
 mod depth_query;
@@ -293,7 +294,9 @@ impl MexcFutures {
         }
         cx.send(
             socket,
-            serde_json::to_string(&Subscription { method, param }).unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Subscription { method, param }).unwrap(),
+            ),
         );
     }
     fn reconcile_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -414,7 +417,9 @@ impl MexcFutures {
         } else if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
             cx.send(
                 socket,
-                format!(r#"{{"method":"sub.depth","param":{{"symbol":"{id}","compress":false}}}}"#),
+                ControlFrame::subscription(format!(
+                    r#"{{"method":"sub.depth","param":{{"symbol":"{id}","compress":false}}}}"#
+                )),
             );
         }
         true
@@ -832,12 +837,12 @@ impl Venue for MexcFutures {
         self.public.open = true;
         self.public_supervisor.opened(cx);
         self.public.ping_at = cx.now;
-        cx.send(socket, PING);
+        cx.send(socket, ControlFrame::heartbeat(PING));
         // Sparse once-per-second prices cover every listed market. Detailed
         // subscriptions provide funding, index and open-interest quantities.
         cx.send(
             socket,
-            r#"{"method":"sub.tickers","param":{},"gzip":false}"#,
+            ControlFrame::subscription(r#"{"method":"sub.tickers","param":{},"gzip":false}"#),
         );
         self.reconcile_tickers(cx);
         let symbols: Vec<_> = self.books.keys().cloned().collect();
@@ -1461,7 +1466,7 @@ impl Venue for MexcFutures {
             socket::Tick::Ping => {
                 if let Some(socket) = self.public.socket {
                     self.public.ping_at = cx.now;
-                    cx.send(socket, PING);
+                    cx.send(socket, ControlFrame::heartbeat(PING));
                 }
             }
             socket::Tick::TimedOut(_) => {

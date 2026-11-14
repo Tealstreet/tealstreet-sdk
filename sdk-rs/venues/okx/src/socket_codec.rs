@@ -1,5 +1,6 @@
 //! Native codecs and store invalidation; Engine owns auth, epochs and replay.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, DataSilence, EncodedBatch,
@@ -239,7 +240,7 @@ impl Okx {
                     self.login(cx, channel);
                 }
                 if channel != PUBLIC && self.credentials.is_some() {
-                    cx.send(epoch.socket(), "ping");
+                    cx.send(epoch.socket(), ControlFrame::heartbeat("ping"));
                 }
             }
             LifecycleEvent::Ready { epoch, reopened } => {
@@ -294,7 +295,7 @@ impl Okx {
                     }
                 }
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "ping"),
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), ControlFrame::heartbeat("ping")),
             LifecycleEvent::Reconnect(feed) => {
                 let channel = self.feed_channel(feed).ok_or(SocketError::Stale)?;
                 self.managed_connect(cx, channel)?;

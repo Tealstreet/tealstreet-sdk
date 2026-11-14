@@ -1,4 +1,5 @@
 //! Original callback controls for the complete private dispatch cutover.
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::signing::{
     Capability, KeyRef, SignError, SignFuture, SignRequest, SignResult, Signer,
@@ -837,7 +838,7 @@ fn recipe_envelope(method: &'static str, params: Params, now: f64, auth: bool) -
                 let socket = cx.connect(url);
                 cx.send_signed(
                     socket,
-                    String::new(),
+                    ControlFrame::authentication(String::new()),
                     Box::new(Envelope::ws_auth(identity.clone(), url)),
                 );
             } else {

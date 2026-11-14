@@ -2087,7 +2087,7 @@ fn write_failures_preserve_native_text_with_unknown_guidance() {
         if matches!(status, 429 | 502) {
             assert_eq!(
                 error.message,
-                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
         } else {
             assert_eq!(

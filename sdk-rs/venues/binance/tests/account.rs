@@ -541,7 +541,10 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
     assert_eq!(store.order("2146760").unwrap().status, OrderStatus::Open);
     assert_eq!(
         h.result(11),
-        Some(&Err("HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders".into()))
+        Some(&Err(
+            "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                .into()
+        ))
     );
     let failure = &h.failures.iter().find(|(id, _)| *id == 11).unwrap().1;
     assert_eq!(
@@ -1421,7 +1424,7 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         if status >= 500 {
             assert_eq!(
                 error.message,
-                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
             let native: Option<serde_json::Value> = serde_json::from_str(body).ok();
             assert_eq!(
@@ -1879,7 +1882,7 @@ fn a_hung_listen_key_create_is_bounded_and_backs_off() {
     assert_eq!(
         h.errors,
         [
-            "Binance user data stream unavailable: network error: HTTP request timed out (class=orderWrite budget=20000ms elapsed=20000ms)"
+            "Binance user data stream unavailable: network error: Request timed out (class=orderWrite budget=20000ms elapsed=20000ms)"
         ]
     );
     h.take("/fapi/v1/listenKey");

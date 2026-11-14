@@ -1,6 +1,7 @@
 //! Private streams and atomic REST reconciliation, guarded against newer pushes.
 use crate::wire::*;
 use crate::{Okx, Pending, scaled, usd};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::credential_selection::SlotPolicy;
@@ -611,7 +612,7 @@ impl Okx {
         ) {
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(crate::sign::WsLogin::new(
                     identity.clone(),
                     self.socket_url(channel),

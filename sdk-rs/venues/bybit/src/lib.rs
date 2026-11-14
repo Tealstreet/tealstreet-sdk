@@ -1,4 +1,5 @@
 //! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod candles;
 mod closed;
@@ -3113,7 +3114,9 @@ impl Venue for BybitLinear {
                 self.public.tickers_capped = false;
                 self.sync_public_interests(cx);
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), r#"{"op":"ping"}"#),
+            LifecycleEvent::Ping(epoch) => {
+                cx.send(epoch.socket(), ControlFrame::heartbeat(r#"{"op":"ping"}"#))
+            }
             LifecycleEvent::Reconnect(_) => self.open_feed(cx, channel),
             LifecycleEvent::Retired {
                 reason, close_code, ..

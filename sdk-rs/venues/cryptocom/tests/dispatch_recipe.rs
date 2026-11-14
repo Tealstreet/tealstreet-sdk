@@ -1,5 +1,6 @@
 //! The exported dispatch recipe reproduces the legacy local envelope bytes
 //! through the real engine dispatcher and an injected local provider.
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::Identity;
@@ -106,7 +107,7 @@ fn signed_actions(metadata: Option<bool>) -> Vec<Action> {
             let user = cx.connect(USER);
             cx.send_signed(
                 user,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(Envelope::ws_auth(ws_identity.clone(), USER)),
             );
         },

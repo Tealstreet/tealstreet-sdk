@@ -47,11 +47,17 @@ Integration contract:
   pages. Reads deferred during discovery retain their original caller deadline
   and settle through `settle_caller_read_root` if the catalogue fails.
   No raw bearer strings or legacy `Cx::request` boundary are used by drb.
-- Supported methods have a closed semantic classification, independent of rate
-  pools. Orders, edits, cancels, position moves and account settings (including
+- WebSocket sends accept only the closed `drb::ControlMethod` vocabulary for
+  subscriptions, authentication and heartbeat control. The encoder mints a
+  `ControlFrame` from that typed operation. General RPC reads use managed HTTP;
+  future socket mutations must use the engine's `WebSocketWrite` path with live
+  command Mutation authority. An arbitrary method string cannot enter the
+  socket control helper.
+- Supported HTTP methods have a closed semantic classification, independent of
+  rate pools. Orders, edits, cancels, position moves and account settings (including
   margin model, leverage and cancel-on-disconnect) require HTTP Mutation authority.
-  Known queries, authentication, heartbeats and subscriptions use Read semantics. Unknown
-  methods are rejected on HTTP and WS before admission; adding a method requires
+  Known queries, authentication, heartbeats and subscriptions use Read semantics.
+  Unknown HTTP methods are rejected before admission; adding a method requires
   updating the classifier and its complete authority table in the foundation tests.
 - HTTP returns `(RpcId, engine::RequestId)`; retain the RPC ID in the caller's
   pending context. Forward status/body and `cx.now` to `response_at` and transport

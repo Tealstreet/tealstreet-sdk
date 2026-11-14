@@ -5,9 +5,9 @@ use super::{CommandId, LogEvent, RequestId, VenueError};
 
 /// Canonical venue-authored Unknown guidance; presentation only.
 pub const UNKNOWN_OUTCOME_TEXT: &str = "The outcome is unknown. Check Open Orders";
-/// The engine's existing unproven HTTP-envelope message.
+/// Shared unproven-envelope guidance for HTTP and WebSocket mutations.
 pub const UNKNOWN_HTTP_OUTCOME_TEXT: &str =
-    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders";
+    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders";
 
 /// Immutable facts after the engine sealed a released mutation Unknown.
 /// No request, completion, classification, Store or retry authority is provided.

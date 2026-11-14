@@ -1,5 +1,6 @@
 //! Native socket wire and financial invalidation; the engine owns lifecycle.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::SocketChannel;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -537,7 +538,10 @@ impl Backpack {
                     return Err(SocketError::Stale);
                 }
                 connection.ping_at = cx.now;
-                cx.send(epoch.socket(), "{\"method\":\"PING\"}");
+                cx.send(
+                    epoch.socket(),
+                    ControlFrame::heartbeat("{\"method\":\"PING\"}"),
+                );
             }
             LifecycleEvent::Reconnect(feed) => {
                 if self.public.feed == Some(feed) {

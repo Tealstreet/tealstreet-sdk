@@ -51,6 +51,22 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## WebSocket control and mutation frames
+
+`Cx::send` and `Cx::send_signed` consume `ControlFrame`. Venue encoding helpers
+declare subscriptions (including unsubscriptions and subscription snapshots),
+session authentication or heartbeats with `ControlFrame::subscription`,
+`ControlFrame::authentication` or `ControlFrame::heartbeat`. These declarations
+are protocol contracts: neither the engine nor the host infers authority from
+JSON method strings. Signed control recipes must preserve the declared purpose.
+Raw text and `WebSocketWrite` cannot enter either control-send API.
+
+Order and setting mutations use `Cx::websocket_write` with a live command
+Mutation Context, followed by `Cx::send_websocket_write`. The host must enable
+the typed write handoff and consume its single-use binding through
+`Engine::claim_websocket_write` immediately before the physical send. The shared
+write lifecycle reports transport-neutral timeout and unproven-outcome errors.
+
 ## Browser request-failure diagnostics
 
 The JS host emits `http.request_failed` at Debug for failed managed HTTP work,

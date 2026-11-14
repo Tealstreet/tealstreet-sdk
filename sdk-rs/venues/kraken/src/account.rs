@@ -1,5 +1,6 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
 use crate::{Kraken, Pending, sign, wire};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
@@ -947,12 +948,15 @@ impl Kraken {
         self.account.acks.clear();
         self.account.payloads.clear();
         self.account.payload_complete = false;
-        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
+        cx.send(
+            socket,
+            ControlFrame::subscription(r#"{"event":"subscribe","feed":"heartbeat"}"#),
+        );
         if let Some(ids) = &self.identities {
             if let Some(identity) = &ids.primary {
                 cx.send_signed(
                     socket,
-                    String::new(),
+                    ControlFrame::authentication(String::new()),
                     Box::new(sign::dispatch::WsAuth::challenge(identity.clone(), socket)),
                 );
             }
@@ -960,10 +964,12 @@ impl Kraken {
         }
         cx.send(
             socket,
-            serde_json::to_string(
-                &serde_json::json!({"event":"challenge","api_key":self.options.key}),
-            )
-            .unwrap(),
+            ControlFrame::authentication(
+                serde_json::to_string(
+                    &serde_json::json!({"event":"challenge","api_key":self.options.key}),
+                )
+                .unwrap(),
+            ),
         );
         true
     }
@@ -1038,7 +1044,7 @@ impl Kraken {
                     for feed in FEEDS {
                         cx.send_signed(
                             socket,
-                            String::new(),
+                            ControlFrame::authentication(String::new()),
                             Box::new(sign::dispatch::WsAuth::subscribe(
                                 identity.clone(),
                                 socket,
@@ -1060,7 +1066,7 @@ impl Kraken {
             let signature = signer.challenge(&msg.message);
             self.account.signed_challenge = Some(signature.clone());
             for feed in FEEDS {
-                cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
+                cx.send(socket, ControlFrame::subscription(serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string()));
             }
             return true;
         }

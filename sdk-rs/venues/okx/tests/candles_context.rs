@@ -235,7 +235,7 @@ fn unanswered_candle_read_ends_at_the_shared_deadline() {
     assert_soft_empty(
         &seen,
         7,
-        "HTTP request timed out (class=orderRead budget=20000ms elapsed=20000ms)",
+        "Request timed out (class=orderRead budget=20000ms elapsed=20000ms)",
     );
     let late = answer(
         &mut e,
@@ -271,7 +271,7 @@ fn history_fallback_leg_keeps_the_original_deadline() {
     assert_soft_empty(
         &seen,
         8,
-        "HTTP request timed out (class=orderRead budget=10000ms elapsed=10000ms)",
+        "Request timed out (class=orderRead budget=10000ms elapsed=10000ms)",
     );
     let late = answer(
         &mut e,

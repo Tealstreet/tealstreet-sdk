@@ -504,8 +504,20 @@ fn directly_edited_attached_legs_are_refused_before_cancel() {
 fn ordinary_amend_refusal_wire_and_outcome_match_master() {
     // Recorded before this fix on master 06a9b1326ac, using only synthetic keys.
     // Ambiguous-status rows reflect #3245's unproven-write rule; all other rows retain master's result.
-    let expected: serde_json::Value =
+    let mut expected: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/ordinary-amend-master.json")).unwrap();
+    // Shared HTTP/WS lifecycle diagnostics now omit the transport name. Keep
+    // the recorded master fixture intact and pin this one presentation change.
+    for case in expected["cases"].as_array_mut().unwrap() {
+        if let Some(message) = case["error"]["message"].as_str()
+            && message
+                == "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+        {
+            case["error"]["message"] = serde_json::json!(
+                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            );
+        }
+    }
     let mut records = Vec::new();
     for (status, code) in [
         (200, -1111),
