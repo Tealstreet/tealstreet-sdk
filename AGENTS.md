@@ -1,6 +1,6 @@
 # Agent Guidance
 
-**Tealstreet's own agents:** before asking the owner (Sam) anything about the migration, releases, CI or owners, read the private decisions doc, [Tealstreet migration](https://linear.app/tealstreet/document/tealstreet-migration-aws-exit-rust-cutover-edd45253faed) (claude.ai Linear connector). Act on what it records, and add any new decision there. External contributors can ignore this.
+**Tealstreet's own agents:** consult the private maintainer decisions doc before asking about migration, releases, CI or ownership. Follow its recorded decisions and add any new decision there. External contributors can ignore this.
 
 This repository is a Tealstreet mirror. It is a filtered, read/write view of an
 upstream monorepo. Contributors and agents work here normally through mirror
