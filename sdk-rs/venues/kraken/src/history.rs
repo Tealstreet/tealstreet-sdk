@@ -455,91 +455,157 @@ enum OrderEvent<'a> {
     NotFound(serde::de::IgnoredAny),
 }
 
-// Diagnose only after typed decoding rejects, using the same strict number decoder.
-// Closed labels replace serde's errors so no supplied row values enter a refusal.
+#[derive(Clone, Copy, Default)]
+struct OrderDiagnosticField<'a>(Option<&'a serde_json::value::RawValue>);
+impl<'de: 'a, 'a> Deserialize<'de> for OrderDiagnosticField<'a> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        <&serde_json::value::RawValue>::deserialize(d).map(|raw| Self(Some(raw)))
+    }
+}
+impl OrderDiagnosticField<'_> {
+    fn invalid_number(self) -> bool {
+        self.0.is_none_or(|raw| {
+            serde_json::from_str::<safe_cex_engine::de::Number>(raw.get()).is_err()
+        })
+    }
+    fn identity_predicate(
+        self,
+        reason: HistoryDecodeReason,
+        missing: &'static str,
+        not_string: &'static str,
+    ) -> Option<(HistoryDecodeReason, &'static str)> {
+        match self.0 {
+            None => Some((reason, missing)),
+            // RawValue already validated the token; only JSON strings begin with a quote.
+            Some(raw) if !raw.get().trim_start().starts_with('"') => Some((reason, not_string)),
+            _ => None,
+        }
+    }
+}
+#[derive(Deserialize)]
+struct OrderEventDiagnostic<'a> {
+    #[serde(default, borrow)]
+    uid: OrderDiagnosticField<'a>,
+    #[serde(default, borrow)]
+    timestamp: OrderDiagnosticField<'a>,
+    #[serde(borrow)]
+    event: OrderDiagnosticBody<'a>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OrderDiagnostic<'a> {
+    #[serde(default, borrow)]
+    uid: OrderDiagnosticField<'a>,
+    #[serde(default, borrow)]
+    tradeable: OrderDiagnosticField<'a>,
+    #[serde(default, borrow)]
+    quantity: OrderDiagnosticField<'a>,
+    #[serde(default, borrow)]
+    filled: OrderDiagnosticField<'a>,
+    #[serde(default, borrow)]
+    timestamp: OrderDiagnosticField<'a>,
+    #[serde(default, borrow)]
+    limit_price: OrderDiagnosticField<'a>,
+    #[serde(default, borrow)]
+    last_update_timestamp: OrderDiagnosticField<'a>,
+}
+#[derive(Deserialize)]
+enum OrderDiagnosticBody<'a> {
+    #[serde(
+        rename = "OrderPlaced",
+        alias = "OrderRejected",
+        alias = "OrderCancelled"
+    )]
+    Order {
+        #[serde(borrow)]
+        order: OrderDiagnostic<'a>,
+    },
+    #[serde(rename = "OrderUpdated")]
+    Updated {
+        #[serde(borrow, rename = "newOrder")]
+        order: OrderDiagnostic<'a>,
+    },
+    #[serde(rename = "OrderEditRejected")]
+    EditRejected {
+        #[serde(borrow, rename = "oldOrder")]
+        order: OrderDiagnostic<'a>,
+    },
+    #[serde(rename = "OrderNotFound")]
+    NotFound(serde::de::IgnoredAny),
+}
+
+// Probe borrowed, typed fields only after the strict decoder rejects the row.
+// Closed labels replace serde errors without building a JSON tree or forwarding values.
 fn order_decode_predicate(text: &str) -> (HistoryDecodeReason, &'static str) {
     let shape = (HistoryDecodeReason::RowShape, "rowShape");
-    let Ok(row) = serde_json::from_str::<serde_json::Value>(text) else {
+    let Ok(row) = serde_json::from_str::<OrderEventDiagnostic<'_>>(text) else {
         return shape;
     };
-    let Some(row) = row.as_object() else {
-        return shape;
-    };
-    match row.get("uid") {
-        None => return (HistoryDecodeReason::Identity, "identity.eventUid.missing"),
-        Some(value) if !value.is_string() => {
-            return (HistoryDecodeReason::Identity, "identity.eventUid.notString");
-        }
-        _ => {}
+    if let Some(predicate) = row.uid.identity_predicate(
+        HistoryDecodeReason::Identity,
+        "identity.eventUid.missing",
+        "identity.eventUid.notString",
+    ) {
+        return predicate;
     }
-    let invalid_number =
-        |value: Option<&serde_json::Value>| value.is_none_or(|value| number(value).is_err());
-    if invalid_number(row.get("timestamp")) {
+    if row.timestamp.invalid_number() {
         return (
             HistoryDecodeReason::TimestampDecimal,
             "time.eventTimestamp.decimalParse",
         );
     }
-    let order = [
-        ("OrderPlaced", "order"),
-        ("OrderUpdated", "newOrder"),
-        ("OrderRejected", "order"),
-        ("OrderCancelled", "order"),
-        ("OrderEditRejected", "oldOrder"),
-    ]
-    .into_iter()
-    .find_map(|(event, field)| row.get("event")?.get(event)?.get(field)?.as_object());
-    let Some(order) = order else {
-        return shape;
+    let order = match row.event {
+        OrderDiagnosticBody::Order { order }
+        | OrderDiagnosticBody::Updated { order }
+        | OrderDiagnosticBody::EditRejected { order } => order,
+        OrderDiagnosticBody::NotFound(_) => return shape,
     };
     for (field, reason, missing, not_string) in [
         (
-            "uid",
+            order.uid,
             HistoryDecodeReason::Identity,
             "identity.uid.missing",
             "identity.uid.notString",
         ),
         (
-            "tradeable",
+            order.tradeable,
             HistoryDecodeReason::Symbol,
             "identity.symbol.missing",
             "identity.symbol.notString",
         ),
     ] {
-        match order.get(field) {
-            None => return (reason, missing),
-            Some(value) if !value.is_string() => return (reason, not_string),
-            _ => {}
+        if let Some(predicate) = field.identity_predicate(reason, missing, not_string) {
+            return predicate;
         }
     }
     for (field, reason, predicate) in [
         (
-            "quantity",
+            order.quantity,
             HistoryDecodeReason::QuantityDecimal,
             "economics.quantity.decimalParse",
         ),
         (
-            "filled",
+            order.filled,
             HistoryDecodeReason::FilledQuantityDecimal,
             "economics.filled.decimalParse",
         ),
         (
-            "timestamp",
+            order.timestamp,
             HistoryDecodeReason::TimestampDecimal,
             "time.timestamp.decimalParse",
         ),
         (
-            "limitPrice",
+            order.limit_price,
             HistoryDecodeReason::LimitPriceDecimal,
             "economics.limitPrice.decimalParse",
         ),
         (
-            "lastUpdateTimestamp",
+            order.last_update_timestamp,
             HistoryDecodeReason::LastUpdateTimestampDecimal,
             "time.lastUpdateTimestamp.decimalParse",
         ),
     ] {
-        if invalid_number(order.get(field)) {
+        if field.invalid_number() {
             return (reason, predicate);
         }
     }
