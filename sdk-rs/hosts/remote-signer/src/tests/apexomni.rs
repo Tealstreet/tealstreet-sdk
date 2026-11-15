@@ -129,3 +129,76 @@ async fn apexomni_batch_bridge_refuses_unowned_refs_and_unbound_result_dependenc
     );
     assert!(seen.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn apexomni_batch_bridge_preserves_owned_contract_dependencies_and_result_order() {
+    let (link, seen) = device(Box::new(|_| {
+        json!({"wsAuthSignature":json!({
+        "credential":"pub", "contracts":["ab".repeat(64)],
+        "signature":base64::engine::general_purpose::STANDARD.encode(MAC)
+    }).to_string()})
+    }));
+    let (account, options) = account(
+        link,
+        "apexomni",
+        json!({"key":"pub","passphrase":"synthetic-passphrase"}),
+    );
+    let seed = KeyRef(
+        options["signing"]["primary"]["extra"]["zklinkSeed"]
+            .as_str()
+            .expect("ApeX installs only an opaque device-owned seed role")
+            .into(),
+    );
+    assert_eq!(
+        account.provider.can_sign(&seed, Algorithm::ZkLinkContract),
+        Capability::Supported
+    );
+    assert_eq!(
+        account.provider.can_sign(&seed, Algorithm::HmacSha256),
+        Capability::Unsupported
+    );
+    let mut contract = vec![0; 36];
+    contract[0] = 0xfe;
+    contract[4] = 1;
+    let mut work = read(
+        &options,
+        vec![
+            bytes("prefix"),
+            PayloadPart::Result {
+                index: 0,
+                encoding: Encoding::Hex,
+            },
+            bytes("suffix"),
+        ],
+    );
+    work.operations.insert(
+        0,
+        Operation::Sign {
+            algorithm: Algorithm::ZkLinkContract,
+            key: seed,
+            payload: vec![PayloadPart::Bytes {
+                bytes: contract.clone(),
+            }],
+        },
+    );
+    let receipt = work.receipt;
+    let signed = account.provider.sign(work).await.unwrap();
+    assert_eq!(signed.receipt, receipt);
+    assert_eq!(
+        signed.values,
+        vec![
+            vec![0xab; 64],
+            b"pub".to_vec(),
+            b"synthetic-passphrase".to_vec(),
+            MAC.to_vec()
+        ]
+    );
+    let sent = seen.lock().unwrap().last().unwrap().clone();
+    assert_eq!(sent["wsAuth"]["outputFormat"], "apexomni-batch");
+    let descriptor: Value =
+        serde_json::from_str(sent["wsAuth"]["toSign"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        descriptor,
+        json!({"contracts":[contract],"payload":[{"bytes":b"prefix"},{"contract":0},{"bytes":b"suffix"}]})
+    );
+}

@@ -58,6 +58,7 @@ async fn startup(material: &str) -> (Result<(), crate::delegated::probe::ProbeRe
                     let frame: Value = serde_json::from_str(&frame.unwrap()).unwrap();
                     assert_eq!(frame["t"], "sign-req");
                     let request = &frame["d"];
+                    assert_eq!(request["wsAuth"]["outputFormat"], "apexomni-batch", "Session must send the native ApeX batch format accepted by the device");
                     let input = serde_json::from_value(json!({"kind":"wsAuth", "toSign":request["wsAuth"]["toSign"], "outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
                     let response = match hosted_signing::prepare("apexomni", &identities, input) {
                         Ok((work, kind)) => {
