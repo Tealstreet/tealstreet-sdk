@@ -25,6 +25,7 @@ const VENUES: &[&str] = &[
     "bitgetusdc",
     "blofin",
     "kucoin",
+    "phemex",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -37,6 +38,7 @@ pub(crate) struct Seen {
     pub(crate) inverse_private_reads: usize,
     pub(crate) urls: Vec<String>,
     pub(crate) demo_private_reads: usize,
+    pub(crate) phemex_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -297,6 +299,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "phemex" {
+            return phemex::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -359,6 +364,9 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "phemex" {
+            return phemex::connect(self, socket, &url, events);
+        }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         let _ = events.send(HostEvent::WsMessage(
@@ -398,10 +406,16 @@ impl Transport for VenueIo {
             seen.paths.push(path(&r).split('?').next().unwrap().into());
             seen.urls.push(r.url.clone());
         }
-        let body = self.response(&r).to_string();
+        let response = self.response(&r);
+        let status = if self.venue == "phemex" && response["code"] == 401 {
+            401
+        } else {
+            200
+        };
+        let body = response.to_string();
         let _ = events.send(HostEvent::HttpStart {
             request: r.id,
-            status: 200,
+            status,
             headers: String::new(),
         });
         let _ = events.send(HostEvent::HttpChunk(r.id, body.into_bytes()));
@@ -409,24 +423,24 @@ impl Transport for VenueIo {
     }
 }
 #[derive(Clone)]
-struct Prepared(VenueIo);
-struct Bound(VenueIo, HttpRequest);
-impl std::fmt::Debug for Prepared {
+struct Prepared<T = VenueIo>(T);
+struct Bound<T = VenueIo>(T, HttpRequest);
+impl<T> std::fmt::Debug for Prepared<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PreparedAdmissionRead")
     }
 }
-impl std::fmt::Debug for Bound {
+impl<T> std::fmt::Debug for Bound<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("BoundAdmissionRead")
     }
 }
-impl PreparedHttp for Prepared {
+impl<T: Transport + Send + 'static> PreparedHttp for Prepared<T> {
     fn bind(self: Box<Self>, r: HttpRequest) -> Result<Box<dyn BoundHttp>, HttpPrepareError> {
         Ok(Box::new(Bound(self.0, r)))
     }
 }
-impl BoundHttp for Bound {
+impl<T: Transport + Send> BoundHttp for Bound<T> {
     fn ready(&self) -> bool {
         true
     }
@@ -448,14 +462,106 @@ fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
         resident: ResidentCopy::test_provider(provider),
     }
 }
+const KUCOIN_STARTUP_OPERATIONS: &[&str] = &[
+    "GET/api/v1/contracts/active",
+    "GET/api/v1/allTickers",
+    "POST/api/v1/bullet-public",
+    "GET/api/v1/positions",
+    "GET/api/v1/orders?status=active&currentPage=1&pageSize=100",
+    "GET/api/v1/stopOrders?status=active&currentPage=1&pageSize=100",
+    "GET/api/v1/account-overview?currency=USDT",
+    "GET/api/v2/position/getPositionMode",
+    "POST/api/v1/bullet-private",
+];
+
+struct KucoinStartupCapture {
+    prior: Arc<Mutex<HashMap<String, String>>>,
+    held: Mutex<Vec<(HttpRequest, Events)>>,
+    balance: Mutex<Option<HttpRequest>>,
+}
+impl KucoinStartupCapture {
+    fn new(prior: Arc<Mutex<HashMap<String, String>>>) -> Self {
+        Self {
+            prior,
+            held: Mutex::default(),
+            balance: Mutex::default(),
+        }
+    }
+    fn complete(&self) -> bool {
+        let prior = self.prior.lock().unwrap();
+        KUCOIN_STARTUP_OPERATIONS
+            .iter()
+            .all(|key| prior.contains_key(*key))
+    }
+    fn release(&self, io: &VenueIo) {
+        if self.complete() {
+            let held = std::mem::take(&mut *self.held.lock().unwrap());
+            for (request, events) in held {
+                io.request(request, events);
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ReplayCaptureIo {
+    io: VenueIo,
+    capture: Option<Arc<KucoinStartupCapture>>,
+}
+impl Transport for ReplayCaptureIo {
+    fn prepare_http(
+        &self,
+        _: HttpRequest,
+        _: safe_cex_engine::request_context::RoutingIntent,
+    ) -> HttpPrepareFuture {
+        let io = self.clone();
+        Box::pin(async move { Ok(Box::new(Prepared(io)) as Box<dyn PreparedHttp>) })
+    }
+    fn connect(
+        &self,
+        socket: SocketId,
+        url: String,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
+        self.io.connect(socket, url, events)
+    }
+    fn request(&self, request: HttpRequest, events: Events) {
+        if let Some(capture) = &self.capture
+            && path(&request).starts_with("/api/v1/account-overview?")
+        {
+            *capture.balance.lock().unwrap() = Some(request.clone());
+            // Keep the positive proof alive until its actual startup signatures exist.
+            if !capture.complete() {
+                capture.held.lock().unwrap().push((request, events));
+                return;
+            }
+        }
+        self.io.request(request, events);
+        if let Some(capture) = &self.capture {
+            capture.release(&self.io);
+        }
+    }
+}
+
 async fn check(
     venue: &'static str,
     prepared: super::super::PreparedDelegated,
 ) -> (Result<(), ProbeRefusal>, Arc<Mutex<Seen>>) {
+    check_captured(venue, prepared, None).await
+}
+
+async fn check_captured(
+    venue: &'static str,
+    prepared: super::super::PreparedDelegated,
+    capture: Option<Arc<KucoinStartupCapture>>,
+) -> (Result<(), ProbeRefusal>, Arc<Mutex<Seen>>) {
     let seen = Arc::new(Mutex::new(Seen::default()));
-    let io = VenueIo {
-        venue,
-        seen: seen.clone(),
+    let io = ReplayCaptureIo {
+        io: VenueIo {
+            venue,
+            seen: seen.clone(),
+        },
+        capture: capture.clone(),
     };
     let result = tokio::time::timeout(
         Duration::from_secs(3),
@@ -474,6 +580,14 @@ async fn check(
         "{venue} startup did not settle: {:?}",
         seen.lock().unwrap().paths
     );
+    if let Some(capture) = capture
+        && matches!(&result, Ok(Ok(())))
+    {
+        assert!(
+            capture.complete(),
+            "positive probe ended before every startup signature was captured"
+        );
+    }
     (result.unwrap(), seen)
 }
 #[tokio::test]
@@ -549,6 +663,12 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "phemex" {
+        // Native Phemex signs path + query + whole-second expiry; keep the read scope.
+        return canonical
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .into();
+    }
     if family(venue) == "bybit" {
         return canonical
             .trim_start_matches(|c: char| c.is_ascii_digit())
@@ -677,8 +797,14 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                     DeviceAnswer::DifferentKey,
                     DeviceAnswer::Replay,
                 ] {
+                    if venue == "phemex" && matches!(answer, DeviceAnswer::Replay) {
+                        // Phemex signs whole-second expiry; old-attempt bytes must really differ.
+                        tokio::time::sleep(Duration::from_millis(1100)).await;
+                    }
                     let (prepared, link, task) = remote(venue, answer, prior.clone()).await;
-                    let (result, seen) = check(venue, prepared).await;
+                    let capture = (venue == "kucoin" && matches!(answer, DeviceAnswer::Correct))
+                        .then(|| Arc::new(KucoinStartupCapture::new(prior.clone())));
+                    let (result, seen) = check_captured(venue, prepared, capture).await;
                     {
                         let seen = seen.lock().unwrap();
                         assert!(
@@ -707,7 +833,6 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                     if let Err(error) = task.await {
                         assert!(error.is_cancelled(), "device responder failed: {error}");
                     }
-                    tokio::time::sleep(Duration::from_millis(5)).await;
                 }
                 let (result, seen) = check(venue, local(venue, "synthetic-other-material")).await;
                 assert!(
@@ -724,6 +849,41 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
             }
         })
         .await;
+}
+
+#[tokio::test]
+async fn kucoin_positive_capture_holds_balance_for_every_missing_startup_signature() {
+    tokio::task::LocalSet::new().run_until(async {
+        let prior = Arc::new(Mutex::new(HashMap::new()));
+        let capture = Arc::new(KucoinStartupCapture::new(prior.clone()));
+        let (prepared, link, task) = remote("kucoin", DeviceAnswer::Correct, prior.clone()).await;
+        let (result, seen) = check_captured("kucoin", prepared, Some(capture.clone())).await;
+        assert!(result.is_ok());
+        assert!(capture.complete());
+        link.mark_unavailable();
+        task.abort();
+        if let Err(error) = task.await { assert!(error.is_cancelled(), "device responder failed: {error}"); }
+        // Exercise the response gate with the actual packet from the accepted native run.
+        let balance = capture.balance.lock().unwrap().clone().expect("native balance request captured");
+        let io = ReplayCaptureIo { io: VenueIo { venue: "kucoin", seen }, capture: Some(capture.clone()) };
+        assert_eq!(io.io.authenticated(&balance), Some(true));
+        for &operation in KUCOIN_STARTUP_OPERATIONS {
+            let genuine = prior.lock().unwrap().remove(operation).unwrap();
+            let (events, mut received) = mpsc::unbounded_channel();
+            io.request(balance.clone(), events);
+            assert!(received.try_recv().is_err(), "balance released without {operation} capture");
+            assert_eq!(capture.held.lock().unwrap().len(), 1);
+            prior.lock().unwrap().insert(operation.into(), genuine);
+            capture.release(&io.io);
+            assert!(matches!(received.try_recv().unwrap(), HostEvent::HttpStart { request, status:200, .. } if request == balance.id));
+            let HostEvent::HttpChunk(id, body) = received.try_recv().unwrap() else { panic!("native venue body required") };
+            assert_eq!(id, balance.id);
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["code"], "200000");
+            assert!(matches!(received.try_recv().unwrap(), HostEvent::HttpEnd(id) if id == balance.id));
+            assert!(capture.held.lock().unwrap().is_empty());
+            assert_eq!(io.io.seen.lock().unwrap().refused, 0);
+        }
+    }).await;
 }
 
 #[tokio::test]
@@ -965,3 +1125,6 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
         })
         .await;
 }
+
+#[path = "phemex_probe_tests.rs"]
+mod phemex;

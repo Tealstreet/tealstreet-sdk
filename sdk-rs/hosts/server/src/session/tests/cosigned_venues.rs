@@ -19,6 +19,7 @@ const READY: &[&str] = &[
     "bitgetusdc",
     "blofin",
     "kucoin",
+    "phemex",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -94,7 +95,8 @@ impl Device {
         let socket_auth = preimage.starts_with("GET/realtime")
             || preimage.contains("/users/self/verify")
             || preimage.contains("/user/verify")
-            || venue == "binancespot" && preimage.starts_with("apiKey=");
+            || venue == "binancespot" && preimage.starts_with("apiKey=")
+            || venue == "phemex" && !preimage.starts_with('/');
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -222,22 +224,225 @@ async fn proof(
     }).await.expect("native proof settles");
 }
 
+fn positive_phase_ready(venue: &str, loaded: bool, device: &Device) -> bool {
+    if !loaded {
+        return false;
+    }
+    // KuCoin can load its store before mode/feed startup signing is delivered.
+    // Replay requires an actual positive signature for every startup operation.
+    venue != "kucoin"
+        || [
+            "GET/api/v1/contracts/active",
+            "GET/api/v1/allTickers",
+            "POST/api/v1/bullet-public",
+            "GET/api/v1/positions",
+            "GET/api/v1/orders?status=active&currentPage=1&pageSize=100",
+            "GET/api/v1/stopOrders?status=active&currentPage=1&pageSize=100",
+            "GET/api/v1/account-overview?currency=USDT",
+            "GET/api/v2/position/getPositionMode",
+            "POST/api/v1/bullet-private",
+        ]
+        .iter()
+        .all(|operation| device.prior.contains_key(*operation))
+}
+
+fn captured_kucoin_startup() -> Device {
+    let mut device = Device::default();
+    for operation in [
+        "GET/api/v1/contracts/active",
+        "GET/api/v1/allTickers",
+        "POST/api/v1/bullet-public",
+        "GET/api/v1/positions",
+        "GET/api/v1/orders?status=active&currentPage=1&pageSize=100",
+        "GET/api/v1/stopOrders?status=active&currentPage=1&pageSize=100",
+        "GET/api/v1/account-overview?currency=USDT",
+        "GET/api/v2/position/getPositionMode",
+        "POST/api/v1/bullet-private",
+    ] {
+        device
+            .prior
+            .insert(operation.into(), "captured signature".into());
+    }
+    device
+}
+
+#[test]
+fn kucoin_positive_phase_waits_for_mode_and_private_feed_signatures() {
+    for last in [
+        [
+            "GET/api/v2/position/getPositionMode",
+            "POST/api/v1/bullet-private",
+        ],
+        [
+            "POST/api/v1/bullet-private",
+            "GET/api/v2/position/getPositionMode",
+        ],
+    ] {
+        let mut device = captured_kucoin_startup();
+        for operation in last {
+            device.prior.remove(operation);
+        }
+        assert!(
+            !positive_phase_ready("kucoin", true, &device),
+            "loaded store does not prove the mode/feed operations were signed"
+        );
+        device
+            .prior
+            .insert(last[0].into(), "captured signature".into());
+        assert!(
+            !positive_phase_ready("kucoin", true, &device),
+            "still waiting for {}",
+            last[1]
+        );
+        device
+            .prior
+            .insert(last[1].into(), "captured signature".into());
+        assert!(positive_phase_ready("kucoin", true, &device));
+    }
+}
+
+#[test]
+fn kucoin_positive_phase_requires_each_startup_operation() {
+    let complete = captured_kucoin_startup();
+    for operation in complete.prior.keys() {
+        let mut missing = captured_kucoin_startup();
+        missing.prior.remove(operation);
+        assert!(
+            !positive_phase_ready("kucoin", true, &missing),
+            "positive capture still lacks {operation}"
+        );
+    }
+}
+
+#[test]
+fn positive_phase_requires_loaded_state_even_with_complete_capture() {
+    let device = captured_kucoin_startup();
+    assert!(!positive_phase_ready("kucoin", false, &device));
+    assert!(positive_phase_ready("kucoin", true, &device));
+}
+
+#[tokio::test]
+async fn kucoin_loaded_actor_does_not_release_an_incomplete_positive_capture() {
+    let (io, _) = MockVenue::for_admission("kucoin");
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut session, mut sent) = user_session(registry, "alice");
+    session.identity.resumable = false;
+    let mut device = Device::default();
+    proof(
+        "kucoin",
+        &mut session,
+        &mut sent,
+        &mut device,
+        Answer::Correct,
+    )
+    .await;
+    load("kucoin", &mut session, &mut sent, &mut device).await;
+    let expected = captured_kucoin_startup();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while expected
+            .prior
+            .keys()
+            .any(|key| !device.prior.contains_key(key))
+        {
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            if frame["t"] == "sign-req" {
+                device
+                    .answer("kucoin", &mut session, frame, Answer::Correct)
+                    .await;
+            }
+        }
+    })
+    .await
+    .expect("capture genuine positive startup signatures for the fixture");
+    // Hold subsequent signer delivery while one genuinely captured signature is withheld.
+    let (_held, mut deferred, _) = crate::out::Out::channel(1);
+    for operation in [
+        "GET/api/v2/position/getPositionMode",
+        "POST/api/v1/bullet-private",
+    ] {
+        let captured = device.prior.remove(operation).unwrap();
+        {
+            let (observed, decision) = tokio::sync::oneshot::channel();
+            let (resume, resumed) = tokio::sync::oneshot::channel();
+            let waiting = load_observed(
+                "kucoin",
+                &mut session,
+                &mut deferred,
+                &mut device,
+                Some(ReadinessPause { observed, resumed }),
+            );
+            tokio::pin!(waiting);
+            // Observe the consumed store read and readiness decision, then resume it.
+            tokio::select! {
+                biased;
+                () = &mut waiting => panic!("load completed before its readiness checkpoint"),
+                loaded = decision => assert_eq!(loaded, Ok(true)),
+            }
+            resume.send(()).unwrap();
+            // Cooperative budgeting must not masquerade as missing signer delivery.
+            let state = tokio::task::unconstrained(std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(waiting.as_mut(), cx))
+            }))
+            .await;
+            assert!(
+                state.is_pending(),
+                "loaded store released capture before {operation} was signed"
+            );
+        }
+        device.prior.insert(operation.into(), captured);
+        load("kucoin", &mut session, &mut deferred, &mut device).await;
+    }
+    session.close();
+}
+
+struct ReadinessPause {
+    observed: tokio::sync::oneshot::Sender<bool>,
+    resumed: tokio::sync::oneshot::Receiver<()>,
+}
+
 async fn load(
     venue: &str,
     session: &mut Session,
     sent: &mut crate::out::Receiver,
     device: &mut Device,
 ) {
+    load_observed(venue, session, sent, device, None).await;
+}
+
+async fn load_observed(
+    venue: &str,
+    session: &mut Session,
+    sent: &mut crate::out::Receiver,
+    device: &mut Device,
+    mut pause: Option<ReadinessPause>,
+) {
     let account = session.joined["acct"].account.clone();
-    tokio::time::timeout(Duration::from_secs(30),async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            if account.handle.read(|s|{let l=s.loaded();l.markets&&l.balance&&l.orders&&l.positions}).await==Some(true){break;}
-            tokio::select! {
-                text=sent.recv()=>{ let frame:Value=serde_json::from_str(&text.unwrap()).unwrap(); if frame["t"]=="sign-req"{device.answer(venue,session,frame,Answer::Correct).await;} }
-                _=tokio::time::sleep(Duration::from_millis(5))=>{}
+            let loaded = account
+                .handle
+                .read(|store| {
+                    let loaded = store.loaded();
+                    loaded.markets && loaded.balance && loaded.orders && loaded.positions
+                })
+                .await
+                == Some(true);
+            let ready = positive_phase_ready(venue, loaded, device);
+            if let Some(pause) = pause.take() {
+                pause.observed.send(loaded).unwrap();
+                pause.resumed.await.unwrap();
+            }
+            if ready {
+                break;
+            }
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            if frame["t"] == "sign-req" {
+                device.answer(venue, session, frame, Answer::Correct).await;
             }
         }
-    }).await.expect("positive resident fully loaded");
+    })
+    .await
+    .expect("positive resident loaded and startup signatures captured");
 }
 
 async fn venue_case(venue: &'static str) {
@@ -297,6 +502,10 @@ async fn venue_case(venue: &'static str) {
     }
     let original_socket = provider.socket();
     for mode in [Answer::OtherKey, Answer::Replay] {
+        if venue == "phemex" && matches!(mode, Answer::Replay) {
+            // Phemex signs whole-second expiries; cross a real stamp boundary before replay.
+            tokio::time::sleep(Duration::from_millis(1100)).await;
+        }
         let before = seen.lock().unwrap().refused;
         let (mut candidate, mut sent) = user_session(registry.clone(), "alice");
         candidate.identity.resumable = false;
@@ -543,4 +752,9 @@ async fn cosigned_bybit_proof_ignores_obsolete_delegated_rollout_field() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn cosigned_phemex_requires_connection_proof() {
+    venue_case("phemex").await;
 }

@@ -359,8 +359,8 @@ async fn construction_case(switch_user: bool, revoke_a: bool, apply_settings: bo
             assert_eq!(before.registry_name(), account.registry_name());
             assert_ne!(before.fingerprint, account.fingerprint);
             assert!(Arc::ptr_eq(
-                &before.delegated.as_ref().unwrap().provider(),
-                &account.delegated.as_ref().unwrap().provider()
+                &before.delegated().as_ref().unwrap().provider(),
+                &account.delegated().as_ref().unwrap().provider()
             ));
         }
         assert!(registry.held(A, &account.name, a_socket).is_some());
@@ -444,7 +444,7 @@ async fn construction_case(switch_user: bool, revoke_a: bool, apply_settings: bo
         registry.dispose(&resident, Disposal::PageDisposed);
     }
     for account in [a, b].into_iter().flatten() {
-        assert!(!account.is_public() && account.link.is_none() && account.delegated.is_some());
+        assert!(!account.is_public() && account.link.is_none() && account.delegated().is_some());
         registry.dispose(&account, Disposal::PageDisposed);
     }
     tokio::time::timeout(Duration::from_secs(10), async {

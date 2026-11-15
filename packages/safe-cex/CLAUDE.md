@@ -784,8 +784,12 @@ absent mode) uses its account worker and keeps keys local; COSIGNED uses its
 existing hosted source. The host supplies the actual mode, including reused
 mirrors; DELEGATED never opts into this route. A missing
 module/capability or a failed supported page engine never falls back. No failed
-or Unknown write is retried or sent through a second writer. Both routes retain
-the initiating owner and bridge admission across readiness waits; #3513's
+or Unknown write is retried or sent through a second writer. The roster-derived
+`rust.beta-manual-write-routing.test.ts` exercises every `BETA_VENUES` entry
+outside native `FRAME_FED_VENUES`, in explicit/absent LOCAL and COSIGNED through
+both manual entry points; DELEGATED cannot borrow either source sender.
+Both routes retain the initiating owner and bridge admission across readiness
+waits; #3513's
 page-engine preflight remains unchanged. Every manual write waits within the existing startup deadline for
 this page engine, including leverage/settings and calls through `callMethodInWorker`;
 expiry returns `notSent` and cannot send when startup later finishes. The host feeds it

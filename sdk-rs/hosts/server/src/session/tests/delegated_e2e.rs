@@ -211,7 +211,7 @@ async fn delegated_e2e_sealed_init_probe_admission_and_resident_signed_manual_wr
         let account = registry
             .held(USER, ACCOUNT, session.socket)
             .expect("verified handover admitted");
-        assert!(account.delegated.is_some() && account.link.is_none());
+        assert!(account.delegated().is_some() && account.link.is_none());
         let snapshot = snapshot(&mut session, &mut sent).await;
         assert_eq!(snapshot["d"]["instanceId"], INSTANCE);
         assert_eq!(snapshot["d"]["snapshot"], true);
@@ -363,7 +363,7 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
     let account = registry
         .held(USER, ACCOUNT, session.socket)
         .expect("enabled declaration admits the valid pair");
-    assert!(account.delegated.is_some() && account.link.is_none());
+    assert!(account.delegated().is_some() && account.link.is_none());
     assert!(venue.observed.lock().unwrap().reads > 0);
     session.close();
 }

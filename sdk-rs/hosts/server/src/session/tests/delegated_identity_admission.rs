@@ -101,7 +101,7 @@ async fn settings_expiry_case(expired: bool) {
     let mut done = caller.take_verified();
     admitted(&mut caller, "acct", "synthetic-key", "current", &mut done).await;
     let original = caller.joined["acct"].account.clone();
-    let provider = original.delegated.as_ref().unwrap().provider();
+    let provider = original.delegated().as_ref().unwrap().provider();
     let old_socket = caller.socket;
     let (release, blocked) = std::sync::mpsc::channel();
     let (entered, waiting) = tokio::sync::oneshot::channel();
@@ -181,7 +181,7 @@ async fn settings_expiry_case(expired: bool) {
         assert!(!f.registry.holds(&rebuilt, caller.socket));
         assert!(Arc::ptr_eq(
             &provider,
-            &rebuilt.delegated.as_ref().unwrap().provider()
+            &rebuilt.delegated().as_ref().unwrap().provider()
         ));
     }
     assert!(

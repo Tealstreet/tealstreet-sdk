@@ -80,6 +80,8 @@ const MAX_SUBSCRIBERS_PER_KEY: u32 = 64;
 
 struct Joined {
     account: Arc<Account>,
+    /// This socket's admitted mode, independent of later resident upgrades.
+    admitted_mode: envelope::AccountSigningMode,
     out: Out,
     client: Client,
     old: Vec<Client>,
@@ -491,6 +493,7 @@ impl Session {
             return Ok(());
         }
         if let Some(probe) = completed.probe {
+            let requested_mode = envelope::AccountSigningMode::requested(&probe.init);
             let candidate = completed.candidate.ok();
             out = out.account(&completed.account_name);
             let account = match probe.permit {
@@ -530,6 +533,7 @@ impl Session {
                     if let Some(joined) = self.joined.get_mut(&completed.account_name)
                         && Arc::ptr_eq(&joined.account, &account)
                     {
+                        joined.admitted_mode = requested_mode;
                         let previous = std::mem::replace(&mut joined.out, out.clone());
                         previous.retire_order_receipts();
                         previous.finish_registration(&out);
@@ -546,12 +550,20 @@ impl Session {
                                 Disposal::SettingsChanged,
                             );
                         }
-                        self.join(account, out.clone()).await;
+                        self.join(account, out.clone(), requested_mode).await;
                     }
                     if self.joined.contains_key(&completed.account_name) {
+                        self.joined[&completed.account_name]
+                            .account
+                            .confirm_signing_mode(
+                                self.socket,
+                                &completed.account_name,
+                                requested_mode,
+                                out.outbox(),
+                            );
                         if self.joined[&completed.account_name]
                             .account
-                            .delegated
+                            .delegated()
                             .is_some()
                         {
                             self.registry.interruptions.delegated_status(
@@ -583,10 +595,17 @@ impl Session {
                         diagnostic.refused(refusal);
                     }
                     self.drop_early(&completed.account_name, "verification refused");
-                    out.send(envelope::init_unverified(
-                        &completed.account_name,
-                        refusal.transient,
-                    ));
+                    out.send(match refusal.transition {
+                        Some(reason) => envelope::init_mode_transition_refused(
+                            &completed.account_name,
+                            reason,
+                            requested_mode,
+                            envelope::AccountSigningMode::Cosigned,
+                        ),
+                        None => {
+                            envelope::init_unverified(&completed.account_name, refusal.transient)
+                        }
+                    });
                 }
             }
             return Ok(());
@@ -624,9 +643,15 @@ impl Session {
             Some(RefusalStage::VenuePolicy)
         } else if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
             Some(RefusalStage::PublicAccount)
-        } else if let Some((reason, _)) =
-            self.registry
-                .signing_mode_refusal_detail(self.user(), &init, false, delegated)
+        } else if let Some((reason, _)) = self
+            .registry
+            .signing_mode_refusal_detail(self.user(), &init, false, delegated)
+            .filter(|(reason, _)| {
+                !matches!(
+                    reason,
+                    crate::accounts::SigningModeRefusalReason::ResidentModeConflict
+                )
+            })
         {
             signing_mode_reason = Some(reason);
             Some(RefusalStage::SigningMode)
@@ -982,7 +1007,8 @@ impl Session {
                     } else {
                         out.with_account_label(&label)
                     };
-                    self.join(account.clone(), out).await;
+                    self.join(account.clone(), out, envelope::AccountSigningMode::Cosigned)
+                        .await;
                 }
             }
         }
@@ -1252,8 +1278,8 @@ impl Session {
         }
         self.forget_disposed();
         if let Some(joined) = self.joined.get(&init.account_name)
-            && joined.account.delegated.is_some()
-            && (public_only || joined.account.matches_init(self.user(), &init))
+            && joined.account.delegated().is_some()
+            && public_only
         {
             out.account(&init.account_name).send(envelope::init_refused(
                 &init.account_name,
@@ -1261,6 +1287,18 @@ impl Session {
             ));
             return Ok(());
         }
+        let requested_mode = envelope::AccountSigningMode::requested(&init);
+        let fingerprint = init.fingerprint();
+        let snapshot_only = self.joined.get(&init.account_name).is_some_and(|joined| {
+            joined.admitted_mode == requested_mode
+                && joined.account.matches_init(self.user(), &init)
+                && (joined.account.fingerprint == fingerprint
+                    || joined.account.delegated().is_some()
+                        && crate::accounts::same_handover_settings(
+                            &joined.account.fingerprint,
+                            &fingerprint,
+                        ))
+        });
         let admission_enabled = self.registry.private_join_requires_proof();
         if !public_only && admission_enabled {
             if !self.admission_token_valid() {
@@ -1268,27 +1306,22 @@ impl Session {
                 self.refuse_handover(&init.account_name, false);
                 return Ok(());
             }
-            if self.joined.get(&init.account_name).is_none_or(|joined| {
-                joined.account.fingerprint != init.fingerprint()
-                    || !joined.account.matches_init(self.user(), &init)
-            }) {
+            if !snapshot_only {
                 self.admission_init(init);
                 return Ok(());
             }
         }
-        if let Some(refusal) =
-            self.registry
-                .signing_mode_refusal(self.user(), &init, public_only, false)
+        if !snapshot_only
+            && let Some(refusal) =
+                self.registry
+                    .signing_mode_refusal(self.user(), &init, public_only, false)
         {
             out.account(&init.account_name)
                 .send(envelope::init_refused(&init.account_name, &refusal));
             self.drop_early(&init.account_name, "init refused for signing mode");
             return Ok(());
         }
-        if let Some(joined) = self.joined.get(&init.account_name)
-            && joined.account.fingerprint == init.fingerprint()
-            && joined.account.matches_init(self.user(), &init)
-        {
+        if snapshot_only {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
             let out = out.account(&init.account_name);
             let joined = self.joined.get_mut(&init.account_name).unwrap();
@@ -1307,6 +1340,14 @@ impl Session {
             }
             previous.finish_registration(&out);
             self.resnapshot(&init.account_name).await;
+            if !account.is_public() {
+                account.confirm_signing_mode(
+                    self.socket,
+                    &init.account_name,
+                    envelope::AccountSigningMode::requested(&init),
+                    out.outbox(),
+                );
+            }
             return Ok(());
         }
         // Existing private settings stay until an admitted client explicitly resets them.
@@ -1360,7 +1401,7 @@ impl Session {
             Ok(account) => {
                 self.metrics.note_init();
                 let private = !account.is_public();
-                self.join(account, out.clone()).await;
+                self.join(account, out.clone(), requested_mode).await;
                 if private && self.joined.contains_key(&init.account_name) {
                     self.registry
                         .interruptions
@@ -1397,7 +1438,12 @@ impl Session {
         Ok(())
     }
 
-    async fn join(&mut self, account: Arc<Account>, out: Out) {
+    async fn join(
+        &mut self,
+        account: Arc<Account>,
+        out: Out,
+        admitted_mode: envelope::AccountSigningMode,
+    ) {
         let name = out.account_label(&account.name).to_owned();
         match self.client(&account, out.clone()).await {
             Ok(client) => {
@@ -1408,6 +1454,7 @@ impl Session {
                     name.clone(),
                     Joined {
                         account,
+                        admitted_mode,
                         out,
                         client,
                         old: Vec::new(),
@@ -1671,7 +1718,7 @@ impl Session {
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
             (op, _, _)
-                if self.joined[&name].account.delegated.is_some()
+                if self.joined[&name].account.delegated().is_some()
                     && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
                         || op == "twap:state"
                             && msg.data.as_array().is_some_and(|rows| {
@@ -1758,13 +1805,17 @@ impl Session {
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
         let result = match serde_json::from_value::<InitPayload>(data["settings"].clone()) {
             Ok(init) if init.account_name == name => {
-                let account = self.joined[name].account.clone();
-                self.settings_change(init, account).await
+                let joined = &self.joined[name];
+                let account = joined.account.clone();
+                let admitted_mode = joined.admitted_mode;
+                self.settings_change(init, account)
+                    .await
+                    .map(|account| (account, admitted_mode))
             }
             _ => Err("Apply settings requires settings for this account label".into()),
         };
         let result = match result {
-            Ok(account) => {
+            Ok((account, admitted_mode)) => {
                 if let Some(previous) = self.joined.remove(name) {
                     Self::leave_engine(previous);
                 }
@@ -1776,7 +1827,7 @@ impl Session {
                     *fallback = replacement.clone();
                 }
                 account.update_reply_outbox(self.socket, replacement.outbox(), name);
-                self.join(account, replacement).await;
+                self.join(account, replacement, admitted_mode).await;
                 if self.joined.contains_key(name) {
                     Ok(())
                 } else {
@@ -2012,7 +2063,7 @@ impl Session {
         let dispatch_out = self.account_out(name);
         let action_expires_at_ms = self.token_expires_at_ms();
         let symbols = if method == "cancelAllOrders"
-            && (account.delegated.is_none()
+            && (account.delegated().is_none()
                 || matches!(order_frame, Some(OrderReceipt::Action { .. })))
         {
             let mut symbols: Vec<String> = account
@@ -2078,7 +2129,7 @@ impl Session {
                         message: "Account closed before leverage dispatch".into(),
                     })
                 })
-        } else if account.delegated.is_some() {
+        } else if account.delegated().is_some() {
             let translate = if matches!(order_frame, Some(OrderReceipt::Action { .. })) {
                 methods::translate_delegated_action
             } else {
@@ -4142,7 +4193,10 @@ mod tests {
                 assert_eq!(original.drain_close(), Some(Close::Moved));
                 original.close();
                 let (mut late, mut frames) = user_session(registry, "u");
-                late.join(account, late.out.clone()).await;
+                // Keep this stopped-actor fixture's original non-DELEGATED admission.
+                late.join(
+                    account, late.out.clone(), envelope::AccountSigningMode::Cosigned,
+                ).await;
                 let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                 assert_eq!(frame["d"]["data"], json!(["account stopped"]),
                     "{mode}: closing a draining session must not relabel an earlier actor crash: {frame}");
@@ -4184,7 +4238,13 @@ mod tests {
                     .await
                     .expect("the account really ended");
                     let (mut late, mut frames) = user_session(registry, "u");
-                    late.join(account, late.out.clone()).await;
+                    // Keep this stopped-actor fixture's original non-DELEGATED admission.
+                    late.join(
+                        account,
+                        late.out.clone(),
+                        envelope::AccountSigningMode::Cosigned,
+                    )
+                    .await;
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                     assert_eq!(frame["d"]["op"], "error");
                     assert_eq!(frame["d"]["data"][0], "account stopped");

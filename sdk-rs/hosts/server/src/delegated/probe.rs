@@ -22,6 +22,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bitgetusdc",
     "blofin",
     "kucoin",
+    "phemex",
 ];
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {
@@ -102,6 +103,7 @@ pub(crate) enum RefusalStage {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
     pub transient: bool,
+    pub transition: Option<crate::envelope::ModeTransitionRefusal>,
     pub stage: RefusalStage,
     pub error_kind: Option<ErrorKind>,
     pub venue_code: Option<i64>,
@@ -109,6 +111,7 @@ pub(crate) struct ProbeRefusal {
 impl ProbeRefusal {
     pub const INVALID: Self = Self {
         transient: false,
+        transition: None,
         stage: RefusalStage::Unverified,
         error_kind: None,
         venue_code: None,
@@ -126,6 +129,7 @@ impl ProbeRefusal {
     fn classified(kind: ErrorKind) -> Self {
         Self {
             transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
+            transition: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(kind),
             venue_code: None,
