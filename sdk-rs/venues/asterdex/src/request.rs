@@ -795,7 +795,7 @@ impl AsterDex {
             }
             if !request.public
                 && request.version == Version::V1
-                && request.is_read()
+                && request.method == Method::Get
                 && code == Some(-1022.0)
             {
                 cx.startup_read_refused(
