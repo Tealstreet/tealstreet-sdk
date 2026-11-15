@@ -2594,8 +2594,9 @@ impl Registry {
     }
 }
 
-/// The top-level init fields (names only) on which two fingerprints differ.
-fn same_handover_settings(old: &str, new: &str) -> bool {
+/// Engine/routing settings after possession proof; mode and passphrase are
+/// handled by admission and can differ between COSIGNED and sealed DELEGATED init.
+pub(crate) fn same_handover_settings(old: &str, new: &str) -> bool {
     fn normalized(text: &str) -> Option<Map<String, Value>> {
         let mut fields: Map<String, Value> = serde_json::from_str(text).ok()?;
         fields.remove("hostedSigningMode");
@@ -2605,6 +2606,7 @@ fn same_handover_settings(old: &str, new: &str) -> bool {
     matches!((normalized(old), normalized(new)), (Some(old), Some(new)) if old == new)
 }
 
+/// The top-level init fields (names only) on which two fingerprints differ.
 fn differing_fields(old: &str, new: &str) -> Vec<String> {
     let parse = |text: &str| {
         serde_json::from_str::<serde_json::Map<String, Value>>(text).unwrap_or_default()

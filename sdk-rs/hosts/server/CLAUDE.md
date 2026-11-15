@@ -99,8 +99,9 @@ as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
 OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
 other private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
-are consumed internally. Matching COSIGNED inits on an admitted connection and
-COSIGNED resumes retain their existing snapshot path. The exact wire names and
+are consumed internally. Matching COSIGNED repeats require the same socket-admitted
+mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
+accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 
 Shared admission serializes temporary proofs by verified user, credential and

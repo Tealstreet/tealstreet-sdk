@@ -1,6 +1,10 @@
 use super::*;
 
 async fn assert_snapshot_repeat(session: &mut Session, account: &Arc<Account>, f: &Fixture) {
+    assert_eq!(
+        session.joined["acct"].admitted_mode,
+        envelope::AccountSigningMode::Cosigned
+    );
     let client = session.joined["acct"].client.id;
     let verification = session.next_verification;
     let generation = account.twap_owner.snapshot();
@@ -98,6 +102,10 @@ async fn admitted_cosigned_mode_change_still_requires_a_new_proof() {
     assert_eq!(request.signing_mode.as_deref(), Some("delegated"));
     session.init(request).await.unwrap();
     assert!(session.pending_verifications.contains_key("acct"));
+    assert_eq!(
+        session.joined["acct"].admitted_mode,
+        envelope::AccountSigningMode::Cosigned
+    );
     assert!(session.next_verification > verification);
     assert_eq!(session.joined["acct"].client.id, client);
     assert!(Arc::ptr_eq(
@@ -119,6 +127,10 @@ async fn admitted_delegated_to_cosigned_mode_change_still_requires_a_new_proof()
     finish(&mut session, &mut done).await;
     let account = session.joined["acct"].account.clone();
     assert!(account.delegated().is_some());
+    assert_eq!(
+        session.joined["acct"].admitted_mode,
+        envelope::AccountSigningMode::Delegated
+    );
     let client = session.joined["acct"].client.id;
     let verification = session.next_verification;
     while sent.try_recv().is_ok() {}
@@ -148,6 +160,10 @@ async fn admitted_delegated_to_cosigned_mode_change_still_requires_a_new_proof()
     session.verification_completed(completion).await.unwrap();
     assert!(account.delegated().is_some());
     assert!(session.pending_verifications.is_empty());
+    assert_eq!(
+        session.joined["acct"].admitted_mode,
+        envelope::AccountSigningMode::Delegated
+    );
     assert!(f.rejected.load(Ordering::SeqCst) > 0);
     session
         .init(init(Some("cosigned-after-refusal")))
@@ -178,6 +194,10 @@ async fn resumed_cosigned_socket_keeps_snapshot_path_after_resident_upgrade() {
     session.identity.resumable = true;
     session.identity.resume_from = Some(from);
     session.open().await;
+    assert_eq!(
+        session.joined["acct"].admitted_mode,
+        envelope::AccountSigningMode::Cosigned
+    );
     assert!(Arc::ptr_eq(
         &session.joined["acct"].account,
         &resident.account
@@ -222,6 +242,10 @@ async fn refused_mode_change_preserves_original_cosigned_admission() {
     session.verification_completed(completion).await.unwrap();
     assert!(session.pending_verifications.is_empty());
     assert!(account.delegated().is_none());
+    assert_eq!(
+        session.joined["acct"].admitted_mode,
+        envelope::AccountSigningMode::Cosigned
+    );
     assert_snapshot_repeat(&mut session, &account, &f).await;
     session.close();
 }
@@ -249,6 +273,10 @@ async fn admitted_cosigned_changed_settings_and_identity_still_require_proof() {
         let client = session.joined["acct"].client.id;
         session.init(request).await.unwrap();
         assert!(session.pending_verifications.contains_key("acct"));
+        assert_eq!(
+            session.joined["acct"].admitted_mode,
+            envelope::AccountSigningMode::Cosigned
+        );
         assert!(
             session.pending_verifications["acct"]
                 .cosigned_link
