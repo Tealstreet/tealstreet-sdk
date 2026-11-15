@@ -26,6 +26,7 @@ const VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "woo",
     "bingx",
     "bitunix",
 ];
@@ -41,6 +42,7 @@ pub(crate) struct Seen {
     pub(crate) urls: Vec<String>,
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
+    pub(crate) woo_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
     pub(crate) bitunix_socket_auths: usize,
     paths: Vec<String>,
@@ -66,7 +68,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
-        "blofin" | "kucoin" | "bingx" => venue,
+        "blofin" | "kucoin" | "woo" | "bingx" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -306,6 +308,9 @@ impl VenueIo {
         if self.venue == "apexomni" {
             return apexomni::response(self, r);
         }
+        if self.venue == "woo" {
+            return woo::response(self, r);
+        }
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
@@ -379,6 +384,9 @@ impl Transport for VenueIo {
     ) -> mpsc::UnboundedSender<String> {
         if self.venue == "apexomni" {
             return apexomni::connect(self, socket, &url, events);
+        }
+        if self.venue == "woo" {
+            return woo::connect(self, socket, &url, events);
         }
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
@@ -687,6 +695,15 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "woo" {
+        return if canonical.contains('|') {
+            canonical.rsplit_once('|').unwrap().0.to_owned()
+        } else {
+            canonical
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .into()
+        };
+    }
     if venue == "bitunix" {
         // Bitunix signs nonce + stamp + key + sorted query/body, without a route.
         return canonical
@@ -766,6 +783,7 @@ async fn remote(
                     || text.contains("/users/self/verify")
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
+                    || venue == "woo" && text.starts_with('|')
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -1168,3 +1186,5 @@ mod apexomni;
 mod bingx;
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
+#[path = "woo_probe_tests.rs"]
+mod woo;

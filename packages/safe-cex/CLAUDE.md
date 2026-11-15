@@ -2486,3 +2486,8 @@ Other models and host-owned capabilities retain their owning modules. Regenerate
 with `corepack yarn types:generate`; the scoped compiler gate is
 `node --test sdk-rs/safe-cex-types/tests/store-contract.cjs`.
 Opaque legacy config members and userData are unknown and require narrowing.
+
+Join-proof v1 wire declarations live in `src/joinProof.types.ts`, re-exported
+from `src/types.ts`. They do not widen the legacy remote-signer dispatch or
+enable a venue. Rust owns closed payload decoding/public identity projection;
+see `docs/plans/callers/public-key-admission.md` and the admission contract tests.
