@@ -304,3 +304,73 @@ test('native option position identity and Greeks survive frames without position
     assert.equal(new Frame(bytes.buffer).positionGreeks()?.count ?? 0, 0);
   } finally { native.free(); }
 });
+
+
+// Real WASM commands must finish through pacing, not by weakening the engine floor.
+test('native product fixture completes consecutive option writes on a fixed clock', (t) => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const native = new Native({ enableOptionMarkets: true });
+  try {
+    const released = [];
+    const claim = native.engine.httpClaim.bind(native.engine);
+    t.mock.method(native.engine, 'httpClaim', (permit, at) => {
+      const result = claim(permit, at);
+      if (JSON.parse(result).status === 'released') released.push(at);
+      return result;
+    });
+    for (let index = 0; index < 2; index++) {
+      const order = { symbol: CALL, type: 'limit', side: 'buy', amount: 0.02,
+        price: 1000, clientOrderId: `paced-option-${index}` };
+      assert.deepEqual(native.command({ op: 'placeOrders', orders: [order] }), [`accepted-${order.clientOrderId}`]);
+    }
+    const writes = native.requests.filter((r) => new URL(r.url).pathname === '/v5/order/create');
+    assert.equal(writes.length, 2);
+    assert.deepEqual(writes.map((r) => JSON.parse(r.body).orderLinkId), ['paced-option-0', 'paced-option-1']);
+    assert.equal(released.length, 2);
+    assert.equal(released[1] - released[0], 200, 'engine-owned physical pacing floor');
+  } finally { native.free(); }
+});
+
+test('native product fixture retains and reclaims the original waiting permit exactly once', (t) => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const native = new Native({ enableOptionMarkets: true });
+  try {
+    const claims = [];
+    const claim = native.engine.httpClaim.bind(native.engine);
+    t.mock.method(native.engine, 'httpClaim', (permit, at) => {
+      claims.push({ permit, at });
+      return claims.length === 1 ? JSON.stringify({ status: 'wait', until: at + 25 }) : claim(permit, at);
+    });
+    const order = { symbol: CALL, type: 'limit', side: 'sell', amount: 0.02, price: 1000, clientOrderId: 'waiting-option' };
+    assert.deepEqual(native.command({ op: 'placeOrders', orders: [order] }), ['accepted-waiting-option']);
+    assert.equal(claims.length, 2);
+    assert.equal(claims[0].permit, claims[1].permit, 'never replace a waiting permit or re-admit the write');
+    assert.equal(claims[1].at - claims[0].at, 25);
+    const writes = native.requests.filter((r) => new URL(r.url).pathname === '/v5/order/create');
+    assert.equal(writes.length, 1);
+    assert.deepEqual(JSON.parse(writes[0].body), { category: 'option', symbol: CALL, side: 'Sell',
+      orderType: 'Limit', qty: '0.02', price: '1000', timeInForce: 'GTC', reduceOnly: false, orderLinkId: 'waiting-option' });
+  } finally { native.free(); }
+});
+
+test('native product fixture expires a waiting claim on its original engine deadline without a write', (t) => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const native = new Native({ enableOptionMarkets: true });
+  try {
+    const claims = [];
+    t.mock.method(native.engine, 'httpClaim', (permit, at) => {
+      claims.push(permit);
+      return JSON.stringify({ status: 'wait', until: at + 1000 });
+    });
+    const order = { symbol: CALL, type: 'limit', side: 'buy', amount: 0.02, price: 1000, clientOrderId: 'expired-option' };
+    assert.throws(() => native.command({ op: 'placeOrders', orders: [order] }), /timed? ?out|expired/i);
+    assert(native.results.has(100), 'the engine, not the fixture watchdog, seals the command');
+    assert.equal(native.now - now, 20000, 'waiting never refreshes the engine call budget');
+    assert(claims.length > 1);
+    assert(claims.every((permit) => permit === claims[0]));
+    assert.equal(native.requests.filter((r) => new URL(r.url).pathname === '/v5/order/create').length, 0);
+  } finally { native.free(); }
+});
