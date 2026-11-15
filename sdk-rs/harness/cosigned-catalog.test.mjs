@@ -170,9 +170,11 @@ test('base-family proof cannot account for an unproved variant', () => {
 });
 
 test('removing a real offered exclusion or adding an unaccounted venue fails closed', () => {
-  const withoutWoo = new Map(excluded);
-  withoutWoo.delete('woo');
-  assert.throws(() => accounted(new Set(['woo']), ready, withoutWoo), /Unaccounted Hosted venues: woo/);
+  const [unproved] = excluded.keys();
+  assert(unproved, 'control requires a real excluded venue');
+  const withoutProof = new Map(excluded);
+  withoutProof.delete(unproved);
+  assert.throws(() => accounted(declared, ready, withoutProof), new RegExp(`Unaccounted Hosted venues: ${unproved}`));
   assert.throws(() => accounted(new Set([...declared, 'future-hosted']), ready, excluded), /future-hosted/);
 });
 

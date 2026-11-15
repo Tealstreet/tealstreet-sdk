@@ -89,8 +89,7 @@ No response field supplies that authority.
 The readonly public `JoinProofRequest`, `JoinProofResponse`, `JoinProofStatement`
 and `JoinProofEnvelope` types describe this contract. They are separate from the
 legacy `RemoteSignerRequest` dispatch until the corresponding device/server
-handlers exist. This contract adds no device handler, capability, pending-join
-strategy or venue readiness. Existing HTTP and WS-auth consumers retain their
+handlers exist. The contract itself enables no device handler, capability or venue readiness. Existing HTTP and WS-auth consumers retain their
 closed legacy inputs. Unknown join-proof capabilities must never waive proof or
 select a different signing mode.
 
@@ -143,3 +142,28 @@ crypto admission test target checks all projections and challenge digests;
 `node --test sdk-rs/harness/join-proof-contract.test.mjs` independently checks the
 binary hashes and strict TypeScript contract. Existing per-family admission tests
 continue to verify the domain-separated messages with the existing providers.
+
+## Pending local verification
+
+The native server has a shared pending local-proof strategy, with no production
+venue activation. It uses the existing isolated SignerLink, one-active/four-waiting
+identity queue, start pacer and final registry attachment. Canonical public facts
+are captured by the server before queueing; client init/reply JSON never supplies
+an expected key or a verification decision. The production resolver currently
+retains private-startup proofs and the existing COSIGNED readiness catalog.
+Family activation must supply authoritative facts and a complete device handler.
+
+After queue admission, a fresh random server attempt and nonce bind the closed
+statement to that captured identity. COSIGNED replies retain their raw JSON until
+`Response::from_json` has checked duplicates and mixed fields. The local verifier
+receives the actual authenticated socket that delivered the reply. A pending
+local proof cannot migrate or replay on signing-link suspend/attach. Ordinary
+admitted signing keeps its existing resume behavior.
+
+DELEGATED verifies the incoming temporary protected provider through its opaque
+primary reference. It does not borrow a retained resident key or ask the device
+to sign. Failed proofs never fall back to private startup or change a resident.
+A verified permit retains its original socket and instance; the Session completion
+and registry attachment recheck captured user, generation, token, lease and the
+remaining admission deadline before holding or publishing the account. Queueing
+and pacing do not restart the local admission budget. No proof result is cached.

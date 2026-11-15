@@ -23,6 +23,7 @@ The exact proof-ready venue names are:
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
+| `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 
 `okxeudemo` remains excluded and does not inherit EEA mainnet proof readiness.
 EEA bootstrap retains the original config authority until catalogue completion;

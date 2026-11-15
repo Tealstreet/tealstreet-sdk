@@ -431,6 +431,7 @@ async fn initial_registration_preparation_cannot_outlive_its_init() {
                 probe_lease: None,
                 admission_expires_at: Some(now_ms() + 60_000),
                 probe_current: None,
+                probe_deadline: None,
             };
             let future = f.registry.build(
                 "alice",

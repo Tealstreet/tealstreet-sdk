@@ -135,6 +135,7 @@ async fn kucoin_provider_device_batch_matches_local_signer_with_independent_pass
                     passphrase: id.passphrase.clone(),
                     passphrase_value: None,
                     broker: None,
+                    zklink_seed: None, // This fixture retains its original non-ApeX roles.
                 },
             )),
         };

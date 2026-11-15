@@ -757,7 +757,12 @@ classifier uses engine `ErrorKind` values: authentication failures are invalid,
 rate limits and transport failures are transient, and complete private startup
 is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
-frame-fed accounts cannot satisfy this check.
+frame-fed accounts cannot satisfy this check. MEXC mainnet proves its normal
+private position-mode, balance, positions and three order-surface reads using
+API-key/timestamp/query HMAC headers; private-stream login is also validated by
+the offline fixture. Wrong-key and replayed signatures fail before attachment,
+foreign sockets cannot settle signing work, and the resident stays unchanged.
+MEXC has no hosted testnet alias; public discovery never proves possession.
 
 OKX EEA mainnet authenticates native signed config before keyed catalogue
 discovery, retaining the config authority until market-dependent settings apply.
@@ -779,6 +784,10 @@ handover. The suite verifies the actual native HTTP signatures against synthetic
 venue responses. Existing Bybit session tests additionally cover resident-account
 and registration preservation. These offline checks do not replace live venue
 validation or the existing server-origin and signing requirements for rollout.
+
+Exact WOO uses the existing native startup's v1/v3 account reads and private
+socket authentication. Its offline fixture independently checks HMAC bytes,
+rejects unsigned reads, and accepts only startup reads and read-feed traffic.
 
 ## Frames (claude-19pt8s, web hosted client)
 

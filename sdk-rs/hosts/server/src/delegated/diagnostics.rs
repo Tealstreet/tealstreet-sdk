@@ -68,6 +68,7 @@ mod tests {
         handovers.forget("synthetic-account-secret");
         let fields = context.fields(ProbeRefusal {
             transient: false,
+            unavailable: false,
             transition: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(safe_cex_engine::ErrorKind::AuthPermission),
