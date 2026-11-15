@@ -36,6 +36,8 @@ pub fn fixture(public_data_only: bool) -> Result<WasmEngine, js_sys::Error> {
         #[cfg(feature = "hosted-signing")]
         hosted_identity: None,
         #[cfg(feature = "hosted-signing")]
+        #[cfg(feature = "hosted-join-proof")]
+        join_proof_identity: None,
         hosted_captures: Default::default(),
         #[cfg(feature = "hosted-wallet")]
         hosted_wallet: None,

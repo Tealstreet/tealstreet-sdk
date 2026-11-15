@@ -87,6 +87,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   start: 'mirror', // a mirror never starts an engine
   signHttpRequest: 'mirror', // hosted signing runs on the browser's own signing host
   signWsAuth: 'mirror',
+  signJoinProof: 'mirror',
   onFrame: 'mirror',
   applyWorkerFrame: 'mirror',
   // Unsupported on a mirror.

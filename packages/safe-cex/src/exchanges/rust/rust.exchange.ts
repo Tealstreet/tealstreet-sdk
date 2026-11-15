@@ -14,6 +14,7 @@ import type {
   WasmEngineLike,
 } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from '../../commandOutcome';
+import type { JoinProofResponse } from '../../joinProof.types';
 import type { Store } from '../../store/store.interface';
 import type {
   AccountGreeks,
@@ -581,7 +582,7 @@ export class RustEngineExchange extends BaseExchange {
   }
   private sharedPublicFeed?: RustPublicFeedClient;
   private signingHost = (): Pick<EngineHostType,
-    'hostedSigning' | 'hostedWalletSigning' | 'hostedSigningClock' | 'coinbaseSigningMetadata'
+    'hostedSigning' | 'hostedJoinProof' | 'hostedWalletSigning' | 'hostedSigningClock' | 'coinbaseSigningMetadata'
   > & { assertCurrent(): void } => {
     const host = this.host;
     if (!host) throw this.pageWriterUnavailable('signing');
@@ -597,10 +598,32 @@ export class RustEngineExchange extends BaseExchange {
         assertCurrent();
         return result;
       },
+      hostedJoinProof: async (input) => {
+        assertCurrent();
+        const result = await host.hostedJoinProof(input);
+        assertCurrent();
+        return result;
+      },
       hostedWalletSigning: (input) => { assertCurrent(); return host.hostedWalletSigning(input); },
       hostedSigningClock: () => { assertCurrent(); return host.hostedSigningClock(); },
       coinbaseSigningMetadata: () => { assertCurrent(); return host.coinbaseSigningMetadata(); },
     };
+  };
+  signJoinProof = async (requestJson: string): Promise<JoinProofResponse> => {
+    const admitted = this.captureWorkerAdmission();
+    admitted?.('signJoinProof', []);
+    if (!this.bridgeConstruction.dispatchSigning || this.isDelegatedMirror || this.isDisposed)
+      throw this.pageWriterUnavailable('signing');
+    const initialization = this.ensureSigningHost();
+    await initialization;
+    admitted?.('signJoinProof', []);
+    if (this.hostInitialization !== initialization) throw this.pageWriterUnavailable('signing');
+    const host = this.signingHost();
+    const result = await host.hostedJoinProof(requestJson);
+    host.assertCurrent();
+    admitted?.('signJoinProof', []);
+    if (this.hostInitialization !== initialization) throw this.pageWriterUnavailable('signing');
+    return result;
   };
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {

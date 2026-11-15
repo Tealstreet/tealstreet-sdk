@@ -450,6 +450,13 @@ of checking `options.key`. Raw legacy native/WASM input is a trusted compatibili
 adapter until those cutover callers migrate; it converges on the same provider
 path and must be removed before TS venue/reference deletion.
 
+`Exchange.signJoinProof` is an optional raw-JSON admission-only entry implemented
+by `RustEngineExchange`. It reuses the original owned signing host and capture
+runner, fences worker owner/generation and host replacement across awaits, and
+returns only the frozen proof response. It performs no HTTP/WS fallback or venue
+activation. The NX transport must retain its original registration and socket;
+see `docs/plans/callers/public-key-admission.md` for the closed dispatch contract.
+
 For families with enabled hosted-signing admission, browser-facing `signHttpRequest`
 and `signWsAuth` use the same owned provider through bounded signing-only captures, without
 starting account discovery or venue transport work. The default synchronized
