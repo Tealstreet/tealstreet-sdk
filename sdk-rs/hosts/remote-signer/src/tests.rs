@@ -11,8 +11,8 @@ use tokio::sync::mpsc;
 
 use super::*;
 
-mod grvt;
 mod asterdex;
+mod grvt;
 
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 
