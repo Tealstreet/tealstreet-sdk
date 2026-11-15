@@ -161,17 +161,50 @@ describe('Worker-mirror manual writes without a frame-fed implementation', () =>
       const fake = fakeModule('bybit', failure === 'missing capability' ? undefined : true, false);
       setWasmEngineLoader(async () => { if (failure === 'failed module load') throw new Error('synthetic module failure'); return fake.module; });
       const { exchange, calls } = mirror('bybit', { signingMode });
-      await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
+      const reason = failure === 'failed supported construction'
+        ? "the account's page manual-write engine did not initialize."
+        : "this page could not load or verify the venue's frame-fed manual-write support.";
+      await expect(exchange.placeOrder(placed)).rejects.toMatchObject({
+        message: `bybit placeOrder was not sent: ${reason}`, kind: 'unsupported', outcome: 'notSent',
+      });
+      await expect(exchange.updateOrder({ order: placed, update: { price: 101 } })).rejects.toMatchObject({
+        message: `bybit updateOrder was not sent: ${reason}`, kind: 'unsupported', outcome: 'notSent',
+      });
+      await expect(exchange.cancelOrders([placed])).rejects.toMatchObject({
+        message: `bybit cancelOrders was not sent: ${reason}`, kind: 'unsupported', outcome: 'notSent',
+      });
       expect(calls).toEqual([]);
+      expect(fake.commands).toEqual([]);
     });
 
   }
 
-  it('gives actionable text for a structurally unavailable DELEGATED writer', async () => {
-    const fake = fakeModule('mexc', false);
+  it.each(['local', 'cosigned', undefined] as const)('explains unsupported frame-fed %s operations without suggesting a mode change', async (signingMode) => {
+    const fake = fakeModule('hyperliquid', false);
     setWasmEngineLoader(async () => fake.module);
-    const { exchange } = mirror('mexc', { signingMode: 'delegated' });
-    await expect(exchange.placeOrder(placed)).rejects.toThrow('Turn cloud off to use this device');
+    const { exchange, calls } = mirror('hyperliquid', { signingMode });
+    await expect(exchange.scheduleCancel()).rejects.toMatchObject({
+      message: 'hyperliquid scheduleCancel was not sent: this venue does not support a frame-fed manual-write engine on this page, and this operation has no source-writer route.',
+      kind: 'unsupported', outcome: 'notSent',
+    });
+    expect(calls).toEqual([]);
+    expect(fake.constructed).not.toHaveBeenCalled();
+    expect(fake.commands).toEqual([]);
+  });
+
+  it('explains DELEGATED server-only execution without suggesting local signing', async () => {
+    const fake = fakeModule('mexc', false);
+    const loader = vi.fn(async () => fake.module);
+    setWasmEngineLoader(loader);
+    const { exchange, calls } = mirror('mexc', { signingMode: 'delegated' });
+    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({
+      message: 'mexc placeOrder was not sent: this account uses DELEGATED server-only execution; its writes must use its delegated server connection, not the page manual-write engine.',
+      kind: 'unsupported', outcome: 'notSent',
+    });
+    expect(loader).not.toHaveBeenCalled();
+    expect(fake.constructed).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+    expect(fake.commands).toEqual([]);
   });
 
   it('retains the initiating owner while the capability module loads', async () => {

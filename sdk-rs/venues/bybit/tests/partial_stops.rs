@@ -5,6 +5,9 @@ mod support;
 #[path = "partial_stops/proof_terminal.rs"]
 mod proof_terminal;
 
+#[path = "partial_stops/proof_readiness.rs"]
+mod proof_readiness;
+
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{Command, Event, HttpRequest};
 use safe_cex_venue_bybit::{Endpoints, Variant};
@@ -1589,11 +1592,17 @@ fn review_dk2_duplicate_refusal_and_restore_ack_never_place_twice() {
 }
 
 #[test]
-fn review_dk2_fresh_last_boundary_and_stale_last_both_refuse_before_cancel() {
-    for (age, cause) in [(5000., "would trigger at once"), (5001., "fresh last")] {
+fn review_dk2_live_delta_and_unconfirmed_last_both_refuse_before_cancel() {
+    // A valid delta confirms unchanged LastPrice beyond five seconds; a frame
+    // without that contract cannot. Both paths still refuse before cancel.
+    for (age, kind, cause) in [
+        (5000., "delta", "would trigger at once"),
+        (5001., "delta", "would trigger at once"),
+        (5001., "unconfirmed", "fresh last"),
+    ] {
         let (mut h, profile) = dk2_long_partial_last_stop();
         h.now += age;
-        h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","markPrice":"79130"}}"#);
+        h.message("/v5/public/linear", &format!(r#"{{"topic":"tickers.BTCUSDT","type":"{kind}","data":{{"symbol":"BTCUSDT","markPrice":"79130"}}}}"#));
         amend(&mut h, Some(79124.9), None);
         assert!(!h.has_request(profile.cancel_path()), "age {age}");
         let error = h.result(91).unwrap().as_ref().unwrap_err();
@@ -3088,6 +3097,7 @@ fn partial_stop_without_mark_refuses_without_adding_another_stop() {
 
 #[test]
 fn partial_stop_stale_mark_is_not_renewed_by_its_fresh_last_source() {
+    // Without this socket's ticker snapshot, a last-only delta cannot attest a mark.
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -3112,6 +3122,37 @@ fn partial_stop_stale_mark_is_not_renewed_by_its_fresh_last_source() {
     );
     amend(&mut h, Some(95.), None);
     assert_guard_refused(&h, "fresh mark");
+}
+
+#[test]
+fn partial_stop_accepts_unchanged_mark_from_a_live_ticker_snapshot_lineage() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    let socket = h.socket("/v5/public/linear").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"snapshot","data":{"symbol":"BTCUSDT","markPrice":"100","lastPrice":"100","indexPrice":"100"}}"#);
+    for _ in 0..10 {
+        h.now += 1_000.;
+        h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","bid1Price":"99"}}"#);
+    }
+    amend(&mut h, Some(95.), None);
+    assert!(h.has_request(profile.cancel_path()), "{:?}", h.done);
+    assert!(!h.has_request("/v5/position/trading-stop"));
+    accept_cancel(&mut h, profile);
+    let replacement = h.take("/v5/position/trading-stop");
+    assert_eq!(
+        body(&replacement),
+        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Partial","stopLoss":"95","slTriggerBy":"MarkPrice","slSize":"7"}"#
+    );
 }
 
 #[test]

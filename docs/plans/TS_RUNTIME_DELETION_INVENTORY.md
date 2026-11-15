@@ -1,5 +1,12 @@
 # TS safe-cex runtime deletion: inventory
 
+**Current scope clarification (2026-11-13):** page-engine write/deletion claims
+below apply to web LOCAL/COSIGNED, not DELEGATED. All DELEGATED clients, including
+DELEGATED-only mobile, retain the hosted typed v1 write path and run no WASM
+engine/local signer. The pinned baseline/deletion tables below are historical;
+their older COSIGNED/DELEGATED shared-page assumptions are superseded. Do not
+remove DELEGATED forwarding based on those baseline tables.
+
 Prep for the final phase of the approved migration. This document deletes no
 code. It lists what becomes dead after each of two prerequisites, what still
 references it, and what breaks if it goes early. Baseline: SDK master

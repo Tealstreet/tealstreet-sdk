@@ -490,6 +490,16 @@ impl TxFlow {
             self.live_tickers.record(cx.store, &symbol, mask);
         }
     }
+    fn record_coin_topic(&self, cx: &mut Cx<'_, Pending>, kind: &str, coin: &str, interval: &str) {
+        let Some(asset) = self
+            .coin_symbol(coin)
+            .and_then(|symbol| self.assets.get(symbol))
+        else {
+            return;
+        };
+        let coin = asset.to_string();
+        cx.record_socket_topic(&["@", kind, "|", &coin, "|", interval, "|||||"]);
+    }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
         let cached = (text.len() <= TICKER_CACHE_FRAME_BYTES)
             .then(|| self.ticker_frames.get(text))
@@ -549,7 +559,7 @@ impl TxFlow {
                 }
             }
             PublicFrame::Depth(row) => {
-                cx.record_socket_topic(&["@l2Book|", &row.coin, "||||||"]);
+                self.record_coin_topic(cx, "l2Book", &row.coin, "");
                 if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                     && ladder.time.is_none_or(|t| row.time >= t)
@@ -578,7 +588,7 @@ impl TxFlow {
             }
             PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
-                    cx.record_socket_topic(&["@candle|", &row.s, "|", &row.i, "|||||"]);
+                    self.record_coin_topic(cx, "candle", &row.s, &row.i);
                     if let Some(symbol) = self.coin_symbol(&row.s)
                         && let Some(interval) = Interval::parse(&row.i)
                         && self.candles.contains_key(&(symbol.to_owned(), interval))

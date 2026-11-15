@@ -128,7 +128,8 @@ the host-owned feature flag, the captured box/router transport proofs, and only
 the advertised `delegatedActivationScopeV1` place/close capabilities. Discover
 box capabilities using `?exchangeName=<joined venue>` and retain its
 `delegatedVenueV1`; activation refuses a missing or mismatched venue. The neutral
-`DELEGATED` flag replaces `DELEGATED_BYBIT`, and `delegatedDisabled` replaces
+`DELEGATED` flag is venue-generic; `DELEGATED_BYBIT` is only its host/DB
+compatibility alias, not a separate switch. `delegatedDisabled` replaces
 `delegatedBybitDisabled`. `requireDelegatedActivation` takes the connection venue
 as its third argument. `OutboxConnection.venue` is an `ExchangeName`; its trusted
 low-level connection still requires a remote-signing-supported venue. Amend, venue
@@ -783,8 +784,12 @@ absent mode) uses its account worker and keeps keys local; COSIGNED uses its
 existing hosted source. The host supplies the actual mode, including reused
 mirrors; DELEGATED never opts into this route. A missing
 module/capability or a failed supported page engine never falls back. No failed
-or Unknown write is retried or sent through a second writer. Both routes retain
-the initiating owner and bridge admission across readiness waits; #3513's
+or Unknown write is retried or sent through a second writer. The roster-derived
+`rust.beta-manual-write-routing.test.ts` exercises every `BETA_VENUES` entry
+outside native `FRAME_FED_VENUES`, in explicit/absent LOCAL and COSIGNED through
+both manual entry points; DELEGATED cannot borrow either source sender.
+Both routes retain the initiating owner and bridge admission across readiness
+waits; #3513's
 page-engine preflight remains unchanged. Every manual write waits within the existing startup deadline for
 this page engine, including leverage/settings and calls through `callMethodInWorker`;
 expiry returns `notSent` and cannot send when startup later finishes. The host feeds it
@@ -865,6 +870,15 @@ retains the check until native completion even after a caller timeout. A fenced
 amend with older WASM lacking this metadata refuses `unsupported` / `notSent`;
 consume matching SDK and WASM together. Owner loss after a committed cancel
 retains Unknown and the existing placement fence.
+
+A DELEGATED `workerMirror` never loads a page WASM engine or signs locally,
+even when its retained account options contain credentials. Generic manual writes
+refuse `unsupported` / `notSent`; the host's typed DELEGATED transport owns them.
+Public candles and private reads use the owning source. Startup and command guards
+also reject a mode change while page readiness is pending; a kept engine cannot
+execute new commands after the host changes the mirror to DELEGATED.
+Signing adapters retain that host and recheck at each credential/signature handoff
+and before publishing results, including later HTTP interceptor continuations.
 
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from
@@ -1215,6 +1229,9 @@ read. These reads establish current access, not future availability: cancellatio
 still precedes replacement as in the legacy adapter, and fresh post-cancel proof
 remains mandatory. A failure first occurring after cancellation stays Unknown
 and fences further placement; the preflight never grants replay or restoration.
+Ordinary peer orders may omit or null their irrelevant `triggerBy`; the captured
+protective target must still carry its exact known trigger source before cancel
+and in fresh terminal proof. Peer lineage and completeness checks remain required.
 
 ## Automatic retries are for reads only
 
@@ -2201,7 +2218,7 @@ The Rust polling helpers preserve wildcard fallback, finite-value clamping,
 and replacement of the entire map. `get_tick_interval` takes the resolved base
 and auth-failure streak so the multiplier precedes the same backoff cap.
 
-Every Rust SDK account sends `setPollScale` before native startup and when the
+Each current Rust SDK account sends `setPollScale` before native startup and when the
 multiplier or Base auth streak changes: its resolved Base `getTickInterval()`
 over the metadata `tickInterval`. Each venue keeps its own reconcile cadence
 (Bybit 5s, Kraken 5-10s, Paradex 10s), so the scale slows or speeds those
@@ -2213,6 +2230,8 @@ scale `null`; venue constructor options do not carry a second polling policy. Un
 eligible for retry, and disposal removes the multiplier listener. These controls
 govern periodic reconciliation, not socket supervision or explicit reads. Base
 auth-streak propagation alone does not prove classified native auth feedback.
+Background owner retirement follows
+[`src/exchanges/CLAUDE.md`](src/exchanges/CLAUDE.md#rust-background-polling-policy-ownership).
 
 ## Debugging exchange REST traffic
 

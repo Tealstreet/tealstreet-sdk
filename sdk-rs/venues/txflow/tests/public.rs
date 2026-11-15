@@ -1449,3 +1449,213 @@ fn cached_ticker_reapplies_financial_fields_and_renews_only_its_receipt() {
     assert_eq!(engine.store().ticker("BTC-USDC").unwrap().last, 990.);
     assert_eq!(receipt(engine.snapshot_frame(6001.)), (3, 1001.));
 }
+
+fn public_topic_receipt(
+    engine: &mut Engine<TxFlow>,
+    kind: &str,
+    interval: &str,
+    now: f64,
+) -> (u32, f64) {
+    let rows = subscription_receipts(engine.snapshot_frame(now));
+    let (_, flags, elapsed) = rows
+        .into_iter()
+        .find(|(topic, _, _)| {
+            let (_, payload) = topic.split_once('.').unwrap();
+            let frame: serde_json::Value = serde_json::from_str(payload).unwrap();
+            let sub = &frame["subscription"];
+            sub["type"] == kind
+                && sub["coin"] == "1"
+                && sub["interval"].as_str().unwrap_or("") == interval
+        })
+        .expect("released native-ID subscription receipt");
+    (flags, elapsed)
+}
+
+fn book_frame(coin_json: &str) -> String {
+    format!(
+        r#"{{"channel":"l2Book","data":{{"coin":{coin_json},"time":5000,"levels":[[{{"px":"80","sz":"1"}}],[{{"px":"81","sz":"2"}}]]}}}}"#
+    )
+}
+
+fn candle_frame(coin_json: &str, interval: &str) -> String {
+    format!(
+        r#"{{"channel":"candle","data":{{"s":{coin_json},"i":"{interval}","t":5000,"o":"80","h":"82","l":"79","c":"81","v":"2"}}}}"#
+    )
+}
+
+fn assert_public_coin_receipt(kind: &str, coin_json: &str) {
+    let (mut engine, node, api) = ready();
+    let interval = if kind == "candle" { "1m" } else { "" };
+    let command = if kind == "candle" {
+        Command::SubscribeCandles {
+            symbol: "BTC-USDC".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }
+    } else {
+        Command::SubscribeOrderBook {
+            symbol: "BTC-USDC".into(),
+        }
+    };
+    engine.handle(3000., Event::Command(command));
+    flush_subscriptions(&mut engine, 4000.);
+    assert_eq!(
+        public_topic_receipt(&mut engine, kind, interval, 4001.).0 & 2,
+        0
+    );
+    if kind == "candle" {
+        message(&mut engine, api, 5000., &candle_frame(coin_json, interval));
+    } else {
+        message(&mut engine, node, 5000., &book_frame(coin_json));
+        assert_eq!(engine.book("BTC-USDC").unwrap().best_bid(), Some(80.));
+    }
+    assert_eq!(
+        public_topic_receipt(&mut engine, kind, interval, 5001.),
+        (3, 1.),
+        "accepted {kind} coin {coin_json} must credit the subscribed native ID"
+    );
+}
+
+#[test]
+fn full_symbol_and_base_book_frames_renew_the_native_id_receipt() {
+    // Testnet /ws returns coin BTC-USDC for a subscription sent with coin 1.
+    for coin in [
+        r#""BTC-USDC""#,
+        r#""BTC""#,
+        r#""btc-usdc""#,
+        r#""btc""#,
+        r#""B\u0054C-USDC""#,
+    ] {
+        assert_public_coin_receipt("l2Book", coin);
+    }
+}
+
+#[test]
+fn accepted_candle_coin_aliases_renew_the_native_id_receipt() {
+    for coin in [
+        r#""BTC-USDC""#,
+        r#""BTC""#,
+        r#""btc-usdc""#,
+        r#""btc""#,
+        r#""B\u0054C-USDC""#,
+    ] {
+        assert_public_coin_receipt("candle", coin);
+    }
+}
+
+#[test]
+fn numeric_book_and_candle_receipts_remain_live() {
+    for kind in ["l2Book", "candle"] {
+        assert_public_coin_receipt(kind, r#""1""#);
+    }
+}
+
+#[test]
+fn unrelated_coins_intervals_feeds_and_controls_do_not_renew_a_receipt() {
+    let (mut engine, node, api) = ready();
+    for command in [
+        Command::SubscribeOrderBook {
+            symbol: "BTC-USDC".into(),
+        },
+        Command::SubscribeCandles {
+            symbol: "BTC-USDC".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        },
+        Command::SubscribeCandles {
+            symbol: "BTC-USDC".into(),
+            interval: safe_cex_engine::model::Interval::M5,
+        },
+    ] {
+        engine.handle(3000., Event::Command(command));
+    }
+    flush_subscriptions(&mut engine, 4000.);
+    message(&mut engine, node, 5000., &book_frame(r#""1""#));
+    message(&mut engine, api, 5000., &candle_frame(r#""1""#, "1m"));
+    message(&mut engine, node, 6000., &book_frame(r#""9""#));
+    message(&mut engine, api, 6000., &candle_frame(r#""9""#, "1m"));
+    message(&mut engine, api, 6000., &candle_frame(r#""1""#, "5m"));
+    message(&mut engine, api, 6500., &book_frame(r#""1""#));
+    message(&mut engine, node, 6500., &candle_frame(r#""1""#, "1m"));
+    message(&mut engine, node, 7000., r#"{"method":"PONG"}"#);
+    message(
+        &mut engine,
+        api,
+        7000.,
+        r#"{"channel":"subscriptionResponse","data":{}}"#,
+    );
+    assert_eq!(
+        public_topic_receipt(&mut engine, "l2Book", "", 7001.),
+        (3, 2001.)
+    );
+    assert_eq!(
+        public_topic_receipt(&mut engine, "candle", "1m", 7001.),
+        (3, 2001.)
+    );
+    assert_eq!(
+        public_topic_receipt(&mut engine, "candle", "5m", 7001.),
+        (3, 1001.)
+    );
+}
+
+#[test]
+fn full_symbol_book_receipt_recovers_after_reconnect_without_retired_traffic() {
+    let (mut engine, node, _) = ready();
+    engine.handle(
+        3000.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTC-USDC".into(),
+        }),
+    );
+    flush_subscriptions(&mut engine, 4000.);
+    message(&mut engine, node, 5000., &book_frame(r#""1""#));
+    assert_eq!(
+        public_topic_receipt(&mut engine, "l2Book", "", 5001.),
+        (3, 1.)
+    );
+    engine.handle(
+        6000.,
+        Event::WsClosed {
+            socket: node,
+            code: 1006,
+        },
+    );
+    let (timer, at) = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if at_ms < 8000. => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("bounded reconnect timer");
+    engine.handle(at, Event::TimerFired { timer });
+    let replacement = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/ws") => Some(socket),
+            _ => None,
+        })
+        .expect("new node connection");
+    assert_ne!(node, replacement);
+    engine.handle(
+        8000.,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    flush_subscriptions(&mut engine, 9000.);
+    message(&mut engine, node, 10000., &book_frame(r#""BTC-USDC""#));
+    assert!(engine.book("BTC-USDC").is_none());
+    assert_eq!(
+        public_topic_receipt(&mut engine, "l2Book", "", 10001.).0 & 2,
+        0
+    );
+    message(
+        &mut engine,
+        replacement,
+        11000.,
+        &book_frame(r#""BTC-USDC""#),
+    );
+    assert_eq!(engine.book("BTC-USDC").unwrap().best_bid(), Some(80.));
+    assert_eq!(
+        public_topic_receipt(&mut engine, "l2Book", "", 11001.),
+        (3, 1.)
+    );
+}
