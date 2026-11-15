@@ -22,6 +22,7 @@ const READY: &[&str] = &[
     "phemex",
     "bingx",
     "asterdex",
+    "bitunix",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -827,4 +828,9 @@ async fn cosigned_asterdex_wallet_shapes_stay_proof_unavailable_without_io() {
             assert_eq!(observed.sockets, 0);
         })
         .await;
+}
+
+#[tokio::test]
+async fn cosigned_bitunix_requires_connection_proof() {
+    venue_case("bitunix").await;
 }

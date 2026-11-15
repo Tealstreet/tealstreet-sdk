@@ -29,10 +29,6 @@
       "reason": "Production metadata disables this venue; native Hosted REST origin and private-startup proof are not built. Keep its live beta roster entry."
     },
     {
-      "venue": "bitunix",
-      "reason": "Native double-SHA private-startup proof with timestamp, replay and socket controls is not built."
-    },
-    {
       "venue": "coinbase",
       "reason": "No native Hosted REST origin; server JWT/JWS ES256/EdDSA bridge and bound private-startup proof are not built."
     },

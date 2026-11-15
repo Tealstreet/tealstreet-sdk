@@ -27,6 +27,7 @@ const VENUES: &[&str] = &[
     "kucoin",
     "phemex",
     "bingx",
+    "bitunix",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -42,6 +43,7 @@ pub(crate) struct Seen {
     pub(crate) phemex_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
     pub(crate) aster_private_sockets: usize,
+    pub(crate) bitunix_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -311,6 +313,9 @@ impl VenueIo {
         if self.venue == "bingx" {
             return bingx::response(self, r);
         }
+        if self.venue == "bitunix" {
+            return bitunix::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -381,6 +386,9 @@ impl Transport for VenueIo {
         }
         if self.venue == "bingx" {
             return bingx::connect(self, socket, &url, events);
+        }
+        if self.venue == "bitunix" {
+            return bitunix::connect(self, socket, &url, events);
         }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
@@ -691,6 +699,15 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .filter(|part| !part.starts_with("timestamp="))
             .collect::<Vec<_>>()
             .join("&");
+    }
+    if venue == "bitunix" {
+        // Bitunix signs nonce + stamp + key + sorted query/body, without a route.
+        return canonical
+            .split_once("synthetic-other-key")
+            .or_else(|| canonical.split_once(KEY))
+            .expect("native Bitunix preimage contains its presented key")
+            .1
+            .into();
     }
     if venue == "phemex" {
         // Native Phemex signs path + query + whole-second expiry; keep the read scope.
@@ -1176,3 +1193,6 @@ mod bingx;
 
 #[path = "asterdex_probe_tests.rs"]
 pub(crate) mod asterdex;
+
+#[path = "bitunix_probe_tests.rs"]
+mod bitunix;
