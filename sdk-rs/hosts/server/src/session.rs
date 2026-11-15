@@ -3183,6 +3183,7 @@ mod tests {
     use safe_cex_remote_signer::Outbox;
 
     mod apply_settings;
+    mod apexomni_batch_bridge;
     mod cosigned_venues;
     mod delegated_probe;
     mod provider_handover_refusals;
