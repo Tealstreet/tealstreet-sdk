@@ -18,6 +18,10 @@ WOO routing inputs also carry the public `applicationId`, retaining its private
 stream suffix when using the fleet relay. Hosted WOO resolves the venue
 mainnet/staging REST origins before startup and passes that application ID from
 account init into the routing plan. Signing admission remains registry-owned.
+Hosted KuCoin Spot resolves its own `https://api.kucoin.com` REST origin,
+independently of Futures' `https://api-futures.kucoin.com`. Both exact names
+refuse testnet rather than falling through to a production origin.
+
 Hosted MEXC resolves its mainnet REST origin to `https://api.mexc.com` through
 the existing Japan proxy pool, including when the saved proxy flag is false.
 Saved MEXC tunnel flags are normalized off: MEXC cannot use HOW, and an old
