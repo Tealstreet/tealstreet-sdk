@@ -7748,7 +7748,11 @@ fn write_pacing_prevents_a_spot_burst_and_keeps_rate_limit_unknown() {
         assert_eq!(payload["qty"], "0.01");
         assert_eq!(payload["price"], "100");
         if index == 11 {
-            h.reply(request.id, 200, r#"{"retCode":10006,"retMsg":"Too many visits. Exceeded the API Rate Limit.","result":{}}"#);
+            h.reply(
+                request.id,
+                200,
+                r#"{"retCode":10018,"retMsg":"legacy IP rate limit","result":{}}"#,
+            );
         } else {
             h.reply(
                 request.id,
@@ -7778,7 +7782,7 @@ fn write_pacing_prevents_a_spot_burst_and_keeps_rate_limit_unknown() {
         .unwrap();
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert_eq!(error.venue_code.as_deref(), Some("10006"));
+    assert_eq!(error.venue_code.as_deref(), Some("10018"));
     assert!(
         error
             .message
@@ -7791,15 +7795,17 @@ fn write_pacing_prevents_a_spot_burst_and_keeps_rate_limit_unknown() {
     );
 }
 
-#[test]
-fn write_pacing_is_shared_by_concurrent_scaled_commands() {
-    let mut h = ready(Variant::Linear);
+fn assert_write_pacing_is_shared_by_concurrent_scaled_commands(variant: Variant) {
+    let mut h = ready(variant);
     for (command, symbol) in [(7000, "BTCUSDT"), (7001, "ETHUSDT")] {
         place(&mut h, command, vec![order(symbol, 0.1); 10]);
     }
     resolve_mode(&mut h, "BTCUSDT");
     resolve_mode(&mut h, "ETHUSDT");
     let first = h.take("/v5/order/create-batch");
+    if variant == Variant::Demo {
+        assert!(first.url.starts_with("https://api-demo.bybit.com/"));
+    }
     let payload: serde_json::Value = serde_json::from_str(body(&first)).unwrap();
     assert_eq!(payload["request"].as_array().unwrap().len(), 10);
     assert!(
@@ -7814,6 +7820,16 @@ fn write_pacing_is_shared_by_concurrent_scaled_commands() {
     let payload: serde_json::Value = serde_json::from_str(body(&second)).unwrap();
     assert_eq!(payload["request"].as_array().unwrap().len(), 10);
     assert_eq!(payload["request"][0]["symbol"], "ETHUSDT");
+}
+
+#[test]
+fn write_pacing_is_shared_by_concurrent_scaled_commands() {
+    assert_write_pacing_is_shared_by_concurrent_scaled_commands(Variant::Linear);
+}
+
+#[test]
+fn local_demo_write_pacing_is_shared_by_concurrent_scaled_commands() {
+    assert_write_pacing_is_shared_by_concurrent_scaled_commands(Variant::Demo);
 }
 
 // Exact native 10006 proves non-placement; transport status or contradictory IDs do not.
@@ -7962,7 +7978,15 @@ fn native_uid_limit_batch_preserves_accepted_ids_without_unknown_or_resend() {
             _ => None,
         })
         .expect("known partial failure");
-    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    // A known partial must not label the accepted sibling rejected or unknown.
+    assert_eq!(error.outcome, None);
+    let partial = error
+        .partial
+        .as_ref()
+        .expect("accepted sibling remains attributable");
+    assert_eq!(partial.order_ids, ["accepted"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+    assert!(!h.unknown.contains(&9108));
     assert_eq!(error.venue_code.as_deref(), Some("10006"));
     assert!(!error.message.contains("The outcome is unknown"));
     assert!(h.engine.store().order("accepted").is_some());

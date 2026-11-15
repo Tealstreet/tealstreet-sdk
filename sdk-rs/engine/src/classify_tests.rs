@@ -1297,3 +1297,213 @@ fn known_partial_evidence_is_reported_without_reclassifying_physical_failure() {
     );
     assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
 }
+
+const NATIVE_RATE_REFUSAL: CodeTable = CodeTable {
+    rows: &[Row {
+        key: Key::Int(6006),
+        verdict: Verdict::RateLimitRefused,
+        only: None,
+    }],
+    success: &[],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+#[test]
+fn exact_native_rate_rejection_is_known_but_never_resendable() {
+    use crate::request_context::{CommandWrites, Error};
+    assert_table(&NATIVE_RATE_REFUSAL);
+    for intent in [
+        Intent::Place,
+        Intent::Cancel,
+        Intent::Amend,
+        Intent::Setting,
+    ] {
+        let response = Response {
+            status: 200,
+            headers: "Retry-After: 3",
+            body: "",
+        };
+        let classified = fact(
+            &NATIVE_RATE_REFUSAL,
+            intent,
+            Released::Response(&response),
+            Some(&int(6006)),
+            "native rate refusal",
+        )
+        .for_attempt(crate::RequestId(2));
+        assert!(classified.verdict().is_refusal());
+        assert_eq!(classified.error().outcome, Some(Outcome::Rejected));
+        assert_eq!(classified.error().kind, Some(ErrorKind::RateLimited));
+        assert_eq!(classified.error().retry_after_ms, Some(3000.));
+        let write = WriteFact::Failed {
+            fact: classified,
+            known_effects: false,
+        };
+        assert!(!write.resendable());
+        let mut journal = CommandWrites::new(4).unwrap();
+        journal.register(crate::RequestId(2), 2).unwrap();
+        journal.released(crate::RequestId(2)).unwrap();
+        journal
+            .result(crate::RequestId(2), write.into_result())
+            .unwrap();
+        assert_eq!(
+            journal.retry(crate::RequestId(2), crate::RequestId(3)),
+            Err(Error::RetryForbidden)
+        );
+        assert_eq!(
+            journal.fail(VenueError::new("terminal")).unwrap().outcome,
+            Some(Outcome::Rejected)
+        );
+    }
+}
+
+#[test]
+fn exact_native_rate_rejection_does_not_override_unproven_status_or_transport() {
+    for status in [408, 429, 500, 502, 503, 504] {
+        let classified = fact(
+            &NATIVE_RATE_REFUSAL,
+            Intent::Place,
+            Released::Response(&response(status)),
+            Some(&int(6006)),
+            "rate",
+        );
+        assert_eq!(
+            classified.error().outcome,
+            Some(Outcome::Unknown),
+            "{status}"
+        );
+    }
+    assert_eq!(
+        fact(
+            &NATIVE_RATE_REFUSAL,
+            Intent::Place,
+            Released::Transport,
+            Some(&int(6006)),
+            "lost"
+        )
+        .error()
+        .outcome,
+        Some(Outcome::Unknown)
+    );
+    let failure = read(
+        &NATIVE_RATE_REFUSAL,
+        Released::Response(&response(200)),
+        Some(&int(6006)),
+        "rate",
+    );
+    assert_eq!(failure.error.outcome, None);
+    assert_eq!(
+        failure.retry,
+        Some(ReadRetry::After(DEFAULT_RATE_LIMIT_DEFERRAL_MS))
+    );
+}
+
+#[test]
+fn native_rate_rejection_requires_one_exact_code_not_a_default_range_message_or_status() {
+    for key in [
+        Key::Range(6000, 6010),
+        Key::Message("native message"),
+        Key::IntMessage(6006, "native message"),
+    ] {
+        let table = match key {
+            Key::Range(..) => CodeTable {
+                rows: &[Row {
+                    key: Key::Range(6000, 6010),
+                    verdict: Verdict::RateLimitRefused,
+                    only: None,
+                }],
+                ..NATIVE_RATE_REFUSAL
+            },
+            Key::Message(_) => CodeTable {
+                rows: &[Row {
+                    key: Key::Message("native message"),
+                    verdict: Verdict::RateLimitRefused,
+                    only: None,
+                }],
+                ..NATIVE_RATE_REFUSAL
+            },
+            _ => CodeTable {
+                rows: &[Row {
+                    key: Key::IntMessage(6006, "native message"),
+                    verdict: Verdict::RateLimitRefused,
+                    only: None,
+                }],
+                ..NATIVE_RATE_REFUSAL
+            },
+        };
+        for native in [
+            int(6006),
+            Native {
+                code: NativeCode::None,
+                message: "native message",
+            },
+        ] {
+            assert!(matches!(
+                verdict(
+                    &table,
+                    Intent::Place,
+                    Released::Response(&response(200)),
+                    Some(&native)
+                ),
+                Verdict::Unknown(_)
+            ));
+        }
+        assert!(std::panic::catch_unwind(|| assert_table(&table)).is_err());
+    }
+    let table = CodeTable {
+        rows: &[],
+        unlisted: Verdict::RateLimitRefused,
+        status: &[(400, Verdict::RateLimitRefused)],
+        ..NATIVE_RATE_REFUSAL
+    };
+    for native in [None, Some(&int(6006))] {
+        assert!(matches!(
+            verdict(
+                &table,
+                Intent::Place,
+                Released::Response(&response(400)),
+                native
+            ),
+            Verdict::Unknown(_)
+        ));
+    }
+    assert!(std::panic::catch_unwind(|| assert_table(&table)).is_err());
+    let text_table = CodeTable {
+        rows: &[Row {
+            key: Key::Text("rateRefused"),
+            verdict: Verdict::RateLimitRefused,
+            only: None,
+        }],
+        ..NATIVE_RATE_REFUSAL
+    };
+    assert_table(&text_table);
+    assert_eq!(
+        text_table.verdict(
+            &Native {
+                code: NativeCode::Text("rateRefused"),
+                message: ""
+            },
+            Intent::Place
+        ),
+        Verdict::RateLimitRefused
+    );
+}
+
+#[test]
+fn native_rate_rejection_cannot_be_granted_by_a_phrase() {
+    let table = CodeTable {
+        rows: &[Row {
+            key: Key::Phrase("native message"),
+            verdict: Verdict::RateLimitRefused,
+            only: None,
+        }],
+        unlisted: Verdict::Refused(ErrorKind::Rejected),
+        ..NATIVE_RATE_REFUSAL
+    };
+    assert!(std::panic::catch_unwind(|| assert_table(&table)).is_err());
+    assert_eq!(
+        table.verdict(&int(6006), Intent::Place),
+        Verdict::Refused(ErrorKind::Rejected)
+    );
+}

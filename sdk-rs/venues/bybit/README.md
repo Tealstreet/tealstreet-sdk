@@ -76,9 +76,13 @@ remain; unrelated reads and history's separate pacing remain unchanged.
 The floors advance only on actual engine Claim release, not queueing or a
 response. Held work retains its original owner, credential, deadline and
 release-time fences. No venue timer, shadow queue, extended deadline or
-rate-limit resend is introduced. Native rate-limited writes retain the shared
-engine's Unknown classification and Open Orders guidance. This per-engine
-budget cannot account for another app or another engine using the same UID.
+rate-limit resend is introduced. A validated native `10006` is a known
+`rateLimited` / `rejected` refusal, including on the LOCAL Demo worker path.
+Accepted batch IDs remain accepted when another item is rejected. Neither
+a known rejection nor Unknown grants a resend. Contradictory rows/IDs, malformed
+replies, ambiguous HTTP statuses, native `429`/`10018`, and protective edits that
+may already have cancelled a stop retain Unknown and Open Orders guidance.
+This per-engine budget cannot account for another app or engine using the same UID.
 
 ## Browser reachability and beta gates
 

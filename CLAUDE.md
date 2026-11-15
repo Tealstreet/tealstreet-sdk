@@ -15,4 +15,5 @@ in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in i
 
 Bybit REST mutation release budgets and their conservative batch fallback cost
 are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.md#bybit-rest-write-pacing).
-The engine owns the clocks and fences; native rate-limit uncertainty is unchanged.
+The engine owns the clocks and fences; only a validated native `10006` rejection
+is known, never resendable. Contradictory and unproven responses remain Unknown.
