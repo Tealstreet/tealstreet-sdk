@@ -127,7 +127,7 @@ async fn local_proof_other_valid_key_cannot_touch_resident() {
 
 #[tokio::test]
 async fn local_proof_catalog_and_unbound_owner_stay_unavailable() {
-    assert!(!crate::delegated::probe::cosigned_ready("backpack"));
+    assert!(!crate::delegated::probe::cosigned_ready(&init()));
     for owner in ["alice", "bob"] {
         let registry = registry(owner == "bob");
         let (mut session, mut sent) = user_session(registry.clone(), owner);
