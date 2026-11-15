@@ -5,6 +5,17 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Router lease-fence diagnostics
+
+Router lease fences snapshot `Running::jobs()` before disposal. The journal
+includes `running_jobs`, `paused_jobs` and `pending_work`. Only a positive running
+algo count logs error and sends `router_lease.fenced` to Sentry with the fixed
+summary “router lease fenced; running algos stopped on this box”. Zero running
+algos logs info with “router lease fenced; no running algos on this box”, including
+paused-only or pending-only work; info remains journal-only. Only unsigned numeric
+counts are allowed for that event; job IDs, labels and payloads stay excluded. Lease retirement,
+account disposal and algo stop/pause behavior are unchanged.
+
 ## Public topic diagnostics
 
 `POST /admin/public-topics` accepts an empty body or `{}` (1024-byte limit).
@@ -102,12 +113,14 @@ Private COSIGNED admissions require possession proof independently of
 DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
-as a fallback when its possession proof is unavailable. Exact Bybit base and
-inverse venues, plus Binance, OKX, Bitget, Blofin, KuCoin and Phemex base venues, have
-private-startup proof coverage. Bybit inverse reuses its own native startup and
-HMAC signing, with inverse-product and Brazil-site session controls. Phemex
+as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
+Binance base/PM/inverse/spot, OKX base/demo, Bitget base/USDC,
+Blofin, KuCoin and Phemex names have native private-startup HMAC proof coverage.
+Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
-HMAC proof with wrong-key, replay and foreign-socket controls. Other
+HMAC proof with wrong-key, replay and foreign-socket controls.
+Variant tests pin product routes, origins and demo headers as well as the
+wrong-key, replay, foreign-socket and resident-preservation controls. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. Matching COSIGNED repeats require the same socket-admitted

@@ -38,8 +38,11 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
    no documented-row escape.
 4. **Outside ambiguous statuses, a decoded native error code → venue table
    verdict, overriding any status-derived kind** (KuCoin returns 400002 with HTTP 401, for example).
-   Released write verdicts carrying `rateLimited` are always weakened to `unknown`,
-   including 2xx native rate codes; they grant no resend or put-back. Reads keep
+   Released write verdicts carrying `rateLimited` are weakened to `unknown`,
+   except an exact native `RateLimitRefused` row proving rejection before execution
+   (Bybit `10006`). Ranges, messages, defaults and HTTP status rows cannot grant
+   that exception; ambiguous statuses and contradictory codec evidence still win.
+   Neither rate-limit verdict grants a resend or put-back. Reads keep
    their native rate-limit and retry policy. Integer codes decode strictly: an
    exact integer or a canonical quoted integer, never `f64`. String codes compare exactly.
 5. **Non-2xx with no decodable native error → the venue's documented status row,
@@ -144,6 +147,7 @@ Tables are `const` struct literals: venue data with no logic.
 pub enum Verdict {
     Refused(ErrorKind),          // proven pre-execution refusal: write `rejected`
     RefusedResend(ErrorKind),    // proven refusal; yields one ResendGrant
+    RateLimitRefused,            // exact native rate rejection; never a resend
     Unknown(Option<ErrorKind>),  // code does not prove the outcome: write `unknown`
     Satisfied(SatisfiedIntent),  // rule 7; requires Row.only == that intent
 }

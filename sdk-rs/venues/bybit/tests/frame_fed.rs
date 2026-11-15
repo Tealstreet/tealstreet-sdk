@@ -431,6 +431,7 @@ fn placed_index(h: &mut Harness, command: u32) -> String {
         command,
         orders: vec![support::order()],
     });
+    h.await_request("/v5/order/create");
     assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
     let body = h.take("/v5/order/create").body.clone().unwrap();
     let at = body.find(r#""positionIdx":"#).expect("positionIdx") + 14;

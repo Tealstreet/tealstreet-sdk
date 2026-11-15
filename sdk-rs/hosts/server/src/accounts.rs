@@ -1086,16 +1086,35 @@ impl Registry {
                 continue;
             }
             let tag = user_tag(&account.user);
-            Log::error(
-                &format!("router lease fenced user_tag={tag}"),
-                &crate::telemetry::Report {
-                    kind: "router_lease.fenced",
-                    summary: "router lease fenced; the account's algos stop on this box",
-                    user_tag: Some(tag.clone()),
-                    venue: Some(&account.venue),
-                    ..Default::default()
-                },
+            let (jobs, pending_work) = account.running.jobs();
+            let paused_jobs = jobs.iter().filter(|job| job.parked).count();
+            let running_jobs = jobs.len() - paused_jobs;
+            let summary = if running_jobs > 0 {
+                "router lease fenced; running algos stopped on this box"
+            } else {
+                "router lease fenced; no running algos on this box"
+            };
+            let message = format!(
+                "{summary} user_tag={tag} running_jobs={running_jobs} paused_jobs={paused_jobs} pending_work={pending_work}"
             );
+            // Only running algos are alertable; paused/pending work remains diagnostic context.
+            if running_jobs == 0 {
+                Log::info(&message);
+            } else {
+                Log::error(
+                    &message,
+                    &crate::telemetry::Report {
+                        kind: "router_lease.fenced",
+                        summary,
+                        user_tag: Some(tag.clone()),
+                        venue: Some(&account.venue),
+                        running_jobs: Some(running_jobs),
+                        paused_jobs: Some(paused_jobs),
+                        pending_work: Some(pending_work),
+                        ..Default::default()
+                    },
+                );
+            }
             account.handle.begin_disposal(DisposalCause::Stopped);
             let stopped = self.keep_notice(&account, "router-lease");
             if !account.algos.as_ref().is_some_and(|sender| {
@@ -3084,6 +3103,155 @@ pub(crate) mod tests {
                 }],
             })
             .unwrap();
+    }
+
+    async fn router_lease_fence_log(chase: bool, twaps: &[Value], pending: usize) -> Value {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = Arc::new(
+                    Registry::new(
+                        EngineThreads::start(1).unwrap(),
+                        Duration::from_millis(1),
+                        Duration::from_secs(60),
+                    )
+                    .with_router_lease(crate::router_lease::Config {
+                        box_id: Some("01".into()),
+                        enforce: true,
+                        ..Default::default()
+                    }),
+                );
+                grant_init_owner(&registry, 1);
+                let (account, mut inputs) = held_account();
+                testing::register(&registry, &account);
+                let chases = if chase {
+                    vec![safe_cex_chaser::ActiveChaser {
+                        id: "synthetic-chase".into(),
+                        symbol: "BTCUSDT".into(),
+                        size: 1.,
+                        side: safe_cex_engine::model::OrderSide::Buy,
+                        max_attempts: 10.,
+                        reduce_only: false,
+                        attempts: 0,
+                        is_stopped: false,
+                        stop_reason: String::new(),
+                        current_order_ids: Vec::new(),
+                        origin: None,
+                        twap_id: None,
+                    }]
+                } else {
+                    Vec::new()
+                };
+                account.running.refresh(&chases, twaps, pending);
+                let capture = crate::state::log_capture::capture();
+                registry.park_expired_router_leases();
+                assert!(
+                    inputs.try_recv().is_err(),
+                    "a live grant must not stop work"
+                );
+                tokio::time::advance(Duration::from_secs(46)).await;
+                registry.park_expired_router_leases();
+                registry.park_expired_router_leases();
+                assert!(matches!(
+                    inputs.try_recv().unwrap(),
+                    crate::algos::AlgoInput::RouterFence { .. }
+                ));
+                assert!(inputs.try_recv().is_err(), "fencing remains exactly once");
+                assert_eq!(registry.account_count(), 0);
+                assert!(account.running.parked_by_lease());
+                grant_init_owner(&registry, 2);
+                assert!(
+                    !account.running.io_allowed(),
+                    "renewal cannot revive old work"
+                );
+                let lines: Vec<Value> = capture
+                    .finish()
+                    .into_iter()
+                    .map(|line| serde_json::from_str::<Value>(&line).unwrap())
+                    .filter(|line| {
+                        line["msg"]
+                            .as_str()
+                            .is_some_and(|msg| msg.starts_with("router lease fenced"))
+                    })
+                    .collect();
+                assert_eq!(lines.len(), 1);
+                lines.into_iter().next().unwrap()
+            })
+            .await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_empty_account_is_info() {
+        let line = router_lease_fence_log(false, &[], 0).await;
+        assert_eq!(line["level"], "info");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; no running algos on this box "));
+        for field in ["running_jobs=0", "paused_jobs=0", "pending_work=0"] {
+            assert!(msg.contains(field), "{msg}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_chase_is_error_with_work_counts() {
+        let line = router_lease_fence_log(true, &[], 0).await;
+        assert_eq!(line["level"], "error");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; running algos stopped on this box "));
+        assert!(msg.contains("running_jobs=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_running_twap_is_error_with_work_counts() {
+        let line = router_lease_fence_log(
+            false,
+            &[serde_json::json!({"id":"synthetic-twap","status":"running"})],
+            0,
+        )
+        .await;
+        assert_eq!(line["level"], "error");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; running algos stopped on this box "));
+        assert!(msg.contains("running_jobs=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_paused_twap_is_info_with_work_counts() {
+        let line = router_lease_fence_log(
+            false,
+            &[serde_json::json!({"id":"synthetic-twap","status":"paused"})],
+            0,
+        )
+        .await;
+        assert_eq!(line["level"], "info");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; no running algos on this box "));
+        assert!(msg.contains("running_jobs=0"));
+        assert!(msg.contains("paused_jobs=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_pending_exec_is_info_with_work_counts() {
+        let line = router_lease_fence_log(false, &[], 1).await;
+        assert_eq!(line["level"], "info");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; no running algos on this box "));
+        assert!(msg.contains("running_jobs=0"));
+        assert!(msg.contains("pending_work=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_mixed_work_is_error_only_for_running_jobs() {
+        let line = router_lease_fence_log(
+            true,
+            &[serde_json::json!({"id":"synthetic-twap","status":"paused"})],
+            1,
+        )
+        .await;
+        assert_eq!(line["level"], "error");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; running algos stopped on this box "));
+        for field in ["running_jobs=1", "paused_jobs=1", "pending_work=1"] {
+            assert!(msg.contains(field), "{msg}");
+        }
     }
 
     #[tokio::test(start_paused = true)]
