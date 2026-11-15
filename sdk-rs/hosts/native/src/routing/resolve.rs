@@ -377,6 +377,10 @@ fn exchange(name: &str) -> Result<&'static Exchange, RoutingError> {
 pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingError> {
     let pick = |mainnet, test| if testnet { test } else { mainnet };
     Ok(match name {
+        "asterdex" => pick(
+            "https://fapi.asterdex.com",
+            "https://fapi.asterdex-testnet.com",
+        ),
         "binance" => pick("https://fapi.binance.com", "https://demo-fapi.binance.com"),
         "binancepm" => pick("https://papi.binance.com", "https://demo-fapi.binance.com"),
         "binanceinverse" => pick("https://dapi.binance.com", "https://demo-dapi.binance.com"),
