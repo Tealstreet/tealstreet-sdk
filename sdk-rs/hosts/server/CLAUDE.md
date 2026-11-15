@@ -5,6 +5,17 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Router lease-fence diagnostics
+
+Router lease fences snapshot `Running::jobs()` before disposal. The journal
+includes `running_jobs`, `paused_jobs` and `pending_work`. Only a positive running
+algo count logs error and sends `router_lease.fenced` to Sentry with the fixed
+summary “router lease fenced; running algos stopped on this box”. Zero running
+algos logs info with “router lease fenced; no running algos on this box”, including
+paused-only or pending-only work; info remains journal-only. Only unsigned numeric
+counts are allowed for that event; job IDs, labels and payloads stay excluded. Lease retirement,
+account disposal and algo stop/pause behavior are unchanged.
+
 ## Public topic diagnostics
 
 `POST /admin/public-topics` accepts an empty body or `{}` (1024-byte limit).
