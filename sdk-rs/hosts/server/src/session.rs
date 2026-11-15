@@ -632,6 +632,8 @@ impl Session {
     fn admission_init(&mut self, init: InitPayload) {
         self.cancel_verification(&init.account_name);
         let delegated = init.signing_mode.as_deref() == Some("delegated");
+        let cdp_unavailable =
+            delegated && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot");
         let diagnostic = delegated.then(|| {
             self.handovers
                 .refusal_context(&init.account_name, &init.exchange_name)
@@ -671,6 +673,9 @@ impl Session {
             if signing_mode_reason.is_some() {
                 self.handover_out(&init.account_name)
                     .send(envelope::init_signing_mode_refused(&init.account_name));
+            } else if cdp_unavailable && matches!(kind, RefusalStage::VenuePolicy) {
+                self.handover_out(&init.account_name)
+                    .send(envelope::init_proof_unavailable(&init.account_name));
             } else {
                 self.refuse_handover(&init.account_name, false);
             }
@@ -685,7 +690,10 @@ impl Session {
             self.refuse_handover(&init.account_name, true);
             return;
         }
-        if !delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name) {
+        // CDP's hosted JWT setup and venue proof are not implemented yet.
+        if (!delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name))
+            || cdp_unavailable
+        {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "proof unavailable");
             self.handover_out(&init.account_name)
@@ -3177,6 +3185,7 @@ mod tests {
     mod apply_settings;
     mod cosigned_venues;
     mod delegated_probe;
+    mod provider_handover_refusals;
     mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
