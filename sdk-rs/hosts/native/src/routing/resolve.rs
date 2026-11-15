@@ -417,6 +417,10 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://api.testnet.paradex.trade/v1",
         ),
         "phemex" => pick("https://api.phemex.com", "https://testnet-api.phemex.com"),
+        "cryptocom" => pick(
+            "https://api.crypto.com/exchange/v1",
+            "https://uat-api.3ona.co/exchange/v1",
+        ),
         "woo" => pick("https://api.woox.io", "https://api.staging.woox.io"),
         "bitunix" => "https://fapi.bitunix.com",
         "kucoin" if !testnet => "https://api-futures.kucoin.com",
