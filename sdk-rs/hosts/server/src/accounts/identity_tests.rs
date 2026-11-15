@@ -267,7 +267,7 @@ fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> 
             DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
         )
         .unwrap();
-        inner.delegated = Some(prepared.resident);
+        inner.signing.set_test_resident(prepared.resident);
         inner.link = None;
         inner.fingerprint = crate::delegated::fingerprint(init);
     }

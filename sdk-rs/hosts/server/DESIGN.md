@@ -606,6 +606,32 @@ dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 ### DELEGATED handover
 
+A private socket always proves its own candidate credentials before crossing a
+resident mode. A COSIGNED join attaches to an existing DELEGATED actor and cannot
+downgrade it. A verified DELEGATED join can upgrade a COSIGNED HMAC actor,
+including its own parked copy, without restarting the actor or its jobs. An
+owned signing-work barrier refuses `mode_transition_busy` while any original
+sign future or setup execution remains unsettled. No work is canceled, retried
+or sent to both signers. Unsupported sealed address/nonce lifetimes refuse
+`mode_transition_unavailable`. These refusals leave the candidate unattached.
+
+The future provider, actual mode and protected resident are installed together.
+Only opaque key refs are translated, by primary/secondary identity role; receipt,
+context and literal payload bytes are unchanged. The old browser signer link is
+irreversibly retired for signing while its account-notification identity remains
+usable. The existing protected allocation/erasure rules remain in force.
+
+An attached session receives `msg/op=account-signing-mode` with data
+`{version:1, requestedMode, actualMode, attached:true, reason}`. Modes are
+`cosigned`/`delegated`; reason is `requested` when they match, otherwise
+`delegated-enabled-elsewhere` (another session, not proof of another device).
+An upgrade broadcasts to all confirmed live registrations with their own labels
+and instance IDs. Pending proofs and retired registrations get no confirmation.
+A refused handover uses the existing error envelope with initRefused=true,
+kind=`admission`, reason=`mode_transition_busy` (transient) or
+`mode_transition_unavailable` (permanent), requestedMode, residentMode and
+attached=false; it deliberately omits actualMode.
+
 DELEGATED uses the same hosted eligibility as COSIGNED: a supported parsed
 `remoteSigning` policy and a configured server origin, including the existing
 unhosted refusal. There is no per-venue DELEGATED list or feature flag. One

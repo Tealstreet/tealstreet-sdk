@@ -10,7 +10,7 @@ async fn refused_candidates_leave_the_running_account_and_its_provider_untouched
         resident.init(init).await.unwrap();
         finish(&mut resident, &mut ready).await;
         let original = f.registry.held("alice", "acct", resident.socket).unwrap();
-        let provider = original.delegated.as_ref().unwrap().provider();
+        let provider = original.delegated().as_ref().unwrap().provider();
         f.code.store(code, Ordering::SeqCst);
         let (mut candidate, mut sent) = user_session(f.registry.clone(), "alice");
         let mut done = candidate.take_verified();
@@ -28,7 +28,7 @@ async fn refused_candidates_leave_the_running_account_and_its_provider_untouched
         ));
         assert!(Arc::ptr_eq(
             &provider,
-            &original.delegated.as_ref().unwrap().provider()
+            &original.delegated().as_ref().unwrap().provider()
         ));
         assert!(original.handle.disposal_cause().is_none());
         candidate.close();
@@ -45,7 +45,7 @@ async fn a_valid_pair_joins_without_comparing_or_replacing_resident_material() {
     resident.init(init).await.unwrap();
     finish(&mut resident, &mut ready).await;
     let original = f.registry.held("alice", "acct", resident.socket).unwrap();
-    let provider = original.delegated.as_ref().unwrap().provider();
+    let provider = original.delegated().as_ref().unwrap().provider();
     let (mut candidate, _sent) = user_session(f.registry.clone(), "alice");
     let mut done = candidate.take_verified();
     let mut init = payload(&mut candidate, Some("second"));
@@ -67,7 +67,7 @@ async fn a_valid_pair_joins_without_comparing_or_replacing_resident_material() {
     ));
     assert!(Arc::ptr_eq(
         &provider,
-        &original.delegated.as_ref().unwrap().provider()
+        &original.delegated().as_ref().unwrap().provider()
     ));
     assert!(original.handle.disposal_cause().is_none());
     candidate.close();
@@ -360,7 +360,8 @@ async fn bybit_admission_retains_classified_refusal_and_original_attempt_context
 #[tokio::test]
 async fn signing_mode_refusals_report_a_closed_reason_without_claiming_key_failure() {
     tokio::task::LocalSet::new().run_until(async {
-        for reason in ["resident_mode_conflict", "invalid_identity", "identity_namespace_conflict"] {
+        // Resident mode changes now enter possession proof; mode_transitions covers that path.
+        for reason in ["invalid_identity", "identity_namespace_conflict"] {
             let f = fixture().await;
             let (mut candidate, mut sent) = user_session(f.registry.clone(), "alice");
             let mut init = payload(&mut candidate, Some("candidate"));

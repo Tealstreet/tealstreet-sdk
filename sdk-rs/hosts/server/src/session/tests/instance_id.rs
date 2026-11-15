@@ -471,7 +471,9 @@ async fn deferred_read_drops_retired_generation_without_relabelling_registration
         crate::accounts::tests::register(&registry, &old);
         let (mut session, mut sent) = user_session(registry.clone(), "u");
         session.socket = 7; // The held-load fixture's existing holder.
-        session.join(old.clone(),session.out.account("acct").with_instance_id(Some("registration-A"))).await;
+        // Keep the held-load fixture's original COSIGNED browser-signer admission.
+        // join now requires that provenance explicitly.
+        session.join(old.clone(),session.out.account("acct").with_instance_id(Some("registration-A")), envelope::AccountSigningMode::Cosigned).await;
         session.handle(r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"deferred-A","method":"fetchOrders","args":[]}}}"#).await.unwrap();
         assert_eq!(old.frame_reads.available_permits(),crate::accounts::MAX_FRAME_READS-1,
             "A's detached read is in flight before replacement");
@@ -1213,7 +1215,7 @@ async fn delegated_mode_refusal_reply(
             crate::accounts::testing::bind_identity(&mut account, &payload);
             let inner = Arc::get_mut(&mut account).unwrap();
             inner.link = None;
-            inner.delegated = Some(prepared.resident);
+            inner.signing.set_test_resident(prepared.resident);
             crate::accounts::testing::register(&registry, &account);
             let (mut session, mut sent) = user_session(registry.clone(), "u");
             if joined {
@@ -1229,7 +1231,11 @@ async fn delegated_mode_refusal_reply(
                     )
                     .await
                     .unwrap_or_else(|_| panic!("same-mode hold succeeds"));
-                session.join(held, previous).await;
+                // Keep the fixture's existing protected DELEGATED admission.
+                // Only the explicit provenance argument is new.
+                session
+                    .join(held, previous, envelope::AccountSigningMode::Delegated)
+                    .await;
                 assert!(session.joined.contains_key("acct"));
                 ready().await;
                 while sent.try_recv().is_ok() {}
@@ -1326,7 +1332,7 @@ async fn queued_mode_refusal_retired_queue(
             );
             let inner = Arc::get_mut(&mut account).unwrap();
             inner.link = None;
-            inner.delegated = Some(prepared.resident);
+            inner.signing.set_test_resident(prepared.resident);
             crate::accounts::testing::bind_identity(&mut account, &payload);
             crate::accounts::testing::register(&registry, &account);
             let (mut session, mut sent) = user_session(registry.clone(), "u");
@@ -1343,7 +1349,9 @@ async fn queued_mode_refusal_retired_queue(
                     )
                     .await
                     .unwrap_or_else(|_| panic!("same-mode hold succeeds"));
-                session.join(held, previous).await;
+                // Keep the fixture's existing protected DELEGATED admission.
+                // Only the explicit provenance argument is new.
+                session.join(held, previous, envelope::AccountSigningMode::Delegated).await;
                 assert!(session.joined.contains_key("acct"));
                 ready().await;
                 while sent.try_recv().is_ok() {}

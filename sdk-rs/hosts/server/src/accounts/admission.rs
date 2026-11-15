@@ -273,14 +273,27 @@ impl Registry {
             .cloned();
         if let Some(account) = existing
             && (account.is_public()
-                || account.delegated.is_some() != delegated
-                || account.fingerprint != proof.fingerprint)
+                || !same_handover_settings(&account.fingerprint, &proof.fingerprint))
         {
             return Err(ProbeRefusal::INVALID);
         }
         self.obtain_with_pair(user, init, false, holder, token, outbox, pair, Some(proof))
             .await
-            .map_err(|_| ProbeRefusal::TRANSIENT)
+            .map_err(|error| {
+                for reason in [
+                    crate::envelope::ModeTransitionRefusal::Busy,
+                    crate::envelope::ModeTransitionRefusal::Unavailable,
+                ] {
+                    if error == reason.reason() {
+                        return ProbeRefusal {
+                            transient: reason.transient(),
+                            transition: Some(reason),
+                            ..ProbeRefusal::INVALID
+                        };
+                    }
+                }
+                ProbeRefusal::TRANSIENT
+            })
     }
 }
 

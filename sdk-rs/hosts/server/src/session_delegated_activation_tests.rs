@@ -315,7 +315,7 @@ async fn partial_activation_cosigned_running_restore_preserves_dispatch() {
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
             assert_eq!(twap_owner, account.twap_owner.snapshot());
-            assert!(account.delegated.is_none());
+            assert!(account.delegated().is_none());
             assert!(account.link.is_some());
             session.close();
             drop(inbox);
@@ -544,7 +544,7 @@ async fn partial_activation_cosigned_decoded_running_restore_preserves_dispatch(
             assert_eq!(data, rows.to_string());
             assert_eq!(origin, format!("socket:{}", session.socket));
             assert_eq!(twap_owner, account.twap_owner.snapshot());
-            assert!(account.delegated.is_none());
+            assert!(account.delegated().is_none());
             assert!(account.link.is_some());
             session.close();
             drop(inbox);
