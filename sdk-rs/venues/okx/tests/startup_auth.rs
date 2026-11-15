@@ -1040,3 +1040,86 @@ fn eea_catalogue_transport_and_rate_interruptions_reset_signature_streak() {
         assert!(rig.until(&mut engine, catalog).is_some());
     }
 }
+
+fn streamed_catalogue_interruption_resets_streak(status: u16, body: &str) {
+    let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
+    let (mut engine, mut rig, config) = eea_config(false, false);
+    let first = config_ok(&mut engine, &mut rig, &config);
+    streamed(&mut engine, &first, 200, refused, 2.);
+    rig.take(&mut engine, 2.);
+    let catalog = |action: &Action| is_get(action, "/api/v5/account/instruments?instType=SWAP");
+    let (at, retry) = rig.until(&mut engine, catalog).unwrap();
+    streamed(&mut engine, &retry, status, body, at);
+    rig.take(&mut engine, at);
+    assert!(rig.failures.is_empty());
+    let (next_at, retry) = rig.until(&mut engine, catalog).expect("rate retry");
+    if status == 429 {
+        assert!(next_at >= at + 10_000.);
+    }
+    streamed(&mut engine, &retry, 200, refused, next_at);
+    rig.take(&mut engine, next_at);
+    assert!(
+        rig.failures.is_empty(),
+        "rate interruption must reset the signature streak"
+    );
+    assert!(
+        rig.until(&mut engine, catalog).is_some(),
+        "a fresh signature retry remains"
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_no_list_rate_limit_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        429,
+        r#"{"code":"50113","msg":"synthetic rate interruption"}"#,
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_list_rate_limit_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        429,
+        r#"{"code":"50113","msg":"synthetic rate interruption","data":[]}"#,
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_no_list_signature_refusal_stays_permanent_on_second_answer() {
+    let (mut engine, mut rig, config) = eea_config(false, false);
+    let first = config_ok(&mut engine, &mut rig, &config);
+    let refused = r#"{"code":"50113","msg":"synthetic refusal"}"#;
+    streamed(&mut engine, &first, 200, refused, 2.);
+    rig.take(&mut engine, 2.);
+    assert!(rig.failures.is_empty());
+    let catalog = |action: &Action| is_get(action, "/api/v5/account/instruments?instType=SWAP");
+    let (at, retry) = rig
+        .until(&mut engine, catalog)
+        .expect("one signature retry");
+    streamed(&mut engine, &retry, 200, refused, at);
+    rig.take(&mut engine, at);
+    assert_eq!(
+        rig.failures.len(),
+        1,
+        "genuine authentication answers are not interruptions"
+    );
+    assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(rig.failures[0].venue_code.as_deref(), Some("50113"));
+    assert!(!rig.run(&mut engine, 600_000.).iter().any(catalog));
+}
+
+#[test]
+fn eea_streamed_catalogue_no_list_200_error_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        200,
+        r#"{"code":"50011","msg":"synthetic rate interruption"}"#,
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_list_200_error_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        200,
+        r#"{"code":"50011","msg":"synthetic rate interruption","data":[]}"#,
+    );
+}

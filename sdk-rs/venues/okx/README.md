@@ -103,5 +103,8 @@ other replies reset the streak; retry floors and admission deadlines do not grow
 Pending EEA config reads retain the HTTP rate/transport diagnosis on unproven
 responses, even when their body contains an authentication code. Such a reply
 cannot become a permanent credential refusal in the shared hosted probe.
+Complete JSON catalogue replies without a data list use the same signature
+assessment as list-bearing replies: non-authentication errors reset the streak;
+genuine signature answers still receive only one retry before permanent refusal.
 Public/frame-fed, non-EEA and already-configured refresh paths retain their
 existing behavior. No startup step places or replays a trading write.

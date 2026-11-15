@@ -1778,6 +1778,18 @@ impl Venue for Okx {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Markets { kind, .. } = &pending {
+            let authentication_reply =
+                response.status < 500 && !matches!(response.status, 418 | 429);
+            if authentication_reply {
+                if self.catalogue_rejected(cx, *kind, response.body) {
+                    Self::retire_discovery(cx, &pending);
+                    return;
+                }
+            } else {
+                self.catalogue_unanswered(*kind);
+            }
+        }
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
