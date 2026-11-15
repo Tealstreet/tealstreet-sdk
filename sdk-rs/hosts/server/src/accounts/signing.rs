@@ -27,7 +27,15 @@ impl Drop for Lease {
         self.0.lock().unwrap().active -= 1;
     }
 }
+#[cfg(test)]
+#[path = "signing_lifetime_tests.rs"]
+mod lifetime_tests;
+
 impl AccountSigner {
+    pub(super) fn provider(self: &Arc<Self>) -> safe_cex_engine::signing::Provider {
+        self.clone()
+    }
+
     pub(super) fn new(
         provider: Option<safe_cex_engine::signing::Provider>,
         identities: Identities,
