@@ -700,14 +700,7 @@ async fn login_switch_case(venue: &'static str) {
     let (mut bob, mut b_sent) = user_session(registry.clone(), "bob");
     bob.identity.resumable = false;
     let mut device = Device::default();
-    proof(
-        venue,
-        &mut bob,
-        &mut b_sent,
-        &mut device,
-        Answer::Correct,
-    )
-    .await;
+    proof(venue, &mut bob, &mut b_sent, &mut device, Answer::Correct).await;
     assert_eq!(bob.joined["acct"].account.user, "bob");
     assert!(registry.held("alice", "acct", old_socket).is_none());
     assert!(registry.held("bob", "acct", bob.socket).is_some());
