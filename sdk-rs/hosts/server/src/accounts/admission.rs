@@ -118,7 +118,7 @@ impl Registry {
 
     pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
         matches!(self.proof_strategy(user, init), ProofStrategy::Local(_))
-            || crate::delegated::probe::cosigned_ready(&init.exchange_name)
+            || crate::delegated::probe::cosigned_ready(init)
     }
 
     pub(crate) fn private_join_requires_proof(&self) -> bool {
