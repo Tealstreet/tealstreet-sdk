@@ -155,6 +155,9 @@ struct SetupProvider {
     cancellations: Arc<std::sync::atomic::AtomicUsize>,
 }
 impl Signer for SetupProvider {
+    fn immediate(&self) -> bool {
+        self.provider.immediate()
+    }
     fn sign(&self, request: SignRequest) -> SignFuture {
         self.provider.sign(request)
     }
