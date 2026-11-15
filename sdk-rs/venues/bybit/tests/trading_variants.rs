@@ -7960,6 +7960,74 @@ fn native_uid_limit_with_unproven_or_contradictory_evidence_stays_unknown() {
     }
 }
 
+fn assert_malformed_uid_refusal_stays_unknown(payload: &str) {
+    for variant in [Variant::Spot, Variant::Demo] {
+        let mut h = ready(variant);
+        place(&mut h, 9110, vec![order("BTCUSDT", 0.1)]);
+        let path = if variant.is_spot() {
+            "/v5/order/create"
+        } else {
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/create-batch"
+        };
+        let request = h.take(path);
+        h.reply(request.id, 200, payload);
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9110,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("malformed refusal must fail closed");
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{variant:?}/{payload}"
+        );
+        assert!(error.message.contains("The outcome is unknown"));
+        h.advance(2000.0);
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request("/v5/order/create-batch"));
+    }
+}
+
+#[test]
+fn malformed_uid_refusal_duplicate_identity_stays_unknown() {
+    assert_malformed_uid_refusal_stays_unknown(
+        r#"{"retCode":10006,"result":{"orderId":"possibly-accepted","orderId":null}}"#,
+    );
+}
+
+#[test]
+fn malformed_uid_refusal_duplicate_result_list_stays_unknown() {
+    assert_malformed_uid_refusal_stays_unknown(
+        r#"{"retCode":10006,"result":{"list":[{"orderId":"possibly-accepted"}],"list":[]}}"#,
+    );
+}
+
+#[test]
+fn malformed_uid_refusal_duplicate_ext_list_stays_unknown() {
+    assert_malformed_uid_refusal_stays_unknown(
+        r#"{"retCode":10006,"result":{},"retExtInfo":{"list":[{"code":0}],"list":[]}}"#,
+    );
+}
+
+#[test]
+fn malformed_uid_refusal_unproven_nested_shapes_stay_unknown() {
+    for payload in [
+        r#"{"retCode":10006,"result":{"orderId":42}}"#,
+        r#"{"retCode":10006,"result":{"list":null}}"#,
+        r#"{"retCode":10006,"result":{},"retExtInfo":{"list":{}}}"#,
+        r#"{"retCode":10006,"result":{"orderStatus":"New"}}"#,
+    ] {
+        assert_malformed_uid_refusal_stays_unknown(payload);
+    }
+}
+
 #[test]
 fn native_uid_limit_batch_preserves_accepted_ids_without_unknown_or_resend() {
     let mut h = ready(Variant::Demo);

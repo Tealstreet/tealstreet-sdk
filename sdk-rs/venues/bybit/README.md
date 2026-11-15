@@ -78,6 +78,8 @@ response. Held work retains its original owner, credential, deadline and
 release-time fences. No venue timer, shadow queue, extended deadline or
 rate-limit resend is introduced. A validated native `10006` is a known
 `rateLimited` / `rejected` refusal, including on the LOCAL Demo worker path.
+The known-refusal exception first validates both nested result objects; duplicate,
+mistyped or unknown fields remain unproven even when lossy ID extraction is empty.
 Accepted batch IDs remain accepted when another item is rejected. Neither
 a known rejection nor Unknown grants a resend. Contradictory rows/IDs, malformed
 replies, ambiguous HTTP statuses, native `429`/`10018`, and protective edits that

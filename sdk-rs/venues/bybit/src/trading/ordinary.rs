@@ -2148,6 +2148,8 @@ impl BybitLinear {
                 | Call::RestorePartialStop { .. }
         ) && probe.verdict().kind() == Some(ErrorKind::RateLimited);
         let weaken = protective_rate_limit
+            || (probe.verdict() == Verdict::RateLimitRefused
+                && ack::clean_rate_limit_refusal(result, ext).is_err())
             || match probe.verdict() {
                 Verdict::Satisfied(_) => {
                     matches!(planned.call, Call::CancelAll { .. })
