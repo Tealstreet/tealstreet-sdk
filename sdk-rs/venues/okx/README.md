@@ -71,3 +71,18 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 408/429/5xx pins still assert the stop, Unknown outcome and the engine's canonical
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
+
+## Native write refusal diagnostics
+
+Failed, empty-message envelopes first use the existing borrowed ACK decoder.
+If JSON escapes prevent that decode, an owned-message fallback preserves the
+native `sCode`/`sMsg`; successful and nonempty-message envelopes never use it.
+When a failed settings envelope has an empty `msg`, a sole failed ACK supplies
+the native code and message. Mixed settings rows retain Unknown and include the
+failed-row reasons; they never prove the whole call was refused. Nonempty
+settings-envelope messages and successful ACK handling are unchanged.
+
+`tests/write_errors.rs` records the [OKX v5 response shape](https://www.okx.com/docs-v5/en/#order-book-trading-trade-post-place-order)
+and pins decoded diagnostics, accepted siblings, unchanged settings on failure,
+and no extra writes after a failure. The fixture uses the public documentation's
+example code/reason, not a private account response.
