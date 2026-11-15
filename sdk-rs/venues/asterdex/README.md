@@ -59,12 +59,13 @@ EIP-712 message with nonce and no timestamp field. Clock recovery rebuilds and
 re-signs a request once with a fresh stamp/nonce. Ambiguous released writes
 remain Unknown without replay; callback refusal before release is NotSent.
 
-V1 private startup reads retain their existing single re-signed resend for
+V1 private startup GET reads retain their existing single re-signed resend for
 `-1022`. During unfinished primary-key startup, a final numeric or string-coded
 rejection reports `AuthInvalid` through the existing startup guard, matching
 legacy credential validation. A successful resend can finish
 the read. Timestamp recovery, trading-write retries and V3 behavior retain their
-existing rules.
+existing rules. Listen-key POST/PUT failures retain their independent socket
+recovery and do not terminate pending credential validation.
 
 Native fixture custody compares every real signing graph with the device codec,
 covering reads, ordinary/protective writes, cancel/amend, listen-key lifecycle,

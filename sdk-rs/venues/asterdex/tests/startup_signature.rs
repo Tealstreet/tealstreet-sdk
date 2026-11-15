@@ -170,3 +170,80 @@ fn v3_signature_refusal_keeps_its_existing_no_resend_startup_behavior() {
             .any(|a| matches!(a,Action::Http(r) if account(r)))
     );
 }
+
+fn listen_key_refusal_during_account_read(status: u16) {
+    let mut engine = support::engine(v1());
+    engine.start(NOW);
+    let mut pending = support::drain(&mut engine, NOW);
+    let mut account_read = None;
+    let mut listen_key = None;
+    for _ in 0..12 {
+        let mut next = Vec::new();
+        for action in pending {
+            if let Action::Http(request) = action {
+                let path = request.url.split('?').next().unwrap();
+                if account(&request) {
+                    account_read = Some(request);
+                } else if path.ends_with("/listenKey") {
+                    listen_key = Some(request);
+                } else {
+                    let body = if path.ends_with("/time") {
+                        r#"{"serverTime":1700000000000}"#
+                    } else if path.ends_with("/exchangeInfo") {
+                        MARKETS
+                    } else {
+                        "[]"
+                    };
+                    next.extend(reply(&mut engine, &request, 200, body));
+                }
+            }
+        }
+        pending = next;
+        if account_read.is_some() && listen_key.is_some() {
+            break;
+        }
+    }
+    let account_read = account_read.expect("account read held pending");
+    let first = listen_key.expect("listen-key session write while startup is unfinished");
+    assert_eq!(first.method, safe_cex_engine::Method::Post);
+    assert!(!engine.store().loaded().balance);
+    let resent: Vec<_> = reply(&mut engine, &first, status, REJECTED)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) if request.url.contains("/listenKey?") => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resent.len(),
+        1,
+        "existing listen-key signature resend remains"
+    );
+    let done = reply(&mut engine, &resent[0], status, REJECTED);
+    assert!(
+        !done
+            .iter()
+            .any(|action| matches!(action, Action::Notice(Notice::StartupFailed { .. }))),
+        "listen-key session failure must not end pending credential validation"
+    );
+    let done = reply(&mut engine, &account_read, 200, BALANCE);
+    assert!(
+        engine.store().loaded().balance,
+        "the held account read can still complete"
+    );
+    assert!(
+        !done
+            .iter()
+            .any(|action| matches!(action, Action::Notice(Notice::StartupFailed { .. })))
+    );
+}
+
+#[test]
+fn listen_key_http_400_refusal_keeps_pending_account_startup_alive() {
+    listen_key_refusal_during_account_read(400);
+}
+
+#[test]
+fn listen_key_http_200_refusal_keeps_pending_account_startup_alive() {
+    listen_key_refusal_during_account_read(200);
+}
