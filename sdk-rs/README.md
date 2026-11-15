@@ -6,6 +6,20 @@ patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 
 ## Crates
 
+### Host ownership observation and teardown
+
+`EngineHost.algosRunning` is a nonterminal ownership observation: a retired or
+unavailable owner returns false without failing the engine, freeing resources,
+settling commands or emitting `onDead`. Normal account teardown can therefore
+observe status and dispose once, without manufacturing an engine death. Retired
+cleanup sends no algo cancellation; already-dispatched writes keep their unknown
+outcome and identity when normal disposal settles them.
+
+Real algo operations, nuke/stop-all, timer execution, commands and I/O still use
+the strict owner guard. A retired or throwing owner prevents execution and fails
+the host. Native data reads retain their execution fence; observing status is
+not permission to resume work or rebind an old host.
+
 Local worker TWAP restore ownership is optional for compatibility with existing
 JS hosts. `EngineHost.algoStart(accountName, twapOwner?)` accepts a trusted
 `{ ownerId: string, generation: number }` snapshot (nonempty owner and a safe,

@@ -518,13 +518,15 @@ export class EngineHost {
     finally { this.handlers.onDead?.(this.deadError); }
   }
 
-  checkAlgoOwner() {
+  observeAlgoOwner() {
     if (this.disposed) return false;
     if (!this.algoOwnerCurrent) return true;
-    let current = false;
-    try { current = this.algoOwnerCurrent() === true; } catch { /* An unavailable owner retires this host. */ }
-    if (current) return true;
-    this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
+    try { return this.algoOwnerCurrent() === true; } catch { return false; }
+  }
+
+  checkAlgoOwner() {
+    if (this.observeAlgoOwner()) return true;
+    if (!this.disposed) this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
     return false;
   }
 
@@ -884,7 +886,10 @@ export class EngineHost {
     this.armAlgos();
   }
 
-  get algosRunning() { return this.checkAlgoOwner() && this.algosStarted; }
+  // Status and teardown may observe a retired owner without executing any work.
+  get algosRunning() { return this.observeAlgoOwner() && this.algosStarted; }
+
+  checkAlgosForExecution() { return this.checkAlgoOwner() && this.algosStarted; }
 
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if the engine refuses it. */
   algoOp(op, data) {
@@ -912,7 +917,8 @@ export class EngineHost {
    * did not, or the algos ended first. */
   algoStopAll(reason) {
     this.assertHttpHandoffIdle();
-    if (!this.algosRunning) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
+    // A user nuke is execution, so keep the strict fence outside the pure getter.
+    if (!this.checkAlgosForExecution()) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
     if (typeof this.engine.algoStopAll !== 'function')
       throw new ExchangeError('This engine cannot stop its algos for a nuke', { kind: 'unsupported', outcome: 'notSent' });
     const stopped = new Promise((resolve) => this.algoStopAllWaiters.push(resolve));

@@ -1655,3 +1655,7 @@ Page readiness/error wrappers honor `callerReportsPlacementFailures` for placeme
 methods: the web caller owns that message. They must not re-emit a ready command
 failure that `command()` deliberately leaves to its caller. Other manual refusals
 still emit their single exchange error event.
+
+Rust algo actions use `EngineHost.checkAlgosForExecution`, not the observational
+`runsRustAlgos`/`algosRunning` getters. Status reads and disposal do not manufacture
+engine deaths; action admission retains strict ownership retirement.

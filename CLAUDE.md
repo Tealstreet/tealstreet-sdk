@@ -7,5 +7,8 @@ Package- and app-specific `CLAUDE.md` files still apply. Before editing package
 or app code, read the nearest `CLAUDE.md` and treat it as the more specific
 context.
 
+The host ownership observation/teardown contract lives in
+[`sdk-rs/README.md`](sdk-rs/README.md#host-ownership-observation-and-teardown).
+
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
