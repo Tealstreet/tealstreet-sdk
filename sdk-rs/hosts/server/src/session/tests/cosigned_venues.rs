@@ -204,8 +204,26 @@ async fn proof(
     }).await.expect("native proof settles");
 }
 
-fn positive_phase_ready(_venue: &str, loaded: bool, _device: &Device) -> bool {
-    loaded
+fn positive_phase_ready(venue: &str, loaded: bool, device: &Device) -> bool {
+    if !loaded {
+        return false;
+    }
+    // KuCoin can load its store before mode/feed startup signing is delivered.
+    // Replay requires an actual positive signature for every startup operation.
+    venue != "kucoin"
+        || [
+            "GET/api/v1/contracts/active",
+            "GET/api/v1/allTickers",
+            "POST/api/v1/bullet-public",
+            "GET/api/v1/positions",
+            "GET/api/v1/orders?status=active&currentPage=1&pageSize=100",
+            "GET/api/v1/stopOrders?status=active&currentPage=1&pageSize=100",
+            "GET/api/v1/account-overview?currency=USDT",
+            "GET/api/v2/position/getPositionMode",
+            "POST/api/v1/bullet-private",
+        ]
+        .iter()
+        .all(|operation| device.prior.contains_key(*operation))
 }
 
 fn captured_kucoin_startup() -> Device {
@@ -351,15 +369,27 @@ async fn load(
     device: &mut Device,
 ) {
     let account = session.joined["acct"].account.clone();
-    tokio::time::timeout(Duration::from_secs(30),async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            if positive_phase_ready(venue, account.handle.read(|s|{let l=s.loaded();l.markets&&l.balance&&l.orders&&l.positions}).await==Some(true), device){break;}
-            tokio::select! {
-                text=sent.recv()=>{ let frame:Value=serde_json::from_str(&text.unwrap()).unwrap(); if frame["t"]=="sign-req"{device.answer(venue,session,frame,Answer::Correct).await;} }
-                _=tokio::time::sleep(Duration::from_millis(5))=>{}
+            let loaded = account
+                .handle
+                .read(|store| {
+                    let loaded = store.loaded();
+                    loaded.markets && loaded.balance && loaded.orders && loaded.positions
+                })
+                .await
+                == Some(true);
+            if positive_phase_ready(venue, loaded, device) {
+                break;
+            }
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            if frame["t"] == "sign-req" {
+                device.answer(venue, session, frame, Answer::Correct).await;
             }
         }
-    }).await.expect("positive resident fully loaded");
+    })
+    .await
+    .expect("positive resident loaded and startup signatures captured");
 }
 
 async fn venue_case(venue: &'static str) {
