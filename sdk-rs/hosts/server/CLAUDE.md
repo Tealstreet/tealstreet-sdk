@@ -130,6 +130,8 @@ Blofin, KuCoin, Phemex and BingX names have native private-startup HMAC proof co
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
+Exact WOO additionally uses its native v1/v3 private account reads and private
+socket HMAC authentication, with wrong-key, replay and foreign-socket controls.
 Exact Bitunix uses its existing native private-startup venue round trip and
 double-SHA256 secret-suffix signer, with independently checked synthetic private
 reads and wrong-key, replay, foreign-socket and resident-preservation controls.
@@ -146,10 +148,23 @@ carries explicit native `asterdex.apiVersion: "v1"` through setup and settings;
 its signed native account reads and real device codec have wrong-key, replay,
 foreign-socket and pending-isolation controls. Wallet V3 proof remains separate.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
-are consumed internally. Matching COSIGNED repeats require the same socket-admitted
+are consumed internally. The shared local-proof strategy captures canonical
+server-owned identity facts before entering the same proof queue and pacer.
+It issues a closed admission challenge and verifies the raw reply against the
+actual receiving socket, or verifies the temporary protected DELEGATED provider.
+The permit records its socket only after verification; final attachment checks
+that receipt, the original instance/token/lease and the local admission deadline.
+No production public-key venue selects this strategy yet. Synthetic Session
+fixtures select it without changing the readiness catalog; device integration
+and authoritative per-family facts must precede any activation. Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
+
+ApeX remote signing uses the existing device `apexomni-batch` codec for native
+REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
+are installed; startup read coverage never proves OmniKey possession or changes
+COSIGNED catalog readiness by itself.
 
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
 Every exact `remoteSigning.enabled` venue needs native proof readiness or a

@@ -42,6 +42,13 @@ extra-field or malformed replies refuse without publishing any result. The
 original receipt survives unchanged. Wallet/address graphs and nonce-bearing
 V3 work remain unsupported by this V1 bridge.
 
+Admission `join_proof` waits reuse the same pending ID map. They return the actual
+receiving socket plus bounded original JSON to the server's closed proof decoder;
+legacy Value responses cannot settle these waits. Suspend, attach, disposal and
+dropped waits retire them without replay. Ordinary signing requests retain their
+existing bounded park/resume behavior. Routing a reply is not proof verification
+and never grants account authority.
+
 `RemoteAccount::public_binding_source` exposes only the original provider's
 public binding and opaque signing reference. It performs no setup or device IO
 and grants no signing authority. The account-owned handover barrier must still

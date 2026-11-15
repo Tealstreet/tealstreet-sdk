@@ -774,6 +774,10 @@ venue responses. Existing Bybit session tests additionally cover resident-accoun
 and registration preservation. These offline checks do not replace live venue
 validation or the existing server-origin and signing requirements for rollout.
 
+Exact WOO uses the existing native startup's v1/v3 account reads and private
+socket authentication. Its offline fixture independently checks HMAC bytes,
+rejects unsigned reads, and accepts only startup reads and read-feed traffic.
+
 ## Frames (claude-19pt8s, web hosted client)
 
 The browser host (`ExchangeServerWorker.ts`) forwards only TEXT frames to the
