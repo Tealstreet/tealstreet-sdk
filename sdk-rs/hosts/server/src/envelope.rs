@@ -328,6 +328,95 @@ pub fn init_signing_mode_refused(account_name: &str) -> String {
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountSigningMode {
+    Cosigned,
+    Delegated,
+}
+
+impl AccountSigningMode {
+    pub fn requested(init: &InitPayload) -> Self {
+        if init.signing_mode.as_deref() == Some("delegated") {
+            Self::Delegated
+        } else {
+            Self::Cosigned
+        }
+    }
+}
+
+/// An attachment acknowledgement, never a requested-mode or pending-proof hint.
+pub fn account_signing_mode(
+    account_name: &str,
+    requested: AccountSigningMode,
+    actual: AccountSigningMode,
+) -> String {
+    msg(
+        account_name,
+        "account-signing-mode",
+        json!({
+            "version": 1,
+            "requestedMode": requested,
+            "actualMode": actual,
+            "attached": true,
+            "reason": if requested == actual { "requested" } else { "delegated-enabled-elsewhere" },
+        }),
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeTransitionRefusal {
+    Busy,
+    Unavailable,
+}
+
+impl ModeTransitionRefusal {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Busy => "mode_transition_busy",
+            Self::Unavailable => "mode_transition_unavailable",
+        }
+    }
+
+    pub fn transient(self) -> bool {
+        self == Self::Busy
+    }
+}
+
+/// Resident mode describes the account, not authority granted to this candidate.
+pub fn init_mode_transition_refused(
+    account_name: &str,
+    refusal: ModeTransitionRefusal,
+    requested: AccountSigningMode,
+    resident: AccountSigningMode,
+) -> String {
+    let message = match refusal {
+        ModeTransitionRefusal::Busy => {
+            "Delegated handover is busy with existing signing work; account not attached. Existing orders and algos are unchanged."
+        }
+        ModeTransitionRefusal::Unavailable => {
+            "Delegated handover cannot safely change this account's signer; account not attached. Existing orders and algos are unchanged."
+        }
+    };
+    msg(
+        account_name,
+        "error",
+        json!([
+            message,
+            {
+                "forceToast": true,
+                "initRefused": true,
+                "kind": "admission",
+                "reason": refusal.reason(),
+                "transient": refusal.transient(),
+                "requestedMode": requested,
+                "residentMode": resident,
+                "attached": false,
+            }
+        ]),
+    )
+}
+
 pub fn init_unverified(account_name: &str, transient: bool) -> String {
     envelope(
         "msg",
@@ -422,5 +511,54 @@ mod tests {
             "apiKeyIndex": {"index": 3},
         }));
         assert!(refused.is_err());
+    }
+}
+
+#[cfg(test)]
+mod mode_state_tests {
+    use super::*;
+
+    #[test]
+    fn a_mode_confirmation_is_bound_to_the_attached_registration() {
+        for requested in [AccountSigningMode::Cosigned, AccountSigningMode::Delegated] {
+            let frame: Value = serde_json::from_str(&with_instance_id(
+                account_signing_mode("alias", requested, AccountSigningMode::Delegated),
+                "current-registration",
+            ))
+            .unwrap();
+            assert_eq!(frame["t"], "msg");
+            assert_eq!(frame["d"]["op"], "account-signing-mode");
+            assert_eq!(frame["d"]["accountName"], "alias");
+            assert_eq!(frame["d"]["instanceId"], "current-registration");
+            assert_eq!(
+                frame["d"]["data"],
+                json!({"version":1,"requestedMode":requested,"actualMode":"delegated","attached":true,"reason":if requested == AccountSigningMode::Delegated {"requested"} else {"delegated-enabled-elsewhere"}})
+            );
+        }
+    }
+
+    #[test]
+    fn handover_refusals_never_claim_an_actual_attached_mode() {
+        for refusal in [
+            ModeTransitionRefusal::Busy,
+            ModeTransitionRefusal::Unavailable,
+        ] {
+            let frame: Value = serde_json::from_str(&init_mode_transition_refused(
+                "candidate",
+                refusal,
+                AccountSigningMode::Delegated,
+                AccountSigningMode::Cosigned,
+            ))
+            .unwrap();
+            let fields = &frame["d"]["data"][1];
+            assert_eq!(fields["kind"], "admission");
+            assert_eq!(fields["reason"], refusal.reason());
+            assert_eq!(fields["transient"], refusal == ModeTransitionRefusal::Busy);
+            assert_eq!(fields["attached"], false);
+            assert_eq!(fields["initRefused"], true);
+            assert_eq!(fields["requestedMode"], "delegated");
+            assert_eq!(fields["residentMode"], "cosigned");
+            assert!(fields.get("actualMode").is_none());
+        }
     }
 }

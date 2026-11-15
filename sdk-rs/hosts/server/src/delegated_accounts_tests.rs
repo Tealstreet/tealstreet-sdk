@@ -35,7 +35,7 @@ fn resident_account(registry: &Registry, user: &str) -> Arc<Account> {
     inner.identity = identity::digest(user, &init).unwrap();
     inner.public_only = false;
     inner.link = None;
-    inner.delegated = Some(
+    inner.signing.set_test_resident(
         prepare_delegated(&init, pair())
             .unwrap_or_else(|_| panic!("Bybit setup"))
             .resident,
@@ -123,7 +123,7 @@ async fn delegated_reuses_the_same_users_matching_engine_without_a_signer_link()
             assert!(registry.holds(&account, 8));
             assert!(!account.is_public());
             assert!(account.link.is_none());
-            assert!(account.delegated.is_some());
+            assert!(account.delegated().is_some());
             assert!(
                 registry
                     .signing_mode_refusal("B", &init(), false, false)

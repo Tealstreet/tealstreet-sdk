@@ -224,7 +224,7 @@ async fn delegated_rpc_expiry_completion_preserves_request_and_registration() {
         let init = payload(&mut session, instance_id);
         session.init(init).await.unwrap();
         finish(&mut session, &mut results).await;
-        assert!(session.joined["acct"].account.delegated.is_some());
+        assert!(session.joined["acct"].account.delegated().is_some());
         assert_rpc_expiry_completion(&f, &mut session, &mut sent, instance_id).await;
         session.close();
     }
@@ -284,7 +284,7 @@ async fn apply_settings_allows_verified_delegated_settings_reinitialization() {
     finish(&mut session, &mut results).await;
     let rebuilt = &session.joined["acct"].account;
     assert!(!Arc::ptr_eq(rebuilt, &original));
-    assert!(rebuilt.delegated.is_some());
+    assert!(rebuilt.delegated().is_some());
     assert_eq!(rebuilt.fingerprint, fingerprint);
     f.registry.dispose(rebuilt, Disposal::PageDisposed);
     session.close();
@@ -377,7 +377,7 @@ async fn verified_pair_starts_then_reuses_the_resident_account() {
         .held("alice", "acct", session.socket)
         .expect("verified pair becomes resident");
     wait_reads(&f).await;
-    assert!(original.delegated.is_some() && original.link.is_none());
+    assert!(original.delegated().is_some() && original.link.is_none());
     assert!(f.private_reads.load(Ordering::SeqCst) > 0);
     session
         .msg(AccountMsg {

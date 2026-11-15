@@ -222,7 +222,7 @@ impl Resident {
         assert!(result.probe.as_ref().unwrap().permit.is_ok());
         session.verification_completed(result).await.unwrap();
         let account = f.registry.held("alice", "acct", session.socket).unwrap();
-        assert!(account.delegated.is_none());
+        assert!(account.delegated().is_none());
         tokio::time::timeout(ADMITTED_ACCOUNT_LOAD_TIMEOUT, async {
             loop {
                 let loaded = account.handle.read(|store| {
@@ -266,7 +266,7 @@ impl Resident {
         let account = f.registry.held("alice", "acct", session.socket).unwrap();
         assert!(Arc::ptr_eq(&account, &self.account));
         assert!(Arc::ptr_eq(account.link.as_ref().unwrap(), &self.link));
-        assert!(account.delegated.is_none());
+        assert!(account.delegated().is_none());
         assert_eq!(self.link.socket(), session.socket);
         assert_eq!(account.fingerprint, self.fingerprint);
         assert!(account.handle.disposal_cause().is_none());
@@ -793,3 +793,6 @@ async fn shared_admission_uses_a_probe_after_the_resume_window() {
     session.identity.resumable = false;
     session.close();
 }
+
+#[path = "cosigned_mode_transitions.rs"]
+mod mode_transitions;
