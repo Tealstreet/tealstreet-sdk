@@ -2,6 +2,7 @@
 //! engine sign work becomes today's ws-auth `RemoteSignerRequest`, so the
 //! browser's existing signing host answers it unchanged.
 mod apexomni;
+mod kraken;
 mod orderly;
 use std::future::Future;
 use std::pin::Pin;
@@ -35,6 +36,7 @@ pub(crate) enum Family {
     ApexOmni,
     Backpack,
     Kucoin,
+    Kraken,
     DoubleSha256,
     Hyperliquid,
     Grvt,
@@ -48,6 +50,7 @@ impl Family {
             "apexomni" => Self::ApexOmni,
             "backpack" => Self::Backpack,
             "kucoin" | "kucoinspot" => Self::Kucoin,
+            "kraken" => Self::Kraken,
             "bitunix" => Self::DoubleSha256,
             "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
             "grvt" => Self::Grvt,
@@ -60,6 +63,7 @@ impl Family {
     fn algorithm(self) -> Algorithm {
         match self {
             Self::Hmac | Self::Kucoin | Self::ApexOmni => Algorithm::HmacSha256,
+            Self::Kraken => Algorithm::HmacSha512,
             Self::Backpack => Algorithm::Ed25519,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
             Self::Hyperliquid | Self::Grvt => Algorithm::Secp256k1Digest,
@@ -578,6 +582,7 @@ impl Inner {
             Family::ApexOmni => self.sign_apexomni(&operations).await?,
             Family::Orderly => return refused(),
             Family::Kucoin => self.sign_kucoin(&operations).await?,
+            Family::Kraken => self.sign_kraken(&operations, receipt).await?,
             Family::Backpack => self.sign_backpack(&operations).await?,
         };
         Ok(SignResult::new(values, receipt))

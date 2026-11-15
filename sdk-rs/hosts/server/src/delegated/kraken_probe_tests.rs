@@ -199,3 +199,83 @@ async fn kraken_two_private_startup_attempts_require_different_signed_bytes() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn kraken_native_remote_startup_checks_primary_batch_and_socket_binding() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let prior = Arc::new(Mutex::new(HashMap::new()));
+            for answer in [DeviceAnswer::Correct, DeviceAnswer::DifferentKey] {
+                let (prepared, link, task) = remote("kraken", answer, prior.clone()).await;
+                let (result, seen) = check("kraken", prepared).await;
+                {
+                    let seen = seen.lock().unwrap();
+                    assert!(seen.signed_reads > 0);
+                    assert_eq!(
+                        result.is_ok(),
+                        matches!(answer, DeviceAnswer::Correct),
+                        "{result:?}"
+                    );
+                    if matches!(answer, DeviceAnswer::Correct) {
+                        assert_eq!(seen.refused, 0);
+                    } else {
+                        assert!(seen.refused > 0);
+                        assert!(matches!(
+                            result,
+                            Err(ProbeRefusal {
+                                transient: false,
+                                ..
+                            })
+                        ));
+                    }
+                }
+                link.mark_unavailable();
+                task.abort();
+                if let Err(error) = task.await {
+                    assert!(error.is_cancelled(), "device responder failed: {error}");
+                }
+            }
+        })
+        .await;
+}
+
+#[test]
+fn kraken_fixture_binds_key_nonce_and_exact_primary_read() {
+    let io = VenueIo {
+        venue: "kraken",
+        seen: Arc::default(),
+    };
+    let mut request = HttpRequest {
+        id: safe_cex_engine::RequestId(1),
+        method: Method::Get,
+        route: None,
+        timeout_ms: None,
+        url: "https://futures.kraken.com/derivatives/api/v3/accounts".into(),
+        headers: vec![("APIKey", KEY.into())],
+        signer_headers: vec![],
+        body: None,
+    };
+    assert_eq!(response(&io, &request)["result"], "error");
+    request
+        .headers
+        .push(("Authent", signature(SECRET, b"/api/v3/accounts")));
+    assert_eq!(response(&io, &request)["result"], "success");
+    request.headers[0].1 = "synthetic-other-key".into();
+    assert_eq!(response(&io, &request)["result"], "error");
+    request.headers[1].1 = signature("synthetic-other-material", b"/api/v3/accounts");
+    assert_eq!(
+        response(&io, &request)["result"],
+        "success",
+        "other credential is valid only for its own key"
+    );
+    request.headers.push(("Nonce", "123".into()));
+    assert_eq!(response(&io, &request)["result"], "error");
+    request.headers[1].1 = signature("synthetic-other-material", b"123/api/v3/accounts");
+    assert_eq!(response(&io, &request)["result"], "success");
+    request.headers[2].1 = "124".into();
+    assert_eq!(
+        response(&io, &request)["result"],
+        "error",
+        "old signature cannot satisfy a new nonce"
+    );
+}
