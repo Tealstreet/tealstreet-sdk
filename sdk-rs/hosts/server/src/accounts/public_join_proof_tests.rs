@@ -285,3 +285,57 @@ async fn a_completed_proof_cannot_rebuild_an_actor_removed_before_attachment() {
         })
         .await;
 }
+
+async fn promoted_schnorr_binding(installed: u8, admit: bool) {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = fixture();
+            let resident = candidate(installed);
+            let key = resident
+                .identities()
+                .primary
+                .as_ref()
+                .unwrap()
+                .signing_ref()
+                .unwrap();
+            let public =
+                PublicKey::from_provider(Family::Schnorr, &resident.provider(), key).unwrap();
+            assert_eq!(
+                f.account.signing.upgrade_proven(resident, Some(&public)),
+                Ok(true)
+            );
+            let permit = permit(&f);
+            f.gate.add_permits(1);
+            let result = f
+                .registry
+                .prove_public_join(
+                    &f.init,
+                    &f.candidate,
+                    &RoutingPlan::default(),
+                    None,
+                    &permit,
+                )
+                .await;
+            assert_eq!(
+                result.is_ok(),
+                admit,
+                "registration cannot change the installed resident key"
+            );
+            assert!(f.account.delegated().is_some());
+            assert!(f.account.link.as_ref().unwrap().is_available());
+            assert!(!f.account.link.as_ref().unwrap().send_echo());
+            assert!(f.observed.lock().unwrap().writes.is_empty());
+            f.account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn promoted_schnorr_rejoin_refuses_a_different_registered_key() {
+    promoted_schnorr_binding(6, false).await;
+}
+
+#[tokio::test]
+async fn promoted_schnorr_rejoin_keeps_the_matching_key_control() {
+    promoted_schnorr_binding(7, true).await;
+}
