@@ -1,6 +1,7 @@
 //! Admission through the production Session path, independent of DELEGATED rollout.
 use super::*;
 use crate::delegated::probe::venue_tests::{Seen, assert_variant_startup, operation};
+use crate::delegated::probe::venue_tests::{kraken, signing_material};
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
 
@@ -23,6 +24,7 @@ const READY: &[&str] = &[
     "woo",
     "bingx",
     "bitunix",
+    "kraken",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -101,6 +103,7 @@ impl Device {
             || venue == "binancespot" && preimage.starts_with("apiKey=")
             || venue == "phemex" && !preimage.starts_with('/')
             || venue == "woo" && preimage.starts_with('|');
+        let socket_auth = socket_auth || venue == "kraken" && kraken::socket_preimage(preimage);
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -113,7 +116,7 @@ impl Device {
             MATERIAL
         };
         let mut options = serde_json::from_value(
-            json!({"key":signing_key,"secret":material,"passphrase":"synthetic-passphrase"}),
+            json!({"key":signing_key,"secret":signing_material(venue, material),"passphrase":"synthetic-passphrase"}),
         )
         .unwrap();
         let (provider, identities) =
@@ -766,6 +769,11 @@ async fn cosigned_phemex_requires_connection_proof() {
 #[tokio::test]
 async fn cosigned_woo_requires_connection_proof() {
     venue_case("woo").await;
+}
+
+#[tokio::test]
+async fn cosigned_kraken_requires_connection_proof() {
+    venue_case("kraken").await;
 }
 
 #[tokio::test]

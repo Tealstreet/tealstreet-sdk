@@ -45,6 +45,8 @@ pub(crate) struct Seen {
     pub(crate) woo_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
     pub(crate) bitunix_socket_auths: usize,
+    pub(crate) kraken_socket_auths: usize,
+    pub(crate) kraken_authents: Vec<(String, String)>,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -305,6 +307,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "kraken" {
+            return kraken::response(self, r);
+        }
         if self.venue == "apexomni" {
             return apexomni::response(self, r);
         }
@@ -382,6 +387,9 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "kraken" {
+            return kraken::connect(self, socket, &url, events);
+        }
         if self.venue == "apexomni" {
             return apexomni::connect(self, socket, &url, events);
         }
@@ -482,6 +490,7 @@ impl<T: Transport + Send> BoundHttp for Bound<T> {
     }
 }
 fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
+    let material = signing_material(venue, material);
     let mut options: safe_cex_venues::EngineOptions =
         serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
     let (provider, identities) =
@@ -492,6 +501,14 @@ fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
         plan: Default::default(),
         options: json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false}).to_string(),
         resident: ResidentCopy::test_provider(provider),
+    }
+}
+
+pub(crate) fn signing_material(venue: &str, material: &str) -> String {
+    if venue == "kraken" {
+        safe_cex_crypto::encode(material.as_bytes(), Encoding::Base64)
+    } else {
+        material.into()
     }
 }
 const KUCOIN_STARTUP_OPERATIONS: &[&str] = &[
@@ -695,6 +712,14 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "kraken" {
+        let descriptor: Value = serde_json::from_str(canonical).unwrap();
+        return descriptor["payload"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .into();
+    }
     if venue == "woo" {
         return if canonical.contains('|') {
             canonical.rsplit_once('|').unwrap().0.to_owned()
@@ -763,7 +788,15 @@ async fn remote(
         safe_cex_remote_signer::SignerLink::new(77, Arc::new(move |frame| tx.send(frame).is_ok()));
     let pending = Arc::downgrade(&link);
     let task = tokio::task::spawn_local(async move {
-        let mut options: safe_cex_venues::EngineOptions = serde_json::from_value(json!({"key":KEY,"secret":if matches!(answer, DeviceAnswer::DifferentKey) { "synthetic-other-material" } else { SECRET },"passphrase":PASS})).unwrap();
+        let material = if matches!(answer, DeviceAnswer::DifferentKey) {
+            "synthetic-other-material"
+        } else {
+            SECRET
+        };
+        let mut options: safe_cex_venues::EngineOptions = serde_json::from_value(
+            json!({"key":KEY,"secret":signing_material(venue, material),"passphrase":PASS}),
+        )
+        .unwrap();
         let (provider, identities) =
             safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
         while let Some(frame) = rx.recv().await {
@@ -784,6 +817,7 @@ async fn remote(
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
                     || venue == "woo" && text.starts_with('|')
+                    || venue == "kraken" && kraken::socket_preimage(text)
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -1188,3 +1222,6 @@ mod bingx;
 mod bitunix;
 #[path = "woo_probe_tests.rs"]
 mod woo;
+
+#[path = "kraken_probe_tests.rs"]
+pub(crate) mod kraken;
