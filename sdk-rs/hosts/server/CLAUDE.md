@@ -38,6 +38,13 @@ keys, symbol lists, request payloads, credentials, or per-user breakdowns.
 
 ## DELEGATED construction
 
+DELEGATED is available on every venue admitted by the shared hosted server gate,
+just like COSIGNED. One runtime `DELEGATED` flag provides the kill switch and
+per-user pin; `DELEGATED_BYBIT` is only a compatibility alias. Bybit was the first
+test account, not an admission boundary. Mobile is DELEGATED-only; DELEGATED
+clients have no WASM engine/local signer and send every write as a typed v1
+action over the existing hosted WebSocket.
+
 Authenticated admissions and socket commands recheck the token expiry captured
 by `auth::Verifier`, shared by COSIGNED and DELEGATED. Init, re-init, resume,
 verification completion and deferred startup dispatch do not extend that expiry.
@@ -84,9 +91,11 @@ Private COSIGNED admissions require possession proof independently of
 DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
-as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
-OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
-other private COSIGNED joins return the typed `proof-unavailable` init refusal.
+as a fallback when its possession proof is unavailable. Exact Bybit base and
+inverse venues, plus Binance, OKX, Bitget, Blofin and KuCoin base venues, have
+private-startup proof coverage. Bybit inverse reuses its own native startup and
+HMAC signing, with inverse-product and Brazil-site session controls. Other
+private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. Matching COSIGNED inits on an admitted connection and
 COSIGNED resumes retain their existing snapshot path. The exact wire names and

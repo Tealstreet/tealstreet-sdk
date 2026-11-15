@@ -4,7 +4,15 @@ use crate::delegated::probe::venue_tests::{Seen, operation};
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
 
-const READY: &[&str] = &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
+const READY: &[&str] = &[
+    "bybit",
+    "bybitinverse",
+    "binance",
+    "okx",
+    "bitget",
+    "blofin",
+    "kucoin",
+];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
 
@@ -76,8 +84,9 @@ impl Device {
     async fn answer(&mut self, venue: &str, session: &mut Session, frame: Value, mode: Answer) {
         let request = &frame["d"];
         let preimage = request["wsAuth"]["toSign"].as_str().unwrap();
-        let socket_auth =
-            preimage.contains("/users/self/verify") || preimage.contains("/user/verify");
+        let socket_auth = preimage.starts_with("GET/realtime")
+            || preimage.contains("/users/self/verify")
+            || preimage.contains("/user/verify");
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -157,6 +166,7 @@ fn payload(venue: &str) -> InitPayload {
     InitPayload {
         account_name: "acct".into(),
         exchange_name: venue.into(),
+        bybit_site_id: (venue == "bybitinverse").then(|| "BRA_BTL".into()),
         key: KEY.into(),
         passphrase: Some("synthetic-passphrase".into()),
         signing_mode: Some("cosigned".into()),
@@ -261,6 +271,20 @@ async fn venue_case(venue: &'static str) {
     let account = resident.joined["acct"].account.clone();
     let provider = account.link.clone().unwrap();
     assert!(seen.lock().unwrap().signed_reads > 0);
+    if venue == "bybitinverse" {
+        let seen = seen.lock().unwrap();
+        assert_eq!(account.venue, "bybitinverse");
+        // In-memory venue I/O bypasses the network adapter; pin the real site plan separately.
+        let plan = crate::accounts::routing_plan(&payload(venue), false).unwrap();
+        assert_eq!(
+            plan.http.headers.get("x-site-id").map(String::as_str),
+            Some("BRA_BTL")
+        );
+        assert!(
+            seen.inverse_private_reads > 0,
+            "inverse startup must read its own product"
+        );
+    }
     let original_socket = provider.socket();
     for mode in [Answer::OtherKey, Answer::Replay] {
         let before = seen.lock().unwrap().refused;
@@ -292,6 +316,11 @@ async fn venue_case(venue: &'static str) {
     }
     assert!(device.replayed > 0);
     resident.close();
+}
+
+#[tokio::test]
+async fn cosigned_bybitinverse_brazil_requires_connection_proof() {
+    venue_case("bybitinverse").await;
 }
 
 #[tokio::test]

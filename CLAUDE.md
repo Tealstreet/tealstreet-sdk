@@ -10,6 +10,9 @@ context.
 The host ownership observation/teardown contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#host-ownership-observation-and-teardown).
 
+Bybit's sparse ticker freshness contract lives in
+[`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
+
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
 
@@ -17,3 +20,10 @@ Bybit REST mutation release budgets and their conservative batch fallback cost
 are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.md#bybit-rest-write-pacing).
 The engine owns the clocks and fences; only a validated native `10006` rejection
 is known, never resendable. Contradictory and unproven responses remain Unknown.
+
+DELEGATED is venue-generic under the same hosted eligibility as COSIGNED. Use
+one runtime `DELEGATED` kill switch/per-user pin; `DELEGATED_BYBIT` is only its
+compatibility alias. Mobile is DELEGATED-only; DELEGATED clients have no WASM
+engine or local signing, and every write is a typed v1 action over the existing
+hosted WebSocket. Current contract: `docs/plans/callers/delegated-action-frames.md`;
+older mode/transport discussions are explicitly superseded where they disagree.

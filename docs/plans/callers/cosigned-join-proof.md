@@ -12,6 +12,7 @@ The exact proof-ready venue names are:
 | Venue | Probe |
 | --- | --- |
 | `bybit` | Native private startup, existing Bybit session suite |
+| `bybitinverse` | Native inverse private startup, HMAC valid/wrong-key/replay controls and Brazil-site session suite |
 | `binance` | Native private startup and shared HMAC suite |
 | `okx` | Native private startup and shared HMAC suite |
 | `bitget` | Native private startup and shared HMAC suite |

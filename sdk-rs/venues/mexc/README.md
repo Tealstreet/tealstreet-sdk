@@ -108,7 +108,9 @@ This crate implements perpetual futures. MEXC's broker protocol uses the same
 header and broker ID for spot and futures; this change adds no spot adapter.
 LOCAL and resident DELEGATED providers use the same LocalSigner recipe, while
 COSIGNED completes that recipe through the existing external signing path.
-MEXC DELEGATED admission remains disabled by the existing Bybit-only flag.
+MEXC DELEGATED eligibility follows the same hosted support as COSIGNED. The
+single runtime `DELEGATED` flag controls availability; `DELEGATED_BYBIT` is only
+its compatibility alias. No MEXC-specific DELEGATED opt-in is required.
 
 Sources:
 

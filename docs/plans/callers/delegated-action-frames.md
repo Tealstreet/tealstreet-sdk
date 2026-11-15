@@ -234,8 +234,13 @@ original action/placement flags. The box advertises the new flag under the same
 compiled/runtime switch; an older router's four-action attestation is insufficient.
 Missing flags keep new writes queued without sending or accepting receipts. Never
 fall back to legacy `callMethod`, another channel, HTTP or browser signing.
-The existing private Bybit-only DELEGATED admission is not widened. Venue-specific
-operations on an incapable account return a proven pre-dispatch refusal.
+DELEGATED is venue-generic, with the same hosted venue eligibility as COSIGNED;
+Bybit was only the first test account. Availability uses one runtime `DELEGATED`
+flag and per-user pin; `DELEGATED_BYBIT` is its compatibility alias, not a separate
+venue gate. Venue-specific operations on an incapable account still return a
+proven pre-dispatch refusal. DELEGATED clients, including DELEGATED-only mobile,
+run no WASM engine or local signer; every write is a typed v1 action on the
+existing hosted WebSocket.
 
 | Local operation | Action payload (all include `kind`) |
 | --- | --- |

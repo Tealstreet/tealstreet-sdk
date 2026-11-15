@@ -128,7 +128,8 @@ the host-owned feature flag, the captured box/router transport proofs, and only
 the advertised `delegatedActivationScopeV1` place/close capabilities. Discover
 box capabilities using `?exchangeName=<joined venue>` and retain its
 `delegatedVenueV1`; activation refuses a missing or mismatched venue. The neutral
-`DELEGATED` flag replaces `DELEGATED_BYBIT`, and `delegatedDisabled` replaces
+`DELEGATED` flag is venue-generic; `DELEGATED_BYBIT` is only its host/DB
+compatibility alias, not a separate switch. `delegatedDisabled` replaces
 `delegatedBybitDisabled`. `requireDelegatedActivation` takes the connection venue
 as its third argument. `OutboxConnection.venue` is an `ExchangeName`; its trusted
 low-level connection still requires a remote-signing-supported venue. Amend, venue
