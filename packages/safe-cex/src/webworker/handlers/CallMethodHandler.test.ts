@@ -135,6 +135,22 @@ describe('CallMethodHandler', () => {
         for (const method of Object.keys(reads)) expect(WORKER_WRITE_METHODS.has(method)).toBe(false);
       });
 
+      it.each([
+        { method: 'refreshAccountSettings', args: ['BTCUSDT'] },
+        { method: 'refreshAccountOrders', args: [['BTCUSDT'], [{ id: 'uncertain-cancel', symbol: 'BTCUSDT' }]] },
+      ] as const)('routes $method as an account read without granting venue-write admission', async ({ method, args }) => {
+        const refresh = vi.fn().mockResolvedValue(undefined);
+        Object.assign(mockExchange, { [method]: refresh });
+        await handler.handleCallMethod(method, method, [...args]);
+        expect(refresh).toHaveBeenCalledWith(...args);
+        expect(mockPostMessage).toHaveBeenLastCalledWith({
+          op: 'callMethod:done', data: { requestId: method, result: undefined, success: true },
+        });
+        expect(WORKER_WRITE_METHODS.has(method)).toBe(false);
+        expect(WORKER_WRITE_METHODS.has('stopAccountAlgos')).toBe(true);
+        expect(WORKER_WRITE_METHODS.has('setLeverage')).toBe(true);
+      });
+
       it('routes catalogue refresh to the worker engine and returns its authoritative delta', async () => {
         const delta = { added: [{ id: 'NEWUSDT' }], removed: [{ id: 'OLDUSDT' }] };
         const refresh = vi.fn().mockResolvedValue(delta);
