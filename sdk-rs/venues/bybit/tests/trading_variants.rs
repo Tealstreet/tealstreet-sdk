@@ -7726,3 +7726,83 @@ fn inverse_position_mode_legacy_refusal_has_no_second_coin() {
             .contains("refused")
     );
 }
+
+#[test]
+fn write_pacing_prevents_a_spot_burst_and_keeps_rate_limit_unknown() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, 6001, vec![order("BTCUSDT", 0.01); 12]);
+    for index in 0..12 {
+        let request = h.take("/v5/order/create");
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(payload["symbol"], "BTCUSDT");
+        assert_eq!(payload["side"], "Buy");
+        assert_eq!(payload["qty"], "0.01");
+        assert_eq!(payload["price"], "100");
+        if index == 11 {
+            h.reply(request.id, 200, r#"{"retCode":10006,"retMsg":"Too many visits. Exceeded the API Rate Limit.","result":{}}"#);
+        } else {
+            h.reply(
+                request.id,
+                200,
+                &format!(r#"{{"retCode":0,"retMsg":"OK","result":{{"orderId":"fake-{index}"}}}}"#),
+            );
+            assert!(
+                !h.has_request("/v5/order/create"),
+                "next write must await its physical release floor"
+            );
+            h.advance(199.0);
+            assert!(!h.has_request("/v5/order/create"));
+            h.advance(1.0);
+            assert!(h.has_request("/v5/order/create"));
+        }
+    }
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 6001,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("10006"));
+    assert!(
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    h.advance(2000.0);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "unknown must never resend"
+    );
+}
+
+#[test]
+fn write_pacing_is_shared_by_concurrent_scaled_commands() {
+    let mut h = ready(Variant::Linear);
+    for (command, symbol) in [(7000, "BTCUSDT"), (7001, "ETHUSDT")] {
+        place(&mut h, command, vec![order(symbol, 0.1); 10]);
+    }
+    resolve_mode(&mut h, "BTCUSDT");
+    resolve_mode(&mut h, "ETHUSDT");
+    let first = h.take("/v5/order/create-batch");
+    let payload: serde_json::Value = serde_json::from_str(body(&first)).unwrap();
+    assert_eq!(payload["request"].as_array().unwrap().len(), 10);
+    assert!(
+        !h.has_request("/v5/order/create-batch"),
+        "different commands share the batch order budget"
+    );
+    // The next command is paced from release, even while the first reply is pending.
+    h.advance(1199.0);
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.advance(1.0);
+    let second = h.take("/v5/order/create-batch");
+    let payload: serde_json::Value = serde_json::from_str(body(&second)).unwrap();
+    assert_eq!(payload["request"].as_array().unwrap().len(), 10);
+    assert_eq!(payload["request"][0]["symbol"], "ETHUSDT");
+}
