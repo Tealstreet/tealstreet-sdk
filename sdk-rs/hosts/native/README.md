@@ -22,6 +22,14 @@ Hosted KuCoin Spot resolves its own `https://api.kucoin.com` REST origin,
 independently of Futures' `https://api-futures.kucoin.com`. Both exact names
 refuse testnet rather than falling through to a production origin.
 
+Native HyroTrader routing resolves the TS production/challenge default
+`https://sim-tealstreet.hyro.site`, independently of Bybit's REST hosts, and
+refuses hosted testnet with `NoBaseUrl`. The existing table keeps direct defaults,
+the opt-in regional REST proxy and Singapore HOW for a saved tunnel flag; native
+socket endpoint configuration is unchanged. This origin lookup does not provision
+the HyroTrader engine's endpoint map: the server's separate unhosted refusal
+remains in place, as does COSIGNED private-startup proof readiness.
+
 Hosted MEXC resolves its mainnet REST origin to `https://api.mexc.com` through
 the existing Japan proxy pool, including when the saved proxy flag is false.
 Saved MEXC tunnel flags are normalized off: MEXC cannot use HOW, and an old
