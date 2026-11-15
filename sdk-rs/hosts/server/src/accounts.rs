@@ -18,6 +18,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 mod admission;
+mod signing;
+use signing::AccountSigner;
 mod proof_queue;
 pub(crate) use admission::ProbePermit;
 pub(crate) mod identity;
@@ -84,9 +86,8 @@ pub struct Account {
     pub handle: AccountHandle,
     /// Explicit construction mode, independent of a remote signer link.
     public_only: bool,
-    /// Present for a DELEGATED private account.
-    pub delegated: Option<ResidentCopy>,
-    /// Present for COSIGNED private accounts only.
+    pub(crate) signing: Arc<AccountSigner>,
+    /// Original browser link; permanently retired for signing after handover.
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
     pub fingerprint: String,
@@ -255,6 +256,7 @@ struct Holders {
     /// Live holders in init/resume order; socket IDs do not order later reinits.
     init_order: Vec<u64>,
     labels: HashMap<u64, std::collections::BTreeMap<String, Option<Live>>>,
+    confirmed: HashMap<(u64, String), (crate::envelope::AccountSigningMode, Outbox)>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
 }
@@ -269,6 +271,7 @@ impl Holders {
     }
 
     fn remove(&mut self, id: u64) {
+        self.confirmed.retain(|(holder, _), _| *holder != id);
         self.init_order.retain(|holder| *holder != id);
         self.by_id.remove(&id);
     }
@@ -290,6 +293,72 @@ impl Holders {
 }
 
 impl Account {
+    pub fn delegated(&self) -> Option<ResidentCopy> {
+        self.signing.resident()
+    }
+
+    pub(crate) fn actual_signing_mode(&self) -> crate::envelope::AccountSigningMode {
+        if self.delegated().is_some() {
+            crate::envelope::AccountSigningMode::Delegated
+        } else {
+            crate::envelope::AccountSigningMode::Cosigned
+        }
+    }
+
+    pub(crate) fn confirm_signing_mode(
+        &self,
+        holder: u64,
+        label: &str,
+        requested: crate::envelope::AccountSigningMode,
+        outbox: Outbox,
+    ) {
+        // Serialize confirmations with broadcasts, so an old COSIGNED
+        // confirmation cannot follow the newer DELEGATED state.
+        let mut holders = self.holders.lock().unwrap();
+        if holders
+            .labels
+            .get(&holder)
+            .and_then(|labels| labels.get(label))
+            .and_then(Option::as_ref)
+            .is_none_or(|live| {
+                live.token
+                    .as_ref()
+                    .is_some_and(|(_, expiry)| *expiry <= now_ms())
+            })
+        {
+            return;
+        }
+        let actual = self.actual_signing_mode();
+        holders
+            .confirmed
+            .insert((holder, label.into()), (requested, outbox.clone()));
+        outbox(crate::envelope::account_signing_mode(
+            label, requested, actual,
+        ));
+    }
+
+    fn broadcast_signing_mode(&self) {
+        let holders = self.holders.lock().unwrap();
+        let actual = self.actual_signing_mode();
+        for ((holder, label), (requested, outbox)) in &holders.confirmed {
+            if holders
+                .labels
+                .get(holder)
+                .and_then(|labels| labels.get(label))
+                .and_then(Option::as_ref)
+                .is_some_and(|live| {
+                    live.token
+                        .as_ref()
+                        .is_none_or(|(_, expiry)| *expiry > now_ms())
+                })
+            {
+                outbox(crate::envelope::account_signing_mode(
+                    label, *requested, actual,
+                ));
+            }
+        }
+    }
+
     pub(crate) fn registry_name(&self) -> &str {
         self.identity.as_deref().unwrap_or(&self.name)
     }
@@ -353,6 +422,7 @@ impl Account {
 
     fn hold_label(&self, id: u64, live: Live, label: &str) {
         let mut holders = self.holders.lock().unwrap();
+        holders.confirmed.remove(&(id, label.into()));
         holders
             .labels
             .entry(id)
@@ -1149,14 +1219,14 @@ impl Registry {
             }
             accounts.values().find(|account| {
                 account.user == user
-                    && account.delegated.is_some()
+                    && account.delegated().is_some()
                     && account.name == init.account_name
             })
         })?;
-        if public_only && account.delegated.is_none() {
+        if public_only && account.delegated().is_none() {
             return None;
         }
-        (!account.is_public() && account.delegated.is_some() != delegated).then(|| {
+        (!account.is_public() && account.delegated().is_some() != delegated).then(|| {
             (
                 SigningModeRefusalReason::ResidentModeConflict,
                 "Account signing mode differs; account not attached".to_owned(),
@@ -1334,7 +1404,7 @@ impl Registry {
             || !account.matches_init(user, init)
             || !self.holds(&account, holder)
             || init.sealed.is_some()
-            || account.delegated.is_some() != (init.signing_mode.as_deref() == Some("delegated"))
+            || account.delegated().is_some() != (init.signing_mode.as_deref() == Some("delegated"))
         {
             return Err("Settings can only be applied to the joined account identity".into());
         }
@@ -1344,7 +1414,7 @@ impl Registry {
         {
             return Err("Tealstreet proxy token expired; settings were not applied".into());
         }
-        let setup = if let Some(resident) = &account.delegated {
+        let setup = if let Some(resident) = &account.delegated() {
             resident.reconfigure(init)?;
             Some(DelegatedSetup::Resident(Box::new(resident.clone())))
         } else {
@@ -1410,8 +1480,13 @@ impl Registry {
             return Err("The server is restarting; reconnecting".into());
         }
         let delegated = setup.is_some();
-        if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
-            return Err(refusal);
+        let probed = proof.is_some();
+        if let Some((reason, refusal)) =
+            self.signing_mode_refusal_detail(user, init, public_only, delegated)
+        {
+            if !probed || !matches!(reason, SigningModeRefusalReason::ResidentModeConflict) {
+                return Err(refusal);
+            }
         }
         if public_only
             && let Some(refusal) =
@@ -1439,7 +1514,6 @@ impl Registry {
         if apply.is_some() {
             attempt.authority.admission_expires_at = token.as_ref().map(|(_, expiry)| *expiry);
         }
-        let probed = proof.is_some();
         if let Some(proof) = proof {
             proof
                 .check(user, init)
@@ -1461,13 +1535,39 @@ impl Registry {
             return Err("The account registration changed; settings were not applied".into());
         }
         if let Some(account) = existing {
-            if probed && (account.fingerprint != fingerprint || account.is_public()) {
-                return Err("Account settings differ; account not attached".into());
-            }
             if probed {
+                if account.is_public()
+                    || !same_handover_settings(&account.fingerprint, &fingerprint)
+                {
+                    return Err("Account settings differ; account not attached".into());
+                }
                 attempt.authority.check_admission()?;
+                crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if delegated && account.delegated().is_none() {
+                    let resident = match setup {
+                        Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
+                        _ => {
+                            return Err(crate::envelope::ModeTransitionRefusal::Unavailable
+                                .reason()
+                                .into());
+                        }
+                    };
+                    attempt.authority.check_admission()?;
+                    if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
+                        return Err("Account is retiring; account not attached".into());
+                    }
+                    if account
+                        .signing
+                        .upgrade(resident)
+                        .map_err(|reason| reason.reason().to_owned())?
+                    {
+                        account.broadcast_signing_mode();
+                    }
+                }
+                account.hold_label(holder, Live { outbox, token }, &init.account_name);
+                return Ok(account);
             }
-            if !account.is_public() && account.delegated.is_some() != delegated {
+            if !account.is_public() && account.delegated().is_some() != delegated {
                 return Err("Account signing mode differs; account not attached".into());
             }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
@@ -1607,6 +1707,21 @@ impl Registry {
             let signer = remote.as_ref().map(|remote| remote.provider.clone());
             (link, plan, options, remote, signer, None)
         };
+        let identities = serde_json::from_str::<Value>(&options)
+            .ok()
+            .and_then(|options| options.get("signing").cloned())
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|_| "Invalid signer identities".to_owned())?
+            .unwrap_or_default();
+        let signing =
+            AccountSigner::new(signer.clone(), identities, link.clone(), delegated.clone());
+        let signer: Option<safe_cex_engine::signing::Provider> = if !delegated_build && !public_only
+        {
+            Some(signing.clone())
+        } else {
+            signer
+        };
         let proxy_token = ProxyToken::new();
         // Preserve COSIGNED keyed construction; DELEGATED supplies its own provider.
         if !delegated_build {
@@ -1737,7 +1852,7 @@ impl Registry {
             handle,
             link,
             public_only,
-            delegated,
+            signing,
             token: proxy_token,
             fingerprint,
             holders: Mutex::default(),
@@ -1797,6 +1912,7 @@ impl Registry {
     ) {
         let still_held = {
             let mut holders = account.holders.lock().unwrap();
+            holders.confirmed.remove(&(holder, label.into()));
             let remaining = if let Some(labels) = holders.labels.get_mut(&holder) {
                 labels.remove(label);
                 labels.values().find_map(Clone::clone)
@@ -2437,7 +2553,7 @@ impl Registry {
         }
         let accounts = entry
             .accounts
-            .extract_if(.., |(account, _)| account.delegated.is_none())
+            .extract_if(.., |(account, _)| account.delegated().is_none())
             .collect::<Vec<_>>();
         entry.alias_until = Some(now_ms() + 2 * self.resume_grace.as_millis() as u64);
         drop(parked);
@@ -2480,6 +2596,16 @@ impl Registry {
 }
 
 /// The top-level init fields (names only) on which two fingerprints differ.
+fn same_handover_settings(old: &str, new: &str) -> bool {
+    fn normalized(text: &str) -> Option<Map<String, Value>> {
+        let mut fields: Map<String, Value> = serde_json::from_str(text).ok()?;
+        fields.remove("hostedSigningMode");
+        fields.remove("passphrase");
+        Some(fields)
+    }
+    matches!((normalized(old), normalized(new)), (Some(old), Some(new)) if old == new)
+}
+
 fn differing_fields(old: &str, new: &str) -> Vec<String> {
     let parse = |text: &str| {
         serde_json::from_str::<serde_json::Map<String, Value>>(text).unwrap_or_default()
@@ -2610,7 +2736,7 @@ pub mod testing {
             venue: venue_name.into(),
             handle,
             public_only: link.is_none(),
-            delegated: None,
+            signing: AccountSigner::new(None, Default::default(), link.clone(), None),
             link,
             token: ProxyToken::new(),
             fingerprint,

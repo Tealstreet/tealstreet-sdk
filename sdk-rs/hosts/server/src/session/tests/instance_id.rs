@@ -1213,7 +1213,7 @@ async fn delegated_mode_refusal_reply(
             crate::accounts::testing::bind_identity(&mut account, &payload);
             let inner = Arc::get_mut(&mut account).unwrap();
             inner.link = None;
-            inner.delegated = Some(prepared.resident);
+            inner.signing.set_test_resident(prepared.resident);
             crate::accounts::testing::register(&registry, &account);
             let (mut session, mut sent) = user_session(registry.clone(), "u");
             if joined {
@@ -1326,7 +1326,7 @@ async fn queued_mode_refusal_retired_queue(
             );
             let inner = Arc::get_mut(&mut account).unwrap();
             inner.link = None;
-            inner.delegated = Some(prepared.resident);
+            inner.signing.set_test_resident(prepared.resident);
             crate::accounts::testing::bind_identity(&mut account, &payload);
             crate::accounts::testing::register(&registry, &account);
             let (mut session, mut sent) = user_session(registry.clone(), "u");

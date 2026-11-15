@@ -55,9 +55,17 @@ handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
 unhosted refusal preserved. There is no separate DELEGATED venue allowlist or
 `delegated.enabled` declaration. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
-is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
-modes; a refused init leaves the running account intact. Socket handover and
-private-read verification must complete before calling this entry point.
+is recorded explicitly. Unproved/trusted construction still refuses cross-mode
+attachment. Socket joins first prove their own credentials: COSIGNED can attach
+to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
+a COSIGNED HMAC resident without replacing its actor, orders or algo jobs.
+All outstanding signer futures/setup work must settle first; busy handovers
+refuse transiently without canceling or replaying them. Address/nonce-sealed
+non-HMAC lifetimes refuse explicitly as unavailable instead of being rebuilt.
+The original opaque refs map by identity role to the protected resident refs.
+Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
+registration's label/instanceId. Refusals have attached=false and no actualMode.
+Socket handover and private-read verification precede any transition.
 Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent

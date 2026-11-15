@@ -15,7 +15,7 @@ async fn delegated_join_proves_its_key_before_upgrading_a_cosigned_resident() {
                 "mode change must enter isolated possession proof, not refuse the resident's mode"
             );
             assert!(session.joined.is_empty());
-            assert!(resident.delegated.is_none());
+            assert!(resident.delegated().is_none());
             assert!(resident.handle.disposal_cause().is_none());
             assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
             session.close();
@@ -44,9 +44,11 @@ fn delegated_resident(f: &Fixture) -> Arc<Account> {
     crate::accounts::testing::bind_identity(&mut account, &request);
     let inner = Arc::get_mut(&mut account).unwrap();
     inner.link = None;
-    inner.delegated = Some(crate::delegated::ResidentCopy::test_provider(Arc::new(
-        safe_cex_crypto::signer::LocalSigner::new(),
-    )));
+    inner
+        .signing
+        .set_test_resident(crate::delegated::ResidentCopy::test_provider(Arc::new(
+            safe_cex_crypto::signer::LocalSigner::new(),
+        )));
     crate::accounts::testing::register(&f.registry, &account);
     account
 }
@@ -64,7 +66,7 @@ async fn cosigned_join_proves_its_own_key_and_attaches_to_delegated_resident() {
     let completion = complete(&mut session, &mut sent, &mut done, &mut device, Answer::Correct, Some("attach")).await;
     session.verification_completed(completion).await.unwrap();
     assert!(Arc::ptr_eq(&session.joined["acct"].account, &resident));
-    assert!(resident.delegated.is_some());
+    assert!(resident.delegated().is_some());
     assert!(resident.link.is_none());
     let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok()).map(|text| serde_json::from_str(&text).unwrap()).collect();
     let mode = frames.iter().find(|frame| frame["d"]["op"] == "account-signing-mode").expect("confirmed actual mode");
@@ -99,7 +101,7 @@ async fn wrong_cosigned_secret_cannot_borrow_the_delegated_resident_signer() {
             .await;
             session.verification_completed(completion).await.unwrap();
             assert!(session.joined.is_empty());
-            assert!(resident.delegated.is_some());
+            assert!(resident.delegated().is_some());
             assert!(resident.handle.disposal_cause().is_none());
             assert!(f.rejected.load(Ordering::SeqCst) > 0);
             assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
@@ -149,7 +151,7 @@ async fn proved_delegated_upgrade_keeps_the_actor_and_announces_both_registratio
         &joining.joined["acct"].account,
         &original.account
     ));
-    assert!(original.account.delegated.is_some());
+    assert!(original.account.delegated().is_some());
     assert!(original.account.handle.disposal_cause().is_none());
     assert_eq!(original.account.running.counts(), original.counts);
     assert_eq!(original.account.twap_owner.snapshot(), before_generation);

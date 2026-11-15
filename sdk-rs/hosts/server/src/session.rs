@@ -549,9 +549,17 @@ impl Session {
                         self.join(account, out.clone()).await;
                     }
                     if self.joined.contains_key(&completed.account_name) {
+                        self.joined[&completed.account_name]
+                            .account
+                            .confirm_signing_mode(
+                                self.socket,
+                                &completed.account_name,
+                                envelope::AccountSigningMode::requested(&probe.init),
+                                out.outbox(),
+                            );
                         if self.joined[&completed.account_name]
                             .account
-                            .delegated
+                            .delegated()
                             .is_some()
                         {
                             self.registry.interruptions.delegated_status(
@@ -583,10 +591,17 @@ impl Session {
                         diagnostic.refused(refusal);
                     }
                     self.drop_early(&completed.account_name, "verification refused");
-                    out.send(envelope::init_unverified(
-                        &completed.account_name,
-                        refusal.transient,
-                    ));
+                    out.send(match refusal.transition {
+                        Some(reason) => envelope::init_mode_transition_refused(
+                            &completed.account_name,
+                            reason,
+                            envelope::AccountSigningMode::requested(&probe.init),
+                            envelope::AccountSigningMode::Cosigned,
+                        ),
+                        None => {
+                            envelope::init_unverified(&completed.account_name, refusal.transient)
+                        }
+                    });
                 }
             }
             return Ok(());
@@ -624,9 +639,15 @@ impl Session {
             Some(RefusalStage::VenuePolicy)
         } else if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
             Some(RefusalStage::PublicAccount)
-        } else if let Some((reason, _)) =
-            self.registry
-                .signing_mode_refusal_detail(self.user(), &init, false, delegated)
+        } else if let Some((reason, _)) = self
+            .registry
+            .signing_mode_refusal_detail(self.user(), &init, false, delegated)
+            .filter(|(reason, _)| {
+                !matches!(
+                    reason,
+                    crate::accounts::SigningModeRefusalReason::ResidentModeConflict
+                )
+            })
         {
             signing_mode_reason = Some(reason);
             Some(RefusalStage::SigningMode)
@@ -1252,8 +1273,8 @@ impl Session {
         }
         self.forget_disposed();
         if let Some(joined) = self.joined.get(&init.account_name)
-            && joined.account.delegated.is_some()
-            && (public_only || joined.account.matches_init(self.user(), &init))
+            && joined.account.delegated().is_some()
+            && public_only
         {
             out.account(&init.account_name).send(envelope::init_refused(
                 &init.account_name,
@@ -1270,6 +1291,7 @@ impl Session {
             }
             if self.joined.get(&init.account_name).is_none_or(|joined| {
                 joined.account.fingerprint != init.fingerprint()
+                    || joined.account.delegated().is_some()
                     || !joined.account.matches_init(self.user(), &init)
             }) {
                 self.admission_init(init);
@@ -1307,6 +1329,14 @@ impl Session {
             }
             previous.finish_registration(&out);
             self.resnapshot(&init.account_name).await;
+            if !account.is_public() {
+                account.confirm_signing_mode(
+                    self.socket,
+                    &init.account_name,
+                    envelope::AccountSigningMode::requested(&init),
+                    out.outbox(),
+                );
+            }
             return Ok(());
         }
         // Existing private settings stay until an admitted client explicitly resets them.
@@ -1671,7 +1701,7 @@ impl Session {
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
             (op, _, _)
-                if self.joined[&name].account.delegated.is_some()
+                if self.joined[&name].account.delegated().is_some()
                     && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
                         || op == "twap:state"
                             && msg.data.as_array().is_some_and(|rows| {
@@ -2012,7 +2042,7 @@ impl Session {
         let dispatch_out = self.account_out(name);
         let action_expires_at_ms = self.token_expires_at_ms();
         let symbols = if method == "cancelAllOrders"
-            && (account.delegated.is_none()
+            && (account.delegated().is_none()
                 || matches!(order_frame, Some(OrderReceipt::Action { .. })))
         {
             let mut symbols: Vec<String> = account
@@ -2078,7 +2108,7 @@ impl Session {
                         message: "Account closed before leverage dispatch".into(),
                     })
                 })
-        } else if account.delegated.is_some() {
+        } else if account.delegated().is_some() {
             let translate = if matches!(order_frame, Some(OrderReceipt::Action { .. })) {
                 methods::translate_delegated_action
             } else {

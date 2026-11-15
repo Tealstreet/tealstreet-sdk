@@ -47,6 +47,7 @@ struct State {
     out: Outbox,
     available: bool,
     suspended: bool,
+    server_owned: bool,
     unavailable_since: Option<Instant>,
     /// The last frame of any kind from the signing socket.
     heard_at: Instant,
@@ -77,6 +78,7 @@ impl SignerLink {
                 out,
                 available: true,
                 suspended: false,
+                server_owned: false,
                 unavailable_since: None,
                 heard_at: Instant::now(),
                 heard_by: HashMap::new(),
@@ -94,6 +96,19 @@ impl SignerLink {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Retire browser signing without aborting or replaying any pending request.
+    pub fn promote_to_server_owned(&self) -> bool {
+        let mut state = self.state();
+        if !state.available || !state.pending.is_empty() {
+            return false;
+        }
+        state.server_owned = true;
+        state.suspended = false;
+        state.unavailable_since = None;
+        state.echo = None;
+        true
     }
 
     pub fn is_available(&self) -> bool {
@@ -165,7 +180,7 @@ impl SignerLink {
             if state.available && state.suspended {
                 return Err(Failure::Suspended);
             }
-            if !state.available {
+            if !state.available || state.server_owned {
                 return Err(Failure::Unavailable);
             }
             if state.pending.contains_key(id) {
@@ -249,7 +264,7 @@ impl SignerLink {
     /// re-sends them; new requests wait for `attach` (see `round_trip`).
     pub fn suspend(&self) {
         let mut state = self.state();
-        if !state.available || state.suspended {
+        if !state.available || state.suspended || state.server_owned {
             return;
         }
         state.suspended = true;
@@ -304,7 +319,7 @@ impl SignerLink {
     /// One outstanding echo at a time; false when one is still out or unsent.
     pub fn send_echo(&self) -> bool {
         let mut state = self.state();
-        if state.echo.is_some() || !state.available || state.suspended {
+        if state.echo.is_some() || !state.available || state.suspended || state.server_owned {
             return false;
         }
         state.echo_seq += 1;
@@ -363,5 +378,49 @@ impl Drop for Pending<'_> {
         {
             state.pending.remove(self.id);
         }
+    }
+}
+
+#[cfg(test)]
+mod server_owned_tests {
+    use super::*;
+    use std::{future::Future, task::Poll};
+    #[tokio::test]
+    async fn promotion_refuses_pending_work_then_never_sends_or_replays_browser_signatures() {
+        let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let link = SignerLink::new(1, Arc::new(move |frame| sent.send(frame).is_ok()));
+        let request = serde_json::json!({"id":"once"});
+        let work = link.round_trip("once", &request);
+        tokio::pin!(work);
+        assert!(
+            std::future::poll_fn(|cx| Poll::Ready(work.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        assert!(received.try_recv().is_ok());
+        assert!(!link.promote_to_server_owned());
+        assert!(link.resolve(
+            1,
+            serde_json::json!({"id":"once", "wsAuthSignature":"synthetic"})
+        ));
+        assert!(work.await.is_ok());
+        assert!(link.promote_to_server_owned());
+        link.suspend();
+        assert!(link.is_available());
+        assert!(link.absent_for().is_none());
+        link.attach(
+            2,
+            Arc::new(|_| panic!("retired remote signing must not send")),
+        );
+        assert_eq!(link.socket(), 2);
+        assert_eq!(
+            link.round_trip("new", &request).await,
+            Err(Failure::Unavailable)
+        );
+        assert!(!link.send_echo());
+        assert!(received.try_recv().is_err());
+        link.mark_unavailable();
+        assert!(!link.is_available());
+        assert!(!link.promote_to_server_owned());
     }
 }
