@@ -45,7 +45,7 @@ fn canonical_public_metadata_is_bound_to_the_original_ref_and_algorithm() {
 
 #[test]
 fn orderly_alias_bindings_do_not_change_hosted_eligibility() {
-    for venue in ["kodiakfi", "mode", "what", "woofi"] {
+    for venue in ["orderly", "kodiakfi", "mode", "what", "woofi"] {
         // Exercise the existing provider codec without enabling a hosted venue.
         let inner = Arc::new(Inner::new(
             venue.into(),

@@ -46,6 +46,7 @@ impl AccountSigner {
         })
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn new(
         provider: Option<safe_cex_engine::signing::Provider>,
         identities: Identities,

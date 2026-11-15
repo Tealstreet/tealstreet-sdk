@@ -49,7 +49,7 @@ impl Family {
             "grvt" => Self::Grvt,
             "lighter" | "lighter-robinhood" => Self::Lighter,
             "paradex" => Self::Paradex,
-            "kodiakfi" | "mode" | "what" | "woofi" => Self::Orderly,
+            "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => Self::Orderly,
             _ => Self::Hmac,
         }
     }
