@@ -6,8 +6,16 @@ use std::time::Duration;
 
 // Exact COSIGNED venues with a private-startup proof and matching negative suite.
 // Other COSIGNED joins refuse explicitly; DELEGATED uses shared hosted eligibility.
-pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] =
-    &["bybit", "binance", "okx", "bitget", "blofin", "kucoin"];
+pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
+    "bybit",
+    // Its native inverse proof and Brazil join now have their own positive/negative controls.
+    "bybitinverse",
+    "binance",
+    "okx",
+    "bitget",
+    "blofin",
+    "kucoin",
+];
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {
     PRIVATE_STARTUP_VENUES.contains(&venue)

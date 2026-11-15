@@ -11,7 +11,14 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
-const VENUES: &[&str] = &["binance", "okx", "bitget", "blofin", "kucoin"];
+const VENUES: &[&str] = &[
+    "bybitinverse",
+    "binance",
+    "okx",
+    "bitget",
+    "blofin",
+    "kucoin",
+];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
 const PASS: &str = "synthetic-passphrase";
@@ -20,6 +27,7 @@ const PASS: &str = "synthetic-passphrase";
 pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
     pub(crate) refused: usize,
+    pub(crate) inverse_private_reads: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -43,6 +51,7 @@ impl VenueIo {
         // Native startup can attach credentials to public discovery. Public
         // responses cannot verify the joined key; only private reads count.
         let public = match self.venue {
+            "bybitinverse" => route.starts_with("/v5/market/"),
             "binance" => [
                 "exchangeInfo",
                 "ticker/24hr",
@@ -74,6 +83,7 @@ impl VenueIo {
         let suffix = r.body.as_deref().unwrap_or("");
         let h = |name: &str| header(r, name).unwrap_or("");
         let key = h(match self.venue {
+            "bybitinverse" => "X-BAPI-API-KEY",
             "binance" => "X-MBX-APIKEY",
             "okx" => "OK-ACCESS-KEY",
             "bitget" | "blofin" => "ACCESS-KEY",
@@ -89,6 +99,19 @@ impl VenueIo {
             hmac_sha256(material.as_bytes(), payload.as_bytes(), encoding)
         };
         match self.venue {
+            "bybitinverse" => {
+                let payload = r.url.split_once('?').map_or("", |(_, query)| query);
+                h("X-BAPI-SIGN")
+                    == mac(
+                        format!(
+                            "{}{}{}{payload}",
+                            h("X-BAPI-TIMESTAMP"),
+                            key,
+                            h("X-BAPI-RECV-WINDOW")
+                        ),
+                        Encoding::Hex,
+                    )
+            }
             "binance" => {
                 let Some((_, query)) = r.url.split_once('?') else {
                     return false;
@@ -149,9 +172,13 @@ impl VenueIo {
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
+            seen.inverse_private_reads += usize::from(r.url.contains("category=inverse"));
             if !valid {
                 seen.refused += 1;
                 return match self.venue {
+                    "bybitinverse" => {
+                        json!({"retCode":10004,"retMsg":"synthetic signature refusal","result":{}})
+                    }
                     "binance" => json!({"code":-2015,"msg":"synthetic refusal"}),
                     "okx" => json!({"code":"50113","msg":"synthetic refusal","data":[]}),
                     "bitget" => json!({"code":"40006","msg":"synthetic refusal","data":null}),
@@ -166,11 +193,17 @@ impl VenueIo {
                 .unwrap();
         let bodies = fixtures[self.venue].as_object().unwrap();
         let url = path(r).split('?').next().unwrap();
-        bodies
+        let mut response = bodies
             .iter()
             .find(|(key, _)| key.as_str() != "*" && url.ends_with(key.as_str()))
             .map_or(&bodies["*"], |(_, body)| body)
-            .clone()
+            .clone();
+        if self.venue == "bybitinverse" {
+            // Bybit syncs its signing clock from this field. A frozen capture repeats
+            // signing bytes across distinct attempts, unlike a live venue clock.
+            response["time"] = crate::accounts::now_ms().into();
+        }
+        response
     }
 }
 impl Transport for VenueIo {
@@ -371,6 +404,11 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "bybitinverse" {
+        return canonical
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .to_owned();
+    }
     if venue == "binance" {
         return canonical
             .split('&')
@@ -426,7 +464,9 @@ async fn remote(
                 .signature
                 .unwrap();
             let is_ws = request["wsAuth"]["toSign"].as_str().is_some_and(|text| {
-                text.contains("/users/self/verify") || text.contains("/user/verify")
+                text.starts_with("GET/realtime")
+                    || text.contains("/users/self/verify")
+                    || text.contains("/user/verify")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -651,6 +691,12 @@ async fn admission_hmac_public_or_frame_fed_startup_cannot_prove_a_private_key()
 fn admission_fixture_checks_private_routes_even_when_signature_headers_are_missing() {
     for (venue, public, private, signature_header) in [
         (
+            "bybitinverse",
+            "/v5/market/instruments-info",
+            "/v5/account/wallet-balance",
+            "X-BAPI-SIGN",
+        ),
+        (
             "binance",
             "/fapi/v1/exchangeInfo",
             "/fapi/v3/account",
@@ -708,4 +754,26 @@ fn admission_fixture_checks_private_routes_even_when_signature_headers_are_missi
             "{venue}: an unsigned private read must refuse"
         );
     }
+}
+
+#[tokio::test]
+async fn admission_bybitinverse_native_private_startup_validates_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for material in [SECRET, "synthetic-other-material"] {
+                let (result, seen) = check("bybitinverse", local("bybitinverse", material)).await;
+                assert_eq!(result.is_ok(), material == SECRET);
+                let seen = seen.lock().unwrap();
+                assert!(seen.signed_reads > 0);
+                assert_eq!(seen.refused > 0, material != SECRET);
+                if material == SECRET {
+                    assert!(
+                        seen.paths
+                            .iter()
+                            .any(|path| path.ends_with("/account/wallet-balance"))
+                    );
+                }
+            }
+        })
+        .await;
 }
