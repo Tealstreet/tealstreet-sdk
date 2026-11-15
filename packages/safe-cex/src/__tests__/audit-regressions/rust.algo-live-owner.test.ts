@@ -28,6 +28,8 @@ it.each(['unchanged', 'generation', 'returning'] as const)('carries the initiati
   }
   Reflect.set(exchange, 'host', {
     algoStart: vi.fn(), algosRunning: true, algoDispose: vi.fn(async () => {}), dispose: vi.fn(),
+    // Execution now uses the explicit host fence; the queue's creation lease is tested here.
+    checkAlgosForExecution: () => true,
   });
   try {
     exchange.startAlgos('acct');

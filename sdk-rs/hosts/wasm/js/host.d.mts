@@ -589,14 +589,16 @@ export class EngineHost {
   health(): EngineHealth | undefined;
   /** Start this account's Rust algos on an `algos` engine build; the host then
    * keeps their timer armed and delivers replies to `onAlgoEmit`.
-   * A false/throwing live owner check permanently retires the entire host before further work. */
+   * Execution under a false/throwing owner check retires the host before further work. */
   algoStart(accountName: string, twapOwner?: Readonly<{ ownerId: string; generation: number }> | null, isOwnerCurrent?: () => boolean): void;
-  /** Started and not yet stopped or disposed. */
+  /** Started, undisposed and still owned. Observation alone never fails or frees the host. */
   readonly algosRunning: boolean;
+  /** Execution admission: a retired/throwing owner fails the host before any algo work. */
+  checkAlgosForExecution(): boolean;
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if refused. */
   algoOp(op: string, data: unknown): void;
   /** Stop every algo (chases once their cancels settle, bounded); resolves when
-   * they are gone. Dispose the host after that. */
+   * they are gone. Retired-owner cleanup is a no-op; dispose still releases the host. */
   algoDispose(reason?: string): Promise<void>;
   /** A nuke's first step: stop every TWAP and chase, the algos staying up.
    * Resolves once chase cancels settle (bounded by the engine at 10 s);

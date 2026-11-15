@@ -1409,7 +1409,7 @@ export class RustEngineExchange extends BaseExchange {
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere: the
    * worker's run in its Rust algos; an in-process CLI's run in the TS algos. */
   stopAccountAlgos = async (): Promise<AlgoStopWithPlacements> => {
-    const stopped: AlgoStopWithPlacements = this.runsRustAlgos
+    const stopped: AlgoStopWithPlacements = this.host?.checkAlgosForExecution()
       ? await this.stopRustAlgos()
       : await stopLocalAccountAlgos(this);
     return { ...stopped, placedSymbols: [...(stopped.placedSymbols ?? []), ...this.attemptedPlacementSymbols] };
@@ -1448,7 +1448,7 @@ export class RustEngineExchange extends BaseExchange {
   startAlgos = (accountName: string): boolean => {
     const host = this.host;
     if (!host || this.isDisposed || this.engineFailure) return false;
-    if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
+    if (this.algoRoute) return this.algoRoute === 'rust' && host.checkAlgosForExecution();
     try {
       const owner = this.twapOwnerBinding;
       host.algoStart(accountName, owner, owner === undefined ? undefined : () => this.algoOwnerCurrent(owner));
@@ -1476,7 +1476,7 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.algoRoute === 'rust') {
-      if (this.runsRustAlgos) rust();
+      if (this.host?.checkAlgosForExecution()) rust();
       else refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
       return;
     }
@@ -1502,7 +1502,7 @@ export class RustEngineExchange extends BaseExchange {
     for (const { op, rust, refuse, owner } of queued) {
       try {
         if (!this.algoOwnerCurrent(owner)) refuse(`${op} cancelled-for-owner-change`);
-        else if (this.algoRoute === 'rust' && this.runsRustAlgos) rust();
+        else if (this.algoRoute === 'rust' && this.host?.checkAlgosForExecution()) rust();
         else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
         else refuse(`${op} was not run: the ${this.name} engine never started`);
       } catch (error) {
@@ -1515,7 +1515,7 @@ export class RustEngineExchange extends BaseExchange {
   algoOp = (op: string, data: unknown): void => {
     try {
       if (!this.host) throw new Error(`${this.name} engine is not started`);
-      if (!this.runsRustAlgos) throw new Error(`${this.name} algos are not running`);
+      if (!this.host.checkAlgosForExecution()) throw new Error(`${this.name} algos are not running`);
       this.host.algoOp(op, data);
     } catch (error) {
       this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
