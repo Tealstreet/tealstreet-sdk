@@ -14,7 +14,7 @@
     },
     {
       "venue": "binanceinverse",
-      "reason": "Exact DAPI/inverse startup proof and negative controls are not built; base Binance readiness does not cover this variant."
+      "reason": "Exact binanceinverse native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "binanceoptions",
@@ -22,11 +22,11 @@
     },
     {
       "venue": "binancepm",
-      "reason": "Exact PAPI portfolio-margin account-mode/private-startup proof and negative controls are not built."
+      "reason": "Exact binancepm native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "binancespot",
-      "reason": "Exact Spot listen-key and private-startup proof and negative controls are not built."
+      "reason": "Exact binancespot native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "bingx",
@@ -42,7 +42,7 @@
     },
     {
       "venue": "bitgetusdc",
-      "reason": "Exact USDC productType/account-mode private-startup proof and negative controls are not built."
+      "reason": "Exact bitgetusdc native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "bitrue",
@@ -54,11 +54,11 @@
     },
     {
       "venue": "bybitdemo",
-      "reason": "Exact demo-origin/private-startup proof and negative controls are not built; base Bybit readiness does not cover demo."
+      "reason": "Exact bybitdemo native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "bybitspot",
-      "reason": "Exact Spot-category/private-startup proof and negative controls are not built; base Bybit readiness does not cover Spot."
+      "reason": "Exact bybitspot native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "coinbase",
@@ -110,7 +110,7 @@
     },
     {
       "venue": "okxdemo",
-      "reason": "Exact simulated-trading-header/private-startup proof and negative controls are not built."
+      "reason": "Exact okxdemo native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "okxeu",
@@ -127,6 +127,10 @@
     {
       "venue": "txflow",
       "reason": "Production metadata and beta/agent gates refuse this venue; native origin, agent signing and bound private-startup proof are not built."
+    },
+    {
+      "venue": "woo",
+      "reason": "Native private-read/socket proof and application-id, timestamp, replay and holder controls are not built."
     }
   ]
 }
