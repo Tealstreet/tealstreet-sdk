@@ -1,4 +1,6 @@
-use safe_cex_exchange_server::accounts::{engine_options, prepare};
+use safe_cex_exchange_server::accounts::{
+    HYROTRADER_UNHOSTED, engine_options, prepare, refuse_unhosted,
+};
 use safe_cex_exchange_server::delegated::{DelegatedPair, prepare_delegated};
 use safe_cex_exchange_server::envelope::InitPayload;
 use safe_cex_remote_signer::{SignerLink, supports_remote_signing};
@@ -73,13 +75,21 @@ fn bybit_delegated_prepares_injected_private_provider_options() {
 
 #[test]
 fn delegated_is_refused_for_unhosted_venues_and_public_accounts() {
-    // Options now has a mainnet origin; keep missing-origin controls genuinely unhosted.
+    // Options is supported; HyroTrader still lacks hosted engine endpoint configuration.
     for venue in ["hyrotrader", "txflow", "unknown"] {
         assert!(
             !safe_cex_exchange_server::delegated::enabled(venue),
             "{venue}: missing-origin fixture must be unhosted"
         );
-        assert!(safe_cex_native::resolve::rest_base_url(venue, false).is_err());
+        if venue == "hyrotrader" {
+            assert_eq!(
+                safe_cex_native::resolve::rest_base_url(venue, false),
+                Ok("https://sim-tealstreet.hyro.site")
+            );
+            assert_eq!(refuse_unhosted(venue), Err(HYROTRADER_UNHOSTED.into()));
+        } else {
+            assert!(safe_cex_native::resolve::rest_base_url(venue, false).is_err());
+        }
         assert!(matches!(
             prepare_delegated(&init(venue), pair()),
             Err(ref error) if error == "DELEGATED is not enabled for this venue"
