@@ -28,6 +28,7 @@ pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
+    pub(crate) phemex_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -169,6 +170,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "phemex" {
+            return phemex::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -218,9 +222,12 @@ impl Transport for VenueIo {
     fn connect(
         &self,
         socket: SocketId,
-        _: String,
+        url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "phemex" {
+            return phemex::connect(self, socket, &url, events);
+        }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         let _ = events.send(HostEvent::WsMessage(
@@ -254,10 +261,16 @@ impl Transport for VenueIo {
             .unwrap()
             .paths
             .push(path(&r).split('?').next().unwrap().into());
-        let body = self.response(&r).to_string();
+        let response = self.response(&r);
+        let status = if self.venue == "phemex" && response["code"] == 401 {
+            401
+        } else {
+            200
+        };
+        let body = response.to_string();
         let _ = events.send(HostEvent::HttpStart {
             request: r.id,
-            status: 200,
+            status,
             headers: String::new(),
         });
         let _ = events.send(HostEvent::HttpChunk(r.id, body.into_bytes()));
@@ -404,6 +417,12 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "phemex" {
+        // Native Phemex signs path + query + whole-second expiry; keep the read scope.
+        return canonical
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .into();
+    }
     if venue == "bybitinverse" {
         return canonical
             .trim_start_matches(|c: char| c.is_ascii_digit())
@@ -777,3 +796,6 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
         })
         .await;
 }
+
+#[path = "phemex_probe_tests.rs"]
+mod phemex;
