@@ -26,8 +26,10 @@ const VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "woo",
     "bingx",
     "mexc",
+    "bitunix",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -41,8 +43,10 @@ pub(crate) struct Seen {
     pub(crate) urls: Vec<String>,
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
+    pub(crate) woo_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
     pub(crate) mexc_socket_auths: usize,
+    pub(crate) bitunix_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -66,7 +70,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
-        "blofin" | "kucoin" | "bingx" | "mexc" => venue,
+        "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -310,11 +314,17 @@ impl VenueIo {
         if self.venue == "mexc" {
             return mexc::response(self, r);
         }
+        if self.venue == "woo" {
+            return woo::response(self, r);
+        }
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
         if self.venue == "bingx" {
             return bingx::response(self, r);
+        }
+        if self.venue == "bitunix" {
+            return bitunix::response(self, r);
         }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
@@ -381,11 +391,17 @@ impl Transport for VenueIo {
         if self.venue == "mexc" {
             return mexc::connect(self, socket, &url, events);
         }
+        if self.venue == "woo" {
+            return woo::connect(self, socket, &url, events);
+        }
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
         if self.venue == "bingx" {
             return bingx::connect(self, socket, &url, events);
+        }
+        if self.venue == "bitunix" {
+            return bitunix::connect(self, socket, &url, events);
         }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
@@ -688,6 +704,24 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
     if venue == "mexc" {
         return mexc::operation(canonical);
     }
+    if venue == "woo" {
+        return if canonical.contains('|') {
+            canonical.rsplit_once('|').unwrap().0.to_owned()
+        } else {
+            canonical
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .into()
+        };
+    }
+    if venue == "bitunix" {
+        // Bitunix signs nonce + stamp + key + sorted query/body, without a route.
+        return canonical
+            .split_once("synthetic-other-key")
+            .or_else(|| canonical.split_once(KEY))
+            .expect("native Bitunix preimage contains its presented key")
+            .1
+            .into();
+    }
     if venue == "phemex" {
         // Native Phemex signs path + query + whole-second expiry; keep the read scope.
         return canonical
@@ -758,6 +792,7 @@ async fn remote(
                     || text.contains("/users/self/verify")
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
+                    || venue == "woo" && text.starts_with('|')
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -1157,5 +1192,9 @@ mod phemex;
 #[path = "bingx_probe_tests.rs"]
 mod bingx;
 
+#[path = "bitunix_probe_tests.rs"]
+mod bitunix;
 #[path = "mexc_probe_tests.rs"]
 mod mexc;
+#[path = "woo_probe_tests.rs"]
+mod woo;

@@ -764,6 +764,11 @@ the offline fixture. Wrong-key and replayed signatures fail before attachment,
 foreign sockets cannot settle signing work, and the resident stays unchanged.
 MEXC has no hosted testnet alias; public discovery never proves possession.
 
+Exact `bitunix` readiness uses that venue round trip, with the existing native
+double-SHA256 secret-suffix request signer. Its synthetic venue independently
+checks nonce/timestamp/key/query signing bytes on the actual private startup
+reads; a public response or a signer result alone never completes admission.
+
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The COSIGNED catalog does not gate DELEGATED admission. COSIGNED coverage
 includes valid startup, a different signing key, a prior signature and a
@@ -773,6 +778,10 @@ handover. The suite verifies the actual native HTTP signatures against synthetic
 venue responses. Existing Bybit session tests additionally cover resident-account
 and registration preservation. These offline checks do not replace live venue
 validation or the existing server-origin and signing requirements for rollout.
+
+Exact WOO uses the existing native startup's v1/v3 account reads and private
+socket authentication. Its offline fixture independently checks HMAC bytes,
+rejects unsigned reads, and accepts only startup reads and read-feed traffic.
 
 ## Frames (claude-19pt8s, web hosted client)
 

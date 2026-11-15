@@ -382,6 +382,10 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://omni.apex.exchange/api",
             "https://testnet.omni.apex.exchange/api",
         ),
+        "asterdex" => pick(
+            "https://fapi.asterdex.com",
+            "https://fapi.asterdex-testnet.com",
+        ),
         "binance" => pick("https://fapi.binance.com", "https://demo-fapi.binance.com"),
         "binancepm" => pick("https://papi.binance.com", "https://demo-fapi.binance.com"),
         "binanceinverse" => pick("https://dapi.binance.com", "https://demo-dapi.binance.com"),
@@ -393,6 +397,9 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://api-demo.bybit.com",
             "https://api-testnet.bybit.com",
         ),
+        // Hosted Coinbase engines do not select sandbox endpoints.
+        "coinbase" if !testnet => "https://drb.coinbase.com/api/v2",
+        "coinbasespot" if !testnet => "https://api.coinbase.com",
         "okx" => pick("https://www.okx.com", "https://openapi.okx.com"),
         "okxdemo" => "https://openapi.okx.com",
         "okxeu" | "okxeudemo" => "https://eea.okx.com",
@@ -422,11 +429,17 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://api.testnet.paradex.trade/v1",
         ),
         "phemex" => pick("https://api.phemex.com", "https://testnet-api.phemex.com"),
+        "cryptocom" => pick(
+            "https://api.crypto.com/exchange/v1",
+            "https://uat-api.3ona.co/exchange/v1",
+        ),
         "woo" => pick("https://api.woox.io", "https://api.staging.woox.io"),
         "bitunix" => "https://fapi.bitunix.com",
         // MEXC has no sandbox; never use its live origin for a hosted testnet account.
         "mexc" if !testnet => "https://api.mexc.com",
         "kucoin" if !testnet => "https://api-futures.kucoin.com",
+        // Spot has its own native startup/origin; neither KuCoin name supports testnet.
+        "kucoinspot" if !testnet => "https://api.kucoin.com",
         "backpack" if !testnet => "https://api.backpack.exchange",
         "grvt" => pick("https://trades.grvt.io", "https://trades.testnet.grvt.io"),
         _ => return Err(RoutingError::NoBaseUrl(name.into())),

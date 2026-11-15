@@ -34,6 +34,13 @@ Run `cargo test --locked -j2 -p safe-cex-remote-signer` from `sdk-rs` for native
 setup/provider/link tests. KuCoin tests drive the actual registry device codec
 and compare every result byte with an independent LocalSigner control.
 
+Admission `join_proof` waits reuse the same pending ID map. They return the actual
+receiving socket plus bounded original JSON to the server's closed proof decoder;
+legacy Value responses cannot settle these waits. Suspend, attach, disposal and
+dropped waits retire them without replay. Ordinary signing requests retain their
+existing bounded park/resume behavior. Routing a reply is not proof verification
+and never grants account authority.
+
 `RemoteAccount::public_binding_source` exposes only the original provider's
 public binding and opaque signing reference. It performs no setup or device IO
 and grants no signing authority. The account-owned handover barrier must still

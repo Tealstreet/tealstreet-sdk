@@ -41,6 +41,23 @@ fn deployed_proxy_hosts_join_venue_urls_exactly_as_typescript() {
         "https://proxies.tyo.tealstreet.io/api/exchange_proxy/https://api.binance.com/api/v3/order?symbol=BTCUSDT&timestamp=1&signature=ab%2Bc"
     );
 
+    for (venue, path) in [
+        ("coinbase", "/public/get_instruments?currency=USDC"),
+        ("coinbasespot", "/api/v3/brokerage/accounts?limit=1"),
+    ] {
+        let base = safe_cex_native::resolve::rest_base_url(venue, false).unwrap();
+        let inputs = account_transport(venue, &account).unwrap();
+        let plan = resolve_routing_plan(venue, &inputs, base, Provider::Tealstreet).unwrap();
+        assert_eq!(plan.http.prefix, PRIVATE.trim_end_matches('/'));
+        assert!(!plan.http.authorize);
+        assert!(plan.http.header_aliases.is_empty());
+        let venue_url = format!("{base}{path}");
+        assert_eq!(
+            join(&plan.http.prefix, &venue_url),
+            format!("{}{venue_url}", PRIVATE)
+        );
+    }
+
     // Public CORS read (binancespot publicHttp), token attached as in TS: that host is not the fleet.
     let public = plan.public_http.unwrap();
     assert!(public.authorize);
