@@ -125,8 +125,9 @@ async fn cosigned_okxeudemo_config_retry_is_bounded_and_can_recover() {
 
 #[tokio::test]
 async fn cosigned_okxeudemo_config_success_is_not_complete_private_startup() {
+    const REFUSED: &str = "/api/v5/account/account-position-risk";
     let (io, seen) = MockVenue::for_admission("okxeudemo");
-    seen.lock().unwrap().refused_private_path = Some("/api/v5/account/balance");
+    seen.lock().unwrap().refused_private_path = Some(REFUSED);
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     let (mut session, mut sent) = user_session(registry.clone(), "alice");
     let mut device = Device::default();
@@ -138,16 +139,18 @@ async fn cosigned_okxeudemo_config_success_is_not_complete_private_startup() {
         Answer::Correct,
     )
     .await;
-    assert!(session.joined.is_empty());
-    assert!(registry.held("alice", "acct", session.socket).is_none());
     let seen = seen.lock().unwrap();
-    assert_variant_startup("okxeudemo", &seen);
     assert!(
-        seen.urls
-            .iter()
-            .any(|url| url.ends_with("/api/v5/account/balance"))
+        seen.urls.iter().any(|url| url
+            .split('?')
+            .next()
+            .is_some_and(|path| path.ends_with(REFUSED))),
+        "native balance read must reach the injected refusal"
     );
     assert!(seen.refused > 0);
+    assert!(session.joined.is_empty());
+    assert!(registry.held("alice", "acct", session.socket).is_none());
+    assert_variant_startup("okxeudemo", &seen);
     let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
         .map(|s| serde_json::from_str(&s).unwrap())
         .collect();
