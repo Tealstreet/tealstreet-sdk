@@ -12,7 +12,7 @@ use safe_cex_engine::signing::{KeyRef, Provider};
 use serde_json::{Map, Value, json};
 
 pub use link::{
-    ECHO_PAD_CAP, EchoSize, MAX_RESPONSE_FIELD, Outbox, SIGN_TIMEOUT, SignerLink, SocketId,
+    ECHO_PAD_CAP, EchoSize, Failure, MAX_RESPONSE_FIELD, Outbox, SIGN_TIMEOUT, SignerLink, SocketId,
 };
 pub use policy::supports_remote_signing;
 pub use provider::{FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, RemoteProvider};
@@ -291,3 +291,6 @@ fn nested_secret(value: &Value) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod join_proof_tests;

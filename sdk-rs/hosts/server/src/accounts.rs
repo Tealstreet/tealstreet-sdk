@@ -576,6 +576,7 @@ struct InitAuthority {
     probe_lease: Option<crate::router_lease::Permit>,
     admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
+    probe_deadline: Option<tokio::time::Instant>,
 }
 
 impl InitAuthority {
@@ -605,6 +606,12 @@ impl InitAuthority {
 
     fn check_admission(&self) -> Result<(), String> {
         self.check()?;
+        if self
+            .probe_deadline
+            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            return Err("Account verification expired; initialization stopped".into());
+        }
         if self
             .admission_expires_at
             .is_some_and(|expiry| expiry <= now_ms())
@@ -708,6 +715,9 @@ pub struct Registry {
     construction_test_plans: HashMap<String, RoutingPlan>,
     #[cfg(test)]
     e2e_venue: Option<crate::delegated_e2e_io::MockVenue>,
+    #[cfg(test)]
+    local_proof_bindings:
+        HashMap<(String, String), Arc<safe_cex_crypto::admission::identity::Projection>>,
 }
 
 /// A chart's forced reset repairs its upstream stream at most this often per account and topic.
@@ -1063,6 +1073,8 @@ impl Registry {
             construction_test_plans: HashMap::new(),
             #[cfg(test)]
             e2e_venue: None,
+            #[cfg(test)]
+            local_proof_bindings: HashMap::new(),
         }
     }
 
@@ -1345,6 +1357,7 @@ impl Registry {
             probe_lease: None,
             admission_expires_at: None,
             probe_current: None,
+            probe_deadline: None,
         };
         authority.check_admission()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1539,6 +1552,7 @@ impl Registry {
             attempt.authority.probe_lease = proof.lease.clone();
             attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
+            attempt.authority.probe_deadline = proof.local_deadline;
             attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
@@ -2660,6 +2674,45 @@ pub mod testing {
     }
 
     use super::*;
+
+    #[cfg(test)]
+    pub(crate) fn local_proof_binding(
+        registry: &mut Registry,
+        user: &str,
+        init: &InitPayload,
+        facts: &str,
+    ) {
+        let projection =
+            safe_cex_crypto::admission::identity::Projection::from_json(user, facts).unwrap();
+        registry.local_proof_bindings.insert(
+            (user.into(), admission::admission_fingerprint(init)),
+            Arc::new(projection),
+        );
+        let http = safe_cex_native::HttpRoute {
+            prefix: "in-memory://local-proof-fixture".into(),
+            ..Default::default()
+        };
+        let ws = safe_cex_native::WsRoute {
+            host: Some("in-memory://local-proof-fixture".into()),
+            ..Default::default()
+        };
+        registry.construction_test_plans.insert(
+            user.into(),
+            RoutingPlan {
+                http: http.clone(),
+                public_http: Some(http.clone()),
+                read_http: Some(http.clone()),
+                read_public_http: Some(http.clone()),
+                public_read_http: Some(http),
+                ws: safe_cex_native::WsRoutes {
+                    public: ws.clone(),
+                    private: ws.clone(),
+                    business: ws,
+                },
+                ..Default::default()
+            },
+        );
+    }
 
     pub fn bind_identity(account: &mut Arc<Account>, init: &InitPayload) {
         let identity = identity::digest(&account.user, init).unwrap();

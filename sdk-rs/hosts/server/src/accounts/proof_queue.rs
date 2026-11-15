@@ -40,7 +40,10 @@ impl ProofQueues {
         user: &str,
         init: &InitPayload,
     ) -> Result<Reservation, ProbeRefusal> {
-        let identity = identity(user, init);
+        self.reserve_identity(identity(user, init))
+    }
+
+    pub(super) fn reserve_identity(&self, identity: [u8; 32]) -> Result<Reservation, ProbeRefusal> {
         let mut queues = self.0.lock().unwrap();
         let entry = queues.entry(identity).or_insert_with(|| QueueEntry {
             queue: Arc::new(Queue {

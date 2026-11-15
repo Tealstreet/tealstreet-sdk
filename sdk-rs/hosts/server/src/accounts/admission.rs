@@ -3,6 +3,14 @@ use crate::delegated::{
     Credentials,
     probe::{ProbeRefusal, RefusalStage},
 };
+use safe_cex_crypto::admission::identity::Projection;
+
+mod local_proof;
+
+enum ProofStrategy {
+    PrivateStartup,
+    Local(Arc<Projection>),
+}
 
 #[cfg(test)]
 #[path = "admission_deadline_tests.rs"]
@@ -17,12 +25,17 @@ pub(crate) struct ProbePermit {
     pending: PendingInits,
     registry_name: String,
     reservation: Option<proof_queue::Reservation>,
+    strategy: ProofStrategy,
+    instance_id: Option<String>,
+    pub(super) local_deadline: Option<tokio::time::Instant>,
+    verified_socket: Option<u64>,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
         if self.user != user
             || identity::registry_name(user, init).as_ref() != Ok(&self.registry_name)
             || self.fingerprint != admission_fingerprint(init)
+            || self.instance_id != init.instance_id
         {
             return Err(ProbeRefusal::INVALID);
         }
@@ -31,6 +44,12 @@ impl ProbePermit {
             .is_some_and(|expiry| expiry <= now_ms())
         {
             return Err(ProbeRefusal::INVALID);
+        }
+        if self
+            .local_deadline
+            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeTimeout));
         }
         if !self.current.load(Ordering::Acquire)
             || self.lease.as_ref().is_some_and(|lease| !lease.allowed())
@@ -72,6 +91,24 @@ impl Credentials {
 }
 
 impl Registry {
+    fn proof_strategy(&self, _user: &str, _init: &InitPayload) -> ProofStrategy {
+        // No production local venue is ready until its authoritative binding
+        // and device path land. Client JSON can never supply these facts.
+        let local: Option<Arc<Projection>> = None;
+        #[cfg(test)]
+        let local = self
+            .local_proof_bindings
+            .get(&(_user.into(), admission_fingerprint(_init)))
+            .cloned()
+            .or(local);
+        local.map_or(ProofStrategy::PrivateStartup, ProofStrategy::Local)
+    }
+
+    pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
+        matches!(self.proof_strategy(user, init), ProofStrategy::Local(_))
+            || crate::delegated::probe::cosigned_ready(&init.exchange_name)
+    }
+
     pub(crate) fn private_join_requires_proof(&self) -> bool {
         #[cfg(any(test, feature = "test-support"))]
         if let Some(enabled) = self.join_admission_override {
@@ -92,7 +129,14 @@ impl Registry {
         }
         let registry_name =
             identity::registry_name(user, init).map_err(|_| ProbeRefusal::INVALID)?;
-        let reservation = self.proof_queues.reserve(user, init)?;
+        let strategy = self.proof_strategy(user, init);
+        let (reservation, local_deadline) = match &strategy {
+            ProofStrategy::PrivateStartup => (self.proof_queues.reserve(user, init)?, None),
+            ProofStrategy::Local(projection) => (
+                self.proof_queues.reserve_identity(projection.digest())?,
+                Some(tokio::time::Instant::now() + proof_timeout()),
+            ),
+        };
         let fingerprint = admission_fingerprint(init);
         let current = Arc::new(AtomicBool::new(true));
         let mut pending = self.pending_inits.lock().unwrap();
@@ -116,11 +160,16 @@ impl Registry {
             pending: self.pending_inits.clone(),
             registry_name,
             reservation: Some(reservation),
+            strategy,
+            instance_id: init.instance_id.clone(),
+            local_deadline,
+            verified_socket: None,
         };
         permit.check(user, init)?;
         Ok(permit)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn probe_join(
         &self,
         user: &str,
@@ -128,10 +177,17 @@ impl Registry {
         token: Option<(String, u64)>,
         candidate: Option<&Credentials>,
         link: Option<Arc<SignerLink>>,
+        socket: u64,
         mut permit: ProbePermit,
     ) -> Result<ProbePermit, ProbeRefusal> {
         permit.token_expires_at = Some(token.as_ref().ok_or(ProbeRefusal::INVALID)?.1);
         permit.check(user, init)?;
+        if link.as_ref().is_some_and(|link| link.socket() != socket) {
+            return Err(ProbeRefusal::INVALID);
+        }
+        let deadline = permit
+            .local_deadline
+            .unwrap_or_else(|| tokio::time::Instant::now() + proof_timeout());
         let work = async {
             let active = permit
                 .reservation
@@ -140,6 +196,20 @@ impl Registry {
                 .start()
                 .await?;
             permit.check(user, init)?;
+            if let ProofStrategy::Local(projection) = &permit.strategy {
+                self.pacer.admit().await;
+                permit.check(user, init)?;
+                return local_proof::verify(
+                    user,
+                    init,
+                    candidate,
+                    link.as_ref(),
+                    socket,
+                    projection,
+                    &permit,
+                )
+                .await;
+            }
             let mut config = self.engine_config.clone();
             config.trusted_signer_state = None;
             let (plan, options, provider, mode, resident) = match (candidate, link.as_ref()) {
@@ -235,14 +305,11 @@ impl Registry {
             }
             receive.await.map_err(|_| ProbeRefusal::TRANSIENT)?
         };
-        let timeout = safe_cex_remote_signer::SIGN_TIMEOUT
-            + Duration::from_millis(u64::from(
-                safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
-            ));
-        tokio::time::timeout(timeout, work)
+        tokio::time::timeout_at(deadline, work)
             .await
             .map_err(|_| ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeTimeout))??;
         permit.check(user, init)?;
+        permit.verified_socket = Some(socket);
         Ok(permit)
     }
 
@@ -258,6 +325,9 @@ impl Registry {
         proof: ProbePermit,
     ) -> Result<Arc<Account>, ProbeRefusal> {
         proof.check(user, init)?;
+        if proof.verified_socket != Some(holder) {
+            return Err(ProbeRefusal::INVALID);
+        }
         let delegated = init.signing_mode.as_deref() == Some("delegated");
         if delegated != pair.is_some() {
             return Err(ProbeRefusal::INVALID);
@@ -297,10 +367,25 @@ impl Registry {
     }
 }
 
-fn admission_fingerprint(init: &InitPayload) -> String {
+pub(super) fn admission_fingerprint(init: &InitPayload) -> String {
     if init.signing_mode.as_deref() == Some("delegated") {
         crate::delegated::fingerprint(init)
     } else {
         init.fingerprint()
+    }
+}
+
+fn proof_timeout() -> Duration {
+    safe_cex_remote_signer::SIGN_TIMEOUT
+        + Duration::from_millis(u64::from(
+            safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+        ))
+}
+
+#[cfg(all(test, feature = "delegated-order-frames"))]
+impl ProbePermit {
+    pub(crate) fn verified_fixture(mut self, socket: u64) -> Self {
+        self.verified_socket = Some(socket);
+        self
     }
 }

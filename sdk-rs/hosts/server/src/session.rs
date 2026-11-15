@@ -595,15 +595,20 @@ impl Session {
                         diagnostic.refused(refusal);
                     }
                     self.drop_early(&completed.account_name, "verification refused");
-                    out.send(match refusal.transition {
-                        Some(reason) => envelope::init_mode_transition_refused(
-                            &completed.account_name,
-                            reason,
-                            requested_mode,
-                            envelope::AccountSigningMode::Cosigned,
-                        ),
-                        None => {
-                            envelope::init_unverified(&completed.account_name, refusal.transient)
+                    out.send(if refusal.unavailable {
+                        envelope::init_proof_unavailable(&completed.account_name)
+                    } else {
+                        match refusal.transition {
+                            Some(reason) => envelope::init_mode_transition_refused(
+                                &completed.account_name,
+                                reason,
+                                requested_mode,
+                                envelope::AccountSigningMode::Cosigned,
+                            ),
+                            None => envelope::init_unverified(
+                                &completed.account_name,
+                                refusal.transient,
+                            ),
                         }
                     });
                 }
@@ -685,7 +690,7 @@ impl Session {
             self.refuse_handover(&init.account_name, true);
             return;
         }
-        if !delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name) {
+        if !delegated && !self.registry.cosigned_proof_ready(self.user(), &init) {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "proof unavailable");
             self.handover_out(&init.account_name)
@@ -712,6 +717,7 @@ impl Session {
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
+        let socket = self.socket;
         self.start_probe_verification(
             init.account_name.clone(),
             Some((link.clone(), lifetime)),
@@ -719,7 +725,7 @@ impl Session {
                 let permit = match permit {
                     Ok(permit) => {
                         registry
-                            .probe_join(&user, &init, token, None, Some(link), permit)
+                            .probe_join(&user, &init, token, None, Some(link), socket, permit)
                             .await
                     }
                     Err(refusal) => Err(refusal),
@@ -773,6 +779,7 @@ impl Session {
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
+        let socket = self.socket;
         self.start_probe_verification(init.account_name.clone(), None, async move {
             let candidate = opening.open(
                 &init.exchange_name,
@@ -784,7 +791,7 @@ impl Session {
                 Ok(candidate) => Some(ProbedInit {
                     diagnostic: Some(diagnostic.clone()),
                     permit: registry
-                        .probe_join(&user, &init, token, Some(candidate), None, permit)
+                        .probe_join(&user, &init, token, Some(candidate), None, socket, permit)
                         .await,
                     init,
                 }),
@@ -1139,11 +1146,17 @@ impl Session {
                         "Unauthenticated exchange-server sessions cannot sign",
                     ));
                 }
+                #[derive(serde::Deserialize)]
+                struct RawResponse {
+                    d: Box<serde_json::value::RawValue>,
+                }
+                let raw = serde_json::from_str::<RawResponse>(text).ok();
                 if self.pending_verifications.values().any(|pending| {
-                    pending
-                        .cosigned_link
-                        .as_ref()
-                        .is_some_and(|link| link.resolve(self.socket, response.clone()))
+                    pending.cosigned_link.as_ref().is_some_and(|link| {
+                        raw.as_ref()
+                            .is_some_and(|raw| link.resolve_join_proof(self.socket, raw.d.get()))
+                            || link.resolve(self.socket, response.clone())
+                    })
                 }) {
                     return Ok(());
                 }
@@ -3177,6 +3190,7 @@ mod tests {
     mod apply_settings;
     mod cosigned_venues;
     mod delegated_probe;
+    mod local_proof;
     mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
