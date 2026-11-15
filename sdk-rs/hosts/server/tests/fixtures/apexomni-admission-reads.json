@@ -1,0 +1,51 @@
+{
+  "symbols": {
+    "code": 0,
+    "data": {
+      "contractConfig": {
+        "perpetualContract": [
+          {
+            "symbol": "BTC-USDT",
+            "crossSymbolName": "BTCUSDT",
+            "baseTokenId": "BTC",
+            "settleAssetId": "USDT",
+            "enableTrade": true,
+            "stepSize": "0.001",
+            "tickSize": "0.1",
+            "minOrderSize": "0.001",
+            "maxOrderSize": "1000",
+            "displayMinLeverage": "1",
+            "displayMaxLeverage": "100",
+            "l2PairId": "50000",
+            "initialMarginRate": "0.01",
+            "defaultInitialMarginRate": "0.05",
+            "maxMarketPriceRange": "0.045"
+          }
+        ]
+      }
+    }
+  },
+  "account": {
+    "code": 0,
+    "data": {
+      "id": "73",
+      "positions": [],
+      "contractAccount": {
+        "makerFeeRate": "0.0002",
+        "takerFeeRate": "0.0005"
+      }
+    }
+  },
+  "account-balance": {
+    "code": 0,
+    "data": {
+      "totalEquityValue": "1000",
+      "initialMargin": "0",
+      "maintenanceMargin": "0"
+    }
+  },
+  "open-orders": {
+    "code": 0,
+    "data": []
+  }
+}
