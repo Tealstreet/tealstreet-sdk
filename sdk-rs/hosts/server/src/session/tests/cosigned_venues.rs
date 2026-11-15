@@ -12,6 +12,7 @@ const READY: &[&str] = &[
     "bitget",
     "blofin",
     "kucoin",
+    "phemex",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";

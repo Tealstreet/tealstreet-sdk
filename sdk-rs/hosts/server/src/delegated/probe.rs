@@ -15,6 +15,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bitget",
     "blofin",
     "kucoin",
+    "phemex",
 ];
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {

@@ -18,6 +18,7 @@ const VENUES: &[&str] = &[
     "bitget",
     "blofin",
     "kucoin",
+    "phemex",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -550,6 +551,10 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                     DeviceAnswer::DifferentKey,
                     DeviceAnswer::Replay,
                 ] {
+                    if venue == "phemex" && matches!(answer, DeviceAnswer::Replay) {
+                        // Phemex signs whole-second expiry; old-attempt bytes must really differ.
+                        tokio::time::sleep(Duration::from_millis(1100)).await;
+                    }
                     let (prepared, link, task) = remote(venue, answer, prior.clone()).await;
                     let (result, seen) = check(venue, prepared).await;
                     {
