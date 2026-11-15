@@ -705,3 +705,7 @@ mod registration_tests {
             .await;
     }
 }
+
+#[cfg(test)]
+#[path = "provider_lifetimes.rs"]
+mod provider_lifetimes;
