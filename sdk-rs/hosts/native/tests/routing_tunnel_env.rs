@@ -30,4 +30,13 @@ fn every_tunnelled_route_uses_the_deployed_tunnel() {
         tunnelled += usize::from(plan.contains(TUNNEL));
     }
     assert_eq!(tunnelled, 6);
+
+    let inputs = account_transport("kraken", &AccountTransport::default()).unwrap();
+    let base = rest_base_url("kraken", false).unwrap();
+    let plan = resolve_routing_plan("kraken", &inputs, base, Provider::Tealstreet).unwrap();
+    assert_eq!(plan.http.mode, safe_cex_native::HttpRouteMode::How);
+    assert_eq!(plan.http.tunnel_url.as_deref(), Some(TUNNEL));
+    assert!(plan.http.prefix.is_empty());
+    assert!(!plan.http.authorize);
+    assert!(plan.http.header_aliases.is_empty());
 }

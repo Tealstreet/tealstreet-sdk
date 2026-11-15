@@ -22,6 +22,7 @@ The exact proof-ready venue names are:
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
+| `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 
 EEA aliases remain unready: their cold signed catalog discovery retries signature
 error `50113`; it needs separate refusal-policy coverage before admission.
