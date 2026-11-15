@@ -7,6 +7,110 @@ use safe_cex_native::{HttpRouteMode, RoutingPlan};
 use serde::Deserialize;
 
 #[test]
+fn cryptocom_mainnet_rest_base_retains_exchange_v1() {
+    assert_eq!(
+        safe_cex_native::resolve::rest_base_url("cryptocom", false),
+        Ok("https://api.crypto.com/exchange/v1")
+    );
+}
+
+#[test]
+fn cryptocom_testnet_rest_base_uses_the_existing_uat_sandbox() {
+    assert_eq!(
+        safe_cex_native::resolve::rest_base_url("cryptocom", true),
+        Ok("https://uat-api.3ona.co/exchange/v1")
+    );
+}
+
+#[test]
+fn cryptocom_hosted_rest_preserves_table_proxy_egress_and_native_socket_routes() {
+    let table: serde_json::Value =
+        serde_json::from_str(include_str!("../src/routing/table.json")).unwrap();
+    for (testnet, base) in [
+        (false, "https://api.crypto.com/exchange/v1"),
+        (true, "https://uat-api.3ona.co/exchange/v1"),
+    ] {
+        for (region, pool) in [(None, "jp"), (Some("JA"), "jp"), (Some("SG"), "asia")] {
+            let expected = table["hosts"]["privateProxy"][pool].as_str().unwrap();
+            assert!(!expected.is_empty());
+            for proxy in [None, Some(false), Some(true)] {
+                for tunnel in [None, Some(false)] {
+                    let inputs = account_transport(
+                        "cryptocom",
+                        &AccountTransport {
+                            testnet: Some(testnet),
+                            proxy_region: region.map(str::to_owned),
+                            tealstreet_proxy: proxy,
+                            tealstreet_tunnel: tunnel,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(inputs.tealstreet_proxy, Some(true));
+                    assert_ne!(inputs.tealstreet_tunnel, Some(true));
+                    for public in [false, true] {
+                        let options = RoutingInputs {
+                            has_key: !public,
+                            public_data_only: Some(public),
+                            ..inputs.clone()
+                        };
+                        let plan =
+                            resolve_routing_plan("cryptocom", &options, base, Provider::Tealstreet)
+                                .unwrap();
+                        assert_eq!(plan.http.mode, HttpRouteMode::Direct);
+                        assert_eq!(plan.http.prefix, expected);
+                        assert_eq!(plan.http.authorization_header, "Authorization");
+                        assert!(plan.http.tunnel_url.is_none());
+                        assert!(plan.http.header_aliases.is_empty());
+                        assert!(plan.ws.public.host.is_none());
+                        assert!(plan.ws.private.host.is_none());
+                        assert!(plan.ws.private.fallback.is_none());
+                        let signed = format!("{base}/private/user-balance");
+                        assert_eq!(
+                            reqwest::Url::parse(&signed).unwrap().path(),
+                            "/exchange/v1/private/user-balance"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cryptocom_explicit_tunnel_preserves_the_existing_singapore_how_route() {
+    for (testnet, base) in [
+        (false, "https://api.crypto.com/exchange/v1"),
+        (true, "https://uat-api.3ona.co/exchange/v1"),
+    ] {
+        for region in [None, Some("JA"), Some("SG")] {
+            let inputs = account_transport(
+                "cryptocom",
+                &AccountTransport {
+                    testnet: Some(testnet),
+                    proxy_region: region.map(str::to_owned),
+                    tealstreet_tunnel: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let plan =
+                resolve_routing_plan("cryptocom", &inputs, base, Provider::Tealstreet).unwrap();
+            assert_eq!(plan.http.mode, HttpRouteMode::How);
+            assert_eq!(
+                plan.http.tunnel_url.as_ref(),
+                Some(&safe_cex_native::resolve::route_bases().unwrap().tunnel["sg"])
+            );
+            assert!(plan.http.prefix.is_empty());
+            assert!(!plan.http.authorize);
+            assert!(plan.http.header_aliases.is_empty());
+            assert!(plan.ws.public.host.is_none());
+            assert!(plan.ws.private.host.is_none());
+        }
+    }
+}
+
+#[test]
 fn apexomni_mainnet_rest_base_retains_api() {
     let result = safe_cex_native::resolve::rest_base_url("apexomni", false);
     assert!(
