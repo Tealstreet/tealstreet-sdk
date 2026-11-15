@@ -6,6 +6,8 @@ use support::Options;
 
 const NOW: f64 = 1_700_000_000_000.;
 const REJECTED: &str = r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#;
+const REJECTED_STRING: &str =
+    r#"{"code":"-1022","msg":"Signature for this request is not valid."}"#;
 const MARKETS: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"LOT_SIZE","minQty":"0.001","maxQty":"1000"}]}]}"#;
 const BALANCE: &str = r#"{"totalWalletBalance":"1000","availableBalance":"800","totalInitialMargin":"100","totalOpenOrderInitialMargin":"20","totalUnrealizedProfit":"5"}"#;
 
@@ -94,10 +96,10 @@ fn retry(actions: &[Action], original: &HttpRequest) -> HttpRequest {
     reads[0].clone()
 }
 
-fn final_refusal(status: u16) {
+fn final_refusal(status: u16, body: &str) {
     let (mut engine, first) = starting(v1());
-    let resent = retry(&reply(&mut engine, &first, status, REJECTED), &first);
-    let done = reply(&mut engine, &resent, status, REJECTED);
+    let resent = retry(&reply(&mut engine, &first, status, body), &first);
+    let done = reply(&mut engine, &resent, status, body);
     let failures: Vec<_> = done
         .iter()
         .filter_map(|a| match a {
@@ -122,12 +124,22 @@ fn final_refusal(status: u16) {
 
 #[test]
 fn final_v1_http_400_signature_rejection_is_startup_auth_invalid() {
-    final_refusal(400);
+    final_refusal(400, REJECTED);
 }
 
 #[test]
 fn final_v1_http_200_signature_rejection_is_startup_auth_invalid() {
-    final_refusal(200);
+    final_refusal(200, REJECTED);
+}
+
+#[test]
+fn final_v1_string_code_http_400_signature_rejection_is_startup_auth_invalid() {
+    final_refusal(400, REJECTED_STRING);
+}
+
+#[test]
+fn final_v1_string_code_http_200_signature_rejection_is_startup_auth_invalid() {
+    final_refusal(200, REJECTED_STRING);
 }
 
 #[test]
