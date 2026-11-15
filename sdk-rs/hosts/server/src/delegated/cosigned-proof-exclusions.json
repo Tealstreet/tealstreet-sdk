@@ -5,10 +5,6 @@
       "reason": "No native Hosted REST origin; native private-read proof and complete zkLink order-signing coverage are not built."
     },
     {
-      "venue": "asterdex",
-      "reason": "Native legacy HMAC and v3 wallet/agent private-startup proof paths need separate server coverage; resolving an origin does not certify readiness."
-    },
-    {
       "venue": "backpack",
       "reason": "Ed25519 native private-startup proof, key encoding, account binding and replay/socket controls are not built."
     },
@@ -95,6 +91,13 @@
     {
       "venue": "woo",
       "reason": "Native private-read/socket proof and application-id, timestamp, replay and holder controls are not built."
+    }
+  ],
+  "excludedShapes": [
+    {
+      "venue": "asterdex",
+      "shape": "v3",
+      "reason": "V3 wallet/agent keys require the local public-key possession and authorization proof; V1 HMAC private-startup readiness does not admit wallet-shaped inits."
     }
   ]
 }

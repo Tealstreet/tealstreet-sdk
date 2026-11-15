@@ -139,6 +139,12 @@ wrong-key, replay, foreign-socket and resident-preservation controls. BingX perp
 prove signed private account reads independently of API-key-only listen-key acquisition;
 Spot and testnet do not inherit that proof. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
+AsterDEX readiness is V1 HMAC only: both Session and Registry checks inspect
+the init shape. Address-prefixed keys or nonempty main-wallet application IDs
+retain `proof-unavailable` before signing or probe IO. The admitted V1 shape
+carries explicit native `asterdex.apiVersion: "v1"` through setup and settings;
+its signed native account reads and real device codec have wrong-key, replay,
+foreign-socket and pending-isolation controls. Wallet V3 proof remains separate.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
@@ -151,6 +157,9 @@ reason in `src/delegated/cosigned-proof-exclusions.json`; remove its exclusion
 when proof lands. The 33-production-venue census is checked separately, and
 Cargo signing features are only a family cross-check. The reason list changes
 no runtime availability, admission or client fallback policy.
+Partially-ready AsterDEX also has an explicit `excludedShapes` V3 ledger record;
+V1 readiness never accounts for its unimplemented wallet proof. The accounting
+test rejects missing, duplicate, stale or unknown shape exclusions.
 
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;

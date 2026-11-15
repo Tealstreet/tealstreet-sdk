@@ -691,9 +691,7 @@ impl Session {
             return;
         }
         // CDP's hosted JWT setup and venue proof are not implemented yet.
-        if (!delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name))
-            || cdp_unavailable
-        {
+        if (!delegated && !crate::delegated::probe::cosigned_ready(&init)) || cdp_unavailable {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "proof unavailable");
             self.handover_out(&init.account_name)

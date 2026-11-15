@@ -3,6 +3,39 @@ use super::*;
 
 const TOKEN: &str = "synthetic-aster-listen-key";
 
+#[test]
+fn asterdex_v1_canonical_setup_keeps_private_identity_and_platform_protection() {
+    for venue in ["bybit", "asterdex"] {
+        let mut options = serde_json::from_value(json!({"key":KEY,"secret":SECRET})).unwrap();
+        let (provider, ids) = safe_cex_venues::prepare_local_signer_for(venue, &mut options)
+            .unwrap_or_else(|error| panic!("{venue} raw setup: {}", error.legacy_text()));
+        assert!(
+            ids.primary
+                .as_ref()
+                .is_some_and(|id| id.signing_ref().is_ok()),
+            "{venue}: private signing identity missing"
+        );
+        #[cfg(target_os = "linux")]
+        {
+            let protected = provider
+                .protect()
+                .unwrap_or_else(|error| panic!("{venue} protection: {error:?}"));
+            assert!(!protected.is_erased());
+        }
+        #[cfg(not(target_os = "linux"))]
+        assert!(
+            matches!(
+                provider.protect(),
+                Err(safe_cex_engine::signing::SignError::Unsupported)
+            ),
+            "{venue}: unsupported protection must never fall back"
+        );
+        if venue == "asterdex" {
+            assert_eq!(options.construction(venue).asterdex_api_version, Some("v1"));
+        }
+    }
+}
+
 pub(crate) async fn device_signature(request: &Value, key: &str, material: &str) -> String {
     let mut options = serde_json::from_value(json!({"key":key,"secret":material})).unwrap();
     let (provider, ids) =
@@ -125,6 +158,42 @@ pub(super) fn connect(
 }
 
 #[tokio::test]
+async fn asterdex_v1_raw_signer_native_startup_checks_key_and_both_origins() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (material, accepted, testnet) in [
+                (SECRET, true, false),
+                (SECRET, true, true),
+                ("synthetic-other-material", false, false),
+                ("synthetic-other-material", false, true),
+            ] {
+                let mut prepared = local("asterdex", material);
+                let mut fields: Value = serde_json::from_str(&prepared.options).unwrap();
+                fields["testnet"] = testnet.into();
+                prepared.options = fields.to_string();
+                let (result, seen) = check("asterdex", prepared).await;
+                let seen = seen.lock().unwrap();
+                assert_eq!(result.is_ok(), accepted, "{result:?}; {:?}", seen.paths);
+                assert!(seen.signed_reads > 0);
+                if accepted {
+                    assert_eq!(seen.refused, 0);
+                } else {
+                    assert!(matches!(
+                        result,
+                        Err(ProbeRefusal {
+                            transient: false,
+                            ..
+                        })
+                    ));
+                    assert!(seen.refused > 0);
+                }
+            }
+        })
+        .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
 async fn asterdex_v1_delegated_private_startup_checks_the_handed_over_pair() {
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -147,6 +216,12 @@ async fn asterdex_v1_delegated_private_startup_checks_the_handed_over_pair() {
                     crate::delegated::DelegatedPair::new(KEY.into(), material.into(), None),
                 )
                 .unwrap();
+                let fields: Value = serde_json::from_str(&prepared.options).unwrap();
+                assert_eq!(fields["asterdex"]["apiVersion"], "v1");
+                assert!(fields.get("secret").is_none());
+                let changed = prepared.resident.reconfigure(&init).unwrap();
+                let changed: Value = serde_json::from_str(&changed.options).unwrap();
+                assert_eq!(changed["asterdex"]["apiVersion"], "v1");
                 let (result, seen) = check("asterdex", prepared).await;
                 let seen = seen.lock().unwrap();
                 assert_eq!(result.is_ok(), accepted, "{result:?}; {:?}", seen.paths);

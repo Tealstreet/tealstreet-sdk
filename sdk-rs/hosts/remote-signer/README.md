@@ -34,6 +34,14 @@ Run `cargo test --locked -j2 -p safe-cex-remote-signer` from `sdk-rs` for native
 setup/provider/link tests. KuCoin tests drive the actual registry device codec
 and compare every result byte with an independent LocalSigner control.
 
+Private AsterDEX V1 uses the existing `asterdex-hmac` device codec with
+`{slot:"primary", payload}`. Only the owned credential/HMAC two-operation graph
+is sent; credential-only presentation stays local. The atomic reply must contain
+that public credential and one canonical lowercase SHA-256 MAC. Partial, foreign,
+extra-field or malformed replies refuse without publishing any result. The
+original receipt survives unchanged. Wallet/address graphs and nonce-bearing
+V3 work remain unsupported by this V1 bridge.
+
 `RemoteAccount::public_binding_source` exposes only the original provider's
 public binding and opaque signing reference. It performs no setup or device IO
 and grants no signing authority. The account-owned handover barrier must still

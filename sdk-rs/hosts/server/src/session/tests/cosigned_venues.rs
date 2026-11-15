@@ -793,6 +793,8 @@ async fn cosigned_asterdex_wallet_shapes_stay_proof_unavailable_without_io() {
             let registry = crate::accounts::testing::e2e_registry("alice", io);
             for (key, main) in [
                 (format!("0x{}", "1".repeat(40)), None),
+                (format!("0X{}", "1".repeat(40)), None),
+                (format!(" 0x{} ", "1".repeat(40)), None),
                 (
                     format!("0x{}", "1".repeat(40)),
                     Some(format!("0x{}", "2".repeat(40))),

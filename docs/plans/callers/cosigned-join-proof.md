@@ -22,11 +22,16 @@ The exact proof-ready venue names are:
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
+| `asterdex` V1 only | Native HMAC private startup on mainnet/testnet, actual device batch codec and connection-bound negative controls |
 
 EEA aliases remain unready: their cold signed catalog discovery retries signature
 error `50113`; it needs separate refusal-policy coverage before admission.
 
 Only these exact names are admitted; the catalog never matches a family prefix.
+AsterDEX additionally checks the init shape: address-prefixed keys or nonempty
+main-wallet application IDs remain unavailable. Only its V1 API-key shape gets
+the native `asterdex.apiVersion: "v1"` setting. The accounting ledger explicitly
+excludes the V3 wallet shape; V1 readiness is not wallet possession proof.
 An unsupported proof returns the existing account error envelope with
 `initRefused: true`, `kind: "proof-unavailable"`, `transient: false` and
 `outcome: "notSent"`. The server attaches no holder, starts no signing request or

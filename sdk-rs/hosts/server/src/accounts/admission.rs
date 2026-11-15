@@ -300,7 +300,7 @@ impl Registry {
                 }
                 (None, Some(link))
                     if init.signing_mode.as_deref() != Some("delegated")
-                        && crate::delegated::probe::cosigned_ready(&init.exchange_name) =>
+                        && crate::delegated::probe::cosigned_ready(init) =>
                 {
                     let prepared = prepare(init, false, Some(link.clone()))
                         .map_err(|_| ProbeRefusal::INVALID)?;

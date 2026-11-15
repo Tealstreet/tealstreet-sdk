@@ -13,7 +13,8 @@ const features = JSON.parse(execFileSync('python3', ['-c',
   'import json,sys,tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))["features"]))',
   manifest], { encoding: 'utf8' }));
 const catalogSource = read('../hosts/server/src/delegated/probe.rs');
-const exclusionRecords = JSON.parse(read('../hosts/server/src/delegated/cosigned-proof-exclusions.json')).exclusions;
+const proofLedger = JSON.parse(read('../hosts/server/src/delegated/cosigned-proof-exclusions.json'));
+const exclusionRecords = proofLedger.exclusions;
 
 // Census/client refusesHostedInit gates, not a new runtime policy. Cover ALL
 // declarations below, so a blocked/disabled venue cannot disappear from review.
@@ -111,6 +112,24 @@ function accounted(declared, ready, excluded) {
   for (const name of excluded.keys()) assert(declared.has(name), `${name}: stale exclusion without remoteSigning`);
 }
 
+function excludedShapes(records, ready) {
+  assert(Array.isArray(records), 'expected explicit excluded shapes');
+  const result = new Map();
+  for (const { venue, shape, reason } of records) {
+    exactNames([venue]);
+    assert(ready.has(venue), `${venue}: shape exclusion needs partial venue readiness`);
+    assert.equal(venue, 'asterdex', 'unknown partially-ready venue');
+    assert.equal(shape, 'v3', 'unknown excluded shape');
+    assert.equal(typeof reason, 'string', 'missing shape exclusion reason');
+    assert(reason.trim(), 'empty shape exclusion reason');
+    const name = `${venue}:${shape}`;
+    assert(!result.has(name), 'duplicate shape exclusion');
+    result.set(name, reason);
+  }
+  if (ready.has('asterdex')) assert(result.has('asterdex:v3'), 'missing AsterDEX V3 shape exclusion');
+  return result;
+}
+
 function enabledFeatures(root, seen = new Set()) {
   assert(Object.hasOwn(features, root), `missing registry feature: ${root}`);
   if (seen.has(root)) return seen;
@@ -125,15 +144,24 @@ const declared = exactNames(Object.entries(rules)
   .filter(([, rule]) => rule.remoteSigning?.enabled === true).map(([name]) => name));
 const ready = catalog(catalogSource);
 const excluded = exclusions(exclusionRecords);
+const shapes = excludedShapes(proofLedger.excludedShapes, ready);
 
 test('AsterDEX readiness is V1-only with an explicit V3 shape exclusion', () => {
   assert(ready.has('asterdex'), 'V1 native private-startup proof must be admitted');
   assert(!excluded.has('asterdex'), 'whole-venue exclusion must not mask V1 readiness');
-  const shapes = JSON.parse(read('../hosts/server/src/delegated/cosigned-proof-exclusions.json')).excludedShapes;
-  assert(Array.isArray(shapes), 'partially-ready venues require explicit excluded shapes');
-  assert.deepEqual(shapes.map(({ venue, shape }) => ({ venue, shape })), [{ venue: 'asterdex', shape: 'v3' }]);
-  assert.equal(typeof shapes[0].reason, 'string');
-  assert(shapes[0].reason.trim());
+  assert.deepEqual([...shapes.keys()], ['asterdex:v3']);
+});
+
+test('partial readiness refuses missing, stale, duplicate or unknown shape exclusions', () => {
+  const valid = { venue: 'asterdex', shape: 'v3', reason: 'Wallet proof remains unavailable' };
+  const partial = new Set(['asterdex']);
+  assert.equal(excludedShapes([valid], partial).size, 1);
+  assert.throws(() => excludedShapes([], partial), /missing AsterDEX V3/);
+  assert.throws(() => excludedShapes([valid], new Set()), /partial venue readiness/);
+  assert.throws(() => excludedShapes([valid, valid], partial), /duplicate/);
+  assert.throws(() => excludedShapes([{ ...valid, reason: ' ' }], partial), /empty/);
+  assert.throws(() => excludedShapes([{ ...valid, shape: 'v4' }], partial), /unknown excluded shape/);
+  assert.throws(() => excludedShapes([{ ...valid, venue: 'bybit' }], new Set(['bybit'])), /unknown partially-ready venue/);
 });
 const helperEligible = new Set([...declared].filter(name => !noServerOrigin.has(name) && !awaitingLiveTest.has(name)));
 // This generated snapshot is checked by rust:metadata:check. It only reconciles

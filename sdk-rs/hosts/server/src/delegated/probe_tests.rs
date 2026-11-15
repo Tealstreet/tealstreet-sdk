@@ -481,11 +481,16 @@ fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
         serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
     let (provider, identities) =
         safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
+    let mut fields = json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false});
+    if venue == "asterdex" {
+        fields["asterdex"] =
+            json!({"apiVersion":options.construction(venue).asterdex_api_version.unwrap()});
+    }
     // Test setup uses the registry's real credential normalization. Runtime
     // admission remains gated separately; no test declaration enables a venue.
     super::super::PreparedDelegated {
         plan: Default::default(),
-        options: json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false}).to_string(),
+        options: fields.to_string(),
         resident: ResidentCopy::test_provider(provider),
     }
 }
@@ -827,11 +832,23 @@ async fn remote(
             );
         }
     });
+    let fields = if venue == "asterdex" {
+        crate::accounts::engine_options(
+            &crate::envelope::InitPayload {
+                exchange_name: venue.into(),
+                key: KEY.into(),
+                ..Default::default()
+            },
+            false,
+        )
+    } else {
+        json!({"key":KEY,"passphrase":PASS})
+    };
     let account = safe_cex_remote_signer::remote_account(
         link.clone(),
         venue,
         Some("synthetic-pending".into()),
-        &json!({"key":KEY,"passphrase":PASS}).to_string(),
+        &fields.to_string(),
     )
     .unwrap();
     (
