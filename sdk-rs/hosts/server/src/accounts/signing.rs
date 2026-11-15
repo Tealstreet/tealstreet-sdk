@@ -89,7 +89,20 @@ impl AccountSigner {
         family: Family,
     ) -> Result<Option<PublicKey>, ModeTransitionRefusal> {
         let state = self.state.lock().unwrap();
-        if state.active != 0 && self.resident.lock().unwrap().is_none() {
+        let owner = self.resident.lock().unwrap();
+        if let Some(resident) = owner.as_ref() {
+            let key = resident
+                .identities()
+                .primary
+                .as_ref()
+                .ok_or(ModeTransitionRefusal::Unavailable)?
+                .signing_ref()
+                .map_err(|_| ModeTransitionRefusal::Unavailable)?;
+            return PublicKey::from_provider(family, &resident.provider(), key)
+                .map(Some)
+                .map_err(|_| ModeTransitionRefusal::Unavailable);
+        }
+        if state.active != 0 {
             return Err(ModeTransitionRefusal::Busy);
         }
         self.read_original_binding(family)
@@ -119,7 +132,6 @@ impl AccountSigner {
                 Some(bytes) => PublicKey::new(family, &bytes)
                     .map(Some)
                     .map_err(|_| Unavailable),
-                None if family == Family::Schnorr => Ok(None),
                 None => Err(Unavailable),
             };
         }

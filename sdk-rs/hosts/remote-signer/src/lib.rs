@@ -41,11 +41,32 @@ pub struct RemoteAccount {
 }
 
 impl RemoteAccount {
+    /// Pin routed, validated registration before publishing any provider handle.
+    /// Existing providers cannot adopt later key-slot rotations.
+    pub fn with_registered_public_key(
+        self,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Result<Self, SetupError> {
+        let inner = self.inner.as_ref().ok_or(SetupError("No private signer"))?;
+        if Arc::strong_count(&self.provider) != 1
+            || Arc::weak_count(&self.provider) != 0
+            || Arc::strong_count(inner) != 2
+            || Arc::weak_count(inner) != 0
+        {
+            return Err(SetupError("Signer already published"));
+        }
+        inner
+            .bind_registered_public_key(public)
+            .map_err(|_| SetupError("Invalid registered signer binding"))?;
+        Ok(self)
+    }
+
     /// Bound to this provider's original identities; no setup or device IO occurs.
     pub fn public_binding_source(&self) -> Option<PublicBindingSource> {
-        self.inner
-            .as_ref()
-            .map(|inner| PublicBindingSource(inner.clone()))
+        self.inner.as_ref().map(|inner| {
+            inner.publish();
+            PublicBindingSource(inner.clone())
+        })
     }
 
     /// Called once after `MAX_CONSECUTIVE_FAILURES` failures spanning at least

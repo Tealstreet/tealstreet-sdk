@@ -61,8 +61,12 @@ to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
 a supported COSIGNED resident without replacing its actor, orders or algo jobs.
 Public-key handovers locally match the candidate to the original provider's
 completed Ethereum/Stark binding or canonical Ed25519 public identity. Schnorr
-uses the existing routed registered-key lookup, captured init/lease/expiry guards
-and exact actor binding. Returning to the same settings never revives a retired proof.
+pins its routed registered key before the original provider is published, then
+rechecks registration against that immutable binding and the candidate on join.
+Already-promoted actors compare their actual installed resident key. Unpinned
+legacy actors refuse explicitly with `mode_transition_unavailable`; a new lookup
+cannot invent their old key. Captured init/lease/expiry guards and exact actor
+binding survive every lookup. Same settings never revive a retired proof.
 All outstanding original sign futures/setup work must join before handover; busy
 handovers refuse transiently without canceling or replaying them. Engine-owned
 address seals, nonce ownership and original opaque refs survive unchanged;

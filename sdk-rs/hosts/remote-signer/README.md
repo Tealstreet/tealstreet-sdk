@@ -39,3 +39,9 @@ public binding and opaque signing reference. It performs no setup or device IO
 and grants no signing authority. The account-owned handover barrier must still
 wait for the original sign/setup jobs to join; the read-only source never owns
 the protected resident or replaces engine-owned seals and nonce state.
+
+Fresh native Schnorr construction can consume `with_registered_public_key` with
+validated routed metadata before exposing the provider. Published handles, prior
+provider use and foreign families refuse this construction-only pin; later key
+rotation cannot change it. Older unpinned providers remain distinguishable from
+ones whose original registration was captured.

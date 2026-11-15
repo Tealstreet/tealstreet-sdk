@@ -611,8 +611,12 @@ resident mode. A COSIGNED join attaches to an existing DELEGATED actor and canno
 downgrade it. A verified DELEGATED join can upgrade a supported COSIGNED actor,
 including its own parked copy, without restarting the actor or its jobs. Ethereum,
 Stark and Ed25519 candidates match the original provider's completed/canonical
-public binding locally; Schnorr matches the venue-registered key through the
-existing routed public lookup. Public proof retains only a weak reference to the
+public binding locally. Initial COSIGNED Schnorr construction pins a routed,
+validated registration before publishing its provider; later joins require the
+current registration and candidate to match that immutable key. After promotion,
+the actual installed resident supplies the binding. Legacy actors without the
+initial binding refuse explicitly, rather than adopting a rotated slot's key.
+Public proof retains only a weak reference to the
 exact resident actor, and captured init, token and lease guards survive the lookup.
 A retired attempt or different actor cannot inherit it, including after settings
 return to their previous values. Existing DELEGATED residents use the same local

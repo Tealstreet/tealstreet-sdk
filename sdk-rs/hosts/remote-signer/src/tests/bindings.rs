@@ -117,7 +117,7 @@ fn unresolved_wallet_bindings_and_malformed_ed25519_never_become_public_proof() 
 }
 
 #[test]
-fn only_the_owned_schnorr_ref_can_request_registered_key_proof() {
+fn unpinned_schnorr_binding_stays_unknown_and_ref_bound() {
     let (remote, options) = account(
         closed_link(),
         "lighter",
@@ -133,6 +133,104 @@ fn only_the_owned_schnorr_ref_can_request_registered_key_proof() {
     let public =
         remote_account(closed_link(), "lighter", None, r#"{"publicDataOnly":true}"#).unwrap();
     assert!(public.public_binding_source().is_none());
+}
+
+fn schnorr_public(scalar: u8) -> safe_cex_crypto::admission::PublicKey {
+    let mut key = [0; 40];
+    key[0] = scalar;
+    safe_cex_crypto::admission::PublicKey::new(
+        safe_cex_crypto::admission::Family::Schnorr,
+        &safe_cex_crypto::lighter::public_key(&key).unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn registered_schnorr_binding_is_initial_immutable_and_ref_bound() {
+    let (remote, options) = account(
+        closed_link(),
+        "lighter",
+        json!({"key":"synthetic-public-account", "apiKeyIndex":"1"}),
+    );
+    let public = schnorr_public(7);
+    let remote = remote.with_registered_public_key(&public).unwrap();
+    assert!(
+        remote
+            .with_registered_public_key(&schnorr_public(8))
+            .is_err()
+    );
+
+    let (remote, _) = account(
+        closed_link(),
+        "lighter",
+        json!({"key":"synthetic-public-account", "apiKeyIndex":"1"}),
+    );
+    let remote = remote.with_registered_public_key(&public).unwrap();
+    let (_, key, _) = refs(&options);
+    let (_, owned, _) = refs(&serde_json::from_str(&remote.options_json).unwrap());
+    let source = remote.public_binding_source().unwrap();
+    assert_eq!(
+        source.public_key(&owned, Algorithm::SchnorrDigest),
+        Ok(Some(public.as_bytes().to_vec()))
+    );
+    assert_eq!(
+        source.public_key(&key, Algorithm::SchnorrDigest),
+        Err(SignError::Unsupported)
+    );
+}
+
+#[test]
+fn published_or_used_remote_provider_cannot_gain_a_registration_binding() {
+    for exposure in 0..4 {
+        let (remote, options) = account(
+            closed_link(),
+            "lighter",
+            json!({"key":"synthetic-public-account", "apiKeyIndex":"1"}),
+        );
+        let (_, key, _) = refs(&options);
+        let provider = (exposure == 0).then(|| remote.provider.clone());
+        let weak = (exposure == 1).then(|| Arc::downgrade(&remote.provider));
+        if exposure == 2 {
+            drop(remote.public_binding_source());
+        }
+        if exposure == 3 {
+            assert_eq!(
+                remote.provider.can_sign(&key, Algorithm::SchnorrDigest),
+                Capability::Supported
+            );
+        }
+        assert!(
+            remote
+                .with_registered_public_key(&schnorr_public(7))
+                .is_err()
+        );
+        drop((provider, weak));
+    }
+    let (remote, _) = account(
+        closed_link(),
+        "bybit",
+        json!({"key":"synthetic-public-account"}),
+    );
+    assert!(
+        remote
+            .with_registered_public_key(&schnorr_public(7))
+            .is_err()
+    );
+}
+
+#[test]
+fn schnorr_registration_rejects_another_public_key_family() {
+    let (remote, _) = account(
+        closed_link(),
+        "lighter",
+        json!({"key":"synthetic-public-account", "apiKeyIndex":"1"}),
+    );
+    let other_family = safe_cex_crypto::admission::PublicKey::new(
+        safe_cex_crypto::admission::Family::Ed25519,
+        &[1; 32],
+    )
+    .unwrap();
+    assert!(remote.with_registered_public_key(&other_family).is_err());
 }
 
 #[tokio::test]

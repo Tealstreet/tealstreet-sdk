@@ -191,12 +191,10 @@ impl Registry {
         if !allowed() {
             return Err(ProbeRefusal::TRANSIENT);
         }
-        let public = if let Some(public) = public {
-            public
-        } else {
-            if family != Family::Schnorr {
-                return Err(ProbeRefusal::INVALID);
-            }
+        let public = public.ok_or_else(|| {
+            ProbeRefusal::transition(crate::envelope::ModeTransitionRefusal::Unavailable)
+        })?;
+        if family == Family::Schnorr {
             let index = init
                 .api_key_index
                 .as_deref()
@@ -222,7 +220,7 @@ impl Registry {
                 init.exchange_name == "lighter-robinhood",
                 init.testnet == Some(true),
             );
-            crate::admission::fetch_lighter_registered_key(
+            let registered = crate::admission::fetch_lighter_registered_key(
                 &transport,
                 network,
                 account_index,
@@ -230,8 +228,11 @@ impl Registry {
                 allowed.clone(),
             )
             .await
-            .map_err(|_| ProbeRefusal::TRANSIENT)?
-        };
+            .map_err(|_| ProbeRefusal::TRANSIENT)?;
+            if registered.as_bytes() != public.as_bytes() {
+                return Err(ProbeRefusal::INVALID);
+            }
+        }
         permit.check(&permit.user, init)?;
         if !allowed()
             || !self

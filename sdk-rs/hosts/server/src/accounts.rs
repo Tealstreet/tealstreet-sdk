@@ -4,6 +4,7 @@ use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_d
 use crate::envelope::InitPayload;
 use crate::state::Log;
 use crate::threads::EngineThreads;
+use safe_cex_crypto::admission::Family;
 use safe_cex_native::DisposalCause;
 use safe_cex_native::resolve::{self, AccountTransport, Provider};
 use safe_cex_native::{
@@ -1717,6 +1718,56 @@ impl Registry {
                 options,
                 remote,
             } = prepare(init, public_only, link.clone())?;
+            let remote = match remote {
+                Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
+                    let account_index = init
+                        .application_id
+                        .as_deref()
+                        .and_then(|value| value.parse().ok())
+                        .ok_or("Missing signer registration account")?;
+                    let index = init
+                        .api_key_index
+                        .as_deref()
+                        .and_then(|value| value.parse().ok())
+                        .ok_or("Missing signer registration index")?;
+                    let captured = authority.clone();
+                    let expiry = token.as_ref().map(|(_, expiry)| *expiry);
+                    let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+                        captured.check_admission().is_ok()
+                            && expiry.is_none_or(|expiry| expiry > now_ms())
+                    });
+                    let proxy_token = ProxyToken::new();
+                    proxy_token.set(token.clone());
+                    let transport =
+                        NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
+                            .with_venue(&venue)
+                            .with_io_guard(allowed.clone());
+                    #[cfg(test)]
+                    let transport =
+                        crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+                    let network = safe_cex_venues::lighter_registration::Network::from_options(
+                        venue == "lighter-robinhood",
+                        init.testnet == Some(true),
+                    );
+                    let public = crate::admission::fetch_lighter_registered_key(
+                        &transport,
+                        network,
+                        account_index,
+                        index,
+                        allowed,
+                    )
+                    .await
+                    .map_err(|_| "Signer registration unavailable")?;
+                    authority.check_admission()?;
+                    crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+                    Some(
+                        remote
+                            .with_registered_public_key(&public)
+                            .map_err(|error| error.to_string())?,
+                    )
+                }
+                remote => remote,
+            };
             let signer = remote.as_ref().map(|remote| remote.provider.clone());
             (link, plan, options, remote, signer, None)
         };

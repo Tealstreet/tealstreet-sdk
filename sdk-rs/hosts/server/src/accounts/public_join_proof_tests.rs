@@ -22,6 +22,9 @@ struct Fixture {
     observed: Arc<Mutex<crate::delegated_e2e_io::Observed>>,
 }
 fn fixture() -> Fixture {
+    fixture_with_binding(Some(7))
+}
+fn fixture_with_binding(original: Option<u8>) -> Fixture {
     let candidate = candidate(7);
     let key = candidate
         .identities()
@@ -76,6 +79,20 @@ fn fixture() -> Fixture {
         &engine_options(&init, false).to_string(),
     )
     .unwrap();
+    let remote = if let Some(scalar) = original {
+        let initial = self::candidate(scalar);
+        let key = initial
+            .identities()
+            .primary
+            .as_ref()
+            .unwrap()
+            .signing_ref()
+            .unwrap();
+        let public = PublicKey::from_provider(Family::Schnorr, &initial.provider(), key).unwrap();
+        remote.with_registered_public_key(&public).unwrap()
+    } else {
+        remote
+    };
     let options: Value = serde_json::from_str(&remote.options_json).unwrap();
     let identities: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
     Arc::get_mut(&mut account).unwrap().signing = AccountSigner::new_bound(
@@ -289,7 +306,7 @@ async fn a_completed_proof_cannot_rebuild_an_actor_removed_before_attachment() {
 async fn promoted_schnorr_binding(installed: u8, admit: bool) {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let f = fixture();
+            let f = fixture_with_binding(Some(installed));
             let resident = candidate(installed);
             let key = resident
                 .identities()
@@ -338,4 +355,113 @@ async fn promoted_schnorr_rejoin_refuses_a_different_registered_key() {
 #[tokio::test]
 async fn promoted_schnorr_rejoin_keeps_the_matching_key_control() {
     promoted_schnorr_binding(7, true).await;
+}
+
+#[tokio::test]
+async fn unpinned_legacy_schnorr_refuses_with_an_explicit_transition_reason() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = fixture_with_binding(None);
+            let permit = permit(&f);
+            f.gate.add_permits(1);
+            let Err(refusal) = f
+                .registry
+                .prove_public_join(
+                    &f.init,
+                    &f.candidate,
+                    &RoutingPlan::default(),
+                    None,
+                    &permit,
+                )
+                .await
+            else {
+                panic!("current registration cannot invent a legacy signer binding");
+            };
+            assert_eq!(
+                refusal.transition,
+                Some(crate::envelope::ModeTransitionRefusal::Unavailable)
+            );
+            assert_eq!(f.observed.lock().unwrap().preparations, 0);
+            assert!(f.account.delegated().is_none());
+            assert!(f.account.link.as_ref().unwrap().is_available());
+            f.account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn cosigned_schnorr_rotation_cannot_replace_the_initial_binding() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = fixture_with_binding(Some(6));
+            let permit = permit(&f);
+            f.gate.add_permits(1);
+            assert!(
+                f.registry
+                    .prove_public_join(
+                        &f.init,
+                        &f.candidate,
+                        &RoutingPlan::default(),
+                        None,
+                        &permit,
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(f.observed.lock().unwrap().reads, 1);
+            assert!(f.account.delegated().is_none());
+            assert!(f.account.link.as_ref().unwrap().is_available());
+            assert!(f.observed.lock().unwrap().writes.is_empty());
+            f.account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn initial_registration_preparation_cannot_outlive_its_init() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = fixture();
+            let mut init = f.init.clone();
+            init.signing_mode = Some("cosigned".into());
+            let current = Arc::new(AtomicBool::new(true));
+            let authority = InitAuthority {
+                current: current.clone(),
+                lease: None,
+                probe_lease: None,
+                admission_expires_at: Some(now_ms() + 60_000),
+                probe_current: None,
+            };
+            let future = f.registry.build(
+                "alice",
+                &init,
+                false,
+                init.fingerprint(),
+                Some(("synthetic-token".into(), now_ms() + 60_000)),
+                2,
+                Arc::new(|_| panic!("retired construction must not contact the device")),
+                &authority,
+                None,
+            );
+            tokio::pin!(future);
+            std::future::poll_fn(|cx| {
+                assert!(future.as_mut().poll(cx).is_pending());
+                if f.observed.lock().unwrap().preparations == 1 {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            })
+            .await;
+            assert_eq!(f.observed.lock().unwrap().preparations, 1);
+            current.store(false, Ordering::Release);
+            f.gate.add_permits(1);
+            assert!(future.await.is_err());
+            assert_eq!(f.observed.lock().unwrap().requests, 0);
+            assert_eq!(f.registry.account_count(), 1);
+            assert!(f.observed.lock().unwrap().writes.is_empty());
+            f.account.handle.dispose();
+        })
+        .await;
 }

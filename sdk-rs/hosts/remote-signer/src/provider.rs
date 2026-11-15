@@ -4,6 +4,7 @@
 mod orderly;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use tokio::time::Instant;
@@ -91,6 +92,7 @@ pub(crate) struct Inner {
     pub link: Arc<SignerLink>,
     pub primary: Owned,
     bound: Mutex<Option<Vec<u8>>>,
+    published: AtomicBool,
     streak: Mutex<Streak>,
     on_fatal: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// When each signer warning last reached stderr, so a looping account logs once a minute.
@@ -275,7 +277,7 @@ fn sha256(bytes: &[u8]) -> Vec<u8> {
 #[derive(Clone)]
 pub struct PublicBindingSource(pub(crate) Arc<Inner>);
 impl PublicBindingSource {
-    /// `None` means this exact Schnorr provider needs its registered-key lookup.
+    /// `None` means an older Schnorr provider has no trusted initial binding.
     pub fn public_key(
         &self,
         key: &KeyRef,
@@ -315,7 +317,7 @@ impl PublicBindingSource {
                 }
                 bytes
             }
-            Family::Lighter => return Ok(None),
+            Family::Lighter => return Ok(inner.bound()),
             _ => return Err(SignError::Unsupported),
         };
         Ok(Some(bytes))
@@ -323,6 +325,23 @@ impl PublicBindingSource {
 }
 
 impl Inner {
+    pub(crate) fn publish(&self) {
+        self.published.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn bind_registered_public_key(
+        &self,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Result<(), SignError> {
+        if self.published.load(Ordering::Acquire)
+            || self.family != Family::Lighter
+            || public.family() != safe_cex_crypto::admission::Family::Schnorr
+        {
+            return Err(SignError::Unsupported);
+        }
+        self.bind(public.as_bytes())
+    }
+
     pub(crate) fn bind_public_metadata(
         &self,
         options: &Map<String, Value>,
@@ -350,6 +369,7 @@ impl Inner {
             link,
             primary,
             bound: Mutex::new(None),
+            published: AtomicBool::new(false),
             streak: Mutex::new(Streak::default()),
             on_fatal: Mutex::new(None),
             warned: Mutex::new(std::collections::HashMap::new()),
@@ -1046,10 +1066,12 @@ impl Signer for PublicProvider {
 
 impl Signer for RemoteProvider {
     fn sign(&self, request: SignRequest) -> SignFuture {
+        self.inner.publish();
         Box::pin(self.inner.clone().sign(request))
     }
 
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.publish();
         if (self.inner.owns_signing(key) || self.inner.primary.broker.as_ref() == Some(key))
             && algorithm == self.inner.family.algorithm()
         {
