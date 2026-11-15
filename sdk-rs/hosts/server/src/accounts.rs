@@ -1717,7 +1717,7 @@ impl Registry {
             AccountSigner::new(signer.clone(), identities, link.clone(), delegated.clone());
         let signer: Option<safe_cex_engine::signing::Provider> = if !delegated_build && !public_only
         {
-            Some(signing.clone())
+            Some(signing.provider())
         } else {
             signer
         };

@@ -14,11 +14,16 @@ pub(crate) struct AccountSigner {
     original: Option<safe_cex_engine::signing::Provider>,
     identities: Identities,
     link: Option<Arc<SignerLink>>,
+    resident: Mutex<Option<ResidentCopy>>,
+}
+// Engine handles retain dispatch access, never the account's erasure authority.
+struct EngineSigner {
+    state: Arc<Mutex<State>>,
+    original: Option<safe_cex_engine::signing::Provider>,
 }
 struct State {
     provider: Option<safe_cex_engine::signing::Provider>,
     aliases: Option<Aliases>,
-    resident: Option<ResidentCopy>,
     active: usize,
 }
 struct Lease(Arc<Mutex<State>>);
@@ -27,7 +32,18 @@ impl Drop for Lease {
         self.0.lock().unwrap().active -= 1;
     }
 }
+#[cfg(test)]
+#[path = "signing_lifetime_tests.rs"]
+mod lifetime_tests;
+
 impl AccountSigner {
+    pub(super) fn provider(&self) -> safe_cex_engine::signing::Provider {
+        Arc::new(EngineSigner {
+            state: self.state.clone(),
+            original: self.original.clone(),
+        })
+    }
+
     pub(super) fn new(
         provider: Option<safe_cex_engine::signing::Provider>,
         identities: Identities,
@@ -38,48 +54,27 @@ impl AccountSigner {
             state: Arc::new(Mutex::new(State {
                 provider: provider.clone(),
                 aliases: None,
-                resident,
                 active: 0,
             })),
             original: provider,
             identities,
             link,
+            resident: Mutex::new(resident),
         })
     }
     pub(super) fn resident(&self) -> Option<ResidentCopy> {
-        self.state.lock().unwrap().resident.clone()
+        self.resident.lock().unwrap().clone()
     }
     #[cfg(test)]
     pub(crate) fn set_test_resident(&self, resident: ResidentCopy) {
-        self.state.lock().unwrap().resident = Some(resident);
-    }
-
-    fn acquire(
-        &self,
-        mut request: SignRequest,
-    ) -> Result<(safe_cex_engine::signing::Provider, SignRequest, Lease), SignError> {
-        let mut state = self.state.lock().unwrap();
-        let provider = state.provider.clone().ok_or(SignError::Unavailable)?;
-        if let Some(aliases) = &state.aliases {
-            for operation in &request.operations {
-                if let Operation::Sign { key, algorithm, .. } = operation
-                    && self.original.as_ref().is_none_or(|original| {
-                        original.can_sign(key, *algorithm) != Capability::Supported
-                    })
-                {
-                    return Err(SignError::Unsupported);
-                }
-            }
-            map_request(&mut request, aliases)?;
-        }
-        state.active += 1;
-        Ok((provider, request, Lease(self.state.clone())))
+        *self.resident.lock().unwrap() = Some(resident);
     }
 
     pub(super) fn upgrade(&self, resident: ResidentCopy) -> Result<bool, ModeTransitionRefusal> {
         use ModeTransitionRefusal::{Busy, Unavailable};
         let mut state = self.state.lock().unwrap();
-        if state.resident.is_some() {
+        let mut owner = self.resident.lock().unwrap();
+        if owner.is_some() {
             return Ok(false);
         }
         if state.active != 0 {
@@ -120,11 +115,34 @@ impl AccountSigner {
         }
         state.provider = Some(provider);
         state.aliases = Some(aliases);
-        state.resident = Some(resident);
+        *owner = Some(resident);
         Ok(true)
     }
 }
-impl Signer for AccountSigner {
+impl EngineSigner {
+    fn acquire(
+        &self,
+        mut request: SignRequest,
+    ) -> Result<(safe_cex_engine::signing::Provider, SignRequest, Lease), SignError> {
+        let mut state = self.state.lock().unwrap();
+        let provider = state.provider.clone().ok_or(SignError::Unavailable)?;
+        if let Some(aliases) = &state.aliases {
+            for operation in &request.operations {
+                if let Operation::Sign { key, algorithm, .. } = operation
+                    && self.original.as_ref().is_none_or(|original| {
+                        original.can_sign(key, *algorithm) != Capability::Supported
+                    })
+                {
+                    return Err(SignError::Unsupported);
+                }
+            }
+            map_request(&mut request, aliases)?;
+        }
+        state.active += 1;
+        Ok((provider, request, Lease(self.state.clone())))
+    }
+}
+impl Signer for EngineSigner {
     fn sign(&self, request: SignRequest) -> SignFuture {
         let acquired = self.acquire(request);
         Box::pin(async move {
@@ -379,7 +397,7 @@ mod tests {
     async fn unpolled_and_active_signing_block_handover_without_resend_or_cancellation() {
         let (signer, old_calls, link) = signer();
         let new_calls: Calls = Arc::default();
-        let future = signer.sign(request());
+        let future = signer.provider().sign(request());
         assert_eq!(
             signer.upgrade(resident(new_calls.clone())),
             Err(ModeTransitionRefusal::Busy)
@@ -430,7 +448,7 @@ mod tests {
             Some(SignerLink::new(1, Arc::new(|_| false))),
             None,
         );
-        let work = signer.sign(request());
+        let work = signer.provider().sign(request());
         tokio::pin!(work);
         assert!(
             std::future::poll_fn(|cx| Poll::Ready(work.as_mut().poll(cx)))
@@ -446,17 +464,17 @@ mod tests {
         done.send(()).unwrap();
         assert_eq!(work.await.unwrap_err(), SignError::Refused);
         assert_eq!(signer.upgrade(resident(calls.clone())), Ok(true));
-        assert!(signer.sign(request()).await.is_err());
+        assert!(signer.provider().sign(request()).await.is_err());
         assert_eq!(calls.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
     async fn settled_handover_maps_only_owned_refs_and_never_replays_old_work() {
         let (signer, old_calls, link) = signer();
-        drop(signer.sign(request()));
+        drop(signer.provider().sign(request()));
         let calls: Calls = Arc::default();
         assert_eq!(signer.upgrade(resident(calls.clone())), Ok(true));
-        assert!(signer.sign(request()).await.is_err());
+        assert!(signer.provider().sign(request()).await.is_err());
         let mut expected = request();
         expected.operations[0] = Operation::Present {
             key: KeyRef("new/credential".into()),
@@ -484,7 +502,7 @@ mod tests {
         assert!(!link.send_echo());
         let replacement: Calls = Arc::default();
         assert_eq!(signer.upgrade(resident(replacement.clone())), Ok(false));
-        assert!(signer.sign(request()).await.is_err());
+        assert!(signer.provider().sign(request()).await.is_err());
         assert_eq!(calls.lock().unwrap().len(), 2);
         assert!(replacement.lock().unwrap().is_empty());
     }
@@ -498,7 +516,7 @@ mod tests {
             key: KeyRef("another-user".into()),
         };
         assert_eq!(
-            signer.sign(foreign).await.unwrap_err(),
+            signer.provider().sign(foreign).await.unwrap_err(),
             SignError::MissingKey
         );
         let mut expanded = request();
@@ -506,7 +524,7 @@ mod tests {
             *algorithm = Algorithm::Ed25519;
         }
         assert_eq!(
-            signer.sign(expanded).await.unwrap_err(),
+            signer.provider().sign(expanded).await.unwrap_err(),
             SignError::Unsupported
         );
         assert!(calls.lock().unwrap().is_empty());
