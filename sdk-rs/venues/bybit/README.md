@@ -56,6 +56,9 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 - A native `110001` cancel answer satisfies the cancellation intent without a
   resend. Existing fresh-read, fill-retention and unknown-outcome protections
   remain authoritative; it does not invent a cancellation or fill event.
+- Protective-edit proof pages can contain ordinary orders without a trigger
+  source. The edited/cancelled stop still requires its exact known `triggerBy`;
+  missing/changed target evidence refuses, and peer lineage remains mandatory.
 - Private reconnects require the existing correlated auth/subscription handshake
   and REST snapshots. A timeout/transport failure is not proof of a rejected
   order; retain the existing identity-based reconciliation before retrying.

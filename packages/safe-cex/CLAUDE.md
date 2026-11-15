@@ -1224,6 +1224,9 @@ read. These reads establish current access, not future availability: cancellatio
 still precedes replacement as in the legacy adapter, and fresh post-cancel proof
 remains mandatory. A failure first occurring after cancellation stays Unknown
 and fences further placement; the preflight never grants replay or restoration.
+Ordinary peer orders may omit or null their irrelevant `triggerBy`; the captured
+protective target must still carry its exact known trigger source before cancel
+and in fresh terminal proof. Peer lineage and completeness checks remain required.
 
 ## Automatic retries are for reads only
 
