@@ -1,0 +1,9 @@
+{
+  "/v1/public/info": {"success":true,"rows":[{"symbol":"PERP_BTC_USDT","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":100,"base_imr":0.02}]},
+  "/v1/public/futures": {"success":true,"rows":[{"symbol":"PERP_BTC_USDT","24h_open":50000,"24h_close":60000,"24h_volume":4,"24h_amount":240000,"index_price":59999,"mark_price":60001,"last_funding_rate":0.0001,"next_funding_time":1700028800000,"open_interest":10000}]},
+  "/v1/public/funding_rates": {"success":true,"rows":[]},
+  "/v3/accountinfo": {"success":true,"data":{"accountMode":"FUTURES","positionMode":"ONE_WAY","freeCollateral":"900","totalCollateral":"1000","totalAccountValue":"1000"}},
+  "/v3/positions": {"success":true,"data":{"positions":[]}},
+  "/v1/orders": {"success":true,"meta":{"total":0,"records_per_page":100,"current_page":1},"rows":[]},
+  "/v3/algo/orders": {"success":true,"data":{"meta":{"total":0,"records_per_page":100,"current_page":1},"rows":[]}}
+}

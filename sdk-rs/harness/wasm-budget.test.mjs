@@ -4,6 +4,20 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3566 pinned build.sh --venue backpack: Rust1.99, bindgen0.2.129, Binaryen132 twice-Oz.
+// Local optimized web/Node SHA256 a5336b7d6336e82ac8c8d8c45633be984b4b56e38928662799d0a37e858f381d.
+// CI43755040219/job132937508086 web2076180; only Backpack retains default device dispatch.
+test('#3566 device admission retains the measured Backpack reserve and historical floor', () => {
+  const measured = Math.max(2_082_554, 2_076_180);
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.backpack;
+  assert.equal(requiredCap, 2_093_056);
+  assert.ok(cap >= Math.max(requiredCap, 2_060_288));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'backpack'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'backpack'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'backpack'), /exceeds/);
+});
+
 // #3266 merge 2d0fdf629b84: equal optimized web/Node artifacts, build.sh --venue mexc.
 // Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
 // Module SHA256 e8939820ec914ac233aafc4ef82692d2fda4478800a10f85a7597073810af27f.

@@ -58,7 +58,7 @@
     },
     {
       "venue": "kraken",
-      "reason": "No native Hosted REST origin; server Present/SHA256/HMAC-SHA512 bridge and private-startup proof are not built."
+      "reason": "Native Futures private-startup proof for the primary key, signed-path custody and replay/socket controls is not built."
     },
     {
       "venue": "kucoinspot",
@@ -73,20 +73,12 @@
       "reason": "Production metadata disables this venue; its distinct origin/chain/account-slot private-startup proof is not built."
     },
     {
-      "venue": "mexc",
-      "reason": "No native Hosted REST origin; native signed private-startup proof distinguishing signing-optional/read/token layouts is not built."
-    },
-    {
       "venue": "paradex",
       "reason": "Client Hosted gate awaits a live test; signed auth/JWT, address/subkey/derived-key validation and startup proof are not complete."
     },
     {
       "venue": "txflow",
       "reason": "Production metadata and beta/agent gates refuse this venue; native origin, agent signing and bound private-startup proof are not built."
-    },
-    {
-      "venue": "woo",
-      "reason": "Native private-read/socket proof and application-id, timestamp, replay and holder controls are not built."
     }
   ]
 }

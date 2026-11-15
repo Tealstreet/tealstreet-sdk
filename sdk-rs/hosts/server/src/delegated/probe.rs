@@ -25,7 +25,9 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "woo",
     "bingx",
+    "mexc",
     "bitunix",
 ];
 
@@ -107,6 +109,7 @@ pub(crate) enum RefusalStage {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
     pub transient: bool,
+    pub unavailable: bool,
     pub transition: Option<crate::envelope::ModeTransitionRefusal>,
     pub stage: RefusalStage,
     pub error_kind: Option<ErrorKind>,
@@ -115,6 +118,7 @@ pub(crate) struct ProbeRefusal {
 impl ProbeRefusal {
     pub const INVALID: Self = Self {
         transient: false,
+        unavailable: false,
         transition: None,
         stage: RefusalStage::Unverified,
         error_kind: None,
@@ -122,6 +126,10 @@ impl ProbeRefusal {
     };
     pub const TRANSIENT: Self = Self {
         transient: true,
+        ..Self::INVALID
+    };
+    pub const UNAVAILABLE: Self = Self {
+        unavailable: true,
         ..Self::INVALID
     };
 
@@ -141,6 +149,7 @@ impl ProbeRefusal {
     fn classified(kind: ErrorKind) -> Self {
         Self {
             transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
+            unavailable: false,
             transition: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(kind),

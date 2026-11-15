@@ -1520,7 +1520,22 @@ impl Venue for Okx {
             // Account reads take the table's kind from the reply itself.
             match pending {
                 Pending::Account(request) => {
-                    let error = account::read_error(&response, error);
+                    let error = match &request {
+                        account::Request::Config { .. }
+                            if self.eea_authenticating(cx) && !authentication_reply =>
+                        {
+                            // An unproven EEA config reply cannot authenticate its body.
+                            // Retain HTTP rate/transport diagnosis instead of a key refusal.
+                            safe_cex_engine::classify::read(
+                                &trading::CODES,
+                                safe_cex_engine::classify::Released::Response(&response),
+                                None,
+                                error,
+                            )
+                            .error
+                        }
+                        _ => account::read_error(&response, error),
+                    };
                     self.account_failed(cx, request, error);
                 }
                 pending => self.request_failed(cx, pending, &error),
@@ -1763,6 +1778,18 @@ impl Venue for Okx {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Markets { kind, .. } = &pending {
+            let authentication_reply =
+                response.status < 500 && !matches!(response.status, 418 | 429);
+            if authentication_reply {
+                if self.catalogue_rejected(cx, *kind, response.body) {
+                    Self::retire_discovery(cx, &pending);
+                    return;
+                }
+            } else {
+                self.catalogue_unanswered(*kind);
+            }
+        }
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);

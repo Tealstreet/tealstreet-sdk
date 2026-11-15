@@ -24,6 +24,7 @@ The exact proof-ready venue names are:
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
+| `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 
 `okxeudemo` has its own exact catalog entry and demo-header/private-startup
 controls; EEA mainnet readiness alone never admits it.

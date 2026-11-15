@@ -255,3 +255,40 @@ async fn cosigned_okxeu_authority_retired_while_config_signing_is_paused() {
         assert!(!link.is_available());
     }
 }
+
+#[tokio::test]
+async fn cosigned_okxeu_rate_limited_config_is_transient_not_bad_credentials() {
+    let (io, seen) = MockVenue::for_admission("okxeu");
+    {
+        let mut seen = seen.lock().unwrap();
+        seen.config_refusals_remaining = 1;
+        seen.config_refusal_status = Some(429);
+    }
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut session, mut sent) = user_session(registry.clone(), "alice");
+    let mut device = Device::default();
+    proof(
+        "okxeu",
+        &mut session,
+        &mut sent,
+        &mut device,
+        Answer::Correct,
+    )
+    .await;
+    assert!(session.joined.is_empty());
+    assert!(registry.held("alice", "acct", session.socket).is_none());
+    assert_eq!(seen.lock().unwrap().refused, 1);
+    let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|text| serde_json::from_str(&text).unwrap())
+        .collect();
+    let refusal = frames
+        .iter()
+        .find_map(|frame| {
+            let data = &frame["d"]["data"][1];
+            (data["initRefused"] == true).then_some(data)
+        })
+        .expect("the private read must refuse without attaching");
+    assert_eq!(refusal["transient"], true, "{refusal:?}");
+    assert!(!frames.iter().any(|frame| frame["d"]["op"] == "frame"));
+    session.close();
+}
