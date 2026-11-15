@@ -84,6 +84,14 @@ derived from reported old/new balances. They do not fail the streamed history
 page or discard later trade rows. Nonnullable ledger identity, asset, date and
 description fields remain strict; no economic values are invented for nulls.
 
+Order-event refusals identify a closed identity, time, or economics predicate in
+the message and `historyDecode` reason, including the affected decimal field.
+No row values, order/account IDs, symbols, amounts or raw deserializer errors
+enter these diagnostics. The [order-events schema](https://docs.kraken.com/api-reference/account-history/get-order-events)
+controls remain strict: one invalid row rejects its whole page. Only earlier
+accepted pages may be returned with `history.incomplete` / `laterPageFailed`;
+rows staged from the failed page are discarded rather than silently skipped.
+
 ## Kraken Spot hosted signing
 
 Kraken Spot remains local-only, with hosted/remote signing deferred and the existing

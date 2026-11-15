@@ -1213,8 +1213,8 @@ fn history_refusals_keep_typed_kind_closed_cause_and_native_code() {
 fn order_row_refusal_names_the_closed_predicate_without_exposing_row_values() {
     for (field, value, reason) in [
         ("uid", json!(""), "identity"),
-        ("quantity", json!("0"), "quantity"),
-        ("filled", json!("3"), "filledQuantity"),
+        ("quantity", json!("0"), "quantityZero"),
+        ("filled", json!("3"), "filledQuantityExceedsQuantity"),
         ("timestamp", json!("-1"), "timestamp"),
         (
             "lastUpdateTimestamp",
@@ -1240,5 +1240,317 @@ fn order_row_refusal_names_the_closed_predicate_without_exposing_row_values() {
             detail["historyDecode"],
             json!({"schema":"krakenOrders","reason":reason})
         );
+    }
+}
+
+// Based on the official get-order-events schema: decimals are strings, times milliseconds.
+// Refusals identify a predicate, never the supplied order/account data.
+fn diagnostic_order_event(variant: &str) -> Value {
+    let mut row = event("private-event-canary", "private-order-canary", variant, NOW);
+    let order = &mut row["event"][variant]["order"];
+    order["accountUid"] = json!("private-account-canary");
+    order["tradeable"] = json!("private-symbol-canary");
+    order["quantity"] = json!("173.25");
+    order["filled"] = json!("73.125");
+    order["limitPrice"] = json!("91234.75");
+    if variant == "OrderUpdated" {
+        let order = row["event"][variant]["order"].take();
+        row["event"][variant] = json!({"newOrder":order});
+    }
+    row
+}
+
+fn assert_order_diagnostic(row: Value, reason: &str, predicate: &str) {
+    let (mut e, _) = ready();
+    let request = query(&mut e, orders());
+    answer(&mut e, &request, "elements", vec![row]);
+    let actions = owned_actions(&mut e, 91);
+    assert_eq!(
+        actions.len(),
+        1,
+        "a refused first page cannot publish partial success"
+    );
+    let Action::Notice(Notice::CommandFailed { error, .. }) = &actions[0] else {
+        panic!("expected strict first-page refusal: {actions:?}");
+    };
+    let detail = serde_json::to_value(error).unwrap();
+    assert_eq!(detail["kind"], "internal");
+    assert_eq!(detail["causeCode"], "HISTORY_DECODE");
+    assert_eq!(
+        detail["historyDecode"],
+        json!({"schema":"krakenOrders","reason":reason})
+    );
+    assert_eq!(
+        detail["message"],
+        format!("Kraken history failed: Kraken order history rejected: {predicate}")
+    );
+    let text = detail.to_string();
+    for private in ["private-", "173.25", "73.125", "91234.75", "1234567890123"] {
+        assert!(
+            !text.contains(private),
+            "row data escaped in refusal: {text}"
+        );
+    }
+    assert!(requests(&mut e).is_empty());
+    assert!(e.store().orders().is_empty());
+}
+
+#[test]
+fn order_event_schema_control_accepts_present_identity_and_valid_decimals() {
+    for variant in [
+        "OrderPlaced",
+        "OrderUpdated",
+        "OrderRejected",
+        "OrderCancelled",
+    ] {
+        let (mut e, _) = ready();
+        let request = query(&mut e, orders());
+        let mut row = diagnostic_order_event(variant);
+        let key = if variant == "OrderUpdated" {
+            "newOrder"
+        } else {
+            "order"
+        };
+        row["event"][variant][key]["filled"] = json!("173.25");
+        answer(&mut e, &request, "elements", vec![row]);
+        let rows = result(&mut e).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["id"], "private-order-canary");
+        assert_eq!(rows[0]["amount"], 173.25);
+        assert_eq!(rows[0]["filled"], 173.25);
+    }
+}
+
+#[test]
+fn order_event_identity_and_time_refusals_are_value_free() {
+    for (field, value, reason, predicate) in [
+        ("uid", json!(""), "identity", "identity.eventUid.empty"),
+        (
+            "timestamp",
+            json!(-1),
+            "timestamp",
+            "time.eventTimestamp.negative",
+        ),
+        (
+            "timestamp",
+            json!("private-time-canary"),
+            "timestampDecimal",
+            "time.eventTimestamp.decimalParse",
+        ),
+    ] {
+        let mut row = diagnostic_order_event("OrderPlaced");
+        row[field] = value;
+        assert_order_diagnostic(row, reason, predicate);
+    }
+}
+
+#[test]
+fn order_identity_presence_and_type_refusals_name_only_the_field() {
+    for (field, reason) in [("uid", "identity"), ("tradeable", "symbol")] {
+        for bad in [None, Some(Value::Null), Some(json!(1_234_567_890_123_i64))] {
+            let mut row = diagnostic_order_event("OrderPlaced");
+            let order = row["event"]["OrderPlaced"]["order"]
+                .as_object_mut()
+                .unwrap();
+            let suffix = if let Some(value) = bad {
+                order.insert(field.into(), value);
+                "notString"
+            } else {
+                order.remove(field);
+                "missing"
+            };
+            let name = if field == "uid" { "uid" } else { "symbol" };
+            assert_order_diagnostic(row, reason, &format!("identity.{name}.{suffix}"));
+        }
+    }
+    for bad in [None, Some(Value::Null), Some(json!(1_234_567_890_123_i64))] {
+        let mut row = diagnostic_order_event("OrderPlaced");
+        let suffix = if let Some(value) = bad {
+            row["uid"] = value;
+            "notString"
+        } else {
+            row.as_object_mut().unwrap().remove("uid");
+            "missing"
+        };
+        assert_order_diagnostic(row, "identity", &format!("identity.eventUid.{suffix}"));
+    }
+}
+
+#[test]
+fn order_refusal_message_identifies_identity_time_and_economics_predicates() {
+    for variant in [
+        "OrderPlaced",
+        "OrderUpdated",
+        "OrderRejected",
+        "OrderCancelled",
+    ] {
+        for (field, value, reason, predicate) in [
+            ("uid", json!(""), "identity", "identity.uid.empty"),
+            ("tradeable", json!(""), "symbol", "identity.symbol.empty"),
+            (
+                "quantity",
+                json!("-1"),
+                "quantityNegative",
+                "economics.quantity.negative",
+            ),
+            (
+                "filled",
+                json!("-1"),
+                "filledQuantityNegative",
+                "economics.filled.negative",
+            ),
+            (
+                "filled",
+                json!("999.5"),
+                "filledQuantityExceedsQuantity",
+                "economics.filled.exceedsQuantity",
+            ),
+            (
+                "timestamp",
+                json!(-1),
+                "timestamp",
+                "time.timestamp.negative",
+            ),
+            (
+                "lastUpdateTimestamp",
+                json!(NOW - 20_000.0),
+                "timestampOrder",
+                "time.lastUpdateTimestamp.beforeTimestamp",
+            ),
+        ] {
+            let mut row = diagnostic_order_event(variant);
+            let key = if variant == "OrderUpdated" {
+                "newOrder"
+            } else {
+                "order"
+            };
+            row["event"][variant][key][field] = value;
+            assert_order_diagnostic(row, reason, predicate);
+        }
+    }
+    for variant in ["OrderPlaced", "OrderUpdated"] {
+        let mut row = diagnostic_order_event(variant);
+        let key = if variant == "OrderUpdated" {
+            "newOrder"
+        } else {
+            "order"
+        };
+        row["event"][variant][key]["quantity"] = json!("0");
+        assert_order_diagnostic(row, "quantityZero", "economics.quantity.zeroForActiveOrder");
+    }
+}
+
+#[test]
+fn order_decimal_refusal_identifies_the_field_without_serializing_its_value() {
+    for variant in [
+        "OrderPlaced",
+        "OrderUpdated",
+        "OrderRejected",
+        "OrderCancelled",
+        "OrderEditRejected",
+    ] {
+        for (field, reason, predicate) in [
+            (
+                "quantity",
+                "quantityDecimal",
+                "economics.quantity.decimalParse",
+            ),
+            (
+                "filled",
+                "filledQuantityDecimal",
+                "economics.filled.decimalParse",
+            ),
+            (
+                "timestamp",
+                "timestampDecimal",
+                "time.timestamp.decimalParse",
+            ),
+            (
+                "lastUpdateTimestamp",
+                "lastUpdateTimestampDecimal",
+                "time.lastUpdateTimestamp.decimalParse",
+            ),
+            (
+                "limitPrice",
+                "limitPriceDecimal",
+                "economics.limitPrice.decimalParse",
+            ),
+        ] {
+            for bad in [
+                json!("private-decimal-canary"),
+                json!("NaN"),
+                json!("Infinity"),
+                json!(""),
+                Value::Null,
+                json!(true),
+            ] {
+                let mut row = diagnostic_order_event(variant);
+                let key = if variant == "OrderUpdated" {
+                    "newOrder"
+                } else {
+                    "order"
+                };
+                row["event"][variant][key][field] = bad;
+                if variant == "OrderEditRejected" {
+                    let order = row["event"][variant]["order"].take();
+                    row["event"][variant] = json!({"oldOrder":order});
+                }
+                assert_order_diagnostic(row, reason, predicate);
+            }
+        }
+    }
+}
+
+#[test]
+fn order_shape_refusal_does_not_copy_deserializer_values() {
+    let mut row = diagnostic_order_event("OrderPlaced");
+    row["event"]["OrderPlaced"]["order"]["direction"] = json!(1_234_567_890_123_i64);
+    assert_order_diagnostic(row, "rowShape", "rowShape");
+}
+
+#[test]
+fn bad_order_row_rejects_its_entire_page_and_only_recovers_earlier_accepted_pages() {
+    for later_page in [false, true] {
+        let (mut e, _) = ready();
+        let request = if later_page {
+            owned_continuation(&mut e, 2)
+        } else {
+            query(&mut e, orders())
+        };
+        let good = event(
+            "unaccepted-event",
+            "unaccepted-order",
+            "OrderCancelled",
+            NOW - 2.0,
+        );
+        let mut bad = diagnostic_order_event("OrderPlaced");
+        bad["event"]["OrderPlaced"]["order"]["filled"] = json!("private-decimal-canary");
+        answer(&mut e, &request, "elements", vec![good, bad]);
+        let actions = owned_actions(&mut e, 91);
+        if later_page {
+            let rows = owned_partial(&actions, 91);
+            assert_eq!(rows.as_array().unwrap().len(), 1);
+            assert_eq!(rows[0]["updatedTime"], NOW - 10.0);
+            assert!(!rows.to_string().contains("unaccepted-"));
+            let marker = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::Event(event)) => Some(event),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(marker.fields.iter().any(|(key, value)| *key == "reason"
+                && matches!(value, safe_cex_engine::Value::Str(reason) if *reason == "laterPageFailed")));
+            assert!(marker.message.contains("economics.filled.decimalParse"));
+            assert!(!marker.message.contains("private-"));
+        } else {
+            assert_eq!(actions.len(), 1);
+            assert!(
+                matches!(&actions[0], Action::Notice(Notice::CommandFailed { error, .. })
+                if error.message.contains("economics.filled.decimalParse"))
+            );
+        }
+        assert!(requests(&mut e).is_empty());
+        assert!(e.store().orders().is_empty());
     }
 }

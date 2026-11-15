@@ -3918,3 +3918,20 @@ test('#3520 TxFlow margin-mode guard retains measured 10 KiB reserve', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
+
+// #3530 CI43669178292/job132677533254, source7c31d4ae7f57 (PR f04bd59c3bf2).
+// Optimized web/Node 2,289,128 B; SHA256 de63f605ca567bf3441c5cf9f18b381c1f599414dde70cea3f3655cf33269b65.
+// The measured composition and PR head share build-input fingerprint 4c6055d606b45c78e1a922ffee43c112260c14c1004db827a05b74c1c6d02f5d.
+test('#3530 typed Kraken diagnostics retain measured reserve and historical alias floors', () => {
+  const measured = 2_289_128;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const parentFloor = 2_287_616;
+  for (const venue of ['kraken', 'krakenspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(parentFloor, required), `${venue} retains the measured 10 KiB reserve`);
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
