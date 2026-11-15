@@ -2045,7 +2045,17 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   private pageWriterUnavailable = (method: string): ExchangeError => {
-    const message = `${this.name} ${method} was not sent: this page cannot run the account's manual-write engine. Turn cloud off to use this device.`;
+    let reason: string;
+    if (this.isDelegatedMirror) {
+      reason = 'this account uses DELEGATED server-only execution; its writes must use its delegated server connection, not the page manual-write engine.';
+    } else if (this.pageWriteSupported === false) {
+      reason = 'this venue does not support a frame-fed manual-write engine on this page, and this operation has no source-writer route.';
+    } else if (this.pageWriteSupported === true) {
+      reason = "the account's page manual-write engine did not initialize.";
+    } else {
+      reason = "this page could not load or verify the venue's frame-fed manual-write support.";
+    }
+    const message = `${this.name} ${method} was not sent: ${reason}`;
     return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   };
 

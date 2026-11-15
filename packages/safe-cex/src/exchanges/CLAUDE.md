@@ -11,6 +11,10 @@ existing source writer remains authoritative (LOCAL account worker, COSIGNED
 hosted source). Failed supported engines and Unknown writes never
 fall back. Source-write admission rechecks the live signing mode after bridge
 waits: a switch to DELEGATED refuses `unsupported` / `notSent` before dispatch.
+Refusal text explains server-only DELEGATED execution, an unsupported frame-fed
+operation without a source route, unverified page support, or failed page-engine
+initialization; it never recommends changing signing mode or turning cloud off.
+It retains `unsupported` / `notSent` without adding a retry or fallback.
 Account reads retain their source bridge. See `packages/safe-cex/CLAUDE.md` →
 "Rust main-thread trading".
 
