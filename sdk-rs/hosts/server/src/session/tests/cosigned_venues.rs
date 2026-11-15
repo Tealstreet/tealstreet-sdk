@@ -334,7 +334,6 @@ async fn kucoin_loaded_actor_does_not_release_an_incomplete_positive_capture() {
     })
     .await
     .expect("capture genuine positive startup signatures for the fixture");
-    let account = session.joined["acct"].account.clone();
     // Hold subsequent signer delivery while one genuinely captured signature is withheld.
     let (_held, mut deferred, _) = crate::out::Out::channel(1);
     for operation in [
@@ -343,18 +342,32 @@ async fn kucoin_loaded_actor_does_not_release_an_incomplete_positive_capture() {
     ] {
         let captured = device.prior.remove(operation).unwrap();
         {
-            let waiting = load("kucoin", &mut session, &mut deferred, &mut device);
+            let (observed, decision) = tokio::sync::oneshot::channel();
+            let (resume, resumed) = tokio::sync::oneshot::channel();
+            let waiting = load_observed(
+                "kucoin",
+                &mut session,
+                &mut deferred,
+                &mut device,
+                Some(ReadinessPause { observed, resumed }),
+            );
             tokio::pin!(waiting);
-            // Actor reads are FIFO: polling load first puts its read before this marker.
-            // Marker completion proves load observed readiness without a timing delay.
+            // Observe the consumed store read and readiness decision, then resume it.
             tokio::select! {
                 biased;
-                () = &mut waiting => panic!("loaded store released capture before {operation} was signed"),
-                loaded = account.handle.read(|s| {
-                    let l = s.loaded();
-                    l.markets && l.balance && l.orders && l.positions
-                }) => assert_eq!(loaded, Some(true)),
+                () = &mut waiting => panic!("load completed before its readiness checkpoint"),
+                loaded = decision => assert_eq!(loaded, Ok(true)),
             }
+            resume.send(()).unwrap();
+            // Cooperative budgeting must not masquerade as missing signer delivery.
+            let state = tokio::task::unconstrained(std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(waiting.as_mut(), cx))
+            }))
+            .await;
+            assert!(
+                state.is_pending(),
+                "loaded store released capture before {operation} was signed"
+            );
         }
         device.prior.insert(operation.into(), captured);
         load("kucoin", &mut session, &mut deferred, &mut device).await;
@@ -362,11 +375,26 @@ async fn kucoin_loaded_actor_does_not_release_an_incomplete_positive_capture() {
     session.close();
 }
 
+struct ReadinessPause {
+    observed: tokio::sync::oneshot::Sender<bool>,
+    resumed: tokio::sync::oneshot::Receiver<()>,
+}
+
 async fn load(
     venue: &str,
     session: &mut Session,
     sent: &mut crate::out::Receiver,
     device: &mut Device,
+) {
+    load_observed(venue, session, sent, device, None).await;
+}
+
+async fn load_observed(
+    venue: &str,
+    session: &mut Session,
+    sent: &mut crate::out::Receiver,
+    device: &mut Device,
+    mut pause: Option<ReadinessPause>,
 ) {
     let account = session.joined["acct"].account.clone();
     tokio::time::timeout(Duration::from_secs(30), async {
@@ -379,7 +407,12 @@ async fn load(
                 })
                 .await
                 == Some(true);
-            if positive_phase_ready(venue, loaded, device) {
+            let ready = positive_phase_ready(venue, loaded, device);
+            if let Some(pause) = pause.take() {
+                pause.observed.send(loaded).unwrap();
+                pause.resumed.await.unwrap();
+            }
+            if ready {
                 break;
             }
             let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
