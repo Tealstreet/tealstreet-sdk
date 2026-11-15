@@ -49,6 +49,11 @@ proxy and provider-owned JWT handling. Hosted testnet refuses rather than using
 live endpoints: the native engines do not implement the separate static Advanced
 Trade sandbox. Private-startup proof readiness is unchanged.
 
+Hosted Binance Options resolves `https://eapi.binance.com` with the existing
+Japan egress policy and saved transport preferences. Hosted testnet refuses
+`NoBaseUrl`; this prerequisite does not enable the engine/reference's legacy
+testnet endpoint or change the private-startup proof catalog.
+
 Hosted Kraken Futures resolves `https://futures.kraken.com`, retaining the native
 engine's full `/derivatives/api/v3`, `/api/history/v3` and `/api/charts/v1` paths.
 Its existing account defaults select Japan HOW even with saved proxy/tunnel flags
