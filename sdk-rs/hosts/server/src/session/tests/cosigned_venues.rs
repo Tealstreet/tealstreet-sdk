@@ -19,6 +19,7 @@ const READY: &[&str] = &[
     "bitgetusdc",
     "blofin",
     "kucoin",
+    "kucoinspot",
     "phemex",
 ];
 const KEY: &str = "synthetic-key";
@@ -230,6 +231,11 @@ fn positive_phase_ready(venue: &str, loaded: bool, device: &Device) -> bool {
     }
     // KuCoin can load its store before mode/feed startup signing is delivered.
     // Replay requires an actual positive signature for every startup operation.
+    if venue == "kucoinspot" {
+        return crate::delegated::probe::venue_tests::KUCOINSPOT_STARTUP_OPERATIONS
+            .iter()
+            .all(|operation| device.prior.contains_key(*operation));
+    }
     venue != "kucoin"
         || [
             "GET/api/v1/contracts/active",
@@ -757,4 +763,30 @@ async fn cosigned_bybit_proof_ignores_obsolete_delegated_rollout_field() {
 #[tokio::test]
 async fn cosigned_phemex_requires_connection_proof() {
     venue_case("phemex").await;
+}
+
+#[tokio::test]
+async fn cosigned_kucoinspot_requires_connection_proof() {
+    venue_case("kucoinspot").await;
+}
+
+#[test]
+fn kucoinspot_positive_capture_waits_for_every_private_startup_signature() {
+    let mut device = Device::default();
+    let operations = crate::delegated::probe::venue_tests::KUCOINSPOT_STARTUP_OPERATIONS;
+    for operation in operations {
+        device
+            .prior
+            .insert((*operation).into(), "captured signature".into());
+    }
+    assert!(!positive_phase_ready("kucoinspot", false, &device));
+    assert!(positive_phase_ready("kucoinspot", true, &device));
+    for operation in operations {
+        let signature = device.prior.remove(*operation).unwrap();
+        assert!(
+            !positive_phase_ready("kucoinspot", true, &device),
+            "missing {operation}"
+        );
+        device.prior.insert((*operation).into(), signature);
+    }
 }

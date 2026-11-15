@@ -25,6 +25,7 @@ const VENUES: &[&str] = &[
     "bitgetusdc",
     "blofin",
     "kucoin",
+    "kucoinspot",
     "phemex",
 ];
 const KEY: &str = "synthetic-key";
@@ -62,6 +63,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
+        "kucoinspot" => "kucoin",
         "blofin" | "kucoin" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
@@ -148,6 +150,11 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
             "/api/v2/mix/account/accounts",
             "productType=usdc-futures",
         ),
+        "kucoinspot" => (
+            "https://api.kucoin.com",
+            "/api/v1/accounts",
+            "/api/v1/hf/orders/active/symbols",
+        ),
         _ => return,
     };
     assert_eq!(
@@ -194,9 +201,12 @@ impl VenueIo {
             "okx" => route.starts_with("/api/v5/public/") || route.starts_with("/api/v5/market/"),
             "bitget" => route.starts_with("/api/v2/mix/market/"),
             "blofin" => route.starts_with("/api/v1/market/"),
-            "kucoin" => ["contracts/active", "allTickers", "bullet-public"]
-                .iter()
-                .any(|suffix| route.ends_with(*suffix)),
+            "kucoin" => {
+                route == "/api/v2/symbols"
+                    || ["contracts/active", "allTickers", "bullet-public"]
+                        .iter()
+                        .any(|suffix| route.ends_with(*suffix))
+            }
             _ => unreachable!(),
         };
         if public {
@@ -302,6 +312,9 @@ impl VenueIo {
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
+        if self.venue == "kucoinspot" {
+            return kucoinspot::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -367,6 +380,9 @@ impl Transport for VenueIo {
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
+        if self.venue == "kucoinspot" {
+            return kucoinspot::connect(socket, &url, events);
+        }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         let _ = events.send(HostEvent::WsMessage(
@@ -395,7 +411,7 @@ impl Transport for VenueIo {
             r.method == Method::Get
                 || (r.method == Method::Post
                     && ((family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
-                        || (self.venue == "kucoin"
+                        || (family(self.venue) == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
                                 .any(|endpoint| path(&r).ends_with(*endpoint))))),
@@ -474,7 +490,15 @@ const KUCOIN_STARTUP_OPERATIONS: &[&str] = &[
     "POST/api/v1/bullet-private",
 ];
 
+pub(crate) const KUCOINSPOT_STARTUP_OPERATIONS: &[&str] = &[
+    "GET/api/v1/accounts?type=trade",
+    "GET/api/v1/hf/orders/active/symbols",
+    "GET/api/v1/hf/orders/active/page?symbol=BTC-USDT&pageNum=1&pageSize=50",
+    "POST/api/v1/bullet-private",
+];
+
 struct KucoinStartupCapture {
+    operations: &'static [&'static str],
     prior: Arc<Mutex<HashMap<String, String>>>,
     held: Mutex<Vec<(HttpRequest, Events)>>,
     balance: Mutex<Option<HttpRequest>>,
@@ -482,16 +506,21 @@ struct KucoinStartupCapture {
 impl KucoinStartupCapture {
     fn new(prior: Arc<Mutex<HashMap<String, String>>>) -> Self {
         Self {
+            operations: KUCOIN_STARTUP_OPERATIONS,
             prior,
             held: Mutex::default(),
             balance: Mutex::default(),
         }
     }
+    fn spot(prior: Arc<Mutex<HashMap<String, String>>>) -> Self {
+        Self {
+            operations: KUCOINSPOT_STARTUP_OPERATIONS,
+            ..Self::new(prior)
+        }
+    }
     fn complete(&self) -> bool {
         let prior = self.prior.lock().unwrap();
-        KUCOIN_STARTUP_OPERATIONS
-            .iter()
-            .all(|key| prior.contains_key(*key))
+        self.operations.iter().all(|key| prior.contains_key(*key))
     }
     fn release(&self, io: &VenueIo) {
         if self.complete() {
@@ -527,7 +556,8 @@ impl Transport for ReplayCaptureIo {
     }
     fn request(&self, request: HttpRequest, events: Events) {
         if let Some(capture) = &self.capture
-            && path(&request).starts_with("/api/v1/account-overview?")
+            && (path(&request).starts_with("/api/v1/account-overview?")
+                || path(&request) == "/api/v1/accounts?type=trade")
         {
             *capture.balance.lock().unwrap() = Some(request.clone());
             // Keep the positive proof alive until its actual startup signatures exist.
@@ -681,7 +711,7 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .collect::<Vec<_>>()
             .join("&");
     }
-    let payload = if venue == "kucoin" {
+    let payload = if family(venue) == "kucoin" {
         serde_json::from_str::<Value>(canonical).unwrap()["payload"]
             .as_str()
             .unwrap()
@@ -802,8 +832,15 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                         tokio::time::sleep(Duration::from_millis(1100)).await;
                     }
                     let (prepared, link, task) = remote(venue, answer, prior.clone()).await;
-                    let capture = (venue == "kucoin" && matches!(answer, DeviceAnswer::Correct))
-                        .then(|| Arc::new(KucoinStartupCapture::new(prior.clone())));
+                    let capture = (matches!(venue, "kucoin" | "kucoinspot")
+                        && matches!(answer, DeviceAnswer::Correct))
+                    .then(|| {
+                        Arc::new(if venue == "kucoinspot" {
+                            KucoinStartupCapture::spot(prior.clone())
+                        } else {
+                            KucoinStartupCapture::new(prior.clone())
+                        })
+                    });
                     let (result, seen) = check_captured(venue, prepared, capture).await;
                     {
                         let seen = seen.lock().unwrap();
@@ -1128,3 +1165,6 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
+
+#[path = "kucoinspot_probe_tests.rs"]
+mod kucoinspot;
