@@ -64,7 +64,8 @@ fn handover(family: Family) {
         front.incarnation().is_none(),
         "a wrapper must never counterfeit a provider seal"
     );
-    assert!(!link.is_available());
+    assert!(link.is_available(), "notification identity remains usable");
+    assert!(!link.send_echo(), "the browser signing channel is retired");
     assert_eq!(
         front.can_sign(&old_key, family.algorithm()),
         Capability::Supported
@@ -336,13 +337,14 @@ async fn remote_handover(venue: &str, family: Family) {
         while let Some(frame) = receive.recv().await {
             let request: Value = serde_json::from_str(&frame).unwrap();
             let format = request["d"]["wsAuth"]["outputFormat"].as_str().unwrap();
-            assert!(matches!(format, "hyperliquid-address" | "paradex-public"));
             count.fetch_add(1, Ordering::SeqCst);
             if let Some(link) = weak.upgrade() {
-                link.resolve(
-                    1,
-                    json!({"id":request["d"]["id"], "wsAuthSignature":answer}),
-                );
+                let response = if matches!(format, "hyperliquid-address" | "paradex-public") {
+                    json!({"id":request["d"]["id"], "wsAuthSignature":answer})
+                } else {
+                    json!({"id":request["d"]["id"], "error":"retired signing control reached the device"})
+                };
+                link.resolve(1, response);
             }
         }
     });
@@ -357,6 +359,7 @@ async fn remote_handover(venue: &str, family: Family) {
     let options: Value = serde_json::from_str(&remote.options_json).unwrap();
     let ids: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
     let key = ids.primary.as_ref().unwrap().signing_ref().unwrap().clone();
+    let credential = ids.primary.as_ref().unwrap().credential.clone();
     let signer = AccountSigner::new_bound(
         Some(remote.provider.clone()),
         ids,
@@ -415,8 +418,46 @@ async fn remote_handover(venue: &str, family: Family) {
     let request = statement.sign_request(family, &key, &[9; 32]).unwrap();
     let signed = signer.provider().sign_ready(&request).unwrap().unwrap();
     assert!(public.verify(&statement, &signed.values[0]));
+    let sign = Operation::Sign {
+        key: key.clone(),
+        algorithm: family.algorithm(),
+        payload: vec![PayloadPart::Bytes { bytes: vec![2; 32] }],
+    };
+    let retired_operations = match family {
+        Family::Ethereum => vec![
+            Operation::Sha256 {
+                payload: vec![PayloadPart::Bytes {
+                    bytes: b"retired signing control".to_vec(),
+                }],
+            },
+            Operation::PublicAddress { key },
+            sign,
+        ],
+        Family::Stark => vec![
+            Operation::Sha256 {
+                payload: vec![PayloadPart::Bytes {
+                    bytes: b"retired signing control".to_vec(),
+                }],
+            },
+            sign,
+        ],
+        Family::Ed25519 => vec![Operation::Present { key: credential }, sign],
+        Family::Schnorr => unreachable!(),
+    };
+    assert!(matches!(
+        remote
+            .provider
+            .sign(SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: retired_operations
+            })
+            .await,
+        Err(SignError::Unavailable)
+    ));
     assert_eq!(calls.load(Ordering::SeqCst), before);
-    assert!(!link.is_available());
+    assert!(link.is_available(), "notification identity remains usable");
+    assert!(!link.send_echo(), "the browser signing channel is retired");
 }
 
 #[tokio::test]
