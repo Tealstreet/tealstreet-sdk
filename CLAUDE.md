@@ -33,4 +33,5 @@ documented in [`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#eea-pr
 
 Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
-enable Session admission, device signing dispatch or venue readiness.
+enable Session admission or venue readiness. The separate SDK/WASM device dispatch
+retains the original signing host and owner; it does not activate any server venue.

@@ -126,6 +126,10 @@ impl Statement {
             value.issued_at_ms,
         )
     }
+    pub fn issued_at_ms(&self) -> u64 {
+        self.issued_at_ms
+    }
+
     pub fn current_at(&self, now_ms: u64, lifetime_ms: u64) -> bool {
         now_ms
             .checked_sub(self.issued_at_ms)
