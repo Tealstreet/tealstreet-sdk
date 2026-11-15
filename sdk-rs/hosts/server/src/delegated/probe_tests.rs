@@ -1174,9 +1174,9 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
 
-#[path = "woo_probe_tests.rs"]
-mod woo;
 #[path = "bingx_probe_tests.rs"]
 mod bingx;
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
+#[path = "woo_probe_tests.rs"]
+mod woo;
