@@ -62,3 +62,8 @@ deployed application routes, authorization and shell features remain caller-owne
   public engine outside the factory; refresh disposes that old provider source.
 - Native factory conformance: build WASM, then run
   `corepack yarn -s workspace @tealstreet/safe-cex-server test-wasm`.
+
+The native factory tests inject their own fixed cache clock; the native transport
+and timers remain real. Warm hydration assertions must not depend on the host
+staying in one UTC hour. Fixture teardown owns every created factory and resets
+the injected transport, loader and mocks before the next case.
