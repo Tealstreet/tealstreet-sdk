@@ -270,7 +270,71 @@ fn sha256(bytes: &[u8]) -> Vec<u8> {
     Sha256::digest(bytes).to_vec()
 }
 
+/// Read-only public facts from one original remote provider and its opaque ref.
+/// Cloning this source cannot install a key, complete setup or authorize signing.
+#[derive(Clone)]
+pub struct PublicBindingSource(pub(crate) Arc<Inner>);
+impl PublicBindingSource {
+    /// `None` means this exact Schnorr provider needs its registered-key lookup.
+    pub fn public_key(
+        &self,
+        key: &KeyRef,
+        algorithm: Algorithm,
+    ) -> Result<Option<Vec<u8>>, SignError> {
+        let inner = &self.0;
+        if !inner.owns_signing(key) || algorithm != inner.family.algorithm() {
+            return Err(SignError::Unsupported);
+        }
+        let bytes = match inner.family {
+            Family::Hyperliquid | Family::Grvt | Family::Paradex => {
+                inner.bound().ok_or(SignError::Unavailable)?
+            }
+            Family::Backpack => {
+                let text = utf8(&inner.primary.public)?;
+                if text.len() != 44 {
+                    return refused();
+                }
+                let encoding = base64::engine::general_purpose::STANDARD;
+                let bytes = encoding.decode(&text).map_err(|_| SignError::Refused)?;
+                if bytes.len() != 32 || encoding.encode(&bytes) != text {
+                    return refused();
+                }
+                bytes
+            }
+            Family::Orderly => {
+                let text = utf8(&inner.primary.public)?;
+                let text = text.strip_prefix("ed25519:").ok_or(SignError::Refused)?;
+                if !(32..=44).contains(&text.len()) {
+                    return refused();
+                }
+                let bytes = bs58::decode(text)
+                    .into_vec()
+                    .map_err(|_| SignError::Refused)?;
+                if bytes.len() != 32 || bs58::encode(&bytes).into_string() != text {
+                    return refused();
+                }
+                bytes
+            }
+            Family::Lighter => return Ok(None),
+            _ => return Err(SignError::Unsupported),
+        };
+        Ok(Some(bytes))
+    }
+}
+
 impl Inner {
+    pub(crate) fn bind_public_metadata(
+        &self,
+        options: &Map<String, Value>,
+    ) -> Result<(), SignError> {
+        if self.family == Family::Grvt
+            && let Some(address) = options.get("grvtSignerAddress")
+        {
+            self.bind(&prefixed(address, 20)?)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(
         venue: String,
         policy: Policy,
@@ -618,6 +682,7 @@ impl Inner {
                     .device(utf8(preimage)?, "grvt-order", |value| prefixed(value, 85))
                     .await?;
                 let (address, signature) = joined.split_at(20);
+                self.bind(address)?;
                 Ok(vec![sha256(preimage), address.to_vec(), signature.to_vec()])
             }
             _ => refused(),

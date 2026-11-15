@@ -608,12 +608,22 @@ dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 A private socket always proves its own candidate credentials before crossing a
 resident mode. A COSIGNED join attaches to an existing DELEGATED actor and cannot
-downgrade it. A verified DELEGATED join can upgrade a COSIGNED HMAC actor,
-including its own parked copy, without restarting the actor or its jobs. An
-owned signing-work barrier refuses `mode_transition_busy` while any original
+downgrade it. A verified DELEGATED join can upgrade a supported COSIGNED actor,
+including its own parked copy, without restarting the actor or its jobs. Ethereum,
+Stark and Ed25519 candidates match the original provider's completed/canonical
+public binding locally; Schnorr matches the venue-registered key through the
+existing routed public lookup. Public proof retains only a weak reference to the
+exact resident actor, and captured init, token and lease guards survive the lookup.
+A retired attempt or different actor cannot inherit it, including after settings
+return to their previous values. Existing DELEGATED residents use the same local
+public-key comparison before attachment; unsigned balance reads are not proof.
+An owned signing-work barrier refuses `mode_transition_busy` while any original
 sign future or setup execution remains unsettled. No work is canceled, retried
-or sent to both signers. Unsupported sealed address/nonce lifetimes refuse
-`mode_transition_unavailable`. These refusals leave the candidate unattached.
+or sent to both signers. The original engine dispatch handle, opaque refs,
+address/public-key seals and nonce ownership stay in place. Missing trusted
+bindings refuse `mode_transition_unavailable`. Coinbase CDP explicitly refuses
+as `proof-unavailable` until its COSIGNED JWT setup and private venue proof exist.
+These refusals leave the candidate unattached.
 
 The future provider, actual mode and protected resident are installed together.
 Only opaque key refs are translated, by primary/secondary identity role; receipt,

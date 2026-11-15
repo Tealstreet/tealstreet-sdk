@@ -58,17 +58,24 @@ passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. Unproved/trusted construction still refuses cross-mode
 attachment. Socket joins first prove their own credentials: COSIGNED can attach
 to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
-a COSIGNED HMAC resident without replacing its actor, orders or algo jobs.
-All outstanding signer futures/setup work must settle first; busy handovers
-refuse transiently without canceling or replaying them. Address/nonce-sealed
-non-HMAC lifetimes refuse explicitly as unavailable instead of being rebuilt.
-The original opaque refs map by identity role to the protected resident refs.
+a supported COSIGNED resident without replacing its actor, orders or algo jobs.
+Public-key handovers locally match the candidate to the original provider's
+completed Ethereum/Stark binding or canonical Ed25519 public identity. Schnorr
+uses the existing routed registered-key lookup, captured init/lease/expiry guards
+and exact actor binding. Returning to the same settings never revives a retired proof.
+All outstanding original sign futures/setup work must join before handover; busy
+handovers refuse transiently without canceling or replaying them. Engine-owned
+address seals, nonce ownership and original opaque refs survive unchanged;
+only dispatch refs map by identity role to the protected resident refs.
 Account-owned signer control retains the protected erasure authority; engine
 dispatch handles never retain it. Reconfiguration shares that authority between
 accounts, and the last account owner drop erases retained engine handles.
 Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
 registration's label/instanceId. Refusals have attached=false and no actualMode.
-Socket handover and private-read verification precede any transition.
+Socket handover and possession verification precede any transition. A verified
+resident public-key join uses the local key proof, not an unsigned startup read. Coinbase
+CDP remains explicitly proof-unavailable pending its COSIGNED JWT setup and
+venue-proof implementation; it never silently falls back to another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent

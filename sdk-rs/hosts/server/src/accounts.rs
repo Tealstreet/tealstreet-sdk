@@ -1524,6 +1524,17 @@ impl Registry {
         }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
+        let public = attempt
+            ._probe
+            .as_ref()
+            .and_then(|proof| proof.public_join.as_ref());
+        if public.is_some_and(|proof| {
+            existing
+                .as_ref()
+                .is_none_or(|current| !proof.account.ptr_eq(&Arc::downgrade(current)))
+        }) {
+            return Err("Account verification expired".into());
+        }
         if let Some(expected) = &apply
             && (expected.identity.is_none()
                 || !self.holds(expected, holder)
@@ -1555,11 +1566,14 @@ impl Registry {
                     if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
                         return Err("Account is retiring; account not attached".into());
                     }
-                    if account
-                        .signing
-                        .upgrade(resident)
-                        .map_err(|reason| reason.reason().to_owned())?
-                    {
+                    let upgraded = match public {
+                        Some(proof) => account
+                            .signing
+                            .upgrade_proven(resident, Some(&proof.public)),
+                        None => account.signing.upgrade(resident),
+                    }
+                    .map_err(|reason| reason.reason().to_owned())?;
+                    if upgraded {
                         account.broadcast_signing_mode();
                     }
                 }
@@ -1713,8 +1727,15 @@ impl Registry {
             .transpose()
             .map_err(|_| "Invalid signer identities".to_owned())?
             .unwrap_or_default();
-        let signing =
-            AccountSigner::new(signer.clone(), identities, link.clone(), delegated.clone());
+        let signing = AccountSigner::new_bound(
+            signer.clone(),
+            identities,
+            link.clone(),
+            delegated.clone(),
+            remote
+                .as_ref()
+                .and_then(|remote| remote.public_binding_source()),
+        );
         let signer: Option<safe_cex_engine::signing::Provider> = if !delegated_build && !public_only
         {
             Some(signing.provider())

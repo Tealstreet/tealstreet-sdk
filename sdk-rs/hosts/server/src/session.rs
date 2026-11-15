@@ -681,7 +681,10 @@ impl Session {
             self.refuse_handover(&init.account_name, true);
             return;
         }
-        if !delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name) {
+        // CDP's hosted JWT setup and venue proof are not implemented yet.
+        if (!delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name))
+            || (delegated && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot"))
+        {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "proof unavailable");
             self.handover_out(&init.account_name)
@@ -3156,6 +3159,7 @@ mod tests {
     mod apply_settings;
     mod cosigned_venues;
     mod delegated_probe;
+    mod provider_handover_refusals;
     mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {

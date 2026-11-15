@@ -311,44 +311,6 @@ fn hmac_control_keeps_its_existing_handover_and_exact_bytes() {
     assert_eq!(actual.receipt, expected.receipt);
 }
 
-#[tokio::test]
-async fn coinbase_cdp_refuses_with_an_explicit_transition_reason() {
-    use crate::delegated::Credentials;
-    for venue in ["coinbase", "coinbasespot"] {
-        let registry = Registry::new(
-            EngineThreads::start(1).unwrap(),
-            Duration::from_millis(1),
-            Duration::from_secs(60),
-        );
-        let init = InitPayload {
-            account_name: "cdp-unavailable".into(),
-            exchange_name: venue.into(),
-            key: "organizations/synthetic/apiKeys/synthetic".into(),
-            signing_mode: Some("delegated".into()),
-            ..Default::default()
-        };
-        let candidate: Credentials =
-            serde_json::from_str(&json!({"key":init.key, "secret":""}).to_string()).unwrap();
-        let permit = registry.probe_permit("synthetic-user", &init).unwrap();
-        let Err(refusal) = registry
-            .probe_join(
-                "synthetic-user",
-                &init,
-                Some(("synthetic-token".into(), now_ms() + 60_000)),
-                Some(&candidate),
-                None,
-                permit,
-            )
-            .await
-        else {
-            panic!("CDP must not attach without its setup/proof prerequisite");
-        };
-        assert_eq!(refusal.transition, Some(ModeTransitionRefusal::Unavailable));
-        assert!(!refusal.transient);
-        assert!(registry.accounts.lock().unwrap().is_empty());
-    }
-}
-
 async fn remote_handover(venue: &str, family: Family) {
     use base64::Engine as _;
     let (local, new_ids) = provider(family, "resident", 7);
@@ -395,7 +357,13 @@ async fn remote_handover(venue: &str, family: Family) {
     let options: Value = serde_json::from_str(&remote.options_json).unwrap();
     let ids: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
     let key = ids.primary.as_ref().unwrap().signing_ref().unwrap().clone();
-    let signer = AccountSigner::new(Some(remote.provider.clone()), ids, Some(link.clone()), None);
+    let signer = AccountSigner::new_bound(
+        Some(remote.provider.clone()),
+        ids,
+        Some(link.clone()),
+        None,
+        remote.public_binding_source(),
+    );
     if matches!(venue, "hyperliquid" | "paradex") {
         let operation = if family == Family::Ethereum {
             Operation::PublicAddress { key: key.clone() }

@@ -33,3 +33,9 @@ receipt remains attached to the original graph.
 Run `cargo test --locked -j2 -p safe-cex-remote-signer` from `sdk-rs` for native
 setup/provider/link tests. KuCoin tests drive the actual registry device codec
 and compare every result byte with an independent LocalSigner control.
+
+`RemoteAccount::public_binding_source` exposes only the original provider's
+public binding and opaque signing reference. It performs no setup or device IO
+and grants no signing authority. The account-owned handover barrier must still
+wait for the original sign/setup jobs to join; the read-only source never owns
+the protected resident or replaces engine-owned seals and nonce state.

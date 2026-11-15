@@ -15,7 +15,9 @@ pub use link::{
     ECHO_PAD_CAP, EchoSize, MAX_RESPONSE_FIELD, Outbox, SIGN_TIMEOUT, SignerLink, SocketId,
 };
 pub use policy::supports_remote_signing;
-pub use provider::{FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, RemoteProvider};
+pub use provider::{
+    FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, PublicBindingSource, RemoteProvider,
+};
 
 use policy::PassphraseRule;
 use provider::{Family, Inner, Owned, PublicProvider};
@@ -39,6 +41,13 @@ pub struct RemoteAccount {
 }
 
 impl RemoteAccount {
+    /// Bound to this provider's original identities; no setup or device IO occurs.
+    pub fn public_binding_source(&self) -> Option<PublicBindingSource> {
+        self.inner
+            .as_ref()
+            .map(|inner| PublicBindingSource(inner.clone()))
+    }
+
     /// Called once after `MAX_CONSECUTIVE_FAILURES` failures spanning at least
     /// `FATAL_MIN_STREAK`; the server disposes the account, as today.
     pub fn on_fatal(&self, callback: impl FnOnce() + Send + 'static) {
@@ -236,6 +245,9 @@ pub fn remote_account(
         link,
         primary,
     ));
+    inner
+        .bind_public_metadata(&options)
+        .map_err(|_| SetupError("Invalid public signer binding"))?;
     Ok(RemoteAccount {
         provider: Arc::new(RemoteProvider {
             inner: inner.clone(),

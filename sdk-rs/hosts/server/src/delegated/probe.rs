@@ -105,6 +105,14 @@ impl ProbeRefusal {
         ..Self::INVALID
     };
 
+    pub(crate) fn transition(reason: crate::envelope::ModeTransitionRefusal) -> Self {
+        Self {
+            transient: reason.transient(),
+            transition: Some(reason),
+            ..Self::INVALID
+        }
+    }
+
     pub(crate) fn at(mut self, stage: RefusalStage) -> Self {
         self.stage = stage;
         self

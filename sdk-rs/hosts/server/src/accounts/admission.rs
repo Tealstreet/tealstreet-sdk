@@ -4,9 +4,20 @@ use crate::delegated::{
     probe::{ProbeRefusal, RefusalStage},
 };
 
+use safe_cex_crypto::admission::{Family, PublicKey};
+
+pub(super) struct PublicJoinProof {
+    pub(super) account: std::sync::Weak<Account>,
+    pub(super) public: PublicKey,
+}
+
 #[cfg(test)]
 #[path = "admission_deadline_tests.rs"]
 mod deadline_tests;
+
+#[cfg(test)]
+#[path = "public_join_proof_tests.rs"]
+mod public_join_proof_tests;
 
 pub(crate) struct ProbePermit {
     user: String,
@@ -17,6 +28,7 @@ pub(crate) struct ProbePermit {
     pending: PendingInits,
     registry_name: String,
     reservation: Option<proof_queue::Reservation>,
+    pub(super) public_join: Option<PublicJoinProof>,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
@@ -116,9 +128,139 @@ impl Registry {
             pending: self.pending_inits.clone(),
             registry_name,
             reservation: Some(reservation),
+            public_join: None,
         };
         permit.check(user, init)?;
         Ok(permit)
+    }
+
+    async fn prove_public_join(
+        &self,
+        init: &InitPayload,
+        candidate: &ResidentCopy,
+        plan: &RoutingPlan,
+        token: Option<(String, u64)>,
+        permit: &ProbePermit,
+    ) -> Result<Option<PublicJoinProof>, ProbeRefusal> {
+        let Some(family) = Family::for_venue(&init.exchange_name) else {
+            return Ok(None);
+        };
+        permit.check(&permit.user, init)?;
+        let (account, public) = {
+            let existing = self
+                .accounts
+                .lock()
+                .unwrap()
+                .get(&(permit.user.clone(), permit.registry_name.clone()))
+                .cloned();
+            let Some(account) = existing else {
+                return Ok(None);
+            };
+            if account.is_public()
+                || !same_handover_settings(&account.fingerprint, &permit.fingerprint)
+            {
+                return Err(ProbeRefusal::INVALID);
+            }
+            if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
+                return Err(ProbeRefusal::TRANSIENT);
+            }
+            let public = account.signing.public_binding(family).map_err(|reason| {
+                if account.delegated().is_none() {
+                    ProbeRefusal::transition(reason)
+                } else {
+                    ProbeRefusal {
+                        transient: reason.transient(),
+                        ..ProbeRefusal::INVALID
+                    }
+                }
+            })?;
+            (Arc::downgrade(&account), public)
+        };
+        let captured = account.clone();
+        let current = permit.current.clone();
+        let lease = permit.lease.clone();
+        let expiry = permit.token_expires_at;
+        let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+            current.load(Ordering::Acquire)
+                && lease.as_ref().is_none_or(|lease| lease.allowed())
+                && expiry.is_none_or(|expiry| expiry > now_ms())
+                && captured.upgrade().is_some_and(|account| {
+                    account.handle.disposal_cause().is_none() && account.running.io_allowed()
+                })
+        });
+        if !allowed() {
+            return Err(ProbeRefusal::TRANSIENT);
+        }
+        let public = if let Some(public) = public {
+            public
+        } else {
+            if family != Family::Schnorr {
+                return Err(ProbeRefusal::INVALID);
+            }
+            let index = init
+                .api_key_index
+                .as_deref()
+                .and_then(|index| index.parse::<u8>().ok())
+                .ok_or_else(|| {
+                    ProbeRefusal::transition(crate::envelope::ModeTransitionRefusal::Unavailable)
+                })?;
+            let account_index = init
+                .application_id
+                .as_deref()
+                .and_then(|account| account.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    ProbeRefusal::transition(crate::envelope::ModeTransitionRefusal::Unavailable)
+                })?;
+            let token_provider = ProxyToken::new();
+            token_provider.set(token);
+            let transport = NetworkTransport::with_routing(plan.clone(), token_provider.provider())
+                .with_venue(&init.exchange_name)
+                .with_io_guard(allowed.clone());
+            #[cfg(test)]
+            let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+            let network = safe_cex_venues::lighter_registration::Network::from_options(
+                init.exchange_name == "lighter-robinhood",
+                init.testnet == Some(true),
+            );
+            crate::admission::fetch_lighter_registered_key(
+                &transport,
+                network,
+                account_index,
+                index,
+                allowed.clone(),
+            )
+            .await
+            .map_err(|_| ProbeRefusal::TRANSIENT)?
+        };
+        permit.check(&permit.user, init)?;
+        if !allowed()
+            || !self
+                .accounts
+                .lock()
+                .unwrap()
+                .get(&(permit.user.clone(), permit.registry_name.clone()))
+                .is_some_and(|current| account.ptr_eq(&Arc::downgrade(current)))
+        {
+            return Err(ProbeRefusal::TRANSIENT);
+        }
+        let key = candidate
+            .identities()
+            .primary
+            .as_ref()
+            .ok_or(ProbeRefusal::INVALID)?
+            .signing_ref()
+            .map_err(|_| ProbeRefusal::INVALID)?;
+        if !public
+            .matches_provider(&candidate.provider(), key)
+            .map_err(|_| ProbeRefusal::INVALID)?
+        {
+            return Err(ProbeRefusal::INVALID);
+        }
+        permit.check(&permit.user, init)?;
+        if !allowed() {
+            return Err(ProbeRefusal::TRANSIENT);
+        }
+        Ok(Some(PublicJoinProof { account, public }))
     }
 
     pub(crate) async fn probe_join(
@@ -178,6 +320,14 @@ impl Registry {
                 .get(user)
                 .cloned()
                 .unwrap_or(plan);
+            if let Some(candidate) = &resident
+                && let Some(proof) = self
+                    .prove_public_join(init, candidate, &plan, token.clone(), &permit)
+                    .await?
+            {
+                permit.public_join = Some(proof);
+                return Ok(());
+            }
             let token_provider = ProxyToken::new();
             token_provider.set(token);
             config.log_label = None;
@@ -271,6 +421,13 @@ impl Registry {
             .unwrap()
             .get(&(user.into(), proof.registry_name.clone()))
             .cloned();
+        if let Some(public) = &proof.public_join
+            && existing
+                .as_ref()
+                .is_none_or(|current| !public.account.ptr_eq(&Arc::downgrade(current)))
+        {
+            return Err(ProbeRefusal::TRANSIENT);
+        }
         if let Some(account) = existing
             && (account.is_public()
                 || !same_handover_settings(&account.fingerprint, &proof.fingerprint))
