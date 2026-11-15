@@ -27,6 +27,7 @@ const VENUES: &[&str] = &[
     "kucoin",
     "phemex",
     "bingx",
+    "mexc",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -41,6 +42,7 @@ pub(crate) struct Seen {
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
+    pub(crate) mexc_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -64,7 +66,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
-        "blofin" | "kucoin" | "bingx" => venue,
+        "blofin" | "kucoin" | "bingx" | "mexc" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -114,6 +116,10 @@ fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "mexc" {
+        mexc::assert_startup(seen);
+        return;
+    }
     let (origin, private, product) = match venue {
         "bybitdemo" => (
             "https://api-demo.bybit.com",
@@ -301,6 +307,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "mexc" {
+            return mexc::response(self, r);
+        }
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
@@ -369,6 +378,9 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "mexc" {
+            return mexc::connect(self, socket, &url, events);
+        }
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
@@ -673,6 +685,9 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "mexc" {
+        return mexc::operation(canonical);
+    }
     if venue == "phemex" {
         // Native Phemex signs path + query + whole-second expiry; keep the read scope.
         return canonical
@@ -1141,3 +1156,6 @@ mod phemex;
 
 #[path = "bingx_probe_tests.rs"]
 mod bingx;
+
+#[path = "mexc_probe_tests.rs"]
+mod mexc;
