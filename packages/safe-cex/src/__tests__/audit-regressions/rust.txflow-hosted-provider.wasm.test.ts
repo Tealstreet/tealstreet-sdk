@@ -59,7 +59,7 @@ async function origin(tamperReceipt = false) {
       }
       switch (request.type) {
         case 'perpMeta': data = { universe: [{ index: 1, name: 'BTC-USDC', baseCurrency: 'BTC', quoteCurrency: 'USDC',
-          currencyType: 'usdc', delisted: false, haltTrading: false, basePrecision: '0.001', priceTick: '0.1', maxLeverage: 50 }] }; break;
+          currencyType: 'usdc', delisted: false, haltTrading: false, basePrecision: '0.001', priceTick: '0.1', maxLeverage: 50, useNotionalMargin: false }] }; break;
         case 'activeAssetCtx': data = { instrumentId: 1, markPx: '100', lastPrice: '100' }; break;
         case 'clearinghouseState': data = { user: OWNER, time: Date.now(), assetPositions: [],
           marginSummary: { accountValue: '1000', totalMarginUsed: '0', totalRawUsd: '1000' } }; break;
