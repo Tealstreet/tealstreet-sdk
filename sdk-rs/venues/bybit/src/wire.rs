@@ -260,6 +260,8 @@ pub struct TickerRow<'a> {
 
 #[derive(Deserialize)]
 pub struct TickerEvent<'a> {
+    #[serde(borrow, default, rename = "type")]
+    pub kind: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub data: TickerDelta<'a>,
 }
@@ -297,6 +299,22 @@ fn optional_decimal<'de, D: serde::Deserializer<'de>>(
         .map(Option::flatten)
 }
 
+/// Missing fields confirm a prior delta value; explicit unknowns do not.
+#[derive(Clone, Copy, Default)]
+pub struct ReferenceDelta {
+    pub present: bool,
+    pub value: Option<f64>,
+}
+
+impl<'de> Deserialize<'de> for ReferenceDelta {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: optional_decimal(deserializer)?,
+        })
+    }
+}
+
 fn discard_optional_string<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<(), D::Error> {
@@ -310,16 +328,16 @@ fn discard_optional_string<'de, D: serde::Deserializer<'de>>(
 pub struct TickerDelta<'a> {
     #[serde(borrow, default)]
     pub symbol: Cow<'a, str>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub last_price: Option<f64>,
+    #[serde(default)]
+    pub last_price: ReferenceDelta,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub bid1_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub ask1_price: Option<f64>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub mark_price: Option<f64>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub index_price: Option<f64>,
+    #[serde(default)]
+    pub mark_price: ReferenceDelta,
+    #[serde(default)]
+    pub index_price: ReferenceDelta,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub price24h_pcnt: Option<f64>,
     /// Option frames spell quotes and change differently from derivatives.
@@ -1611,7 +1629,7 @@ mod tests {
         let event: TickerEvent<'_> = serde_json::from_str(
             r#"{"data":{"symbol":"BTCUSDT","lastPrice":"54321","volume24h":"1000","turnover24h":"54321000"}}"#,
         ).unwrap();
-        assert_eq!(event.data.last_price, Some(54321.0));
+        assert_eq!(event.data.last_price.value, Some(54321.0));
         assert_eq!(event.data.volume24h, Some(1000.0));
         assert!(
             matches!(event.data.symbol, Cow::Borrowed(_)),
@@ -1638,7 +1656,7 @@ mod tests {
         let event: TickerEvent<'_> = serde_json::from_str(
             r#"{"data":{"symbol":"BTC\u0055SDT","lastPrice":"\u00354321","bid1Price":null,"volume24h":""}}"#,
         ).unwrap();
-        assert_eq!(event.data.last_price, Some(54321.0));
+        assert_eq!(event.data.last_price.value, Some(54321.0));
         assert!(matches!(event.data.symbol, Cow::Owned(_)));
         assert_eq!(event.data.symbol, "BTCUSDT");
         assert!(event.data.bid1_price.is_none());
@@ -1682,11 +1700,11 @@ mod tests {
             ]
             .map(|value| present(value).map(float).map(f64::to_bits));
             let actual = [
-                delta.last_price,
+                delta.last_price.value,
                 delta.bid1_price,
                 delta.ask1_price,
-                delta.mark_price,
-                delta.index_price,
+                delta.mark_price.value,
+                delta.index_price.value,
                 delta.price24h_pcnt,
                 delta.open_interest,
                 delta.funding_rate,

@@ -65,6 +65,16 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## Bybit ticker reference freshness
+
+Bybit derivatives omit unchanged fields from ticker deltas. Only references
+established by the current socket's snapshot lineage, still matching the store,
+are confirmed by that symbol's subsequent deltas. Reconnects, malformed or
+untyped ticker frames, and explicitly unknown references retire that proof.
+REST seeds and other symbols' traffic cannot supply it. The protective-amend
+freshness limit remains five seconds without confirmation; unknown prices stay
+unknown. Spot, options and Hyro retain their existing snapshot/observation rules.
+
 ## Browser request-failure diagnostics
 
 The JS host emits `http.request_failed` at Debug for failed managed HTTP work,
