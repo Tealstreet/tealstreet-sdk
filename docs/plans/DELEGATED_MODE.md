@@ -1,5 +1,23 @@
 # DELEGATED mode: options against spec v10
 
+## Current DELEGATED policy (2026-11-13)
+
+DELEGATED is venue-generic, with the same hosted venue eligibility as COSIGNED.
+Every venue the hosted server can run is eligible; Bybit was only the first test
+account. There is no separate DELEGATED venue list or per-venue feature flag.
+One runtime `DELEGATED` flag supplies the kill switch and per-user pin;
+`DELEGATED_BYBIT` is only a compatibility alias for that same flag.
+
+Mobile is DELEGATED-only. DELEGATED clients run no WASM engine or local signer;
+every write uses a typed v1 action over the existing hosted WebSocket. Capability
+and account-operation checks remain required and never select a local fallback.
+
+The baseline, option comparisons and pinned observations below are historical.
+Their earlier client-engine/mobile-mode and venue-specific rollout assumptions
+are **superseded** by this policy; retain them as dated design/evidence records,
+not current activation instructions. The current wire contract is documented in
+[DELEGATED action frames](callers/delegated-action-frames.md).
+
 ## Context
 
 Status: discussion only. This document compares possible changes to **Rust
@@ -13,6 +31,8 @@ hybrid, longer key retention, outbox/idempotency/resend, routing reuse, and shar
 LOCAL and COSIGNED behavior is context, not an invitation to redesign them.
 
 ## Baseline (spec v10)
+
+**Historical / superseded where it conflicts with the current policy above.**
 
 These are settled baseline points, not new proposals:
 
@@ -57,6 +77,8 @@ server-forwarding options below would supersede it **only if approved**, and a
 mobile facade would also reopen #13's explicitly rejected alternative.
 
 ## Current state (mobile and server)
+
+**Historical / superseded where it conflicts with the current policy above.**
 
 Evidence snapshots: SDK `05241cd0f41b05c382fceed0e0347d9b81729a0c`; mobile
 `8377a4f3f1e048df14ad76be93bf2837366bcd60`; router/roller source
@@ -555,6 +577,8 @@ multiple RTTs for either option. No latency benefit is assumed for cold start.
 
 ## Options assessment (for discussion)
 
+**Historical / superseded where it conflicts with the current policy above.**
+
 One discussion leaning is **Option 2**, if server-forwarded mobile writes are
 the desired delta: it reuses the hosted custody path and avoids app request-key
 management. This is not a choice of implementation. Keeping spec #4/#12 unchanged
@@ -577,6 +601,8 @@ costs and gives up the same-connection provenance benefit for manual writes.
 Whether any hybrid's availability gain justifies that scope is open.
 
 ## Mobile-no-WASM question
+
+**Historical / superseded where it conflicts with the current policy above.**
 
 **Question:** could mobile move directly to a server-writing DELEGATED client
 without an on-device exchange engine or venue signer?
@@ -847,6 +873,8 @@ Any later client/server envelope or SDK facade change would need explicit host
 coordination (**NEEDS-NX for implementation**, not a code change in this document).
 
 ## Risks/open questions for Sam
+
+**Historical / superseded where it conflicts with the current policy above.**
 
 1. Is reopening #4/#12/#13 for mobile manual forwarding desirable, including the
    previously rejected facade and account-route/IP-whitelist compatibility cost?

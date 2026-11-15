@@ -527,7 +527,7 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
   - At `exp + 30s` the socket closes with 1008. That 30s is the same reconnect grace as `PROXY_TOKEN_RECONNECT_GRACE_MS`.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
 - **Private COSIGNED join proof:** fresh connections use the same isolated native
-  probe and admission path as DELEGATED, independently of `delegated.enabled`.
+  probe and admission path as DELEGATED, using shared hosted eligibility.
   Exact `bybit`, `binance`, `okx`, `bitget`, `blofin` and `kucoin` are proof-ready.
   Other private COSIGNED venues return an init refusal with
   `kind: "proof-unavailable"`, `initRefused: true`, `transient: false` and
@@ -608,8 +608,12 @@ dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 DELEGATED uses the same hosted eligibility as COSIGNED: a supported parsed
 `remoteSigning` policy and a configured server origin, including the existing
-unhosted refusal. There is no per-venue DELEGATED list. Authenticated connections
-request a handover with `msg` data
+unhosted refusal. There is no per-venue DELEGATED list or feature flag. One
+runtime `DELEGATED` flag supplies the kill switch/per-user pin; the old
+`DELEGATED_BYBIT` name is only its compatibility alias. Bybit was the first test
+account. DELEGATED-only mobile and all DELEGATED clients have no WASM engine or
+local signer; every write is a typed v1 action on the existing hosted WebSocket.
+Authenticated connections request a handover with `msg` data
 `{op:"delegated-key-req", accountName, data:{exchangeName}}`.
 An unjoined caller must supply `data.exchangeName`; a joined account may omit it
 and use its existing venue. Missing or unsupported targets refuse without an

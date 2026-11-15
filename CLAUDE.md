@@ -12,3 +12,10 @@ The host ownership observation/teardown contract lives in
 
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
+
+DELEGATED is venue-generic under the same hosted eligibility as COSIGNED. Use
+one runtime `DELEGATED` kill switch/per-user pin; `DELEGATED_BYBIT` is only its
+compatibility alias. Mobile is DELEGATED-only; DELEGATED clients have no WASM
+engine or local signing, and every write is a typed v1 action over the existing
+hosted WebSocket. Current contract: `docs/plans/callers/delegated-action-frames.md`;
+older mode/transport discussions are explicitly superseded where they disagree.

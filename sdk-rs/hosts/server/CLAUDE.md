@@ -38,6 +38,13 @@ keys, symbol lists, request payloads, credentials, or per-user breakdowns.
 
 ## DELEGATED construction
 
+DELEGATED is available on every venue admitted by the shared hosted server gate,
+just like COSIGNED. One runtime `DELEGATED` flag provides the kill switch and
+per-user pin; `DELEGATED_BYBIT` is only a compatibility alias. Bybit was the first
+test account, not an admission boundary. Mobile is DELEGATED-only; DELEGATED
+clients have no WASM engine/local signer and send every write as a typed v1
+action over the existing hosted WebSocket.
+
 Authenticated admissions and socket commands recheck the token expiry captured
 by `auth::Verifier`, shared by COSIGNED and DELEGATED. Init, re-init, resume,
 verification completion and deferred startup dispatch do not extend that expiry.
