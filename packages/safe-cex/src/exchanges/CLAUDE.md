@@ -224,6 +224,10 @@ check `exchange.capabilities` and convert, rather than storing the `[]`
 provider is configured. Missing overrides for those methods therefore fail
 silently and must be checked explicitly when adding support.
 
+`WORKER_READ_METHODS` classifies venue effects, including reads that refresh worker
+state. Keep `refreshAccountSettings` and `refreshAccountOrders` there so derived
+DELEGATED catalogs bypass write admission; `stopAccountAlgos` remains a write.
+
 Key methods exchanges typically override:
 
 - `start()` — bootstraps the exchange (markets → tickers → WS → private

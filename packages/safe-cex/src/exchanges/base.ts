@@ -392,6 +392,9 @@ export const WORKER_OPTIONAL_METHODS = [
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'refreshMarkets',
+  // Refresh RPCs re-read venue state; reconciliation does not authorize a venue write.
+  'refreshAccountSettings',
+  'refreshAccountOrders',
   'fetchPositions',
   'readPositions',
   'fetchBalance',
