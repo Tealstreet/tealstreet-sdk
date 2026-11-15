@@ -1520,21 +1520,21 @@ impl Venue for Okx {
             // Account reads take the table's kind from the reply itself.
             match pending {
                 Pending::Account(request) => {
-                    let error = if matches!(request, account::Request::Config { .. })
-                        && self.eea_authenticating(cx)
-                        && !authentication_reply
-                    {
-                        // An unproven EEA config reply cannot authenticate its body.
-                        // Retain HTTP rate/transport diagnosis instead of a key refusal.
-                        safe_cex_engine::classify::read(
-                            &trading::CODES,
-                            safe_cex_engine::classify::Released::Response(&response),
-                            None,
-                            error,
-                        )
-                        .error
-                    } else {
-                        account::read_error(&response, error)
+                    let error = match &request {
+                        account::Request::Config { .. }
+                            if self.eea_authenticating(cx) && !authentication_reply =>
+                        {
+                            // An unproven EEA config reply cannot authenticate its body.
+                            // Retain HTTP rate/transport diagnosis instead of a key refusal.
+                            safe_cex_engine::classify::read(
+                                &trading::CODES,
+                                safe_cex_engine::classify::Released::Response(&response),
+                                None,
+                                error,
+                            )
+                            .error
+                        }
+                        _ => account::read_error(&response, error),
                     };
                     self.account_failed(cx, request, error);
                 }
