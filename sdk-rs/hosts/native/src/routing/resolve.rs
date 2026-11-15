@@ -377,6 +377,11 @@ fn exchange(name: &str) -> Result<&'static Exchange, RoutingError> {
 pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingError> {
     let pick = |mainnet, test| if testnet { test } else { mainnet };
     Ok(match name {
+        // Native private reads append /v3/... to this /api base.
+        "apexomni" => pick(
+            "https://omni.apex.exchange/api",
+            "https://testnet.omni.apex.exchange/api",
+        ),
         "binance" => pick("https://fapi.binance.com", "https://demo-fapi.binance.com"),
         "binancepm" => pick("https://papi.binance.com", "https://demo-fapi.binance.com"),
         "binanceinverse" => pick("https://dapi.binance.com", "https://demo-dapi.binance.com"),

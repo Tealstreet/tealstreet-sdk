@@ -1123,3 +1123,5 @@ async fn enabled_bybit_requests_carry_the_public_key_id_and_other_variants_keep_
         assert_eq!(sent["wsAuth"]["toSign"], "GET/realtime1700000000000");
     }
 }
+
+mod bindings;

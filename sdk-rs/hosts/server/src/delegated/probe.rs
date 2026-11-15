@@ -23,6 +23,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "bingx",
     "bitunix",
 ];
 
@@ -121,6 +122,14 @@ impl ProbeRefusal {
         transient: true,
         ..Self::INVALID
     };
+
+    pub(crate) fn transition(reason: crate::envelope::ModeTransitionRefusal) -> Self {
+        Self {
+            transient: reason.transient(),
+            transition: Some(reason),
+            ..Self::INVALID
+        }
+    }
 
     pub(crate) fn at(mut self, stage: RefusalStage) -> Self {
         self.stage = stage;

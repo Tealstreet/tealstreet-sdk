@@ -26,6 +26,7 @@ const VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "bingx",
     "bitunix",
 ];
 const KEY: &str = "synthetic-key";
@@ -40,6 +41,7 @@ pub(crate) struct Seen {
     pub(crate) urls: Vec<String>,
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
+    pub(crate) bingx_private_sockets: usize,
     pub(crate) bitunix_socket_auths: usize,
     paths: Vec<String>,
 }
@@ -64,7 +66,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
-        "blofin" | "kucoin" => venue,
+        "blofin" | "kucoin" | "bingx" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -304,6 +306,9 @@ impl VenueIo {
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
+        if self.venue == "bingx" {
+            return bingx::response(self, r);
+        }
         if self.venue == "bitunix" {
             return bitunix::response(self, r);
         }
@@ -372,6 +377,9 @@ impl Transport for VenueIo {
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
+        if self.venue == "bingx" {
+            return bingx::connect(self, socket, &url, events);
+        }
         if self.venue == "bitunix" {
             return bitunix::connect(self, socket, &url, events);
         }
@@ -403,6 +411,8 @@ impl Transport for VenueIo {
             r.method == Method::Get
                 || (r.method == Method::Post
                     && ((family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
+                        || (self.venue == "bingx"
+                            && path(&r) == "/openApi/user/auth/userDataStream")
                         || (self.venue == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
@@ -691,7 +701,7 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .trim_start_matches(|c: char| c.is_ascii_digit())
             .to_owned();
     }
-    if family(venue) == "binance" {
+    if family(venue) == "binance" || venue == "bingx" {
         return canonical
             .split('&')
             .filter(|part| !part.starts_with("timestamp="))
@@ -1146,5 +1156,7 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
 
+#[path = "bingx_probe_tests.rs"]
+mod bingx;
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
