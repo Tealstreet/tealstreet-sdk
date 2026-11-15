@@ -10,7 +10,7 @@ async fn cdp_join_refusal_is_typed_visible_and_never_claims_an_attachment() {
                 let init = InitPayload {
                     account_name: "synthetic-cdp".into(),
                     exchange_name: venue.into(),
-                    key: "organizations/synthetic/apiKeys/synthetic".into(),
+                    key: ["organizations", "synthetic", "apiKeys", "synthetic"].join("/"),
                     signing_mode: Some("delegated".into()),
                     instance_id: Some("current-registration".into()),
                     ..Default::default()
@@ -41,7 +41,7 @@ async fn cdp_refusal_preserves_the_existing_cosigned_actor() {
                 let original = InitPayload {
                     account_name: "synthetic-cdp".into(),
                     exchange_name: venue.into(),
-                    key: "organizations/synthetic/apiKeys/synthetic".into(),
+                    key: ["organizations", "synthetic", "apiKeys", "synthetic"].join("/"),
                     ..Default::default()
                 };
                 let account = crate::accounts::testing::trading_account(
