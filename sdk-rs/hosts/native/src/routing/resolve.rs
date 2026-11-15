@@ -397,6 +397,9 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://api-demo.bybit.com",
             "https://api-testnet.bybit.com",
         ),
+        // Hosted Coinbase engines do not select sandbox endpoints.
+        "coinbase" if !testnet => "https://drb.coinbase.com/api/v2",
+        "coinbasespot" if !testnet => "https://api.coinbase.com",
         "okx" => pick("https://www.okx.com", "https://openapi.okx.com"),
         "okxdemo" => "https://openapi.okx.com",
         "okxeu" | "okxeudemo" => "https://eea.okx.com",

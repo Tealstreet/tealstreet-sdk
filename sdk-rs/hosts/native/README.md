@@ -35,6 +35,12 @@ must name a `tealstreet.io` host, with no query; a trailing `/` is dropped. Unse
 keeps the table's hosts. The exchange server reads them once at startup
 (`resolve::route_bases`), refuses a malformed one, and logs the effective bases.
 
+Hosted Coinbase perpetuals resolve `https://drb.coinbase.com/api/v2`; Coinbase
+Spot resolves `https://api.coinbase.com`. Both retain the existing regional REST
+proxy and provider-owned JWT handling. Hosted testnet refuses rather than using
+live endpoints: the native engines do not implement the separate static Advanced
+Trade sandbox. Private-startup proof readiness is unchanged.
+
 A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
 ```ts
