@@ -20,7 +20,7 @@ adjustMmrLevConstant adl adlRankIndicator af af1 afterCommand agentAccountId age
 aggregatedQuantity aid algoClOrdId algoId algoOrderId algoStatus algoType algo_order_id algo_status
 algo_type algorithm alias alias_to allTime allowTrailingStop allowances allowedSelfTradePreventionModes
 altname amendAllowed amendPrice amend_id amount amount24 amountScale ap apiAllowed apiKey apiKeyIndex
-apiMakerFeeRate apiPassphrase apiSecret apiStateClose apiStateOpen apiTakerFeeRate apiVersion api_fee
+apiMakerFeeRate apiPassphrase apiSecret apiStateBuy apiStateClose apiStateOpen apiTakerFeeRate apiVersion api_fee
 api_key api_version applicationId applyMaxToMarket applyMinToMarket appraisal approval_expiry approved
 approved_integrators approximate_quote_24h_volume archived arg args ask ask1 ask1Price ask1Size askId
 askLimitPriceRate askMultiplierDown askMultiplierUp askNotional askPr askPrice askPx askQty askRp askSize

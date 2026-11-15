@@ -329,3 +329,65 @@ fn legacy_sequential_refusal_without_reqid_is_visible_as_in_typescript_worker_ro
     assert!(p.events.iter().all(|(op, _)| op != "exec-result"));
     assert!(p.calls.is_empty());
 }
+
+#[test]
+fn unknown_notional_position_card_keeps_quantity_and_unknown_valuation() {
+    let mut p = port();
+    p.store["positions"][0]["notional"] = Value::Null;
+    run(&mut p, "position");
+    let out = logs(&p);
+    assert!(out.contains("BTCUSDT  LONG"), "{out}");
+    assert!(out.contains("Size:   0.020 (—)"), "{out}");
+    assert!(out.contains("+$12.25 (—)"), "{out}");
+    assert!(out.contains("Lev:    — / 5x"), "{out}");
+    assert!(p.calls.is_empty());
+}
+
+#[test]
+fn unknown_notional_position_table_preserves_the_row_and_known_opposite_scope() {
+    let mut p = port();
+    p.store["positions"][0]["notional"] = Value::Null;
+    run(&mut p, "positions --all");
+    let out = logs(&p);
+    let unknown = out
+        .lines()
+        .find(|line| line.contains("BTCUSDT"))
+        .unwrap_or("");
+    assert_eq!(unknown.matches('—').count(), 3, "{out}");
+    let known = out.lines().find(|line| line.contains("ETHUSDT")).unwrap();
+    assert!(!known.contains('—'), "{out}");
+    assert!(!out.contains("NaN") && !out.contains("inf"), "{out}");
+    assert!(p.calls.is_empty());
+}
+
+#[test]
+fn unknown_notional_margin_never_displays_the_known_partial_sum_as_total() {
+    let mut p = port();
+    p.store["positions"][0]["notional"] = Value::Null;
+    run(&mut p, "margin");
+    let out = logs(&p);
+    for label in ["Position Size", "Account Lev", "Margin Ratio"] {
+        assert!(
+            out.lines()
+                .find(|line| line.contains(label))
+                .unwrap()
+                .contains('—'),
+            "{out}"
+        );
+    }
+    assert!(out.contains("+$2.25"), "{out}");
+    assert!(p.calls.is_empty());
+}
+
+#[test]
+fn known_zero_notional_with_open_quantity_remains_visible() {
+    for command in ["position", "positions --all"] {
+        let mut p = port();
+        p.store["positions"][0]["notional"] = json!(0.0);
+        run(&mut p, command);
+        let out = logs(&p);
+        assert!(out.contains("BTCUSDT"), "{out}");
+        assert!(out.contains("$0.00"), "{out}");
+        assert!(out.contains("(—)"), "{out}");
+    }
+}

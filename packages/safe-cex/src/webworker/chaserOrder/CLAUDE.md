@@ -26,6 +26,12 @@ synchronously, cancellation is started for known IDs, and a bridged warning
 tells the user the chase was interrupted. Do not defer this cleanup to a future
 store update.
 
+The standalone CLI stop adapter calls this cleanup before disposing its exchange.
+Each chase keeps its original exchange as an immutable session generation;
+late placement, lookup and completion continuations drop results once it is disposed.
+Active repricing also checks retirement after cancellation and before/after fill
+reconciliation, including failures. Serial compensating cancels stop on disposal.
+
 ## Hot-path: order updates are immediate; ticker-only checks are rate-limited
 
 `ChaserOrderManager.processInstance` registers an `onUpdate`
@@ -317,3 +323,9 @@ chase (`apps/web/src/order/chaseOrder.ts`). Three rules keep `filled` right:
 - **It can still undercount** a fill the store has not seen yet, or one on an
   order placed while STOP was in flight (`tryPlaceOrders` cancels those itself). That is the
   safe direction for a reduce-only TP/SL; never pad it upward.
+
+## Position presence is independent of valuation
+
+Reduce-only completion uses `contracts` to detect a flat position. Unknown
+notional (native NaN or JSON null) neither hides an open quantity nor prevents
+a confirmed zero quantity from completing the chase.

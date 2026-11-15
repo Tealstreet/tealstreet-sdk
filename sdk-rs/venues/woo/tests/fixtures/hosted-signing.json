@@ -1,0 +1,419 @@
+[
+  {
+    "label": "account",
+    "method": "GET",
+    "path": "/v3/accountinfo",
+    "params": [],
+    "body": null,
+    "payload": "1700000000000GET/v3/accountinfo",
+    "signature": "5dc17ce52c1ed2ebcbaaceb3bf9c5ceeea054a8b80e5cf3756b2402bbb191df7"
+  },
+  {
+    "label": "positions",
+    "method": "GET",
+    "path": "/v3/positions",
+    "params": [],
+    "body": null,
+    "payload": "1700000000000GET/v3/positions",
+    "signature": "603d1c3abd1865b564bc000abff3b972103d67f84f5c8206a1257c1ce7440542"
+  },
+  {
+    "label": "orders",
+    "method": "GET",
+    "path": "/v1/orders",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "status",
+        "INCOMPLETE"
+      ],
+      [
+        "page",
+        "1"
+      ],
+      [
+        "size",
+        "100"
+      ]
+    ],
+    "body": null,
+    "payload": "page=1&size=100&status=INCOMPLETE&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "d9b4689089128a1445ef33181abae87c9e54406bc8ffc076fd7988584a719cde"
+  },
+  {
+    "label": "algo-orders",
+    "method": "GET",
+    "path": "/v3/algo/orders",
+    "params": [
+      [
+        "status",
+        "INCOMPLETE"
+      ],
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ]
+    ],
+    "body": null,
+    "payload": "1700000000000GET/v3/algo/orders?status=INCOMPLETE&symbol=PERP_BTC_USDT",
+    "signature": "88d700b1cee654532e4bae76ce51d3854e82641176ffd56fb945b5c26e302c7f"
+  },
+  {
+    "label": "leverage",
+    "method": "GET",
+    "path": "/v1/client/futures_leverage",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "position_mode",
+        "ONE_WAY"
+      ],
+      [
+        "margin_mode",
+        "CROSS"
+      ]
+    ],
+    "body": null,
+    "payload": "margin_mode=CROSS&position_mode=ONE_WAY&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "f304d43424d2c9a11e041ab83c25d51ba17c83d9a5d33a6701286cb39eea6c33"
+  },
+  {
+    "label": "fills",
+    "method": "GET",
+    "path": "/v3/trade/transactionHistory",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "startTime",
+        "1699999999000"
+      ],
+      [
+        "endTime",
+        "1700000000000"
+      ],
+      [
+        "page",
+        "1"
+      ],
+      [
+        "size",
+        "100"
+      ]
+    ],
+    "body": null,
+    "payload": "1700000000000GET/v3/trade/transactionHistory?symbol=PERP_BTC_USDT&startTime=1699999999000&endTime=1700000000000&page=1&size=100",
+    "signature": "69729c7a797e0bf95011d51a30f174abf5fecef512af1fb4a6a6f2a09320422b"
+  },
+  {
+    "label": "legacy-fills",
+    "method": "GET",
+    "path": "/v1/client/trades",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "page",
+        "2"
+      ],
+      [
+        "size",
+        "100"
+      ]
+    ],
+    "body": null,
+    "payload": "page=2&size=100&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "e177ac620487306ac8caf1feea783005df9f43e622e1829e91e9b59f117c02e6"
+  },
+  {
+    "label": "income",
+    "method": "GET",
+    "path": "/v1/client/transaction_history",
+    "params": [
+      [
+        "start_t",
+        "1699999999000"
+      ],
+      [
+        "end_t",
+        "1700000000000"
+      ],
+      [
+        "page",
+        "1"
+      ],
+      [
+        "size",
+        "100"
+      ]
+    ],
+    "body": null,
+    "payload": "end_t=1700000000000&page=1&size=100&start_t=1699999999000|1700000000000",
+    "signature": "0c108cdf905eacffb9517ce1fa9afb5c20330da2e63f29a048a59ea2c91d6204"
+  },
+  {
+    "label": "ordinary-place",
+    "method": "POST",
+    "path": "/v1/order",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "order_type",
+        "LIMIT"
+      ],
+      [
+        "side",
+        "BUY"
+      ],
+      [
+        "order_price",
+        "60000.0"
+      ],
+      [
+        "order_quantity",
+        "0.010"
+      ],
+      [
+        "client_order_id",
+        "123"
+      ],
+      [
+        "broker_id",
+        "ab82cb09-cfec-4473-80a3-b740779d0644"
+      ],
+      [
+        "reduce_only",
+        "false"
+      ]
+    ],
+    "body": null,
+    "payload": "broker_id=ab82cb09-cfec-4473-80a3-b740779d0644&client_order_id=123&order_price=60000.0&order_quantity=0.010&order_type=LIMIT&reduce_only=false&side=BUY&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "31d16f3853e0ab4c90ae630f76e464f5dbd6e1667960df9fcf515112a985233c"
+  },
+  {
+    "label": "ordinary-reduce",
+    "method": "POST",
+    "path": "/v1/order",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "order_type",
+        "LIMIT"
+      ],
+      [
+        "side",
+        "SELL"
+      ],
+      [
+        "order_price",
+        "60000.0"
+      ],
+      [
+        "order_quantity",
+        "0.010"
+      ],
+      [
+        "reduce_only",
+        "true"
+      ],
+      [
+        "broker_id",
+        "ab82cb09-cfec-4473-80a3-b740779d0644"
+      ]
+    ],
+    "body": null,
+    "payload": "broker_id=ab82cb09-cfec-4473-80a3-b740779d0644&order_price=60000.0&order_quantity=0.010&order_type=LIMIT&reduce_only=true&side=SELL&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "6403dc19d0c8dddf7eb6a53f00b27bf2d4678667148624875200296d864d7c33"
+  },
+  {
+    "label": "protective-stop",
+    "method": "POST",
+    "path": "/v3/algo/order",
+    "params": [],
+    "body": "{\"symbol\":\"PERP_BTC_USDT\",\"algoType\":\"STOP\",\"type\":\"MARKET\",\"side\":\"SELL\",\"quantity\":\"0.010\",\"triggerPrice\":\"59000.0\",\"reduceOnly\":true,\"brokerId\":\"ab82cb09-cfec-4473-80a3-b740779d0644\"}",
+    "payload": "1700000000000POST/v3/algo/order{\"symbol\":\"PERP_BTC_USDT\",\"algoType\":\"STOP\",\"type\":\"MARKET\",\"side\":\"SELL\",\"quantity\":\"0.010\",\"triggerPrice\":\"59000.0\",\"reduceOnly\":true,\"brokerId\":\"ab82cb09-cfec-4473-80a3-b740779d0644\"}",
+    "signature": "5e910f02c1745d76eed1729284958bb8c3e2c00b87a0c5167b57fe315b7f7248"
+  },
+  {
+    "label": "protective-bracket",
+    "method": "POST",
+    "path": "/v3/algo/order",
+    "params": [],
+    "body": "{\"symbol\":\"PERP_BTC_USDT\",\"algoType\":\"POSITIONAL_TP_SL\",\"childOrders\":[{\"algoType\":\"STOP_LOSS\",\"triggerPrice\":\"59000.0\",\"type\":\"CLOSE_POSITION\"},{\"algoType\":\"TAKE_PROFIT\",\"triggerPrice\":\"61000.0\",\"type\":\"CLOSE_POSITION\"}],\"brokerId\":\"ab82cb09-cfec-4473-80a3-b740779d0644\"}",
+    "payload": "1700000000000POST/v3/algo/order{\"symbol\":\"PERP_BTC_USDT\",\"algoType\":\"POSITIONAL_TP_SL\",\"childOrders\":[{\"algoType\":\"STOP_LOSS\",\"triggerPrice\":\"59000.0\",\"type\":\"CLOSE_POSITION\"},{\"algoType\":\"TAKE_PROFIT\",\"triggerPrice\":\"61000.0\",\"type\":\"CLOSE_POSITION\"}],\"brokerId\":\"ab82cb09-cfec-4473-80a3-b740779d0644\"}",
+    "signature": "793d9013e087e62857a034d4d1baeb2eaab2bd148541123e05a1ebae5adda0a3"
+  },
+  {
+    "label": "trailing",
+    "method": "POST",
+    "path": "/v3/algo/order",
+    "params": [],
+    "body": "{\"symbol\":\"PERP_BTC_USDT\",\"algoType\":\"TRAILING_STOP\",\"callbackValue\":\"100.0\",\"reduceOnly\":true,\"brokerId\":\"ab82cb09-cfec-4473-80a3-b740779d0644\"}",
+    "payload": "1700000000000POST/v3/algo/order{\"symbol\":\"PERP_BTC_USDT\",\"algoType\":\"TRAILING_STOP\",\"callbackValue\":\"100.0\",\"reduceOnly\":true,\"brokerId\":\"ab82cb09-cfec-4473-80a3-b740779d0644\"}",
+    "signature": "c5dd4299eae95255621d633e4ccc7204368168393327fd25c75379b0c91e6782"
+  },
+  {
+    "label": "ordinary-amend",
+    "method": "PUT",
+    "path": "/v3/order/42",
+    "params": [],
+    "body": "{\"orderId\":\"42\",\"quantity\":\"0.010\",\"price\":\"60001.0\"}",
+    "payload": "1700000000000PUT/v3/order/42{\"orderId\":\"42\",\"quantity\":\"0.010\",\"price\":\"60001.0\"}",
+    "signature": "73abcde6fe0d32be7b0800d1befe4d208a076ccdd96e1128d22b3655d904ea5f"
+  },
+  {
+    "label": "protective-amend",
+    "method": "PUT",
+    "path": "/v3/algo/order/7",
+    "params": [],
+    "body": "{\"childOrders\":[{\"algoOrderId\":\"8\",\"triggerPrice\":\"59100.0\",\"quantity\":\"0.010\"}]}",
+    "payload": "1700000000000PUT/v3/algo/order/7{\"childOrders\":[{\"algoOrderId\":\"8\",\"triggerPrice\":\"59100.0\",\"quantity\":\"0.010\"}]}",
+    "signature": "14de708dbd219bd5383dba44532d51bd508b9dc3df78c8722767fc1f4319d400"
+  },
+  {
+    "label": "ordinary-cancel",
+    "method": "DELETE",
+    "path": "/v1/order",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "order_id",
+        "42"
+      ]
+    ],
+    "body": null,
+    "payload": "order_id=42&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "b7110bb2fcfe37e44d6b91ddd6563f08b077246f9a0fbf37601e97f096bb3ad6"
+  },
+  {
+    "label": "protective-cancel",
+    "method": "DELETE",
+    "path": "/v3/algo/order/7",
+    "params": [],
+    "body": null,
+    "payload": "1700000000000DELETE/v3/algo/order/7",
+    "signature": "146a767d840408067551566be2a10c72e62c16754ada1a489f0bfbe0d2a3bd4f"
+  },
+  {
+    "label": "ordinary-cancel-all",
+    "method": "DELETE",
+    "path": "/v3/orders/pending",
+    "params": [],
+    "body": null,
+    "payload": "1700000000000DELETE/v3/orders/pending",
+    "signature": "2d2bf62eb2fe28660c8a1177b8b3c9c04eb70836e1b613348eeb114270036f13"
+  },
+  {
+    "label": "protective-cancel-all",
+    "method": "DELETE",
+    "path": "/v3/algo/orders/pending",
+    "params": [],
+    "body": null,
+    "payload": "1700000000000DELETE/v3/algo/orders/pending",
+    "signature": "89d7d9072895f953ef0ee191fa8bbfa0a40ddabceef7f15ed64815600c81d7fe"
+  },
+  {
+    "label": "symbol-cancel-all",
+    "method": "DELETE",
+    "path": "/v3/merge/orders/pending/PERP_BTC_USDT",
+    "params": [],
+    "body": null,
+    "payload": "1700000000000DELETE/v3/merge/orders/pending/PERP_BTC_USDT",
+    "signature": "2b0f323c94e14a288bc3239e2bce5a2621540b5c3cc78b82d2943224e6877d65"
+  },
+  {
+    "label": "set-leverage",
+    "method": "POST",
+    "path": "/v1/client/futures_leverage",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "leverage",
+        "5"
+      ],
+      [
+        "position_side",
+        "BOTH"
+      ],
+      [
+        "margin_mode",
+        "CROSS"
+      ]
+    ],
+    "body": null,
+    "payload": "leverage=5&margin_mode=CROSS&position_side=BOTH&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "79e8ee5624e61157b38bfe30f44ed7217d592ca5220ea185c536a17c1f8b8876"
+  },
+  {
+    "label": "set-mode",
+    "method": "POST",
+    "path": "/v1/client/position_mode",
+    "params": [
+      [
+        "position_mode",
+        "HEDGE_MODE"
+      ]
+    ],
+    "body": null,
+    "payload": "position_mode=HEDGE_MODE|1700000000000",
+    "signature": "96b94df529270b3379ec9c9a764be8b2ddd634d423f0f43585c02b3f3a203dba"
+  },
+  {
+    "label": "escaped-v1",
+    "method": "GET",
+    "path": "/v1/orders",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "note",
+        "é /+%"
+      ]
+    ],
+    "body": null,
+    "payload": "note=%C3%A9%20%2F%2B%25&symbol=PERP_BTC_USDT|1700000000000",
+    "signature": "c2e46bab8ad6d15cc9cdf45c8a3881d55c5f9a017ca1ee5f5a8bd614b3ce791b"
+  },
+  {
+    "label": "escaped-v3",
+    "method": "GET",
+    "path": "/v3/trade/transactionHistory",
+    "params": [
+      [
+        "symbol",
+        "PERP_BTC_USDT"
+      ],
+      [
+        "note",
+        "é /+%"
+      ]
+    ],
+    "body": null,
+    "payload": "1700000000000GET/v3/trade/transactionHistory?symbol=PERP_BTC_USDT&note=%C3%A9%20%2F%2B%25",
+    "signature": "1273f51e4bab86e4e9c97bf7da12d2fac9276d14e8a493d29a28ef8367bb6020"
+  }
+]

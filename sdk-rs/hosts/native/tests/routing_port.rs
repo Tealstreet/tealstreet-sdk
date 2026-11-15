@@ -6,6 +6,42 @@ use safe_cex_native::resolve::{
 };
 use serde::Deserialize;
 
+#[test]
+fn woo_private_relay_keeps_the_application_id_for_proxy_and_tunnel_accounts() {
+    assert_eq!(
+        safe_cex_native::resolve::rest_base_url("woo", false).unwrap(),
+        "https://api.woox.io"
+    );
+    for flags in [
+        serde_json::json!({"tealstreetProxy": true}),
+        serde_json::json!({"tealstreetTunnel": true}),
+    ] {
+        let mut options = flags;
+        options["applicationId"] = "application-123".into();
+        options["hasKey"] = true.into();
+        let inputs: RoutingInputs =
+            serde_json::from_value(options).expect("public application metadata");
+        let plan =
+            resolve_routing_plan("woo", &inputs, "https://api.woox.io", Provider::Tealstreet)
+                .unwrap();
+        let host = plan
+            .ws
+            .private
+            .host
+            .expect("private socket must use the fleet relay");
+        let url = reqwest::Url::parse(&host).unwrap();
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "ts-relay")
+                .unwrap()
+                .1,
+            "wss://wss.woox.io/v2/ws/private/stream/application-123"
+        );
+        assert!(plan.ws.private.fallback.is_none());
+        assert!(plan.ws.public.host.is_none());
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Case {
@@ -204,6 +240,7 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         "https://openapi.blofin.com",
         Some("https://demo-trading-openapi.blofin.com"),
     ),
+    ("kucoin", "https://api-futures.kucoin.com", None),
     ("bingx", "https://open-api.bingx.com", None),
     (
         "lighter",
@@ -224,6 +261,11 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         "phemex",
         "https://api.phemex.com",
         Some("https://testnet-api.phemex.com"),
+    ),
+    (
+        "woo",
+        "https://api.woox.io",
+        Some("https://api.staging.woox.io"),
     ),
     // Bitunix's testnet is `x-simulated-trading` on the mainnet host.
     (

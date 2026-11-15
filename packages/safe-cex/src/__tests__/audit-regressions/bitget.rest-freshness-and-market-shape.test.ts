@@ -190,12 +190,8 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
 
     await (exchange.privateWebsocket as any).executePositionFetch();
 
-    expect(exchange.store.positions.find((position) => position.id === positionId)).toEqual(
-      expect.objectContaining({
-        contracts: 0,
-        entryPrice: 0,
-      }),
-    );
+    expect(exchange.store.positions.find((position) => position.id === positionId)).toBeUndefined();
+    expect(exchange.store.positionSettings[positionId]).toMatchObject({ symbol: 'BTCUSDT' });
   });
 
   it('keeps and updates Classic TP/SL rows from not_trigger algo WS frames', async () => {

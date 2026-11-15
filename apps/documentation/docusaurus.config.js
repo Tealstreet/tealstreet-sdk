@@ -410,10 +410,6 @@ const config = {
                 href: 'https://teal.link/cryptocom',
               },
               {
-                label: 'Breakout',
-                href: 'https://teal.link/breakout',
-              },
-              {
                 label: 'Hyperliquid',
                 href: 'https://teal.link/hyperliquid',
               },

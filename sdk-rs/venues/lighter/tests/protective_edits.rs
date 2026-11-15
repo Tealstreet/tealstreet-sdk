@@ -101,7 +101,28 @@ fn wrong_side_and_stale_mark_never_cancel() {
             mark(&mut e, &feeds, NOW, fields);
         }
         amend(&mut e, now);
-        let out = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        let mut out = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        if now > NOW + 5000.0 {
+            let reference = out
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(r) if r.url.ends_with("/api/v1/exchangeStats") => Some(r.clone()),
+                    _ => None,
+                })
+                .expect("a stale native receipt gets one public read");
+            assert!(
+                !out.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx")))
+            );
+            reply_at(
+                &mut e,
+                now,
+                &reference,
+                200,
+                r#"{"code":200,"order_book_stats":[]}"#,
+            );
+            out = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        }
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
         assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(Outcome::NotSent))),"{out:?}");
         assert!(e.store().order("42").is_some());
@@ -161,10 +182,13 @@ fn cancel_ack_requires_exact_unfilled_terminal_target_before_replacement() {
 fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
     for (status, body) in [
         (429, r#"{"code":23000,"message":"throttle"}"#),
+        (429, r#"{"code":21104,"message":"invalid nonce"}"#),
         (405, r#"{"code":21104,"message":"invalid nonce"}"#),
         (200, r#"{"code":23000,"message":"throttle"}"#),
+        (200, r#"{"code":23100,"message":"throttle"}"#),
         (408, r#"{"code":21104,"message":"invalid nonce"}"#),
         (500, r#"{"code":21702,"message":"refused"}"#),
+        (503, r#"{"code":21702,"message":"refused"}"#),
         (200, "bad json"),
     ] {
         let (mut e, _, mut t) = boot();
@@ -173,6 +197,22 @@ fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
         let out = advance(&mut e, &mut t, NOW + 1000.0);
         assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))),"{status}: {out:?}");
         assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(Outcome::Unknown)&&error.protection.is_none())),"{out:?}");
+        let error = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        let message = error.message.to_ascii_lowercase();
+        assert!(
+            message.contains("unknown") && message.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(
+            !message.contains("refused") && !message.contains("no stop"),
+            "{error:?}"
+        );
     }
 }
 fn tx(r: &HttpRequest) -> Value {
@@ -1096,3 +1136,6 @@ fn a_pre_modify_census_cannot_regrant_old_provenance_after_success_or_unknown() 
         assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:9,error}) if (error.message.contains("original unavailable") || (unknown && error.message.contains("outcome is uncertain")))&&error.outcome==Some(Outcome::NotSent))),"{unknown}: {out:?}");
     }
 }
+
+#[path = "protective_edits/reference_preflight.rs"]
+mod reference_preflight;

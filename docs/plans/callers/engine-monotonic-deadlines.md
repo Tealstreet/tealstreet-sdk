@@ -10,7 +10,12 @@ The default transport now anchors epoch-shaped time once after clock startup,
 then advances it only by `performance.now()` differences. Browser workers wait
 up to 30 s for their first page-provided time push; absence refuses clock startup
 explicitly instead of anchoring the engine to an unknown machine-clock offset.
-The page still owns time polling; no new venue/network requests are added.
+The page still owns routine time polling. A detected wall-versus-monotonic
+discontinuity also queues a one-off server-time resync, including in browser
+workers, to replace the cached server offset after a user adjusts the local
+clock. Concurrent resyncs in a realm share the clock's in-flight request.
+The resync starts in a microtask so even synchronous Node clock notifications
+cannot reenter Rust during a clock read or physical HTTP handoff.
 
 Host time pushes call `Engine::sync_host_time(raw_now, utc_now)` through the
 WASM host. This updates only the per-engine protocol-clock fallback and signing
@@ -56,6 +61,34 @@ UTC field. Receipt-age clocks retain scheduling time. Kraken Spot execution
 fences/order-update fallback timestamps and the KuCoin Spot missing book
 timestamp use protocol UTC so comparison against venue timestamps stays in one
 domain. BreakoutProp is untouched.
+
+MEXC protective edits additionally check each price receipt's protocol UTC age
+at preflight and final physical release. A frozen scheduling clock cannot keep a
+pre-suspend price fresh; a UTC rollback behind the receipt also requires a new
+own-source quote. The scheduling-age check remains in place, so UTC changes
+cannot revive expired receipts. BloFin compares venue execution timestamps with
+protocol UTC session/reporting marks and current UTC. Polymarket live candle
+subscriptions and recurring polls likewise construct their windows from protocol
+UTC; only the poll cadence uses scheduling time.
+
+BloFin retains immutable UTC and scheduling captures of each execution boundary.
+Each observation projects the scheduling capture through the current calibration
+and caps it at the captured UTC for an order without proven live provenance.
+This admits new live fills after a backward UTC
+correction and restores the original boundary when UTC recovers; a temporary
+rollback cannot permanently admit historical fills. Forward corrections never
+advance boundaries past their captured UTC, so accumulated live fills after a
+sleep remain live even when scheduling stopped.
+
+An accepted open order on the authenticated stream records live provenance,
+even before its first fill. A validated live execution also establishes this
+provenance. Later clock corrections or sleeps cannot reclassify its progress as
+historical or consume unpriceable live quantity into a historical floor. Pricing
+and deduplication still use the last validated cumulative prefix; live admission
+alone does not imply a zero quantity when the stream omits it. Provenance and
+optional quantity are bounded and evicted together. Frame-fed writers receive
+only observed cumulative quantities without inheriting authority to report native
+live executions. An unseen order still passes through the historical-prefix guard.
 
 Controls reproduce both directions of a 162-day correction through the default
 SDK clock, a late initial worker sync, missing worker sync, disposal, explicit

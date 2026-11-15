@@ -4,6 +4,8 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "bingx-spot-replay")]
+mod bingx_spot_replay;
 #[cfg(feature = "hosted-operation-proof")]
 mod hosted_operation_proof;
 #[cfg(feature = "kraken")]
@@ -17,7 +19,6 @@ mod hosted_operations;
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -39,11 +40,11 @@ mod hosted_operations;
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
-    Action, Engine, Event, Health, Notice, RequestId, SocketId, TimerId, Value, Venue,
+    Action, CommandId, Engine, Event, Health, Notice, RequestId, SocketId, TimerId, Value, Venue,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -83,7 +84,6 @@ trait AnyEngine {
     fn failed(&self) -> bool {
         false
     }
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
@@ -108,6 +108,7 @@ trait AnyEngine {
         Err(entropy_configuration_error())
     }
 
+    fn http_command_owner(&self, request: RequestId) -> Option<CommandId>;
     fn signing_pending(&self, _: RequestId) -> bool {
         false
     }
@@ -234,7 +235,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.address_setup_retired_wire(token, now)
     }
 
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
@@ -268,6 +268,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
         } else {
             Engine::set_entropy(self, fill)
         }
+    }
+    fn http_command_owner(&self, request: RequestId) -> Option<CommandId> {
+        Engine::http_command_owner(self, request)
     }
     fn signing_pending(&self, attempt: RequestId) -> bool {
         Engine::signing_pending(self, attempt)
@@ -658,13 +661,16 @@ pub fn wasm_memory_bytes() -> f64 {
 
 /// Resolve construction choices without constructing an engine or performing I/O.
 #[wasm_bindgen(js_name = resolveConstruction)]
-pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, JsError> {
+pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, js_sys::Error> {
     if !safe_cex_venues::supported(venue) {
-        return Err(JsError::new(&format!("unsupported venue: {venue}")));
+        return Err(construction_error(safe_cex_venues::unsupported_venue(
+            venue,
+        )));
     }
-    let options: safe_cex_venues::EngineOptions =
-        serde_json::from_str(options_json).map_err(|_| JsError::new("Invalid engine options"))?;
-    Ok(serde_json::to_string(&options.construction(venue))?)
+    let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+        .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
+    serde_json::to_string(&options.construction(venue))
+        .map_err(|error| js_sys::Error::new(&error.to_string()))
 }
 
 fn entropy_configuration_error() -> safe_cex_engine::VenueError {
@@ -776,6 +782,8 @@ fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
 pub struct WasmEngine {
     dispatch_signing: bool,
     external_signer: bool,
+    #[cfg(feature = "coinbase")]
+    coinbase_binding: Option<String>,
     construction: String,
     inner: Box<dyn AnyEngine>,
     #[cfg(feature = "hosted-signing")]
@@ -801,6 +809,13 @@ fn hosted_error(error: safe_cex_engine::signing::SignError) -> js_sys::Error {
 #[cfg(feature = "hosted-signing")]
 #[wasm_bindgen]
 impl WasmEngine {
+    #[cfg(feature = "coinbase")]
+    #[wasm_bindgen(js_name = coinbaseSigningMetadata)]
+    pub fn coinbase_signing_metadata(&self) -> Result<String, js_sys::Error> {
+        self.coinbase_binding
+            .clone()
+            .ok_or_else(|| hosted_error(safe_cex_engine::signing::SignError::Unavailable))
+    }
     /// Clock capture only: does not start the venue or emit any action.
     #[wasm_bindgen(js_name = hostedSigningClock)]
     pub fn hosted_signing_clock(&self, now: f64) -> Result<String, js_sys::Error> {
@@ -864,6 +879,17 @@ impl WasmEngine {
         }
         let (work, kind) = safe_cex_venues::hosted_signing::prepare(venue, identities, input)
             .map_err(hosted_error)?;
+        #[cfg(feature = "coinbase")]
+        if matches!(kind, safe_cex_venues::hosted_signing::OutputKind::Coinbase) {
+            let age = protocol_now
+                - work
+                    .receipt
+                    .stamp_ms
+                    .ok_or_else(|| hosted_error(SignError::InvalidRequest))?;
+            if !age.is_finite() || !(-30_000. ..=30_000.).contains(&age) {
+                return Err(hosted_error(SignError::InvalidRequest));
+            }
+        }
         let prepared = self
             .hosted_captures
             .prepare_with_policy(
@@ -957,7 +983,6 @@ impl WasmEngine {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "polymarket",
@@ -996,7 +1021,10 @@ impl WasmEngine {
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         // A false read-key result outranks any provider setup failure, as natively.
         safe_cex_venues::read_key_preflight(venue, &options).map_err(construction_error)?;
-        let external_signer = options.signing.is_some() && signer_setup_json.is_none();
+        let external_setup = options.signing.is_some() && signer_setup_json.is_none();
+        let has_external_refs = options.signing.as_ref().is_some_and(|identities| {
+            identities.primary.is_some() || identities.secondary.is_some()
+        });
         #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
@@ -1012,7 +1040,7 @@ impl WasmEngine {
             .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
-        } else if external_signer {
+        } else if external_setup {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
         } else if dispatch_signing {
             let (signer, identities) =
@@ -1061,14 +1089,30 @@ impl WasmEngine {
                         grvt_trading_account_id: options.grvt_trading_account_id.clone(),
                         #[cfg(not(feature = "grvt"))]
                         grvt_trading_account_id: None,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_v3: matches!(options.asterdex.api_version, Some(version) if version.prefix() == "/fapi/v3"),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_v3: false,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_user_address: options.asterdex.user_address.clone(),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_user_address: None,
                     };
                     (venue.to_owned(), identities, account)
                 })
             })
             .flatten();
+        #[cfg(feature = "coinbase")]
+        let coinbase_binding = options
+            .coinbase_signing
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| js_sys::Error::new("Invalid Coinbase public signing binding"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
-        let inner = safe_cex_venues::build_with_signer(
+        let inner = safe_cex_venues::build_with_signer_in_context(
+            safe_cex_venues::ConstructionContext::Client,
             venue,
             options,
             Some(production_entropy().map_err(construction_error)?),
@@ -1076,6 +1120,9 @@ impl WasmEngine {
             Boxed,
         )
         .map_err(construction_error)?;
+        // Public normalization may discard the provider. Otherwise the external
+        // refs still need a callback, including refs retained inside the venue.
+        let external_signer = external_setup && has_external_refs && inner.signer().is_some();
         Ok(Self {
             inner,
             construction,
@@ -1083,6 +1130,8 @@ impl WasmEngine {
             external_signer,
             #[cfg(feature = "hosted-signing")]
             hosted_identity,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -1295,10 +1344,14 @@ impl WasmEngine {
     }
 
     fn flush(&mut self) -> String {
+        let actions = self.inner.drain();
+        if actions.is_empty() {
+            return String::new();
+        }
         #[cfg(feature = "algos")]
-        return encode(&self.algos.route(self.inner.drain()));
+        return encode(&self.algos.route(actions));
         #[cfg(not(feature = "algos"))]
-        encode(&self.inner.drain())
+        encode(&actions)
     }
 
     /// Health counters as JSON (`safe_cex_engine::Health`, camelCase).
@@ -1630,6 +1683,8 @@ impl WasmEngine {
             inner,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -1642,6 +1697,9 @@ impl WasmEngine {
 fn is_false(value: &bool) -> bool {
     !*value
 }
+
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "txflow"))]
+mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2167,7 +2225,6 @@ mod tests {
         feature = "bitrue",
         feature = "bitunix",
         feature = "blofin",
-        feature = "breakoutprop",
         feature = "bybit",
         feature = "coinbase",
         feature = "cryptocom",
@@ -2199,7 +2256,6 @@ mod tests {
             "coinbasespot",
             "apexomni",
             "asterdex",
-            "breakoutprop",
             "binance",
             "binancespot",
             "binanceinverse",
@@ -2242,8 +2298,6 @@ mod tests {
         let engine_options = |venue: &str, extra: &str| {
             let endpoints = if venue == "txflow" {
                 r#","testnet":true"#
-            } else if venue == "breakoutprop" {
-                r#","key":"user","secret":"password""#
             } else if venue == "hyrotrader" {
                 r#","endpoints":{"rest":"https://hyro.test","publicWs":"wss://hyro.test/public","privateWs":"wss://hyro.test/private"}"#
             } else {
@@ -2254,7 +2308,6 @@ mod tests {
         for venue in venues {
             let no_history = any(
                 &[
-                    "breakoutprop",
                     "hyperliquidspot",
                     "krakenspot",
                     "binancespot",
@@ -2356,14 +2409,7 @@ mod tests {
                     ),
                 fills_by_order_id: venue == "grvt",
                 cancel_all: if any(
-                    &[
-                        "polymarket",
-                        "breakoutprop",
-                        "woo",
-                        "grvt",
-                        "kucoin",
-                        "kucoinspot",
-                    ],
+                    &["polymarket", "woo", "grvt", "kucoin", "kucoinspot"],
                     venue,
                 ) || any(&ORDERLY, venue)
                 {
@@ -2425,7 +2471,6 @@ mod tests {
                 max_leverage: match venue {
                     "bitrue" => MaxLeverage::Query,
                     "polymarket" => MaxLeverage::Rails,
-                    "breakoutprop" => MaxLeverage::Unsupported,
                     _ => MaxLeverage::Market,
                 },
                 account_leverage: any(&ORDERLY, venue),
@@ -2540,7 +2585,7 @@ mod tests {
                 finite_history_bounds: any(&["coinbase", "coinbasespot"], venue),
                 reject_order_history_filters: any(&["coinbase", "coinbasespot", "txflow"], venue)
                     || any(&ORDERLY, venue),
-                public_catalogue_validation: venue == "breakoutprop",
+                public_catalogue_validation: false,
                 isolated_book_subscriptions: venue == "asterdex",
                 inverse_closed_positions: venue == "bybitinverse",
                 nuke_account_cancel: any(
@@ -2722,6 +2767,9 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
+            fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+                None
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -2778,6 +2826,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -2937,6 +2987,9 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
+        fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+            None
+        }
         fn external_signer(
             &mut self,
             _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -3018,6 +3071,9 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
+            fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+                None
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -3068,6 +3124,8 @@ mod tests {
                 dispatch_signing: false,
                 #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
+                #[cfg(feature = "coinbase")]
+                coinbase_binding: None,
                 #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
                 #[cfg(feature = "hosted-wallet")]
@@ -3100,6 +3158,8 @@ mod tests {
                 dispatch_signing: false,
                 #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
+                #[cfg(feature = "coinbase")]
+                coinbase_binding: None,
                 #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
                 #[cfg(feature = "hosted-wallet")]
@@ -3129,6 +3189,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -3163,6 +3225,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
@@ -3177,6 +3241,8 @@ mod tests {
             dispatch_signing: false,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]

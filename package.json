@@ -15,6 +15,8 @@
     "build": "turbo run build",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
     "check:licenses": "node scripts/check-licenses.mjs",
+    "generate:script-types": "tsx packages/script-authoring/scripts/generate-script-types-bundle.ts",
+    "check:script-types": "yarn workspace @tealstreet/script-authoring check:script-types",
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
     "rust:metadata": "node sdk-rs/safe-cex-types/scripts/generate-exchange-metadata.cjs",
     "rust:metadata:check": "node sdk-rs/safe-cex-types/scripts/generate-exchange-metadata.cjs --check",
@@ -23,9 +25,6 @@
     "rust:private-tape-orderly": "node sdk-rs/harness/private-tape-orderly.mjs",
     "rust:private-tape-backpack": "node sdk-rs/harness/private-tape-backpack.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
-    "rust:test-breakoutprop-parity": "node --import tsx --test sdk-rs/harness/breakoutprop-frame.integration.mts",
-    "rust:private-tape-breakoutprop": "node sdk-rs/harness/private-tape-breakoutprop.mjs",
-    "rust:public-tape-breakoutprop": "node sdk-rs/harness/private-tape-breakoutprop.mjs --public",
     "rust:private-tape-grvt": "node sdk-rs/harness/private-tape-grvt.mjs",
     "rust:private-tape-asterdex": "node sdk-rs/harness/private-tape-asterdex.mjs",
     "rust:private-tape-asterdex-v3": "node sdk-rs/harness/private-tape-asterdex.mjs --v3 --out sdk-rs/harness/tapes/asterdex-v3-private.jsonl",
@@ -50,6 +49,7 @@
     "rust:private-tape-txflow": "node sdk-rs/harness/private-tape-txflow.mjs",
     "rust:private-tape-mexc": "node sdk-rs/harness/private-tape-mexc.mjs",
     "rust:private-tape-bingx": "node sdk-rs/harness/private-tape-bingx.mjs",
+    "rust:private-tape-bingxspot": "node sdk-rs/harness/bingxspot-fixtures.mjs",
     "rust:private-tape:blofin": "node sdk-rs/harness/private-tape-blofin.mjs",
     "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
     "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",
@@ -85,7 +85,8 @@
     "rust:gate:verify": "node sdk-rs/harness/verify-gates.mjs",
     "rust:wasm-budget": "node sdk-rs/harness/wasm-budget.mjs",
     "rust:private-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs",
-    "rust:public-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs --public"
+    "rust:public-tape-bitgetusdc": "node sdk-rs/harness/private-tape-bitgetusdc.mjs --public",
+    "types:generate": "cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example generate && node sdk-rs/safe-cex-types/generate.cjs && cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example history && node sdk-rs/safe-cex-types/history-generate.cjs && cargo run -j2 --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-types --example store && node sdk-rs/safe-cex-types/store-generate.cjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
@@ -108,6 +109,7 @@
     "yarn": ">=1.22.0"
   },
   "resolutions": {
+    "**/dts-bundle-generator/typescript": "6.0.3",
     "eslint": "^9.28.0",
     "axios": "^1.13.2",
     "qs": "^6.14.1",

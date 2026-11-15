@@ -1276,8 +1276,12 @@ impl Venue for KucoinSpot {
             Ok(d) => d,
             Err(e) => {
                 if let Pending::Write(job) = pending {
-                    cx.command_error(job.command, &e);
-                    let error = crate::wire::write_failure(response.status, response.body, e);
+                    let error = crate::wire::dispatched_write_failure(
+                        response.status,
+                        response.body,
+                        e,
+                        crate::wire::SPOT_RATE_CODES,
+                    );
                     self.write_failed(cx, job, error);
                 } else {
                     cx.startup_read_refused(&crate::wire::write_failure(
@@ -1718,8 +1722,13 @@ impl Venue for KucoinSpot {
                 }
             }
             Pending::Write(j) => {
-                cx.command_error(j.command, error);
-                self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
+                let error = crate::wire::dispatched_write_failure(
+                    0,
+                    "",
+                    error.into(),
+                    crate::wire::SPOT_RATE_CODES,
+                );
+                self.write_failed(cx, j, error);
                 return;
             }
             Pending::Fills { owner, .. } => {

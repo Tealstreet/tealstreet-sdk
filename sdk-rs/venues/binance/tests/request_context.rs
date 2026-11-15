@@ -994,7 +994,9 @@ fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
 }
 
 #[test]
-fn a_later_native_batch_rate_limit_stops_the_remaining_lots() {
+// PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at
+// packages/safe-cex/src/__tests__/reference/binance/binance.exchange.ts:1997-2011.
+fn a_native_batch_item_rate_limit_stops_lots_while_definite_refusals_continue() {
     for rate_limited in [true, false] {
         let mut h = ready();
         h.requests.clear();
@@ -1042,5 +1044,72 @@ fn a_later_native_batch_rate_limit_stops_the_remaining_lots() {
             }),
             "{error:?}"
         );
+        if rate_limited {
+            assert!(
+                error
+                    .message
+                    .contains("The outcome is unknown. Check Open Orders")
+            );
+            let rows = error.elements.as_ref().unwrap();
+            assert!(
+                matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::Unknown { error } if error.venue_code.as_deref() == Some("-1003"))
+            );
+            assert!(matches!(
+                &rows[5].result,
+                safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+            ));
+        }
+    }
+}
+
+#[test]
+fn released_rate_limit_statuses_without_a_code_are_unknown() {
+    use safe_cex_engine::ErrorKind;
+    for (status, headers, outcome, kind, retry) in [
+        (
+            429,
+            "Retry-After: 3\r\n",
+            Some(Outcome::Unknown),
+            Some(ErrorKind::RateLimited),
+            Some(3_000.),
+        ),
+        (
+            418,
+            "",
+            Some(Outcome::Unknown),
+            Some(ErrorKind::RateLimited),
+            None,
+        ),
+        (
+            403,
+            "",
+            Some(Outcome::Rejected),
+            Some(ErrorKind::Rejected),
+            None,
+        ),
+        // 409 can mean a partially successful cancel-replace: never a refusal.
+        (409, "", Some(Outcome::Unknown), None, None),
+    ] {
+        let mut h = ready();
+        let order = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 730,
+            orders: vec![order],
+        }));
+        let request = h.take("/fapi/v1/order");
+        h.reply(
+            request.id,
+            status,
+            headers,
+            "<html>Too Many Requests</html>",
+        );
+        let failure = &h.failures.iter().find(|(id, _)| *id == 730).unwrap().1;
+        assert_eq!(failure.outcome, outcome, "{status}");
+        assert_eq!(failure.kind, kind, "{status}");
+        assert_eq!(failure.retry_after_ms, retry, "{status}");
+        assert!(failure.message.contains("HTTP"), "{status}");
     }
 }

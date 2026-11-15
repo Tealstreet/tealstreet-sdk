@@ -19,11 +19,11 @@ import encrypt from '/img/connect/common/encrypt.png';
 
 ### Current Tealstreet IP whitelist
 
-When the exchange asks for the Tealstreet Network IPs, allow the current Vultr Tokyo fleet first, plus the legacy app's selected venue/region addresses below. Legacy AWS egress is still used for rollback and whitelabel. The API key form copies their union, including any required additional venue addresses, unless a verified venue limit requires fleet only (with legacy addresses shown as optional); do not copy addresses from an older screenshot.
+When the exchange asks for the Tealstreet Network IPs, allow the current Vultr Tokyo fleet below. The API key form copies this same list, plus any venue-specific additional addresses it shows; do not copy addresses from an older screenshot.
 
 <ProxyFleetIps />
 
-Follow the venue's guide for whether IP restrictions are supported. Bitunix currently warns against IP restriction; if its form shows additional passthrough IPs, retain those too.
+Follow the venue's guide for whether IP restrictions are supported. Bitunix currently warns against IP restriction, but if you still restrict a Bitunix key, include the additional Bitunix passthrough addresses shown by the form.
 
 ### What is an API?
 
@@ -161,7 +161,6 @@ For exchange specific tutorials on obtaining your API keys, please see the follo
     <a href="/docs/connect/paradex">Paradex</a>
   </li>
 </ul>
-<!-- * [Breakout](/docs/connect/breakout) -->
 <!-- * [Gate.io](/docs/connect/gateio) (Planned) -->
 
 - After you create your API key you may need to whitelist certain IP addresses. Head over to the Tealstreet window where you setup the API keys and copy the whitelisted IP(s) and paste them on the exchange website.

@@ -2,15 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { nativePositionSize } from './positionSizing';
 
-/**
- * The case this function exists to make impossible to get wrong twice.
- *
- * `getPositionNativeContracts` returned `extra.contractsNative` outright while
- * `getPositionNativeSize` took the larger of it and the derived value. On a
- * stale extra the two disagreed by 4x, and the disagreeing one fed the Agent's
- * percentage closes and the full-close check.
- */
-
 describe('nativePositionSize', () => {
   it('divides an inverse position by contractSize, ignoring price', () => {
     expect(nativePositionSize({ contracts: 0, notional: 40 }, { contractSize: 100, isInverse: true })).toBe(0.4);
@@ -25,24 +16,28 @@ describe('nativePositionSize', () => {
     expect(nativePositionSize({ contracts: 0.25 }, { contractSize: 1 })).toBe(0.25);
   });
 
-  it('prefers the venue-supplied native size when it is the larger', () => {
+  it('refuses a native size larger than conflicting derived evidence', () => {
     expect(
-      nativePositionSize({ contracts: 0, notional: 40, extra: { contractsNative: 0.9 } }, {
-        contractSize: 100,
-        isInverse: true,
-      }),
-    ).toBe(0.9);
+      nativePositionSize(
+        { contracts: 0, notional: 40, extra: { contractsNative: 0.9 } },
+        {
+          contractSize: 100,
+          isInverse: true,
+        },
+      ),
+    ).toBeNull();
   });
 
-  it('IGNORES a stale extra that is smaller than the derived size', () => {
-    // The whole bug: 0.1 reported for a 0.4-contract position, so a "close
-    // 100%" closed a quarter and reported success.
+  it('refuses stale native evidence instead of selecting larger derived evidence', () => {
     expect(
-      nativePositionSize({ contracts: 0, notional: 40, extra: { contractsNative: 0.1 } }, {
-        contractSize: 100,
-        isInverse: true,
-      }),
-    ).toBe(0.4);
+      nativePositionSize(
+        { contracts: 0, notional: 40, extra: { contractsNative: 0.1 } },
+        {
+          contractSize: 100,
+          isInverse: true,
+        },
+      ),
+    ).toBeNull();
   });
 
   it('falls back to the raw count when contractSize is missing or zero', () => {

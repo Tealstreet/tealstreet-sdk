@@ -40,6 +40,8 @@ export class WasmEngine implements WasmEngineLike {
   /** Present only in builds with the sign-meta feature. */
   signMeta?(attempt: number): string | undefined;
   httpReadClass?(request: number): 0 | 1 | 2 | 3;
+  /** Actual native command owning a managed request; independent of host timing attribution. */
+  httpCommandOwner?(request: number): number | undefined;
   httpPreparationPending(preparation: string): boolean;
   httpPrepared(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed(preparation: string, code: string, now: number): string;
@@ -50,6 +52,7 @@ export class WasmEngine implements WasmEngineLike {
   requiresExternalSigner(): boolean;
   /** JSON array of SignAlgorithm the JS provider can sign; omitted means unknown. */
   useExternalSigner(algorithmsJson?: string): void;
+  coinbaseSigningMetadata?(): string;
   hostedSigningClock(now: number): string;
   prepareHostedSigning(inputJson: string, now: number): string;
   localHostedSigning(id: number, now: number): string;

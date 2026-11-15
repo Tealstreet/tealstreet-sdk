@@ -25,6 +25,7 @@
  * real segment renderer via `setFooterRenderer`.
  */
 import chalk from 'chalk';
+import { captureStorageSession, onStorageOwnerChange } from './storage-context';
 
 import { addResizeListener, reserveBottom, resumeRegion, suspendRegion } from './scroll-region';
 import { BRAND } from './brand';
@@ -153,6 +154,7 @@ function blankFooterRows(): void {
  */
 export function enableFooter(intervalMs?: number): void {
   if (enabled || !isTty()) return;
+  const ownerSession = captureStorageSession();
   enabled = true;
   redrawMs = Math.max(200, intervalMs ?? DEFAULT_REDRAW_MS);
 
@@ -160,7 +162,7 @@ export function enableFooter(intervalMs?: number): void {
   // footer row index and width both move on resize) after it re-applies.
   reserveBottomRows();
   removeResizeListener = addResizeListener(() => {
-    if (!enabled || suspended) return;
+    if (!enabled || suspended || !ownerSession.isCurrent()) return;
     lastContentLine = null; // width/row changed — force a repaint
     drawDivider();
     drawFooter();
@@ -168,7 +170,9 @@ export function enableFooter(intervalMs?: number): void {
 
   drawDivider();
   drawFooter();
-  redrawTimer = setInterval(drawFooter, redrawMs);
+  redrawTimer = setInterval(() => {
+    if (ownerSession.isCurrent()) drawFooter();
+  }, redrawMs);
   // Don't keep the process alive solely for the footer tick.
   redrawTimer.unref?.();
 }
@@ -229,3 +233,8 @@ export function redrawFooter(): void {
 export function isFooterEnabled(): boolean {
   return enabled;
 }
+
+onStorageOwnerChange(() => {
+  disableFooter();
+  renderer = () => ({ left: '', right: '' });
+});

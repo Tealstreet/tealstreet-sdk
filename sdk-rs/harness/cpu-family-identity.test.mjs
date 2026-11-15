@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { familyComparisonAuthority, readFamilyIdentity } from './cpu-family-identity.mjs';
+import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory } from './cpu-family-identity.mjs';
 import { classifyInitialCase } from './cpu-ci.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
@@ -240,6 +240,94 @@ test('family comparison source authority refuses retries and a different physica
     x => { x.state.job.head_sha = A; }, x => { x.state.job.name = 'Rust / replay measurement (bitget)'; }]) {
     const data = await fixture(); change(data);
     await assert.rejects(familyComparisonAuthority(data.options));
+  }
+});
+
+test('BingX fixture workflow archives the measured candidate before CPU-miss collection', async t => {
+  const { execFileSync, spawnSync } = await import('node:child_process');
+  const fs = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { resolve } = await import('node:path');
+  const root = fs.realpathSync(fs.mkdtempSync(resolve(tmpdir(), 'cpu-bingx-archive-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const put = (name, bytes) => { const path = resolve(root, name); fs.mkdirSync(resolve(path, '..'), { recursive: true }); fs.writeFileSync(path, bytes); };
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const measurement = workflow.slice(workflow.indexOf('\n  gate:\n'), workflow.indexOf('\n  bitget-paired:\n'));
+  const names = ['Build the venue wasm engine', 'Archive the matching CI replay engine',
+    'Check the wasm size budget', 'Build the nondefault BingX Spot measurement engine'];
+  const steps = measurement.split(/^      - /m).filter(step => names.some(name => step.startsWith(`name: ${name}\n`)));
+  assert.equal(steps.length, names.length);
+  git('init', '-q', '-b', 'master'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid');
+  put('.gitignore', 'sdk-rs/hosts/wasm/pkg/\nsdk-rs/harness/out/\nrunner/\n');
+  // Only compilation and archival tool metadata are scripted; workflow shell,
+  // production collector, byte hashes and identity validation remain real.
+  put('sdk-rs/harness/build.sh', `set -eu
+variant=ordinary
+for arg in "$@"; do if [ "$arg" = --bingx-spot-replay ]; then variant=fixture; fi; done
+mkdir -p sdk-rs/hosts/wasm/pkg/node
+printf '%s wasm' "$variant" > sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm
+printf '%s glue' "$variant" > sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js
+printf '{"type":"commonjs"}' > sdk-rs/hosts/wasm/pkg/node/package.json
+`);
+  put('sdk-rs/harness/ci-wasm.mjs', `import fs from 'node:fs'; import {createHash} from 'node:crypto'; import {execFileSync} from 'node:child_process';
+const destination=process.argv.at(-1), hashes={}; fs.mkdirSync(destination,{recursive:true});
+for(const name of ['safe_cex_wasm_bg.wasm','safe_cex_wasm.js','package.json']) {
+ const bytes=fs.readFileSync('sdk-rs/hosts/wasm/pkg/node/'+name); hashes[name]=createHash('sha256').update(bytes).digest('hex'); fs.writeFileSync(destination+'/'+name,bytes);
+}
+fs.writeFileSync(destination+'/build.json',JSON.stringify({schema:1,sourceHead:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),runId:'10',family:'bingx',venue:'bingx',target:'nodejs',profile:'release',tools:{rustc:'pinned'},buildFlags:{wasmOptLevel:'-Oz'},hashes}));
+`);
+  fs.copyFileSync(new URL('./collect-cpu-family.py', import.meta.url), resolve(root, 'sdk-rs/harness/collect-cpu-family.py'));
+  git('add', '.'); git('commit', '-qm', 'ordinary baseline'); const baseline = git('rev-parse', 'HEAD');
+  put('candidate.txt', 'fixture build is available'); git('add', '.'); git('commit', '-qm', 'candidate');
+  const candidate = git('rev-parse', 'HEAD'), tree = git('rev-parse', 'HEAD^{tree}');
+  put('runner/bin/corepack', `#!/bin/sh
+set -eu
+test "$1" = yarn; shift
+case "$1" in
+  rust:build-wasm) shift; exec bash sdk-rs/harness/build.sh "$@" ;;
+  -s) shift; if [ "$1" = node ]; then shift; exec '${process.execPath}' "$@"; fi
+      test "$1" = rust:wasm-budget
+      test "$(cat sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)" = 'ordinary wasm'
+      cp -r sdk-rs/hosts/wasm/pkg/node sdk-rs/hosts/wasm/pkg/shipped-size-evidence ;;
+  *) exit 2 ;;
+esac
+`);
+  fs.chmodSync(resolve(root, 'runner/bin/corepack'), 0o755);
+  const env = { ...process.env, PATH: `${resolve(root, 'runner/bin')}:${process.env.PATH}`,
+    RUNNER_TEMP: resolve(root, 'runner'), GITHUB_ACTIONS: 'true', GITHUB_RUN_ATTEMPT: '1', GITHUB_RUN_ID: '10' };
+  for (const step of steps) {
+    const command = step.split('        run: ')[1].trim().replace(/^\|\n/, '')
+      .replaceAll('${{ matrix.venue }}', 'bingx').replaceAll('${{ inputs.replay_artifact }}', 'family');
+    const child = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', command], { cwd: root, encoding: 'utf8', env });
+    assert.equal(child.status, 0, child.stderr);
+  }
+  assert.equal(fs.readFileSync(resolve(root, 'sdk-rs/hosts/wasm/pkg/shipped-size-evidence/safe_cex_wasm_bg.wasm'), 'utf8'), 'ordinary wasm');
+  const data = await fixture('bingx');
+  data.state.run.head_sha = data.state.job.head_sha = candidate;
+  data.state.sourceHead = candidate;
+  const options = { ...data.options, root, env, gitRead: (...args) => args[1] === 'HEAD' ? candidate : tree,
+    reader: { ...data.options.reader, getCommit: async () => ({ sha: candidate, tree: { sha: tree }, parents: [{ sha: baseline }] }) } };
+  const authority = await collectFamilyIdentity(options, 'bingx');
+  const directory = resolve(root, 'sdk-rs/harness/out/cpu-family');
+  const files = ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js', 'package.json'];
+  const runtimeManifest = { entries: files.map(name => ({ path: `sdk-rs/hosts/wasm/pkg/node/${name}`,
+    type: 'file', sha256: sha(fs.readFileSync(resolve(root, `sdk-rs/hosts/wasm/pkg/node/${name}`))) })) };
+  const read = () => readFamilyIdentityDirectory({ directory, authority, state: data.state, runtimeManifest });
+  assert.equal(read(), undefined, 'different fixture bytes must not earn ordinary-family byte equivalence');
+  const metadata = JSON.parse(fs.readFileSync(resolve(directory, 'candidate/build.json')));
+  const miss = evidence(metadata); Object.assign(miss.report, expectedGateCases('bingx').find(c => c.venue === 'bingxspot' && c.tape.includes('/fixtures/')));
+  miss.execution.measuredCheckoutSha = candidate;
+  assert.equal(classifyInitialCase(miss, declarations, undefined, read()).decision, 'cpu-refused');
+  for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js']) {
+    assert.equal(fs.readFileSync(resolve(directory, `candidate/${name}`), 'utf8'), `fixture ${name.endsWith('.wasm') ? 'wasm' : 'glue'}`);
+    const original = fs.readFileSync(resolve(directory, `candidate/${name}`));
+    fs.writeFileSync(resolve(directory, `candidate/${name}`), fs.readFileSync(resolve(directory, `baseline/${name}`)));
+    const changed = structuredClone(metadata); changed.hashes[name] = sha(fs.readFileSync(resolve(directory, `candidate/${name}`)));
+    fs.writeFileSync(resolve(directory, 'candidate/build.json'), JSON.stringify(changed));
+    assert.throws(read, /candidate differs from original family runtime/, `ordinary ${name} cannot replace the measured fixture`);
+    fs.writeFileSync(resolve(directory, `candidate/${name}`), original);
+    fs.writeFileSync(resolve(directory, 'candidate/build.json'), JSON.stringify(metadata));
   }
 });
 

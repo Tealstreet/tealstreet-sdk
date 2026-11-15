@@ -17,6 +17,7 @@ import {
   WS_MIN_RECONNECTION_DELAY,
 } from '../config/config';
 import { LogSeverity } from '../types';
+import { diagnosticConsole, diagnosticText } from '../utils/diagnosticRedaction';
 import {
   isHeartbeatFrame,
   isWsDiagnosticsEnabled,
@@ -72,7 +73,7 @@ type WebSocketConnectionOptions = Omit<Options, 'headers'> & {
  */
 const lifecycleLog = (...args: unknown[]): void => {
   if (ENABLE_WS_LIFECYCLE_DEBUG_LOGS) {
-    console.log(...args);
+    diagnosticConsole.log(...args);
   }
 };
 
@@ -495,9 +496,9 @@ export class BaseWebSocket<T extends BaseExchange> {
   lastLog = new RingBuffer<string>(20);
   logLastLog = (message: string) => {
     try {
-      this.lastLog.add(message);
+      this.lastLog.add(diagnosticText(message));
     } catch (e) {
-      console.error('Error adding log to ring buffer from websocket', e);
+      diagnosticConsole.error('Error adding log to ring buffer from websocket', e);
     }
   };
 
@@ -900,7 +901,7 @@ export class BaseWebSocket<T extends BaseExchange> {
     // In reconnect storms, dedupe repeated signatures within cooldown windows.
     const errorMessage = this.getCloseLogMessage(closeCode, closeReason, closeCodeDescription);
     if (errorMessage) {
-      console.error(`[${this.parent.name}] ${errorMessage}`);
+      diagnosticConsole.error(`[${this.parent.name}] ${errorMessage}`);
       this.parent.emitter.emit('grafana-error', errorMessage);
     }
 

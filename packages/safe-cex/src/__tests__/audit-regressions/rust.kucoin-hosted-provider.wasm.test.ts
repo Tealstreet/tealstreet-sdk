@@ -9,8 +9,8 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../../store/store.base';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
-let stamp = 1_700_000_000_123;
 vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+let stamp = 1_700_000_000_123;
 const live: RustEngineExchange[] = [];
 const mac = (secret: string, payload: string) => createHmac('sha256', secret).update(payload).digest('base64');
 const broker = { partner: 'partner', brokerName: 'broker', brokerKey: 'fixture-broker' };
@@ -20,7 +20,7 @@ afterEach(() => {
   setRustEngineTransport();
   stamp = 1_700_000_000_123;
 });
-function fixture(options: Partial<ExchangeOptions> = {}) {
+function fixture(venue: 'kucoin' | 'kucoinspot', options: Partial<ExchangeOptions> = {}) {
   setWasmEngineLoader(loadNodeEngine);
   const io = vi.fn(() => {
     throw new Error('No network in hosted parity proof');
@@ -34,7 +34,7 @@ function fixture(options: Partial<ExchangeOptions> = {}) {
     clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
   }));
   const exchange = new RustEngineExchange(
-    'kucoin',
+    venue,
     {
       key: 'fixture-key',
       secret: 'fixture-secret',
@@ -52,10 +52,26 @@ function fixture(options: Partial<ExchangeOptions> = {}) {
   return { exchange, io, logs };
 }
 
-// Futures' complete signed endpoint inventory. Amend is cancel -> terminal proof
-// GET -> replacement POST; WS authentication is the signed bullet-private POST,
+// Both markets' request inventory. Futures amend is cancel -> terminal proof
+// GET -> replacement POST; Spot amends in place. WS auth is bullet-private,
 // followed by a token-authenticated URL rather than another socket MAC.
-const endpoints: Array<[string, string]> = [
+const endpoints = (venue: 'kucoin' | 'kucoinspot'): Array<[string, string]> => venue === 'kucoinspot' ? [
+  ['GET', '/api/v2/symbols'],
+  ['GET', '/api/v1/market/allTickers'],
+  ['POST', '/api/v1/bullet-private'],
+  ['GET', '/api/v1/accounts?type=trade'],
+  ['GET', '/api/v1/hf/orders/active/symbols'],
+  ['GET', '/api/v1/hf/orders/active/page?symbol=BTC-USDT&pageNum=1&pageSize=50'],
+  ['GET', '/api/v2/user-info'],
+  ['GET', '/api/v1/hf/orders/order-1?symbol=BTC-USDT'],
+  ['GET', '/api/v1/hf/fills?symbol=BTC-USDT&limit=100'],
+  ['POST', '/api/v1/hf/orders'],
+  ['POST', '/api/v1/hf/orders/alter'],
+  ['DELETE', '/api/v1/hf/orders/order-1?symbol=BTC-USDT'],
+  ['DELETE', '/api/v1/hf/orders?symbol=BTC-USDT'],
+  ['DELETE', '/api/v1/hf/orders/cancelAll'],
+  ['GET', '/api/v1/market/candles?symbol=BTC-USDT&type=1min&startAt=1700000000&endAt=1700000060'],
+] : [
   ['GET', '/api/v1/contracts/active'],
   ['GET', '/api/v1/allTickers'],
   ['POST', '/api/v1/bullet-private'],
@@ -85,8 +101,8 @@ const endpoints: Array<[string, string]> = [
   ['GET', '/api/v1/trade/history?symbol=XBTUSDTM'],
 ];
 
-it('actual WASM KuCoin local and remote providers emit identical endpoint payloads and all MACs', async () => {
-  const browser = fixture();
+it.each(['kucoin', 'kucoinspot'] as const)('%s: actual WASM KuCoin local and remote providers emit identical endpoint payloads and all MACs', async (venue) => {
+  const browser = fixture(venue);
   const sign = vi.fn((request: RemoteSignerRequest) => browser.exchange.signWsAuth(request));
   const remoteSigner: RemoteSigner = {
     accountName: 'fixture-account',
@@ -94,19 +110,21 @@ it('actual WASM KuCoin local and remote providers emit identical endpoint payloa
     isAvailable: () => true,
     onAvailabilityChange: () => () => {},
   };
-  const server = fixture({ secret: '', remoteSigner, extra: { kucoinBroker: { ...broker, brokerKey: '' } } });
-  for (const [method, url] of endpoints) {
+  const server = fixture(venue, { secret: '', passphrase: undefined, remoteSigner, extra: { kucoinBroker: { ...broker, brokerKey: '' } } });
+  for (const [method, url] of endpoints(venue)) {
     for (const corrected of [false, true]) {
       stamp = corrected ? 1_700_000_001_123 : 1_700_000_000_123;
       const request: RemoteSignerRequest = {
         id: 'parity',
         type: 'http',
-        exchangeName: 'kucoin',
+        exchangeName: venue,
         config: {
           method,
           url,
-          baseURL: 'https://api-futures.kucoin.com',
-          ...(method === 'POST' ? { data: '{"symbol":"XBTUSDTM","size":1,"memo":"é/+%"}' } : {}),
+          baseURL: venue === 'kucoinspot' ? 'https://api.kucoin.com' : 'https://api-futures.kucoin.com',
+          ...(method === 'POST' ? { data: venue === 'kucoinspot'
+            ? '{"symbol":"BTC-USDT","size":"0.001","memo":"é/+%"}'
+            : '{"symbol":"XBTUSDTM","size":1,"memo":"é/+%"}' } : {}),
           headers: {
             'KC-API-SIGN': 'stale',
             'KC-API-PASSPHRASE': 'stale',
@@ -127,6 +145,7 @@ it('actual WASM KuCoin local and remote providers emit identical endpoint payloa
       expect(remote.config?.headers['KC-API-PARTNER-SIGN']).toBe(mac('fixture-broker', `${stamp}partnerfixture-key`));
       expect(sign).toHaveBeenLastCalledWith(
         expect.objectContaining({
+          exchangeName: venue,
           wsAuth: {
             outputFormat: 'kucoin-batch',
             toSign: JSON.stringify({ slot: 'primary', payload: preimage, brokerPrefix: `${stamp}partner` }),
@@ -147,8 +166,8 @@ it('actual WASM KuCoin local and remote providers emit identical endpoint payloa
     expect(wires).not.toContain(material);
 });
 
-it('actual WASM refuses raw auth formats, unknown batches and missing broker custody without publishing signatures', async () => {
-  const browser = fixture({ extra: undefined });
+it.each(['kucoin', 'kucoinspot'] as const)('%s: actual WASM refuses raw auth formats, unknown batches and missing broker custody without publishing signatures', async (venue) => {
+  const browser = fixture(venue, { extra: undefined });
   for (const wsAuth of [
     { toSign: 'raw-passphrase', outputFormat: 'base64' as const },
     { toSign: '{"payload":"p","unknown":true}', outputFormat: 'kucoin-batch' as const },
@@ -157,7 +176,7 @@ it('actual WASM refuses raw auth formats, unknown batches and missing broker cus
     const result = await browser.exchange.signWsAuth({
       id: 'refused',
       type: 'ws-auth',
-      exchangeName: 'kucoin',
+      exchangeName: venue,
       wsAuth,
     });
     expect(result.wsAuthSignature).toBeUndefined();
@@ -170,15 +189,15 @@ it('actual WASM refuses raw auth formats, unknown batches and missing broker cus
     expect(JSON.stringify(browser.logs)).not.toContain(material);
 });
 
-it('actual WASM secondary reads bind their own device credential and passphrase', async () => {
-  const browser = fixture({
+it.each(['kucoin', 'kucoinspot'] as const)('%s: actual WASM secondary reads bind their own device credential and passphrase', async (venue) => {
+  const browser = fixture(venue, {
     secondary_key: 'fixture-read-key',
     secondary_secret: 'fixture-read-secret',
     secondary_passphrase: 'fixture-read-passphrase',
   });
   const sign = vi.fn((request: RemoteSignerRequest) => browser.exchange.signWsAuth(request));
   const remoteSigner: RemoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
-  const server = fixture({
+  const server = fixture(venue, {
     secret: '',
     passphrase: undefined,
     remoteSigner,
@@ -189,20 +208,20 @@ it('actual WASM secondary reads bind their own device credential and passphrase'
   });
   const toSign = JSON.stringify({
     slot: 'secondary',
-    payload: `${stamp}GET/api/v1/positions`,
+    payload: `${stamp}GET${venue === 'kucoinspot' ? '/api/v1/accounts?type=trade' : '/api/v1/positions'}`,
     brokerPrefix: `${stamp}partner`,
   });
   const result = await server.exchange.signWsAuth({
     id: 'secondary',
     type: 'ws-auth',
-    exchangeName: 'kucoin',
+    exchangeName: venue,
     wsAuth: { toSign, outputFormat: 'kucoin-batch' },
   });
   expect(result.error).toBeUndefined();
   expect(JSON.parse(result.wsAuthSignature!)).toEqual({
     credential: 'fixture-read-key',
     macs: [
-      mac('fixture-read-secret', `${stamp}GET/api/v1/positions`),
+      mac('fixture-read-secret', `${stamp}GET${venue === 'kucoinspot' ? '/api/v1/accounts?type=trade' : '/api/v1/positions'}`),
       mac('fixture-read-secret', 'fixture-read-passphrase'),
       mac('fixture-broker', `${stamp}partnerfixture-read-key`),
     ],
@@ -210,4 +229,34 @@ it('actual WASM secondary reads bind their own device credential and passphrase'
   expect(sign).toHaveBeenCalledTimes(1);
   expect(browser.io).not.toHaveBeenCalled();
   expect(server.io).not.toHaveBeenCalled();
+});
+
+
+it.each(['kucoin', 'kucoinspot'] as const)('%s: explicit public-only WASM accounts ignore unused signers and cannot authenticate', async (venue) => {
+  for (const key of ['', 'unused-public-key']) {
+    const payloadSigner = vi.fn();
+    const remoteSigner = { sign: vi.fn(), isAvailable: vi.fn(), onAvailabilityChange: vi.fn() };
+    const { exchange, io } = fixture(venue, {
+      key, publicDataOnly: true, payloadSigner, remoteSigner,
+      secondary_key: 'unused-read-key', secondary_secret: 'unused-read-secret',
+    });
+    expect(exchange.isPublicDataOnly).toBe(true);
+    const result = await exchange.signHttpRequest({
+      id: 'public', type: 'http', exchangeName: venue,
+      config: { method: 'GET', url: '/api/v1/market/allTickers', baseURL: 'https://api.kucoin.com' },
+    });
+    expect(result.error).toBeUndefined();
+    expect(Object.keys(result.config!.headers).some((header) => /^KC-API-/i.test(header))).toBe(false);
+    const auth = await exchange.signWsAuth({
+      id: 'public-auth', type: 'ws-auth', exchangeName: venue,
+      wsAuth: { outputFormat: 'kucoin-batch', toSign: JSON.stringify({ payload: `${stamp}POST/api/v1/bullet-private` }) },
+    });
+    expect(auth.wsAuthSignature).toBeUndefined();
+    expect(auth.error).toBeTruthy();
+    expect(payloadSigner).not.toHaveBeenCalled();
+    expect(remoteSigner.sign).not.toHaveBeenCalled();
+    expect(remoteSigner.isAvailable).not.toHaveBeenCalled();
+    expect(remoteSigner.onAvailabilityChange).not.toHaveBeenCalled();
+    expect(io).not.toHaveBeenCalled();
+  }
 });

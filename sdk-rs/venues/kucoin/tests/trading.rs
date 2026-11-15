@@ -9,6 +9,9 @@ mod support;
 use safe_cex_venue_kucoin::Kucoin;
 use support::credentials::Options;
 
+#[path = "trading/allocation.rs"]
+mod allocation;
+
 struct Harness {
     engine: Engine<Kucoin>,
     actions: Vec<Action>,
@@ -472,7 +475,7 @@ fn late_batch_format_failure_sends_no_writes() {
     let mut h = Harness::new();
     let mut second = order();
     second.client_order_id = None;
-    second.amount = 2000.0;
+    second.amount = 0.1; // Rounds to zero; above-max sizes are sent for TS parity.
     place(&mut h, vec![order(), second]);
     h.metadata(false, "CROSS");
     assert!(!h.has("/api/v1/orders"));
@@ -1271,23 +1274,28 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
     let unknown = (None, Some(Outcome::Unknown));
     for (status, body, classified, text) in [
-        (503, "<html>", unknown, "Invalid KuCoin response (HTTP 503)"),
+        (
+            503,
+            "<html>",
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+            "KuCoin write outcome is unknown. Check Open Orders",
+        ),
         (
             503,
             r#"{"code":"500000","msg":"busy"}"#,
-            unknown,
-            "KuCoin API Error 500000: busy (HTTP 503)",
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+            "KuCoin write outcome is unknown. Check Open Orders",
         ),
         (
             429,
             r#"{"code":"429000","msg":"too many"}"#,
-            rejected(ErrorKind::RateLimited),
-            "KuCoin API Error 429000: too many (HTTP 429)",
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
+            "KuCoin write outcome is unknown. Check Open Orders",
         ),
         (
             200,
@@ -1318,7 +1326,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             r#"{"code":"200000","data":{}}"#,
             unknown,
-            "Missing KuCoin order id",
+            "KuCoin write outcome is unknown. Check Open Orders",
         ),
     ] {
         let mut h = Harness::new();
@@ -1417,7 +1425,11 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
         h.pace();
         assert_eq!(
             h.done(1).as_ref().unwrap_err(),
-            "KuCoin API Error 100001: Unknown order (HTTP 400)"
+            if outcome.1 == Some(Outcome::Unknown) {
+                "KuCoin write outcome is unknown. Check Open Orders"
+            } else {
+                "KuCoin API Error 100001: Unknown order (HTTP 400)"
+            }
         );
         let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
         assert_eq!((error.kind, error.outcome), outcome);
@@ -3030,7 +3042,9 @@ fn protective_failure_words_keep_the_kind_and_protected_position_side() {
                         "Your BTCUSDT {position} position's {label} cancel was sent but could not be confirmed"
                     ),
                     "unknown_place" => {
-                        format!("Your BTCUSDT {position} position may have no {label}")
+                        format!(
+                            "Your BTCUSDT {position} position's {label} replacement outcome is unknown"
+                        )
                     }
                     _ => format!(
                         "Your BTCUSDT {position} position's {label} put-back outcome is unknown"
@@ -3059,4 +3073,381 @@ fn protective_failure_words_keep_the_kind_and_protected_position_side() {
             }
         }
     }
+}
+
+// Dispatched writes: transport ambiguity and native rate limits never prove refusal.
+#[test]
+fn dispatched_write_ambiguity_matrix() {
+    for (status, body) in [
+        (429, "{}"),
+        (429, REFUSED),
+        (429, RATE_LIMITED),
+        (429, r#"{"code":"400005","msg":"signature refused"}"#),
+        (200, RATE_LIMITED),
+        (408, REFUSED),
+        (500, REFUSED),
+        (503, RATE_LIMITED),
+        (408, r#"{"code":"400005","msg":"signature refused"}"#),
+        (500, r#"{"code":"400005","msg":"signature refused"}"#),
+        (503, r#"{"code":"400005","msg":"signature refused"}"#),
+        (599, r#"{"code":"400005","msg":"signature refused"}"#),
+        (400, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (404, r#"{"code":"429000","msg":"Too Many Requests"}"#),
+        (200, BUSINESS_RATE_LIMITED),
+        (404, BUSINESS_RATE_LIMITED),
+    ] {
+        for operation in [
+            "create",
+            "stop_create",
+            "amend_cancel",
+            "amend_replace",
+            "stop_cancel",
+            "stop_replace",
+            "stop_restore",
+            "cancel",
+            "cancel_stop",
+            "setting",
+        ] {
+            let mut h = Harness::new();
+            let request = match operation {
+                "create" | "stop_create" => {
+                    let mut o = order();
+                    if operation == "stop_create" {
+                        o.kind = OrderType::StopLoss;
+                        o.client_order_id = None;
+                        o.price = Some(90.0);
+                    }
+                    place(&mut h, vec![o]);
+                    h.metadata(false, "CROSS");
+                    h.take("/api/v1/")
+                }
+                "amend_cancel" | "amend_replace" | "stop_cancel" | "stop_replace"
+                | "stop_restore" => {
+                    if operation.starts_with("stop") {
+                        resting_stop(&mut h);
+                    } else {
+                        h.set_order("old", OrderType::Limit, 6.0);
+                    }
+                    amend_stop(&mut h, "old", 120.0);
+                    if operation.ends_with("replace") || operation == "stop_restore" {
+                        let request = to_replacement(
+                            &mut h,
+                            "old",
+                            if operation == "amend_replace" {
+                                4.0
+                            } else {
+                                0.0
+                            },
+                        );
+                        if operation == "stop_restore" {
+                            h.fresh_ticker(95.0);
+                            h.response(&request, 200, REFUSED);
+                            h.pace();
+                            h.take("/api/v1/orders")
+                        } else {
+                            request
+                        }
+                    } else {
+                        h.metadata(false, "CROSS");
+                        h.take("/api/v1/orders/old")
+                    }
+                }
+                "cancel" | "cancel_stop" => {
+                    h.set_order(
+                        "old",
+                        if operation == "cancel_stop" {
+                            OrderType::StopLoss
+                        } else {
+                            OrderType::Limit
+                        },
+                        6.0,
+                    );
+                    h.command(Command::CancelOrders {
+                        command: 1,
+                        ids: vec!["old".into()],
+                    });
+                    h.take("/api/v1/")
+                }
+                _ => {
+                    h.command(Command::SetLeverage {
+                        command: 1,
+                        symbol: "BTCUSDT".into(),
+                        leverage: 10.0,
+                        side: None,
+                    });
+                    h.metadata(false, "CROSS");
+                    h.take("changeCrossUserLeverage")
+                }
+            };
+            assert_ne!(request.method, Method::Get, "{operation}");
+            h.response(&request, status, body);
+            assert!(
+                writes(&h).is_empty(),
+                "immediate resend/put-back: {operation} {status} {body}: {:?}",
+                writes(&h)
+            );
+            h.pace();
+            let error = failure(&h);
+            let case = format!("{operation} {status} {body}: {error:?}");
+            assert_eq!(error.outcome, Some(Outcome::Unknown), "{case}");
+            let text = error.legacy_text().to_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{case}"
+            );
+            assert!(
+                !text.contains("refused") && !text.contains("no stop"),
+                "{case}"
+            );
+            assert_eq!(error.protection, None, "{case}");
+            assert!(writes(&h).is_empty(), "resend/put-back: {case}");
+        }
+    }
+}
+
+const BUSINESS_RATE_LIMITED: &str =
+    r#"{"code":"200002","msg":"Too many requests in a short period of time"}"#;
+
+#[test]
+fn review_3259_futures_business_rate_create_is_unknown() {
+    let mut h = Harness::new();
+    place(&mut h, vec![order()]);
+    h.metadata(false, "CROSS");
+    let request = h.take("/api/v1/orders");
+    h.response(&request, 200, BUSINESS_RATE_LIMITED);
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("200002"));
+    assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+    assert!(writes(&h).is_empty());
+}
+
+#[test]
+fn review_3259_futures_business_rate_cancel_never_falls_back() {
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["a".into()],
+    });
+    let request = h.take("/api/v1/orders/a");
+    h.response(&request, 404, BUSINESS_RATE_LIMITED);
+    assert!(
+        writes(&h).is_empty(),
+        "rate response released another cancel: {:?}",
+        writes(&h)
+    );
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+    assert!(writes(&h).is_empty());
+}
+
+#[test]
+fn review_3259_cancel_job_keeps_the_unknown_legs_text() {
+    for unknown_first in [false, true] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["a".into(), "b".into()],
+        });
+        for (index, id) in ["a", "b"].into_iter().enumerate() {
+            let request = h.take(&format!("/api/v1/orders/{id}"));
+            if (index == 0) == unknown_first {
+                h.response(&request, 200, RATE_LIMITED);
+            } else {
+                h.response(
+                    &request,
+                    400,
+                    r#"{"code":"400100","msg":"cancellation refused"}"#,
+                );
+            }
+            h.pace();
+        }
+        let error = failure(&h);
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+        assert_eq!(error.venue_code.as_deref(), Some("429000"));
+        assert!(
+            error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+            "{error:?}"
+        );
+        assert!(!error.message.contains("refused"), "{error:?}");
+        assert!(writes(&h).is_empty());
+    }
+}
+
+#[test]
+fn review_3259_futures_warning_is_normalized_before_the_terminal() {
+    for operation in ["create", "amend", "cancel", "setting"] {
+        let mut h = Harness::new();
+        let request = match operation {
+            "create" => {
+                place(&mut h, vec![order()]);
+                h.metadata(false, "CROSS");
+                h.take("/api/v1/orders")
+            }
+            "amend" => {
+                h.set_order("old", OrderType::Limit, 6.0);
+                amend_stop(&mut h, "old", 120.0);
+                to_replacement(&mut h, "old", 4.0)
+            }
+            "cancel" => {
+                h.command(Command::CancelOrders {
+                    command: 1,
+                    ids: vec!["old".into()],
+                });
+                h.take("/api/v1/orders/old")
+            }
+            _ => {
+                h.command(Command::SetLeverage {
+                    command: 1,
+                    symbol: "BTCUSDT".into(),
+                    leverage: 10.0,
+                    side: None,
+                });
+                h.metadata(false, "CROSS");
+                h.take("changeCrossUserLeverage")
+            }
+        };
+        h.actions.clear();
+        h.response(
+            &request,
+            429,
+            r#"{"code":"400005","msg":"signature refused"}"#,
+        );
+        h.pace();
+        let warnings: Vec<_> = h
+            .actions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| match action {
+                Action::Notice(Notice::CommandError {
+                    command: 1,
+                    message,
+                }) => Some((index, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1, "{operation}: {:?}", h.actions);
+        let (warning_at, message) = warnings[0];
+        assert!(
+            message.contains("unknown") && message.contains("Check Open Orders"),
+            "{operation}: {message}"
+        );
+        assert!(!message.contains("refused"), "{operation}: {message}");
+        let terminal_at = h
+            .actions
+            .iter()
+            .position(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+            .unwrap();
+        assert!(warning_at < terminal_at);
+        assert_eq!(message, &failure(&h).message);
+        assert!(writes(&h).is_empty());
+    }
+}
+
+#[test]
+fn postmerge_internal_error_does_not_grant_cancel_fallback() {
+    for body in [
+        r#"{"code":"500000","msg":"system error"}"#,
+        r#"{"code":"future-error","msg":"unlisted error"}"#,
+        r#"{"code":"200000"}"#,
+        "invalid JSON",
+    ] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["a".into()],
+        });
+        let request = h.take("/api/v1/orders/a");
+        h.response(&request, 404, body);
+        let extra = writes(&h);
+        if !extra.is_empty() {
+            let fallback = h.take("/api/v1/stopOrders/a");
+            h.response(
+                &fallback,
+                200,
+                r#"{"code":"200000","data":{"cancelledOrderIds":["a"]}}"#,
+            );
+        }
+        h.pace();
+        let terminal = h.done(1);
+        assert!(
+            extra.is_empty(),
+            "extra physical writes: {extra:?}; terminal after successful fallback: {terminal:?}"
+        );
+        assert_eq!(failure(&h).outcome, Some(Outcome::Unknown));
+    }
+}
+
+#[test]
+fn postmerge_two_cancel_unknown_native_message_stays_actionable() {
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["a".into(), "b".into()],
+    });
+    for (id, body) in [
+        ("a", r#"{"code":"500000","msg":"system error"}"#),
+        ("b", r#"{"code":"429000","msg":"rate limit"}"#),
+    ] {
+        let request = h.take(&format!("/api/v1/orders/{id}"));
+        h.response(&request, 200, body);
+        h.pace();
+    }
+    assert!(writes(&h).is_empty());
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("500000"));
+    assert_eq!(error.venue_message.as_deref(), Some("system error"));
+    assert!(
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        "{error:?}"
+    );
+}
+#[test]
+fn postmerge_accepted_cancel_proof_warning_explains_uncertainty() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    amend_stop(&mut h, "old", 120.0);
+    h.metadata(false, "CROSS");
+    let cancel = h.take("/api/v1/orders/old");
+    h.response(
+        &cancel,
+        200,
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.actions
+        .retain(|a| !matches!(a, Action::Notice(Notice::CommandError { .. })));
+    for attempt in 0..3 {
+        let proof = h.take("/api/v1/orders/old");
+        assert_eq!(proof.method, Method::Get);
+        h.response(&proof, 400, r#"{"code":"400100","msg":"proof refused"}"#);
+        if attempt < 2 {
+            h.advance(100.);
+        }
+    }
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(writes(&h).is_empty());
+    let warnings: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandError { message, .. }) => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(!warnings.is_empty());
+    assert!(
+        warnings
+            .iter()
+            .all(|text| text.contains("unknown") && text.contains("Check Open Orders")),
+        "{warnings:?}"
+    );
 }

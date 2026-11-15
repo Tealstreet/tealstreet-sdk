@@ -4,4 +4,16 @@ import type { OrderStatus } from "./OrderStatus";
 import type { OrderType } from "./OrderType";
 import type { PositionSide } from "./PositionSide";
 
-export type HistoricalOrder = { id: string, symbol: string, side: OrderSide, type: OrderType, status: OrderStatus, price?: number, averagePrice?: number, amount: number, filled: number, reduceOnly?: boolean, positionSide?: PositionSide | 'both', createdTime: number, updatedTime?: number, realizedPnl?: number, fees?: number, feeAsset?: string, rebate?: number, rebateAsset?: string, };
+export type HistoricalOrder = { id: string, symbol: string, side: OrderSide, type: OrderType, status: OrderStatus, price?: number, averagePrice?: number, amount: number, filled: number, reduceOnly?: boolean, positionSide?: PositionSide | 'both', createdTime: number, updatedTime?: number, 
+/**
+ * Venue-reported gross PnL; absence means unmapped or unreported, never zero.
+ */
+realizedPnl?: number, 
+/**
+ * Positive is a cost to the trader; do not net rebates into fees.
+ */
+fees?: number, feeAsset?: string, 
+/**
+ * Positive is received by the trader, separate from fees.
+ */
+rebate?: number, rebateAsset?: string, };

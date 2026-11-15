@@ -348,3 +348,28 @@ fn a_topic_repaired_again_after_ten_minutes_resubscribes_in_place() {
     assert_eq!(h.silent_retirements(), 0);
     assert_eq!(h.engine.venue.sent, ["false:tick.BTC", "true:tick.BTC"]);
 }
+
+#[test]
+fn an_unnamed_managed_topic_keeps_the_default_refusal_without_a_hook() {
+    let mut engine = crate::test_support::seeded_engine(Feed::default());
+    engine.handle(
+        0.,
+        Event::Command(Command::RepairSubscription(
+            crate::SubscriptionTopic::OrderBook {
+                symbol: "BTC".into(),
+            },
+        )),
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    let Action::Notice(Notice::Event(event)) = &actions[0] else {
+        panic!("only the original refusal is emitted: {actions:?}");
+    };
+    assert_eq!(event.level, Level::Warn);
+    assert_eq!(event.code, log_code::SUBSCRIPTION_REJECTED);
+    assert!(
+        event
+            .message
+            .ends_with("the venue cannot name its stream for this topic")
+    );
+}

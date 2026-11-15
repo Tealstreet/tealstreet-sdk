@@ -943,7 +943,9 @@ fn order_of(amount: f64) -> safe_cex_engine::model::PlaceOrderOpts {
 }
 
 #[test]
-fn a_quantity_rounding_to_zero_is_refused_and_a_split_sends_exactly_its_amount() {
+// TS: packages/safe-cex/src/__tests__/reference/binance/binance.exchange.ts:1830-1844.
+// Independent rounding emits 10.6 for this 10.5 intent; retain that exact legacy sequence.
+fn a_quantity_rounding_to_zero_is_refused_and_a_split_uses_ts_lots() {
     let mut h = ready(Variant::UsdM);
     let mut markets = h.engine.store().markets().to_vec();
     let at = markets.iter().position(|m| m.symbol == "BTCUSDT").unwrap();
@@ -987,10 +989,19 @@ fn a_quantity_rounding_to_zero_is_refused_and_a_split_sends_exactly_its_amount()
             r.id,
             200,
             "",
-            r#"[{"orderId":1},{"orderId":2},{"orderId":3}]"#,
+            r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4}]"#,
         );
     }
-    assert_eq!(sizes, ["4", "4", "2.5"]);
+    assert_eq!(sizes, ["2.7", "2.7", "2.7", "2.5"]);
+    assert_eq!(
+        sizes
+            .iter()
+            .map(|value| value.parse::<f64>().unwrap() * 10.0)
+            .sum::<f64>()
+            / 10.0,
+        10.6
+    );
+    assert!(h.result(71).unwrap().is_ok());
 }
 
 #[test]

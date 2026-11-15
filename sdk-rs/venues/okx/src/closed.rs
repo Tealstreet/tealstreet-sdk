@@ -1,5 +1,5 @@
-//! Venue-reported closed positions: raw `/api/v5/account/positions-history`
-//! rows, which the host maps with the TS mappers. `begin`/`end` are ignored by
+//! Closed positions feed raw journal rows or native reported PnL.
+//! `begin`/`end` are ignored by
 //! this endpoint; `before`/`after` are exclusive close-time bounds. Each next
 //! page asks `after = oldest + 1`, so rows sharing the oldest millisecond that
 //! did not fit the page are fetched again; re-sent boundary rows are dropped.
@@ -29,6 +29,7 @@ pub struct ClosedState {
 }
 
 pub struct Request {
+    output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     root: ReadRoot,
     history: ReadCursorHistory<String>,
     leg: Option<ReadLeg>,
@@ -61,6 +62,25 @@ struct CloseTime<'a> {
 }
 
 impl Okx {
+    pub(crate) fn start_closed_pnl(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        account: String,
+    ) {
+        let output = safe_cex_engine::history_output::ClosedPnlOutput::new(
+            safe_cex_engine::ClosedPositionFormat::Okx,
+            account,
+            false,
+            symbol.clone(),
+            cx.store.markets(),
+        );
+        self.start_closed_read(cx, command, symbol, from_ms, to_ms, Some(output));
+    }
+
     pub(crate) fn start_closed_positions(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -68,6 +88,18 @@ impl Okx {
         symbol: Option<String>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
+    ) {
+        self.start_closed_read(cx, command, symbol, from_ms, to_ms, None);
+    }
+
+    fn start_closed_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     ) {
         if self.credentials.is_none() {
             match cx.admit_caller_read_root(None, None) {
@@ -124,7 +156,7 @@ impl Okx {
         self.request_closed_page(
             cx,
             Request {
-                root,
+                output,                root,
                 history: ReadCursorHistory::new(completion, walk, |reason| match reason {
                     Stall::PageBudget => format!("OKX closed positions stopped at the {MAX_PAGES}-page cap; older positions were not fetched"),
                     _ => "OKX closed positions stopped at a repeated cursor; older positions were not fetched".into(),
@@ -287,7 +319,7 @@ impl Okx {
         if let Some(leg) = request.leg.take() {
             let _ = cx.finish_http_context(leg.context());
         }
-        let _ = request.history.finish(cx, Err(error));
+        safe_cex_engine::history_output::finish(cx, request.history, Err(error), request.output);
     }
 
     pub(crate) fn closed_failed(cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
@@ -304,7 +336,7 @@ impl Okx {
     }
 
     fn finish_closed(cx: &mut Cx<'_, Pending>, request: Request) {
-        let _ = request.history.finish(cx, Ok(()));
+        safe_cex_engine::history_output::finish(cx, request.history, Ok(()), request.output);
     }
 
     pub(crate) fn retire_closed(&mut self, owner: Owner) {

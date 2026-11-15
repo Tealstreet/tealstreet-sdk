@@ -86,6 +86,9 @@ pub struct ServerConfig {
     pub signing_mode: Option<&'static str>,
     /// Optional deployment-owned observation of actual upstream socket topics.
     pub interest_observer: Option<safe_cex_engine::socket_lifecycle::InterestObserver>,
+    /// In-process facts from trusted local setup, never deserialized from account JSON.
+    #[cfg(feature = "venues")]
+    pub trusted_signer_state: Option<safe_cex_venues::TrustedSignerState>,
 }
 
 impl Default for ServerConfig {
@@ -105,6 +108,8 @@ impl Default for ServerConfig {
             log_label: None,
             signing_mode: None,
             interest_observer: None,
+            #[cfg(feature = "venues")]
+            trusted_signer_state: None,
         }
     }
 }
@@ -131,6 +136,18 @@ impl ServerConfig {
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+/// A registry construction refusal keeps its classification: an unsupported
+/// (e.g. retired, still-saved) venue is `Unsupported`, and the `VenueError`
+/// itself rides as the source, so its kind and outcome survive this boundary.
+#[cfg(feature = "venues")]
+fn construction_refusal(error: safe_cex_engine::VenueError) -> io::Error {
+    let kind = match error.kind {
+        Some(safe_cex_engine::ErrorKind::Unsupported) => io::ErrorKind::Unsupported,
+        _ => io::ErrorKind::InvalidInput,
+    };
+    io::Error::new(kind, error)
 }
 
 #[derive(Clone)]
@@ -225,7 +242,8 @@ impl FrameServer {
             transport,
         };
         let result = if let Some(signer) = signer {
-            safe_cex_venues::build_with_signer(
+            safe_cex_venues::build_with_signer_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
                 venue,
                 options,
                 Some(crate::production_entropy()),
@@ -233,9 +251,15 @@ impl FrameServer {
                 register,
             )
         } else {
-            safe_cex_venues::build(venue, options, Some(crate::production_entropy()), register)
+            safe_cex_venues::build_in_context(
+                safe_cex_venues::ConstructionContext::Hosted,
+                venue,
+                options,
+                Some(crate::production_entropy()),
+                register,
+            )
         };
-        result.map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+        result.map_err(construction_refusal)?
     }
 
     /// Tokens grant full access to one preconfigured account. They must be
@@ -440,17 +464,33 @@ pub fn spawn_venue_account<T: Transport + 'static>(
             spawn_account(Host::new(engine, self.transport), self.config)
         }
     }
-    let options = serde_json::from_str(options_json)
+    let mut options = serde_json::from_str(options_json)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    if let Some(state) = &config.trusted_signer_state {
+        state
+            .apply(venue, &mut options)
+            .map_err(construction_refusal)?;
+    }
     let spawn = Spawn { transport, config };
     let entropy = Some(crate::production_entropy());
     let result = match signer {
-        Some(signer) => {
-            safe_cex_venues::build_with_signer(venue, options, entropy, Some(signer), spawn)
-        }
-        None => safe_cex_venues::build(venue, options, entropy, spawn),
+        Some(signer) => safe_cex_venues::build_with_signer_in_context(
+            safe_cex_venues::ConstructionContext::Hosted,
+            venue,
+            options,
+            entropy,
+            Some(signer),
+            spawn,
+        ),
+        None => safe_cex_venues::build_in_context(
+            safe_cex_venues::ConstructionContext::Hosted,
+            venue,
+            options,
+            entropy,
+            spawn,
+        ),
     };
-    result.map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+    result.map_err(construction_refusal)?
 }
 
 /// Why `AccountHandle::input` refused a client message; `notice` is the
@@ -3812,20 +3852,73 @@ mod tests {
                         Arc::new(signer),
                     )
                     .unwrap();
-                for (venue, options, message) in [
-                    ("nope", "{}", "unsupported venue: nope"),
-                    (
+                // Unavailable hosted venues keep their typed refusal before
+                // raw or injected signing setup, including public accounts.
+                // #3502 restores Bitrue admission, so it no longer belongs in this OUT matrix.
+                for venue in [
+                    "nope",
+                    "bitmex",
+                    "bitmextestnet",
+                    "orderly",
+                    "polymarket",
+                    "txflow",
+                    "weex",
+                ] {
+                    for options in [
+                        "{}",
+                        r#"{"publicDataOnly":true}"#,
+                        r#"{"key":"k","secret":"s"}"#,
+                        r#"{"key":"k","remoteSigning":true}"#,
+                    ] {
+                        let error = server
+                            .add_venue("b", "token-b", venue, options, NoTransport)
+                            .unwrap_err();
+                        assert_unsupported_venue(&error, venue);
+                        let error = spawn_venue_account(
+                            venue,
+                            options,
+                            NoTransport,
+                            None,
+                            ServerConfig::default(),
+                        )
+                        .err()
+                        .expect("spawn is refused");
+                        assert_unsupported_venue(&error, venue);
+                        let signer = Arc::new(safe_cex_crypto::signer::LocalSigner::new());
+                        let error = server
+                            .add_venue_with_signer(
+                                "b",
+                                "token-b",
+                                venue,
+                                options,
+                                NoTransport,
+                                signer.clone(),
+                            )
+                            .expect_err("injected hosted registration is refused");
+                        assert_unsupported_venue(&error, venue);
+                        let error = spawn_venue_account(
+                            venue,
+                            options,
+                            NoTransport,
+                            Some(signer),
+                            ServerConfig::default(),
+                        )
+                        .err()
+                        .expect("injected hosted spawn is refused");
+                        assert_unsupported_venue(&error, venue);
+                    }
+                }
+                let error = server
+                    .add_venue(
+                        "b",
+                        "token-b",
                         "weex",
                         r#"{"key":"k","secret":"s"}"#,
-                        "Invalid local signer setup",
-                    ),
-                ] {
-                    let error = server
-                        .add_venue("b", "token-b", venue, options, NoTransport)
-                        .unwrap_err();
-                    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-                    assert_eq!(error.to_string(), message);
-                }
+                        NoTransport,
+                    )
+                    .unwrap_err();
+                // Full Hosted roster admission precedes WEEX credential setup.
+                assert_unsupported_venue(&error, "weex");
                 assert!(
                     server
                         .add_venue("b", "token-b", "binance", "not json", NoTransport)
@@ -3833,6 +3926,26 @@ mod tests {
                 );
             })
             .await;
+    }
+
+    #[cfg(feature = "venues")]
+    fn assert_unsupported_venue(error: &io::Error, venue: &str) {
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported, "{venue}");
+        assert_eq!(error.to_string(), format!("unsupported venue: {venue}"));
+        let detail = error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<safe_cex_engine::VenueError>())
+            .expect("the registry refusal rides as the source");
+        assert_eq!(
+            detail.kind,
+            Some(safe_cex_engine::ErrorKind::Unsupported),
+            "{venue}"
+        );
+        assert_eq!(
+            detail.outcome,
+            Some(safe_cex_engine::Outcome::NotSent),
+            "{venue}"
+        );
     }
 
     #[tokio::test]

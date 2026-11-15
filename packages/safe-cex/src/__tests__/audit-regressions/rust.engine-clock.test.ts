@@ -37,6 +37,7 @@ const running: RustEngineExchange[] = [];
 let monotonic = 0;
 beforeEach(() => {
   monotonic = 0;
+  (virtualClock as any).lastAfterClockStepSync = null;
   vi.spyOn(performance, 'now').mockImplementation(() => monotonic);
   virtualClock.setServerTimeSource(async () => EPOCH);
 });
@@ -44,6 +45,7 @@ afterEach(() => {
   running.splice(0).forEach((exchange) => exchange.dispose());
   virtualClock.stop();
   virtualClock.setServerTimeSource(undefined);
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -236,4 +238,145 @@ it('restores the synchronized production clock after an explicit host override',
   const f = fixture('mexc', () => EPOCH + 900_000);
   await f.exchange.start();
   expect(f.seen).toContainEqual(['start', EPOCH]);
+});
+
+it.each([
+  { jump: 600_000, worker: false },
+  { jump: -600_000, worker: false },
+  { jump: 600_000, worker: true },
+  { jump: -600_000, worker: true },
+])('refreshes a stale offset after a $jump ms wall step without suspend (worker=$worker)', async ({ jump, worker }) => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(EPOCH - jump);
+  let finishSync!: (utc: number) => void;
+  const source = vi.fn()
+    .mockResolvedValueOnce(EPOCH)
+    .mockImplementation(() => new Promise<number>((resolve) => { finishSync = resolve; }));
+  virtualClock.setServerTimeSource(source);
+  setRustEngineTransport();
+  const f = fixture('binance', () => EPOCH);
+  let protocolRaw = EPOCH;
+  let protocolUtc = EPOCH;
+  const syncHostTime = vi.fn((now: number, utc: number) => { protocolRaw = now; protocolUtc = utc; return true; });
+  f.engine.syncHostTime = syncHostTime;
+  // Model the signing clock at the engine boundary; real timestamp/HMAC
+  // coverage lives in the native engine's clock regressions.
+  const signingTimes: number[] = [];
+  const command = f.engine.command;
+  f.engine.command = (json, now) => {
+    if (JSON.parse(json).command !== undefined) signingTimes.push(protocolUtc + now - protocolRaw);
+    return command(json, now);
+  };
+  await f.exchange.start();
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH);
+  expect(source).toHaveBeenCalledOnce();
+  const transport: Transport = (f.exchange as any).host.transport;
+  // Initial time is already supplied by the page; exercise the worker's
+  // exceptional resync path without introducing routine worker polling.
+  if (worker) vi.stubGlobal('window', undefined);
+
+  monotonic = 12_000;
+  vi.setSystemTime(EPOCH - jump + monotonic);
+  await f.exchange.setLeverage('BTCUSDT', 2);
+  expect(source).toHaveBeenCalledOnce(); // Ordinary elapsed time needs no sync.
+
+  vi.setSystemTime(EPOCH + monotonic); // The user fixes their wall clock.
+  const syncCount = syncHostTime.mock.calls.length;
+  expect(transport.now()).toBe(EPOCH + monotonic);
+  expect(source).toHaveBeenCalledOnce();
+  expect(syncHostTime).toHaveBeenCalledTimes(syncCount); // Clock reads cannot reenter Rust.
+  await f.exchange.setLeverage('BTCUSDT', 2);
+  expect(source).toHaveBeenCalledTimes(2);
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic + jump);
+  const sharedSync = virtualClock.syncClientServerTime({ afterClockStep: true });
+  expect(source).toHaveBeenCalledTimes(2); // An outstanding sync is shared.
+
+  finishSync(EPOCH + monotonic);
+  await sharedSync;
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic);
+  await f.exchange.setLeverage('BTCUSDT', 2);
+  expect(signingTimes.at(-1)).toBe(EPOCH + monotonic);
+  expect(transport.now()).toBe(EPOCH + monotonic);
+  expect(f.seen.filter(([event]) => event === 'command').at(-1)).toEqual(['command', EPOCH + monotonic]);
+});
+
+it.each([
+  { jump: 600_000, worker: false },
+  { jump: -600_000, worker: false },
+  { jump: 600_000, worker: true },
+  { jump: -600_000, worker: true },
+])('recovers a second $jump ms wall step at the cooldown boundary (worker=$worker)', async ({ jump, worker }) => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  vi.setSystemTime(EPOCH - 600_000);
+  const source = vi.fn(async () => EPOCH + monotonic);
+  virtualClock.setServerTimeSource(source);
+  setRustEngineTransport();
+  const f = fixture('binance', () => EPOCH);
+  let protocolRaw = EPOCH;
+  let protocolUtc = EPOCH;
+  f.engine.syncHostTime = (now, utc) => { protocolRaw = now; protocolUtc = utc; return true; };
+  const signingTimes: number[] = [];
+  const command = f.engine.command;
+  f.engine.command = (json, now) => {
+    if (JSON.parse(json).command !== undefined) signingTimes.push(protocolUtc + now - protocolRaw);
+    return command(json, now);
+  };
+  await f.exchange.start();
+  const transport: Transport = (f.exchange as any).host.transport;
+  if (worker) vi.stubGlobal('window', undefined);
+
+  vi.setSystemTime(EPOCH);
+  transport.now();
+  await Promise.resolve();
+  await virtualClock.syncClientServerTime({ afterClockStep: true });
+  expect(source).toHaveBeenCalledTimes(2);
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH);
+
+  monotonic = 1_000;
+  await vi.advanceTimersByTimeAsync(1_000);
+  vi.setSystemTime(EPOCH + monotonic + jump);
+  expect(transport.now()).toBe(EPOCH + monotonic);
+  await f.exchange.setLeverage('BTCUSDT', 2);
+  expect(source).toHaveBeenCalledTimes(2);
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic + jump);
+
+  monotonic = 14_999;
+  await vi.advanceTimersByTimeAsync(13_999);
+  expect(source).toHaveBeenCalledTimes(2);
+  monotonic = 15_000;
+  await vi.advanceTimersByTimeAsync(1);
+  expect(source).toHaveBeenCalledTimes(3);
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic);
+  await f.exchange.setLeverage('BTCUSDT', 2);
+  expect(signingTimes.at(-1)).toBe(EPOCH + monotonic);
+  expect(transport.now()).toBe(EPOCH + monotonic);
+});
+
+it('shares a completed wall-step resync across two default transports', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(EPOCH - 600_000);
+  const source = vi.fn(async () => EPOCH + monotonic);
+  virtualClock.setServerTimeSource(source);
+  setRustEngineTransport();
+  const first = fixture('mexc', () => EPOCH);
+  await first.exchange.start();
+  const second = fixture('phemex', () => EPOCH);
+  await second.exchange.start();
+  expect(source).toHaveBeenCalledOnce();
+  source.mockClear();
+
+  vi.setSystemTime(EPOCH);
+  const firstTransport: Transport = (first.exchange as any).host.transport;
+  const secondTransport: Transport = (second.exchange as any).host.transport;
+  firstTransport.now();
+  await Promise.resolve();
+  await virtualClock.syncClientServerTime({ afterClockStep: true });
+  expect(source).toHaveBeenCalledOnce();
+
+  // The second engine observes the same wall change after the first sync settled.
+  secondTransport.now();
+  await Promise.resolve();
+  await virtualClock.syncClientServerTime({ afterClockStep: true });
+  expect(source).toHaveBeenCalledOnce();
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH);
 });

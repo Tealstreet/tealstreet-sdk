@@ -1,6 +1,7 @@
-// Engine-supported environments, not a catalogue of every venue's offerings.
-// Keep this allowlist aligned with venues/* and registry/src/lib.rs. Never
-// accept an endpoint from an environment variable or an API response unchecked.
+// Reviewed smoke environments, not a catalogue of every venue's offerings.
+// Ordinary profiles follow venues/* and registry/src/lib.rs; opt-in qualification
+// profiles confer no factory admission. Never accept an unchecked endpoint from
+// an environment variable or an API response.
 import { VENUES } from './venues.mjs';
 
 const profiles = {};
@@ -12,6 +13,12 @@ const modes = (testnet, mainnet) => ({ testnet, mainnet });
 register('binance', 'BINANCE', modes(
   endpoints('https://demo-fapi.binance.com', 'wss://demo-fstream.binance.com'),
   endpoints('https://fapi.binance.com', 'wss://fstream.binance.com'),
+));
+// COIN-M shares the futures demo keys. The demo REST and binancefuture socket
+// pairing mirrors the engine and TS reference paths.
+register('binanceinverse', 'BINANCE', modes(
+  endpoints('https://demo-dapi.binance.com', 'wss://dstream.binancefuture.com'),
+  endpoints('https://dapi.binance.com', 'wss://dstream.binance.com'),
 ));
 // Spot testnet keys are separate from futures demo keys, so Spot has its own env family.
 register('binancespot', 'BINANCESPOT', modes(
@@ -107,6 +114,11 @@ register('mexc', 'MEXC', {
 register('bingx', 'BINGX', {
   mainnet: endpoints('https://open-api.bingx.com', 'wss://ws-market-swap.qq-os.com wss://open-api-swap.bingx.com'),
 });
+// Qualification profile only: do not add this name to VENUES or a production
+// factory. Callers need a separately approved smoke-only engine constructor.
+register('bingxspot', 'BINGX_SPOT', {
+  mainnet: endpoints('https://open-api.bingx.com', 'wss://open-api-ws.bingx.com'),
+}, undefined, { optIn: true });
 register('weex', 'WEEX', {
   mainnet: endpoints('https://api-contract.weex.com', 'wss://ws-contract.weex.com'),
 }, { key: 'KEY', secret: 'SECRET', passphrase: 'PASSPHRASE' }, { options: { privateWsHeaders: true } });
@@ -132,7 +144,9 @@ register('polymarket', 'POLYMARKET', {
   },
 });
 
-export const LIVE_SMOKE_VENUES = Object.freeze(Object.keys(VENUES));
+// Fixture qualification and an opt-in smoke profile confer no ordinary admission.
+export const LIVE_SMOKE_VENUES = Object.freeze(Object.keys(VENUES)
+  .filter(name => !VENUES[name].rustFixture && !profiles[name]?.optIn));
 
 const setOption = (options, path, value) => {
   const parts = path.split('.');
@@ -152,7 +166,7 @@ const testMode = (profile) => {
  * smoke uses: the venue's test environment, mainnet only where it has none.
  * Names only; this never reads a value.
  */
-export const liveSmokeCredentialSets = (names = Object.keys(profiles)) => {
+export const liveSmokeCredentialSets = (names = Object.keys(profiles).filter((name) => !profiles[name].optIn)) => {
   const sets = new Map();
   for (const name of names) {
     const profile = profiles[name];
@@ -171,9 +185,15 @@ export const liveSmokeCredentialSets = (names = Object.keys(profiles)) => {
  * Resolve environment before touching credentials. There is no mainnet fallback.
  * `credentials` (field suffix to value, e.g. from stdin) replaces the environment
  * entirely; `allowMissing` lets a dry run proceed without any credential.
+ * BingX Spot additionally requires enableBingxSpot === true and authorized ===
+ * true on every call. Authorization attests a maintainer-approved transport,
+ * credential permissions and bounded order/cancel scope; it is not admission.
  */
-export const liveSmokeProfile = (name, requestedMode, env = process.env, { credentials, allowMissing = false } = {}) => {
-  if (!Object.hasOwn(VENUES, name)) throw new Error('Unknown live-smoke venue');
+export const liveSmokeProfile = (name, requestedMode, env = process.env,
+  { credentials, allowMissing = false, enableBingxSpot = false, authorized = false } = {}) => {
+  if (!Object.hasOwn(VENUES, name) && name !== 'bingxspot') throw new Error('Unknown live-smoke venue');
+  if (name === 'bingxspot' && (enableBingxSpot !== true || authorized !== true))
+    throw new Error('Venue has no reviewed live-smoke endpoint profile; BingX Spot smoke requires explicit opt-in and authorization');
   const profile = profiles[name];
   if (!profile) throw new Error('Venue has no reviewed live-smoke endpoint profile');
   const availableModes = Object.keys(profile.environments);
@@ -247,6 +267,19 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env, { crede
   const bitgetSimulation = profile.family === 'BITGET' && mode !== 'mainnet';
   const validateRequest = (request) => {
     if (!allowUrl(request.url, 'http')) throw new Error('HTTP URL is outside the selected venue environment');
+    if (name === 'bingxspot') {
+      const path = new URL(request.url).pathname;
+      const method = (request.method ?? 'GET').toUpperCase();
+      const reads = ['/openApi/spot/v1/common/symbols', '/openApi/spot/v2/quote/ticker',
+        '/openApi/spot/v2/quote/klines', '/openApi/spot/v1/market/depth',
+        '/openApi/spot/v1/account/balance', '/openApi/spot/v1/trade/openOrders',
+        '/openApi/spot/v1/trade/query', '/openApi/spot/v1/trade/myTrades'];
+      const writes = ['/openApi/spot/v1/trade/order', '/openApi/spot/v1/trade/cancel',
+        '/openApi/spot/v1/trade/cancelOpenOrders'];
+      if (!((method === 'GET' && reads.includes(path)) || (method === 'POST' && writes.includes(path)) ||
+          (['POST', 'PUT'].includes(method) && path === '/openApi/user/auth/userDataStream')))
+        throw new Error('BingX Spot request is outside the smoke routes');
+    }
     if (['OKX', 'OKX_EEA'].includes(profile.family) && mode === 'demo') {
       const headers = Array.isArray(request.headers) ? request.headers : Object.entries(request.headers ?? {});
       const markers = headers.filter(([key]) => key.toLowerCase() === 'x-simulated-trading');
@@ -283,6 +316,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env, { crede
   };
   const validateSocket = (url) => {
     if (!allowUrl(url, 'ws')) throw new Error('WebSocket URL is outside the selected venue environment');
+    if (name === 'bingxspot' && new URL(url).pathname !== '/market')
+      throw new Error('BingX Spot socket is outside the smoke routes');
     if (bitgetSimulation && !['/v2/ws/public', '/v2/ws/private'].includes(new URL(url).pathname))
       throw new Error('Bitget simulation does not support this socket');
   };
@@ -303,7 +338,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env, { crede
     postOnly: !['bitrue', 'polymarket'].includes(name),
     // A funded mainnet run only places, confirms, cancels and reads back.
     minimal: mode === 'mainnet',
-    leverage: ['binancespot', 'bybitspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
+    leverage: ['binancespot', 'bybitspot', 'bingxspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },
     allowUrl, canonicalizeUrl, validateRequest, validateSocket, validateSocketMessage,

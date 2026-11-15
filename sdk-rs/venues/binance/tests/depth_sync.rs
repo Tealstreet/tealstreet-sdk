@@ -58,6 +58,7 @@ fn a_snapshot_frame_carries_the_whole_state_without_draining_changes() {
     assert_eq!(
         kinds(&snapshot),
         [
+            MESSAGE_HANDLER_STATS,
             MARKETS,
             TICKERS,
             TICKER_OBSERVATIONS,

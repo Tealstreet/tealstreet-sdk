@@ -35,7 +35,7 @@
  * is half of the `prompt_cache_key`, so a stale value would serve a plan built
  * against the previous contract.
  */
-export const OEMS_PLAN_SCHEMA_VERSION = 2;
+export const OEMS_PLAN_SCHEMA_VERSION = 3;
 
 /** Must match `^[a-zA-Z0-9_-]+$` — the provider validates the name. */
 export const OEMS_PLAN_SCHEMA_NAME = 'tealstreet_oems_plan';

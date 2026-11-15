@@ -57,6 +57,7 @@ function claimGroup(manager, group) {
   let status = 0;
   let beforeClaim;
   let claimStarted = false;
+  let claimNow;
   let fatal;
   // External invoke/run/dispose/cleanup/cancel refuse while this guard is set.
   group.notificationCount = 0;
@@ -71,9 +72,16 @@ function claimGroup(manager, group) {
       } catch { beforeClaim = 'invalid'; break; }
     }
     if (!beforeClaim) {
+      try {
+        claimNow = host.transport.now();
+        for (const entry of group.entries) manager.assertCurrent(entry.resource);
+      }
+      catch { beforeClaim = 'invalid'; }
+    }
+    if (!beforeClaim) {
       claimStarted = true;
       // Narrow internal entry; general host.invoke remains closed to reentry.
-      status = host.engine.httpClaimGroup(group.permit, host.transport.now(), bounds);
+      status = host.engine.httpClaimGroup(group.permit, claimNow, bounds);
       if (host.engine.failed?.()) throw new Error('Engine failed during group claim');
       if (status === 1) {
         for (let i = 0; i < group.entries.length; i++) {
@@ -81,6 +89,7 @@ function claimGroup(manager, group) {
           entry.resource.phase = 'released';
           try {
             const rawNow = host.transport.now();
+            manager.assertCurrent(entry.resource);
             const sendBefore = bounds[i];
             if (!Number.isFinite(rawNow) || !Number.isFinite(sendBefore) || rawNow >= sendBefore) entry.failed = true;
             else entry.response = entry.resource.bound.dispatch();

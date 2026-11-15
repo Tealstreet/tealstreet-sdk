@@ -339,8 +339,9 @@ export class PhemexExchange extends BaseExchange {
     const symbol = this.formatSymbolIn(p.symbol);
     const ticker = this.store.tickersBySymbol[symbol];
     const markPrice = parseFloat(v(p, 'markPriceRp'));
-    const lastPrice = Number.isFinite(ticker?.last)
-      ? ticker!.last
+    const last = ticker?.last;
+    const lastPrice = typeof last === 'number' && Number.isFinite(last)
+      ? last
       : Number.isFinite(markPrice)
         ? markPrice
         : entryPrice;

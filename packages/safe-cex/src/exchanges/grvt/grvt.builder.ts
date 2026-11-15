@@ -161,6 +161,24 @@ const resolveGrvtProxyHeaders = async (): Promise<Record<string, string>> =>
 
 const getStringField = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
 
+const isBuilderAuthorizationRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+type BuilderAuthorizationRow = { address: string; info: Record<string, unknown> };
+
+const getBuilderAuthorizationRows = (value: unknown): BuilderAuthorizationRow[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const rows: unknown[] = value;
+  const builders: BuilderAuthorizationRow[] = [];
+  for (const info of rows) {
+    if (!isBuilderAuthorizationRecord(info)) return undefined;
+    const address = info.builder_account_id || info.ba;
+    if (typeof address !== 'string' || address.length === 0) return undefined;
+    builders.push({ address, info });
+  }
+  return builders;
+};
+
 const getValidAddress = (...values: Array<string | undefined>): string | undefined =>
   values.find((value) => value !== undefined && isAddress(value));
 
@@ -478,6 +496,8 @@ export const checkGrvtBuilderAuthorized = async (
   const proxyHeaders = await resolveGrvtProxyHeaders();
 
   try {
+    if (builder.length === 0) return { authorized: false };
+
     // Authenticate with GRVT via proxy
     const authResult = await authenticateGrvt(apiKey, testnet, proxyHeaders);
     if (!authResult.success) {
@@ -518,15 +538,17 @@ export const checkGrvtBuilderAuthorized = async (
       return { authorized: false };
     }
 
-    const data = (await response.json()) as Record<string, any>;
+    const data: unknown = await response.json();
+    if (!isBuilderAuthorizationRecord(data)) return { authorized: false };
 
     // Check if our builder is in the list
-    // Response format: { results: [{ builder_address, max_fee_rate, ... }] } or lite format { r: [...] }
-    const builders = data.results || data.r || [];
+    // Response format: { results: [{ builder_account_id, max_fee_rate, ... }] } or lite format { r: [...] }
+    const builders = getBuilderAuthorizationRows(data.results === undefined ? data.r : data.results);
+    if (builders === undefined) return { authorized: false };
 
-    for (const builderInfo of builders) {
+    for (const { address, info: builderInfo } of builders) {
       // Full format: builder_account_id, Lite format: ba
-      const addr = (builderInfo.builder_account_id || builderInfo.ba || '').toLowerCase();
+      const addr = address.toLowerCase();
       if (addr === builder.toLowerCase()) {
         // Found our builder — get the max fee rate.
         // GRVT returns the percentage *string* that was originally sent during

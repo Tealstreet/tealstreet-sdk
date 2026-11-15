@@ -51,7 +51,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
   afterEach(() => vi.restoreAllMocks());
   it('rejects every retired hosted factory and direct constructor before starting the clock', async () => {
     const clock = vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
-    for (const name of ['coinbase', 'coinbasespot', ...orderlyNames] as ExchangeName[]) {
+    for (const name of orderlyNames) {
       const options: ExchangeOptions = { key: 'hosted-key', secret: '', remoteSigner, privateOnly: true };
       await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow(`${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`);

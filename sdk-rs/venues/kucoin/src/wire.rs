@@ -277,6 +277,58 @@ pub(crate) fn not_sent(message: impl Into<String>) -> safe_cex_engine::VenueErro
     safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
 }
 
+// 200002 is a business-layer rate limit for Futures; Spot uses it for suspended cancellation.
+// https://www.kucoin.com/docs-new/error-code/futures
+pub(crate) const FUTURES_RATE_CODES: &[&str] = &["200002", "429000"];
+#[cfg(feature = "spot")]
+pub(crate) const SPOT_RATE_CODES: &[&str] = &["429000"];
+
+/// Legacy ordinary writes must weaken ambiguous evidence before job settlement.
+/// Reads keep the native refusal classification used by startup and recovery.
+pub(crate) fn dispatched_write_failure(
+    status: u16,
+    body: &str,
+    message: String,
+    native_rate_codes: &[&str],
+) -> safe_cex_engine::VenueError {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    // Futures HTTP 404 alone cannot prove the first cancel was refused. Explicit
+    // native not-found replies can authorize the other order-family DELETE.
+    let classification_status = if status == 404
+        && native_rate_codes == FUTURES_RATE_CODES
+        && !serde_json::from_str::<Envelope<'_>>(body)
+            .is_ok_and(|row| matches!(row.code, "404" | "404000"))
+    {
+        200
+    } else {
+        status
+    };
+    let mut error = write_failure(classification_status, body, message);
+    let kind = match status {
+        408 => Some(ErrorKind::Timeout),
+        429 => Some(ErrorKind::RateLimited),
+        500.. => Some(ErrorKind::VenueUnavailable),
+        _ if error
+            .venue_code
+            .as_deref()
+            .is_some_and(|code| native_rate_codes.contains(&code)) =>
+        {
+            Some(ErrorKind::RateLimited)
+        }
+        _ => None,
+    };
+    if let Some(kind) = kind {
+        error.kind = Some(kind);
+        error.outcome = Some(Outcome::Unknown);
+    } else if error.outcome.is_none() && classification_status != status {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    if error.outcome == Some(Outcome::Unknown) {
+        error.message = "KuCoin write outcome is unknown. Check Open Orders".into();
+    }
+    error
+}
+
 /// A failed private write answer. 408/5xx, transport loss (status 0) and
 /// malformed 2xx answers do not prove a refusal; documented codes are
 /// classified and others stay unset.

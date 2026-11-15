@@ -1,7 +1,12 @@
 import { formatPrice } from '@tealstreet/utils/src/formatting/formatPrice';
 import { OrderStatus, OrderType, PositionSide, type Position, type Order } from '@tealstreet/safe-cex/src/types';
-import { calculatePositionAccountLeverage } from '@tealstreet/safe-cex/src/utils/leverage';
+import {
+  calculatePositionAccountLeverage,
+  calculateTotalNotional,
+} from '@tealstreet/safe-cex/src/utils/leverage';
+import { calculatePositionPnlPercent } from '@tealstreet/safe-cex/src/utils/positionPnlPercent';
 import type { ExchangeLike } from '../../types';
+import { formatBaseSize, formatOrderBaseSize } from '../../utils/formatBaseSize';
 import { RESET, DIM, CLEAR_SCREEN } from './colors';
 import {
   type TableData,
@@ -10,6 +15,9 @@ import {
   separatorRow,
   renderTable,
 } from '../../table';
+
+const formatKnown = (value: number | null, render: (value: number) => string): string =>
+  value !== null && Number.isFinite(value) ? render(value) : '—';
 
 /**
  * Type for multi-account data
@@ -43,7 +51,7 @@ function formatOrderTypeLabel(type: OrderType): string {
  * Format positions table - reusable formatter for CLI watch modes
  */
 export function formatPositionsTable(exchange: ExchangeLike): string {
-  const positions = exchange.store?.positions?.filter((pos) => pos.notional !== 0) ?? [];
+  const positions = exchange.store?.positions?.filter((pos) => pos.contracts !== 0) ?? [];
 
   if (positions.length === 0) {
     return 'No open positions\n';
@@ -72,21 +80,21 @@ export function formatPositionsTable(exchange: ExchangeLike): string {
     const side = pos.side === PositionSide.Long ? 'LONG' : 'SHORT';
     const pnlStyle: TextStyle = pos.unrealizedPnl >= 0 ? 'green' : 'red';
     const pnlSign = pos.unrealizedPnl >= 0 ? '+' : '';
-    const pnlPercent = pos.entryPrice > 0 ? ((pos.unrealizedPnl / pos.notional) * 100).toFixed(1) : '0.0';
+    const pnlPercent = calculatePositionPnlPercent(pos.notional, pos.unrealizedPnl);
 
     const balance = exchange.store?.balance;
     const accountLev = calculatePositionAccountLeverage(pos.notional, balance?.total ?? 0);
-    const levStyle: TextStyle = accountLev > 5 ? 'yellow' : 'cyan';
-    const levStr = `${accountLev.toFixed(2)}/${pos.leverage}x`;
+    const levStyle: TextStyle = accountLev === null ? 'dim' : accountLev > 5 ? 'yellow' : 'cyan';
+    const levStr = `${formatKnown(accountLev, (value) => value.toFixed(2))}/${pos.leverage}x`;
 
     totalPnl += pos.unrealizedPnl;
 
-    const pnlStr = `${pnlSign}${formatPrice(pos.unrealizedPnl)} (${pnlSign}${pnlPercent}%)`;
+    const pnlStr = `${pnlSign}${formatPrice(pos.unrealizedPnl)} (${pnlPercent === null ? '—' : `${pnlSign}${pnlPercent.toFixed(1)}%`})`;
     tableData.rows.push({
       cells: [
         cell(pos.symbol),
         cell(side, sideStyle),
-        cell(formatPrice(Math.abs(pos.notional))),
+        cell(formatBaseSize(pos.contracts, market)),
         cell(formatPrice(pos.entryPrice, pricePrecision)),
         cell(formatPrice(markPrice, pricePrecision), 'cyan'),
         cell(pnlStr, pnlStyle),
@@ -130,7 +138,6 @@ export function formatOrdersTable(exchange: ExchangeLike): string {
   for (const order of orders) {
     const market = exchange.store?.markets?.find((m) => m.symbol === order.symbol);
     const pricePrecision = market?.precision?.price;
-    const amountPrecision = market?.precision?.amount;
     const sideStyle: TextStyle = order.side === 'buy' ? 'green' : 'red';
     const side = order.side === 'buy' ? 'BUY' : 'SELL';
     const type = formatOrderTypeLabel(order.type);
@@ -145,7 +152,7 @@ export function formatOrdersTable(exchange: ExchangeLike): string {
         cell(order.symbol),
         cell(side, sideStyle),
         cell(type),
-        cell(formatPrice(order.amount, amountPrecision)),
+        cell(formatOrderBaseSize(order, market)),
         cell(order.price ? formatPrice(order.price, pricePrecision) : 'Market', 'cyan'),
         cell(trigger),
       ],
@@ -160,22 +167,23 @@ export function formatOrdersTable(exchange: ExchangeLike): string {
  */
 export function formatMarginTable(exchange: ExchangeLike): string {
   const balance = exchange.store?.balance;
-  const positions = exchange.store?.positions?.filter((pos) => pos.notional !== 0) ?? [];
+  const positions = exchange.store?.positions?.filter((pos) => pos.contracts !== 0) ?? [];
 
   if (!balance) {
     return 'Balance data not available\n';
   }
 
   // Calculate total margin used
-  let totalNotional = 0;
+  const totalNotional = calculateTotalNotional(positions);
   let totalUnrealizedPnl = 0;
   for (const pos of positions) {
-    totalNotional += Math.abs(pos.notional);
     totalUnrealizedPnl += pos.unrealizedPnl;
   }
 
   // Calculate margin ratio if we have positions
-  const marginRatio = balance.total > 0 ? (totalNotional / balance.total) * 100 : 0;
+  const accountLev = calculatePositionAccountLeverage(totalNotional, balance.total);
+  const rawRatio = accountLev === null ? NaN : accountLev * 100;
+  const marginRatio = Number.isFinite(rawRatio) ? rawRatio : null;
   const usedMargin = balance.used ?? 0;
   const freeMargin = balance.free ?? balance.total - usedMargin;
 
@@ -205,20 +213,19 @@ export function formatMarginTable(exchange: ExchangeLike): string {
 
   // Total notional
   tableData.rows.push({
-    cells: [cell('Position Size'), cell(formatPrice(totalNotional))],
+    cells: [cell('Position Size'), cell(formatKnown(totalNotional, formatPrice))],
   });
 
   // Account leverage (total notional / balance)
-  const accountLev = balance.total > 0 ? totalNotional / balance.total : 0;
-  const levStyle: TextStyle = accountLev > 5 ? 'red' : accountLev > 2 ? 'yellow' : 'green';
+  const levStyle: TextStyle = accountLev === null ? 'dim' : accountLev > 5 ? 'red' : accountLev > 2 ? 'yellow' : 'green';
   tableData.rows.push({
-    cells: [cell('Account Lev'), cell(accountLev.toFixed(2) + 'x', levStyle)],
+    cells: [cell('Account Lev'), cell(formatKnown(accountLev, (value) => value.toFixed(2) + 'x'), levStyle)],
   });
 
   // Margin ratio
-  const ratioStyle: TextStyle = marginRatio > 80 ? 'red' : marginRatio > 50 ? 'yellow' : 'green';
+  const ratioStyle: TextStyle = marginRatio === null ? 'dim' : marginRatio > 80 ? 'red' : marginRatio > 50 ? 'yellow' : 'green';
   tableData.rows.push({
-    cells: [cell('Margin Ratio'), cell(marginRatio.toFixed(1) + '%', ratioStyle)],
+    cells: [cell('Margin Ratio'), cell(formatKnown(marginRatio, (value) => value.toFixed(1) + '%'), ratioStyle)],
   });
 
   // Unrealized PnL
@@ -243,7 +250,7 @@ export function formatMultiAccountPositionsTable(accounts: AccountExchange[]): s
   }> = [];
 
   for (const { accountName, exchange } of accounts) {
-    const positions = exchange.store?.positions?.filter((pos) => pos.notional !== 0) ?? [];
+    const positions = exchange.store?.positions?.filter((pos) => pos.contracts !== 0) ?? [];
     for (const pos of positions) {
       allPositions.push({ accountName, position: pos, exchange });
     }
@@ -292,22 +299,22 @@ export function formatMultiAccountPositionsTable(accounts: AccountExchange[]): s
     const side = pos.side === PositionSide.Long ? 'LONG' : 'SHORT';
     const pnlStyle: TextStyle = pos.unrealizedPnl >= 0 ? 'green' : 'red';
     const pnlSign = pos.unrealizedPnl >= 0 ? '+' : '';
-    const pnlPercent = pos.entryPrice > 0 ? ((pos.unrealizedPnl / pos.notional) * 100).toFixed(1) : '0.0';
+    const pnlPercent = calculatePositionPnlPercent(pos.notional, pos.unrealizedPnl);
 
     const balance = exchange.store?.balance;
     const accountLev = calculatePositionAccountLeverage(pos.notional, balance?.total ?? 0);
-    const levStyle: TextStyle = accountLev > 5 ? 'yellow' : 'cyan';
-    const levStr = `${accountLev.toFixed(2)}/${pos.leverage}x`;
+    const levStyle: TextStyle = accountLev === null ? 'dim' : accountLev > 5 ? 'yellow' : 'cyan';
+    const levStr = `${formatKnown(accountLev, (value) => value.toFixed(2))}/${pos.leverage}x`;
 
     totalPnl += pos.unrealizedPnl;
 
-    const pnlStr = `${pnlSign}${formatPrice(pos.unrealizedPnl)} (${pnlSign}${pnlPercent}%)`;
+    const pnlStr = `${pnlSign}${formatPrice(pos.unrealizedPnl)} (${pnlPercent === null ? '—' : `${pnlSign}${pnlPercent.toFixed(1)}%`})`;
     tableData.rows.push({
       cells: [
         cell(accountName),
         cell(pos.symbol),
         cell(side, sideStyle),
-        cell(formatPrice(Math.abs(pos.notional))),
+        cell(formatBaseSize(pos.contracts, market)),
         cell(formatPrice(pos.entryPrice, pricePrecision)),
         cell(formatPrice(markPrice, pricePrecision), 'cyan'),
         cell(pnlStr, pnlStyle),
@@ -379,7 +386,6 @@ export function formatMultiAccountOrdersTable(accounts: AccountExchange[]): stri
 
     const market = exchange.store?.markets?.find((m) => m.symbol === order.symbol);
     const pricePrecision = market?.precision?.price;
-    const amountPrecision = market?.precision?.amount;
     const sideStyle: TextStyle = order.side === 'buy' ? 'green' : 'red';
     const side = order.side === 'buy' ? 'BUY' : 'SELL';
     const type = formatOrderTypeLabel(order.type);
@@ -395,7 +401,7 @@ export function formatMultiAccountOrdersTable(accounts: AccountExchange[]): stri
         cell(order.symbol),
         cell(side, sideStyle),
         cell(type),
-        cell(formatPrice(order.amount, amountPrecision)),
+        cell(formatOrderBaseSize(order, market)),
         cell(order.price ? formatPrice(order.price, pricePrecision) : 'Market', 'cyan'),
         cell(trigger),
       ],
@@ -427,26 +433,25 @@ export function formatMultiAccountMarginTable(accounts: AccountExchange[]): stri
 
   let grandTotalBalance = 0;
   let grandTotalPnl = 0;
-  let grandTotalNotional = 0;
+  const accountNotionals: Array<{ notional: number | null }> = [];
 
   for (const { accountName, exchange } of accounts) {
     const balance = exchange.store?.balance;
-    const positions = exchange.store?.positions?.filter((pos) => pos.notional !== 0) ?? [];
+    const positions = exchange.store?.positions?.filter((pos) => pos.contracts !== 0) ?? [];
 
-    let totalNotional = 0;
+    const totalNotional = calculateTotalNotional(positions);
     let totalUnrealizedPnl = 0;
     for (const pos of positions) {
-      totalNotional += Math.abs(pos.notional);
       totalUnrealizedPnl += pos.unrealizedPnl;
     }
 
     grandTotalBalance += balance?.total ?? 0;
     grandTotalPnl += totalUnrealizedPnl;
-    grandTotalNotional += totalNotional;
+    accountNotionals.push({ notional: totalNotional });
 
     const freeMargin = balance?.free ?? (balance?.total ?? 0) - (balance?.used ?? 0);
-    const accountLev = (balance?.total ?? 0) > 0 ? totalNotional / (balance?.total ?? 1) : 0;
-    const levStyle: TextStyle = accountLev > 5 ? 'red' : accountLev > 2 ? 'yellow' : 'green';
+    const accountLev = calculatePositionAccountLeverage(totalNotional, balance?.total ?? 0);
+    const levStyle: TextStyle = accountLev === null ? 'dim' : accountLev > 5 ? 'red' : accountLev > 2 ? 'yellow' : 'green';
     const pnlStyle: TextStyle = totalUnrealizedPnl >= 0 ? 'green' : 'red';
     const pnlSign = totalUnrealizedPnl >= 0 ? '+' : '';
 
@@ -455,8 +460,8 @@ export function formatMultiAccountMarginTable(accounts: AccountExchange[]): stri
         cell(accountName),
         cell(formatPrice(balance?.total ?? 0), 'cyan'),
         cell(formatPrice(freeMargin)),
-        cell(formatPrice(totalNotional)),
-        cell(accountLev.toFixed(2) + 'x', levStyle),
+        cell(formatKnown(totalNotional, formatPrice)),
+        cell(formatKnown(accountLev, (value) => value.toFixed(2) + 'x'), levStyle),
         cell(pnlSign + formatPrice(totalUnrealizedPnl), pnlStyle),
       ],
     });
@@ -466,8 +471,9 @@ export function formatMultiAccountMarginTable(accounts: AccountExchange[]): stri
   tableData.rows.push(separatorRow(6));
 
   // Totals row
-  const grandLev = grandTotalBalance > 0 ? grandTotalNotional / grandTotalBalance : 0;
-  const grandLevStyle: TextStyle = grandLev > 5 ? 'red' : grandLev > 2 ? 'yellow' : 'green';
+  const grandTotalNotional = calculateTotalNotional(accountNotionals);
+  const grandLev = calculatePositionAccountLeverage(grandTotalNotional, grandTotalBalance);
+  const grandLevStyle: TextStyle = grandLev === null ? 'dim' : grandLev > 5 ? 'red' : grandLev > 2 ? 'yellow' : 'green';
   const grandPnlStyle: TextStyle = grandTotalPnl >= 0 ? 'green' : 'red';
   const grandPnlSign = grandTotalPnl >= 0 ? '+' : '';
 
@@ -476,8 +482,8 @@ export function formatMultiAccountMarginTable(accounts: AccountExchange[]): stri
       cell('TOTAL', 'cyan'),
       cell(formatPrice(grandTotalBalance), 'cyan'),
       cell('-'),
-      cell(formatPrice(grandTotalNotional)),
-      cell(grandLev.toFixed(2) + 'x', grandLevStyle),
+      cell(formatKnown(grandTotalNotional, formatPrice)),
+      cell(formatKnown(grandLev, (value) => value.toFixed(2) + 'x'), grandLevStyle),
       cell(grandPnlSign + formatPrice(grandTotalPnl), grandPnlStyle),
     ],
   });

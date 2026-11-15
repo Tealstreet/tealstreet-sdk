@@ -37,6 +37,7 @@ impl ContextRegistry {
                 phase: CommandPhase::LocalSetting,
                 last_deadline: now,
                 writes: None,
+                engine_unknown: None,
                 mutation_declared: true,
                 pending: 0,
                 deliveries: 0,

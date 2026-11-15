@@ -16,6 +16,65 @@ fn candle_topic(market: &Market, interval: Interval) -> String {
     format!("{}@kline_{interval}", native(market))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum AuthValue {
+    Integer(i64),
+    Text(String),
+    Other(serde::de::IgnoredAny),
+}
+impl AuthValue {
+    fn integer(&self) -> Option<i64> {
+        match self {
+            Self::Integer(value) => Some(*value),
+            Self::Text(value) => value.parse().ok(),
+            Self::Other(_) => None,
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AuthReply {
+    success: Option<bool>,
+    code: Option<AuthValue>,
+    status: Option<AuthValue>,
+}
+
+fn auth_refusal(reply: AuthReply) -> VenueError {
+    let code = reply.code.as_ref().and_then(AuthValue::integer);
+    // https://docs.woox.io/#error-codes: -1002 covers several causes, not specifically IP.
+    let reason = match code {
+        Some(-1001) => "invalid API key or signature format",
+        Some(-1002) => "unauthorized: invalid key, insufficient permission, expired or revoked key",
+        Some(-1003) => "rate limit exceeded",
+        Some(-1000) => "unknown venue error",
+        Some(-1011) => "venue RPC connection unavailable",
+        Some(-1012) => "venue RPC request rejected",
+        _ => "unclassified auth refusal",
+    };
+    let mut message = "WOO X private websocket authentication failed".to_owned();
+    if let Some(code) = code {
+        message.push_str(&format!(" (WOO code {code})"));
+    }
+    if let Some(status) = reply
+        .status
+        .as_ref()
+        .and_then(AuthValue::integer)
+        .filter(|status| (100..=599).contains(status))
+    {
+        message.push_str(&format!(" (status {status})"));
+    }
+    message.push_str(": ");
+    message.push_str(reason);
+    let error = VenueError::new(message)
+        .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+        .venue_message(reason);
+    match code {
+        Some(code) => error.venue_code(code.to_string()),
+        None => error,
+    }
+}
+
 impl Woo {
     /// The public feed and key `desired_interests` streams `topic` under.
     pub(super) fn topic_interest(
@@ -235,26 +294,14 @@ impl Woo {
         match event.event {
             Some("pong") => Control::Pong,
             Some("auth") => {
-                #[derive(serde::Deserialize)]
-                struct Auth {
-                    success: Option<bool>,
-                    message: Option<String>,
-                }
-                let evidence = match serde_json::from_str::<Auth>(text) {
-                    Ok(Auth {
+                let evidence = match serde_json::from_str::<AuthReply>(text) {
+                    Ok(AuthReply {
                         success: Some(true),
                         ..
                     }) => AuthEvidence::Accepted,
-                    Ok(Auth {
-                        success: Some(false),
-                        message,
-                    }) => AuthEvidence::Rejected(VenueError::new(
-                        message
-                            .filter(|value| !value.is_empty())
-                            .unwrap_or_else(|| {
-                                "WOO X private websocket authentication failed".into()
-                            }),
-                    )),
+                    Ok(reply) if reply.success == Some(false) => {
+                        AuthEvidence::Rejected(auth_refusal(reply))
+                    }
                     _ => AuthEvidence::Malformed,
                 };
                 Control::Auth(evidence)
@@ -295,13 +342,16 @@ impl Woo {
             LifecycleEvent::Authenticated { epoch, first: true } => {
                 cx.send_after_socket_interests(epoch.feed(), r#"{"event":"ping"}"#.into())?;
             }
-            LifecycleEvent::AuthFailure { evidence, .. } => {
-                let message = match evidence {
-                    AuthEvidence::Rejected(error) => error.message,
-                    _ => "WOO X private websocket authentication failed".into(),
-                };
-                cx.notice(Level::Error, code::AUTH_REJECTED, message);
-            }
+            LifecycleEvent::AuthFailure { evidence, .. } => match evidence {
+                AuthEvidence::Rejected(error) => {
+                    cx.notice_error(Level::Error, code::AUTH_REJECTED, &error)
+                }
+                _ => cx.notice(
+                    Level::Error,
+                    code::AUTH_REJECTED,
+                    "WOO X private websocket authentication failed",
+                ),
+            },
             LifecycleEvent::Retired { epoch, .. } => {
                 if self.private_feed(epoch.feed())? {
                     self.account_close(cx, epoch.socket());

@@ -308,15 +308,15 @@ describe('nativeCloseSize', () => {
     ).toBe(0.4);
   });
 
-  it('ignores a stale venue-supplied native size that is smaller', () => {
-    expect(
+  it('refuses stale venue-supplied evidence instead of selecting the larger size', () => {
+    expect(() =>
       nativeCloseSize(withMarket({ contractSize: 100, isInverse: true }), {
         symbol: 'DOGEUSDT',
         contracts: 40,
         notional: 40,
         extra: { contractsNative: 0.1 },
       }),
-    ).toBe(0.4);
+    ).toThrow(/unknown/i);
   });
 
   it('REFUSES when the market has not loaded, rather than falling back to base', () => {
@@ -327,5 +327,20 @@ describe('nativeCloseSize', () => {
     // one missed `prepareCliOrder` away from re-opening it.
     const noMarket = { name: 'okx', store: { markets: [] } } as unknown as ExchangeLike;
     expect(() => nativeCloseSize(noMarket, { symbol: 'DOGEUSDT', contracts: 5000 })).toThrow(/Market not found/);
+  });
+});
+
+describe('unknown close sizing', () => {
+  const exchange = {
+    name: 'okx',
+    store: { markets: [{ symbol: 'BTCUSDT', contractSize: 1 }] },
+  } as unknown as ExchangeLike;
+  it('refuses conflicting native/derived quantities', () => {
+    expect(() => nativeCloseSize(exchange, { symbol: 'BTCUSDT', contracts: 2, extra: { contractsNative: 1 } })).toThrow(
+      /unknown/i,
+    );
+  });
+  it('refuses when neither quantity is known', () => {
+    expect(() => nativeCloseSize(exchange, { symbol: 'BTCUSDT', contracts: NaN })).toThrow(/unknown/i);
   });
 });

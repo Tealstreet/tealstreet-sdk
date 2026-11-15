@@ -1094,7 +1094,7 @@ fn history_entry(r: &Request, item: &str) -> Result<Option<Entry>, String> {
                 _ => return Err("Invalid WOO history status".into()),
             };
             let kind = match row.kind.as_ref() {
-                "LIMIT" | "IOC" | "FOK" | "POST_ONLY" | "ASK" | "BID" => OrderType::Limit,
+                "LIMIT" | "IOC" | "FOK" | "POST_ONLY" | "ASK" | "BID" | "RPI" => OrderType::Limit,
                 "MARKET" => OrderType::Market,
                 _ => return Err("Invalid WOO history order type".into()),
             };

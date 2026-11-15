@@ -54,6 +54,12 @@ impl Harness {
     fn unstarted_with_provider(
         wrap: impl FnOnce(safe_cex_engine::signing::Provider) -> safe_cex_engine::signing::Provider,
     ) -> Self {
+        Self::unstarted_with_mode(wrap, false)
+    }
+    fn unstarted_with_mode(
+        wrap: impl FnOnce(safe_cex_engine::signing::Provider) -> safe_cex_engine::signing::Provider,
+        frame_fed: bool,
+    ) -> Self {
         let (venue, provider) = Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
@@ -62,6 +68,9 @@ impl Harness {
         .build();
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.set_signer(Some(wrap(provider))).unwrap();
+        if frame_fed {
+            engine.set_frame_fed().unwrap();
+        }
         let mut h = Self {
             engine,
             now: 1000.0,
@@ -3235,16 +3244,20 @@ fn metadata_write_provider_refusal_releases_pending_owner_before_next_read() {
             requests,
             "provider refusal releases no HTTP"
         );
-        assert_eq!(
-            h.failures
-                .iter()
-                .filter(|(id, _)| *id == 944)
-                .collect::<Vec<_>>(),
-            vec![&(
-                944,
-                safe_cex_engine::signing::SignError::Refused.venue_error()
-            )]
-        );
+        let failures = h
+            .failures
+            .iter()
+            .filter(|(id, _)| *id == 944)
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), 1);
+        let mut actual = failures[0].1.clone();
+        let expected = safe_cex_engine::signing::SignError::Refused.venue_error();
+        let elements = actual.elements.take().expect("unsent setting outcome");
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0].result,
+            safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
+            if error.as_ref() == &expected));
+        assert_eq!(actual, expected);
         assert_eq!(
             h.engine.health().auth_failures,
             auth_failures,
@@ -4119,7 +4132,22 @@ fn protective_references_keep_the_real_field_receipt_through_seed_and_live_updat
             "{working_type}/{live_last:?}: {:?}",
             h.failures
         );
+        if allowed {
+            assert!(
+                !h.requests
+                    .iter()
+                    .any(|r| r.url.contains("/quote/ticker")
+                        || r.url.contains("/quote/premiumIndex")),
+                "fresh native proof needs no read"
+            );
+        }
         if !allowed {
+            let read = h.take("/quote/ticker");
+            h.reply(
+                read.id,
+                200,
+                r#"{"code":0,"data":[{"symbol":"BTC-USDT","time":6001}]}"#,
+            );
             let error = &h.failures.iter().find(|(id, _)| *id == 304).unwrap().1;
             assert!(error.message.contains("reference stale"), "{error:?}");
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
@@ -4159,6 +4187,12 @@ fn a_refused_premium_envelope_cannot_renew_a_protective_reference() {
         !h.requests
             .iter()
             .any(|r| r.url.contains("/trade/cancelReplace"))
+    );
+    let read = h.take("/quote/premiumIndex");
+    h.reply(
+        read.id,
+        200,
+        &PREMIUM.replacen("\"code\":0", "\"code\":100410", 1),
     );
     let error = &h.failures.iter().find(|(id, _)| *id == 305).unwrap().1;
     assert!(error.message.contains("reference stale"), "{error:?}");
@@ -4226,15 +4260,31 @@ fn native_stop_snapshot_supplies_exact_put_back_parameters_and_frame_provenance(
     );
     let outgoing = safe_cex_engine::test_support::prepared_actions(&mut destination, h.now);
     assert!(
-        !outgoing.iter().any(|a| matches!(a, Action::Http(_))),
-        "a frame cannot invent a fresh local reference: {outgoing:?}"
+        outgoing.iter().all(|a| !matches!(a,
+        Action::Http(r) if r.method != Method::Get)),
+        "a frame cannot authorize a destructive leg: {outgoing:?}"
     );
+    let reference = outgoing
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/quote/ticker") => Some(r),
+            _ => None,
+        })
+        .expect("missing receipt requires one public read");
+    destination.handle(
+        h.now,
+        Event::HttpFailed {
+            request: reference.id,
+            error: "offline",
+        },
+    );
+    let failed = safe_cex_engine::test_support::prepared_actions(&mut destination, h.now);
     assert!(
-        outgoing.iter().any(|a| matches!(a,
+        failed.iter().any(|a| matches!(a,
         Action::Notice(Notice::CommandFailed { error, .. })
             if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
                 && error.message.contains("reference stale"))),
-        "{outgoing:?}"
+        "{failed:?}"
     );
 
     h.event(Event::Command(Command::AmendOrder {
@@ -4318,3 +4368,6 @@ fn trigger_market_keeps_native_guarantee_flags_without_guessing_a_put_back() {
             .any(|r| r.method == Method::Post && r.url.ends_with("/trade/order"))
     );
 }
+
+#[path = "account/protective_reference.rs"]
+mod protective_reference;

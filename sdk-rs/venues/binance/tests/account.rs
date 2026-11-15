@@ -541,7 +541,7 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
     assert_eq!(store.order("2146760").unwrap().status, OrderStatus::Open);
     assert_eq!(
         h.result(11),
-        Some(&Err("HTTP response does not prove the write outcome".into()))
+        Some(&Err("HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders".into()))
     );
     let failure = &h.failures.iter().find(|(id, _)| *id == 11).unwrap().1;
     assert_eq!(
@@ -722,6 +722,49 @@ fn near_the_weight_limit_background_reads_pause() {
     assert!(!h.has_request("/fapi/v3/account"), "paused for a minute");
     h.advance(15_000.0);
     assert!(h.has_request("/fapi/v3/account"));
+}
+
+#[test]
+fn a_write_limit_keeps_background_pause_when_the_engine_seals_unknown() {
+    for (status, headers, body) in [
+        (
+            429,
+            "Retry-After: 60",
+            r#"{"code":-1022,"msg":"signature refused"}"#,
+        ),
+        (
+            503,
+            "x-mbx-used-weight-1m: 2000",
+            r#"{"code":-1022,"msg":"signature refused"}"#,
+        ),
+        (
+            200,
+            "x-mbx-used-weight-1m: 2000",
+            r#"{"code":-1003,"msg":"rate limited"}"#,
+        ),
+    ] {
+        let mut h = ready();
+        place(&mut h, 91, vec![limit(OrderSide::Buy, 1., 100.)]);
+        let write = h.take("/fapi/v1/order");
+        h.reply(write.id, status, headers, body);
+        let error = &h
+            .failures
+            .iter()
+            .find(|(command, _)| *command == 91)
+            .unwrap()
+            .1;
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        h.advance(50_000.);
+        assert!(
+            !h.has_request("/fapi/v3/account"),
+            "HTTP {status}: background read escaped pause"
+        );
+        h.advance(15_000.);
+        assert!(
+            h.has_request("/fapi/v3/account"),
+            "HTTP {status}: reads never resumed"
+        );
+    }
 }
 
 #[test]
@@ -1378,7 +1421,7 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         if status >= 500 {
             assert_eq!(
                 error.message,
-                "HTTP response does not prove the write outcome"
+                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
             let native: Option<serde_json::Value> = serde_json::from_str(body).ok();
             assert_eq!(

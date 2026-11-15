@@ -60,7 +60,8 @@ impl<P> Cx<'_, P> {
 
     /// Settle-only: from the same custody, settle the current call and park
     /// with NO next entry, for proof that arrives only on a stream. Bounded
-    /// (`bound_ms > 0`) and one-shot; release readies `done_plan`, expiry fails.
+    /// (`bound_ms > 0`) and one-shot per call; release readies `done_plan`
+    /// or explicit definitive continuation, expiry fails.
     pub fn serial_plan_settle_wait(
         &mut self,
         plan: &Plan,
@@ -68,6 +69,12 @@ impl<P> Cx<'_, P> {
         context: &Context,
         bound_ms: u32,
     ) -> Result<ConditionWait, Error>;
+
+    /// Only in this Plan's genuine ready callback after a released settle wait.
+    /// Exact retained context and definitive journal evidence are required.
+    pub fn continue_settled_serial_plan(
+        &mut self, plan: &Plan, context: &Context, next: SerialCall,
+    ) -> Result<Slot, Error>;
 
     /// From any callback, borrowed included. Grants nothing directly: it
     /// schedules the Plan's `on_http_plan_ready`, in this flush.
@@ -339,3 +346,16 @@ it through the explicit control mode in `scripts/test-http-plan-feature-modes.py
 Engine-focused tests under `http-plans` and `http-plans,order-locks`; clippy
 `-D warnings`; fmt. Independent review of the plan and REDs, then the source.
 WASM bytes reported, linked only by adopters.
+
+## Native identity continuation
+
+TxFlow serial placement batches use a bounded settle wait for each physical
+batch. The current attempt and its PendingPlacement remain retained until the
+codec resolves authoritative native IDs. A released wait grants only Plan-ready
+custody. `continue_settled_serial_plan` checks that exact Plan, retained handoff
+context/issuer, completed schedule and definitive write journal before compacting
+the old leg and admitting one fresh call. A pending identity, foreign/stale token,
+borrowed callback or repeated resume grants no next write. Invalid next terms
+leave the settled Plan usable for completion. Ordinary continuation rules and
+unknown-outcome refusal are unchanged. The venue clears its reconciliation timer
+and counter before releasing each batch, keeping the next batch's bound independent.

@@ -2,6 +2,7 @@ import type { OemsContext } from './context.types';
 
 import { buildOemsPrompt, OEMS_PROMPT_VERSION } from './prompt';
 import { OEMS_PLAN_SCHEMA_VERSION } from './planSchema';
+import { boundOemsContext } from './boundContext';
 
 const context = (over: Partial<OemsContext> = {}): OemsContext => ({
   generatedAt: 1,
@@ -54,9 +55,46 @@ describe('buildOemsPrompt', () => {
     expect(instructions).toContain('close_positions');
   });
 
+  it.each([false, true])('invalidates the prior cache contract for nullable native size (final=%s)', (final) => {
+    const built = buildOemsPrompt({ context: context(), transcript: [], message: 'close my position', final }, 'n');
+    expect(built.instructions).toContain('A null nativeContracts means unknown position size');
+    // Version 7 predates the nullable native-size instruction on master.
+    expect(OEMS_PROMPT_VERSION).toBeGreaterThan(7);
+    expect(built.cacheKey).not.toBe(`tealstreet-oems-7-${OEMS_PLAN_SCHEMA_VERSION}${final ? '-final' : ''}`);
+  });
+
   it('keys the cache on both versions, so neither can drift alone', () => {
     const { cacheKey } = buildOemsPrompt({ context: context(), transcript: [], message: 'x' }, 'n');
     expect(cacheKey).toBe(`tealstreet-oems-${OEMS_PROMPT_VERSION}-${OEMS_PLAN_SCHEMA_VERSION}`);
+  });
+
+  it.each([false, true])('describes a null liquidation price as unknown (final=%s)', (final) => {
+    const bounded = boundOemsContext(
+      context({
+        positions: [
+          {
+            account: 'main',
+            symbol: 'BTCUSDT',
+            side: 'long',
+            contracts: 1,
+            nativeContracts: 1,
+            entryPrice: 90_000,
+            markPrice: 95_000,
+            notional: 95_000,
+            unrealizedPnl: 5_000,
+            liquidationPrice: null,
+            leverage: 2,
+            positionMode: 'one-way',
+          },
+        ],
+      }),
+    );
+    const built = buildOemsPrompt(
+      { context: bounded, transcript: [], message: 'What is my liquidation price?', final },
+      'n',
+    );
+    expect(built.input).toContain('"liquidationPrice":null');
+    expect(built.instructions).toContain('A null liquidationPrice means the liquidation price is unknown');
   });
 
   it('renders an empty transcript rather than nothing', () => {
@@ -192,10 +230,7 @@ describe('read tools in the prompt', () => {
   /** The snapshot half of the same problem: a read result said it was a subset
    *  while a fifty-of-eighty position list said nothing. */
   it('marks a truncated SNAPSHOT, and names what is missing', () => {
-    const built = buildOemsPrompt(
-      { ...base, context: { ...context(), dropped: { positions: 30, accounts: 5 } } },
-      'n',
-    );
+    const built = buildOemsPrompt({ ...base, context: { ...context(), dropped: { positions: 30, accounts: 5 } } }, 'n');
     expect(built.input).toContain('[SNAPSHOT TRUNCATED');
     expect(built.input).toContain('30 more positions');
     expect(built.input).toContain('5 more accounts');
@@ -226,4 +261,3 @@ describe('read tools in the prompt', () => {
     expect(built.input).not.toContain('TRUNCATED');
   });
 });
-

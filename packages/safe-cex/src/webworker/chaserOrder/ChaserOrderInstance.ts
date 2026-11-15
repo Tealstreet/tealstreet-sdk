@@ -39,7 +39,8 @@ export class ChaserOrderInstance {
   // Used by the manager to skip cancel+replace immediately after a
   // fill — see `ChaserOrderManager.updateOrders` for the rationale.
   private _lastPartialFillAt = 0;
-  exchange: Exchange;
+  // The captured exchange is this chase's account/session generation; disposal retires it.
+  readonly exchange: Exchange;
 
   constructor(exchange: Exchange, options: ChaserOrderOptions) {
     exchange.syncAccountState?.();

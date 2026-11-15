@@ -142,6 +142,7 @@ struct InfoSuccessor {
 #[derive(Default)]
 struct Connection {
     feed: Option<FeedId>,
+    feed_refused: bool,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
     private_bootstrap: socket_codec::PrivateBootstrap,
@@ -171,6 +172,7 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
+    repair_boot_sequence: u64,
     options: Options,
     /// The standalone `hyperliquidspot` venue: spot is the whole product.
     spot: bool,
@@ -219,6 +221,7 @@ impl Hyperliquid {
             Default::default(),
         );
         Self {
+            repair_boot_sequence: socket_codec::next_repair_boot_sequence(),
             options,
             spot: false,
             spot_markets,
@@ -679,6 +682,7 @@ impl Hyperliquid {
         let raw = frame.data.get();
         match frame.channel.as_ref() {
             "allMids" => {
+                cx.record_socket_topic(&["@allMids|||||||"]);
                 if let Ok(mids) = serde_json::from_str::<Mids>(raw) {
                     for (coin, price) in mids.mids {
                         if let (Some(symbol), Ok(mid)) = (self.symbol(&coin), price.parse::<f64>())
@@ -701,6 +705,7 @@ impl Hyperliquid {
                 }
             }
             "fastAssetCtxs" => {
+                cx.record_socket_topic(&["@fastAssetCtxs|||||||"]);
                 if let Ok(encoded) = serde_json::from_str::<&str>(raw)
                     && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded)
                     && let Ok(decoded) =
@@ -738,6 +743,7 @@ impl Hyperliquid {
             "trades" => {
                 if let Ok(rows) = serde_json::from_str::<Vec<TradeRow>>(raw) {
                     for row in rows {
+                        cx.record_socket_topic(&["@trades|", &row.coin, "||||||"]);
                         let Some(symbol) = self.symbol(&row.coin).map(str::to_owned) else {
                             continue;
                         };
@@ -763,6 +769,11 @@ impl Hyperliquid {
                     && let Some(symbol) = self.symbol(&depth.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                 {
+                    if depth.fast {
+                        cx.record_socket_topic(&["@l2Book|", &depth.coin, "||||true||"]);
+                    } else if !self.spot {
+                        cx.record_socket_topic(&["@l2Book|", &depth.coin, "||||||"]);
+                    }
                     if self.spot {
                         let Some(market) = cx.store.market(&symbol) else {
                             return;
@@ -833,6 +844,7 @@ impl Hyperliquid {
                         .as_ref()
                         .is_none_or(|(time, _)| bbo.time >= *time)
                 {
+                    cx.record_socket_topic(&["@bbo|", &bbo.coin, "||||||"]);
                     ladder.bbo = Some((bbo.time, bbo.bbo));
                     if ladder.depth_time.is_some() {
                         Self::combine(ladder);
@@ -842,6 +854,7 @@ impl Hyperliquid {
             }
             "candle" => {
                 let mut apply = |row: CandleRow<'_>| {
+                    cx.record_socket_topic(&["@candle|", &row.s, "|", &row.i, "|||||"]);
                     if let Some(symbol) = self.symbol(&row.s)
                         && let Some(interval) = Interval::parse(&row.i)
                         && self.candles.contains_key(&(symbol.to_owned(), interval))
@@ -1363,6 +1376,9 @@ impl Venue for Hyperliquid {
     ) -> Result<(), VenueError> {
         self.protective_release_veto(store, pending, release)
     }
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[trading::PACING]
     }
@@ -1385,8 +1401,8 @@ impl Venue for Hyperliquid {
         response: Response<'_>,
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
-        if matches!(pending, Pending::Trade(_)) {
-            self.unproven_trade_evidence(response, evidence);
+        if let Pending::Trade(request) = pending {
+            self.unproven_trade_evidence(request, response, evidence);
         }
     }
     fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
@@ -1583,7 +1599,8 @@ impl Venue for Hyperliquid {
         cx: &mut Cx<'_, Pending>,
         topic: &SubscriptionTopic,
     ) -> Option<Result<(), String>> {
-        self.retry_refused(cx, topic)
+        self.unnamed_candle_repair(cx, topic)
+            .or_else(|| self.retry_refused(cx, topic))
     }
     fn socket_control(
         &self,

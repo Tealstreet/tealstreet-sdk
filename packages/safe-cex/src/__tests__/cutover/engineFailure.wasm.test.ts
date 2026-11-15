@@ -41,7 +41,7 @@ it.each(['setTickerSymbols', 'setPollScale'] as const)(
     vi.spyOn(console, 'trace').mockImplementation(() => {});
     let shouldTrap = false;
     const idle = () => '[]';
-    const venue = operation === 'setPollScale' ? 'breakoutprop' : 'binance';
+    const venue = 'binance';
     const source: WasmEngineLike = {
       capabilities: () => engineCapabilities(venue),
       start: idle,
@@ -98,7 +98,7 @@ it.each(['setTickerSymbols', 'setPollScale'] as const)(
     await startup;
     shouldTrap = true;
     if (operation === 'setTickerSymbols') exchange.setActiveTickerSymbols(['BTCUSDT']);
-    else setTickIntervalMultipliers({ breakoutprop: 2 });
+    else setTickIntervalMultipliers({ binance: 2 });
     await vi.advanceTimersByTimeAsync(1000);
     expect(exchange.isEngineDead).toBe(true);
     expect(exchange.isDisposed).toBe(true);

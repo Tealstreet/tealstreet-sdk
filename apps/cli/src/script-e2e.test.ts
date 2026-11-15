@@ -45,8 +45,10 @@ const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 const TMP_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'tealstreet-script-e2e-'));
 process.env.HOME = TMP_BASE;
 process.env.USERPROFILE = TMP_BASE;
+process.env.TEALSTREET_CONFIG_DIR = TMP_BASE;
+process.env.TEALSTREET_CONFIG_FILE = path.join(TMP_BASE, 'config.json');
 
-const { clearScriptsCache, loadScripts, lookupScript, SCRIPTS_DIR } = await import('./scripts-store');
+const { clearScriptsCache, loadScripts, lookupScript, getScriptsDir } = await import('./scripts-store');
 const { runScriptFromHostWithAdapter } = await import('./script-runner');
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -176,12 +178,12 @@ const buildStubStore = (): PreprocessStore & { vars: Map<string, string> } => {
 };
 
 const writeScript = (name: string, body: string): void => {
-  if (!fs.existsSync(SCRIPTS_DIR)) fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(SCRIPTS_DIR, `${name}.ts`), body);
+  if (!fs.existsSync(getScriptsDir())) fs.mkdirSync(getScriptsDir(), { recursive: true });
+  fs.writeFileSync(path.join(getScriptsDir(), `${name}.ts`), body);
 };
 
 const cleanScriptsDir = (): void => {
-  if (fs.existsSync(SCRIPTS_DIR)) fs.rmSync(SCRIPTS_DIR, { recursive: true, force: true });
+  if (fs.existsSync(getScriptsDir())) fs.rmSync(getScriptsDir(), { recursive: true, force: true });
   clearScriptsCache();
 };
 
@@ -210,9 +212,9 @@ export const meta: ScriptMeta = {
 
 beforeAll(() => {
   // Sanity: the redirected HOME is what scripts-store actually computed
-  // SCRIPTS_DIR from. If the imports above raced the env mutation, this
+  // getScriptsDir() from. If the imports above raced the env mutation, this
   // catches it loudly instead of leaking writes to the real ~/.tealstreet.
-  expect(SCRIPTS_DIR.startsWith(TMP_BASE)).toBe(true);
+  expect(getScriptsDir().startsWith(TMP_BASE)).toBe(true);
 });
 
 beforeEach(() => {

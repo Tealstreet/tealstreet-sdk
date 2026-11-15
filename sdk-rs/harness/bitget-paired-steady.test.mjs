@@ -4,11 +4,14 @@ import test from 'node:test';
 import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_TOLERANCE, BITGET_PAIRED_PROTOCOL_SHA256,
   assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
   BITGET_CUMULATIVE_ANCHOR, BITGET_MEASUREMENT_FILES, combineBitgetPairedCertificates,
-  assessBitgetUnchangedBytes, readBitgetSteadyCertificate, hasPairedBitgetSteady, bitgetSteadyWarning } from './bitget-paired-steady.mjs';
+  assessBitgetUnchangedBytes, readBitgetSteadyCertificate, hasPairedBitgetSteady, bitgetSteadyWarning,
+  bitgetCpuRejectionRecord, revalidateBitgetCpuRejection, bitgetBaselineObservation, BITGET_STEADY_NOISE, BITGET_STEADY_FAIL_RATIO } from './bitget-paired-steady.mjs';
 import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
-import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
+import { classifyInitialCase, pairedCertificateForRuntime, certifySuites } from './cpu-ci.mjs';
 import { readBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
 import { BitgetOracleChanged } from './bitget-paired-oracle.mjs';
+import { Frame, SECTION } from '../hosts/wasm/js/wire.mjs';
+import { replayPositions } from './bitget-anchor-positions.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 const A = 'a'.repeat(40), B = 'b'.repeat(40), tree = 'c'.repeat(40), head = 'd'.repeat(40);
@@ -218,15 +221,15 @@ test('the steady certificate never waives another CPU objective', () => {
     'main-thread CPU over 1.00x still refuses the CPU gate');
 });
 
-test('Sam 2026-11-07: Bitget paired steady fails when Rust is slower than TS; creep only adds rejections', () => {
+test('Bitget paired steady fails beyond measured noise; creep only adds rejections', () => {
   const warn = assessBitgetPairedSteady(fixture(1, .95)).certificate;
   assert.equal(warn.steadyAccepted, true, '0.95x with q in tolerance is accepted');
   assert.equal(warn.readiness.ready, false);
   const combined = certificateFor(fixture(1, .95));
   assert.match(bitgetSteadyWarning(combined), /missed the 10%-faster target \(rust\/ts=0\.950x, target 0\.90x\)/);
-  const slower = assessBitgetPairedSteady(fixture(1, 1.01)).certificate;
+  const slower = assessBitgetPairedSteady(fixture(1, 1.02)).certificate;
   assert.equal(slower.notSlowerThanTs, false);
-  assert.equal(slower.steadyAccepted, false, '1.01x fails');
+  assert.equal(slower.steadyAccepted, false, '1.02x exceeds measured noise');
   assert.equal(bitgetSteadyWarning(slower), null, 'a failure is not downgraded to a warning');
   const creep = assessBitgetPairedSteady(fixture(1.05, .89 / 1.05)).certificate;
   assert.equal(creep.notSlowerThanTs, true, '0.89x is faster than TS');
@@ -388,7 +391,7 @@ test('unchanged disposition cannot waive correctness, memory or process CPU fail
 });
 
 test('changed bytes still require both measured witnesses and the unchanged frozen bound', async () => {
-  for (const q of [1.023, 1.024, 1.0343978501725235]) {
+  for (const q of [1, 1.023]) {
     const data = fixture(q), reads = [];
     const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
       readEvidence: async name => { reads.push(name); return name === 'tip' ? data.evidence : anchorFixture(data).evidence; } });
@@ -399,6 +402,53 @@ test('changed bytes still require both measured witnesses and the unchanged froz
     assert.equal(certificate.tip.originalReports.length, 8);
     assert.equal(certificate.anchor.originalReports.length, 8);
   }
+});
+
+test('a complete rejected tip never collects an anchor that cannot rescue it', async () => {
+  for (const [q, rA] of [[1.024, .85], [1.0343978501725235, .85],
+    [1.0278628752799848 / 1.0225747088093846, 1.0225747088093846]]) {
+    const data = fixture(q, rA), reads = [];
+    await assert.rejects(readBitgetSteadyCertificate({ authority: data.authority, manifest,
+      readEvidence: async name => {
+        reads.push(name);
+        assert.equal(name, 'tip', 'rejected tip must not start an anchor build or replay');
+        return data.evidence;
+      } }), error => {
+      assert.equal(error.disposition, 'REJECTED');
+      assert.equal(error.certificate, null, 'a lone rejected witness is never a certificate');
+      assert.equal(error.tip.steadyAccepted, false);
+      assert.equal(error.tip.originalReports.length, 8, 'validate the complete tip before rejecting');
+      return true;
+    });
+    assert.deepEqual(reads, ['tip']);
+  }
+});
+
+test('a byte-changed build certifies against the original anchor with its empty legacy positions', async () => {
+  const data = fixture(1.01), reads = [];
+  assert.notEqual(data.evidence.archives.baseline.files['safe_cex_wasm_bg.wasm'],
+    data.evidence.archives.candidate.files['safe_cex_wasm_bg.wasm']);
+  const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
+    readEvidence: async name => {
+      reads.push(name);
+      // The collector must decode the selected module before it can return
+      // measured evidence. This used to throw for the pinned anchor even with
+      // zero positions; changed bytes could never reach certification.
+      const buffer = new ArrayBuffer(32), view = new DataView(buffer);
+      view.setUint32(0, 0x46584353, true);
+      view.setUint16(4, 1, true); view.setUint16(6, 1, true);
+      view.setUint16(16, SECTION.POSITIONS, true);
+      view.setUint16(18, name === 'anchor' ? 1 : 2, true);
+      view.setUint32(20, 8, true);
+      assert.equal(replayPositions(new Frame(buffer), 'bitget', false).count, 0);
+      return name === 'tip' ? data.evidence : anchorFixture(data).evidence;
+    } });
+  assert.deepEqual(reads, ['tip', 'anchor']);
+  assert.equal(certificate.anchorSource, BITGET_CUMULATIVE_ANCHOR);
+  assert.equal(certificate.steadyAccepted, true);
+  assert.equal(certificate.tip.originalReports.length, 8);
+  assert.equal(certificate.anchor.originalReports.length, 8);
+  assert.equal(hasPairedBitgetSteady(certificate, data.evidence.cohorts[1].evidence.report, B), true);
 });
 
 test('an unchanged TS oracle still certifies, while baseline Rust corruption still fails', async () => {
@@ -494,4 +544,110 @@ test('a valid refusal plans no second but never hides corruption or memory failu
   memory.report.failures = performanceFailures(memory.report.samples.ts, memory.report.samples.rust);
   memory.report.status = 'FAIL'; memory.reportBytes = JSON.stringify(memory.report);
   assert.throws(() => classifyInitialCase(memory, manifest, undefined, undefined, refusal));
+});
+
+test('Bitget steady distinguishes measured baseline noise from a slowdown beyond that noise', () => {
+  for (const ratio of [1, 1.01, 1.015369697275649, 1.01725]) {
+    const result = assessBitgetPairedSteady(fixture(1, ratio));
+    assert.equal(result.valid, true, result.errors.join('\n'));
+    assert.equal(result.certificate.steadyAccepted, true, `${ratio} is within observed baseline variance`);
+  }
+  for (const ratio of [1.01726, 1.0203509277368097, 1.03]) {
+    assert.equal(assessBitgetPairedSteady(fixture(1, ratio)).certificate.steadyAccepted, false, `${ratio} exceeds noise`);
+  }
+});
+
+test('master push and nightly cannot use the unmeasured unchanged-bytes shortcut', () => {
+  for (const event of ['push', 'workflow_dispatch']) {
+    const data = unchangedFixture(), source = inputs();
+    Object.assign(source.run, { event, head_branch: 'master', head_sha: B });
+    source.job.head_sha = B;
+    source.landing = { sha: B, tree: { sha: tree }, parents: [{ sha: A }] };
+    data.authority = bitgetPairedAuthority(source);
+    const result = assessBitgetUnchangedBytes(data);
+    assert.equal(result.valid, false, 'master baseline must actually be measured');
+    assert.match(result.errors.join('\n'), /master.*measur/i);
+  }
+});
+
+for (const witness of ['tip', 'anchor']) test(`a complete failed ${witness} yields a recomputed CPU verdict, never an oracle refusal`, async () => {
+  const data = fixture(witness === 'tip' ? 1.05 : 1, .85);
+  const anchor = anchorFixture(data);
+  if (witness === 'anchor') {
+    for (const cohort of anchor.evidence.cohorts.filter(row => row.before.arm === 'baseline')) {
+      cohort.evidence = patchedRust(cohort.evidence, { steadyCpuMs: 150 });
+    }
+  }
+  const options = { authority: data.authority, manifest,
+    readEvidence: async name => name === 'tip' ? data.evidence : anchor.evidence };
+  let original;
+  try { await readBitgetSteadyCertificate(options); } catch (error) { original = error; }
+  assert.equal(original.disposition, 'REJECTED');
+  const record = bitgetCpuRejectionRecord(original);
+  const args = { ...options, record: structuredClone(record), message: original.message };
+  const result = await revalidateBitgetCpuRejection(args);
+  assert.equal(result.message, original.message);
+  assert.equal(record.certified, false);
+  assert.equal(record.certificate, null);
+  assert.equal(record.tip.steadyAccepted, witness === 'anchor');
+  const { results } = await certifySuites(['bitget', 'okx'], async suite => {
+    if (suite === 'bitget') throw await revalidateBitgetCpuRejection(args);
+    return { suite };
+  });
+  assert.deepEqual(results.suites, { bitget: false, okx: true });
+  assert.equal(results.certified, false);
+  assert.equal(results.reasons.bitget, original.message, 'the final CPU gate carries the actual failed comparison');
+
+  for (const change of [
+    x => { x.record.tip.q += .01; },
+    x => { x.record.certified = true; },
+    x => { x.message += ' modified'; },
+    x => { x.record.errors = ['not a CPU verdict']; },
+  ]) {
+    const bad = { ...args, record: structuredClone(record) }; change(bad);
+    await assert.rejects(revalidateBitgetCpuRejection(bad), /differs from recomputed/);
+  }
+  // A log line/payload cannot supply a verdict if any raw cohort is missing or corrupt.
+  const incomplete = structuredClone(data.evidence); incomplete.cohorts.pop();
+  await assert.rejects(revalidateBitgetCpuRejection({ ...args, readEvidence: async () => incomplete }), /did not reproduce/);
+  const corrupt = structuredClone(data.evidence); corrupt.cohorts[0].evidence.raw[0].bytes += 'x';
+  await assert.rejects(revalidateBitgetCpuRejection({ ...args, readEvidence: async () => corrupt }), /did not reproduce/);
+  const accepted = fixture();
+  await assert.rejects(revalidateBitgetCpuRejection({ ...args, authority: accepted.authority,
+    readEvidence: async name => name === 'tip' ? accepted.evidence : anchorFixture(accepted).evidence }), /recomputed as accepted/);
+});
+
+test('the fixed Bitget allowance records its observed range without changing global strict objectives', () => {
+  assert.equal(BITGET_STEADY_NOISE, 458.32 / 450.66 - 469.5715 / 469.6945);
+  assert.equal(BITGET_STEADY_FAIL_RATIO, 1 + BITGET_STEADY_NOISE);
+  const data = fixture(1, 1.01), cert = certificateFor(data);
+  assert.equal(cert.steadyAccepted, true);
+  assert.equal(cert.tip.notSlowerThanTs, false, 'retain the literal comparison separately from noise');
+  assert.equal(cert.tip.withinSteadyNoise, true);
+  const report = data.evidence.cohorts[0].evidence.report;
+  assert(performanceFailures(report.samples.ts, report.samples.rust).some(x => x.startsWith('performance steady-state CPU:')),
+    'raw reports and every other venue keep strict policy');
+});
+
+test('master telemetry records the landed and parent ratios even on a failed tip, never certifies', () => {
+  for (const ratio of [.99, 1.03]) {
+    const data = fixture(1, ratio), source = inputs();
+    Object.assign(source.run, { event: 'push', head_branch: 'master', head_sha: B });
+    source.job.head_sha = B;
+    source.landing = { sha: B, tree: { sha: tree }, parents: [{ sha: A }] };
+    data.authority = bitgetPairedAuthority(source);
+    const tip = assessBitgetPairedSteady(data).certificate;
+    const observation = bitgetBaselineObservation(data.authority, tip);
+    assert.equal(observation.masterSource, B);
+    assert.equal(observation.baselineSource, A);
+    assert.equal(observation.masterRustTsRatio, tip.pooled.candidate.rustTsRatio);
+    assert.equal(observation.baselineRustTsRatio, tip.pooled.baseline.rustTsRatio);
+    assert.equal(observation.steadyAccepted, ratio < 1);
+    assert.equal(observation.certified, false);
+    assert.equal(observation.runId, data.authority.runId);
+    assert(Object.isFrozen(observation));
+    assert.throws(() => bitgetBaselineObservation(data.authority, structuredClone(tip)), /requires measured master/);
+  }
+  const pr = fixture();
+  assert.throws(() => bitgetBaselineObservation(pr.authority, assessBitgetPairedSteady(pr).certificate), /requires measured master/);
 });

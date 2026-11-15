@@ -699,6 +699,7 @@ impl ApexOmni {
         let Some(data) = message.data else {
             return true;
         };
+        cx.record_socket_topic(&[&message.topic]);
         if message.topic == "instrumentInfo.all" {
             if let Ok(rows) = serde_json::from_str::<Vec<wire::Tick<'_>>>(data.get()) {
                 for row in rows {

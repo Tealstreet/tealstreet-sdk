@@ -50,7 +50,7 @@ mints nothing. It also puts a cloid on every order it sends, so the WS handler
 can identify its own orders — see `src/exchanges/hyperliquid/CLAUDE.md`.
 
 **Refuse caller IDs** (`mintClientOrderId` → `undefined`): Lighter, Kraken
-(+spot), MEXC, AsterDEX, BitMEX, BreakoutProp, HyroTrader, Polymarket.
+(+spot), MEXC, AsterDEX, HyroTrader, Polymarket.
 
 ## Lookup
 

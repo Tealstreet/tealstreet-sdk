@@ -1,16 +1,20 @@
+import type { WorkerMethodName } from '../workerMethodArguments';
 import type { WriteMarks } from '../../writeTiming';
 
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { serializeCommandError } from '../../commandOutcome';
-import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
+import { WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
 import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { historyCompletenessOf } from '../../historyCompleteness';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { runWithWriteTiming, WriteTiming } from '../../writeTiming';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
+import { isWorkerWriteMarks } from '../workerMessage';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
 
 const logging = false;
+const forwardedMethods: ReadonlySet<string> = new Set([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS]);
 
 export class CallMethodHandler extends BaseHandler {
   private symbolMetadataThrottler: ThrottleManager<typeof this._exchange.updateSymbolMetadata>;
@@ -44,30 +48,37 @@ export class CallMethodHandler extends BaseHandler {
     return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   };
 
-  handleCallMethod = async (
+  handleCallMethod = (
     requestId: string,
-    method: CallableMethodsInWorker | (typeof WORKER_OPTIONAL_METHODS)[number],
-    args: any[],
+    method: WorkerMethodName,
+    args: unknown[],
+    marks?: WriteMarks,
+  ) => this.dispatchCallMethod(requestId, method, args, marks);
+
+  private dispatchCallMethod = async (
+    requestId: string,
+    method: string,
+    args: unknown[],
     marks?: WriteMarks,
   ) => {
-    let result: any = null;
+    let result: unknown = null;
     // The caller's write timing: the exchange stamps the engine stages and the caller emits.
     const timing = marks ? new WriteTiming(method, { ...marks }) : undefined;
     timing?.mark('received');
     if (logging) {
-      console.log('Calling method', method);
+      diagnosticConsole.log('Calling method', method);
     }
     try {
       // Mirrors forward every metadata refresh; the worker keeps coalescing them.
       if (method === 'updateSymbolMetadata') {
-        this.symbolMetadataThrottler.call(...(args as Parameters<typeof this._exchange.updateSymbolMetadata>));
+        Reflect.apply(this.symbolMetadataThrottler.call, this.symbolMetadataThrottler, args);
         this.replySuccess(requestId, null);
         return;
       }
-      if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
-        const call = (this._exchange as unknown as Record<string, unknown>)[method];
+      if (forwardedMethods.has(method)) {
+        const call: unknown = Reflect.get(this._exchange, method);
         if (typeof call !== 'function') throw this.unsupportedMethod(method);
-        const start = () => (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
+        const start = () => Reflect.apply(call, undefined, args);
         result = await (timing ? runWithWriteTiming(timing, start) : start());
         if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
         this.replySuccess(requestId, result, timing);
@@ -75,7 +86,7 @@ export class CallMethodHandler extends BaseHandler {
       }
       switch (method) {
         case 'scheduleCancel':
-          result = await this._exchange.scheduleCancel(...(args as Parameters<typeof this._exchange.scheduleCancel>));
+          result = await Reflect.apply(this._exchange.scheduleCancel, this._exchange, args);
           break;
         case 'fetchLastLogsFromWebsockets':
           result = this._exchange.fetchLastLogsFromWebsockets();
@@ -93,53 +104,43 @@ export class CallMethodHandler extends BaseHandler {
           result = this._exchange.recoverAfterOffline();
           break;
         case 'fetchOHLCV':
-          result = await this._exchange.fetchOHLCV(...(args as Parameters<typeof this._exchange.fetchOHLCV>));
+          result = await Reflect.apply(this._exchange.fetchOHLCV, this._exchange, args);
           break;
         case 'fetchHistoricalFills':
-          result = await this._exchange.fetchHistoricalFills(
-            ...(args as Parameters<typeof this._exchange.fetchHistoricalFills>),
-          );
+          result = await Reflect.apply(this._exchange.fetchHistoricalFills, this._exchange, args);
           break;
         case 'fetchOrders':
-          result = await this._exchange.fetchOrders(...(args as Parameters<typeof this._exchange.fetchOrders>));
+          result = await Reflect.apply(this._exchange.fetchOrders, this._exchange, args);
           break;
         case 'fetchAndSetOrders':
-          result = await this._exchange.fetchAndSetOrders(
-            ...(args as Parameters<typeof this._exchange.fetchAndSetOrders>),
-          );
+          result = await Reflect.apply(this._exchange.fetchAndSetOrders, this._exchange, args);
           break;
         case 'removeOrders':
-          await this._exchange.removeOrders(...(args as Parameters<typeof this._exchange.removeOrders>));
+          await Reflect.apply(this._exchange.removeOrders, this._exchange, args);
           break;
         case 'fetchHistoricalOrders':
           // Without a case here the handler falls through to `default` and returns
           // success:false, so the method exists but is unreachable from the web app.
-          result = await this._exchange.fetchHistoricalOrders(
-            ...(args as Parameters<typeof this._exchange.fetchHistoricalOrders>),
-          );
+          result = await Reflect.apply(this._exchange.fetchHistoricalOrders, this._exchange, args);
           break;
         case 'fetchClosedPnl':
-          result = await this._exchange.fetchClosedPnl(...(args as Parameters<typeof this._exchange.fetchClosedPnl>));
+          result = await Reflect.apply(this._exchange.fetchClosedPnl, this._exchange, args);
           break;
         case 'fetchIncomeHistory':
-          result = await this._exchange.fetchIncomeHistory(
-            ...(args as Parameters<typeof this._exchange.fetchIncomeHistory>),
-          );
+          result = await Reflect.apply(this._exchange.fetchIncomeHistory, this._exchange, args);
           break;
         case 'fetchIncomeHistoryRange':
-          result = await this._exchange.fetchIncomeHistoryRange(
-            ...(args as Parameters<typeof this._exchange.fetchIncomeHistoryRange>),
-          );
+          result = await Reflect.apply(this._exchange.fetchIncomeHistoryRange, this._exchange, args);
           break;
         default:
           throw this.unsupportedMethod(method);
       }
       if (logging) {
-        console.log('Method called', method, result);
+        diagnosticConsole.log('Method called', method, result);
       }
       this.replySuccess(requestId, result);
-    } catch (e: any) {
-      console.error('Error calling method', e);
+    } catch (e: unknown) {
+      diagnosticConsole.error('Error calling method', e);
       const serializedError = serializeCommandError(e);
       this._ctx.postMessage({
         op: 'callMethod:done',
@@ -151,15 +152,20 @@ export class CallMethodHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
     switch (payload.op) {
       case 'callMethod':
-        const {
-          requestId,
-          method,
-          args,
-          timing,
-        }: { requestId: string; method: CallableMethodsInWorker; args: any[]; timing?: WriteMarks } = {
-          ...payload.data,
-        };
-        this.handleCallMethod(requestId, method, args, timing);
+        const data: unknown = payload.data;
+        if (!data || typeof data !== 'object' || !('requestId' in data) || typeof data.requestId !== 'string') return;
+        if (!('method' in data) || typeof data.method !== 'string' || !('args' in data) || !Array.isArray(data.args)) {
+          const error = new ExchangeError('Invalid worker method envelope', {
+            message: 'Invalid worker method envelope', kind: 'unsupported', outcome: 'notSent',
+          });
+          this._ctx.postMessage({ op: 'callMethod:done', data: {
+            requestId: data.requestId, success: false, result: serializeCommandError(error),
+          } });
+          return;
+        }
+        // Arguments stay unknown at the wire boundary; venue validators retain their authority.
+        const marks = 'timing' in data && isWorkerWriteMarks(data.timing) ? data.timing : undefined;
+        this.dispatchCallMethod(data.requestId, data.method, data.args, marks);
         break;
     }
   }

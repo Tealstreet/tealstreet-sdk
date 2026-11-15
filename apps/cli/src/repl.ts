@@ -1,7 +1,19 @@
+import './session-tasks';
+import {
+  getStorageDir,
+  getStoragePath,
+  getStorageEpoch,
+  isStorageSessionCurrent,
+  assertStorageSession,
+  onStorageOwnerChange,
+  runInStorageSession,
+  enqueueSessionWork,
+  captureStorageSession,
+  StorageSessionCancelledError,
+} from './storage-context';
 import * as readline from 'readline';
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+
 import chalk from 'chalk';
 import type { CLISession, PromptConfig } from '../../../packages/cli-core/src/index';
 import { accountsToStart } from './accountsToStart';
@@ -29,8 +41,9 @@ import {
   recordFill,
   newRunId,
   runWithAuditRunId,
-  AUDIT_LOG_PATH,
+  getAuditLogPath,
 } from './audit-log';
+// All commands now handled by cli-core
 // All commands now handled by cli-core
 import {
   formatPositionsTable,
@@ -61,23 +74,17 @@ import {
   CYAN,
   RESET,
   DIM,
-  CLEAR_SCREEN,
   CLEAR_LINE,
 } from '../../../packages/cli-core/src/commands/trading';
 
 import { WatchMode, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, CURSOR_HOME } from './utils/watch-mode';
 import { registerRecordCommands, registerExportImportCommands } from './commands';
 
-import {
-  OrderSide,
-  type OrderFillEvent,
-  type Candle,
-  type Timeframe,
-  type Market,
-} from '../../../packages/safe-cex/src/types';
+import { OrderSide, type Candle, type Timeframe, type Market } from '../../../packages/safe-cex/src/types';
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
-import { G, U } from './console-glyphs';
+import { G } from './console-glyphs';
+// TWAP support for taskAction handling
 // TWAP support for taskAction handling
 import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
 import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
@@ -98,19 +105,13 @@ import { twapManager } from '../../../packages/safe-cex/src/webworker/twap/TwapM
 import { TwapInstance } from '../../../packages/safe-cex/src/webworker/twap/TwapInstance';
 import { createStandalonePlatformAdapter } from './platform-adapter';
 import { logger, originalConsoleLog, setConsoleTap, setPromptController } from './logger';
-import type { ExchangeLike, ExchangeAccountConfig } from '../../../packages/cli-core/src/types';
-import {
-  login,
-  logout,
-  showAuthStatus,
-  isLoggedIn,
-  checkAndRefreshToken,
-  tokenNeedsRefresh,
-  getTokenExpiryDays,
-} from './auth';
+import type { ExchangeLike } from '../../../packages/cli-core/src/types';
+import { formatBaseSize } from '../../../packages/cli-core/src/utils/formatBaseSize';
+import { login, logout, showAuthStatus, isLoggedIn, tokenNeedsRefresh, getTokenExpiryDays } from './auth';
 import { getCurrentVersion, performUpdate, forceCheckForUpdates } from './updater';
 import { ExchangeManager } from './exchange-manager';
 import { classifyConnectError } from './connect-error';
+import { setupExchangeListeners, type ExchangeListenerContext } from './exchange-listeners';
 import { disableFooter, enableFooter, redrawFooter, setFooterRenderer } from './footer';
 import {
   DEFAULT_SEGMENTS,
@@ -122,7 +123,6 @@ import {
   type FooterState,
 } from './footer-segments';
 import { enableStatusLine } from './status-line';
-import { classifyForCLI, criticalErrorKey, errorEventClassification } from './error-classifier';
 import { startListener, stopListener } from './listener';
 import { webhookBodyRefusal, webhookChainRefusal, webhookRefusal } from '@tealstreet/cli-core';
 import { restartWebhookRelay, startWebhookRelay, stopWebhookRelay } from './listener/webhook-relay';
@@ -135,7 +135,7 @@ import type { Capabilities, CoreAdapter, RunScriptResult } from '@tealstreet/scr
 
 import { createStandaloneCoreAdapter } from './script-adapter';
 import { runScriptFromHost, runScriptFromHostWithAdapter } from './script-runner';
-import { awaitScriptsLoaded, loadScripts, lookupScript, SCRIPTS_DIR } from './scripts-store';
+import { awaitScriptsLoaded, loadScripts, lookupScript, getScriptsDir } from './scripts-store';
 import { getCliTranspile } from './bun-transpile';
 import { parseScriptInvocation } from './script-dispatcher';
 import { BRAND } from './brand';
@@ -203,8 +203,15 @@ let stopMonitorFn: (() => void) | null = null;
 let chartUnsubscribe: (() => void) | null = null;
 let commandQueue: Promise<void> = Promise.resolve();
 
-// Track critical errors that have already been shown (account:category)
-const shownCriticalErrors = new Set<string>();
+const exchangeListenerContext: ExchangeListenerContext = {
+  adapter,
+  logger,
+  recordFill,
+  isMonitorMode: () => isMonitorMode,
+  getCurrentAccountName: () => session.currentAccountName,
+  getHealthMonitor: (accountName) => exchangeManager.getHealthMonitor(accountName),
+  addWatchMessage,
+};
 
 /**
  * Check if interactive mode is available.
@@ -260,8 +267,8 @@ function formatWatchMessages(): string {
 }
 
 // Command history persistence
-const HISTORY_DIR = path.join(os.homedir(), BRAND.configDirName);
-const HISTORY_FILE = path.join(HISTORY_DIR, 'cli_history');
+const HISTORY_DIR = () => getStorageDir();
+const HISTORY_FILE = () => getStoragePath('cli_history');
 const MAX_HISTORY_SIZE = 1000;
 
 /**
@@ -270,8 +277,8 @@ const MAX_HISTORY_SIZE = 1000;
  */
 function loadHistory(): string[] {
   try {
-    if (fs.existsSync(HISTORY_FILE)) {
-      const content = fs.readFileSync(HISTORY_FILE, 'utf-8');
+    if (fs.existsSync(HISTORY_FILE())) {
+      const content = fs.readFileSync(HISTORY_FILE(), 'utf-8');
       // Readline expects history in reverse order (most recent first)
       return content
         .split('\n')
@@ -289,12 +296,12 @@ function loadHistory(): string[] {
  */
 function saveHistory(history: string[]): void {
   try {
-    if (!fs.existsSync(HISTORY_DIR)) {
-      fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    if (!fs.existsSync(HISTORY_DIR())) {
+      fs.mkdirSync(HISTORY_DIR(), { recursive: true });
     }
     // Keep only the last MAX_HISTORY_SIZE entries
     const trimmedHistory = history.slice(-MAX_HISTORY_SIZE);
-    fs.writeFileSync(HISTORY_FILE, trimmedHistory.join('\n') + '\n');
+    fs.writeFileSync(HISTORY_FILE(), trimmedHistory.join('\n') + '\n');
   } catch (error) {
     // Ignore errors
   }
@@ -305,10 +312,10 @@ function saveHistory(history: string[]): void {
  */
 function appendToHistory(command: string): void {
   try {
-    if (!fs.existsSync(HISTORY_DIR)) {
-      fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    if (!fs.existsSync(HISTORY_DIR())) {
+      fs.mkdirSync(HISTORY_DIR(), { recursive: true });
     }
-    fs.appendFileSync(HISTORY_FILE, command + '\n');
+    fs.appendFileSync(HISTORY_FILE(), command + '\n');
   } catch (error) {
     // Ignore errors
   }
@@ -402,7 +409,13 @@ export function recreateReadline(): void {
     const trimmedLine = line.trim();
     if (trimmedLine) {
       appendToHistory(trimmedLine);
-      commandQueue = commandQueue.then(() => processCommand(trimmedLine)).catch(console.error);
+      commandQueue = enqueueSessionWork(
+        commandQueue,
+        () => processCommand(trimmedLine),
+        (message) => adapter.printInfo(message),
+      ).catch((error) => {
+        if (!(error instanceof StorageSessionCancelledError)) console.error(error);
+      });
     }
     commandQueue.then(() => {
       newRl.setPrompt(getPrompt());
@@ -497,7 +510,7 @@ async function startWatchChart(
       firstClose = candles[0].close;
     }
   } catch (error) {
-    originalConsoleLog(`Error fetching candles: ${(error as Error).message}`);
+    originalConsoleLog(`Error fetching candles: ${error instanceof Error ? error.message : String(error)}`);
     isMonitorMode = false;
     rl.resume();
     rl.prompt();
@@ -555,14 +568,14 @@ async function startWatchChart(
     const orders = exchange.store.orders.filter((o) => o.symbol === symbol && o.status === 'open');
 
     const chartLines: ChartLine[] = [];
-    const positionLine = position ? formatPositionLine(position, pricePrecision) : null;
+    const positionLine = position ? formatPositionLine(position, market) : null;
     if (positionLine) chartLines.push(positionLine);
     for (const order of orders) {
-      const orderLine = formatOrderLine(order, pricePrecision);
+      const orderLine = formatOrderLine(order, market);
       if (orderLine) chartLines.push(orderLine);
     }
 
-    const positionSummary = formatPositionSummary(position, pricePrecision);
+    const positionSummary = formatPositionSummary(position, market);
 
     let countdown: string | undefined;
     const tfMs = TIMEFRAME_MS[timeframe];
@@ -917,120 +930,6 @@ function startWatchTable(exchange: Exchange, rl: readline.Interface, tableType: 
 }
 
 /**
- * Format a fill event for display
- */
-function formatFill(fill: OrderFillEvent): string {
-  const side = fill.side === OrderSide.Buy ? 'Bought' : 'Sold';
-  const priceStr = fill.price?.toLocaleString() ?? 'market';
-  return `${side} ${fill.amount} ${fill.symbol} @ $${priceStr}`;
-}
-
-/**
- * Setup event listeners on an exchange
- */
-function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): void {
-  // Listen for command output. ExchangeLike.emitter is a generic
-  // `(...args: unknown[]) => void` shape, so per-event payload types are
-  // narrowed locally at each handler entry.
-  exchange.emitter.on('exec-log', (...args: unknown[]) => {
-    const { message } = args[0] as { message: string };
-    if (isMonitorMode) {
-      // Buffer messages during watch mode so they don't get wiped
-      addWatchMessage('info', message);
-    } else {
-      console.log(message);
-    }
-  });
-
-  // Listen for fills
-  exchange.emitter.on('fill', (...args: unknown[]) => {
-    const fill = args[0] as OrderFillEvent;
-    const fillMsg = formatFill(fill);
-    logger.info(`Fill: ${fillMsg}`, fill);
-    // TSBUG-107 slice 4: attribute the fill back to the run/command that
-    // placed the order (no-op when auditing is off or the order isn't
-    // tracked). Account comes from the remembered lineage. Independent of
-    // display mode.
-    recordFill(fill.orderId ?? fill.id, fillMsg);
-    if (isMonitorMode) {
-      addWatchMessage('fill', fillMsg);
-    } else {
-      adapter.printSuccess(`${U.ok} Fill: ${fillMsg}`);
-    }
-  });
-
-  // Listen for errors — classify via health monitor before displaying
-  exchange.emitter.on('error', (...args: unknown[]) => {
-    const error = args[0] as string;
-    const acctName = accountName || session.currentAccountName || 'unknown';
-    const monitor = exchangeManager.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(error, true, errorEventClassification(args[1])) : null;
-    const action = classifyForCLI(category, 'error', error);
-
-    switch (action.action) {
-      case 'suppress':
-        // Don't print at all
-        return;
-      case 'critical': {
-        const key = criticalErrorKey(acctName, category!);
-        if (shownCriticalErrors.has(key)) return; // Already shown
-        shownCriticalErrors.add(key);
-        const msg = action.message || error;
-        if (isMonitorMode) {
-          addWatchMessage('error', `[${category!.toUpperCase()}] ${acctName}: ${msg}`);
-        } else {
-          adapter.printError(
-            `[${category!.toUpperCase()}] Account "${acctName}": ${msg}. Run "accounts disable ${acctName}" to stop.`,
-          );
-        }
-        return;
-      }
-      case 'warn':
-        if (isMonitorMode) {
-          addWatchMessage('warning', error);
-        } else {
-          console.warn(`Exchange warning: ${error}`);
-        }
-        return;
-      case 'error': {
-        const errMsg = action.message ? `${action.message}: ${error}` : error;
-        if (isMonitorMode) {
-          addWatchMessage('error', errMsg);
-        } else {
-          console.error(`Exchange error: ${errMsg}`);
-        }
-        return;
-      }
-      case 'passthrough':
-      default:
-        if (isMonitorMode) {
-          addWatchMessage('error', error);
-        } else {
-          console.error(`Exchange error: ${error}`);
-        }
-        return;
-    }
-  });
-
-  // Listen for warnings — classify via health monitor before displaying
-  exchange.emitter.on('warning', (...args: unknown[]) => {
-    const warning = args[0] as string;
-    const acctName = accountName || session.currentAccountName || 'unknown';
-    const monitor = exchangeManager.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(warning, false) : null;
-    const action = classifyForCLI(category, 'warning', warning);
-
-    if (action.action === 'suppress') return;
-
-    if (isMonitorMode) {
-      addWatchMessage('warning', warning);
-    } else {
-      console.warn(`Exchange warning: ${warning}`);
-    }
-  });
-}
-
-/**
  * Generate the CLI prompt with status info
  */
 function getPrompt(): string {
@@ -1103,11 +1002,12 @@ function buildFooterState(): FooterState {
       state.totalUpnl = positions.reduce((sum, p) => sum + (p.unrealizedPnl ?? 0), 0);
     }
     if (symbol) {
+      const market = (store.markets ?? []).find((m) => m.symbol === symbol);
       const pos = positions.find((p) => p.symbol === symbol && p.contracts !== 0);
       if (pos) {
         state.position = {
           side: pos.side as 'long' | 'short',
-          contracts: pos.contracts,
+          size: `${formatBaseSize(pos.contracts, market)}${market?.base ? ' ' + market.base : ''}`,
           entryPrice: pos.entryPrice,
           notional: pos.notional,
           unrealizedPnl: pos.unrealizedPnl,
@@ -1157,6 +1057,7 @@ const FOOTER_READONLY_CAPS: Capabilities = {
 };
 
 async function runFooterScript(name: string): Promise<void> {
+  const epoch = getStorageEpoch();
   // In-flight guard: never stack runs for the same script. Held until the REAL
   // run settles (not the timeout), so a hung script can't spawn a fresh run
   // every tick — it stays in-flight and renders its provisional error token.
@@ -1171,7 +1072,7 @@ async function runFooterScript(name: string): Promise<void> {
   // Overrun → surface `!name` so the segment isn't blank; the run keeps going
   // and overwrites the cache if/when it lands.
   const slowTimer = setTimeout(() => {
-    if (!settled) footerScriptCache.set(name, `!${name}`);
+    if (isStorageSessionCurrent(epoch) && !settled) footerScriptCache.set(name, `!${name}`);
   }, FOOTER_SCRIPT_TIMEOUT_MS);
   slowTimer.unref?.();
   try {
@@ -1181,12 +1082,15 @@ async function runFooterScript(name: string): Promise<void> {
     // return value is rendered.
     const silent: CoreAdapter = {
       ...createStandaloneCoreAdapter(exchangeManager, session, adapter),
-      print: () => {},
+      print: () => assertStorageSession(epoch),
     };
-    const result: RunScriptResult = await runScriptFromHostWithAdapter(
-      { adapter: silent, transpile: getCliTranspile() },
-      { record: roRecord, rawArgs: '', invokedFrom: 'inline' },
+    const result: RunScriptResult = await runInStorageSession(() =>
+      runScriptFromHostWithAdapter(
+        { adapter: silent, transpile: getCliTranspile() },
+        { record: roRecord, rawArgs: '', invokedFrom: 'inline' },
+      ),
     );
+    if (!isStorageSessionCurrent(epoch)) return;
     if (result.ok) {
       const raw =
         typeof result.returnValue === 'string'
@@ -1199,11 +1103,11 @@ async function runFooterScript(name: string): Promise<void> {
       footerScriptCache.set(name, `!${name}`); // error token (incl. denied writes)
     }
   } catch {
-    footerScriptCache.set(name, `!${name}`);
+    if (isStorageSessionCurrent(epoch)) footerScriptCache.set(name, `!${name}`);
   } finally {
     settled = true;
     clearTimeout(slowTimer);
-    footerScriptInflight.delete(name);
+    if (isStorageSessionCurrent(epoch)) footerScriptInflight.delete(name);
   }
 }
 
@@ -1235,6 +1139,7 @@ function stopFooterScriptRefresh(): void {
  * then session commands from cli-core
  */
 async function processSingleCommand(command: string, captureTo?: string): Promise<void> {
+  const ownerSession = captureStorageSession();
   // Handle login command
   if (command === 'login') {
     await login();
@@ -1337,12 +1242,12 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     const sub = command.slice('audit'.length).trim().toLowerCase();
     if (sub === 'on') {
       setAuditEnabled(true);
-      adapter.printSuccess(`Audit log ON — write-ops append to ${AUDIT_LOG_PATH}`);
+      adapter.printSuccess(`Audit log ON — write-ops append to ${getAuditLogPath()}`);
     } else if (sub === 'off') {
       setAuditEnabled(false);
       adapter.printSuccess('Audit log OFF');
     } else if (sub === '' || sub === 'status') {
-      adapter.printInfo(`Audit log: ${isAuditEnabled() ? 'ON' : 'OFF'} (${AUDIT_LOG_PATH})`);
+      adapter.printInfo(`Audit log: ${isAuditEnabled() ? 'ON' : 'OFF'} (${getAuditLogPath()})`);
     } else if (sub === 'tail' || sub.startsWith('tail ')) {
       const n = parseInt(sub.slice('tail'.length).trim(), 10);
       const entries = readAuditTail(Number.isFinite(n) && n > 0 ? n : 20);
@@ -1486,7 +1391,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     const loadPromise = loadScripts();
     try {
       const scripts = await loadPromise;
-      adapter.printSuccess(`Loaded ${scripts.length} script${scripts.length === 1 ? '' : 's'} from ${SCRIPTS_DIR}`);
+      adapter.printSuccess(`Loaded ${scripts.length} script${scripts.length === 1 ? '' : 's'} from ${getScriptsDir()}`);
       for (const s of scripts) {
         adapter.printInfo(`  - ${s.name}`);
       }
@@ -1798,6 +1703,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     promptConfig,
     preprocessStore,
   );
+  ownerSession.assertCurrent();
 
   // TSBUG-107: durable write-op audit trail (off by default). Recorded
   // BEFORE the failure throw below so failed writes are logged too.
@@ -1850,7 +1756,11 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
 
     // Setup listeners for new exchange
     if (result.newSession.currentExchange) {
-      setupExchangeListeners(result.newSession.currentExchange, result.newSession.currentAccountName);
+      setupExchangeListeners(
+        result.newSession.currentExchange,
+        exchangeListenerContext,
+        result.newSession.currentAccountName,
+      );
       // Update network monitor with new exchange reference
       networkMonitor?.setExchange(result.newSession.currentExchange);
 
@@ -1888,10 +1798,12 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
           try {
             adapter.printInfo(`Enabling account "${name}"...`);
             const exchange = await exchangeManager.enable(accountConfig);
-            setupExchangeListeners(exchange, name);
+            setupExchangeListeners(exchange, exchangeListenerContext, name);
             adapter.printSuccess(`Account "${name}" enabled`);
           } catch (error) {
-            adapter.printError(`Failed to enable account "${name}": ${(error as Error).message}`);
+            adapter.printError(
+              `Failed to enable account "${name}": ${error instanceof Error ? error.message : String(error)}`,
+            );
           }
         }
       } else if (action === 'disable') {
@@ -1908,7 +1820,9 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
             await exchangeManager.disable(name);
             adapter.printSuccess(`Account "${name}" disabled`);
           } catch (error) {
-            adapter.printError(`Failed to disable account "${name}": ${(error as Error).message}`);
+            adapter.printError(
+              `Failed to disable account "${name}": ${error instanceof Error ? error.message : String(error)}`,
+            );
           }
         }
       }
@@ -1977,6 +1891,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
                 origin: 'cli',
               },
               () => {
+                if (!ownerSession.isCurrent()) return;
                 // State updated callback - log progress
                 const state = twapInstance.state;
                 logger.info(`[TWAP] ${state.ordersExecuted}/${state.ordersCount} slices executed`);
@@ -1988,7 +1903,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
             adapter.printSuccess(`TWAP started [${twapInstance.id.slice(0, 8)}]`);
           }
         } catch (error) {
-          adapter.printError(`Failed to start TWAP: ${(error as Error).message}`);
+          adapter.printError(`Failed to start TWAP: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     } else if (action === 'stop' && type === 'twap') {
@@ -2031,10 +1946,15 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
  * (stripped + one warning per invocation) for backwards compatibility;
  * users should migrate to `&`.
  */
-export async function processCommand(
+export function processCommand(commandString: string, options: { drainFinalInFlight?: boolean } = {}): Promise<void> {
+  return runInStorageSession(() => processCommandInSession(commandString, options));
+}
+
+async function processCommandInSession(
   commandString: string,
   options: { drainFinalInFlight?: boolean } = {},
 ): Promise<void> {
+  const ownerSession = captureStorageSession();
   // Per-call overrides from the listener's `cmd:exec` handler. When a
   // web tab dispatches a command with `account`/`symbol` set, scope the
   // run to those values instead of the REPL's long-lived session — so
@@ -2066,7 +1986,7 @@ export async function processCommand(
       store: preprocessStore,
     });
   } catch (e) {
-    adapter.printError((e as Error).message);
+    adapter.printError(e instanceof Error ? e.message : String(e));
     return;
   }
 
@@ -2100,6 +2020,7 @@ export async function processCommand(
       if (step.awaitPrior && inFlight.length > 0) {
         await Promise.allSettled(inFlight.splice(0));
       }
+      ownerSession.assertCurrent();
       const p = runStep(step);
       if (step.block || step.retry !== undefined || step.captureTo !== undefined) {
         await p;
@@ -2201,6 +2122,7 @@ async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): P
 }
 
 function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, err: Error): void {
+  if (!isStorageSessionCurrent()) return;
   if (step.errorMode === 'continue') {
     adapter.printWarning(`(continue-on-error) ${err.message}`);
   } else if (!(err as Error & { alreadyReported?: boolean }).alreadyReported) {
@@ -2223,6 +2145,7 @@ function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, 
  *   writeback inside the runner sets the user var.
  */
 async function runScriptStep(command: string, step: import('@tealstreet/cli-core').PreprocessedStep): Promise<void> {
+  const ownerSession = captureStorageSession();
   const parsed = parseScriptInvocation(command);
   if (!parsed) {
     reportStepError(
@@ -2245,6 +2168,7 @@ async function runScriptStep(command: string, step: import('@tealstreet/cli-core
     }
   }
 
+  ownerSession.assertCurrent();
   const record = lookupScript(parsed.name);
   if (!record) {
     reportStepError(
@@ -2309,7 +2233,9 @@ async function runScriptStep(command: string, step: import('@tealstreet/cli-core
     }
     let lastErr: string | undefined;
     for (let attempt = 0; attempt <= step.retry; attempt++) {
+      ownerSession.assertCurrent();
       const result = await runOnce(attempt);
+      ownerSession.assertCurrent();
       if (result.ok) {
         recordInvocation(true);
         return;
@@ -2361,7 +2287,7 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     // Onto the SAME queue typed input uses. A trigger fires from a timer, so
     // without this it would interleave with a chain the user is midway
     // through — two order-placing chains reading the same store at once.
-    const queued = commandQueue.then(run);
+    const queued = enqueueSessionWork(commandQueue, run, (message) => adapter.printInfo(message));
     // The queue must survive a failing trigger; the caller still sees the
     // rejection so the trigger can record it.
     commandQueue = queued.then(
@@ -2448,13 +2374,11 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     }
 
     // Start all accounts (including primary) in the background without blocking the CLI prompt
+    const startupEpoch = getStorageEpoch();
     const activeAccounts = adapter.getActiveAccounts();
     const primaryAccount = session.currentAccountName ? getAccount(session.currentAccountName) : null;
-    const accountsToEnable = accountsToStart(
-      primaryAccount,
-      Boolean(accountName),
-      activeAccounts,
-      (name) => exchangeManager.isConnected(name),
+    const accountsToEnable = accountsToStart(primaryAccount, Boolean(accountName), activeAccounts, (name) =>
+      exchangeManager.isConnected(name),
     );
 
     if (accountsToEnable.length > 0) {
@@ -2464,8 +2388,9 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
         exchangeManager
           .enable(activeAccount)
           .then((exchange) => {
+            if (!isStorageSessionCurrent(startupEpoch)) return;
             connectionStates.set(activeAccount.name, 'connected');
-            setupExchangeListeners(exchange, activeAccount.name);
+            setupExchangeListeners(exchange, exchangeListenerContext, activeAccount.name);
             // If this is the primary account, update session
             if (activeAccount.name === session.currentAccountName) {
               session.currentExchange = exchange;
@@ -2482,7 +2407,8 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
             }
           })
           .catch((error) => {
-            const errorMsg = (error as Error).message;
+            if (!isStorageSessionCurrent(startupEpoch)) return;
+            const errorMsg = error instanceof Error ? error.message : String(error);
             const kind = classifyConnectError(errorMsg);
             connectionStates.set(activeAccount.name, kind === 'auth' ? 'auth-failed' : 'failed');
             if (activeAccount.name === session.currentAccountName) {
@@ -2606,16 +2532,20 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
       // Drain the chain's last fire-and-forget step, or a one-step `buy` would
       // ack `done` before the order is even placed.
       // An alias in the body may have been defined on another listener moments ago.
-      const queued = commandQueue.then(async () => {
-        // It waited behind typed input; an alert past its expiry is stale.
-        if (ctx.expiresAt !== undefined && Date.now() > ctx.expiresAt) {
-          throw new Error('Not run: it waited behind your own commands past its expiry.');
-        }
-        await syncAliasesIfStale();
-        return runWithAdapterContext({ ...ctx, untrustedBody: true }, () =>
-          processCommand(body, { drainFinalInFlight: true }),
-        );
-      });
+      const queued = enqueueSessionWork(
+        commandQueue,
+        async () => {
+          // It waited behind typed input; an alert past its expiry is stale.
+          if (ctx.expiresAt !== undefined && Date.now() > ctx.expiresAt) {
+            throw new Error('Not run: it waited behind your own commands past its expiry.');
+          }
+          await syncAliasesIfStale();
+          return runWithAdapterContext({ ...ctx, untrustedBody: true }, () =>
+            processCommand(body, { drainFinalInFlight: true }),
+          );
+        },
+        (message) => adapter.printInfo(message),
+      );
       commandQueue = queued.then(
         () => undefined,
         () => undefined,
@@ -2640,38 +2570,46 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     appendToHistory(command);
 
     // Chain commands to ensure sequential processing
-    commandQueue = commandQueue.then(async () => {
-      if (command === 'exit' || command === 'quit') {
-        adapter.printInfo('Goodbye!');
-        if (connectionMonitor) {
-          connectionMonitor.stop();
-          connectionMonitor = null;
+    commandQueue = enqueueSessionWork(
+      commandQueue,
+      async () => {
+        if (command === 'exit' || command === 'quit') {
+          adapter.printInfo('Goodbye!');
+          if (connectionMonitor) {
+            connectionMonitor.stop();
+            connectionMonitor = null;
+          }
+          if (networkMonitor) {
+            networkMonitor.stop();
+            networkMonitor = null;
+          }
+          stopListener();
+          stopWebhookRelay();
+          stopAliasSync();
+          // Stop all exchanges (primary and enabled)
+          await exchangeManager.stopAll();
+          process.exit(0);
         }
-        if (networkMonitor) {
-          networkMonitor.stop();
-          networkMonitor = null;
+
+        // Process command
+        await processCommand(command);
+
+        // Update prompt with latest status (symbol, price, position, connection)
+        // But NOT if we're in monitor/serve mode - those handle their own display
+        if (!isMonitorMode) {
+          rl.setPrompt(getPrompt());
+          rl.prompt();
         }
-        stopListener();
-        stopWebhookRelay();
-        stopAliasSync();
-        // Stop all exchanges (primary and enabled)
-        await exchangeManager.stopAll();
-        process.exit(0);
-      }
-
-      // Process command
-      await processCommand(command);
-
-      // Update prompt with latest status (symbol, price, position, connection)
-      // But NOT if we're in monitor/serve mode - those handle their own display
-      if (!isMonitorMode) {
-        rl.setPrompt(getPrompt());
-        rl.prompt();
-      }
-    });
+      },
+      (message) => adapter.printInfo(message),
+    );
     // A command that throws must not leave the queue rejected: every later
     // typed command and webhook would then fail without running.
-    commandQueue = commandQueue.catch((err) => adapter.printError(`Error: ${(err as Error).message}`));
+    commandQueue = commandQueue.catch((err) => {
+      if (!(err instanceof StorageSessionCancelledError)) {
+        adapter.printError(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   });
 
   rl.on('close', async () => {
@@ -2724,7 +2662,7 @@ export async function executeCommandWithCapture(command: string): Promise<string
   try {
     await processSingleCommand(command);
   } catch (error) {
-    adapter.printError(`Error: ${(error as Error).message}`);
+    adapter.printError(`Error: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     // Restore console.log
     console.log = originalLog;
@@ -2790,7 +2728,7 @@ export async function runSingleCommand(
   try {
     session = await connectToAccount(account, session, adapter);
   } catch (error) {
-    const errorMsg = (error as Error).message;
+    const errorMsg = error instanceof Error ? error.message : String(error);
     const kind = classifyConnectError(errorMsg);
     if (kind === 'auth') {
       adapter.printError('Authentication failed. Your token may have expired.');
@@ -2809,7 +2747,7 @@ export async function runSingleCommand(
   }
 
   // Setup event listeners
-  setupExchangeListeners(session.currentExchange, session.currentAccountName);
+  setupExchangeListeners(session.currentExchange, exchangeListenerContext, session.currentAccountName);
 
   // A rejected key is terminal for anything that needs the venue — running it
   // anyway is what printed a zeroed balance table that read as an empty
@@ -2879,14 +2817,14 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         try {
           session = await connectToAccount(account, session, adapter);
         } catch (error) {
-          adapter.printError(`Failed to connect: ${(error as Error).message}`);
+          adapter.printError(`Failed to connect: ${error instanceof Error ? error.message : String(error)}`);
         }
         if (!session.currentExchange) {
           const errorLine = [...output].reverse().find((line) => line.kind === 'error')?.text;
           return fail(connectFailureCode(errorLine, getAuthState()), errorLine ?? 'Could not connect to the account.');
         }
 
-        setupExchangeListeners(session.currentExchange, session.currentAccountName);
+        setupExchangeListeners(session.currentExchange, exchangeListenerContext, session.currentAccountName);
         ensureCommandsRegistered();
         const requestedCommand = commandRegistry.find(commandString.trim().split(/\s+/)[0]?.toLowerCase() ?? '');
         const needsKey = requestedCommand?.requiresConnection !== false;
@@ -2958,3 +2896,24 @@ async function waitForTwapsStartedByCommand(twapsBeforeCommand: Set<string>): Pr
     }, 250);
   });
 }
+
+onStorageOwnerChange(() => {
+  session.currentExchange = null;
+  session.currentAccountName = '';
+  session.currentSymbol = '';
+  connectionStates.clear();
+  stopMonitorFn?.();
+  connectionMonitor?.stop();
+  networkMonitor?.stop();
+  stopFooterScriptRefresh();
+  watchMessageBuffer.length = 0;
+  const config = loadConfig();
+  footerSegments = config.footer?.segments ? [...config.footer.segments] : [...DEFAULT_SEGMENTS];
+  disableFooter();
+  if (rlInstance && config.footer?.enabled !== false) {
+    setFooterRenderer(footerRenderer);
+    enableFooter(config.footer?.intervalMs);
+    startFooterScriptRefresh(config.footer?.intervalMs);
+  }
+  if (rlInstance && 'history' in rlInstance) rlInstance.history = loadHistory();
+});

@@ -2,8 +2,10 @@
 //! non-retried writes, each call bounded on its own.
 use crate::{Okx, Pending, sign, wire};
 use safe_cex_engine::classify::{
-    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict, WriteFact,
+    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Released, Row, SatisfiedIntent, Verdict,
+    WriteFact,
 };
+use safe_cex_engine::log::Level;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
@@ -12,6 +14,9 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{
+    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, WritePlan,
+};
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -19,6 +24,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
+const UNKNOWN_OUTCOME_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 /// Every write is one call with its own 20 s bound; only a 50113 signature
 /// refusal, which executed nothing, is re-signed and sent once more.
@@ -155,6 +161,9 @@ struct Step {
     body: String,
     expected: usize,
     collect_ids: bool,
+    write_index: Option<usize>,
+    /// Reporting only: the row whose native acknowledgement is unproven.
+    unknown_row: Option<usize>,
 }
 #[derive(Default)]
 pub struct TradingState {
@@ -177,6 +186,8 @@ struct Job {
     preflight: Option<Preflight>,
     plan: Option<Plan>,
     steps: VecDeque<Step>,
+    writes: Option<WritePlan>,
+    pending_write: Option<usize>,
     ids: Vec<String>,
     finish: Finish,
     optimistic: Vec<(String, OrderStatus)>,
@@ -292,6 +303,28 @@ enum Finish {
     Empty,
     Leverage(String, f64),
     Mode(bool),
+}
+
+impl Job {
+    fn track_writes(&mut self) {
+        if !matches!(self.finish, Finish::Ids) || self.trailing.is_some() || self.lookup.is_some() {
+            return;
+        }
+        let mut elements = Vec::new();
+        for step in &mut self.steps {
+            if !step.collect_ids || step.receipts.is_empty() {
+                return;
+            }
+            step.write_index = Some(elements.len());
+            for receipt in &step.receipts {
+                elements.push(Element {
+                    index: elements.len(),
+                    client_order_id: Some(receipt.identity.clone()),
+                });
+            }
+        }
+        self.writes = Some(WritePlan::new(elements));
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -534,6 +567,7 @@ impl Okx {
         }) else {
             return;
         };
+        job.track_writes();
         if job.steps.is_empty() {
             let _ = match self.finish_effects(cx, &mut job) {
                 Ok(data) => cx.done_empty_plan(&preflight, data),
@@ -634,8 +668,8 @@ impl Okx {
             }
         }
         let mut regular = Vec::new();
-        let mut brackets = Vec::new();
         let mut algos = Vec::new();
+        let mut derived = Vec::new();
         for o in orders {
             if is_algo(o.kind) {
                 algos.push(o);
@@ -649,6 +683,9 @@ impl Okx {
                 return Err("invalid market size limits".into());
             }
             let amount = adjusted(o.amount, m.precision.amount, false)?;
+            if !amount.is_finite() {
+                return Err("Order amount must be finite after adjustment".into());
+            }
             let max = lot_floor(m.limits.amount.max, m.precision.amount)?;
             if o.client_order_id.is_some() && amount > max {
                 return Err(
@@ -666,40 +703,7 @@ impl Okx {
                 let size = remaining.min(max);
                 let payload = self.order_payload(cx, &o, size)?;
                 count += 1;
-                if bracket {
-                    // Protect each accepted lot before another entry can fail.
-                    brackets.push(placement_step(
-                        "/api/v5/trade/batch-orders",
-                        &[payload],
-                        1,
-                        true,
-                    )?);
-                    for (kind, price) in [
-                        (OrderType::StopLoss, o.stop_loss),
-                        (OrderType::TakeProfit, o.take_profit),
-                    ] {
-                        if let Some(price) = price.filter(|v| *v != 0.0) {
-                            let mut leg = o.clone();
-                            leg.kind = kind;
-                            leg.side = o.side.opposite();
-                            leg.amount = size;
-                            leg.price = Some(price);
-                            leg.client_order_id = None;
-                            leg.stop_loss = None;
-                            leg.take_profit = None;
-                            leg.reduce_only = Some(true);
-                            let payload = self.order_payload(cx, &leg, size)?;
-                            brackets.push(placement_step(
-                                "/api/v5/trade/order-algo",
-                                &payload,
-                                1,
-                                true,
-                            )?);
-                        }
-                    }
-                } else {
-                    regular.push(payload);
-                }
+                regular.push(payload);
                 remaining = num::adjust(remaining - size, m.precision.amount);
             }
             if o.client_order_id.is_some() && count != 1 {
@@ -707,7 +711,27 @@ impl Okx {
                     "Caller client order ID requires exactly one plain native order".into(),
                 );
             }
+            if bracket {
+                // Legacy TS derives full-input protection after formatting all entry lots.
+                for (kind, price) in [
+                    (OrderType::StopLoss, o.stop_loss),
+                    (OrderType::TakeProfit, o.take_profit),
+                ] {
+                    if let Some(price) = price.filter(|v| *v != 0.0) {
+                        let mut leg = o.clone();
+                        leg.kind = kind;
+                        leg.side = o.side.opposite();
+                        leg.price = Some(price);
+                        leg.client_order_id = None;
+                        leg.stop_loss = None;
+                        leg.take_profit = None;
+                        leg.reduce_only = Some(true);
+                        derived.push(leg);
+                    }
+                }
+            }
         }
+        algos.extend(derived);
         algos.sort_by_key(|o| match o.kind {
             OrderType::StopLoss => 0,
             OrderType::TrailingStopLoss => 1,
@@ -728,7 +752,6 @@ impl Okx {
                 true,
             )?);
         }
-        steps.extend(brackets);
         for payload in algos {
             steps.push(placement_step(
                 "/api/v5/trade/order-algo",
@@ -756,6 +779,9 @@ impl Okx {
             m.precision.amount,
             algo && o.kind != OrderType::Conditional,
         )?;
+        if o.kind == OrderType::Conditional && !size.is_finite() {
+            return Err("Conditional amount must be finite after adjustment".into());
+        }
         let protective = matches!(
             o.kind,
             OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
@@ -1306,16 +1332,39 @@ impl Okx {
         slot: Slot,
         context: Context,
     ) {
-        let Some(job) = self.trading.jobs.get(&command) else {
+        let rest = self.rest();
+        let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
         let step = job.steps.front().expect("issued step");
+        if job.pending_write.is_none()
+            && let (Some(expected), Some(writes)) = (step.write_index, &mut job.writes)
+        {
+            let recorded = (0..step.receipts.len()).try_for_each(|offset| {
+                writes.record(
+                    expected + offset,
+                    ElementResult::Unknown {
+                        error: Box::new(unknown_outcome(VenueError::new(UNKNOWN_OUTCOME_TEXT))),
+                    },
+                )
+            });
+            if recorded.is_ok() {
+                job.pending_write = Some(expected);
+            } else {
+                job.writes = None;
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "OKX write outcome reporting is unavailable",
+                );
+            }
+        }
         let read = step.query.is_some();
         let path = step.query.as_ref().map_or_else(
             || step.path.to_owned(),
             |query| format!("{}?{query}", step.path),
         );
-        let url = format!("{}{path}", self.rest());
+        let url = format!("{rest}{path}");
         let recipe = sign::Http::new(self.credentials.clone(), path).demo(self.options.testnet);
         let body = (!read).then(|| step.body.clone());
         let request = Request {
@@ -1645,7 +1694,39 @@ impl Okx {
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
-        let step = job.steps.front().expect("inflight step");
+        let step = job.steps.front_mut().expect("inflight step");
+        step.unknown_row = acks.iter().position(|ack| {
+            (!matches!(ack.s_code, "" | "0")
+                && matches!(
+                    CODES.verdict(&native(ack.s_code, ack.s_msg), Intent::Place),
+                    Verdict::Unknown(_)
+                ))
+                || (matches!(ack.s_code, "" | "0")
+                    && ack.ord_id.is_empty()
+                    && ack.algo_id.is_empty())
+        });
+        if let (Some(writes), Some(index)) = (&mut job.writes, job.pending_write)
+            && acks.len() == step.expected
+        {
+            let recorded = placement_results(cx, &request.context, &acks).and_then(|results| {
+                results
+                    .into_iter()
+                    .enumerate()
+                    .try_for_each(|(offset, result)| writes.record(index + offset, result))
+                    .map_err(|error| VenueError::new(error.to_string()))
+            });
+            if recorded.is_ok() {
+                job.pending_write = None;
+            } else {
+                job.writes = None;
+                job.pending_write = None;
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "OKX write outcome reporting is unavailable",
+                );
+            }
+        }
         if step.collect_ids && matches!(envelope.code, "0" | "2") {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -1678,7 +1759,7 @@ impl Okx {
                     ack.algo_id
                 };
                 if id.is_empty() {
-                    return self.unproven(cx, request, "OKX placement response missing order ID");
+                    continue;
                 }
                 if !self.account.order_final(id)
                     && let Some(market) = cx.store.market_by_id(&identity.inst_id)
@@ -1696,8 +1777,50 @@ impl Okx {
                 job.ids.push(id.into());
             }
         }
-        if acks.iter().any(|ack| ack.s_code == "50004") {
-            return self.unproven(cx, request, "OKX 50004: write execution status is unknown");
+        let missing_id = step.collect_ids
+            && matches!(envelope.code, "0" | "2")
+            && acks.iter().any(|ack| {
+                matches!(ack.s_code, "" | "0") && ack.ord_id.is_empty() && ack.algo_id.is_empty()
+            });
+        if missing_id || acks.iter().any(|ack| ack.s_code == "50004") {
+            let message = if missing_id {
+                "OKX placement response missing order ID"
+            } else {
+                "OKX 50004: write execution status is unknown"
+            };
+            // Preserve proven siblings in this same unproven batch. Recording
+            // only an empty Unknown fact loses them in the engine projection.
+            // Keep the existing Internal/Unknown classification and halt.
+            if step.collect_ids && matches!(envelope.code, "0" | "2") {
+                let ids: Vec<String> = acks
+                    .iter()
+                    .filter(|ack| matches!(ack.s_code, "" | "0"))
+                    .map(|ack| {
+                        if ack.algo_id.is_empty() {
+                            ack.ord_id
+                        } else {
+                            ack.algo_id
+                        }
+                    })
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if !ids.is_empty() {
+                    let fact =
+                        safe_cex_engine::classify::unproven_reply(message).with_order_ids(&ids);
+                    let _ = cx.http_write_fact(
+                        &request.context,
+                        WriteFact::Failed {
+                            fact,
+                            known_effects: true,
+                        },
+                        None,
+                    );
+                    let error = VenueError::new(message).outcome(Outcome::Unknown);
+                    return self.end(cx, request.command, Some(&request), error, true);
+                }
+            }
+            return self.unproven(cx, request, message);
         }
         // Placement success needs its new native ID. Cancel identities are
         // matched against the requested rows below, including native refusals.
@@ -1786,14 +1909,28 @@ impl Okx {
                     }
                 })
                 .collect();
-            cx.http_write_batch(
-                &request.context,
-                &CODES,
-                expected,
-                &items,
-                errors.join_with("; "),
-                None,
-            )
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                cx.http_write_applied_batch(
+                    &request.context,
+                    &CODES,
+                    expected,
+                    &items,
+                    errors.join_with("; "),
+                    None,
+                )
+            } else {
+                cx.http_write_batch(
+                    &request.context,
+                    &CODES,
+                    expected,
+                    &items,
+                    errors.join_with("; "),
+                    None,
+                )
+            }
         } else {
             let accepted = WriteFact::Accepted { order_ids: vec![] };
             cx.http_write_fact(&request.context, accepted, None)
@@ -1816,22 +1953,22 @@ impl Okx {
             } else {
                 errors.join_with("; ")
             };
-            let error = VenueError::new(message).outcome(Outcome::Unknown);
+            let mut error = VenueError::new(message).outcome(Outcome::Unknown);
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                error.message = format!("{}. {UNKNOWN_OUTCOME_TEXT}", error.message);
+                // Native facts still supply kind/code/partial; retain the venue's guidance.
+                error.presents = true;
+                error.elements = Some(Box::new(cancel_outcomes(&response, &acks, &requested)));
+            }
             return self.end(cx, request.command, Some(&request), error, true);
         }
-        // An all-refused envelope (code 1) continues only when every row says its order
-        // is already gone: the sibling cancels still have live orders to reach.
-        let only_gone_rows = acks
-            .iter()
-            .filter(|a| !matches!(a.s_code, "" | "0"))
-            .all(|a| matches!(a.s_code, "51400" | "51401" | "51402"));
         let read_after =
             continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
-        if envelope.code != "0"
-            && !(continue_cancel_errors
-                && (envelope.code == "2" || (envelope.code == "1" && only_gone_rows))
-                && acks.iter().any(|a| !matches!(a.s_code, "" | "0")))
-        {
+        // Legacy TS's response interceptor throws on every nonzero envelope.
+        if envelope.code != "0" {
             let error = if errors.is_empty() {
                 let error = format!("OKX {}: {}", envelope.code, envelope.msg);
                 rejection(error, Some(envelope.code), response.status)
@@ -2003,6 +2140,9 @@ impl Okx {
         mut error: VenueError,
         uncertain: bool,
     ) {
+        if uncertain {
+            error = unknown_outcome(error);
+        }
         if !uncertain
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             && let Some(request) = current
@@ -2032,9 +2172,44 @@ impl Okx {
                 }
             }
         }
-        let Some(job) = self.trading.jobs.remove(&command) else {
+        let Some(mut job) = self.trading.jobs.remove(&command) else {
             return;
         };
+        if let (Some(writes), Some(index)) = (&mut job.writes, job.pending_write.take()) {
+            let classified = if uncertain {
+                error.clone().outcome(Outcome::Unknown)
+            } else {
+                error.clone()
+            };
+            let recorded = (0..job.steps.front().map_or(0, |step| step.receipts.len()))
+                .try_for_each(|offset| {
+                    let result = if matches!(
+                        classified.outcome,
+                        Some(Outcome::NotSent | Outcome::Rejected)
+                    ) && !classified
+                        .partial
+                        .as_ref()
+                        .is_some_and(|partial| !partial.order_ids.is_empty())
+                    {
+                        ElementResult::NotSent {
+                            error: Some(Box::new(classified.clone())),
+                        }
+                    } else {
+                        ElementResult::Unknown {
+                            error: Box::new(unknown_outcome(classified.clone())),
+                        }
+                    };
+                    writes.record(index + offset, result)
+                });
+            if recorded.is_err() {
+                job.writes = None;
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "OKX write outcome reporting is unavailable",
+                );
+            }
+        }
         if !uncertain
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             && current.is_some_and(|request| request.path == "/api/v5/trade/amend-algos")
@@ -2067,7 +2242,7 @@ impl Okx {
             error.outcome = None;
         }
         // The old stop's cancel landed and nothing replaced it: its row must not read Open.
-        let note = job
+        let mut note = job
             .replacing_stop
             .as_ref()
             .filter(|_| job.effective && job.ids.is_empty() && job.trailing.is_none())
@@ -2075,6 +2250,56 @@ impl Okx {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
         let stop_gone = note.is_some();
+        if uncertain && let Some(step) = job.steps.front().filter(|step| step.query.is_none()) {
+            cx.command_error(command, UNKNOWN_OUTCOME_TEXT);
+            let unknown = format!("{UNKNOWN_OUTCOME_TEXT}; unconfirmed request {}", step.body);
+            note = Some(match note {
+                Some(note) => format!("{note}; {unknown}"),
+                None => unknown,
+            });
+            let indexed_unknown = error.elements.as_ref().and_then(|elements| {
+                elements
+                    .0
+                    .iter()
+                    .find(|element| matches!(element.result, ElementResult::Unknown { .. }))
+            });
+            let identity =
+                reporting_identity(step, indexed_unknown.map(|element| element.element.index));
+            let mut fields = vec![
+                ("command", command.into()),
+                (
+                    "placedCount",
+                    job.ids.iter().map(|_| 1.0).sum::<f64>().into(),
+                ),
+                // Put the unconfirmed identity before the body so the
+                // engine's 512-byte log cap cannot hide a later batch row.
+                (
+                    "unknownRequest",
+                    match &identity {
+                        Some(identity) => format!("{identity}; {}", step.body),
+                        None => step.body.clone(),
+                    }
+                    .into(),
+                ),
+            ];
+            if let Some(element) = indexed_unknown
+                && let ElementResult::Unknown { error } = &element.result
+            {
+                fields.push(("index", (element.element.index as f64).into()));
+                if let Some(identity) = identity {
+                    fields.push(("targetOrderId", identity.into()));
+                }
+                if let Some(code) = &error.venue_code {
+                    fields.push(("venueCode", code.to_string().into()));
+                }
+            }
+            cx.event(
+                Level::Warn,
+                "order.outcome_unknown",
+                UNKNOWN_OUTCOME_TEXT,
+                fields,
+            );
+        }
         // A sibling rests: the caller must be told even though this call failed.
         if !job.ids.is_empty() {
             error = error.partial_ids(&job.ids);
@@ -2095,6 +2320,9 @@ impl Okx {
                 );
             }
         }
+        if let Some(writes) = &job.writes {
+            error = writes.attach(error);
+        }
         let _ = match (&job.plan, &job.preflight) {
             (Some(plan), _) => {
                 if let Some(request) = current {
@@ -2108,6 +2336,21 @@ impl Okx {
             (None, Some(preflight)) => cx.fail_preflight(preflight, error),
             (None, None) => Ok(()),
         };
+    }
+
+    pub(crate) fn trading_unproven_evidence(
+        &self,
+        request: &Request,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Some(writes) = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.writes.as_ref())
+        {
+            evidence.write_plan(writes);
+        }
     }
 
     /// The engine retired a write owner itself (for example an unproven 408/5xx):
@@ -2127,6 +2370,69 @@ pub(crate) fn trade_reconciliation(
     request: &Request,
 ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
     ReconciliationData::new(request.path.to_owned())
+}
+
+/// Passive outcomes for an identity-validated native cancellation batch.
+/// Indices match the batch's request rows and its partial.failed_index.
+/// Use the engine's released-write verdict, including rate-limit uncertainty.
+fn cancel_outcomes(
+    response: &Response<'_>,
+    acks: &[Ack<'_>],
+    requested: &[Requested],
+) -> ElementOutcomes {
+    ElementOutcomes(
+        acks.iter()
+            .zip(requested)
+            .enumerate()
+            .map(|(index, (ack, target))| {
+                let verdict = safe_cex_engine::classify::verdict(
+                    &CODES,
+                    Intent::Cancel,
+                    Released::Response(response),
+                    Some(&native(ack.s_code, ack.s_msg)),
+                );
+                let result = if matches!(ack.s_code, "" | "0")
+                    || verdict == Verdict::Satisfied(SatisfiedIntent::Cancel)
+                {
+                    ElementResult::Applied {
+                        effect: AppliedEffect::Cancel,
+                        target_order_id: Some(target.id().into()),
+                        position_key: None,
+                    }
+                } else {
+                    let mut error = VenueError::new(format!(
+                        "OKX cancellation target {}: {} (code {})",
+                        target.id(),
+                        ack.s_msg,
+                        ack.s_code
+                    ))
+                    .venue_code(ack.s_code)
+                    .venue_message(ack.s_msg);
+                    if let Some(kind) = verdict.kind() {
+                        error.kind = Some(kind);
+                    }
+                    if verdict.is_refusal() {
+                        ElementResult::NotSent {
+                            error: Some(Box::new(error.outcome(Outcome::Rejected))),
+                        }
+                    } else {
+                        error.outcome = Some(Outcome::Unknown);
+                        error.message = format!("{}. {UNKNOWN_OUTCOME_TEXT}", error.message);
+                        ElementResult::Unknown {
+                            error: Box::new(error),
+                        }
+                    }
+                };
+                ElementOutcome {
+                    element: Element {
+                        index,
+                        client_order_id: None,
+                    },
+                    result,
+                }
+            })
+            .collect(),
+    )
 }
 
 /// A definitive OKX refusal. Its kind comes from the table (the native code,
@@ -2156,6 +2462,81 @@ fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
         error = error.venue_code(code);
     }
     error
+}
+
+fn unknown_outcome(mut error: VenueError) -> VenueError {
+    if error.venue_message.is_none() {
+        error.venue_message = Some(error.message.clone().into_boxed_str());
+    }
+    error.message = UNKNOWN_OUTCOME_TEXT.into();
+    error.outcome = Some(Outcome::Unknown);
+    // Presentation only; the engine still classifies the retained write facts.
+    error.presents = true;
+    error
+}
+
+fn native_refusal(
+    cx: &Cx<'_, Pending>,
+    context: &Context,
+    ack: &Ack<'_>,
+) -> Result<ElementResult, VenueError> {
+    let fact = cx
+        .classify_write(
+            context,
+            &CODES,
+            Some(&native(ack.s_code, ack.s_msg)),
+            ack.s_msg,
+        )
+        .map_err(|error| error.venue_error())?;
+    let error = fact.error().clone();
+    Ok(
+        if matches!(
+            fact.verdict(),
+            Verdict::Refused(_) | Verdict::RefusedResend(_)
+        ) {
+            ElementResult::NotSent {
+                error: Some(Box::new(error)),
+            }
+        } else {
+            ElementResult::Unknown {
+                error: Box::new(unknown_outcome(error)),
+            }
+        },
+    )
+}
+
+fn placement_results(
+    cx: &Cx<'_, Pending>,
+    context: &Context,
+    acks: &[Ack<'_>],
+) -> Result<Vec<ElementResult>, VenueError> {
+    acks.iter()
+        .map(|ack| {
+            if matches!(ack.s_code, "" | "0") {
+                let id = if ack.algo_id.is_empty() {
+                    ack.ord_id
+                } else {
+                    ack.algo_id
+                };
+                return Ok(if id.is_empty() {
+                    ElementResult::Unknown {
+                        error: Box::new(unknown_outcome(
+                            VenueError::new(
+                                "OKX placement acknowledgement omitted native identity",
+                            )
+                            .kind(ErrorKind::Internal)
+                            .outcome(Outcome::Unknown),
+                        )),
+                    }
+                } else {
+                    ElementResult::Placed {
+                        order_ids: vec![id.into()],
+                    }
+                });
+            }
+            native_refusal(cx, context, ack)
+        })
+        .collect()
 }
 
 /// Refused before any request was sent.
@@ -2205,7 +2586,37 @@ fn step<T: Serialize + ?Sized>(
         body: serde_json::to_string(body).map_err(|e| e.to_string())?,
         expected,
         collect_ids,
+        write_index: None,
+        unknown_row: None,
     })
+}
+
+/// Presentation metadata only; never a dispatch, validation or retry decision.
+fn reporting_identity(step: &Step, index: Option<usize>) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity {
+        cl_ord_id: Option<String>,
+        algo_cl_ord_id: Option<String>,
+        ord_id: Option<String>,
+        algo_id: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Payload {
+        Rows(Vec<Identity>),
+        Row(Identity),
+    }
+    let row = match serde_json::from_str::<Payload>(&step.body).ok()? {
+        Payload::Rows(rows) => rows
+            .into_iter()
+            .nth(index.or(step.unknown_row).unwrap_or(0))?,
+        Payload::Row(row) => row,
+    };
+    row.cl_ord_id
+        .or(row.algo_cl_ord_id)
+        .or(row.ord_id)
+        .or(row.algo_id)
 }
 fn next_call(job: &Job) -> SerialCall {
     if job.lookup.is_some() {
@@ -2278,6 +2689,8 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         preflight: None,
         plan: None,
         steps: steps.into(),
+        writes: None,
+        pending_write: None,
         ids: Vec::new(),
         finish,
         optimistic: Vec::new(),

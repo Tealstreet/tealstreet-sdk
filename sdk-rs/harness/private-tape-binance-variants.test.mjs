@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { Tape } from './tape.mjs';
+import { VENUES } from './venues.mjs';
 
 const generate = (venue) => {
   const directory = mkdtempSync(join(tmpdir(), 'binance-variant-tape-'));
@@ -21,25 +23,38 @@ const generate = (venue) => {
   }
 };
 
-test('PM startup and cancel-all serve the algo API while preserving the legacy TS inputs', () => {
-  const records = generate('binancepm').trim().split('\n').map(JSON.parse);
-  const rows = (method, path) => records.filter((row) => row.type === 'http' &&
-    row.method === method && new URL(row.url).pathname === `/papi/v1/um/${path}`);
-  const [legacy] = rows('GET', 'conditional/openOrders');
-  const [algo] = rows('GET', 'algo/openAlgoOrders');
-  assert.ok(algo, 'Rust startup needs the current PM algo endpoint');
-  assert.equal(legacy.impl, 'ts');
-  assert.equal(algo.impl, 'rust');
-  assert.equal(algo.status, legacy.status);
-  assert.equal(algo.body, legacy.body);
-  assert.deepEqual(JSON.parse(algo.body), []);
-  const [cancel] = rows('DELETE', 'algo/allOpenOrders');
-  assert.ok(cancel, 'Rust cancel-all needs the current PM algo endpoint');
-  assert.equal(cancel.impl, 'rust');
-  assert.deepEqual(JSON.parse(cancel.body), { code: 200, msg: 'success' });
-  assert.equal(new URL(cancel.url).searchParams.get('symbol'), 'ETHUSDT');
-  assert.equal(rows('DELETE', 'conditional/allOpenOrders').length, 0);
-});
+const respond = (tape, method, url) => {
+  const parsed = new URL(url);
+  parsed.searchParams.set('timestamp', String(Date.now()));
+  parsed.searchParams.set('recvWindow', '5000');
+  const signature = createHmac('sha256', 'replay-secret').update(parsed.search.slice(1)).digest('hex');
+  parsed.searchParams.set('signature', signature);
+  return tape.respond(method, parsed.href, undefined, { 'X-MBX-APIKEY': 'replay-key' });
+};
+
+for (const impl of ['ts', 'rust']) {
+  test(`PM ${impl} snapshot receives the shared algo response through the real Tape`, () => {
+    const records = generate('binancepm').trim().split('\n').map(JSON.parse);
+    const tape = new Tape(records, VENUES.binancepm, true, 30000, impl);
+    const response = respond(tape, 'GET', 'https://papi.binance.com/papi/v1/um/algo/openAlgoOrders');
+    assert.equal(response.status, 200, 'Both migrated receivers must finish conditional-order startup');
+    assert.deepEqual(JSON.parse(response.body), []);
+    assert.equal(respond(tape, 'GET', 'https://papi.binance.com/papi/v1/um/conditional/openOrders').status, 599);
+  });
+
+  test(`PM ${impl} cancel-all serves both families once and refuses a different symbol`, () => {
+    const records = generate('binancepm').trim().split('\n').map(JSON.parse);
+    const tape = new Tape(records, VENUES.binancepm, true, 30000, impl);
+    for (const family of ['allOpenOrders', 'algo/allOpenOrders']) {
+      const endpoint = `https://papi.binance.com/papi/v1/um/${family}`;
+      assert.equal(respond(tape, 'DELETE', `${endpoint}?symbol=BTCUSDT`).status, 599);
+      const response = respond(tape, 'DELETE', `${endpoint}?symbol=ETHUSDT`);
+      assert.equal(response.status, 200, 'Both migrated receivers must acknowledge each cancel-all family');
+      assert.deepEqual(JSON.parse(response.body), { code: 200, msg: 'success' });
+      assert.equal(respond(tape, 'DELETE', `${endpoint}?symbol=ETHUSDT`).status, 599);
+    }
+  });
+}
 
 test('COIN-M startup serves the empty algo census without changing any legacy tape record', () => {
   const tape = generate('binanceinverse');
@@ -61,24 +76,19 @@ test('COIN-M startup serves the empty algo census without changing any legacy ta
   assert.equal(entry.tapeSha256, createHash('sha256').update(tape).digest('hex'));
 });
 
-test('COIN-M migration leaves the Spot and PM tape bytes unchanged', () => {
-  for (const [venue, expected] of [
-    ['binancespot', '17f14a131f0240857e7a0866432587f8929a9aea084d1f619c65a88bb4309c67'],
-    ['binancepm', 'c37534b929ea81c1959f2eb8f585f6305f34c43a03bb7a3bb5107f7319083bda'],
-  ]) assert.equal(createHash('sha256').update(generate(venue)).digest('hex'), expected, venue);
+test('PM migration leaves the Spot tape bytes unchanged', () => {
+  assert.equal(createHash('sha256').update(generate('binancespot')).digest('hex'),
+    '17f14a131f0240857e7a0866432587f8929a9aea084d1f619c65a88bb4309c67');
 });
 
 test('PM migration preserves every original payload, command and checkpoint boundary', () => {
   const tape = generate('binancepm');
   const records = tape.trim().split('\n').map(JSON.parse);
-  const original = records.filter((row) => !row.url?.endsWith('/algo/openAlgoOrders')).map((row) => {
-    if (row.url?.endsWith('/conditional/openOrders')) {
-      const { impl, ...legacy } = row;
-      assert.equal(impl, 'ts');
-      return legacy;
-    }
+  const original = records.map((row) => {
+    if (row.url?.endsWith('/algo/openAlgoOrders'))
+      return { ...row, url: row.url.replace('/algo/openAlgoOrders', '/conditional/openOrders') };
     if (row.url?.includes('/algo/allOpenOrders?'))
-      return { ...row, url: row.url.replace('/algo/allOpenOrders?', '/conditional/allOpenOrders?') };
+      return { ...row, url: row.url.replace('/algo/allOpenOrders?', '/conditional/allOpenOrders?'), impl: 'rust' };
     return row;
   }).map((row) => JSON.stringify(row)).join('\n') + '\n';
   assert.equal(createHash('sha256').update(original).digest('hex'),

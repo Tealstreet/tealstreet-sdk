@@ -1,0 +1,18 @@
+{
+  "mode": 0,
+  "kem_id": 32,
+  "kdf_id": 1,
+  "aead_id": 3,
+  "info": "4f6465206f6e2061204772656369616e2055726e",
+  "skEm": "f4ec9b33b792c372c1d2c2063507b684ef925b8c75a42dbcbf57d63ccd381600",
+  "pkRm": "4310ee97d88cc1f088a5576c77ab0cf5c3ac797f3d95139c6c84b5429c59662a",
+  "enc": "1afa08d3dec047a643885163f1180476fa7ddb54c6a8029ea33f95796bf2ac4a",
+  "encryption": {
+    "aad": "436f756e742d30",
+    "ct": "1c5250d8034ec2b784ba2cfd69dbdb8af406cfe3ff938e131f0def8c8b60b4db21993c62ce81883d2dd1b51a28",
+    "nonce": "5c4d98150661b848853b547f",
+    "pt": "4265617574792069732074727574682c20747275746820626561757479"
+  },
+  "source": "https://www.rfc-editor.org/rfc/rfc9180.html#appendix-A.2.1",
+  "vectorSource": "https://github.com/cfrg/draft-irtf-cfrg-hpke/blob/b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb/test-vectors.json"
+}

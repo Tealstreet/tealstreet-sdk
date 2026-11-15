@@ -50,6 +50,19 @@ export const createAndVerifyTag = async ({ api, repo, tag, sha }) => {
 };
 
 const REQUIRED_JOB = 'Rust / required coverage';
+// GitHub times out (502/504) listing a large re-run's jobs at 100 per page.
+const JOBS_PER_PAGE = 50;
+const LOOKUP_ATTEMPTS = 3;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A GET that retries GitHub's transient 5xx answers; other statuses return at once. */
+const getWithRetry = async (api, path, sleep) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const reply = await api('GET', path);
+    if (reply.status < 500 || attempt === LOOKUP_ATTEMPTS) return reply;
+    await sleep(2000 * attempt);
+  }
+};
 
 /** A set RUST_BETA_HOLD variable stops every release, naming why. */
 export const assertNotHeld = (hold) => {
@@ -57,25 +70,25 @@ export const assertNotHeld = (hold) => {
 };
 
 /**
- * `sha` must have a completed Rust SDK master push run whose "Rust / required coverage"
- * job (the correctness aggregate branch protection requires) succeeded. CPU
- * certification is non-blocking, so its noise must not stop a release.
+ * Require a Rust SDK push run on master with head_sha === sha, whose
+ * "Rust / required coverage" job is completed with conclusion success.
+ * #3489 relaxed whole-run completion; the run may still be in progress.
  */
-export const assertCertified = async ({ api, repo, sha }) => {
+export const assertCertified = async ({ api, repo, sha, sleep = pause }) => {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('source must be a full commit SHA');
-  const { status, json } = await api('GET', `/repos/${repo}/actions/workflows/rust.yml/runs?head_sha=${sha}&event=push&branch=master&per_page=20`);
+  const { status, json } = await getWithRetry(api, `/repos/${repo}/actions/workflows/rust.yml/runs?head_sha=${sha}&event=push&branch=master&per_page=20`, sleep);
   if (status !== 200) throw new Error(`Rust SDK run lookup returned HTTP ${status}`);
-  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push' && run.status === 'completed');
+  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push');
   for (const run of runs) {
-    for (let page = 1; page <= 5; page += 1) {
-      const jobs = await api('GET', `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100&page=${page}`);
+    for (let page = 1; page <= 10; page += 1) {
+      const jobs = await getWithRetry(api, `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=${JOBS_PER_PAGE}&page=${page}`, sleep);
       if (jobs.status !== 200) throw new Error(`Rust SDK jobs lookup returned HTTP ${jobs.status}`);
       const required = (jobs.json?.jobs ?? []).find((job) => job.name === REQUIRED_JOB);
       if (required) {
         if (required.status === 'completed' && required.conclusion === 'success') return;
         break;
       }
-      if ((jobs.json?.jobs ?? []).length < 100) break;
+      if ((jobs.json?.jobs ?? []).length < JOBS_PER_PAGE) break;
     }
   }
   throw new Error(`no Rust SDK master push run for ${sha} with ${REQUIRED_JOB} success; refusing to publish uncertified source`);

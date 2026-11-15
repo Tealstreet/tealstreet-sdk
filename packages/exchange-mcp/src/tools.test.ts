@@ -220,3 +220,12 @@ it.each(['get_order_history', 'get_fills', 'get_closed_pnl', 'get_income'])(
     expect(rows).toEqual([{ timestamp: 1 }]);
   },
 );
+
+it('get_closed_pnl preserves null and zero without fabricating UTC dates or dropping rows', async () => {
+  const rows = [
+    { unrealizedPnl: null, fees: null, time: null, closedTime: null },
+    { unrealizedPnl: 0, fees: 0, time: 0, closedTime: 0 },
+  ];
+  const result = await run('get_closed_pnl', { fetchClosedPnl: async () => rows }, {});
+  expect(JSON.parse(JSON.stringify(result))).toEqual(rows);
+});

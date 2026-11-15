@@ -24,6 +24,7 @@ struct Descriptor {
 }
 
 pub(super) fn prepare(
+    venue: &str,
     ids: &Identities,
     descriptor: String,
     receipt: SignReceipt,
@@ -89,7 +90,7 @@ pub(super) fn prepare(
     let work = SignRequest {
         receipt,
         context: Context {
-            venue: "kucoin".into(),
+            venue: venue.into(),
             method: "HOSTED".into(),
             ..Default::default()
         },

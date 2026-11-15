@@ -3,6 +3,9 @@ import type { OrderSide } from "./OrderSide";
 import type { PositionSide } from "./PositionSide";
 export type Execution = {
     readonly id?: string;
+    /**
+     * Seconds, unlike PublicTrade.timestamp and HistoricalTrade.time (milliseconds).
+     */
     readonly timestamp: number;
     readonly symbol: string;
     readonly orderId?: string;
@@ -11,9 +14,18 @@ export type Execution = {
     readonly side: OrderSide;
     readonly commission?: number;
     readonly commissionAsset?: string;
+    /**
+     * Absent means unreported; both is explicit one-way attribution.
+     */
     readonly positionSide?: PositionSide | 'both';
+    /**
+     * Venue-reported gross realized PnL; commission is separate.
+     */
     readonly realizedPnl?: number;
     readonly maker?: boolean;
+    /**
+     * Venue-reported integrator revenue, distinct from user commission.
+     */
     readonly venueReportedRevenue?: number;
     readonly venueReportedRevenueAsset?: string;
 };

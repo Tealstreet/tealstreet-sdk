@@ -4,4 +4,9 @@ import type { OptionGreeks } from "./OptionGreeks";
 import type { PositionMode } from "./PositionMode";
 import type { PositionSide } from "./PositionSide";
 
-export type Position = { id: string, symbol: string, side: PositionSide, entryPrice: number, notional: number, leverage: number, marginType?: MarginType, positionMode?: PositionMode, unrealizedPnl: number, realizedPnl?: number, contracts: number, liquidationPrice: number, marginSize?: number, info?: any, extra?: { contractsNative?: number, unrealizedPnlNative?: number, }, lastUpdate?: number, option?: { greeks?: OptionGreeks, }, };
+/**
+ * Canonical SDK position. Notional and liquidationPrice are required and nullable when unknown.
+ * contracts is the whole base-unit quantity; extra.contractsNative retains native placement units.
+ * marginSize is absolute quote-currency margin when published by the venue; cross margin may be zero.
+ */
+export type Position = { id: string, symbol: string, side: PositionSide, entryPrice: number, notional: number | null, leverage: number, marginType?: MarginType, positionMode?: PositionMode, unrealizedPnl: number, realizedPnl?: number, contracts: number, liquidationPrice: number | null, marginSize?: number, info?: any, extra?: { contractsNative?: number, unrealizedPnlNative?: number, }, lastUpdate?: number, option?: { greeks?: OptionGreeks, }, };

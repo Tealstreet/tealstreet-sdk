@@ -4,6 +4,8 @@ import type { CommandContext } from '../Command';
 import { OrderSide, OrderType, OrderTimeInForce, type PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 import type { ExchangeLike } from '../../types';
 import { MemoryPreprocessStore } from '../../preprocess/memoryStore';
+import { executeCommand } from '../CommandExecutor';
+import { WorkerPlatformAdapter } from '../../worker-host/WorkerPlatformAdapter';
 
 function makeExchange(): ExchangeLike {
   return {
@@ -95,9 +97,7 @@ describe('ScaleCommand — preconditions', () => {
   it('errors when ticker price is unavailable', async () => {
     const ex = makeExchange();
     ex.store!.tickers = [];
-    // notionalToSize throws when the ticker is missing. ScaleCommand
-    // catches that into a CommandResult so the user sees a clean
-    // error and not a stack trace.
+    // Price resolution reports a clean command error when no ticker is loaded.
     const r = await cmd.execute(ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000'], ex));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/[Pp]rice/);
@@ -138,21 +138,28 @@ describe('ScaleCommand — modifier honesty', () => {
     [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic', '2'], 'cubic'],
     [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic', 'BTCUSDT'], 'cubic'],
     [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential'], 'exponential'],
-    [
-      ['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential', 'BTCUSDT'],
-      'exponential',
-    ],
-    [
-      ['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'bogus', 'BTCUSDT'],
-      'bogus',
-    ],
+    [['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'exponential', 'BTCUSDT'], 'exponential'],
   ])('rejects an unimplemented modifier with the supported list (%s)', async (args, modifier) => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(args, ex));
     expect(r.success).toBe(false);
-    expect(r.error).toBe(`modifier '${modifier}' is not implemented; supported: reduce, taker`);
+    expect(r.error).toContain(`modifier '${modifier}' is not implemented; supported: reduce, taker`);
     expect(ex.placeOrders).not.toHaveBeenCalled();
   });
+
+  it.each([['bogus'], ['bogus', 'BTCUSDT']])(
+    'rejects an unknown symbol before any later token: %s',
+    async (...tail) => {
+      const ex = makeExchange();
+      const r = await cmd.execute(
+        ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', ...tail], ex),
+      );
+      expect(r.success).toBe(false);
+      expect(r.error).toContain('Unknown argument "bogus"');
+      expect(r.error).not.toContain('modifier');
+      expect(ex.placeOrders).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects `cubic` even when a CUBIC market resolves as a symbol (reserved keyword)', async () => {
     const ex = makeExchange();
@@ -161,7 +168,9 @@ describe('ScaleCommand — modifier honesty', () => {
       { symbol: 'CUBICUSDT', base: 'CUBIC', quote: 'USDT', precision: { amount: 1, price: 0.01 } } as never,
     ];
     ex.store!.tickers = [...(ex.store!.tickers ?? []), { symbol: 'CUBICUSDT', last: 5 } as never];
-    const r = await cmd.execute(ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic'], ex));
+    const r = await cmd.execute(
+      ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000', 'cubic'], ex),
+    );
     expect(r.success).toBe(false);
     expect(r.error).toBe(`modifier 'cubic' is not implemented; supported: reduce, taker`);
     expect(ex.placeOrders).not.toHaveBeenCalled();
@@ -170,16 +179,10 @@ describe('ScaleCommand — modifier honesty', () => {
   it.each([
     [['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce'], 'reduce alone'],
     [['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'taker'], 'taker alone'],
+    [['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce', 'taker'], 'reduce + taker'],
+    [['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'taker', 'reduce'], 'taker + reduce'],
     [
-      ['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'reduce', 'taker'],
-      'reduce + taker',
-    ],
-    [
-      ['scale', 'sell', '$1000', 'into', '3', 'from', '50000', 'to', '51000', 'taker', 'reduce'],
-      'taker + reduce',
-    ],
-    [
-      ['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'taker', 'ETHUSDT'],
+      ['scale', 'buy', '$1000', 'into', '3', 'from', '2900', 'to', '3000', 'taker', 'ETHUSDT'],
       'supported modifier + symbol scope',
     ],
   ])('still parses supported modifiers (%s)', async (args, _label) => {
@@ -206,7 +209,7 @@ describe('ScaleCommand — modifier honesty', () => {
       ctx(['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'BTCUSDX'], ex),
     );
     expect(r.success).toBe(false);
-    expect(r.error).toBe(
+    expect(r.error).toContain(
       'Unknown symbol "BTCUSDX". Use a valid market symbol, or omit it to trade the focused symbol (BTCUSDT).',
     );
     expect(ex.placeOrders).not.toHaveBeenCalled();
@@ -225,12 +228,120 @@ describe('ScaleCommand — order distribution', () => {
     expect(placedOrders(ex)).toHaveLength(5);
   });
 
-  it('splits total notional evenly across slices (size = total / N)', async () => {
+  it('sizes $2400 at 40k and 80k as $1200 per rung', async () => {
     const ex = makeExchange();
-    await cmd.execute(ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000'], ex));
-    const orders = placedOrders(ex);
-    // $1000 total / 50000 last-price = 0.02 BTC total. /5 slices = 0.004 each.
-    expect(orders.every((o) => o.amount === 0.004)).toBe(true);
+    ex.store!.tickers![0].last = 82_000;
+
+    const result = await cmd.execute(ctx(['scale', 'buy', '$2400', 'into', '2', 'from', '40000', 'to', '80000'], ex));
+
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 40_000, amount: 0.03 },
+      { price: 80_000, amount: 0.015 },
+    ]);
+  });
+
+  it.each(['$20', '10%bal'])('sizes %s using the tick-rounded outgoing rung prices', async (size) => {
+    const ex = makeExchange();
+    Object.assign(ex.store!.markets![0], { symbol: 'MEMEUSDT', base: 'MEME', precision: { amount: 1, price: 0.001 } });
+    Object.assign(ex.store!.tickers![0], { symbol: 'MEMEUSDT', last: 0.002 });
+    ex.store!.balance = { free: 200, total: 200, used: 0, upnl: 0 };
+
+    const result = await cmd.execute(
+      ctx(['scale', 'buy', size, 'into', '2', 'from', '0.0015', 'to', '0.0016'], ex, 'MEMEUSDT'),
+    );
+
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 0.002, amount: 5_000 },
+      { price: 0.002, amount: 5_000 },
+    ]);
+    expect(placedOrders(ex).reduce((sum, order) => sum + order.amount * order.price!, 0)).toBe(20);
+  });
+
+  it('allocates each dollar share before rounding its size to the lot step', async () => {
+    const ex = makeExchange();
+
+    const result = await cmd.execute(ctx(['scale', 'buy', '$260', 'into', '2', 'from', '100000', 'to', '110000'], ex));
+
+    expect(result.success).toBe(true);
+    // Each $130 share rounds to .001 BTC, not .002 at the first rung.
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 100_000, amount: 0.001 },
+      { price: 110_000, amount: 0.001 },
+    ]);
+  });
+
+  it.each(['$2000', '50%bal'])(
+    'splits inverse %s into equal native contracts regardless of rung price',
+    async (size) => {
+      const ex = makeExchange();
+      Object.assign(ex.store!.markets![0], {
+        isInverse: true,
+        contractSize: 100,
+        precision: { amount: 1, price: 0.01 },
+      });
+      ex.store!.balance = { free: 4_000, total: 4_000, used: 0, upnl: 0 };
+
+      const result = await cmd.execute(ctx(['scale', 'buy', size, 'into', '2', 'from', '40000', 'to', '80000'], ex));
+
+      expect(result.success).toBe(true);
+      expect(placedOrders(ex)).toMatchObject([
+        { price: 40_000, amount: 10 },
+        { price: 80_000, amount: 10 },
+      ]);
+    },
+  );
+
+  it.each(['$40', '10%bal'])('refuses %s when the allocated rungs round to zero', async (size) => {
+    const ex = makeExchange();
+    ex.store!.balance = { free: 400, total: 400, used: 0, upnl: 0 };
+
+    await expect(
+      cmd.execute(ctx(['scale', 'buy', size, 'into', '2', 'from', '60000', 'to', '60001'], ex)),
+    ).rejects.toThrow(/lot step/);
+    expect(ex.placeOrders).not.toHaveBeenCalled();
+  });
+
+  it('converts DOGE rung shares to native 1000-DOGE contracts', async () => {
+    const ex = makeExchange();
+    const market = ex.store!.markets![0];
+    market.symbol = 'DOGEUSDT';
+    market.base = 'DOGE';
+    market.contractSize = 1_000;
+    market.precision = { amount: 0.01, price: 0.0001 };
+    ex.store!.tickers![0].symbol = 'DOGEUSDT';
+    ex.store!.tickers![0].last = 0.1;
+
+    const result = await cmd.execute(
+      ctx(['scale', 'buy', '$30', 'into', '2', 'from', '0.05', 'to', '0.1'], ex, 'DOGEUSDT'),
+    );
+
+    expect(result.success).toBe(true);
+    // $15 per rung: 300 DOGE at 0.05 and 150 DOGE at 0.1.
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 0.05, amount: 0.3 },
+      { price: 0.1, amount: 0.15 },
+    ]);
+  });
+
+  it.each(['$215', '50%bal'])('floors MEXC rung shares using the converted native step: %s', async (size) => {
+    const ex = makeExchange();
+    ex.name = 'mexc';
+    Object.assign(ex.store!.markets![0], { contractSize: 0.01, precision: { amount: 0.03, price: 0.01 } });
+    ex.store!.tickers![0].last = 100;
+    ex.store!.balance = { free: 430, total: 430, used: 0, upnl: 0 };
+    const store = new MemoryPreprocessStore();
+    store.setBudget(215);
+
+    const result = await cmd.execute(
+      ctx(['scale', 'buy', size, 'into', '2', 'from', '100', 'to', '100'], ex, 'BTCUSDT', store),
+    );
+
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toMatchObject([{ amount: 105, price: 100 }, { amount: 105, price: 100 }]);
+    expect(store.getBudgetSpent()).toBe(210);
+    expect(store.getBudgetSpent()).toBeLessThanOrEqual(215);
   });
 
   it('spaces prices evenly between from and to', async () => {
@@ -293,7 +404,7 @@ describe('ScaleCommand — order distribution', () => {
     await cmd.execute(ctx(['scale', 'buy', '$300', 'into', '3', 'from', '2900', 'to', '3000', 'ETHUSDT'], ex));
     const orders = placedOrders(ex);
     expect(orders.every((o) => o.symbol === 'ETHUSDT')).toBe(true);
-    // $300 / 3000 last = 0.1 ETH total. /3 = 0.0333 → adjusted to 0.01 precision = 0.03.
+    // $100 per rung at 2900–3000 is about 0.034 ETH, rounded to the 0.01 lot step.
     expect(orders.every((o) => o.amount === 0.03)).toBe(true);
   });
 });
@@ -321,21 +432,21 @@ describe('ScaleCommand — boundary cases', () => {
     expect(r.success).toBe(false);
   });
 
-  it('percent-of-balance entry: 50% scales across N orders', async () => {
-    // 50% of $1000 free balance @ 1x leverage = $500 notional. /5
-    // slices = $100/slice. /50000 last = 0.002 BTC, adjusted to
-    // 0.001 precision → 0.002 each.
+  it('sizes a balance percentage at the rung prices', async () => {
+    // 50% of $4800 free at 1x = $2400, so $1200 per rung.
     const ex = makeExchange();
-    ex.store!.balance = { used: 0, free: 1000, total: 1000, upnl: 0 } as never;
-    await cmd.execute(ctx(['scale', 'buy', '50%', 'into', '5', 'from', '49000', 'to', '50000'], ex));
-    const orders = placedOrders(ex);
-    expect(orders).toHaveLength(5);
-    expect(orders.every((o) => o.amount === 0.002)).toBe(true);
+    ex.store!.tickers![0].last = 82_000;
+    ex.store!.balance = { used: 0, free: 4800, total: 4800, upnl: 0 } as never;
+    await cmd.execute(ctx(['scale', 'buy', '50%', 'into', '2', 'from', '40000', 'to', '80000'], ex));
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 40_000, amount: 0.03 },
+      { price: 80_000, amount: 0.015 },
+    ]);
   });
 
   it('percent-of-position exit: 50% reduce scales out', async () => {
-    // 50% of a 1 BTC position = 0.5 BTC. /5 = 0.1/slice. The reduce
-    // flag flips the percent-default to position scope.
+    // 50% of a 1 BTC position = 0.5 BTC. /5 = 0.1/slice at every price.
+    // The reduce flag flips the percent-default to position scope.
     const ex = makeExchange();
     ex.store!.positions = [
       {
@@ -350,7 +461,7 @@ describe('ScaleCommand — boundary cases', () => {
         liquidationPrice: 0,
       } as never,
     ];
-    await cmd.execute(ctx(['scale', 'sell', '50%', 'into', '5', 'from', '50000', 'to', '51000', 'reduce'], ex));
+    await cmd.execute(ctx(['scale', 'sell', '50%', 'into', '5', 'from', '40000', 'to', '80000', 'reduce'], ex));
     const orders = placedOrders(ex);
     expect(orders).toHaveLength(5);
     expect(orders.every((o) => o.amount === 0.1)).toBe(true);
@@ -403,7 +514,7 @@ describe('ScaleCommand — suffix-USD size regression', () => {
     const orders = placedOrders(ex);
     expect(orders).toHaveLength(5);
     expect(orders.every((o) => o.symbol === 'BTCUSDT')).toBe(true);
-    // $1000 / 50000 = 0.02 BTC total / 5 slices = 0.004 each
+    // $200 per rung at 49000–50000 is about 0.004 BTC at the 0.001 lot step.
     expect(orders.every((o) => o.amount === 0.004)).toBe(true);
   });
 
@@ -493,7 +604,185 @@ describe('ScaleCommand — budget', () => {
       ctx(['scale', 'buy', '$1000', 'into', '10', 'from', '50000', 'to', '48500'], ex, 'BTCUSDT', store),
     );
     expect(r.success).toBe(true);
-    // ~$1000 of notional charged (rounding per rung keeps it close).
-    expect(store.getBudgetSpent()).toBeCloseTo(1000, 0);
+    // Each $100 share floors to .002 BTC. Charge the submitted rung prices,
+    // whose combined notional is $985 rather than $1000 at the last price.
+    expect(placedOrders(ex).every((order) => order.amount === 0.002)).toBe(true);
+    expect(store.getBudgetSpent()).toBeCloseTo(985, 6);
+    const placedNotional = placedOrders(ex).reduce((sum, order) => sum + order.amount * order.price!, 0);
+    expect(store.getBudgetSpent()).toBeCloseTo(placedNotional, 6);
+  });
+});
+
+describe.each(['hyperliquid', 'hyperliquidspot', 'binance'])('ScaleCommand — round down shares on %s', (venue) => {
+  it('retains exact fractional-lot multiples without dropping a lot', async () => {
+    const ex = makeExchange();
+    ex.name = venue;
+    Object.assign(ex.store!.markets![0], { isSpot: true, precision: { amount: 0.1, price: 0.01 } });
+    ex.store!.tickers![0].last = 100;
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', 'buy', '$90', 'into', '3', 'from', '100', 'to', '100'], ex),
+    );
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex).map((o) => o.amount)).toEqual([0.3, 0.3, 0.3]);
+  });
+
+  it.each([false, true])('floors each share in native contract units (inverse=%s)', async (inverse) => {
+    const ex = makeExchange();
+    ex.name = venue;
+    Object.assign(ex.store!.markets![0], {
+      isSpot: false,
+      isInverse: inverse,
+      contractSize: inverse ? 100 : 10,
+      precision: { amount: inverse ? 1 : 0.1, price: 0.01 },
+    });
+    ex.store!.tickers![0].last = 100;
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', 'buy', '$510', 'into', '3', 'from', '100', 'to', '100'], ex),
+    );
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex).map((o) => o.amount)).toEqual(inverse ? [1, 1, 1] : [0.1, 0.1, 0.1]);
+    const notional = placedOrders(ex).reduce((sum, o) => sum + o.amount * (inverse ? 100 : 10 * o.price!), 0);
+    expect(notional).toBe(300);
+  });
+
+  it.each(['buy', 'sell'])('refuses sub-lot dollar and balance shares for %s before placement', async (side) => {
+    for (const size of ['$210', '21%bal']) {
+      const ex = makeExchange();
+      ex.name = venue;
+      Object.assign(ex.store!.markets![0], { isSpot: true, precision: { amount: 1, price: 0.01 } });
+      ex.store!.tickers![0].last = 100;
+      ex.store!.balance = { free: 1000, total: 1000, used: 0, upnl: 0 };
+      const store = new MemoryPreprocessStore();
+      store.setBudget(1000);
+      const result = await executeCommand(
+        `scale ${side} ${size} into 3 from 100 to 100`,
+        'BTCUSDT',
+        undefined,
+        ex,
+        new WorkerPlatformAdapter(ex),
+        undefined,
+        store,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/lot step/);
+      expect(ex.placeOrders).not.toHaveBeenCalled();
+      expect(store.getBudgetSpent()).toBe(0);
+    }
+  });
+
+  it.each(['$510', '51%bal'])('floors each %s share without exceeding the requested notional', async (size) => {
+    const ex = makeExchange();
+    ex.name = venue;
+    Object.assign(ex.store!.markets![0], { isSpot: true, precision: { amount: 1, price: 0.01 } });
+    ex.store!.tickers![0].last = 100;
+    ex.store!.balance = { free: 1000, total: 1000, used: 0, upnl: 0 };
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', 'buy', size, 'into', '3', 'from', '100', 'to', '100'], ex),
+    );
+    expect(result.success).toBe(true);
+    const orders = placedOrders(ex);
+    expect(orders).toHaveLength(3);
+    expect(orders.map((o) => o.amount)).toEqual([1, 1, 1]);
+    expect(orders.reduce((sum, o) => sum + o.amount * o.price!, 0)).toBeLessThanOrEqual(510);
+  });
+});
+
+describe.each(['buy', 'sell'])('ScaleCommand — submitted-price budget for %s', (side) => {
+  it('refuses a $600 ladder under a $500 cap before writing', async () => {
+    const ex = makeExchange();
+    const store = new MemoryPreprocessStore();
+    store.setBudget(500);
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', side, '$600', 'into', '2', 'from', '60000', 'to', '60000'], ex, 'BTCUSDT', store),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/budget/);
+    expect(ex.placeOrders).not.toHaveBeenCalled();
+    expect(store.getBudgetSpent()).toBe(0);
+  });
+
+  it('charges accepted higher-price rungs at $600, retaining the preflight amount', async () => {
+    const ex = makeExchange();
+    const store = new MemoryPreprocessStore();
+    store.setBudget(1000);
+    vi.mocked(ex.placeOrders!).mockImplementationOnce(async () => {
+      ex.store!.tickers![0].last = 1;
+      return ['first-rung', 'second-rung'];
+    });
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', side, '$600', 'into', '2', 'from', '60000', 'to', '60000'], ex, 'BTCUSDT', store),
+    );
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toMatchObject([
+      { amount: 0.005, price: 60000 },
+      { amount: 0.005, price: 60000 },
+    ]);
+    expect(store.getBudgetSpent()).toBe(600);
+  });
+
+  it('allows a lower-price $400 ladder under a $400 cap', async () => {
+    const ex = makeExchange();
+    const store = new MemoryPreprocessStore();
+    store.setBudget(400);
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', side, '$400', 'into', '2', 'from', '40000', 'to', '40000'], ex, 'BTCUSDT', store),
+    );
+    expect(result.success).toBe(true);
+    expect(store.getBudgetSpent()).toBe(400);
+  });
+
+  it('prices unequal rungs separately in the combined cap including prior spend', async () => {
+    const ex = makeExchange();
+    const store = new MemoryPreprocessStore();
+    store.setBudget(1300);
+    store.addBudgetSpent(200);
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', side, '$1200', 'into', '2', 'from', '60000', 'to', '120000'], ex, 'BTCUSDT', store),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/budget/);
+    expect(ex.placeOrders).not.toHaveBeenCalled();
+    expect(store.getBudgetSpent()).toBe(200);
+  });
+
+  it('charges unequal tick-rounded rungs in native linear contracts', async () => {
+    const ex = makeExchange();
+    Object.assign(ex.store!.markets![0], { contractSize: 0.01, precision: { amount: 0.1, price: 1000 } });
+    const store = new MemoryPreprocessStore();
+    store.setBudget(1200);
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', side, '$1200', 'into', '2', 'from', '59600', 'to', '119600'], ex, 'BTCUSDT', store),
+    );
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toMatchObject([
+      { amount: 1, price: 60000 },
+      { amount: 0.5, price: 120000 },
+    ]);
+    expect(store.getBudgetSpent()).toBe(1200);
+  });
+
+  it('keeps inverse USD face value independent of rung prices', async () => {
+    const ex = makeExchange();
+    Object.assign(ex.store!.markets![0], { isInverse: true, contractSize: 100, precision: { amount: 1, price: 0.01 } });
+    const store = new MemoryPreprocessStore();
+    store.setBudget(600);
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', side, '$600', 'into', '2', 'from', '60000', 'to', '120000'], ex, 'BTCUSDT', store),
+    );
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex).map((order) => order.amount)).toEqual([3, 3]);
+    expect(store.getBudgetSpent()).toBe(600);
+  });
+
+  it('excludes reduce-only rungs from the cap and charge', async () => {
+    const ex = makeExchange();
+    const store = new MemoryPreprocessStore();
+    store.setBudget(1);
+    const result = await new ScaleCommand().execute(
+      ctx(['scale', side, '$600', 'into', '2', 'from', '60000', 'to', '60000', 'reduce'], ex, 'BTCUSDT', store),
+    );
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toHaveLength(2);
+    expect(store.getBudgetSpent()).toBe(0);
   });
 });

@@ -938,6 +938,17 @@ impl Venue for Okx {
         }
     }
 
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        _response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            self.trading_unproven_evidence(request, evidence);
+        }
+    }
+
     fn on_http_owner_retired(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
@@ -1062,6 +1073,13 @@ impl Venue for Okx {
             && let price @ (PriceChannel::Tickers | PriceChannel::Mark | PriceChannel::Index) =
                 PriceChannel::of(name)
         {
+            cx.record_socket_topic(&[
+                "{\"channel\":\"",
+                name,
+                "\",\"instId\":\"",
+                row.inst_id,
+                "\"}",
+            ]);
             self.price_row(cx, price, row);
             self.account_prices(cx);
             return;
@@ -1076,6 +1094,25 @@ impl Venue for Okx {
                 format!("OKX {}: {}", message.code, message.msg),
             );
             return;
+        }
+        if message.data.is_some() {
+            let topic = message.arg.channel;
+            cx.record_socket_topic(&["{\"channel\":\"", topic, "\"}"]);
+            cx.record_socket_topic(&[
+                "{\"channel\":\"",
+                topic,
+                "\",\"instId\":\"",
+                message.arg.inst_id,
+                "\"}",
+            ]);
+            cx.record_socket_topic(&["{\"channel\":\"", topic, "\",\"instType\":\"ANY\"}"]);
+            cx.record_socket_topic(&[
+                "{\"channel\":\"",
+                topic,
+                "\",\"instType\":\"",
+                message.arg.inst_type,
+                "\"}",
+            ]);
         }
         if channel != PUBLIC
             && (message.event == "login"
@@ -1793,6 +1830,12 @@ impl Venue for Okx {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            safe_cex_engine::VenueAction::FetchClosedPnl {
+                symbol,
+                from_ms,
+                to_ms,
+                account,
+            } => self.start_closed_pnl(cx, command, symbol, from_ms, to_ms, account),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

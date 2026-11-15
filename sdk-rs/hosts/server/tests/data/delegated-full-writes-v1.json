@@ -1,0 +1,350 @@
+[
+  {
+    "action": {
+      "kind": "place",
+      "orders": [
+        {
+          "symbol": "BTCUSDT",
+          "type": "limit",
+          "side": "buy",
+          "amount": 0.001,
+          "price": 50000
+        },
+        {
+          "symbol": "BTCUSDT",
+          "type": "limit",
+          "side": "buy",
+          "amount": 0.001,
+          "price": 50001
+        }
+      ]
+    },
+    "method": "placeOrders",
+    "fingerprint": "e26d03bc3dc5602bb0a0c3eb903a221eefe56c68e274e1823f472e9ad8734d48"
+  },
+  {
+    "action": {
+      "kind": "cancelOrders",
+      "orders": [
+        {
+          "id": "resting-order",
+          "symbol": "BTCUSDT"
+        },
+        {
+          "id": "second-resting-order",
+          "symbol": "BTCUSDT",
+          "type": "limit"
+        }
+      ]
+    },
+    "method": "cancelOrders",
+    "fingerprint": "0dd178351558f0b32931a880d4f3b4c2d812b4e685e8f7071cb5d24e9e6f99fd"
+  },
+  {
+    "action": {
+      "kind": "cancelSymbol",
+      "symbol": "BTCUSDT"
+    },
+    "method": "cancelSymbolOrders",
+    "fingerprint": "50aaea54761693a133a565369495ca6fd1ce9c5862c09fd1e8c8008c15d3a0ac"
+  },
+  {
+    "action": {
+      "kind": "setLeverage",
+      "symbol": "BTCUSDT",
+      "leverage": 5,
+      "side": "long"
+    },
+    "method": "setLeverage",
+    "fingerprint": "cefb0db5bc7afa0988f78306c916c6e32b90077eb05d2a2fe8d5f8536ed20cc6"
+  },
+  {
+    "action": {
+      "kind": "setAllLeverage",
+      "leverage": 5
+    },
+    "method": "setAllLeverage",
+    "fingerprint": "c2c031dcc9aa27e72eb95999ba7ba8c210a3fa39e9757d0623a7ecf66df1b37b"
+  },
+  {
+    "action": {
+      "kind": "setMarginType",
+      "isolated": true
+    },
+    "method": "changeMarginType",
+    "fingerprint": "53f50fdbd723038cfd6c85dc53ddef618fd0940ead215fe3145654d3b3b5ce04",
+    "refused": true
+  },
+  {
+    "action": {
+      "kind": "setMarginType",
+      "isolated": true,
+      "symbol": "BTCUSDT"
+    },
+    "method": "changeMarginType",
+    "fingerprint": "730e08530aafa26d96e4a318a1a00901ee1100cc228f0fedce6069bce2432f20"
+  },
+  {
+    "action": {
+      "kind": "setPositionMode",
+      "hedged": false,
+      "symbol": "BTCUSDT"
+    },
+    "method": "changePositionMode",
+    "fingerprint": "79be73c5461b5cc8e38a40eb68ff0802f343b8f1ff492620d5b0f884f76f9285"
+  },
+  {
+    "action": {
+      "kind": "close",
+      "order": {
+        "symbol": "BTCUSDT",
+        "type": "limit",
+        "side": "sell",
+        "amount": 0.001,
+        "price": 50000,
+        "reduceOnly": true
+      }
+    },
+    "method": "placeOrder",
+    "fingerprint": "eebbee08a456820dbc2111eb0ea317cc60c89d79d445886c41461e4334f008c9"
+  },
+  {
+    "action": {
+      "kind": "closeAll"
+    },
+    "method": "nukePositions",
+    "fingerprint": "3d3b1f9675cb56e5f8a46c6168bca7b36dc9f0232abb18a25600bb9603a4251d"
+  },
+  {
+    "action": {
+      "kind": "nukeOrders"
+    },
+    "method": "nukeOrders",
+    "fingerprint": "19f8e8a007e17a300586c961443ffadfc7055d3114cbff2af67defa9ddb037c3"
+  },
+  {
+    "action": {
+      "kind": "stopAlgos"
+    },
+    "method": "stopAccountAlgos",
+    "fingerprint": "617ddf2a47eb566744ad38928ec5fef08a6499a1c1afdbac517a1cc038d81c7f"
+  },
+  {
+    "action": {
+      "kind": "scheduleCancel",
+      "time": null
+    },
+    "method": "scheduleCancel",
+    "fingerprint": "ef4734b41de5492c4ef65e9b8ac81c24c1edde53b60ed640499c1ea93de81072"
+  },
+  {
+    "action": {
+      "kind": "setStpMode",
+      "mode": "EXPIRE_TAKER"
+    },
+    "method": "delegatedSetStpMode",
+    "fingerprint": "00678ed3e68ee8d109ba90d0656945f0226097d6b8e64255059fc7fda24a463f"
+  },
+  {
+    "action": {
+      "kind": "setAccountTier",
+      "tier": "premium"
+    },
+    "method": "delegatedSetAccountTier",
+    "fingerprint": "917a52d87710550123504ba4609c2da5ffab99ceb6b98019bde84737138725b9"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "exec",
+      "data": {
+        "command": "buy $100",
+        "symbol": "BTCUSDT"
+      }
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "54fd08b5ae8075c6ff6df205b3a08eef3fc9f0404d8785bc2eeec2a3518076c3"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "chaser:start",
+      "data": {
+        "symbol": "BTCUSDT",
+        "size": 0.001,
+        "side": "buy",
+        "maxAttempts": 10,
+        "delay": 500
+      }
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "b6c22c4cdeea6aab63522ec929e641f6d48cf0eb34d1210a055082f82c80e86d"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "chaser:terminate",
+      "data": "absent-job"
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "b3c6afebc95bed141f032b6038da946d341018c9e732e930f19506d448f4cc80"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "chaser:terminateAll",
+      "data": {}
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "c827bee12cd932b4d6fb24b0f967d62486d808c71f8438e89c973dddd1903655"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "twap:start",
+      "data": {
+        "accountName": "synthetic-main",
+        "activeMarket": {
+          "symbol": "BTCUSDT"
+        },
+        "size": 0.004,
+        "duration": 10,
+        "ordersCount": 2,
+        "side": "buy",
+        "chaserDelay": 0,
+        "reduceOnly": false,
+        "randomnessPercentage": 0,
+        "useLimitOrders": false,
+        "useChaserOrders": false
+      }
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "0dda8d30ee6bd13921d1b1323475509a75bb2de02dac198d67779c18a641390f"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "twap:resume",
+      "data": "absent-job"
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "79224dc8fb2990c17ecd65c2ab65004ae68fd0dbc48ad44478a0122ea10aa539"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "twap:pause",
+      "data": "absent-job"
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "e499c55ad8161472a74af593d355ef2e845c61306dbe983b0f37d0491a0a4708"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "twap:stop",
+      "data": "absent-job"
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "d35765ff8c925f32cce1c23728a7709937bc9ccef1879bb415d0d72f94c07f52"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "twap:cleanup",
+      "data": "absent-job"
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "89e060f666fe008c2822d47ab4f1fdd297c4a55068bab160741df16bedebb14f"
+  },
+  {
+    "action": {
+      "kind": "algo",
+      "op": "twap:state",
+      "data": [
+        {
+          "id": "restored-typed-job",
+          "ownerId": "A",
+          "options": {
+            "accountName": "synthetic-main",
+            "activeMarket": {
+              "symbol": "BTCUSDT"
+            },
+            "size": 0.004,
+            "duration": 10,
+            "ordersCount": 2,
+            "side": "buy",
+            "chaserDelay": 0,
+            "reduceOnly": false,
+            "randomnessPercentage": 0,
+            "useLimitOrders": false,
+            "useChaserOrders": false
+          },
+          "state": {
+            "accountName": "synthetic-main",
+            "activeMarket": {
+              "symbol": "BTCUSDT"
+            },
+            "size": 0.004,
+            "ordersSizes": [
+              0.002,
+              0.002
+            ],
+            "side": "buy",
+            "status": "paused",
+            "ordersCount": 2,
+            "ordersExecuted": 0,
+            "nextOrderAt": 0
+          }
+        }
+      ]
+    },
+    "method": "delegatedAlgo",
+    "fingerprint": "71d8bb4d6a27bf12b9c3775c38bdd9695b0b18ec4e79da0e7ee0f5d0d97cc8ba"
+  },
+  {
+    "action": {
+      "kind": "cancel",
+      "order": {
+        "id": "resting-order",
+        "symbol": "BTCUSDT",
+        "type": "limit"
+      }
+    },
+    "method": "cancelOrders",
+    "fingerprint": "e8abf51763887a106928b86fefe7f1b46700a29895914228dc84fce6dde411c0"
+  },
+  {
+    "action": {
+      "kind": "cancelAll",
+      "symbols": [
+        "BTCUSDT"
+      ]
+    },
+    "method": "cancelAllOrders",
+    "fingerprint": "0c9b43b559e616a88dd369e0b9d4185e56b7fd3d8d638cf0d64f2ac27664653d"
+  },
+  {
+    "action": {
+      "kind": "amend",
+      "order": {
+        "id": "resting-order",
+        "symbol": "BTCUSDT"
+      },
+      "update": {
+        "amount": 0
+      }
+    },
+    "method": "updateOrder",
+    "refused": true,
+    "fingerprint": "5a04e805dffb10385e9c0ca9c6df1a2d06d43b39c8e26664328d3d93ba292160"
+  },
+  {
+    "action": {
+      "kind": "cancelAccountOrders"
+    },
+    "method": "delegatedCancelAccountOrders",
+    "refused": true,
+    "fingerprint": "9ba9e705ea4e685eaac3a3382e3f034f53d6717ee375f205e5ebb982328198e9"
+  }
+]

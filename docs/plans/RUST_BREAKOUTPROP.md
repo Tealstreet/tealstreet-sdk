@@ -1,5 +1,8 @@
 # BreakoutProp Rust port
 
+Historical record: this venue was retired from the SDK on 2026-11-07.
+The implementation paths and validation commands below describe the former adapter.
+
 Branch: `feat/rust-breakoutprop`, based on `origin/feat/rust-rewrite`.
 Specification: `RUST_REWRITE.md`; process/gates: `VENUE_PORT_BRIEF.md`.
 

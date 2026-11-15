@@ -117,6 +117,63 @@ describe('ReconnectingWebSocket loop phase', () => {
     vi.useRealTimers();
   });
 
+  it.each([
+    { refusal: 503, base: 1000 },
+    { refusal: 503, base: 3000 },
+    { refusal: 1013, base: 1000 },
+    { refusal: 1013, base: 3000 },
+  ])(
+    'paces router $refusal retries with a $base ms socket jitter base and a ten-second cap',
+    async ({ refusal, base }) => {
+      const socket = new ReconnectingWebSocket('wss://example.test/account', undefined, {
+        ...options,
+        WebSocket: ControllableWebSocket,
+        minReconnectionDelay: base,
+        reconnectionDelayGrowFactor: 1.3,
+        reconnectsAtOnce: (event) => event.code === 4100,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const transport = ControllableWebSocket.live[attempt];
+        if (refusal === 1013) {
+          transport.fire('open');
+          transport.fire('close', { code: 1013, reason: 'Try again later' });
+        } else transport.fire('error', { message: 'Unexpected server response: 503' });
+        expect(socket.retryCount).toBe(attempt + 1);
+        const delay = Math.floor(Math.min(base * Math.pow(1.3, attempt), 10_000));
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(ControllableWebSocket.live).toHaveLength(attempt + 1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(ControllableWebSocket.live).toHaveLength(attempt + 2);
+      }
+      socket.close();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(ControllableWebSocket.live).toHaveLength(13);
+    },
+  );
+
+  it('drops owner A retry work when login switches to B during backoff', async () => {
+    const a = new ReconnectingWebSocket('wss://example.test/owner-A', undefined, {
+      ...options,
+      WebSocket: ControllableWebSocket,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    ControllableWebSocket.live[0].fire('close', { code: 1013, reason: 'Try again later' });
+    expect(a.loopState.phase).toBe('retry-scheduled');
+    a.close();
+    const b = new ReconnectingWebSocket('wss://example.test/owner-B', undefined, {
+      ...options,
+      WebSocket: ControllableWebSocket,
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ControllableWebSocket.live.map((socket) => socket.url)).toEqual([
+      'wss://example.test/owner-A',
+      'wss://example.test/owner-B',
+    ]);
+    expect(a.loopState.phase).toBe('stopped');
+    b.close();
+  });
+
   it('moves through connecting, connected, retry-scheduled and stopped, reporting each change once', async () => {
     const phases: string[] = [];
     const socket = new ReconnectingWebSocket('wss://example.test/account', undefined, {
@@ -242,5 +299,67 @@ describe('ReconnectingWebSocket audited connect timeout', () => {
     expect(socket.timeoutConnecting()).toBe(false);
     socket.terminate();
     expect(socket.timeoutConnecting()).toBe(false);
+  });
+});
+
+describe('reconnect diagnostics', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    FakeWebSocket.made = [];
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it.each([false, true])(
+    'logs the resolved route without a function, query, credentials or frame contents (async=%s)',
+    async (asyncProvider) => {
+      const url = 'wss://fixture-user:fixture-password@example.test/feed?signature=fixture-signature#fixture-fragment';
+      const provider = vi.fn(asyncProvider ? async () => url : () => url);
+      const socket = new ReconnectingWebSocket(provider, ['fixture-protocol-token'], {
+        ...options,
+        debug: true,
+        startClosed: true,
+      });
+      try {
+        socket.reconnect(1000, 'fixture-reason?signature=fixture-reason-signature');
+        await vi.advanceTimersByTimeAsync(1);
+        expect(provider).toHaveBeenCalledTimes(1);
+        expect(FakeWebSocket.made[0].url).toBe(url);
+        FakeWebSocket.made[0].readyState = 1;
+        socket.send('{"signature":"fixture-frame-signature"}');
+        const logged = [...vi.mocked(console.log).mock.calls, ...vi.mocked(console.info).mock.calls]
+          .map((args) => JSON.stringify(args))
+          .join('\n');
+        expect(logged).toContain('wss://example.test/feed');
+        expect(logged).not.toContain(provider.toString());
+        expect(logged).not.toMatch(/fixture-|\?signature|=>/);
+      } finally {
+        socket.close();
+      }
+    },
+  );
+
+  it('uses a redacted placeholder when the provider fails, without logging its error', async () => {
+    const socket = new ReconnectingWebSocket(
+      async () => {
+        throw new Error('fixture-provider-signature');
+      },
+      [],
+      { ...options, startClosed: true },
+    );
+    try {
+      socket.reconnect();
+      await vi.advanceTimersByTimeAsync(1);
+      const logged = [...vi.mocked(console.log).mock.calls, ...vi.mocked(console.info).mock.calls]
+        .flat()
+        .map(String)
+        .join(' ');
+      expect(logged).toContain('[unavailable]');
+      expect(logged).not.toMatch(/fixture-provider-signature|=>/);
+      expect(FakeWebSocket.made).toHaveLength(0);
+    } finally {
+      socket.close();
+    }
   });
 });

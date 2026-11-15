@@ -263,8 +263,8 @@ impl NonceReservation {
             .is_some_and(|state| releasable(state, self.nonce, self.authority.domain.window)))
     }
 
-    /// The engine supplies only its private infallible Lifecycle/pacing commit.
-    pub(crate) fn commit_release(&self, commit: impl FnOnce()) -> Result<bool, NonceError> {
+    /// Refused handoffs leave the nonce reservation unreleased.
+    pub(crate) fn commit_release(&self, commit: impl FnOnce() -> bool) -> Result<bool, NonceError> {
         let mut store = NONCES
             .get_or_init(Mutex::default)
             .lock()
@@ -285,7 +285,9 @@ impl NonceReservation {
         if !releasable(state, self.nonce, window) {
             return Ok(false);
         }
-        commit();
+        if !commit() {
+            return Ok(false);
+        }
         state.released = Some(
             state
                 .released
@@ -391,17 +393,26 @@ mod tests {
         assert!(matches!(claim.reserve(0., 0.), Err(NonceError::Exhausted)));
     }
     #[test]
+    fn refused_handoff_leaves_nonce_unreleased() {
+        let claim = selected("nonce-subject/refused-handoff");
+        let reserved = claim.reserve(1000., 1000.).unwrap();
+        assert!(!reserved.commit_release(|| false).unwrap());
+        assert!(reserved.fresh().unwrap());
+        assert!(reserved.commit_release(|| true).unwrap());
+        assert!(!reserved.fresh().unwrap());
+    }
+    #[test]
     fn reservation_alone_never_supersedes_and_floor_commit_is_max_only() {
         let claim = selected("nonce-subject/release-floor");
         let a = claim.reserve(1000., 1000.).unwrap();
         let b = claim.reserve(1000., 1000.).unwrap();
         assert!(a.fresh().unwrap());
-        assert!(a.commit_release(|| {}).unwrap());
+        assert!(a.commit_release(|| true).unwrap());
         assert!(
             !a.commit_release(|| panic!("duplicate cannot commit"))
                 .unwrap()
         );
-        assert!(b.commit_release(|| {}).unwrap());
+        assert!(b.commit_release(|| true).unwrap());
         assert!(!a.fresh().unwrap());
         assert!(!a.commit_release(|| panic!("older cannot commit")).unwrap());
     }

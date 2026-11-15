@@ -1,5 +1,6 @@
 // Same catalogue as isolated families; combined feature union is not standalone proof.
 import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { checkAdvertisedCommands, constructionProfiles } from './capability-conformance.mjs';
 import { checkHyperliquidLocalSigning } from './hyperliquid-local-signing.mjs';
@@ -11,7 +12,27 @@ const names = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.ur
   .match(/^\s+'?[a-z-]+'?: '[a-z]+',$/gm)
   .map((line) => line.trim().split(':')[0].replaceAll("'", ''));
 for (const venue of names) {
-  test(`combined capability ingress: ${venue}`, () => {
+  const fixtureOnly = venue === 'bingxspot';
+  test(`combined ${fixtureOnly ? 'fixture-only refusal' : 'capability ingress'}: ${venue}`, () => {
+    // The family map knows Spot for fixtures; live factory admission awaits smoke.
+    if (fixtureOnly) {
+      for (const options of [{}, { publicDataOnly: true }, { testnet: true }]) {
+        const json = JSON.stringify(options);
+        for (const create of [
+          () => new module.WasmEngine(venue, json),
+          () => module.resolveConstruction(venue, json),
+        ]) {
+          assert.throws(create, (error) => {
+            assert.equal(error.message, `unsupported venue: ${venue}`);
+            assert.deepEqual(JSON.parse(error.venueError), {
+              message: `unsupported venue: ${venue}`, kind: 'unsupported', outcome: 'notSent',
+            });
+            return true;
+          });
+        }
+      }
+      return;
+    }
     for (const [profile, options] of constructionProfiles(venue).entries()) {
       const proofs = checkAdvertisedCommands(() => new module.WasmEngine(venue, JSON.stringify(options)), `combined/${venue}/profile${profile}`);
       console.log(JSON.stringify({ conformance: `${venue}/${profile}`, ingress: proofs.map(({ field, op, evidence }) => ({ field, op, evidence })) }));

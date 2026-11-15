@@ -13,10 +13,11 @@ const setup = (publicDataOnly = true) => {
         id: 'BTC-USDT-SWAP',
         symbol: 'BTCUSDT',
         base: 'BTC',
-        quote: 'USDT',
+        quote: 'USDT', active: true,
+        limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
         contractSize: 0.01,
         precision: { amount: 0.01, price: 0.1 },
-      } as Market,
+      } satisfies Market,
     ],
   });
   return new OKXExchange(

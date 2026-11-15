@@ -3,6 +3,8 @@
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::Deserialize;
 
+pub(crate) const TOKEN_EXPIRED: &str = "Tealstreet proxy token expired";
+
 pub const PROXY_PUBLIC_KEY: &str = "-----BEGIN PUBLIC KEY-----
 MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAuQe6F/ux1LfEBUmfzqnc
 slvMkUU2fr8jk6g1CotUpdCkIPjDzID4tVy+wmin+A9D7XqBicpRaE4utz/+CMmW
@@ -68,6 +70,19 @@ pub struct Verifier {
 }
 
 impl Verifier {
+    /// Recheck the expiry captured from a verified token. Public sockets have
+    /// no token; authenticated sockets have no expiry leeway.
+    pub(crate) fn check_expiry(
+        expires_at_ms: Option<u64>,
+        now_ms: u64,
+    ) -> Result<(), &'static str> {
+        if expires_at_ms.is_some_and(|expires| now_ms >= expires) {
+            Err(TOKEN_EXPIRED)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn new(public_key_pem: &str) -> Result<Self, jsonwebtoken::errors::Error> {
         Ok(Self {
             key: DecodingKey::from_rsa_pem(public_key_pem.as_bytes())?,
@@ -97,11 +112,12 @@ impl Verifier {
         }
         let claims = decode::<Claims>(token, &self.key, &validation).ok()?.claims;
         let expires_at_ms = claims.exp.checked_mul(1000)?;
-        (!claims.user_id.is_empty() && expires_at_ms > now_ms).then_some(Verified {
-            user_id: claims.user_id,
-            chat_handle: claims.chat_handle,
-            expires_at_ms,
-        })
+        (!claims.user_id.is_empty() && Self::check_expiry(Some(expires_at_ms), now_ms).is_ok())
+            .then_some(Verified {
+                user_id: claims.user_id,
+                chat_handle: claims.chat_handle,
+                expires_at_ms,
+            })
     }
 }
 
@@ -202,5 +218,15 @@ mod tests {
             assert_eq!(verified.user_id, "auth0|opaque-user");
             assert_eq!(verified.chat_handle, None, "{handle:?}");
         }
+    }
+
+    #[test]
+    fn token_expiry_uses_the_verified_exp_without_leeway() {
+        let (token, now) = token(None);
+        let verifier = Verifier::unsigned();
+        let expires = verifier.verify(&token, now).unwrap().expires_at_ms;
+        assert!(verifier.verify(&token, expires - 1).is_some());
+        assert!(verifier.verify(&token, expires).is_none());
+        assert!(verifier.verify(&token, expires + 1).is_none());
     }
 }

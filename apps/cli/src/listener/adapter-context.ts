@@ -1,3 +1,4 @@
+import { runInStorageSession } from '../storage-context';
 // Per-call adapter override threaded via AsyncLocalStorage. Used by the
 // loopback listener's cmd:exec handler to redirect print* output to a
 // streaming WS frame emitter without touching every adapter.printX call
@@ -56,5 +57,5 @@ export function getAdapterContext(): AdapterContext | undefined {
 }
 
 export function runWithAdapterContext<T>(ctx: AdapterContext, fn: () => Promise<T>): Promise<T> {
-  return als.run(ctx, fn);
+  return runInStorageSession(() => als.run(ctx, fn));
 }

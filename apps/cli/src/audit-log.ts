@@ -1,3 +1,4 @@
+import { getStorageDir, onStorageOwnerChange, assertStorageSession } from './storage-context';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'crypto';
 import {
@@ -14,10 +15,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 import { logger } from './logger';
-import { BRAND, brandEnv } from './brand';
 
 /**
  * Durable, append-only audit log of write-op COMMANDS for the standalone
@@ -66,10 +65,10 @@ import { BRAND, brandEnv } from './brand';
  * the rotated backup only when a recent rotation left the live file
  * short), never slurping the whole file.
  */
-const CONFIG_DIR = brandEnv('CONFIG_DIR') || join(homedir(), BRAND.configDirName);
-const AUDIT_FLAG_FILE = join(CONFIG_DIR, 'audit.json');
-const AUDIT_LOG_FILE = join(CONFIG_DIR, 'audit.log');
-const ROTATED_LOG_FILE = AUDIT_LOG_FILE + '.1';
+const CONFIG_DIR = () => getStorageDir();
+const AUDIT_FLAG_FILE = () => join(CONFIG_DIR(), 'audit.json');
+const AUDIT_LOG_FILE = () => join(CONFIG_DIR(), 'audit.log');
+const ROTATED_LOG_FILE = () => AUDIT_LOG_FILE() + '.1';
 
 /** Size cap for the live log; past this it rolls to `audit.log.1`. Mutable
  *  only so tests can shrink it — production keeps the 5 MB default. */
@@ -155,19 +154,20 @@ function rememberOrderLineage(orderIds: string[], command: string, account: stri
 }
 
 function ensureDir(): void {
-  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
+  if (!existsSync(CONFIG_DIR())) mkdirSync(CONFIG_DIR(), { recursive: true });
 }
 
 /** Whether the audit log is currently on. Loaded once from disk, then cached. */
 export function isAuditEnabled(): boolean {
+  assertStorageSession();
   if (enabledCache !== undefined) return enabledCache;
   let enabled = false;
-  if (existsSync(AUDIT_FLAG_FILE)) {
+  if (existsSync(AUDIT_FLAG_FILE())) {
     try {
-      const parsed = JSON.parse(readFileSync(AUDIT_FLAG_FILE, 'utf-8'));
+      const parsed = JSON.parse(readFileSync(AUDIT_FLAG_FILE(), 'utf-8'));
       enabled = typeof parsed?.enabled === 'boolean' ? parsed.enabled : false;
     } catch (e) {
-      logger.warn(`Failed to load ${AUDIT_FLAG_FILE}: ${(e as Error).message}`);
+      logger.warn(`Failed to load ${AUDIT_FLAG_FILE()}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   enabledCache = enabled;
@@ -175,12 +175,13 @@ export function isAuditEnabled(): boolean {
 }
 
 export function setAuditEnabled(on: boolean): void {
+  assertStorageSession();
   enabledCache = !!on;
   try {
     ensureDir();
-    writeFileSync(AUDIT_FLAG_FILE, JSON.stringify({ enabled: !!on }, null, 2) + '\n', 'utf-8');
+    writeFileSync(AUDIT_FLAG_FILE(), JSON.stringify({ enabled: !!on }, null, 2) + '\n', 'utf-8');
   } catch (e) {
-    logger.warn(`Failed to save ${AUDIT_FLAG_FILE}: ${(e as Error).message}`);
+    logger.warn(`Failed to save ${AUDIT_FLAG_FILE()}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -197,14 +198,14 @@ export function appendAuditEntry(entry: AuditEntry): void {
     ensureDir();
     const runId = 'runId' in entry ? entry.runId : currentAuditRunId();
     const full = runId ? { ...entry, runId } : entry;
-    appendFileSync(AUDIT_LOG_FILE, JSON.stringify(full) + '\n', 'utf-8');
+    appendFileSync(AUDIT_LOG_FILE(), JSON.stringify(full) + '\n', 'utf-8');
     // Stat the real file (not a process-local counter) so two CLI sessions
     // sharing ~/.tealstreet/audit.log can't drift a cached size and miss
     // the cap. Write-ops are low-frequency, so a stat per append is cheap.
-    if (statSync(AUDIT_LOG_FILE).size > maxLogBytes) rotate();
+    if (statSync(AUDIT_LOG_FILE()).size > maxLogBytes) rotate();
   } catch (e) {
     // Auditing must never break the trade path — log the failure and move on.
-    logger.warn(`Failed to append audit entry: ${(e as Error).message}`);
+    logger.warn(`Failed to append audit entry: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -214,10 +215,10 @@ export function appendAuditEntry(entry: AuditEntry): void {
  *  not break the trade path). */
 function rotate(): void {
   try {
-    if (existsSync(ROTATED_LOG_FILE)) unlinkSync(ROTATED_LOG_FILE);
-    renameSync(AUDIT_LOG_FILE, ROTATED_LOG_FILE);
+    if (existsSync(ROTATED_LOG_FILE())) unlinkSync(ROTATED_LOG_FILE());
+    renameSync(AUDIT_LOG_FILE(), ROTATED_LOG_FILE());
   } catch (e) {
-    logger.warn(`Failed to rotate audit log: ${(e as Error).message}`);
+    logger.warn(`Failed to rotate audit log: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -280,22 +281,22 @@ export function readAuditTail(n: number): AuditEntry[] {
   try {
     let parsed: AuditEntry[] = [];
     for (let want = count; ; want *= 4) {
-      const { lines, atBof } = readTailLines(AUDIT_LOG_FILE, want);
+      const { lines, atBof } = readTailLines(AUDIT_LOG_FILE(), want);
       parsed = parseEntries(lines);
       if (parsed.length >= count || atBof || want >= 1_000_000) break;
     }
-    if (parsed.length < count && existsSync(ROTATED_LOG_FILE)) {
-      const older = parseEntries(readTailLines(ROTATED_LOG_FILE, count - parsed.length).lines);
+    if (parsed.length < count && existsSync(ROTATED_LOG_FILE())) {
+      const older = parseEntries(readTailLines(ROTATED_LOG_FILE(), count - parsed.length).lines);
       parsed = older.concat(parsed);
     }
     return parsed.slice(-count);
   } catch (e) {
-    logger.warn(`Failed to read ${AUDIT_LOG_FILE}: ${(e as Error).message}`);
+    logger.warn(`Failed to read ${AUDIT_LOG_FILE()}: ${e instanceof Error ? e.message : String(e)}`);
     return [];
   }
 }
 
-export const AUDIT_LOG_PATH = AUDIT_LOG_FILE;
+export const getAuditLogPath = () => AUDIT_LOG_FILE();
 
 /** Command heads recorded by the write-op audit log. Reads (positions /
  *  orders / margin / watch / help …) are intentionally excluded — only
@@ -446,3 +447,5 @@ export function __resetAuditCacheForTest(): void {
 export function __setMaxLogBytesForTest(n: number): void {
   maxLogBytes = n;
 }
+
+onStorageOwnerChange(__resetAuditCacheForTest);

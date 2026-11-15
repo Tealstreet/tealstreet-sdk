@@ -2,8 +2,8 @@
 //! transferable buffer of typed columns. Layout: docs/plans/RUST_REWRITE.md,
 //! "Data shapes: the flush frame". The decoder is hosts/wasm/js/wire.mjs.
 use crate::model::{
-    Candle, MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide,
-    RejectReason, StopTriggerType, TimeInForce,
+    MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide, RejectReason,
+    StopTriggerType, TimeInForce,
 };
 use crate::store::TICKER_FIELDS;
 use std::collections::{HashMap, hash_map::DefaultHasher};
@@ -58,6 +58,8 @@ pub mod section {
     pub const ORDERS_READ: u16 = 23;
     /// Optional [ticker row, last/mark/index source-observed-at] f64 rows.
     pub const TICKER_OBSERVATIONS: u16 = 24;
+    /// Per-subscription group, topic ref, subscribed/active flags and monotonic message age.
+    pub const MESSAGE_HANDLER_STATS: u16 = 25;
 }
 
 pub mod status_flag {
@@ -235,22 +237,6 @@ impl<'a> FrameWriter<'a> {
         for value in values {
             self.f64(value);
         }
-    }
-
-    pub fn candles(&mut self, rows: &[(u32, &'a str, Candle)]) {
-        if rows.is_empty() {
-            return;
-        }
-        self.begin(section::CANDLES);
-        self.u32(rows.len() as u32);
-        self.u32s(rows.iter().map(|(market, ..)| *market));
-        let intervals: Vec<u32> = rows.iter().map(|(_, i, _)| self.string(i)).collect();
-        self.u32s(intervals);
-        self.pad();
-        for (_, _, c) in rows {
-            self.f64s([c.timestamp, c.open, c.high, c.low, c.close, c.volume]);
-        }
-        self.end();
     }
 
     /// Append the strings section, patch the section count and return the frame.
@@ -566,7 +552,7 @@ mod tests {
             close: 2.5,
             volume: 9.0,
         };
-        w.candles(&[(0, "1m", candle)]);
+        crate::candle_output::write(&mut w, &[(0, "1m", candle)]);
         let frame = w.finish();
 
         assert_eq!(&frame[..4], b"SCXF");

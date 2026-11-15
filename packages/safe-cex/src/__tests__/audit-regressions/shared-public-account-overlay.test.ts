@@ -21,7 +21,7 @@ const sharedMarket = (symbol: string, id = symbol): Market =>
     active: true,
     precision: { amount: 0.001, price: 0.1 },
     limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 100 } },
-  }) as Market;
+  }) satisfies Market;
 
 /** Runs start() up to initExternalPublicData and returns what the overlay does at that moment. */
 const overlayAtProviderSeed = async (exchange: any, shared: Market[]) => {

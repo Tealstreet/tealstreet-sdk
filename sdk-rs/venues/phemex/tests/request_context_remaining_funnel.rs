@@ -1086,10 +1086,8 @@ fn released_unproven_write_cleanup_precedes_immediate_cancel_all() {
 }
 
 fn unsupported(id: u32) -> Command {
-    Command::FetchLeverage {
-        command: id,
-        symbol: "BTCUSDT".into(),
-    }
+    // Leverage reads are supported; STP remains an unsupported-command probe.
+    Command::FetchStpMode { command: id }
 }
 fn assert_refusal(actions: &[Action], id: u32, message: &str, kind: Option<ErrorKind>) {
     let results = terminal(actions, id);
@@ -1385,24 +1383,45 @@ fn income_later_provider_loss_preserves_prefix_and_first_page_loss_stays_typed()
                 let next=wire(&output,"tradeAccountDetail");
                 output=reply(&mut e,NOW+1.,&next,200,"[]");
             }
+            let preparation = output
+                .iter()
+                .find_map(|action| match action {
+                    Action::ManagedHttp(action) => match action.as_ref() {
+                        HttpAction::Prepare {
+                            preparation,
+                            request,
+                            ..
+                        } if request.url.contains("currency=USDC") => Some(*preparation),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .expect("pending USDC route preparation");
+            assert!(e.http_preparation_pending(preparation));
             e.set_signer(None).unwrap();
             output = release(&mut e, NOW + 2., output);
+            assert!(!e.http_preparation_pending(preparation));
+            assert!(!output.iter().any(|action| matches!(
+                action,
+                Action::Sign { .. } | Action::SignedOutbound { .. }
+            )));
+        } else {
+            let attempt = output
+                .iter()
+                .find_map(|action| match action {
+                    Action::Sign { attempt, .. } => Some(*attempt),
+                    _ => None,
+                })
+                .expect("real delegated signing refusal");
+            output.extend(at(
+                &mut e,
+                NOW,
+                Event::Signed {
+                    attempt,
+                    result: Err(safe_cex_engine::signing::SignError::Refused),
+                },
+            ));
         }
-        let attempt = output
-            .iter()
-            .find_map(|action| match action {
-                Action::Sign { attempt, .. } => Some(*attempt),
-                _ => None,
-            })
-            .expect("real delegated signing refusal");
-        output.extend(at(
-            &mut e,
-            if accepted { NOW + 2. } else { NOW },
-            Event::Signed {
-                attempt,
-                result: Err(safe_cex_engine::signing::SignError::Refused),
-            },
-        ));
         let results = terminal(&output, 880);
         assert_eq!(results.len(), 1);
         let markers=output.iter().filter(|action| matches!(action,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE && event.level==safe_cex_engine::Level::Warn && event.message.contains("INCOMPLETE"))).count();

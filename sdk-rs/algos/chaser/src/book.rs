@@ -120,7 +120,7 @@ pub struct Progress {
     pub stopped: bool,
     /// Finished: nothing of this chase is still working.
     pub ended: bool,
-    /// Ended with a cancel that never proved its order gone.
+    /// A placement or cancellation has not proved whether an order remains open.
     pub order_may_be_open: bool,
 }
 
@@ -176,6 +176,29 @@ fn cancel_retryable(error: &VenueError) -> bool {
                 | ErrorKind::RateLimited
         )
     ) || signer_offline(error)
+}
+
+fn has_unknown_outcome(error: &VenueError) -> bool {
+    use safe_cex_engine::write_plan::ElementResult;
+    error.outcome == Some(Outcome::Unknown)
+        || error.elements.as_ref().is_some_and(|rows| {
+            rows.iter().any(|row| match &row.result {
+                ElementResult::Unknown { .. } => true,
+                ElementResult::NotSent { error: Some(error) } => has_unknown_outcome(error),
+                _ => false,
+            })
+        })
+}
+
+fn stop_twap_unknown_cancel(chase: &Chase, error: &VenueError) -> bool {
+    if chase.options.twap_id.is_none() || !has_unknown_outcome(error) {
+        return false;
+    }
+    // Retain uncertainty for TWAP's journal and relinquish every remaining cancel.
+    chase.note_order_may_be_open();
+    chase.release_orders();
+    chase.mark_complete("The outcome is unknown. Check Open Orders");
+    true
 }
 
 impl ChaserBook {
@@ -245,7 +268,7 @@ impl ChaserBook {
                 remaining_size: chase.remaining(),
                 stopped: chase.is_stopped(),
                 ended: false,
-                order_may_be_open: false,
+                order_may_be_open: chase.order_may_be_open(),
             })
             .or_else(|| {
                 let ended = self.ended.borrow();
@@ -286,6 +309,14 @@ impl ChaserBook {
                 book.detach(&chase);
             });
         }
+    }
+
+    /// Unknown halts relinquish both current and still-pending orders, without cancelling.
+    pub fn halt_keep_order(self: &Rc<Self>, id: &str) {
+        if let Some(chase) = self.find(id) {
+            chase.release_orders();
+        }
+        self.remove_keep_order(id);
     }
 
     /// Stop every chase; their cleanups run in the background.
@@ -451,7 +482,7 @@ impl ChaserBook {
         !self.store().positions.iter().any(|position| {
             position.symbol == chase.options.symbol
                 && position.side == side
-                && position.notional != 0.0
+                && position.contracts != 0.0
         })
     }
 
@@ -899,6 +930,9 @@ impl ChaserBook {
         if !to_cancel.is_empty() {
             self.log(chase, "cancelling orders");
             if let Err(error) = self.bounded_cancel(&chase.options.symbol, &to_cancel).await {
+                if stop_twap_unknown_cancel(chase, &error) {
+                    return Ok(());
+                }
                 // The stop's own cancel keeps trying; this chase places nothing more.
                 if cancel_retryable(&error) {
                     chase.mark_complete(&if signer_offline(&error) {
@@ -1219,9 +1253,10 @@ impl ChaserBook {
                     Some(partial) if !partial.order_ids.is_empty() => {
                         (partial.order_ids.clone(), false)
                     }
-                    _ => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
+                    _ => (Vec::new(), has_unknown_outcome(error)),
                 },
             };
+            chase.set_placement_unknown(lost || placed.as_ref().is_err_and(has_unknown_outcome));
             if let Err(error) = &placed {
                 last_refusal = Some(error.message.clone());
                 if let Some((reason, refused)) = settled_refusal(error)
@@ -1258,8 +1293,10 @@ impl ChaserBook {
                     {
                         ids = vec![order.id];
                         unconfirmed = false;
+                        chase.set_placement_unknown(false);
                     }
                     Some(order) => {
+                        chase.set_placement_unknown(false);
                         // Filled, or a post-only reject after a partial fill:
                         // count it, then retry what is left.
                         chase.set_filled_amount(&order.id, order.placement_filled());
@@ -1272,6 +1309,7 @@ impl ChaserBook {
                 }
             }
             if unconfirmed {
+                chase.note_order_may_be_open();
                 // Not found, or no client id to look it up by: placing again
                 // could double it, and it may still land.
                 let message = format!(
@@ -1450,6 +1488,9 @@ impl ChaserBook {
                 }
                 Err(error) => error,
             };
+            if stop_twap_unknown_cancel(chase, &error) {
+                break;
+            }
             let elapsed = started.elapsed().as_millis() as u64;
             if !cancel_retryable(&error) || elapsed >= CANCEL_RETRY_BOUND_MS {
                 // A refusal is often the order already filling: completion, with its fills, says which.

@@ -8,21 +8,25 @@ pub(crate) struct Original {
     pub client: u64,
     pub index: u64,
     pub waiting_mark: bool,
+    pub frame: String,
 }
 #[derive(Default)]
 pub(crate) struct ProtectionState {
     pub originals: HashMap<String, Original>,
     pub complex: HashSet<String>,
     pub marks: HashMap<String, (f64, f64)>,
+    pub frame_originals: Vec<String>,
+    pub retired_frame_originals: HashMap<String, Original>,
 }
 pub(super) struct Edit {
+    pub account_index: Option<u64>,
     pub original: Original,
     pub replacement: Order,
     pub canceled: bool,
     pub restoring: bool,
     pub refusal: Option<VenueError>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(untagged)]
 enum Scalar {
     Text(String),
@@ -46,7 +50,7 @@ impl Scalar {
         .filter(|n| n.is_finite())
     }
 }
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, Serialize)]
 #[serde(default)]
 struct NativeRow {
     #[serde(rename = "type")]
@@ -112,14 +116,45 @@ fn kind(row: &NativeRow) -> Option<u8> {
             .filter(|n| matches!(n, 0 | 2 | 3 | 4 | 5)),
         Scalar::Text(s) => match s.to_ascii_lowercase().as_str() {
             "0" | "limit" => Some(0),
-            "2" | "stop_loss" => Some(2),
-            "3" | "stop_loss_limit" => Some(3),
-            "4" | "take_profit" => Some(4),
-            "5" | "take_profit_limit" => Some(5),
+            "2" | "stop_loss" | "stop-loss" => Some(2),
+            "3" | "stop_loss_limit" | "stop-loss-limit" => Some(3),
+            "4" | "take_profit" | "take-profit" => Some(4),
+            "5" | "take_profit_limit" | "take-profit-limit" => Some(5),
             _ => None,
         },
         _ => None,
     }
+}
+fn time_in_force(row: &NativeRow) -> Option<u64> {
+    let value = row.time_in_force.as_ref()?;
+    match value {
+        Scalar::Text(text) => match text.as_str() {
+            "immediate-or-cancel" => Some(0),
+            "good-till-time" => Some(1),
+            "post-only" => Some(2),
+            _ => value.integer(),
+        },
+        _ => value.integer(),
+    }
+}
+fn canceled(status: &str) -> bool {
+    matches!(
+        status,
+        "canceled"
+            | "cancelled"
+            | "canceled-post-only"
+            | "canceled-reduce-only"
+            | "canceled-position-not-allowed"
+            | "canceled-margin-not-allowed"
+            | "canceled-too-much-slippage"
+            | "canceled-not-enough-liquidity"
+            | "canceled-self-trade"
+            | "canceled-expired"
+            | "canceled-oco"
+            | "canceled-child"
+            | "canceled-liquidation"
+            | "canceled-invalid-balance"
+    )
 }
 #[derive(Deserialize)]
 struct Envelope {
@@ -217,7 +252,7 @@ impl Original {
         if client == 0 || client > MAX_CLIENT_INDEX {
             return None;
         }
-        let tif = integer(row, "time_in_force")?;
+        let tif = time_in_force(row)?;
         if tif > 2 {
             return None;
         }
@@ -248,6 +283,11 @@ impl Original {
             client,
             index: integer(row, "order_index")?,
             waiting_mark: row.trigger_status.as_deref() == Some("mark-price"),
+            frame: if matches!(native_kind, 2..=5) {
+                serde_json::to_string(row).ok()?
+            } else {
+                String::new()
+            },
         })
     }
 }
@@ -288,6 +328,37 @@ impl Lighter {
             }
         }
     }
+    pub(crate) fn ingest_frame_originals(&mut self, store: &Store) {
+        for raw in std::mem::take(&mut self.protection.frame_originals) {
+            let Ok(row) = serde_json::from_str::<NativeRow>(&raw) else {
+                continue;
+            };
+            let Some(id) = integer(&row, "order_index").map(|id| id.to_string()) else {
+                continue;
+            };
+            if self.account_order_terminal(&id) {
+                continue;
+            }
+            let Some(order) = store.order(&id) else {
+                self.protection.frame_originals.push(raw);
+                continue;
+            };
+            if let Some(original) = Original::from_row(store, &row, order) {
+                // A replay cannot regrant native parameters retired by a local modify.
+                if self
+                    .protection
+                    .retired_frame_originals
+                    .get(&id)
+                    .is_some_and(|retired| native_same(&retired.native, &original.native))
+                {
+                    continue;
+                }
+                self.protection.retired_frame_originals.remove(&id);
+                self.protection.complex.remove(&id);
+                self.protection.originals.insert(id, original);
+            }
+        }
+    }
     pub(crate) fn observe_mark(&mut self, symbol: &str, field: Option<f64>, now: f64) {
         if let Some(value) = field {
             if now.is_finite() && value.is_finite() && value > 0.0 {
@@ -296,6 +367,18 @@ impl Lighter {
                 self.protection.marks.remove(symbol);
             }
         }
+    }
+    pub(crate) fn protective_account_veto(&self) -> Result<(), VenueError> {
+        if let Some(edit) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|j| j.protection.as_ref())
+            && (edit.account_index.is_none() || edit.account_index != self.account.account_index)
+        {
+            return Err(not_sent("Lighter stop not changed: account changed"));
+        }
+        Ok(())
     }
     pub(super) fn protective_reference(
         &self,
@@ -410,7 +493,7 @@ pub(super) fn terminal_proof(body: &str, old: &Original) -> bool {
         && integer(row, "market_index").or_else(|| integer(row, "market_id"))
             == Some(old.native.market_id as u64)
         && integer(row, "client_order_index") == Some(old.client)
-        && matches!(Some(row.status.as_str()), Some("canceled" | "cancelled"))
+        && canceled(&row.status)
         && number(row, "filled_base_amount") == Some(0.0)
         && row
             .filled_quote_amount
@@ -522,7 +605,7 @@ pub(super) fn restored_proof(body: &str, edit: &Edit, client: &str) -> bool {
             .filled_quote_amount
             .as_ref()
             .is_none_or(|n| n.number() == Some(0.0))
-        && integer(row, "time_in_force") == Some(native.time_in_force as u64)
+        && time_in_force(row) == Some(native.time_in_force as u64)
         && integer(row, "order_expiry") == native.order_expiry
         && number(row, "trigger_price")
             == Some(if native.order_type == 0 {

@@ -10,12 +10,14 @@ describe('BaseExchange disposal cleanup', () => {
     const signerListener = vi.fn();
     const grafanaListener = vi.fn();
     const httpTelemetryListener = vi.fn();
+    const wsDiagnosticListener = vi.fn();
 
     exchange.on('log', logListener);
     exchange.on('ws-reconnected', reconnectListener);
     exchange.on('remoteSignerStatus', signerListener);
     exchange.on('grafana-error', grafanaListener);
     exchange.on('grafana-http-request', httpTelemetryListener);
+    exchange.on('ws-diagnostic', wsDiagnosticListener);
 
     expect((store as any).listeners.size).toBe(1);
 
@@ -26,6 +28,7 @@ describe('BaseExchange disposal cleanup', () => {
     exchange.emitter.emit('remoteSignerStatus', 'connected');
     exchange.emitter.emit('grafana-error', 'after-dispose');
     exchange.emitter.emit('grafana-http-request', { url: '/after-dispose' });
+    exchange.emitter.emit('ws-diagnostic', { channel: 'public', direction: 'receive', message: 'after-dispose' });
 
     expect((store as any).listeners.size).toBe(0);
     expect(logListener).not.toHaveBeenCalled();
@@ -33,5 +36,6 @@ describe('BaseExchange disposal cleanup', () => {
     expect(signerListener).not.toHaveBeenCalled();
     expect(grafanaListener).not.toHaveBeenCalled();
     expect(httpTelemetryListener).not.toHaveBeenCalled();
+    expect(wsDiagnosticListener).not.toHaveBeenCalled();
   });
 });

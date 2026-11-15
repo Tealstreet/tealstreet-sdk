@@ -100,7 +100,7 @@ export function familyCpuAssessment(assessment, report, certificate, source) {
   insist(report.ciWasm === undefined || report.ciWasm?.sourceHead === source &&
     same(report.ciWasm.hashes, certificate.moduleHashes), 'report metadata differs from issued family byte proof');
   const cpu = performanceObjectives(report.samples.ts, report.samples.rust).filter(value => CPU_FIELDS.includes(value.field));
-  const failures = performanceFailures(report.samples.ts, report.samples.rust).filter(failure =>
+  const failures = performanceFailures(report.samples.ts, report.samples.rust, report.venue).filter(failure =>
     cpu.some(value => failure.startsWith(`performance ${value.label}:`)));
   return { ...assessment, errors: assessment.errors.filter(error =>
     !failures.some(failure => error === `${report.venue}: unexpected ${failure}`)) };
@@ -111,7 +111,7 @@ export function familyCpuMiss(evidence, assessment) {
   if (!assessment.errors.length || validatePublicEvidence(evidence).length) return false;
   const report = evidence.report;
   const cpu = performanceObjectives(report.samples.ts, report.samples.rust).filter(value => CPU_FIELDS.includes(value.field));
-  const failures = performanceFailures(report.samples.ts, report.samples.rust).filter(failure =>
+  const failures = performanceFailures(report.samples.ts, report.samples.rust, report.venue).filter(failure =>
     cpu.some(value => failure.startsWith(`performance ${value.label}:`)));
   return assessment.errors.every(error => failures.some(failure => error === `${report.venue}: unexpected ${failure}`));
 }

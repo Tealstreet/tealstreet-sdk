@@ -320,7 +320,7 @@ export class DisplayedPositionsPostprocessor extends BasePostprocessor {
             leverage: (market as { maxLeverage?: number }).maxLeverage || 1,
             unrealizedPnl: 0,
             contracts: 0, // Show 0 contracts as it's pending
-            liquidationPrice: 0,
+            liquidationPrice: null,
             // Optional Position fields
             realizedPnl: 0,
             // Required DisplayedPosition fields

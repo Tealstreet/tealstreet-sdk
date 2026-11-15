@@ -53,7 +53,10 @@ test('compiled Hyperliquid Spot failed cancel cannot authorize amend replacement
     await r.start();
     await r.command({ op: 'placeOrders', orders: [{ symbol: 'PURR/USDC', type: 'limit', side: 'buy', amount: 0.25, price: 90 }] });
     r.rejectCancel();
-    await assert.rejects(r.command({ op: 'amendOrder', id: '901', price: 91 }), /Order was never placed/);
+    await assert.rejects(r.command({ op: 'amendOrder', id: '901', price: 91 }), {
+      message: 'The outcome is unknown. Check Open Orders',
+      outcome: 'unknown',
+    });
     const actions = r.requests.filter((request) => new URL(request.url).pathname === '/exchange').map((request) => JSON.parse(request.body).action.type);
     assert.deepEqual(actions, ['order', 'cancel']);
   } finally { r.dispose(); }
@@ -75,7 +78,10 @@ test('compiled Hyperliquid Spot accepts the documented native PURR pair in amend
     await r.start();
     await r.command({ op: 'placeOrders', orders: [{ symbol: 'PURR/USDC', type: 'limit', side: 'buy', amount: 0.25, price: 90 }] });
     r.rejectCancel();
-    await assert.rejects(r.command({ op: 'amendOrder', id: '901', price: 91 }), /Order was never placed/);
+    await assert.rejects(r.command({ op: 'amendOrder', id: '901', price: 91 }), {
+      message: 'The outcome is unknown. Check Open Orders',
+      outcome: 'unknown',
+    });
     const actions = r.requests.filter((request) => new URL(request.url).pathname === '/exchange').map((request) => JSON.parse(request.body).action);
     assert.deepEqual(actions.map(action => action.type), ['order', 'cancel']);
     assert.deepEqual(actions[1].cancels, [{ a: 10000, o: 901 }]);

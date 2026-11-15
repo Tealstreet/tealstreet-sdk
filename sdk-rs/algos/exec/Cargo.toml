@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 safe-cex-algos = { path = "../runtime", default-features = false }
 safe-cex-engine.workspace = true
+safe-cex-position-math.workspace = true
 getrandom.workspace = true
 safe-cex-chaser = { path = "../chaser" }
 safe-cex-algo-twap = { path = "../twap" }

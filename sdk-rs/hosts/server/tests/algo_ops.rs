@@ -136,6 +136,7 @@ struct Algos {
     out: mpsc::UnboundedReceiver<String>,
     seen: Vec<Value>,
     commands: Arc<Mutex<Vec<String>>>,
+    owner: Arc<safe_cex_exchange_server::twap_owner::Binding>,
 }
 
 impl Algos {
@@ -143,6 +144,16 @@ impl Algos {
         Self::with_held_placements(false).await
     }
     async fn with_held_placements(hold_placements: bool) -> Self {
+        Self::with_binding(
+            hold_placements,
+            Arc::new(safe_cex_exchange_server::twap_owner::Binding::new("u")),
+        )
+        .await
+    }
+    async fn with_binding(
+        hold_placements: bool,
+        owner: Arc<safe_cex_exchange_server::twap_owner::Binding>,
+    ) -> Self {
         let commands: Arc<Mutex<Vec<String>>> = Arc::default();
         let engine = safe_cex_engine::test_support::seeded_engine(AlgoVenue {
             book: Book::default(),
@@ -185,6 +196,7 @@ impl Algos {
             PlacedSymbols::default(),
             Arc::new(AtomicBool::new(true)),
             Default::default(),
+            owner.clone(),
             inbox_rx,
         ));
         // The feed's join snapshot loads the market before any op.
@@ -194,6 +206,7 @@ impl Algos {
             out,
             seen: Vec::new(),
             commands,
+            owner,
         }
     }
 
@@ -204,6 +217,8 @@ impl Algos {
                 op: op.into(),
                 data: data.to_string(),
                 origin: "socket:1".into(),
+                twap_owner: self.owner.snapshot(),
+                action: None,
             })
             .unwrap();
     }
@@ -452,6 +467,131 @@ async fn twap_pause_resume_stop_and_cleanup_take_the_bare_id() {
 }
 
 #[tokio::test]
+async fn bound_twap_host_resumes_only_matching_persisted_ownership() {
+    LocalSet::new()
+        .run_until(async {
+            for case in ["same", "foreign", "stale", "untagged"] {
+                let mut algos = Algos::start().await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as f64;
+                let generation = algos.owner.snapshot().generation;
+                let mut row = json!({"id":"saved", "ownerId":"u", "ownerGeneration":generation,
+                "options":web_twap(), "state":{
+                    "accountName":"acct", "activeMarket":web_market(), "size":0.1,
+                    "ordersSizes":[0.01], "side":"buy", "status":"running", "ordersCount":10,
+                    "ordersExecuted":9, "nextOrderAt":now + 100.0
+                }});
+                if case == "foreign" {
+                    row["ownerId"] = json!("other-user");
+                }
+                if case == "stale" {
+                    row["ownerGeneration"] = json!(generation + 1);
+                }
+                if case == "untagged" {
+                    row.as_object_mut().unwrap().remove("ownerId");
+                    row.as_object_mut().unwrap().remove("ownerGeneration");
+                }
+                algos.op("twap:state", json!([row]));
+                if case == "same" {
+                    algos
+                        .next("store", |data| !active_twaps(data).is_empty())
+                        .await;
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    assert!(
+                        algos
+                            .commands
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .any(|command| command.contains("PlaceOrders"))
+                    );
+                } else {
+                    let refusal = tokio::time::timeout(Duration::from_secs(2), async {
+                        loop {
+                            let message: Value =
+                                serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
+                            if message["d"]["op"] == "error" {
+                                break message["d"]["data"].clone();
+                            }
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(refusal[1]["forceToast"], true, "{case}: {refusal}");
+                    assert!(
+                        refusal
+                            .to_string()
+                            .contains("persisted TWAP owner or generation does not match"),
+                        "{case}: {refusal}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    assert!(
+                        algos.commands.lock().unwrap().is_empty(),
+                        "{case} placed a stale slice"
+                    );
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_twap_queued_before_rebind_is_dropped_instead_of_adopted() {
+    LocalSet::new()
+        .run_until(async {
+            for rebind in [false, true] {
+                let mut algos = Algos::start().await;
+                // No yield between enqueue and rebind: the op carries the old snapshot.
+                algos.op("twap:start", web_twap());
+                if rebind {
+                    algos.owner.rebind_owner("other-user");
+                    let refusal = tokio::time::timeout(Duration::from_secs(2), async {
+                        loop {
+                            let message: Value = serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
+                            if message["d"]["op"] == "error" {
+                                break message["d"]["data"].clone();
+                            }
+                        }
+                    }).await.unwrap();
+                    assert_eq!(refusal[0], "Algo operation cancelled-for-owner-change: authenticated connection binding changed");
+                    assert_eq!(refusal[1]["forceToast"], true);
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    assert!(algos.commands.lock().unwrap().is_empty());
+                    // A newly captured op still works under the new generation.
+                    algos.op("twap:start", web_twap());
+                }
+                algos.next("store", |data| !active_twaps(data).is_empty()).await;
+                assert_eq!(algos.commands.lock().unwrap().len(), 1);
+            }
+        }).await;
+}
+
+#[tokio::test]
+async fn a_same_user_resume_keeps_a_running_twap() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("twap:start", web_twap());
+            // A same-user reconnect/resume inside the 60-second window is not an owner change.
+            assert!(!algos.owner.rebind_owner("u"));
+            algos
+                .next("store", |data| !active_twaps(data).is_empty())
+                .await;
+            assert_eq!(algos.commands.lock().unwrap().len(), 1);
+            assert!(
+                !algos
+                    .seen
+                    .iter()
+                    .any(|event| event.to_string().contains("cancelled-for-owner-change")),
+                "a same-user resume cancelled the TWAP"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn twap_state_restores_the_rows_its_own_state_updates_persisted() {
     LocalSet::new()
         .run_until(async {
@@ -473,12 +613,11 @@ async fn twap_state_restores_the_rows_its_own_state_updates_persisted() {
                 .next()
                 .map(|(id, row)| (id.clone(), row.clone()))
                 .unwrap();
-            // TwapWorker.tsx: [{id, options, state}] from sessionStorage, to a fresh host.
-            let mut restored = Algos::start().await;
-            restored.op(
-                "twap:state",
-                json!([{"id": id, "options": row["options"], "state": row["state"]}]),
-            );
+            // Persistence retains the original tags; a fresh host for the same binding resumes.
+            let mut restored = Algos::with_binding(false, first.owner.clone()).await;
+            let mut saved = row.clone();
+            saved["id"] = id.clone().into();
+            restored.op("twap:state", json!([saved]));
             let store = restored
                 .next("store", |data| !active_twaps(data).is_empty())
                 .await;
@@ -506,6 +645,59 @@ async fn exec_from_the_cli_answers_exec_result_with_its_req_id() {
             let result = first(&result["data"]);
             assert_eq!(result["handled"], true, "{result}");
             assert_eq!(result["success"], true, "{result}");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn an_exec_sleep_cannot_start_a_twap_after_its_binding_is_retired() {
+    LocalSet::new()
+        .run_until(async {
+            for rebind in [false, true] {
+                let mut algos = Algos::start().await;
+                algos.op(
+                    "exec",
+                    json!({"symbol":"BTCUSDT", "reqId":"deferred-twap",
+                    "command":"echo checkpoint; sleep 100ms; twap buy $1000 into 2 over 1"}),
+                );
+                algos
+                    .next("exec-log", |data| first(data)["message"] == "checkpoint")
+                    .await;
+                if rebind {
+                    algos.owner.rebind_owner("other-user");
+                }
+                let result = algos
+                    .next("exec-result", |data| {
+                        first(data)["reqId"] == "deferred-twap"
+                    })
+                    .await;
+                let result = first(&result["data"]);
+                assert_eq!(result["success"], !rebind, "{result}");
+                if rebind {
+                    assert!(
+                        result["error"]
+                            .as_str()
+                            .unwrap()
+                            .contains("cancelled-for-owner-change")
+                    );
+                    assert!(algos.commands.lock().unwrap().is_empty());
+                } else {
+                    assert!(algos.seen.iter().any(|event| {
+                        event["op"] == "twap:stateUpdate"
+                            && event["data"]
+                                .as_object()
+                                .is_some_and(|rows| !rows.is_empty())
+                    }));
+                    tokio::time::timeout(Duration::from_secs(2), async {
+                        while algos.commands.lock().unwrap().is_empty() {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(algos.commands.lock().unwrap().len(), 1);
+                }
+            }
         })
         .await;
 }
@@ -545,7 +737,7 @@ async fn twap_state_restores_a_row_the_ts_worker_persisted() {
                 "startedAt":now - 180_000.0});
             algos.op(
                 "twap:state",
-                json!([{"id":"ts-twap-1","options":options,"state":state}]),
+                json!([{"id":"ts-twap-1","ownerId":"u","ownerGeneration":algos.owner.snapshot().generation,"options":options,"state":state}]),
             );
             let store = algos
                 .next("store", |data| !active_twaps(data).is_empty())

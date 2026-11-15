@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from '../../exchanges/bitunix/bitunix.income';
-import { mapBlofinClosedPosition, mapBlofinFillToIncomeRecords } from '../../exchanges/blofin/blofin.income';
+import { mapBitunixTradeToIncomeRecords } from '../reference/bitunix/bitunix.income';
+import { mapBitunixClosedPosition } from '../reference/bitunix/bitunix.closed-pnl';
+import { mapBlofinFillToIncomeRecords } from '../reference/blofin/blofin.income';
+import { mapBlofinClosedPosition } from '../reference/blofin/blofin.closed-pnl';
 import { PositionSide } from '../../types';
 
 const resolveBlofin = (instId: string) => (instId === 'DOGE-USDT' ? 'DOGEUSDT' : undefined);

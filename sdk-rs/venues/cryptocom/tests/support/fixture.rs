@@ -57,8 +57,17 @@ pub fn venue(options: Options) -> Cryptocom {
 }
 pub fn engine(options: Options) -> Engine<Cryptocom> {
     let (options, signer) = setup(options);
+    let ids = safe_cex_engine::signing::Identities {
+        primary: options.credentials.clone(),
+        ..Default::default()
+    };
     let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
-    engine.set_signer(Some(signer)).unwrap();
+    engine
+        .set_signer(Some(Arc::new(super::hosted_parity::Parity {
+            local: signer,
+            ids,
+        })))
+        .unwrap();
     engine
 }
 

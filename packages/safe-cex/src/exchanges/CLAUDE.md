@@ -5,6 +5,12 @@ is the single source of truth for boilerplate that would otherwise be repeated
 in every per-exchange `CLAUDE.md`. **Read this first** before diving into any
 individual exchange doc.
 
+Rust page-mirror manual writes use the page engine or refuse locally, except a
+non-DELEGATED mirror whose module explicitly reports no frame-fed support: its
+existing source writer remains authoritative (LOCAL account worker, COSIGNED
+hosted source). Failed supported engines and Unknown writes never
+fall back. See `packages/safe-cex/CLAUDE.md` → "Rust main-thread trading".
+
 For per-exchange specifics (endpoints, quirks, auth signing details), see
 the `CLAUDE.md` inside each exchange's directory.
 
@@ -233,6 +239,33 @@ venues that do not publish one of those values use `0`; consumers must treat
 that value as "zero or unavailable," not proof that the upstream value is
 genuinely zero.
 
+Worker-frame decode recovery permits one snapshot RPC at a time. The first
+request is immediate; repeated rejected frames are gated by monotonic time with
+exponential equal jitter (250–500 ms initially, capped at 15–30 seconds).
+Repeated rejections coalesce behind one cooldown timer, including rejections
+received during an in-flight RPC; there is no independent polling loop.
+Accepted data repairs only its rejected book symbol or candle symbol/interval.
+The gate resets once every unresolved stream is repaired; unrelated traffic,
+including a healthy stream in the snapshot RPC response, cannot reset it.
+Unidentifiable stream failures retain cooldown until the mirror is reset.
+A recovered stream also fences any older in-flight snapshot from applying.
+
+Direct `listenOrderBook` / `listenOHLCV`, `PublicDataSource`, and the matching
+`*Webworker` listeners accept an optional third rejection callback. Native frame
+rejections reuse the existing frame readers and recovery-scope identity helper;
+in-process public-data providers carry the observer and release it on disposal,
+including when a synchronous source callback disposes the provider during registration.
+Observer-enabled provider subscriptions establish liveness before calling the
+source. Disposal immediately fences both data and rejection callbacks, including
+callbacks before the source returns; the late handle is released exactly once.
+The signal names the requested stream/symbol (and candle interval) and carries the original error. A rejected book batch invalidates all
+book baselines; known failure identities notify only matching subscribers.
+Unknown identities notify the affected stream kind broadly, and unreadable
+envelopes notify both kinds. Rejection-observer
+exceptions are isolated, and unsubscribe/dispose removes the rejection listener.
+If a native rejection observer disposes the exchange, frame processing stops
+before sibling data or frame forwarding is delivered.
+
 ### Common Startup Sequence
 
 Most exchange `start()` implementations follow this shape:
@@ -270,6 +303,10 @@ this.log(`Order rejected: ${err}`, LogSeverity.Error);
   `Info`.
 - The default `Info` is what `console.log`s show in app logs and what the
   emitter forwards to subscribers.
+
+`ExchangeEmitter` makes diagnostic copies for `log`, `error`, `warning`,
+`engine-event`, `exec-log` and all `grafana-*` events before listener delivery.
+Live command/result and market events retain their original payloads and identity.
 
 ### Pre-flight validation throws must emit first
 
@@ -788,7 +825,7 @@ early-return; cryptocom and polymarket instead compute a URL-derived
 to tag.
 
 An exchange with no per-URL **market-data** test (bitget, phemex, bingx,
-bitrue, kucoin futures, grvt, breakoutprop) needs that distinction established
+bitrue, kucoin futures, grvt) needs that distinction established
 first, which is a signing change, not a tagging one. Some of those do have a
 per-URL early return for something else — bingx's `LISTEN_KEY` — which is not the same thing and does not cover their market data.
 
@@ -965,7 +1002,7 @@ threshold" before "finishing" the migration. `asterdex`'s
 `cleanupMessageHandlerStats(stream)` calls target keys that are never recorded;
 dead, but harmless.
 
-**`blofin`, `breakoutprop` and `orderly` never call `recordMessageHandlerStats`
+**`blofin` and `orderly` never call `recordMessageHandlerStats`
 at all** — only the cleanup side. Their datafeed list in the connection popup is
 therefore empty and this watchdog is blind on them: a subscription that silently
 stops delivering there produces no signal of any kind. That is a bigger gap than
@@ -1591,3 +1628,18 @@ whole mixed known/unknown batch before writes. Native ID-only cancel APIs may
 send the supplied identity directly. Empty requested lists remain valid no-ops.
 The family inventory and regression evidence live in
 `docs/plans/RUST_UNKNOWN_CANCEL.md`.
+
+
+Manual page writes retain the original worker-owner generation and bridge through
+internal reads, capability waits and nuke retry timers. Composite operations pass
+that admission to every later cancel/close leg; nested calls cannot recapture a
+successor owner. Unchanged-owner command payloads and ordering remain identical.
+
+The page readiness boundary reports local refusals once, including optional methods
+and the direct schedule-cancel/account-tier paths; caller rejection alone cannot
+replace the exchange error event. Already-reported command failures stay deduped.
+
+Page readiness/error wrappers honor `callerReportsPlacementFailures` for placement
+methods: the web caller owns that message. They must not re-emit a ready command
+failure that `command()` deliberately leaves to its caller. Other manual refusals
+still emit their single exchange error event.

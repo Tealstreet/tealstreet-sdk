@@ -7,10 +7,11 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createReplayEntropy } from './replay-entropy.mjs';
 import { prepareRecordedHttp } from './recorded-http.mjs';
+import { replayPositions } from './bitget-anchor-positions.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
-import { axiosClients, venueOf } from './venues.mjs';
+import { axiosClients, replayVenueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { idleLoadedBaseline, measureBeforeCapture, retainedMemory, settledMemory } from './memory.mjs';
@@ -18,7 +19,7 @@ import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { captureReplayState, finalizeReplay } from './replay-finalize.mjs';
 import { credentialValues, findNoticeLeaks } from './notice-leaks.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
-import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
+import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, captureTsSettings, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -34,7 +35,7 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const venue = venueOf(values.venue);
+const venue = replayVenueOf(values.venue);
 const tapeBytes = readFileSync(values.tape);
 const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
   .toString('utf8')
@@ -208,17 +209,22 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
-  const { memory: heapBefore, loadMetrics, loaded: { EngineHost, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder } } = await idleLoadedBaseline({
+  const { memory: heapBefore, loadMetrics, loaded: { EngineHost, socketMessages, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder } } = await idleLoadedBaseline({
     baseline,
     load: async () => {
       await initializeReplay();
-      const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
+      const { EngineHost, socketMessages } = await import('../hosts/wasm/js/host.mjs');
       const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
       const { loadEngine } = await import('./engine.mjs');
-      const { WasmEngine, wasmMemoryBytes } = await loadEngine(values.wasm);
+      const module = await loadEngine(values.wasm);
+      const { WasmEngine, wasmMemoryBytes } = module;
+      const fixture = venue.rustFixture && module[venue.rustFixture];
+      if (venue.rustFixture && typeof fixture !== 'function') throw new Error('Missing fixture-only replay constructor; no production fallback');
       const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options, { performance: values.performance });
       const encoder = new TextEncoder();
-      return { EngineHost, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder };
+      return { EngineHost, socketMessages, Frame, TickerState, MARKET_COLUMNS,
+        WasmEngine: fixture ? class { constructor() { return fixture(!isPrivate); } } : WasmEngine,
+        wasmMemoryBytes, tape, encoder };
     },
   });
   const wasmBeforeBytes = wasmMemoryBytes();
@@ -247,10 +253,13 @@ async function runRust() {
     prepareHttp: prepareRecordedHttp,
     connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       if (!values.performance) venue.validateSocket?.(url, headers);
+      const receive = venue.compressedTextSockets
+        ? socketMessages(onMessage, error => { throw error; })
+        : data => (typeof data === 'string' ? onMessage(data) : onBinary?.(data));
       const socket = tape.connect(
         url,
         onOpen,
-        (data) => (typeof data === 'string' ? onMessage(data) : onBinary?.(data)),
+        receive,
         onClose,
       );
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
@@ -313,7 +322,7 @@ async function runRust() {
       tickers.apply(frame);
       for (const book of frame.books()) books.set(book.market, book);
       orders = frame.orders() ?? orders;
-      const positionUpdate = frame.positions();
+      const positionUpdate = replayPositions(frame, values.venue, isPrivate);
       if (positionUpdate) {
         positions = positionUpdate;
         positionGreeks = frame.positionGreeks();
@@ -544,11 +553,14 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
-    for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    for (const column of POSITION_COLUMNS) {
+      if (column !== 'contractsNative' && column !== 'unrealizedPnlNative') row[column] = positions[column][i];
+    }
     const greekIndex = positionGreeks && Array.from({ length: positionGreeks.count }, (_, index) => index).find((index) => positionGreeks.positionId(index) === positions.id(i));
     if (greekIndex !== undefined) row.option = { greeks: { delta: positionGreeks.delta[greekIndex], gamma: positionGreeks.gamma[greekIndex], vega: positionGreeks.vega[greekIndex], theta: positionGreeks.theta[greekIndex], units: positionGreeks.units(greekIndex) } };
-    if (venue.coinNativeAmounts) row.extra = { contractsNative: row.notional / markets.contractSize[positions.market[i]], unrealizedPnlNative: row.unrealizedPnl };
-    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
+    if (positions.contractsNative[i] !== undefined || positions.unrealizedPnlNative[i] !== undefined) {
+      row.extra = { contractsNative: positions.contractsNative[i], unrealizedPnlNative: positions.unrealizedPnlNative[i] };
+    }
     positionRows.push(row);
   }
   const settingRows = [];
@@ -786,16 +798,9 @@ async function runTs() {
             } : {}),
           },
           orders: receiver.orders.map((o) => ({ ...o })),
-          // Zero-size placeholders carry each market's leverage and margin type.
           positions: receiver.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
           flatPositionPnl: flatPositionPnl(receiver.positions),
-          settings: venue.tsSettings?.(exchange, store) ?? [
-            ...new Map(
-              receiver.positions
-                .filter((p) => p.leverage > 0)
-                .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
-            ).values(),
-          ],
+          settings: venue.tsSettings?.(exchange, store) ?? captureTsSettings(receiver),
           fills: executions.map(captureTsFill),
         }
       : undefined;

@@ -8,7 +8,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { BASE_WS_URL } from '../../../exchanges/bitget/bitget.types';
 
 
-type Data = Record<string, any>;
+type Data = Record<string, unknown>;
 type MessageHandlers = {
   [topic: string]: Array<(json: Data) => void>;
 };
@@ -39,7 +39,7 @@ export class BitgetSecondaryPublicWebsocket extends BaseWebSocket<BitgetExchange
     return undefined;
   };
 
-  private buildTickerUpdate = (data: Record<string, any>): Partial<Writable<Ticker>> => {
+  private buildTickerUpdate = (data: Record<string, unknown>): Partial<Writable<Ticker>> => {
     const update: Partial<Writable<Ticker>> = {};
 
     const bid = this.toFiniteNumber(data.bidPr ?? data.bidPrice ?? data.bid);

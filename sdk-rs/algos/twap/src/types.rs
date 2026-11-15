@@ -136,10 +136,23 @@ pub struct InFlightSlice {
     pub client_order_id: Option<String>,
 }
 
+/// A trusted host snapshot, independent of account names and restore payloads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TwapOwner {
+    pub owner_id: String,
+    pub generation: u64,
+}
+
 /// One `twap:state` restore entry, as the client persisted it.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedTwap {
     pub id: String,
+    /// Missing owner tags cannot authorize a native restore.
+    #[serde(default)]
+    pub owner_id: Option<String>,
+    #[serde(default)]
+    pub owner_generation: Option<u64>,
     pub options: TwapOptions,
     pub state: TwapState,
 }

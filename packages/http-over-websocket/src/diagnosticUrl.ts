@@ -73,7 +73,11 @@ const redactAssignments = (message: string): string => {
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = keys.exec(message))) {
-    if (!isDiagnosticSecretKey(match[1], true)) continue;
+    if (!isDiagnosticSecretKey(match[1], true)) {
+      // A label's final separator or space may also introduce the next key.
+      keys.lastIndex--;
+      continue;
+    }
     const start = keys.lastIndex;
     const tail = message.slice(start);
     if (/^[{\[]/.test(tail) && !tail.startsWith(REDACTED)) return REDACTED;

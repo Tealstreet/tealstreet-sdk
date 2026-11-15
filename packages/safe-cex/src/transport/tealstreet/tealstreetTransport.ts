@@ -73,7 +73,7 @@ const awaitProxyToken = async (exchange: ExchangeName, signal?: AbortSignal): Pr
 };
 
 export const proxyAuthorizationHeader = (exchange: ExchangeName): string =>
-  exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex' || exchange === 'breakoutprop'
+  exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex'
     ? 'Tealstreet-Authorization'
     : 'Authorization';
 
@@ -138,7 +138,7 @@ export const tealstreetTransport: TransportProvider = {
         const token = await awaitProxyToken(exchange, request.signal as AbortSignal | undefined);
 
         // Use Tealstreet-Authorization when the venue has its own Authorization
-        // semantics. Breakout DXtrade and MEXC WEB/APP sessions own Authorization; MEXC
+        // semantics. MEXC WEB/APP sessions own Authorization; MEXC
         // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
         // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
         markRestProxyHeader(request);

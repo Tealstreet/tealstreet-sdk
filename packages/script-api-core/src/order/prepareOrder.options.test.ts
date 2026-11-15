@@ -5,14 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
 import { prepareOrder } from './prepareOrder';
 
-const perp = {
-  symbol: 'BTCUSDT',
+const perp: Market = {
+  symbol: 'BTCUSDT', id: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
   precision: { price: 0.1, amount: 0.001 },
   limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-} as unknown as Market;
+};
 
-const option = {
-  symbol: 'BTC-25DEC26-150000-C-USDT',
+const option: Market = {
+  symbol: 'BTC-25DEC26-150000-C-USDT', id: 'BTC-25DEC26-150000-C-USDT', base: 'BTC', quote: 'USDT', active: true,
   precision: { price: 5, amount: 0.01 },
   limits: { amount: { min: 0.01, max: 1000 }, leverage: { min: 1, max: 1 }, price: { min: 10 } },
   option: {
@@ -25,7 +25,7 @@ const option = {
     premiumAsset: 'USDT',
     settleAsset: 'USDT',
   },
-} as unknown as Market;
+};
 
 const limit = (symbol: string, extra: object) => ({
   symbol,

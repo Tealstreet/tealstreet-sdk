@@ -9,7 +9,7 @@
 // Exchanges that should use the Tokyo (jp) egress server. Matched as a
 // case-insensitive substring against either an exchange name OR a request
 // baseURL, so `binance`/`binancespot`, `bitget`/`bitgetusdc`,
-// `breakout`/`breakoutprop`, `aster`/`asterdex`, etc. all resolve together.
+// `aster`/`asterdex`, etc. all resolve together.
 export const TOKYO_EGRESS_EXCHANGES = [
   'hlnode',
   'hyperliquid',
@@ -20,7 +20,6 @@ export const TOKYO_EGRESS_EXCHANGES = [
   'binance',
   'kucoin',
   'kraken',
-  'breakout',
   'aster',
   'paradex',
   'grvt',

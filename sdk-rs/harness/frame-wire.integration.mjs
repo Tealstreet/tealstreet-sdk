@@ -6,14 +6,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
-import { captureRustFill } from './comparison-policy.mjs';
+import { captureRustFill, captureTsSettings } from './comparison-policy.mjs';
 import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
 import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
+
+test('replay settings retain closed-symbol metadata and prefer current exposure settings', () => {
+  const store = new DefaultStore();
+  const position = {
+    id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: 'long', leverage: 20,
+    marginType: 'cross', contracts: 1, notional: 100, entryPrice: 100,
+    unrealizedPnl: 0, liquidationPrice: null,
+  };
+  store.addOrUpdatePositionsFull([position]);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 20, marginType: 'cross' }]);
+  store.addOrUpdatePositionsFull([]);
+  assert.deepEqual(store.positions, []);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 20, marginType: 'cross' }]);
+  store.addOrUpdatePositionsFull([{ ...position, leverage: 7, marginType: 'isolated' }]);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 7, marginType: 'isolated' }]);
+  store.updatePosition(position, { leverage: 3, marginType: 'cross' });
+  assert.equal(store.positionSettings[position.id].leverage, 7);
+  assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 3, marginType: 'cross' }]);
+  store.updatePosition(position, { leverage: 0 });
+  assert.deepEqual(captureTsSettings(store), []);
+  store.reset();
+  assert.deepEqual(captureTsSettings(store), []);
+});
 
 test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameApplier', () => {
   const directory = mkdtempSync(join(tmpdir(), 'safe-cex-frame-wire-'));
   try {
-    const result = spawnSync('cargo', ['run', '--quiet', '--locked', '--manifest-path',
+    const result = spawnSync('cargo', ['run', '-j2', '--quiet', '--locked', '--manifest-path',
       'sdk-rs/Cargo.toml', '-p', 'safe-cex-engine', '--example', 'book_bandwidth', '--', directory],
     { encoding: 'utf8', timeout: 120_000 });
     assert.equal(result.status, 0, result.stderr || result.error?.message);
@@ -51,11 +74,57 @@ test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameAppli
 });
 
 test('Rust revised sections preserve native fields and identity through the SDK', async (t) => {
-  const result = spawnSync('cargo', ['run', '--quiet', '--locked', '--manifest-path',
+  const result = spawnSync('cargo', ['run', '-j2', '--quiet', '--locked', '--manifest-path',
     'sdk-rs/Cargo.toml', '-p', 'safe-cex-engine', '--example', 'wire_contract_frames'],
   { encoding: 'utf8', timeout: 120_000 });
   assert.equal(result.status, 0, result.stderr || result.error?.message);
   const fixtures = JSON.parse(result.stdout);
+  await t.test('P1: actual native Position output preserves null, optional fields and native quantities', () => {
+    assert.equal(fixtures.positionCases.length, 13);
+    for (const [index, fixture] of fixtures.positionCases.entries()) {
+      const bytes = Uint8Array.from(Buffer.from(fixture.frame, 'hex'));
+      const frame = new Frame(bytes.buffer);
+      const worker = new DefaultStore();
+      if (fixture.invalidNative) {
+        assert.throws(() => new FrameApplier(worker).apply(frame), /invalid Position contractsNative/);
+        assert.deepEqual(worker.positions, []);
+        continue;
+      }
+      new FrameApplier(worker).apply(frame);
+      // The same bytes reach the main store; no display or sizing repair is needed.
+      const main = new DefaultStore();
+      new FrameApplier(main).apply(new Frame(structuredClone(frame.buffer)));
+      assert.deepEqual(main.positions, worker.positions);
+      assert.equal(frame.first(8).revision, 2);
+      const row = worker.positions[0];
+      if (index < 6) {
+        const expected = index === 5 ? 123.5 : null;
+        assert.equal(row.liquidationPrice, expected);
+        assert.equal(fixture.raw.liquidationPrice, expected);
+        assert.equal(fixture.raw.leverage, 0);
+        assert.equal(fixture.raw.unrealizedPnl, 0);
+        assert.equal('realizedPnl' in fixture.raw, false);
+        assert.equal(row.leverage, 0);
+        assert.equal(row.unrealizedPnl, 0);
+        assert.equal('realizedPnl' in row, false);
+        assert.equal('marginSize' in row, false);
+        assert.equal('lastUpdate' in row, false);
+        assert.equal(JSON.parse(JSON.stringify(worker.serialize())).positions[0].liquidationPrice, expected);
+      } else {
+        assert.equal(row.extra.contractsNative, fixture.expectedNative);
+      }
+      const expectedSettings = Object.fromEntries(worker.positions.map((position) => [position.id, {
+        id: position.id, symbol: position.symbol, side: position.side, leverage: position.leverage,
+        ...(position.marginType !== undefined ? { marginType: position.marginType } : {}),
+        ...(position.positionMode !== undefined ? { positionMode: position.positionMode } : {}),
+      }]));
+      worker.addOrUpdatePositionsFull([]);
+      assert.deepEqual(worker.positions, []);
+      assert.deepEqual(worker.serialize().positions, []);
+      assert.deepEqual({ ...worker.positionSettings }, expectedSettings);
+      assert.deepEqual(worker.serialize().positionSettings, expectedSettings);
+    }
+  });
   const read = (name) => {
     const bytes = Uint8Array.from(Buffer.from(fixtures[name], 'hex'));
     return new Frame(bytes.buffer);

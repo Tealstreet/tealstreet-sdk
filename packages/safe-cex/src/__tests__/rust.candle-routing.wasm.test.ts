@@ -84,7 +84,7 @@ it('keyed Bybit candles use a real public WASM source while its frame-fed accoun
     isPerpetual: true,
     precision: { amount: 0.001, price: 0.1 },
     limits: { amount: { min: 0.001, max: 120 }, leverage: { min: 1, max: 100 } },
-  } as Market;
+  } satisfies Market;
   exchange.ingestSourceFrame(
     consumerFrame({
       markets: [market],

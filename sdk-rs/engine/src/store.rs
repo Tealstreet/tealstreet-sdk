@@ -11,8 +11,40 @@ use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, 
 #[cfg(feature = "prediction")]
 use crate::model::{PredictionHolding, PredictionMarket};
 use crate::order_read_cover::{Covers, OrderReadMark, OrderReadScope};
-use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
+#[cfg(test)]
+use crate::wire::market_flag;
+use crate::wire::{self, FrameWriter, loaded_flag, section};
 use std::collections::{HashMap, HashSet};
+
+/// Each imported column owns its value (including absence) until its inputs
+/// change. A size update must not discard independent native PnL evidence.
+#[derive(Clone, Copy, Default)]
+struct PositionNativeExtras {
+    values: [Option<f64>; 2],
+    imported: [bool; 2],
+}
+
+impl PositionNativeExtras {
+    fn update(&mut self, position: &mut Position, update: impl FnOnce(&mut Position)) {
+        // Venue-owned rows have no imported evidence to invalidate.
+        let before = self
+            .imported
+            .iter()
+            .any(|&imported| imported)
+            .then(|| position.clone());
+        update(position);
+        if let Some(before) = before {
+            let same_row = before.id == position.id && before.symbol == position.symbol;
+            // Both sizing inputs matter: which one supplied the native quantity
+            // depends on the producer's units/catalogue, not the receiver's.
+            self.imported[0] &= same_row
+                && before.contracts.to_bits() == position.contracts.to_bits()
+                && before.notional.to_bits() == position.notional.to_bits();
+            self.imported[1] &=
+                same_row && before.unrealized_pnl.to_bits() == position.unrealized_pnl.to_bits();
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Store {
@@ -46,6 +78,9 @@ pub struct Store {
     #[cfg(feature = "repair-mutations")]
     snapshot_begins: u64,
     positions: Vec<Position>,
+    /// Parallel to positions. Frame-fed metadata is authoritative, including
+    /// absent values; venue-owned rows compute their metadata at output time.
+    position_native_extras: Vec<PositionNativeExtras>,
     position_ids: bool,
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
@@ -192,7 +227,10 @@ impl Store {
     /// An empty catalogue is never authoritative: a venue outage can answer an
     /// empty list, which would otherwise mark markets loaded and wipe the
     /// previous catalogue. The engine reports each rejection as a warning.
-    pub fn set_markets(&mut self, markets: Vec<Market>) {
+    pub fn set_markets(&mut self, mut markets: Vec<Market>) {
+        for market in &mut markets {
+            crate::market_output::prepare(market, self.quantity_units);
+        }
         if markets.is_empty() {
             self.rejected_empty_catalogue = true;
             return;
@@ -548,6 +586,17 @@ impl Store {
 
     /// Mutate a row of the current ticker table; rebuild cached indexes on replacement.
     pub fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
+        self.update_ticker_at_observed(index, 0, update);
+    }
+
+    /// Update a current ticker row and record the fields a venue actually observed,
+    /// including unchanged values. Cached indexes must be rebuilt on replacement.
+    pub fn update_ticker_at_observed(
+        &mut self,
+        index: u32,
+        observed: u16,
+        update: impl FnOnce(&mut Ticker),
+    ) {
         let Some(ticker) = self.tickers.get_mut(index as usize) else {
             return;
         };
@@ -567,11 +616,15 @@ impl Store {
                 mask |= 1 << bit;
             }
         }
+        let reported = mask | observed;
+        if reported == 0 {
+            return;
+        }
+        self.mark_references_seen(index, reported);
+        self.mark_observations_seen(index, reported);
         if mask == 0 {
             return;
         }
-        self.mark_references_seen(index, mask);
-        self.mark_observations_seen(index, mask);
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {
@@ -785,6 +838,7 @@ impl Store {
         self.orders_revision = self.orders_revision.saturating_add(1);
         self.read_covers.reset();
         self.positions.clear();
+        self.position_native_extras.clear();
         self.balance = Balance::default();
         self.coin_balances = None;
         self.currency_balances = None;
@@ -871,6 +925,7 @@ impl Store {
     }
 
     pub fn set_positions(&mut self, positions: Vec<Position>) {
+        self.position_native_extras = vec![PositionNativeExtras::default(); positions.len()];
         self.positions = positions;
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -878,6 +933,24 @@ impl Store {
         self.prune_prediction_holdings();
         self.changes.positions = true;
         self.set_loaded(|loaded| loaded.positions = true);
+    }
+
+    /// Keep the producer's native values and presence bits instead of deriving
+    /// them again from the receiving store's possibly missing/stale catalogue.
+    pub(crate) fn set_frame_positions(
+        &mut self,
+        positions: Vec<Position>,
+        native_extras: Vec<[Option<f64>; 2]>,
+    ) {
+        assert_eq!(positions.len(), native_extras.len());
+        self.set_positions(positions);
+        self.position_native_extras = native_extras
+            .into_iter()
+            .map(|values| PositionNativeExtras {
+                values,
+                imported: [true; 2],
+            })
+            .collect();
     }
 
     #[cfg(feature = "prediction")]
@@ -905,10 +978,19 @@ impl Store {
         match (index, position.contracts == 0.0) {
             (Some(index), true) => {
                 self.positions.remove(index);
+                self.position_native_extras.remove(index);
             }
-            (Some(index), false) => self.positions[index] = position,
+            (Some(index), false) => {
+                self.position_native_extras[index].update(&mut self.positions[index], |stored| {
+                    *stored = position;
+                });
+            }
             (None, true) => return,
-            (None, false) => self.positions.push(position),
+            (None, false) => {
+                self.positions.push(position);
+                self.position_native_extras
+                    .push(PositionNativeExtras::default());
+            }
         }
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -919,9 +1001,17 @@ impl Store {
 
     /// Change positions in place; rows left with zero contracts are removed.
     pub fn update_positions(&mut self, mut update: impl FnMut(&mut Position)) {
-        for position in &mut self.positions {
-            update(position);
+        for (position, native) in self
+            .positions
+            .iter_mut()
+            .zip(&mut self.position_native_extras)
+        {
+            native.update(position, &mut update);
         }
+        // Filter the sidecar using the same rows before compacting positions.
+        let mut rows = self.positions.iter();
+        self.position_native_extras
+            .retain(|_| rows.next().is_some_and(|p| p.contracts != 0.0));
         self.positions.retain(|p| p.contracts != 0.0);
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -1372,34 +1462,12 @@ impl Store {
             self.write_prediction_holdings(w);
         }
         if changes.balance {
-            let b = &self.balance;
-            w.begin(section::BALANCE);
-            w.f64s([b.used, b.free, b.total, b.upnl]);
-            if self.coin_balances.is_some() || self.currency_balances.is_some() {
-                let coins = self.coin_balances.as_deref().unwrap_or_default();
-                w.u32(coins.len() as u32);
-                for coin in coins {
-                    let base = w.string(&coin.base);
-                    w.u32(base);
-                }
-                w.pad();
-                w.f64s(coins.iter().map(|coin| coin.amount));
-                w.f64s(coins.iter().map(|coin| coin.notional));
-                if let Some(currencies) = &self.currency_balances {
-                    w.u32(currencies.len() as u32);
-                    w.u32(u32::from(self.coin_balances.is_none()));
-                    for currency in currencies {
-                        let name = w.string(&currency.currency);
-                        w.u32(name);
-                    }
-                    w.pad();
-                    w.f64s(currencies.iter().map(|row| row.balance.total));
-                    w.f64s(currencies.iter().map(|row| row.balance.free));
-                    w.f64s(currencies.iter().map(|row| row.balance.used));
-                    w.f64s(currencies.iter().map(|row| row.balance.upnl));
-                }
-            }
-            w.end();
+            crate::balance_output::write(
+                w,
+                &self.balance,
+                self.coin_balances.as_deref(),
+                self.currency_balances.as_deref(),
+            );
         }
         if changes.settings {
             self.write_settings(w);
@@ -1508,8 +1576,14 @@ impl Store {
             w.u32s(refs);
         }
         w.pad();
-        w.f64s(rows.iter().map(|row| row.expiry.unwrap_or(f64::NAN)));
-        w.f64s(rows.iter().map(|row| row.strike.unwrap_or(f64::NAN)));
+        w.f64s(
+            rows.iter()
+                .map(|row| crate::market_output::optional(row.expiry)),
+        );
+        w.f64s(
+            rows.iter()
+                .map(|row| crate::market_output::optional(row.strike)),
+        );
         w.end();
     }
 
@@ -1578,58 +1652,7 @@ impl Store {
     }
 
     fn write_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let markets = &self.markets;
-        let pretty = markets.iter().any(|market| market.pretty_symbol.is_some());
-        w.begin_revision(section::MARKETS, u16::from(pretty));
-        w.u32(markets.len() as u32);
-        for m in markets {
-            let refs = [
-                w.string(&m.id),
-                w.string(&m.symbol),
-                w.string(&m.base),
-                w.string(&m.quote),
-            ];
-            w.u32s(refs);
-        }
-        w.u32s(markets.iter().map(|m| {
-            [
-                (Some(m.active), market_flag::ACTIVE),
-                (m.is_inverse, market_flag::INVERSE),
-                (m.is_spot, market_flag::SPOT),
-                (m.is_perpetual, market_flag::PERPETUAL),
-                (m.is_expiring, market_flag::EXPIRING),
-                (m.is_read_only, market_flag::READ_ONLY),
-            ]
-            .iter()
-            .filter(|(set, _)| *set == Some(true))
-            .fold(
-                self.quantity_units << market_flag::UNITS_SHIFT,
-                |bits, (_, flag)| bits | flag,
-            )
-        }));
-        w.pad();
-        let columns: [fn(&Market) -> f64; 10] = [
-            |m| m.precision.amount,
-            |m| m.precision.price,
-            |m| m.limits.amount.min,
-            |m| m.limits.amount.max,
-            |m| m.limits.leverage.min,
-            |m| m.limits.leverage.max,
-            |m| m.limits.price.map_or(f64::NAN, |p| p.min),
-            |m| m.contract_size.unwrap_or(f64::NAN),
-            |m| m.taker_fee.unwrap_or(f64::NAN),
-            |m| m.maker_fee.unwrap_or(f64::NAN),
-        ];
-        for column in columns {
-            w.f64s(markets.iter().map(column));
-        }
-        if pretty {
-            for market in markets {
-                let reference = w.optional_string(market.pretty_symbol.as_deref());
-                w.u32(reference);
-            }
-        }
-        w.end();
+        crate::market_output::write(&self.markets, self.quantity_units, w);
     }
 
     fn write_tickers<'a>(&'a self, w: &mut FrameWriter<'a>) {
@@ -1677,96 +1700,39 @@ impl Store {
     }
 
     fn write_orders<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let orders = &self.orders;
-        w.begin_revision(section::ORDERS, 1);
-        w.u32(orders.len() as u32);
-        for o in orders {
-            let refs = [
-                w.string(&o.id),
-                w.optional_string(o.client_order_id.as_deref()),
-                w.optional_string(o.parent_id.as_deref()),
-            ];
-            w.u32s(refs);
-        }
-        w.u32s(orders.iter().map(|o| self.market_ref(&o.symbol)));
-        w.u32s(orders.iter().map(|o| {
-            wire::order_enums(
-                o.status,
-                o.kind,
-                o.side,
-                o.reduce_only,
-                o.close,
-                o.time_in_force,
-                o.trigger_type,
-                o.extra.as_ref().and_then(|e| e.reject_reason),
-            )
-        }));
-        w.pad();
-        let columns: [fn(&Order) -> f64; 7] = [
-            |o| o.price,
-            |o| o.amount,
-            |o| o.filled,
-            |o| o.remaining,
-            |o| o.last_update,
-            |o| o.take_profit.unwrap_or(f64::NAN),
-            |o| o.stop_loss.unwrap_or(f64::NAN),
-        ];
-        for column in columns {
-            w.f64s(orders.iter().map(column));
-        }
-        let extra_columns: [fn(&crate::model::OrderExtra) -> Option<f64>; 4] = [
-            |extra| extra.remaining_native,
-            |extra| extra.filled_in_placement_units,
-            |extra| extra.remaining_notional,
-            |extra| extra.conditional_order_price,
-        ];
-        for column in extra_columns {
-            w.f64s(
-                orders
-                    .iter()
-                    .map(|order| order.extra.as_ref().and_then(column).unwrap_or(f64::NAN)),
-            );
-        }
-        w.u32s(orders.iter().map(|order| {
-            order
-                .extra
-                .as_ref()
-                .map_or(0, crate::model::order_trigger_word::encode)
-        }));
-        for order in orders {
-            let symbol = w.string(&order.symbol);
-            w.u32(symbol);
-        }
-        w.end();
+        crate::order_output::write(
+            &self.orders,
+            |symbol| self.market(symbol),
+            |symbol| self.market_ref(symbol),
+            self.quantity_units,
+            w,
+        );
     }
 
     fn write_settings<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let mut rows: Vec<_> = self
             .settings
             .iter()
-            .map(|(symbol, setting)| (self.market_ref(symbol), symbol, setting))
+            .filter_map(|(symbol, setting)| {
+                crate::store_output::rails(setting)
+                    .map(|rails| (self.market_ref(symbol), symbol, setting, rails))
+            })
             .collect();
-        rows.sort_unstable_by(|(a_index, a_symbol, _), (b_index, b_symbol, _)| {
+        rows.sort_unstable_by(|(a_index, a_symbol, _, _), (b_index, b_symbol, _, _)| {
             a_index.cmp(b_index).then(a_symbol.cmp(b_symbol))
         });
         w.begin_revision(section::SETTINGS, 1);
         w.u32(rows.len() as u32);
-        w.u32s(rows.iter().map(|(market, _, _)| *market));
+        w.u32s(rows.iter().map(|(market, _, _, _)| *market));
         w.u32s(
             rows.iter()
-                .map(|(_, _, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
+                .map(|(_, _, s, _)| s.margin_type.map_or(0, |m| m as u32 + 1)),
         );
         w.pad();
-        w.f64s(rows.iter().map(|(_, _, s)| s.leverage));
-        w.f64s(
-            rows.iter()
-                .map(|(_, _, s)| s.buy_leverage.unwrap_or(s.leverage)),
-        );
-        w.f64s(
-            rows.iter()
-                .map(|(_, _, s)| s.sell_leverage.unwrap_or(s.leverage)),
-        );
-        for (_, symbol, _) in &rows {
+        w.f64s(rows.iter().map(|(_, _, s, _)| s.leverage));
+        w.f64s(rows.iter().map(|(_, _, _, rails)| rails[0]));
+        w.f64s(rows.iter().map(|(_, _, _, rails)| rails[1]));
+        for (_, symbol, _, _) in &rows {
             let symbol = w.string(symbol);
             w.u32(symbol);
         }
@@ -1775,29 +1741,54 @@ impl Store {
 
     fn write_positions<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let positions = &self.positions;
-        w.begin_revision(section::POSITIONS, 1);
+        let extras: Vec<_> = positions
+            .iter()
+            .zip(&self.position_native_extras)
+            .map(|(position, native)| {
+                if native.imported == [true; 2] {
+                    return native.values;
+                }
+                let derived = {
+                    let market = self
+                        .market_by_symbol
+                        .get(position.symbol.as_str())
+                        .map(|index| &self.markets[*index as usize]);
+                    crate::position_output::native_extras(position, market, self.quantity_units)
+                };
+                std::array::from_fn(|i| {
+                    if native.imported[i] {
+                        native.values[i]
+                    } else {
+                        derived[i]
+                    }
+                })
+            })
+            .collect();
+        w.begin_revision(section::POSITIONS, 2);
         w.u32(positions.len() as u32);
         w.u32s(positions.iter().map(|p| self.market_ref(&p.symbol)));
-        w.u32s(
-            positions
-                .iter()
-                .map(|p| wire::position_enums(p.side, p.margin_type, p.position_mode)),
-        );
+        w.u32s(positions.iter().zip(&extras).map(|(p, extra)| {
+            wire::position_enums(p.side, p.margin_type, p.position_mode)
+                | (u32::from(extra[0].is_some()) << 24)
+                | (u32::from(extra[1].is_some()) << 25)
+        }));
         w.pad();
         let columns: [fn(&Position) -> f64; 9] = [
             |p| p.entry_price,
             |p| p.notional,
-            |p| p.leverage,
-            |p| p.unrealized_pnl,
-            |p| p.realized_pnl.unwrap_or(f64::NAN),
+            |p| crate::position_output::display(p.leverage),
+            |p| crate::position_output::display(p.unrealized_pnl),
+            |p| p.realized_pnl.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
             |p| p.contracts,
-            |p| p.liquidation_price,
-            |p| p.margin_size.unwrap_or(f64::NAN),
-            |p| p.last_update.unwrap_or(f64::NAN),
+            |p| crate::position_output::liquidation(p.liquidation_price).unwrap_or(f64::NAN),
+            |p| p.margin_size.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
+            |p| p.last_update.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
         ];
         for column in columns {
             w.f64s(positions.iter().map(column));
         }
+        w.f64s(extras.iter().map(|extra| extra[0].unwrap_or(f64::NAN)));
+        w.f64s(extras.iter().map(|extra| extra[1].unwrap_or(f64::NAN)));
         for position in positions {
             let id = w.string(&position.id);
             w.u32(id);
@@ -2354,11 +2345,11 @@ mod tests {
         let mut writer = FrameWriter::new(Vec::new(), 1.);
         store.write_positions(&mut writer);
         let frame = writer.finish();
-        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 2);
         let rows = wire::sections(&frame).next().unwrap().1;
         assert_eq!(word(rows, 4), wire::NONE);
-        assert_eq!(frame_string(&frame, word(rows, 88)), "venue-position-7");
-        assert_eq!(frame_string(&frame, word(rows, 92)), "DELISTED");
+        assert_eq!(frame_string(&frame, word(rows, 104)), "venue-position-7");
+        assert_eq!(frame_string(&frame, word(rows, 108)), "DELISTED");
     }
 
     #[test]
@@ -2656,6 +2647,59 @@ mod tests {
             by_index.take_pending().ticker_deltas
         );
         assert_eq!(by_index.tickers()[1].last, 7.);
+    }
+
+    #[test]
+    fn indexed_observed_updates_preserve_reference_times_and_exact_delta_frames() {
+        for export_observations in [false, true] {
+            let mut separate = Store::default();
+            let mut combined = Store::default();
+            for store in [&mut separate, &mut combined] {
+                store.export_ticker_observations = export_observations;
+                store.set_tickers(vec![ticker("B"), ticker("A"), ticker("A")]);
+                store.take_pending();
+            }
+            // Includes an unchanged observation, a changed value, signed zero,
+            // omitted references, and a message with no reference observation.
+            for (now, observed, last, mark) in [
+                (1., 1 << 2, 0., 0.),
+                (2., 1 << 3, 0., 5.),
+                (3., (1 << 2) | (1 << 4), -0., 5.),
+                (4., 0, -0., 5.),
+                (5., 1, -0., 5.),
+            ] {
+                separate.set_clock(now);
+                combined.set_clock(now);
+                let update = |row: &mut Ticker| {
+                    row.last = last;
+                    row.mark = mark;
+                };
+                separate.update_ticker("A", update);
+                separate.observe_ticker_fields("A", observed);
+                combined.update_ticker_at_observed(2, observed, update);
+                assert_eq!(combined.ticker_seen_at, separate.ticker_seen_at);
+                assert_eq!(combined.ticker_observed_at, separate.ticker_observed_at);
+                assert_eq!(combined.ticker_revision, separate.ticker_revision);
+                assert_eq!(combined.tickers()[1].last.to_bits(), 0f64.to_bits());
+                let separate_pending = separate.take_pending();
+                let combined_pending = combined.take_pending();
+                assert_eq!(
+                    combined_pending.ticker_deltas,
+                    separate_pending.ticker_deltas
+                );
+                let mut separate_frame = FrameWriter::new(vec![], now);
+                let mut combined_frame = FrameWriter::new(vec![], now);
+                separate.write(&separate_pending, &mut separate_frame);
+                combined.write(&combined_pending, &mut combined_frame);
+                assert_eq!(combined_frame.finish(), separate_frame.finish());
+            }
+            let times = combined.ticker_observed_at.clone();
+            combined.update_ticker_at_observed(u32::MAX, u16::MAX, |_| {
+                panic!("invalid ticker index reached closure")
+            });
+            assert_eq!(combined.ticker_observed_at, times);
+            assert!(combined.take_pending().ticker_deltas.is_empty());
+        }
     }
 
     #[test]
@@ -3109,14 +3153,14 @@ mod tests {
             let (_, positions) = wire::sections(&frame)
                 .find(|(kind, _)| *kind == section::POSITIONS)
                 .unwrap();
-            // Revision one appends exact ID and symbol after numeric columns.
-            assert_eq!(positions.len(), 96);
+            // Revision two appends exact ID and symbol after numeric columns.
+            assert_eq!(positions.len(), 112);
             assert_eq!(
-                frame_string(&frame, word(positions, 88)),
+                frame_string(&frame, word(positions, 104)),
                 store.positions()[0].id,
             );
             assert_eq!(
-                frame_string(&frame, word(positions, 92)),
+                frame_string(&frame, word(positions, 108)),
                 store.positions()[0].symbol,
             );
         }

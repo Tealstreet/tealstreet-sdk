@@ -273,7 +273,7 @@ test('actual post-merge workflow invocation enters and completes the real collec
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const measured = /^  gate:\n([\s\S]*?)(?=^  bitget-paired:)/m.exec(workflow)[1];
   const publicCommands = measured.split('\n').filter(line => line.includes('rust:gate:record') && line.includes('-public.jsonl.gz'));
-  assert.equal(publicCommands.length, 11);
+  assert.equal(publicCommands.length, 12);
   for (const command of publicCommands) assert.match(command, / --runs 16$/);
   const options = fixture(t, 'bitget');
   const gate = `const PUBLIC_REPLAY_PAIRS = ${PUBLIC_REPLAY_PAIRS}; import fs from 'node:fs'; import path from 'node:path';

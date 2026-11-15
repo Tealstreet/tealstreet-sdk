@@ -232,7 +232,10 @@ export interface UpdateOrderPatch {
 export interface ClosePositionOpts {
   readonly symbol: string;
   readonly side?: PositionSide;
+  /** Explicit native contracts; mutually exclusive with percent. */
   readonly amount?: number;
+  /** Core API 1.4.0+: (0, 100]; partial closes floor to the native step; 100 preserves the full size. */
+  readonly percent?: number;
   readonly account?: string;
 }
 

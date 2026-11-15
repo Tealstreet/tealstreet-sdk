@@ -5,6 +5,8 @@ sidebar_position: 3
 
 # Aliases & user variables
 
+Variables, aliases, their sync queue and safety settings belong to the signed-in user. Switching users reloads that user’s files and resets live/tracked variables and session budget spend. See [user profiles and migration](../operations/config-files.md#login-logout-and-migration).
+
 The CLI gives you three kinds of named values plus aliases for shorthand
 commands. Read this page once and you'll know which one to reach for.
 

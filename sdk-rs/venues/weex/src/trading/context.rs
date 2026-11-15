@@ -12,6 +12,7 @@ use safe_cex_engine::text::JoinWith;
 
 // WEEX common error reference: https://www.weex.com/help/articles/52122274060569
 // Only explicit validation/authentication refusals prove pre-execution denial.
+const UNKNOWN_RATE: &str = UNKNOWN_OUTCOME_TEXT;
 const TABLE: CodeTable = CodeTable {
     rows: &[
         Row {
@@ -186,6 +187,11 @@ fn failure(
     native: Option<&Native<'_>>,
     message: String,
 ) -> Result<Result<Vec<String>, VenueError>, Error> {
+    let message = if native.is_some_and(|n| n.code == NativeCode::Int(429)) {
+        UNKNOWN_RATE.to_owned()
+    } else {
+        message
+    };
     let fact = cx.classify_write(context, &TABLE, native, message)?;
     let error = fact.error().clone();
     cx.http_write_fact(
@@ -201,6 +207,98 @@ fn failure(
 pub(super) struct Recorded {
     pub result: Result<Vec<String>, VenueError>,
     pub publish: bool,
+}
+
+pub(super) fn unknown_message(message: &str) -> String {
+    if message.contains(UNKNOWN_OUTCOME_TEXT) {
+        message.to_owned()
+    } else {
+        format!("{message}. {UNKNOWN_OUTCOME_TEXT}")
+    }
+}
+
+pub(super) fn failed_element(mut error: VenueError) -> ElementResult {
+    error.elements = None;
+    if matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent)) {
+        ElementResult::NotSent {
+            error: Some(Box::new(error)),
+        }
+    } else {
+        error.outcome = Some(Outcome::Unknown);
+        error.message = unknown_message(&error.message);
+        ElementResult::Unknown {
+            error: Box::new(error),
+        }
+    }
+}
+
+pub(super) fn element_results(
+    call: &Call,
+    response: Response<'_>,
+    recorded: &Recorded,
+) -> Vec<ElementResult> {
+    if recorded.publish
+        && let Call::Place {
+            orders,
+            batch,
+            protective,
+            ..
+        } = call
+    {
+        let rows = place_rows(orders, *batch, *protective, response.body)
+            .expect("native placement rows already validated");
+        return orders
+            .iter()
+            .enumerate()
+            .map(|(index, order)| {
+                let row = if *protective || !*batch {
+                    &rows[index]
+                } else {
+                    rows.iter()
+                        .find(|row| row.client() == order.client_order_id.as_deref())
+                        .expect("validated native correlation")
+                };
+                if row.success {
+                    ElementResult::Placed {
+                        order_ids: vec![row.native().unwrap().id().unwrap()],
+                    }
+                } else {
+                    let native = row_native(row);
+                    let released = safe_cex_engine::classify::Released::Response(&response);
+                    let intent = safe_cex_engine::classify::Intent::Place;
+                    let verdict =
+                        safe_cex_engine::classify::verdict(&TABLE, intent, released, Some(&native));
+                    failed_element(safe_cex_engine::classify::error(
+                        verdict,
+                        intent,
+                        released,
+                        Some(&native),
+                        row.error(),
+                    ))
+                }
+            })
+            .collect();
+    }
+    let result = match &recorded.result {
+        Err(error) => failed_element(error.clone()),
+        Ok(_) => {
+            use safe_cex_engine::write_plan::AppliedEffect;
+            let (effect, target_order_id) = match call {
+                Call::Cancel { native, .. } => (
+                    AppliedEffect::Cancel,
+                    (native.len() == 1).then(|| native[0].clone()),
+                ),
+                Call::Amend { before, .. } => (AppliedEffect::Amend, Some(before.id.clone())),
+                _ => (AppliedEffect::Settings, None),
+            };
+            ElementResult::Applied {
+                effect,
+                target_order_id,
+                position_key: None,
+            }
+        }
+    };
+    vec![result; call.element_count()]
 }
 pub(super) fn record(
     cx: &mut Cx<'_, Pending>,
@@ -390,6 +488,14 @@ fn record_rows(
         .map(|row| format!("{}: {}", row.client().unwrap_or(label), row.error()))
         .collect::<Vec<_>>()
         .join_with("; ");
+    let message = if rows
+        .iter()
+        .any(|row| !row.success && row_native(row).code == NativeCode::Int(429))
+    {
+        UNKNOWN_RATE.to_owned()
+    } else {
+        message
+    };
     let mut result =
         project(cx.http_write_batch(context, &TABLE, expected, &items, message, None)?);
     if !placement && let Ok(ids) = &mut result {

@@ -18,7 +18,7 @@ const market = (symbol: string, base: string, info?: Record<string, unknown>): M
     precision: { amount: 0.00001, price: 1 },
     limits: { amount: { min: 0.00001, max: 1e9 }, leverage: { min: 1, max: 1 } },
     ...(info && { info }),
-  }) as Market;
+  }) satisfies Market;
 
 describe('the underlying token behind a wrapped spot pair reaches market.info as TS sets it', () => {
   it('applies hlTokenName and hlTokenFullName, absent full names stay absent, other markets untouched', () => {

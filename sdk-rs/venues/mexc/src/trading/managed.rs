@@ -272,7 +272,8 @@ impl MexcFutures {
                 path.into(),
                 payload.clone(),
                 self.options.recv_window,
-            );
+            )
+            .with_header_policy(self.options.signing_policy.header_policy());
             let url = recipe.url();
             Ok((context, plan, slot, recipe, url))
         })();
@@ -449,7 +450,10 @@ impl MexcFutures {
         error: VenueError,
     ) {
         if error.outcome == Some(Outcome::NotSent) {
-            let _ = cx.present_plan_failure(&request.plan, error.message.clone());
+            // The venue path's composed message for a definite transport
+            // refusal on a protective amend; override because the outcome
+            // is `NotSent`, which the gated entry point would drop.
+            let _ = cx.override_plan_failure_message(&request.plan, error.message.clone());
         }
         let _ = cx.finish_plan_failed_call(&request.plan, &request.slot, &request.context);
         if let Some(run) = self
@@ -497,6 +501,7 @@ impl MexcFutures {
         store: &safe_cex_engine::Store,
         request: &ManagedRequest,
         now: f64,
+        utc: f64,
     ) -> Result<(), VenueError> {
         let job = self
             .trading
@@ -533,10 +538,12 @@ impl MexcFutures {
             .ok_or_else(|| not_sent("MEXC protection provenance missing"))?;
         match request.native.call {
             Call::Cancel { .. } | Call::NativeEdit => {
-                protection::guard_at(store, now, &self.references, edit, false).map_err(not_sent)
+                protection::guard_at(store, now, utc, &self.references, edit, false)
+                    .map_err(not_sent)
             }
             Call::ProtectivePlace { restore: true } => {
-                protection::guard_at(store, now, &self.references, edit, true).map_err(not_sent)
+                protection::guard_at(store, now, utc, &self.references, edit, true)
+                    .map_err(not_sent)
             }
             Call::ProtectivePlace { restore: false } => {
                 if !edit.cancel_proven {
@@ -544,7 +551,7 @@ impl MexcFutures {
                         "MEXC cancellation is not proven; replacement withheld",
                     ));
                 }
-                protection::replacement_guard_at(store, now, &self.references, edit)
+                protection::replacement_guard_at(store, now, utc, &self.references, edit)
                     .map_err(not_sent)
             }
             _ => Ok(()),

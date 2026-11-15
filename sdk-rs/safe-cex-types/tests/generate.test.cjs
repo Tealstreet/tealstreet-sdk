@@ -4,7 +4,8 @@ const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
 const { transform } = require('../generate.cjs');
 
 test('multiline documented nested properties retain readonly, types and comments', () => {
-  const output = transform(`export type Market = {
+  const output = transform(
+    `export type Market = {
     precision: {
       /** Note: amount step. */
       amount: number;
@@ -14,14 +15,20 @@ test('multiline documented nested properties retain readonly, types and comments
       /** Optional nested value. */
       count?: number;
     };
-  };`, {}, 'Market.ts').source;
+  };`,
+    {},
+    'Market.ts',
+  ).source;
   assert(output.includes('Note: amount step.'));
   assert(output.includes('Optional nested value.'));
   const parsed = ts.createSourceFile('Market.ts', output, ts.ScriptTarget.Latest, true);
   let count = 0;
-  const visit = node => {
+  const visit = (node) => {
     if (ts.isPropertySignature(node)) {
-      assert(node.modifiers.some(m => m.kind === ts.SyntaxKind.ReadonlyKeyword), node.name.text);
+      assert(
+        node.modifiers.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword),
+        node.name.text,
+      );
       count++;
     }
     ts.forEachChild(node, visit);
@@ -32,47 +39,102 @@ test('multiline documented nested properties retain readonly, types and comments
 });
 
 test('documented string unions become runtime enums with exact escaped values', () => {
-  const members = [{ name: 'Buy', value: 'b"uy' }, { name: 'Sell', value: 'sell' }];
-  const output = transform(`/** Side documentation. */
+  const members = [
+    { name: 'Buy', value: 'b"uy' },
+    { name: 'Sell', value: 'sell' },
+  ];
+  const output = transform(
+    `/** Side documentation. */
 export type Side =
   | "b\\\"uy"
-  | "sell";`, { Side: members }, 'Side.ts').source;
+  | "sell";`,
+    { Side: members },
+    'Side.ts',
+  ).source;
   assert(output.includes('Side documentation.'));
   const parsed = ts.createSourceFile('Side.ts', output, ts.ScriptTarget.Latest, true);
   assert(ts.isEnumDeclaration(parsed.statements[0]));
-  assert.deepEqual(parsed.statements[0].members.map(m => [m.name.text, m.initializer.text]),
-    members.map(m => [m.name, m.value]));
+  assert.deepEqual(
+    parsed.statements[0].members.map((m) => [m.name.text, m.initializer.text]),
+    members.map((m) => [m.name, m.value]),
+  );
 });
 
 test('new exported enums without metadata, literal drift and duplicate values fail', () => {
   assert.throws(() => transform('export type Tenth = "new";', {}, 'Tenth.ts'), /missing Rust enum metadata/);
-  assert.throws(() => transform('export type Side = "buy";', { Side: [{ name: 'Buy', value: 'sell' }] }, 'Side.ts'), /raw literal drift/);
-  assert.throws(() => transform('export type Side = "buy" | "buy";', {
-    Side: [{ name: 'Buy', value: 'buy' }, { name: 'Sell', value: 'buy' }],
-  }, 'Side.ts'), /duplicate literal value/);
+  assert.throws(
+    () => transform('export type Side = "buy";', { Side: [{ name: 'Buy', value: 'sell' }] }, 'Side.ts'),
+    /raw literal drift/,
+  );
+  assert.throws(
+    () =>
+      transform(
+        'export type Side = "buy" | "buy";',
+        {
+          Side: [
+            { name: 'Buy', value: 'buy' },
+            { name: 'Sell', value: 'buy' },
+          ],
+        },
+        'Side.ts',
+      ),
+    /duplicate literal value/,
+  );
 });
 
 test('Rust mutability markers stay structural inside documented nested objects', () => {
-  const output = transform(`export type Options = {
+  const output = transform(
+    `export type Options = {
     auth?: {
       /** @ts-mutable */
       address?: string;
       builder?: { fee: number };
     };
-  };`, {}, 'Options.ts').source;
+  };`,
+    {},
+    'Options.ts',
+  ).source;
   const fields = ts.createSourceFile('Options.ts', output, ts.ScriptTarget.Latest, true).statements[0].type.members;
-  const readonly = node => Boolean(node.modifiers?.some(m => m.kind === ts.SyntaxKind.ReadonlyKeyword));
+  const readonly = (node) => Boolean(node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword));
   assert(readonly(fields[0]));
   assert(!readonly(fields[0].type.members[0]));
   assert(readonly(fields[0].type.members[1]));
   assert(readonly(fields[0].type.members[1].type.members[0]));
-  assert.equal(transform(output, {}, 'Options.ts').source, output);
+  assert(!output.includes('@ts-mutable'));
 });
 
 test('literal aliases require Rust intent and never become nominal runtime enums', () => {
   const source = 'export type Timeframe = "1m" | "1h";';
-  const members = [{ name: 'T1m', value: '1m' }, { name: 'T1h', value: '1h' }];
+  const members = [
+    { name: 'T1m', value: '1m' },
+    { name: 'T1h', value: '1h' },
+  ];
   const output = transform(source, {}, 'Timeframe.ts', { Timeframe: members }).source;
   assert(ts.isTypeAliasDeclaration(ts.createSourceFile('Timeframe.ts', output, 99, true).statements[0]));
-  assert.throws(() => transform(source, {}, 'Timeframe.ts', { Timeframe: members.slice(0, 1) }), /raw alias literal drift/);
+  assert.throws(
+    () => transform(source, {}, 'Timeframe.ts', { Timeframe: members.slice(0, 1) }),
+    /raw alias literal drift/,
+  );
+});
+
+test('internal mutability directives disappear while public documentation and writable shape survive', () => {
+  const source = `export type Book = {
+    /** Visible documentation.
+     * @ts-mutable
+     * @deprecated Retained public tag.
+     */
+    bids: {
+      /** @ts-mutable */
+      price: number;
+    }[];
+  };`;
+  const output = transform(source, {}, 'Book.ts').source;
+  assert(!output.includes('@ts-mutable'));
+  assert(output.includes('Visible documentation.'));
+  assert(output.includes('@deprecated Retained public tag.'));
+  const book = ts.createSourceFile('Book.ts', output, 99, true).statements[0];
+  assert(!book.type.members[0].modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword));
+  assert(
+    !book.type.members[0].type.elementType.members[0].modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword),
+  );
 });

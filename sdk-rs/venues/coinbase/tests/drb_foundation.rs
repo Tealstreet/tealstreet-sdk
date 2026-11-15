@@ -288,7 +288,13 @@ fn only_documented_correlated_errors_prove_refusal() {
         let id = send(&mut t);
         let failure = t.response(id,200,&json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":"fixture","data":{"reason":"fixture"}}}).to_string()).unwrap_err();
         assert_eq!(failure.code, Some(code));
-        assert_eq!(failure.verdict, Verdict::Refused(kind));
+        // send() releases private/buy: rate limiting cannot prove a write was refused.
+        let expected = if code == 10028 {
+            Verdict::Unknown(Some(kind))
+        } else {
+            Verdict::Refused(kind)
+        };
+        assert_eq!(failure.verdict, expected);
     }
     for body in [
         r#"{"jsonrpc":"2.0","id":2,"error":{"code":10009,"message":"not_enough_funds"}}"#,
@@ -730,6 +736,70 @@ fn invalidation_keeps_the_auth_completion_watermark() {
         session.authorization(3001.).as_deref(),
         Some("Bearer fixture-access")
     );
+}
+
+#[test]
+fn invalidation_fences_pending_authentication_and_completed_replays() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let credentials = Credentials::new(
+        "organizations/test/apiKeys/fixture",
+        &STANDARD.encode([7u8; 32]),
+    )
+    .unwrap();
+    for channel in [Channel::Http, Channel::WebSocket(SocketId(7))] {
+        let mut session = Session::new(channel);
+        session.accept(auth_result(3600), 1000.).unwrap();
+        for started in [2000., 2500.] {
+            session
+                .params(&credentials, started, |bytes| {
+                    bytes.fill(3);
+                    Ok(())
+                })
+                .unwrap();
+        }
+        session.invalidate();
+        for started in [2000., 2500., 1000.] {
+            assert!(
+                session.accept(auth_result(3600), started).is_err(),
+                "pre-invalidation authentication at {started} revived {channel:?}"
+            );
+            assert!(session.needs_refresh(3000.));
+            assert!(session.authorization(3000.).is_none());
+        }
+        session
+            .params(&credentials, 4000., |bytes| {
+                bytes.fill(4);
+                Ok(())
+            })
+            .unwrap();
+        session.accept(auth_result(3600), 4000.).unwrap();
+        assert!(!session.needs_refresh(4001.));
+        session.invalidate();
+        assert!(
+            session.accept(auth_result(3600), 4000.).is_err(),
+            "a same-start replay revived {channel:?}"
+        );
+    }
+}
+
+#[test]
+fn invalidation_fences_authentication_before_the_first_completion() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let credentials = Credentials::new(
+        "organizations/test/apiKeys/fixture",
+        &STANDARD.encode([7u8; 32]),
+    )
+    .unwrap();
+    let mut session = Session::new(Channel::Http);
+    session
+        .params(&credentials, 1000., |bytes| {
+            bytes.fill(3);
+            Ok(())
+        })
+        .unwrap();
+    session.invalidate();
+    assert!(session.accept(auth_result(3600), 1000.).is_err());
+    assert!(session.authorization(1001.).is_none());
 }
 
 #[test]

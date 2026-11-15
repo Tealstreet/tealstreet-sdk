@@ -94,6 +94,10 @@ need one.
 | `$totalshort`    | `$totalshortusd / $total`                            |
 | `$margin`        | Focused-symbol position margin (notional ÷ leverage) |
 
+The five notional-based tokens above (`$totallongusd`, `$totalshortusd`,
+`$totallong`, `$totalshort`, `$margin`) refuse if a required position valuation
+is unknown. They do not substitute zero or use a partial sum.
+
 ---
 
 ## Market shape

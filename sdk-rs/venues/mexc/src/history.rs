@@ -465,13 +465,16 @@ impl MexcFutures {
                         stream: Some(at),
                     },
                     |identity| {
-                        Box::new(sign::dispatch::Http::new(
-                            identity.clone(),
-                            Method::Get,
-                            recipe_path,
-                            payload,
-                            self.options.recv_window,
-                        ))
+                        Box::new(
+                            sign::dispatch::Http::new(
+                                identity.clone(),
+                                Method::Get,
+                                recipe_path,
+                                payload,
+                                self.options.recv_window,
+                            )
+                            .with_header_policy(self.options.signing_policy.header_policy()),
+                        )
                     },
                     |leg| {
                         let mut request = request;

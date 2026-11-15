@@ -2,6 +2,7 @@
 // unknown unless the cited venue contract defines a quantity-only minimum.
 export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   binance: 'https://developers.binance.com/docs/derivatives/usds-margined-futures/common-definition',
+  binanceinverse: 'https://developers.binance.com/docs/derivatives/coin-margined-futures/common-definition',
   binancespot: 'https://developers.binance.com/docs/binance-spot-api-docs/filters',
   phemex: 'https://api.phemex.com/public/products',
   asterdex: 'https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md',
@@ -9,6 +10,7 @@ export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   bitget: 'https://www.bitget.com/docs/catalog/classic-contract-market/classic-contract-market',
   bitrue: 'https://www.bitrue.com/api_docs_includes_file/futures/index.html',
   bingx: 'https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-market/api-reference.md',
+  bingxspot: 'https://github.com/BingX-API/api-ai-skills/blob/main/skills/spot-market/api-reference.md',
   orderly: 'https://orderly.network/docs/build-on-omnichain/restful-api/public/get-available-symbols',
   woo: 'https://docs.woox.io/#available-symbols-public',
   lighter: 'https://github.com/elliottech/lighter-python/blob/main/lighter/models/order_book_details.py',
@@ -67,6 +69,7 @@ const familyOf = (name) => {
 };
 const hosts = {
   binance: /^(?:demo-)?fapi\.binance\.com$/,
+  binanceinverse: /^(?:demo-)?dapi\.binance\.com$/,
   binancespot: /^(?:api\.binance\.com|testnet\.binance\.vision)$/,
   phemex: /^(?:testnet-)?api\.phemex\.com$/,
   asterdex: /^fapi\.asterdex(?:-testnet)?\.com$/,
@@ -74,6 +77,7 @@ const hosts = {
   bitget: /^api\.bitget\.com$/,
   bitrue: /^fapi\.bitrue\.com$/,
   bingx: /^open-api\.bingx\.com$/,
+  bingxspot: /^open-api\.bingx\.com$/,
   orderly: /^(?:testnet-)?api-evm\.orderly\.org$/,
   woo: /^api\.(?:staging\.)?woox\.io$/,
   lighter: /^(?:testnet-api\.lighter\.xyz|mainnet\.zklighter\.elliot\.ai)$/,
@@ -118,6 +122,18 @@ function filtered(row) {
   return known(Math.max(...values), lot.minQty, lot.stepSize, 1, false, bounds.length ? Math.max(...bounds) : undefined, lot.maxQty);
 }
 
+// COIN-M filters carry no monetary minimum: the documented floor is one LOT_SIZE
+// contract, each worth contractSize USD, so quantity is contracts.
+function coinMargined(row) {
+  const filters = array(row.filters).filter((filter) => filter && typeof filter === 'object');
+  const lots = filters.filter((filter) => filter.filterType === 'LOT_SIZE');
+  const bounds = filters.filter((filter) => filter.filterType === 'PERCENT_PRICE').map((filter) => positive(filter.multiplierDown));
+  const contractSize = positive(row.contractSize);
+  if (lots.length !== 1 || !contractSize || bounds.some((value) => value === undefined)) return unknown();
+  return known(0, lots[0].minQty, lots[0].stepSize, contractSize, true,
+    bounds.length ? Math.max(...bounds) : undefined, lots[0].maxQty);
+}
+
 // The optional returned amount fields are in PLACE/AMEND units. Store order
 // quantities may use different units (notably OKX, BloFin, KuCoin and MEXC).
 export function venueMarketRules(venue, records, market) {
@@ -134,6 +150,8 @@ export function venueMarketRules(venue, records, market) {
       // AssetPairs is a complete catalog: a later failed or malformed reply
       // cannot authorize sizing from a previously selected pair.
       if (family === 'krakenspot' && record.method?.toUpperCase() === 'GET' && url.pathname === '/0/public/AssetPairs') result = unknown();
+      if (family === 'bingxspot' && record.method?.toUpperCase() === 'GET' &&
+          url.pathname === '/openApi/spot/v1/common/symbols') result = unknown();
       if (!(record.status >= 200 && record.status < 300)) continue;
       payload = JSON.parse(record.body);
       if (!payload || typeof payload !== 'object') continue;
@@ -146,6 +164,9 @@ export function venueMarketRules(venue, records, market) {
         if (method !== 'GET' || !(family === 'asterdex' ? ['/fapi/v1/exchangeInfo', '/fapi/v3/exchangeInfo'] :
           ['/fapi/v1/exchangeInfo']).includes(path)) continue;
         rows = array(payload.symbols); rule = filtered; break;
+      case 'binanceinverse':
+        if (method !== 'GET' || path !== '/dapi/v1/exchangeInfo') continue;
+        rows = array(payload.symbols); rule = coinMargined; break;
       case 'binancespot':
         // Spot LOT_SIZE/NOTIONAL as futures; PERCENT_PRICE_BY_SIDE claims no lower bound here.
         if (method !== 'GET' || path !== '/api/v3/exchangeInfo') continue;
@@ -188,6 +209,19 @@ export function venueMarketRules(venue, records, market) {
         rows = array(payload.data);
         rule = (row) => known(row.tradeMinUSDT, row.tradeMinQuantity ?? row.tradeMinLimit,
           decimalStep(row.quantityPrecision)); break;
+      case 'bingxspot':
+        if (method !== 'GET' || path !== '/openApi/spot/v1/common/symbols' || !code(payload.code)) continue;
+        rows = array(payload.data?.symbols);
+        match = (row) => row.symbol === market.id;
+        rule = (row) => {
+          const maximumNotional = positive(row.maxNotional);
+          if (market.id !== `${market.base}-${market.quote}` || market.symbol !== `${market.base}${market.quote}` ||
+              decimal(row.status) !== 1 || (row.apiStateBuy !== undefined && row.apiStateBuy !== true) ||
+              !positive(row.tickSize) || !positive(row.maxQty) || !maximumNotional ||
+              maximumNotional < decimal(row.minNotional)) return unknown();
+          const limits = known(row.minNotional, row.minQty, row.stepSize, 1, false, undefined, row.maxQty);
+          return limits.notionalKnown ? { ...limits, maximumNotional } : limits;
+        }; break;
       case 'orderly': case 'woo':
         if (method !== 'GET' || path !== '/v1/public/info' || payload.success !== true) continue;
         rows = array(family === 'woo' ? payload.rows : payload.data?.rows);

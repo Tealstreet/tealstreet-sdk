@@ -1233,7 +1233,6 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
 }
 
 #[test]
-#[ignore = "P8 remote zkLink adoption, owner codex-hcmq3f + claude-19pt8s; #1874 placement RED retained"]
 fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
     let mut e = ready();
     let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
@@ -1272,7 +1271,6 @@ fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
 }
 
 #[test]
-#[ignore = "P8 remote zkLink adoption, owner codex-hcmq3f + claude-19pt8s; #1874 placement RED retained"]
 fn p0_write_unlisted_native_code_is_explicitly_unknown() {
     let mut e = ready();
     let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
@@ -2964,4 +2962,47 @@ fn ambiguous_put_back_cannot_claim_unprotected_or_resend() {
         assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
         assert!(error.message.contains("Check Open Orders"), "{error:?}");
     }
+}
+
+#[test]
+fn engine_ambiguity_rate_code_cannot_restore_protection() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(
+        &mut e,
+        &replacement,
+        NOW + 200.0,
+        r#"{"code":429,"msg":"too many requests"}"#,
+    );
+    let out = requests(&mut e);
+    assert!(
+        placements(&out).is_empty(),
+        "native rate code issued another place: {:?}",
+        out
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_signature_code_cannot_resend() {
+    let mut e = ready();
+    e.handle(NOW + 10., Event::Command(hmac_cancel()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature refused"}"#,
+            },
+        },
+    );
+    let out = requests(&mut e);
+    assert!(
+        out.iter().all(|r| r.method == safe_cex_engine::Method::Get),
+        "ambiguous status resends: {:?}",
+        out
+    );
 }

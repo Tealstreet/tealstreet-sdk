@@ -94,7 +94,7 @@ export const wooOrdersToExecutions = (orders: HistoricalOrder[]): Execution[] =>
       commission: optionalNum(order.fees),
       commissionAsset: order.feeAsset,
       realizedPnl: optionalNum(order.realizedPnl),
-    } as Execution);
+    });
   }
 
   return executions;

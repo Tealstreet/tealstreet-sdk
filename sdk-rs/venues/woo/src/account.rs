@@ -370,7 +370,7 @@ fn terminal(s: &str) -> Option<OrderStatus> {
 }
 fn order_type(s: &str) -> Option<OrderType> {
     match s {
-        "LIMIT" | "POST_ONLY" | "IOC" | "FOK" => Some(OrderType::Limit),
+        "LIMIT" | "POST_ONLY" | "IOC" | "FOK" | "RPI" => Some(OrderType::Limit),
         "MARKET" | "ASK" | "BID" => Some(OrderType::Market),
         "STOP" | "STOP_LOSS" => Some(OrderType::StopLoss),
         "TAKE_PROFIT" => Some(OrderType::TakeProfit),
@@ -750,6 +750,14 @@ impl Woo {
         let c = &mut self.account.connection;
         c.open = true;
         c.ping_at = cx.now;
+        if let Some(identity) = &self.options.credentials {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::dispatch::WsAuth::new(identity.clone(), socket)),
+            );
+            return true;
+        }
         let Some(text) = crate::sign::websocket_auth(&self.options, cx.protocol_now()) else {
             return true;
         };
@@ -1913,6 +1921,7 @@ impl Woo {
         let Some(data) = msg.data else {
             return true;
         };
+        cx.record_socket_topic(&[&msg.topic]);
         if msg.topic == "executionreport" {
             if let Ok(row) = serde_json::from_str::<OrderRow<'_>>(data.get()) {
                 self.account_execution(cx, &row, false, None);

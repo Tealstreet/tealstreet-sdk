@@ -108,8 +108,18 @@ export interface VenueErrorDetail {
   /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
   protection?: 'restored' | 'unprotected';
   partial?: { orderIds: string[]; total?: number; failedIndex?: number };
+  /** Complete logical outcomes of a validated multi-write plan, in dispatch order. */
+  elements?: ({ index: number; clientOrderId?: string } & (
+    | { status: 'placed'; orderIds: string[] }
+    | { status: 'applied'; effect: 'cancel' | 'amend' | 'tradingStop' | 'settings' | 'deferredChild' | 'positionTrigger'; targetOrderId?: string; positionKey?: string }
+    | { status: 'notSent'; error?: VenueErrorDetail }
+    | { status: 'unknown'; error: VenueErrorDetail }
+  ))[];
   builderAuthorization?: BuilderAuthorizationDetail;
 }
+
+/** Validate and clone indexed write outcomes; malformed arrays return undefined. */
+export function writePlanElementsOf(value: unknown): VenueErrorDetail['elements'];
 
 export interface EngineHandlers {
   /** Called once after a WASM trap makes this host terminal and releases its I/O. */
@@ -218,6 +228,7 @@ export class ExchangeError extends Error {
   readonly partialOrderCount?: number;
   readonly totalOrderCount?: number;
   readonly failedOrderIndex?: number;
+  readonly elements?: VenueErrorDetail['elements'];
   readonly receiptKey?: string;
   readonly commandId?: number;
   readonly orderIdentities?: readonly OrderIdentityReceipt[];
@@ -314,7 +325,7 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'kucoin-batch' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'coinbase-jws' | 'backpack-ed25519' | 'orderly-ed25519' | 'kucoin-batch' | 'apexomni-batch' | 'kraken-sha512' | 'kraken-challenge' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
@@ -370,6 +381,10 @@ export interface EngineHostOptions {
 export type EntropyProvider = (length: number) => Uint8Array;
 
 export interface CommandOptions {
+  /** Synchronously return undefined or throw if the captured owner retired.
+   * Checked at command-owned managed HTTP continuations/handoffs until native terminal, even after caller timeout.
+   * Requires native httpCommandOwner metadata. */
+  assertCurrent?(): void;
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
    * The effective wait also enters the engine as receipt metadata; never the venue. */
   timeoutMs?: number;
@@ -425,6 +440,12 @@ export interface EngineHealth {
   lastPrivateMessage: number | null;
 }
 
+/** Optional SDK helpers declared by the venue before asynchronous engine startup. */
+export interface EngineHelperCapabilities {
+  resolveLeverageContext?: boolean;
+  fetchAlgoOrders?: boolean;
+}
+
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface EngineBridgeConstruction {
   spot: boolean;
@@ -436,6 +457,7 @@ export interface EngineBridgeConstruction {
   dispatchSigning:boolean;
   /** Declared read-key policy; absent installs the read key as before. */
   readCredentials?: 'validateOnly' | 'publicRead';
+  helpers?: EngineHelperCapabilities;
 }
 
 export interface EngineConstruction {
@@ -465,6 +487,8 @@ export interface WasmEngineLike {
   command(json: string, now: number): string;
   /** `algos` builds: `now` is the engine clock, `wall` epoch ms. */
   algoStart?(accountName: string, now: number, wall: number): void;
+  algoStartOwned?(accountName: string, twapOwnerJson: string, now: number, wall: number): void;
+  algoStartUnowned?(accountName: string, now: number, wall: number): void;
   algoOp?(op: string, dataJson: string, now: number, wall: number): string;
   algoAdvance?(now: number, wall: number): string;
   algoDeadline?(): number | undefined;
@@ -503,6 +527,7 @@ export interface WasmEngineLike {
   /** Optional engine ownership export; invalid or absent data retains the legacy context. */
   signMeta?(attempt: number): string | undefined;
   httpReadClass?(request: number): 0 | 1 | 2 | 3;
+  httpCommandOwner?(request: number): number | undefined;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
@@ -514,6 +539,7 @@ export interface WasmEngineLike {
   requiresExternalSigner?(): boolean;
   useExternalSigner?(algorithmsJson?: string): void;
   hostedSigningClock?(now: number): string;
+  coinbaseSigningMetadata?(): string;
   prepareHostedSigning?(inputJson: string, now: number): string;
   localHostedSigning?(id: number, now: number): string;
   finishHostedSigning?(id: number, resultJson: string, now: number): string;
@@ -535,11 +561,12 @@ export class EngineHost {
    * once every setup task has settled (bound or refused). A no-op without a signer. */
   prepareAddressSetup(): Promise<void>;
   /** Sign compatibility bytes without startup, transport actions or account mutation. */
+  coinbaseSigningMetadata(): { keyName: string; algorithm: 'es256' | 'edDsa' };
   hostedSigningClock(): HostedSigningClock;
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
   /** Device answer for a keyless server's wallet ws-auth request, signed by the
-   * local provider; refuses an injected signer. Returns the `0x` hex result. */
-  hostedWalletSigning(input: { toSign: string; outputFormat: 'grvt-order' | 'grvt-address' | 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' | 'paradex-stark' | 'paradex-public' }): string;
+   * local provider; refuses an injected signer. Returns the venue's encoded result. */
+  hostedWalletSigning(input: { toSign: string; outputFormat: 'txflow-agent' | 'txflow-address' | 'asterdex-address' | 'asterdex-hmac' | 'asterdex-wallet' | 'grvt-order' | 'grvt-address' | 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' | 'paradex-stark' | 'paradex-public' }): string;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
@@ -552,16 +579,18 @@ export class EngineHost {
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
-  /** Abnormally close the open sockets of `channel` (all when omitted) so the
-   * venue reconnects; returns how many were closed. */
-  reconnectSockets(channel?: EngineSocketChannel): number;
+  /** Abnormally close open sockets of `channel` (all when omitted). Recovery
+   * bounds retain pre-pause physical receipts until stale, preserving
+   * fresh/uninitialized siblings; returns how many sockets were closed. */
+  reconnectSockets(channel?: EngineSocketChannel, recovery?: { staleBefore: number; suspendedBefore?: number }): number;
   /** Sockets waiting out plain backoff redial now; a venue-imposed floor still binds. */
   redialWaitingSockets(): void;
   /** Undefined for an engine without `health()`. */
   health(): EngineHealth | undefined;
   /** Start this account's Rust algos on an `algos` engine build; the host then
-   * keeps their timer armed and delivers replies to `onAlgoEmit`. */
-  algoStart(accountName: string): void;
+   * keeps their timer armed and delivers replies to `onAlgoEmit`.
+   * A false/throwing live owner check permanently retires the entire host before further work. */
+  algoStart(accountName: string, twapOwner?: Readonly<{ ownerId: string; generation: number }> | null, isOwnerCurrent?: () => boolean): void;
   /** Started and not yet stopped or disposed. */
   readonly algosRunning: boolean;
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if refused. */

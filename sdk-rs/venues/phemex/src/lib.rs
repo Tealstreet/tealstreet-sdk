@@ -4,6 +4,7 @@ mod account_wire;
 mod history;
 mod identity;
 mod income;
+mod leverage;
 mod public_candles;
 mod public_reads;
 mod public_trades;
@@ -117,6 +118,18 @@ pub struct PhemexPerpetuals {
     income: income::State,
 }
 impl PhemexPerpetuals {
+    fn observe_rate_limit(&mut self, now: f64, r: &Response<'_>) {
+        if r.status == 429 {
+            let pause = r
+                .header("x-ratelimit-retry-after-contract")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(60.)
+                .max(1.)
+                * 1000.;
+            self.paused_until = self.paused_until.max(now + pause);
+        }
+    }
+
     /// Report each rejected frame, including its wire type when JSON is readable.
     fn public_unreadable(cx: &mut Cx<'_, Pending>, error: &serde_json::Error, text: &str) {
         #[derive(serde::Deserialize)]
@@ -195,6 +208,10 @@ impl PhemexPerpetuals {
     fn command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if let Command::FetchAccount { command } = command {
             self.fetch_identity(cx, command);
+            return;
+        }
+        if let Command::FetchLeverage { symbol, .. } = command {
+            self.fetch_leverage(cx, symbol);
             return;
         }
         let Some(command) = self.trade_command(cx, command) else {
@@ -448,6 +465,16 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        _: f64,
+        _: &Pending,
+        response: Response<'_>,
+    ) {
+        self.observe_rate_limit(now, &response);
+    }
+
     fn managed_sockets() -> bool {
         true
     }
@@ -661,6 +688,7 @@ impl Venue for PhemexPerpetuals {
             Err(error) => return Self::public_unreadable(cx, &error, text),
         };
         if e.method == "perp_market24h_pack_p.update" {
+            cx.record_socket_topic(&["0:tickers"]);
             #[derive(serde::Deserialize)]
             struct Pack<'a> {
                 #[serde(borrow)]
@@ -716,6 +744,7 @@ impl Venue for PhemexPerpetuals {
                 }
             }
         } else if e.orderbook_p.is_some() {
+            cx.record_socket_topic(&["1:book:", &e.symbol]);
             if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text)
                 .inspect_err(|error| Self::public_unreadable(cx, error, text))
             {
@@ -740,12 +769,18 @@ impl Venue for PhemexPerpetuals {
                 Ok(k) => k,
                 Err(error) => return Self::public_unreadable(cx, &error, text),
             };
-            // Subscribe snapshots are history, including their newest row. Only
-            // explicitly incremental frames may enter the live candle path.
-            if k.kind != "incremental" {
-                return;
+            for r in &k.kline_p {
+                cx.record_socket_topic_number(&["2:candle:", &e.symbol, ":"], r.1.0 as u32 as u64);
             }
-            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+            match k.kind.as_str() {
+                "snapshot" => {
+                    // TS listenOHLCV replays wire rows 1 then 0, not all history.
+                    k.kline_p.truncate(2);
+                    k.kline_p.reverse();
+                }
+                "incremental" => k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0)),
+                _ => return,
+            }
             for r in k.kline_p {
                 for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                     s == &e.symbol.to_ascii_uppercase()
@@ -834,16 +869,7 @@ impl Venue for PhemexPerpetuals {
             self.on_http_failed(cx, p, error.read_venue_error());
             return;
         }
-        if r.status == 429 {
-            self.paused_until = self.paused_until.max(
-                cx.now
-                    + r.header("x-ratelimit-retry-after-contract")
-                        .and_then(|v| v.parse::<f64>().ok())
-                        .unwrap_or(60.)
-                        .max(1.)
-                        * 1000.,
-            );
-        }
+        self.observe_rate_limit(cx.now, &r);
         if let Some(context) = p.public_read_context()
             && cx.validate_background_read_http_delivery(context).is_err()
         {

@@ -282,7 +282,7 @@ impl OrderRow<'_> {
     }
     pub fn status(&self) -> Option<OrderStatus> {
         match self.status.to_ascii_lowercase().as_str() {
-            "created" | "new" | "untriggered" | "partiallyfilled" | "partially_filled" => {
+            "created" | "init" | "new" | "untriggered" | "partiallyfilled" | "partially_filled" => {
                 Some(OrderStatus::Open)
             }
             "triggered" | "filled" => Some(OrderStatus::Closed),
@@ -390,7 +390,7 @@ impl OrderRow<'_> {
                 "GoodTillCancel" => Some(TimeInForce::GoodTillCancel),
                 "ImmediateOrCancel" => Some(TimeInForce::ImmediateOrCancel),
                 "FillOrKill" => Some(TimeInForce::FillOrKill),
-                "PostOnly" => Some(TimeInForce::PostOnly),
+                "PostOnly" | "RPIPostOnly" => Some(TimeInForce::PostOnly),
                 _ => None,
             },
             last_update: if self.version() > 0 {

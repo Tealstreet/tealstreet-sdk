@@ -1,0 +1,2668 @@
+diff --git a/sdk-rs/safe-cex-types/src/lib.rs b/sdk-rs/safe-cex-types/src/lib.rs
+--- a/sdk-rs/safe-cex-types/src/lib.rs
++++ b/sdk-rs/safe-cex-types/src/lib.rs
+@@ -1,6 +1,33 @@
+ //! Rust-owned finite JSON domain models. See ../TYPE_PARITY.md for generator compatibility limits.
+ use serde::{Deserialize, Serialize};
+ use ts_rs::TS;
++
++pub mod options;
++pub use options::{
++    LocalSignerMetadataCapability,
++    RustPublicFeedCapability,
++    ExchangeAccountConfigBybitSiteId,
++    ExchangeAccountConfigHealthStatus,
++    ExchangeAccountConfig,
++    ExchangeOptionsAuth,
++    ExchangeOptionsHyperliquidBuilder,
++    ExchangeOptionsBybitSiteId,
++    ExchangeOptionsTuning,
++    ExchangeOptionsExtraAsterdexApiVersion,
++    ExchangeOptionsExtraLighterBuilderFeeMode,
++    ExchangeOptionsExtraKucoinBroker,
++    ExchangeOptionsExtraHyrotraderMode,
++    ExchangeOptionsExtra,
++    ExchangeOptionsExternalPublicDataVariant0Type,
++    ExchangeOptionsExternalPublicDataVariant0,
++    ExchangeOptionsExternalPublicDataVariant1Type,
++    ExchangeOptionsExternalPublicDataVariant1,
++    ExchangeOptionsExternalPublicData,
++    ExchangeOptions,
++    ExchangeAccount,
++    ExchangeOptionsEngine,
++    ExchangeOptionsPolymarket
++};
+
+ pub mod position;
+ pub(crate) use position::serialize_position_fields;
+@@ -26,44 +53,6 @@
+     T: Deserialize<'de>,
+ {
+     T::deserialize(deserializer).map(Some)
+-}
+-
+-/// Typed account extension consumed by the Polymarket source constructor.
+-/// Unlike the venue's retained UTF-16 record, this uses the shared account
+-/// UTF-8 string boundary. signerType retains source numeric values verbatim.
+-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+-#[serde(rename_all = "camelCase")]
+-pub struct ExchangeOptionsPolymarket {
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub api_key: Option<String>,
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub api_secret: Option<String>,
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub api_passphrase: Option<String>,
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub signer_type: Option<f64>,
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub funder_address: Option<String>,
+ }
+
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+@@ -1450,898 +1439,6 @@
+     Krakenspot,
+ }
+
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeAccountConfigBybitSiteId {
+-    #[serde(rename = "BRA_BTL")]
+-    BraBtl,
+-}
+-
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeAccountConfigHealthStatus {
+-    #[serde(rename = "ok")]
+-    Ok,
+-    #[serde(rename = "auth_error")]
+-    AuthError,
+-    #[serde(rename = "auth_expired")]
+-    AuthExpired,
+-    #[serde(rename = "permissions_error")]
+-    PermissionsError,
+-    #[serde(rename = "startup_failed")]
+-    StartupFailed,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeAccountConfig {
+-    /// @ts-mutable
+-    #[serde(rename = "exchange")]
+-    pub exchange: ExchangeName,
+-    /// @ts-mutable
+-    #[serde(rename = "name")]
+-    pub name: String,
+-    /// @ts-mutable
+-    #[serde(rename = "testnet")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub testnet: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "apiKey")]
+-    pub api_key: String,
+-    /// @ts-mutable
+-    #[serde(rename = "apiSecret")]
+-    pub api_secret: String,
+-    /// @ts-mutable
+-    #[serde(rename = "passphrase")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub passphrase: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "secondary_apiKey")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub secondary_api_key: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "secondary_apiSecret")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub secondary_api_secret: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "secondary_passphrase")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub secondary_passphrase: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "enableSpotMarkets")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub enable_spot_markets: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "enableOptionMarkets")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub enable_option_markets: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "enableInverseMarkets")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub enable_inverse_markets: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "bybitSiteId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub bybit_site_id: Option<ExchangeAccountConfigBybitSiteId>,
+-    /// @ts-mutable
+-    #[serde(rename = "applicationId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub application_id: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "apiKeyIndex")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub api_key_index: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "vault")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub vault: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "omniKeySeed")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub omni_key_seed: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "subaccount")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub subaccount: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "orderlyExchangeId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub orderly_exchange_id: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "paradexAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub paradex_address: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "subkeyAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub subkey_address: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "grvtSignerAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub grvt_signer_address: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "grvtTradingAccountId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub grvt_trading_account_id: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "tealstreetProxy")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub tealstreet_proxy: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "tealstreetTunnel")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub tealstreet_tunnel: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "tealstreetWsRoute")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub tealstreet_ws_route: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "proxyRegion")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub proxy_region: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "hyrotraderDemo")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub hyrotrader_demo: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "useExtensionDirect")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub use_extension_direct: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "user")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub user: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "color")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub color: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "active")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub active: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "pinned")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub pinned: Option<bool>,
+-    /// @ts-mutable
+-    #[serde(rename = "telegramBotToken")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub telegram_bot_token: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "lastSymbol")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub last_symbol: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "healthStatus")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub health_status: Option<ExchangeAccountConfigHealthStatus>,
+-    /// @ts-mutable
+-    #[serde(rename = "updatedAt")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub updated_at: Option<f64>,
+-    /// @ts-mutable
+-    #[serde(rename = "deletedAt")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub deleted_at: Option<f64>,
+-    /// @ts-mutable
+-    #[serde(rename = "syncId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub sync_id: Option<String>,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptionsAuth {
+-    /// @ts-mutable
+-    #[serde(rename = "userAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub user_address: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "signerAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub signer_address: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "privateKey")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub private_key: Option<String>,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptionsHyperliquidBuilder {
+-    #[serde(rename = "address")]
+-    pub address: String,
+-    #[serde(rename = "feeTenthsBps")]
+-    pub fee_tenths_bps: f64,
+-}
+-
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeOptionsBybitSiteId {
+-    #[serde(rename = "BRA_BTL")]
+-    BraBtl,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptionsTuning {
+-    #[serde(rename = "activeTickerSymbols")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub active_ticker_symbols: Option<Vec<String>>,
+-    #[serde(rename = "calculateUpnlFromRealtimeLastPrice")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub calculate_upnl_from_realtime_last_price: Option<bool>,
+-    #[serde(rename = "dataUpdateThrottleMultiplier")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub data_update_throttle_multiplier: Option<f64>,
+-    #[serde(rename = "skipRendersWhenWindowIsHidden")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub skip_renders_when_window_is_hidden: Option<bool>,
+-    #[serde(rename = "consoleLogging")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub console_logging: Option<bool>,
+-}
+-
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeOptionsExtraAsterdexApiVersion {
+-    #[serde(rename = "v1")]
+-    V1,
+-    #[serde(rename = "v3")]
+-    V3,
+-}
+-
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeOptionsExtraLighterBuilderFeeMode {
+-    #[serde(rename = "dynamic")]
+-    Dynamic,
+-    #[serde(rename = "static")]
+-    Static,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptionsExtraKucoinBroker {
+-    #[serde(rename = "partner")]
+-    pub partner: String,
+-    #[serde(rename = "brokerKey")]
+-    pub broker_key: String,
+-    #[serde(rename = "brokerName")]
+-    pub broker_name: String,
+-    #[serde(rename = "verify")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub verify: Option<bool>,
+-}
+-
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeOptionsExtraHyrotraderMode {
+-    #[serde(rename = "demo")]
+-    Demo,
+-    #[serde(rename = "production")]
+-    Production,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptionsExtra {
+-    /// @ts-mutable
+-    #[serde(rename = "tickInterval")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub tick_interval: Option<f64>,
+-    /// @ts-mutable
+-    #[serde(rename = "recvWindow")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub recv_window: Option<f64>,
+-    /// @ts-mutable
+-    #[serde(rename = "asterdexApiVersion")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub asterdex_api_version: Option<ExchangeOptionsExtraAsterdexApiVersion>,
+-    /// @ts-mutable
+-    #[serde(rename = "asterBuilderAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub aster_builder_address: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "asterBuilderFeeRateMaker")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub aster_builder_fee_rate_maker: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "asterBuilderFeeRateTaker")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub aster_builder_fee_rate_taker: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "lighterBuilderFeeMode")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub lighter_builder_fee_mode: Option<ExchangeOptionsExtraLighterBuilderFeeMode>,
+-    /// @ts-mutable
+-    #[serde(rename = "lighterIntegratorAccountIndex")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub lighter_integrator_account_index: Option<String>,
+-    /// @ts-mutable
+-    #[serde(rename = "lighterStopSlippagePct")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub lighter_stop_slippage_pct: Option<f64>,
+-    /// @ts-mutable
+-    #[serde(rename = "hyrotraderMode")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
+-    /// @ts-mutable
+-    #[serde(rename = "kucoinBroker")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub kucoin_broker: Option<ExchangeOptionsExtraKucoinBroker>,
+-}
+-
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeOptionsExternalPublicDataVariant0Type {
+-    #[serde(rename = "websocket")]
+-    Websocket,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptionsExternalPublicDataVariant0 {
+-    /// @ts-mutable
+-    #[serde(rename = "type")]
+-    #[ts(inline)]
+-    pub r#type: ExchangeOptionsExternalPublicDataVariant0Type,
+-    /// @ts-mutable
+-    #[serde(rename = "url")]
+-    pub url: String,
+-    /// @ts-mutable
+-    #[serde(rename = "exchangeId")]
+-    pub exchange_id: String,
+-    /// @ts-mutable
+-    #[serde(rename = "authToken")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub auth_token: Option<String>,
+-}
+-
+-/// @ts-union
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-pub enum ExchangeOptionsExternalPublicDataVariant1Type {
+-    #[serde(rename = "in-process")]
+-    InProcess,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptionsExternalPublicDataVariant1 {
+-    /// @ts-mutable
+-    #[serde(rename = "type")]
+-    #[ts(inline)]
+-    pub r#type: ExchangeOptionsExternalPublicDataVariant1Type,
+-    /// @ts-mutable
+-    #[serde(rename = "source")]
+-    #[ts(type = "PublicDataSource")]
+-    pub source: PublicDataSourceCapability,
+-}
+-
+-/// @ts-shape
+-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+-#[serde(untagged)]
+-pub enum ExchangeOptionsExternalPublicData {
+-    Variant0(#[ts(inline)] ExchangeOptionsExternalPublicDataVariant0),
+-    Variant1(#[ts(inline)] ExchangeOptionsExternalPublicDataVariant1),
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeOptions {
+-    #[serde(rename = "key")]
+-    pub key: String,
+-    #[serde(rename = "secret")]
+-    pub secret: String,
+-    #[serde(rename = "passphrase")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub passphrase: Option<String>,
+-    #[serde(rename = "secondary_key")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub secondary_key: Option<String>,
+-    #[serde(rename = "secondary_secret")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub secondary_secret: Option<String>,
+-    #[serde(rename = "secondary_passphrase")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub secondary_passphrase: Option<String>,
+-    #[serde(rename = "secondaryProxyUrl")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub secondary_proxy_url: Option<String>,
+-    #[serde(rename = "auth")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub auth: Option<ExchangeOptionsAuth>,
+-    #[serde(rename = "paradexAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub paradex_address: Option<String>,
+-    #[serde(rename = "subkeyAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub subkey_address: Option<String>,
+-    #[serde(rename = "grvtSignerAddress")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub grvt_signer_address: Option<String>,
+-    #[serde(rename = "grvtTradingAccountId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub grvt_trading_account_id: Option<String>,
+-    #[serde(rename = "starkPrivateKey")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub stark_private_key: Option<String>,
+-    #[serde(rename = "vault")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub vault: Option<String>,
+-    #[serde(rename = "applicationId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub application_id: Option<String>,
+-    #[serde(rename = "apiKeyIndex")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub api_key_index: Option<String>,
+-    #[serde(rename = "hyperliquidBuilder")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub hyperliquid_builder: Option<ExchangeOptionsHyperliquidBuilder>,
+-    #[serde(rename = "testnet")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub testnet: Option<bool>,
+-    #[serde(rename = "enableSpotMarkets")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub enable_spot_markets: Option<bool>,
+-    #[serde(rename = "enableOptionMarkets")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub enable_option_markets: Option<bool>,
+-    #[serde(rename = "enableInverseMarkets")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub enable_inverse_markets: Option<bool>,
+-    #[serde(rename = "bybitSiteId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub bybit_site_id: Option<ExchangeOptionsBybitSiteId>,
+-    #[serde(rename = "publicDataOnly")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub public_data_only: Option<bool>,
+-    #[serde(rename = "privateOnly")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub private_only: Option<bool>,
+-    #[serde(rename = "tealstreetProxy")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub tealstreet_proxy: Option<bool>,
+-    #[serde(rename = "tealstreetTunnel")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub tealstreet_tunnel: Option<bool>,
+-    #[serde(rename = "tealstreetWsRoute")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub tealstreet_ws_route: Option<bool>,
+-    #[serde(rename = "overrideProxyUrl")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub override_proxy_url: Option<String>,
+-    #[serde(rename = "proxyRegion")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub proxy_region: Option<String>,
+-    #[serde(rename = "omniKeySeed")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub omni_key_seed: Option<String>,
+-    #[serde(rename = "subaccount")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub subaccount: Option<String>,
+-    #[serde(rename = "orderlyExchangeId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub orderly_exchange_id: Option<String>,
+-    #[serde(rename = "tuning")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub tuning: Option<ExchangeOptionsTuning>,
+-    #[serde(rename = "extra")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub extra: Option<ExchangeOptionsExtra>,
+-    /// Runtime extension read by Polymarket through its source `opts as any`.
+-    #[serde(rename = "polymarket")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(skip)]
+-    pub polymarket: Option<crate::ExchangeOptionsPolymarket>,
+-    #[serde(rename = "remoteSigner")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(type = "RemoteSigner", optional)]
+-    pub remote_signer: Option<RemoteSignerCapability>,
+-    #[serde(rename = "transport")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(type = "TransportProvider", optional)]
+-    pub transport: Option<TransportCapability>,
+-    #[serde(rename = "payloadSigner")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(type = "PayloadSigner", optional)]
+-    pub payload_signer: Option<PayloadSignerCapability>,
+-    #[serde(rename = "hostedMode")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    pub hosted_mode: Option<bool>,
+-    #[serde(rename = "externalPublicData")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(inline)]
+-    pub external_public_data: Option<ExchangeOptionsExternalPublicData>,
+-}
+-
+ #[derive(Debug, Clone, PartialEq, Serialize, TS)]
+ #[ts(optional_fields)]
+ pub struct ValidateAccountResult {
+@@ -2405,29 +1502,6 @@
+     #[serde(rename = "update")]
+     #[ts(inline)]
+     pub update: UpdateOrderOptsUpdate,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+-#[ts(optional_fields)]
+-pub struct ExchangeAccount {
+-    #[serde(rename = "userId")]
+-    pub user_id: String,
+-    #[serde(rename = "subId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(type = "string | null", optional)]
+-    pub sub_id: Option<Option<String>>,
+-    #[serde(rename = "affiliateId")]
+-    #[serde(
+-        default,
+-        deserialize_with = "deserialize_present",
+-        skip_serializing_if = "Option::is_none"
+-    )]
+-    #[ts(type = "string | null", optional)]
+-    pub affiliate_id: Option<Option<String>>,
+ }
+
+ /// @ts-union
+@@ -2991,6 +2065,25 @@
+         skip_serializing_if = "Option::is_none"
+     )]
+     pub force_all_proxies_off: Option<bool>,
++    #[serde(rename = "localSigner", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++    #[ts(type = "LocalSignerMetadata", optional)]
++    pub local_signer: Option<LocalSignerMetadataCapability>,
++    #[serde(rename = "hyperliquidFastBook", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++    pub hyperliquid_fast_book: Option<bool>,
++    #[serde(rename = "callerReportsPlacementFailures", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++    pub caller_reports_placement_failures: Option<bool>,
++    #[serde(rename = "workerMirror", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++    pub worker_mirror: Option<bool>,
++    #[serde(rename = "engine", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++    #[ts(inline)]
++    pub engine: Option<ExchangeOptionsEngine>,
++    #[serde(rename = "publicFeed", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++    #[ts(type = "RustPublicFeedPolicy", optional)]
++    pub public_feed: Option<RustPublicFeedCapability>,
++    #[serde(rename = "polymarket", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++    #[ts(inline)]
++    pub polymarket: Option<ExchangeOptionsPolymarket>,
++
+ }
+
+ // These distinct uninhabited markers cannot encode or invent an in-process capability.
+@@ -3100,36 +2193,14 @@
+ // Private wire companions keep serde metadata without exposing permissive decoders.
+ mod strict_codecs {
+     #[cfg(test)]
++    use super::ExchangeName;
++    use super::{LocalSignerMetadataCapability, ExchangeOptionsEngine, RustPublicFeedCapability, ExchangeOptionsPolymarket};
++    #[cfg(test)]
+     use super::{
+-        AccountGreeks, BothPositionSide, Candle, ClosedPnlEntry, DisplayedMargin, ExchangeAccount,
+-        ExchangeAccountConfig, ExchangeOptions, ExchangeOptionsExternalPublicDataVariant0,
+-        ExchangeOptionsExternalPublicDataVariant1, Execution, ExecutionsOptions, ExtendedTimeframe,
+-        FetchedLeverage, HistoricalOrder, HistoricalTrade, HistoricalTradeOptions,
+-        IncomeHistoryOptions, IncomeRecord, Market, MessageHandlerStatsType, OHLCVOptions,
+-        OHLCVSOptions, OptionChainQuery, OptionChainRow, OptionGreeks, OptionQuote, OrderBook,
+-        OrderHistoryOptions, OrderRiskProfile, PlaceOrderOpts, PublicExchangeOptions, PublicTrade,
+-        RequestOutcome, RequestOutcomeCounts, SecondsTimeframe, StoreDataLoaded, StoreOptions,
+-        StoreUpdateIds, Ticker, UpdateOrderOpts, UpdateOrderOptsUpdateVariant0,
+-        UpdateOrderOptsUpdateVariant1, ValidateAccountResult,
++        AccountGreeks, BothPositionSide, Candle, ClosedPnlEntry, DisplayedMargin, Execution, ExecutionsOptions, ExtendedTimeframe, FetchedLeverage, HistoricalOrder, HistoricalTrade, HistoricalTradeOptions, IncomeHistoryOptions, IncomeRecord, Market, MessageHandlerStatsType, OHLCVOptions, OHLCVSOptions, OptionChainQuery, OptionChainRow, OptionGreeks, OptionQuote, OrderBook, OrderHistoryOptions, OrderRiskProfile, PlaceOrderOpts, PublicExchangeOptions, PublicTrade, RequestOutcome, RequestOutcomeCounts, SecondsTimeframe, StoreDataLoaded, StoreOptions, StoreUpdateIds, Ticker, UpdateOrderOpts, UpdateOrderOptsUpdateVariant0, UpdateOrderOptsUpdateVariant1, ValidateAccountResult
+     };
+     use super::{
+-        AccountValidationError, AnyTimeframe, Balance, ClosedPnlEntryContracts,
+-        ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice, ClosedPnlEntryFees,
+-        ClosedPnlEntryLeverage, ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl, CoinBalance,
+-        DataProvenance, ExchangeAccountConfigBybitSiteId, ExchangeAccountConfigHealthStatus,
+-        ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
+-        ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
+-        ExchangeOptionsExternalPublicDataVariant1Type, ExchangeOptionsExtra,
+-        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode,
+-        ExchangeOptionsExtraKucoinBroker, ExchangeOptionsExtraLighterBuilderFeeMode,
+-        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, ExecutionPositionSide,
+-        IncomeCategory, MarginType, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage,
+-        MarketLimitsPrice, MarketPrecision, ModelField, OptionRight, OptionTerms,
+-        OptionTermsSettlement, OptionTermsStyle, Order, OrderBookOrders, OrderExtra,
+-        OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
+-        OrderType, PayloadSignerCapability, PositionMode, PositionSide, PublicDataSourceCapability,
+-        RemoteSignerCapability, Timeframe, TransportCapability, True, UpdateOrderOptsUpdate,
+-        deserialize_present,
++        AccountValidationError, AnyTimeframe, Balance, ClosedPnlEntryContracts, ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice, ClosedPnlEntryFees, ClosedPnlEntryLeverage, ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl, CoinBalance, DataProvenance, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId, ExchangeOptionsExternalPublicData, ExchangeOptionsExtra, ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, ExecutionPositionSide, IncomeCategory, MarginType, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, ModelField, OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, Order, OrderBookOrders, OrderExtra, OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, PayloadSignerCapability, PositionMode, PositionSide, RemoteSignerCapability, Timeframe, TransportCapability, True, UpdateOrderOptsUpdate, deserialize_present
+     };
+     #[derive(serde::Deserialize)]
+     #[serde(remote = "super::OrderStatus")]
+@@ -4930,985 +4001,6 @@
+     }
+
+     #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeAccountConfigBybitSiteId")]
+-    enum WireExchangeAccountConfigBybitSiteId {
+-        #[serde(rename = "BRA_BTL")]
+-        BraBtl,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeAccountConfigBybitSiteId {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeAccountConfigBybitSiteId::deserialize(
+-                serde::de::value::StringDeserializer::<D::Error>::new(value),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeAccountConfigHealthStatus")]
+-    enum WireExchangeAccountConfigHealthStatus {
+-        #[serde(rename = "ok")]
+-        Ok,
+-        #[serde(rename = "auth_error")]
+-        AuthError,
+-        #[serde(rename = "auth_expired")]
+-        AuthExpired,
+-        #[serde(rename = "permissions_error")]
+-        PermissionsError,
+-        #[serde(rename = "startup_failed")]
+-        StartupFailed,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeAccountConfigHealthStatus {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeAccountConfigHealthStatus::deserialize(
+-                serde::de::value::StringDeserializer::<D::Error>::new(value),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeAccountConfig")]
+-    struct WireExchangeAccountConfig {
+-        #[serde(rename = "exchange")]
+-        exchange: ExchangeName,
+-        #[serde(rename = "name")]
+-        name: String,
+-        #[serde(rename = "testnet")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        testnet: Option<bool>,
+-        #[serde(rename = "apiKey")]
+-        api_key: String,
+-        #[serde(rename = "apiSecret")]
+-        api_secret: String,
+-        #[serde(rename = "passphrase")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        passphrase: Option<String>,
+-        #[serde(rename = "secondary_apiKey")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        secondary_api_key: Option<String>,
+-        #[serde(rename = "secondary_apiSecret")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        secondary_api_secret: Option<String>,
+-        #[serde(rename = "secondary_passphrase")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        secondary_passphrase: Option<String>,
+-        #[serde(rename = "enableSpotMarkets")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        enable_spot_markets: Option<bool>,
+-        #[serde(rename = "enableOptionMarkets")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        enable_option_markets: Option<bool>,
+-        #[serde(rename = "enableInverseMarkets")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        enable_inverse_markets: Option<bool>,
+-        #[serde(rename = "bybitSiteId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        bybit_site_id: Option<ExchangeAccountConfigBybitSiteId>,
+-        #[serde(rename = "applicationId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        application_id: Option<String>,
+-        #[serde(rename = "apiKeyIndex")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        api_key_index: Option<String>,
+-        #[serde(rename = "vault")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        vault: Option<String>,
+-        #[serde(rename = "omniKeySeed")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        omni_key_seed: Option<String>,
+-        #[serde(rename = "subaccount")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        subaccount: Option<String>,
+-        #[serde(rename = "orderlyExchangeId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        orderly_exchange_id: Option<String>,
+-        #[serde(rename = "paradexAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        paradex_address: Option<String>,
+-        #[serde(rename = "subkeyAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        subkey_address: Option<String>,
+-        #[serde(rename = "grvtSignerAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        grvt_signer_address: Option<String>,
+-        #[serde(rename = "grvtTradingAccountId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        grvt_trading_account_id: Option<String>,
+-        #[serde(rename = "tealstreetProxy")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tealstreet_proxy: Option<bool>,
+-        #[serde(rename = "tealstreetTunnel")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tealstreet_tunnel: Option<bool>,
+-        #[serde(rename = "tealstreetWsRoute")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tealstreet_ws_route: Option<bool>,
+-        #[serde(rename = "proxyRegion")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        proxy_region: Option<String>,
+-        #[serde(rename = "hyrotraderDemo")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        hyrotrader_demo: Option<bool>,
+-        #[serde(rename = "useExtensionDirect")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        use_extension_direct: Option<bool>,
+-        #[serde(rename = "user")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        user: Option<String>,
+-        #[serde(rename = "color")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        color: Option<String>,
+-        #[serde(rename = "active")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        active: Option<bool>,
+-        #[serde(rename = "pinned")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        pinned: Option<bool>,
+-        #[serde(rename = "telegramBotToken")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        telegram_bot_token: Option<String>,
+-        #[serde(rename = "lastSymbol")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        last_symbol: Option<String>,
+-        #[serde(rename = "healthStatus")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        health_status: Option<ExchangeAccountConfigHealthStatus>,
+-        #[serde(rename = "updatedAt")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        updated_at: Option<f64>,
+-        #[serde(rename = "deletedAt")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        deleted_at: Option<f64>,
+-        #[serde(rename = "syncId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        sync_id: Option<String>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeAccountConfig {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeAccountConfig::deserialize(crate::strict_decode::object(deserializer))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsAuth")]
+-    struct WireExchangeOptionsAuth {
+-        #[serde(rename = "userAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        user_address: Option<String>,
+-        #[serde(rename = "signerAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        signer_address: Option<String>,
+-        #[serde(rename = "privateKey")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        private_key: Option<String>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsAuth {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsAuth::deserialize(crate::strict_decode::object(deserializer))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsPolymarket")]
+-    #[serde(rename_all = "camelCase")]
+-    struct WireExchangeOptionsPolymarket {
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        api_key: Option<String>,
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        api_secret: Option<String>,
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        api_passphrase: Option<String>,
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        signer_type: Option<f64>,
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        funder_address: Option<String>,
+-    }
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsPolymarket {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsPolymarket::deserialize(crate::strict_decode::object(deserializer))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsHyperliquidBuilder")]
+-    struct WireExchangeOptionsHyperliquidBuilder {
+-        #[serde(rename = "address")]
+-        address: String,
+-        #[serde(rename = "feeTenthsBps")]
+-        fee_tenths_bps: f64,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsHyperliquidBuilder {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsHyperliquidBuilder::deserialize(crate::strict_decode::object(
+-                deserializer,
+-            ))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsBybitSiteId")]
+-    enum WireExchangeOptionsBybitSiteId {
+-        #[serde(rename = "BRA_BTL")]
+-        BraBtl,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsBybitSiteId {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeOptionsBybitSiteId::deserialize(serde::de::value::StringDeserializer::<
+-                D::Error,
+-            >::new(value))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsTuning")]
+-    struct WireExchangeOptionsTuning {
+-        #[serde(rename = "activeTickerSymbols")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        active_ticker_symbols: Option<Vec<String>>,
+-        #[serde(rename = "calculateUpnlFromRealtimeLastPrice")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        calculate_upnl_from_realtime_last_price: Option<bool>,
+-        #[serde(rename = "dataUpdateThrottleMultiplier")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        data_update_throttle_multiplier: Option<f64>,
+-        #[serde(rename = "skipRendersWhenWindowIsHidden")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        skip_renders_when_window_is_hidden: Option<bool>,
+-        #[serde(rename = "consoleLogging")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        console_logging: Option<bool>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsTuning {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsTuning::deserialize(crate::strict_decode::object(deserializer))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExtraAsterdexApiVersion")]
+-    enum WireExchangeOptionsExtraAsterdexApiVersion {
+-        #[serde(rename = "v1")]
+-        V1,
+-        #[serde(rename = "v3")]
+-        V3,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtraAsterdexApiVersion {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeOptionsExtraAsterdexApiVersion::deserialize(
+-                serde::de::value::StringDeserializer::<D::Error>::new(value),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExtraLighterBuilderFeeMode")]
+-    enum WireExchangeOptionsExtraLighterBuilderFeeMode {
+-        #[serde(rename = "dynamic")]
+-        Dynamic,
+-        #[serde(rename = "static")]
+-        Static,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtraLighterBuilderFeeMode {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeOptionsExtraLighterBuilderFeeMode::deserialize(
+-                serde::de::value::StringDeserializer::<D::Error>::new(value),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExtraKucoinBroker")]
+-    struct WireExchangeOptionsExtraKucoinBroker {
+-        #[serde(rename = "partner")]
+-        partner: String,
+-        #[serde(rename = "brokerKey")]
+-        broker_key: String,
+-        #[serde(rename = "brokerName")]
+-        broker_name: String,
+-        #[serde(rename = "verify")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        verify: Option<bool>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtraKucoinBroker {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsExtraKucoinBroker::deserialize(crate::strict_decode::object(
+-                deserializer,
+-            ))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExtraHyrotraderMode")]
+-    enum WireExchangeOptionsExtraHyrotraderMode {
+-        #[serde(rename = "demo")]
+-        Demo,
+-        #[serde(rename = "production")]
+-        Production,
+-    }
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtraHyrotraderMode {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeOptionsExtraHyrotraderMode::deserialize(
+-                serde::de::value::StringDeserializer::<D::Error>::new(value),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExtra")]
+-    struct WireExchangeOptionsExtra {
+-        #[serde(rename = "tickInterval")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tick_interval: Option<f64>,
+-        #[serde(rename = "recvWindow")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        recv_window: Option<f64>,
+-        #[serde(rename = "asterdexApiVersion")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        asterdex_api_version: Option<ExchangeOptionsExtraAsterdexApiVersion>,
+-        #[serde(rename = "asterBuilderAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        aster_builder_address: Option<String>,
+-        #[serde(rename = "asterBuilderFeeRateMaker")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        aster_builder_fee_rate_maker: Option<String>,
+-        #[serde(rename = "asterBuilderFeeRateTaker")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        aster_builder_fee_rate_taker: Option<String>,
+-        #[serde(rename = "lighterBuilderFeeMode")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        lighter_builder_fee_mode: Option<ExchangeOptionsExtraLighterBuilderFeeMode>,
+-        #[serde(rename = "lighterIntegratorAccountIndex")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        lighter_integrator_account_index: Option<String>,
+-        #[serde(rename = "lighterStopSlippagePct")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        lighter_stop_slippage_pct: Option<f64>,
+-        #[serde(rename = "hyrotraderMode")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
+-        #[serde(rename = "kucoinBroker")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        kucoin_broker: Option<ExchangeOptionsExtraKucoinBroker>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtra {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsExtra::deserialize(crate::strict_decode::object(deserializer))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExternalPublicDataVariant0Type")]
+-    enum WireExchangeOptionsExternalPublicDataVariant0Type {
+-        #[serde(rename = "websocket")]
+-        Websocket,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExternalPublicDataVariant0Type {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeOptionsExternalPublicDataVariant0Type::deserialize(
+-                serde::de::value::StringDeserializer::<D::Error>::new(value),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExternalPublicDataVariant0")]
+-    struct WireExchangeOptionsExternalPublicDataVariant0 {
+-        #[serde(rename = "type")]
+-        r#type: ExchangeOptionsExternalPublicDataVariant0Type,
+-        #[serde(rename = "url")]
+-        url: String,
+-        #[serde(rename = "exchangeId")]
+-        exchange_id: String,
+-        #[serde(rename = "authToken")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        auth_token: Option<String>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExternalPublicDataVariant0 {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsExternalPublicDataVariant0::deserialize(
+-                crate::strict_decode::object(deserializer),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExternalPublicDataVariant1Type")]
+-    enum WireExchangeOptionsExternalPublicDataVariant1Type {
+-        #[serde(rename = "in-process")]
+-        InProcess,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExternalPublicDataVariant1Type {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            let value = String::deserialize(deserializer)?;
+-            WireExchangeOptionsExternalPublicDataVariant1Type::deserialize(
+-                serde::de::value::StringDeserializer::<D::Error>::new(value),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptionsExternalPublicDataVariant1")]
+-    struct WireExchangeOptionsExternalPublicDataVariant1 {
+-        #[serde(rename = "type")]
+-        r#type: ExchangeOptionsExternalPublicDataVariant1Type,
+-        #[serde(rename = "source")]
+-        source: PublicDataSourceCapability,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExternalPublicDataVariant1 {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptionsExternalPublicDataVariant1::deserialize(
+-                crate::strict_decode::object(deserializer),
+-            )
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeOptions")]
+-    struct WireExchangeOptions {
+-        #[serde(rename = "key")]
+-        key: String,
+-        #[serde(rename = "secret")]
+-        secret: String,
+-        #[serde(rename = "passphrase")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        passphrase: Option<String>,
+-        #[serde(rename = "secondary_key")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        secondary_key: Option<String>,
+-        #[serde(rename = "secondary_secret")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        secondary_secret: Option<String>,
+-        #[serde(rename = "secondary_passphrase")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        secondary_passphrase: Option<String>,
+-        #[serde(rename = "secondaryProxyUrl")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        secondary_proxy_url: Option<String>,
+-        #[serde(rename = "auth")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        auth: Option<ExchangeOptionsAuth>,
+-        #[serde(rename = "paradexAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        paradex_address: Option<String>,
+-        #[serde(rename = "subkeyAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        subkey_address: Option<String>,
+-        #[serde(rename = "grvtSignerAddress")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        grvt_signer_address: Option<String>,
+-        #[serde(rename = "grvtTradingAccountId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        grvt_trading_account_id: Option<String>,
+-        #[serde(rename = "starkPrivateKey")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        stark_private_key: Option<String>,
+-        #[serde(rename = "vault")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        vault: Option<String>,
+-        #[serde(rename = "applicationId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        application_id: Option<String>,
+-        #[serde(rename = "apiKeyIndex")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        api_key_index: Option<String>,
+-        #[serde(rename = "hyperliquidBuilder")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        hyperliquid_builder: Option<ExchangeOptionsHyperliquidBuilder>,
+-        #[serde(rename = "testnet")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        testnet: Option<bool>,
+-        #[serde(rename = "enableSpotMarkets")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        enable_spot_markets: Option<bool>,
+-        #[serde(rename = "enableOptionMarkets")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        enable_option_markets: Option<bool>,
+-        #[serde(rename = "enableInverseMarkets")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        enable_inverse_markets: Option<bool>,
+-        #[serde(rename = "bybitSiteId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        bybit_site_id: Option<ExchangeOptionsBybitSiteId>,
+-        #[serde(rename = "publicDataOnly")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        public_data_only: Option<bool>,
+-        #[serde(rename = "privateOnly")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        private_only: Option<bool>,
+-        #[serde(rename = "tealstreetProxy")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tealstreet_proxy: Option<bool>,
+-        #[serde(rename = "tealstreetTunnel")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tealstreet_tunnel: Option<bool>,
+-        #[serde(rename = "tealstreetWsRoute")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tealstreet_ws_route: Option<bool>,
+-        #[serde(rename = "overrideProxyUrl")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        override_proxy_url: Option<String>,
+-        #[serde(rename = "proxyRegion")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        proxy_region: Option<String>,
+-        #[serde(rename = "omniKeySeed")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        omni_key_seed: Option<String>,
+-        #[serde(rename = "subaccount")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        subaccount: Option<String>,
+-        #[serde(rename = "orderlyExchangeId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        orderly_exchange_id: Option<String>,
+-        #[serde(rename = "tuning")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        tuning: Option<ExchangeOptionsTuning>,
+-        #[serde(rename = "extra")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        extra: Option<ExchangeOptionsExtra>,
+-        #[serde(rename = "polymarket")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        polymarket: Option<crate::ExchangeOptionsPolymarket>,
+-        #[serde(rename = "remoteSigner")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        remote_signer: Option<RemoteSignerCapability>,
+-        #[serde(rename = "transport")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        transport: Option<TransportCapability>,
+-        #[serde(rename = "payloadSigner")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        payload_signer: Option<PayloadSignerCapability>,
+-        #[serde(rename = "hostedMode")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        hosted_mode: Option<bool>,
+-        #[serde(rename = "externalPublicData")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        external_public_data: Option<ExchangeOptionsExternalPublicData>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeOptions {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeOptions::deserialize(crate::strict_decode::object(deserializer))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+     #[serde(remote = "super::ValidateAccountResult")]
+     struct WireValidateAccountResult {
+         #[serde(rename = "error")]
+@@ -5982,33 +4074,6 @@
+     impl<'de> serde::Deserialize<'de> for super::UpdateOrderOpts {
+         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+             WireUpdateOrderOpts::deserialize(crate::strict_decode::object(deserializer))
+-        }
+-    }
+-
+-    #[derive(serde::Deserialize)]
+-    #[serde(remote = "super::ExchangeAccount")]
+-    struct WireExchangeAccount {
+-        #[serde(rename = "userId")]
+-        user_id: String,
+-        #[serde(rename = "subId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        sub_id: Option<Option<String>>,
+-        #[serde(rename = "affiliateId")]
+-        #[serde(
+-            default,
+-            deserialize_with = "deserialize_present",
+-            skip_serializing_if = "Option::is_none"
+-        )]
+-        affiliate_id: Option<Option<String>>,
+-    }
+-
+-    impl<'de> serde::Deserialize<'de> for super::ExchangeAccount {
+-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+-            WireExchangeAccount::deserialize(crate::strict_decode::object(deserializer))
+         }
+     }
+
+@@ -6546,6 +4611,21 @@
+             skip_serializing_if = "Option::is_none"
+         )]
+         force_all_proxies_off: Option<bool>,
++        #[serde(rename = "localSigner", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++        local_signer: Option<LocalSignerMetadataCapability>,
++        #[serde(rename = "hyperliquidFastBook", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++        hyperliquid_fast_book: Option<bool>,
++        #[serde(rename = "callerReportsPlacementFailures", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++        caller_reports_placement_failures: Option<bool>,
++        #[serde(rename = "workerMirror", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++        worker_mirror: Option<bool>,
++        #[serde(rename = "engine", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++        engine: Option<ExchangeOptionsEngine>,
++        #[serde(rename = "publicFeed", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++        public_feed: Option<RustPublicFeedCapability>,
++        #[serde(rename = "polymarket", default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
++        polymarket: Option<ExchangeOptionsPolymarket>,
++
+     }
+
+     impl<'de> serde::Deserialize<'de> for super::PublicExchangeOptions {
+@@ -7268,31 +5348,6 @@
+                         .to_owned(),
+                 ],
+             );
+-            crate::strict_decode::tests::string_union::<ExchangeAccountConfigBybitSiteId>("ExchangeAccountConfigBybitSiteId", WireExchangeAccountConfigBybitSiteId::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeAccountConfigBybitSiteId::BraBtl).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::string_union::<ExchangeAccountConfigHealthStatus>("ExchangeAccountConfigHealthStatus", WireExchangeAccountConfigHealthStatus::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeAccountConfigHealthStatus::Ok).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeAccountConfigHealthStatus::AuthError).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeAccountConfigHealthStatus::AuthExpired).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeAccountConfigHealthStatus::PermissionsError).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeAccountConfigHealthStatus::StartupFailed).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::record::<ExchangeAccountConfig>("ExchangeAccountConfig");
+-            crate::strict_decode::tests::record::<ExchangeOptionsAuth>("ExchangeOptionsAuth");
+-            crate::strict_decode::tests::record::<ExchangeOptionsHyperliquidBuilder>(
+-                "ExchangeOptionsHyperliquidBuilder",
+-            );
+-            crate::strict_decode::tests::string_union::<ExchangeOptionsBybitSiteId>("ExchangeOptionsBybitSiteId", WireExchangeOptionsBybitSiteId::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsBybitSiteId::BraBtl).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::record::<ExchangeOptionsTuning>("ExchangeOptionsTuning");
+-            crate::strict_decode::tests::string_union::<ExchangeOptionsExtraAsterdexApiVersion>("ExchangeOptionsExtraAsterdexApiVersion", WireExchangeOptionsExtraAsterdexApiVersion::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExtraAsterdexApiVersion::V1).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeOptionsExtraAsterdexApiVersion::V3).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::string_union::<ExchangeOptionsExtraLighterBuilderFeeMode>("ExchangeOptionsExtraLighterBuilderFeeMode", WireExchangeOptionsExtraLighterBuilderFeeMode::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExtraLighterBuilderFeeMode::Dynamic).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeOptionsExtraLighterBuilderFeeMode::Static).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::record::<ExchangeOptionsExtraKucoinBroker>(
+-                "ExchangeOptionsExtraKucoinBroker",
+-            );
+-            crate::strict_decode::tests::string_union::<ExchangeOptionsExtraHyrotraderMode>("ExchangeOptionsExtraHyrotraderMode", WireExchangeOptionsExtraHyrotraderMode::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Demo).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Production).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::record::<ExchangeOptionsExtra>("ExchangeOptionsExtra");
+-            crate::strict_decode::tests::string_union::<ExchangeOptionsExternalPublicDataVariant0Type>("ExchangeOptionsExternalPublicDataVariant0Type", WireExchangeOptionsExternalPublicDataVariant0Type::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExternalPublicDataVariant0Type::Websocket).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::record::<ExchangeOptionsExternalPublicDataVariant0>(
+-                "ExchangeOptionsExternalPublicDataVariant0",
+-            );
+-            crate::strict_decode::tests::string_union::<ExchangeOptionsExternalPublicDataVariant1Type>("ExchangeOptionsExternalPublicDataVariant1Type", WireExchangeOptionsExternalPublicDataVariant1Type::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExternalPublicDataVariant1Type::InProcess).unwrap().as_str().unwrap().to_owned()]);
+-            crate::strict_decode::tests::record::<ExchangeOptionsExternalPublicDataVariant1>(
+-                "ExchangeOptionsExternalPublicDataVariant1",
+-            );
+-            crate::strict_decode::tests::record::<ExchangeOptions>("ExchangeOptions");
+             crate::strict_decode::tests::record::<ValidateAccountResult>("ValidateAccountResult");
+             crate::strict_decode::tests::record::<UpdateOrderOptsUpdateVariant0>(
+                 "UpdateOrderOptsUpdateVariant0",
+@@ -7301,7 +5356,6 @@
+                 "UpdateOrderOptsUpdateVariant1",
+             );
+             crate::strict_decode::tests::record::<UpdateOrderOpts>("UpdateOrderOpts");
+-            crate::strict_decode::tests::record::<ExchangeAccount>("ExchangeAccount");
+             crate::strict_decode::tests::string_union::<DataProvenance>(
+                 "DataProvenance",
+                 WireDataProvenance::deserialize(serde::de::value::StringDeserializer::<
+diff --git a/packages/safe-cex/src/types.ts b/packages/safe-cex/src/types.ts
+--- a/packages/safe-cex/src/types.ts
++++ b/packages/safe-cex/src/types.ts
+@@ -1,12 +1,10 @@
+ // eslint-disable-next-line @typescript-eslint/triple-slash-reference
+ /// <reference path="./env.d.ts" />
+ import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
+-import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
+ import type { ExchangeErrorKind } from './commandOutcome';
+-import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
+ import type { OptionGreeks } from './generated/OptionGreeks';
+ import type { Position } from './generated/Position';
+-import type { TransportProvider } from './transport/types';
++import type { ExchangeOptions } from './generated/ExchangeOptions';
+ import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
+ import type { TwapInstance } from './webworker/twap/TwapInstance';
+ import type { TwapOptions } from './webworker/twap/TwapOptions';
+@@ -69,224 +67,6 @@
+   | 'kraken'
+   | 'krakenspot';
+
+-export type ExchangeOptions = {
+-  readonly key: string;
+-  readonly secret: string;
+-  readonly passphrase?: string;
+-  /** Rust local-provider setup only; consumed before generic options are retained.
+-   * Stable IDs are caller-assigned, never derived from credential material. */
+-  readonly localSigner?: LocalSignerMetadata;
+-
+-  readonly secondary_key?: string;
+-  readonly secondary_secret?: string;
+-  readonly secondary_passphrase?: string;
+-
+-  // Proxy URL for the secondary (read-only) key's transport. Lets reads route
+-  // through a separate cheap fleet while writes stay on the primary transport.
+-  // Undefined = secondary client keeps the primary/default transport.
+-  readonly secondaryProxyUrl?: string;
+-
+-  // AsterDEX Web3 authentication
+-  readonly auth?: {
+-    userAddress?: string;
+-    signerAddress?: string;
+-    privateKey?: string;
+-  };
+-
+-  // Paradex Ethereum authentication (private key stored in key field)
+-  readonly paradexAddress?: string;
+-  readonly subkeyAddress?: string;
+-
+-  // GRVT authentication (Ethereum address for order signing, must be tagged to API key)
+-  readonly grvtSignerAddress?: string;
+-  readonly grvtTradingAccountId?: string;
+-
+-  /** Polymarket CLOB V2; `key` is the local signing wallet's private key. */
+-  readonly polymarket?: {
+-    /** Discover only these Gamma market slugs; omitted means the full universe. */
+-    readonly marketSlugs?: string[];
+-    /** Supply all three L2 credentials together, or derive them with L1 auth. */
+-    readonly apiKey?: string;
+-    readonly apiSecret?: string;
+-    readonly apiPassphrase?: string;
+-    /** EOA, proxy, Safe, or ERC-1271 deposit wallet signing. Defaults to EOA. */
+-    readonly signerType?: 0 | 1 | 2 | 3;
+-    /** Deposit wallet/maker address; required for non-EOA signature types. */
+-    readonly funderAddress?: string;
+-  };
+-
+-  readonly starkPrivateKey?: string;
+-  readonly vault?: string;
+-  readonly applicationId?: string;
+-  readonly apiKeyIndex?: string;
+-  /**
+-   * Which Hyperliquid builder wallet this account routes through, and the rate
+-   * it charges — `feeTenthsBps` is tenths of a basis point, so 10 is 1bp.
+-   *
+-   * Absent means the historical default (`getBuilderAddress` +
+-   * `TEALSTREET_BUILDER_FEE`), which is what every caller took before this
+-   * existed. Resolve it through `resolveHyperliquidBuilder` rather than reading
+-   * the field, so the fallback is defined in exactly one place.
+-   *
+-   * **The address and the rate travel together and must never be mixed.** A
+-   * user approves a specific (builder, max rate) pair, so sending one builder's
+-   * address with another's rate is an order Hyperliquid rejects.
+-   */
+-  readonly hyperliquidBuilder?: {
+-    readonly address: string;
+-    readonly feeTenthsBps: number;
+-  };
+-  /** Extra fast HL perp depth topic per book. Default off; budget all sockets against the per-IP cap. */
+-  readonly hyperliquidFastBook?: boolean;
+-  readonly testnet?: boolean;
+-  /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
+-  readonly enableSpotMarkets?: boolean;
+-  /** See `ExchangeAccountConfig.enableOptionMarkets`. Default off. */
+-  readonly enableOptionMarkets?: boolean;
+-  /** See `ExchangeAccountConfig.enableInverseMarkets`. Default off. */
+-  readonly enableInverseMarkets?: boolean;
+-  /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
+-  readonly bybitSiteId?: 'BRA_BTL';
+-  readonly publicDataOnly?: boolean;
+-  /** The host names a refused placement itself, so the exchange does not also report it. */
+-  readonly callerReportsPlacementFailures?: boolean;
+-  /**
+-   * A main-thread instance paired with a worker that owns the account. Its reads
+-   * and trading go to the worker, waiting for the bridge; it never runs an engine.
+-   */
+-  readonly workerMirror?: boolean;
+-  /** Retained input compatibility; this build always uses Rust for beta venues. */
+-  readonly engine?: 'rust';
+-  readonly privateOnly?: boolean;
+-  /** Rust live public-feed ownership. Shared ports must be explicitly transferred to workers. */
+-  readonly publicFeed?: RustPublicFeedPolicy;
+-  readonly tealstreetProxy?: boolean;
+-  // tunnel (http over websocket)
+-  readonly tealstreetTunnel?: boolean;
+-  readonly tealstreetWsRoute?: boolean;
+-  readonly overrideProxyUrl?: string;
+-  readonly proxyRegion?: string;
+-  readonly omniKeySeed?: string;
+-  readonly subaccount?: string;
+-  readonly orderlyExchangeId?: string;
+-  readonly tuning?: {
+-    readonly activeTickerSymbols?: string[];
+-    readonly calculateUpnlFromRealtimeLastPrice?: boolean;
+-    readonly dataUpdateThrottleMultiplier?: number;
+-    readonly skipRendersWhenWindowIsHidden?: boolean;
+-    readonly consoleLogging?: boolean;
+-  };
+-  readonly extra?: {
+-    /** `Infinity` turns periodic REST polling off, for callers that fetch on demand. */
+-    tickInterval?: number;
+-    /** Rust command waiting deadline in ms (default 120000); expiry never retries or cancels a write. */
+-    rustCommandTimeoutMs?: number;
+-    recvWindow?: number;
+-    // Optional AsterDEX REST API version override.
+-    asterdexApiVersion?: 'v1' | 'v3';
+-    // Optional Aster Code builder attribution overrides.
+-    // Aster accepts one feeRate per order; maker/taker fields are Tealstreet placement policy.
+-    asterBuilderAddress?: string;
+-    asterBuilderFeeRateMaker?: string;
+-    asterBuilderFeeRateTaker?: string;
+-    // Lighter builder/integrator fee mode.
+-    lighterBuilderFeeMode?: 'dynamic' | 'static';
+-    // Optional override for Lighter integrator account index.
+-    lighterIntegratorAccountIndex?: string;
+-    // Lighter TP/SL allowed execution slippage, as a percentage from trigger price.
+-    lighterStopSlippagePct?: number;
+-    // HyroTrader uses the same connector for the shared simulator demo and real user-pasted challenge keys.
+-    hyrotraderMode?: 'demo' | 'production';
+-    /**
+-     * KuCoin broker attribution config.
+-     *
+-     * Browser builds may supply this from NEXT_PUBLIC_KUCOIN_FUTURES_BROKER_*
+-     * or NEXT_PUBLIC_KUCOIN_SPOT_BROKER_* env vars when product policy permits
+-     * sending signed broker attribution from the client runtime.
+-     */
+-    kucoinBroker?: {
+-      readonly partner: string;
+-      readonly brokerKey: string;
+-      readonly brokerName: string;
+-      readonly verify?: boolean;
+-    };
+-  };
+-
+-  /** Delegates request signing to a signer outside this exchange runtime. */
+-  readonly remoteSigner?: RemoteSigner;
+-
+-  /**
+-   * Overrides the runtime's registered transport (`setDefaultTransport`) for this
+-   * in-process instance. Never set it where options cross a worker or wire boundary:
+-   * a function does not survive structuredClone, and exchange-server drops it.
+-   */
+-  readonly transport?: TransportProvider;
+-
+-  /**
+-   * Stands in for `secret`: receives the exact bytes the exchange would HMAC and
+-   * returns the signature value, plus any headers to add to the same request.
+-   * Bybit and Binance: REST only, so the private websocket is not connected.
+-   * Paradex: signs the auth and order typed data, and `key` is the subkey public key.
+-   */
+-  readonly payloadSigner?: PayloadSigner;
+-
+-  /**
+-   * When true, exchange-independent post-processors run client-side instead of server-side.
+-   * Only exchange-dependent post-processors (MessageHandlerStats, ChaserOrder) run on the server.
+-   */
+-  readonly hostedMode?: boolean;
+-
+-  /**
+-   * External public data provider configuration.
+-   * When set, the exchange does not create its own public WebSocket connection.
+-   * Instead, it receives public data from a gateway or another in-process exchange.
+-   * When undefined, the exchange uses its direct public-data connection.
+-   */
+-  readonly externalPublicData?:
+-    | {
+-        /**
+-         * Type of external data provider
+-         * - 'websocket': Connect to a WebSocket gateway that fans out public data
+-         */
+-        type: 'websocket';
+-
+-        /**
+-         * WebSocket URL of the public data gateway
+-         * Example: 'ws://public-data-gateway:8080'
+-         */
+-        url: string;
+-
+-        /**
+-         * Exchange identifier used by the gateway to route messages
+-         * Example: 'bybit', 'binance'
+-         */
+-        exchangeId: string;
+-
+-        /**
+-         * Optional authentication token for the gateway connection
+-         */
+-        authToken?: string;
+-      }
+-    | {
+-        /**
+-         * Type of external data provider
+-         * - 'in-process': Use another Exchange instance in the same process as the data source.
+-         *   The source exchange's store updates (tickers/markets) are forwarded to this exchange.
+-         *   Orderbook and candle subscriptions are delegated to the source's listen* methods.
+-         *
+-         * This enables sharing a single public-data exchange connection across N authenticated
+-         * instances (e.g., 100 Bybit accounts sharing one public WS connection).
+-         */
+-        type: 'in-process';
+-
+-        /**
+-         * A running Exchange instance that provides public data.
+-         * Typically created via createPublicExchange() and started before being passed here.
+-         */
+-        source: PublicDataSource;
+-      };
+-};
+-
+ /**
+  * Exchange account configuration - used across web, CLI, telegram, etc.
+  * This represents a user's saved exchange account with credentials.
+@@ -309,118 +89,6 @@
+   balance?: Balance;
+   /** Typed reason when the engine classified the failure (Rust venues), e.g. 'authInvalid'. */
+   kind?: ExchangeErrorKind;
+-}
+-
+-export interface ExchangeAccountConfig {
+-  exchange: ExchangeName;
+-  name: string;
+-  testnet?: boolean;
+-
+-  // API credentials (also used for private keys on wallet-based exchanges)
+-  apiKey: string;
+-  apiSecret: string;
+-  passphrase?: string;
+-
+-  // Secondary API keys (for exchanges that support multiple keys)
+-  secondary_apiKey?: string;
+-  secondary_apiSecret?: string;
+-  secondary_passphrase?: string;
+-
+-  /**
+-   * Opt this account into the exchange's spot markets, for venues that serve
+-   * spot and derivatives from one connection (`supportsSpotToggle` metadata).
+-   *
+-   * Default-off is deliberate: a perp trader's market list and request volume
+-   * must be unchanged unless they explicitly ask for spot.
+-   */
+-  enableSpotMarkets?: boolean;
+-
+-  /**
+-   * Opt this account into the exchange's option markets, for venues that trade options
+-   * in the same account as their derivatives (`supportsOptionsToggle` metadata).
+-   *
+-   * Default off, for the same reason as `enableSpotMarkets`: a perp trader's market list
+-   * and request volume must be unchanged unless they ask for options.
+-   */
+-  enableOptionMarkets?: boolean;
+-
+-  /**
+-   * Opt this account into the exchange's inverse (coin-margined) markets, for venues that trade them in the same
+-   * account as their linear derivatives (`supportsInverseToggle` metadata). Default off, as for options.
+-   */
+-  enableInverseMarkets?: boolean;
+-
+-  /**
+-   * Bybit Brazil accounts use the global Bybit hosts but require
+-   * `x-site-id: BRA_BTL` on REST and WebSocket connection requests.
+-   */
+-  bybitSiteId?: 'BRA_BTL';
+-
+-  // Exchange-specific authentication fields
+-  applicationId?: string;
+-  apiKeyIndex?: string;
+-  vault?: string;
+-  omniKeySeed?: string;
+-  subaccount?: string;
+-  orderlyExchangeId?: string;
+-
+-  // Paradex Ethereum authentication (private key stored in apiKey field)
+-  paradexAddress?: string;
+-  subkeyAddress?: string;
+-
+-  // GRVT authentication (Ethereum address for order signing, must be tagged to API key)
+-  grvtSignerAddress?: string;
+-  grvtTradingAccountId?: string;
+-
+-  // Proxy settings
+-  tealstreetProxy?: boolean;
+-  tealstreetTunnel?: boolean;
+-  tealstreetWsRoute?: boolean;
+-  proxyRegion?: string;
+-
+-  /**
+-   * True only for the bundled shared /hyrotrader-demo account. Real HyroTrader
+-   * accounts use user-pasted challenge API keys and should behave as live
+-   * accounts even though the connector reuses simulator-compatible endpoints.
+-   */
+-  hyrotraderDemo?: boolean;
+-
+-  /** When set, and the Tealstreet browser extension is present, this account
+-   *  connects directly to the exchange (no proxy/tunnel) — the extension's
+-   *  declarativeNetRequest rules handle CORS/header injection. Resolved
+-   *  web-side only; ignored when the extension is absent (proxy stays the
+-   *  fallback). */
+-  useExtensionDirect?: boolean;
+-
+-  // UI/metadata fields (optional, not used for trading)
+-  user?: string;
+-  color?: string;
+-  active?: boolean;
+-  pinned?: boolean;
+-  telegramBotToken?: string;
+-  lastSymbol?: string;
+-
+-  /** Runtime health status — set by error classification, auto-clears on successful connect */
+-  /**
+-   * `startup_failed` is not an auth verdict: the exchange's `start()` threw, so
+-   * the account is alive with no sockets and the topic watchdog reloads it on a
+-   * loop. It exists so that failure has a visible name instead of a silent
+-   * reconnect spinner. Device-local (see `DEVICE_LOCAL_ACCOUNT_FIELDS`).
+-   */
+-  healthStatus?: 'ok' | 'auth_error' | 'auth_expired' | 'permissions_error' | 'startup_failed';
+-
+-  /** Last write timestamp (ms since epoch). Used for last-write-wins
+-   *  across CLI ↔ web account sync. Missing → treated as 0 for LWW. */
+-  updatedAt?: number;
+-  /** Tombstone marker for sync deletes. Live accounts have undefined. */
+-  deletedAt?: number;
+-  /** Stable identity minted at creation, carried across renames and key
+-   *  rotations. Merge still keys on `name`; this is what tells a rotated
+-   *  key (same id, plain last-write-wins) from two devices that
+-   *  independently created different accounts under one name (different
+-   *  id, both worth keeping). Missing on pre-sync rows — see
+-   *  `apps/web/src/utils/accountSync/accountFields.ts`. */
+-  syncId?: string;
+ }
+
+ export type PublicExchangeOptions = Omit<ExchangeOptions, 'key' | 'secret'> & {
+@@ -1195,12 +863,6 @@
+   fetchedLeverage: Record<string, FetchedLeverage>;
+ };
+
+-export type ExchangeAccount = {
+-  readonly userId: string;
+-  readonly subId?: string | null;
+-  readonly affiliateId?: string | null;
+-};
+-
+ export const readOnlyOrderStatuses: OrderStatus[] = [
+   OrderStatus.Creating,
+   OrderStatus.Updating,
+@@ -1341,3 +1003,7 @@
+   /** Account name for multi-account matching (e.g., "bear2") */
+   accountName?: string;
+ }
++
++export type { ExchangeOptions };
++export type { ExchangeAccount } from './generated/ExchangeAccount';
++export type { ExchangeAccountConfig } from './generated/ExchangeAccountConfig';
+diff --git a/sdk-rs/safe-cex-num/src/numeric_ingress/shared_output.rs b/sdk-rs/safe-cex-num/src/numeric_ingress/shared_output.rs
+--- a/sdk-rs/safe-cex-num/src/numeric_ingress/shared_output.rs
++++ b/sdk-rs/safe-cex-num/src/numeric_ingress/shared_output.rs
+@@ -105,12 +105,6 @@
+     }
+ }
+
+-impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtra {
+-    fn check_number_output(&self) {
+-        crate::js_number_output!(self, struct { hyrotrader_mode, tick_interval, recv_window, asterdex_api_version, aster_builder_address, aster_builder_fee_rate_maker, aster_builder_fee_rate_taker, lighter_builder_fee_mode, lighter_integrator_account_index, lighter_stop_slippage_pct, kucoin_broker });
+-    }
+-}
+-
+ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtraAsterdexApiVersion {
+     fn check_number_output(&self) {
+         crate::js_number_output!(self, enum { V1, V3 });
+@@ -369,18 +363,6 @@
+ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicData {
+     fn check_number_output(&self) {
+         crate::js_number_output!(self, enum { Variant0(value), Variant1(value) });
+-    }
+-}
+-
+-impl JsNumberOutput for safe_cex_types::ExchangeOptionsPolymarket {
+-    fn check_number_output(&self) {
+-        crate::js_number_output!(self, struct { api_key, api_secret, api_passphrase, signer_type, funder_address });
+-    }
+-}
+-
+-impl JsNumberOutput for safe_cex_types::ExchangeOptions {
+-    fn check_number_output(&self) {
+-        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, polymarket, remote_signer, transport, payload_signer, hosted_mode, external_public_data });
+     }
+ }
+
+diff --git a/sdk-rs/safe-cex-num/src/numeric_ingress.rs b/sdk-rs/safe-cex-num/src/numeric_ingress.rs
+--- a/sdk-rs/safe-cex-num/src/numeric_ingress.rs
++++ b/sdk-rs/safe-cex-num/src/numeric_ingress.rs
+@@ -13,6 +13,7 @@
+ pub use passthrough::{JsNumberPassthrough, js_deserialize_passthrough};
+ mod position_record_output;
+ mod shared_output;
++mod options_output;
+ pub use eligibility::JsNumberOutput;
+ use safe_cex_types::retained_json::RetainedJsonInput;
+ use serde_json::{Error, Value};
+diff --git a/sdk-rs/safe-cex-types/generate.cjs b/sdk-rs/safe-cex-types/generate.cjs
+--- a/sdk-rs/safe-cex-types/generate.cjs
++++ b/sdk-rs/safe-cex-types/generate.cjs
+@@ -4,7 +4,7 @@
+ const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
+
+ // In-process capabilities retain TS ownership until the IO/FFI implementation phase.
+-const runtimeBoundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource'];
++const runtimeBoundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource', 'LocalSignerMetadata', 'RustPublicFeedPolicy'];
+
+ function stringLiterals(type) {
+   const types = ts.isUnionTypeNode(type) ? type.types : [type];
+@@ -83,7 +83,7 @@
+     const imports = missing.map(n => `import type { ${n} } from './${n}';`).join('\n');
+     fs.writeFileSync(path.join(bindings, name), boundaryImport + (imports ? `${imports}\n${output.source}` : output.source));
+   }
+-  fs.writeFileSync(path.join(bindings, 'runtime-boundaries.ts'), `// Runtime capabilities deliberately retain TypeScript ownership; see TYPE_PARITY.md.\nexport type { RemoteSigner, PayloadSigner, PublicDataSource } from '../../../packages/safe-cex/src/types';\nexport type { TransportProvider } from '../../../packages/safe-cex/src/transport/types';\n`);
++  fs.writeFileSync(path.join(bindings, 'runtime-boundaries.ts'), `// Runtime capabilities deliberately retain TypeScript ownership; see TYPE_PARITY.md.\nexport type { RemoteSigner, PayloadSigner, PublicDataSource } from '../../../packages/safe-cex/src/types';\nexport type { TransportProvider } from '../../../packages/safe-cex/src/transport/types';\nexport type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';\nexport type { RustPublicFeedPolicy } from '../../../packages/safe-cex/src/exchanges/rust/publicFeed';\n`);
+   assert.deepEqual(seen.sort(), Object.keys(metadata).sort(), 'every exported Rust enum must be rendered exactly once');
+ }
+
+@@ -112,5 +112,10 @@
+ if (require.main === module) {
+   generate(path.join(__dirname, 'bindings'));
+   publishPosition();
++  const { renderOptions } = require('./tests/options-render.cjs');
++  for (const name of ['ExchangeOptions', 'ExchangeAccount', 'ExchangeAccountConfig']) {
++    fs.writeFileSync(path.resolve(__dirname, `../../packages/safe-cex/src/generated/${name}.ts`),
++      renderOptions(name, fs.readFileSync(path.join(__dirname, 'bindings/raw', `${name}.ts`), 'utf8'), transform));
++  }
+ }
+ module.exports = { transform, stringLiterals };
+diff --git a/sdk-rs/safe-cex-types/tests/check-types.cjs b/sdk-rs/safe-cex-types/tests/check-types.cjs
+--- a/sdk-rs/safe-cex-types/tests/check-types.cjs
++++ b/sdk-rs/safe-cex-types/tests/check-types.cjs
+@@ -11,7 +11,7 @@
+ const models = ["OrderRiskProfile", "CoinBalance", "Balance", "Ticker", "PublicTrade", "OptionChainQuery", "OptionChainRow", "AccountGreeks", "Candle", "Execution", "OrderBookOrders", "OrderBook", "PlaceOrderOpts", "HistoricalTrade", "HistoricalTradeOptions", "OHLCVOptions", "OHLCVSOptions", "ExecutionsOptions", "OrderHistoryOptions", "HistoricalOrder", "StoreDataLoaded", "StoreOptions", "FetchedLeverage", "DisplayedMargin", "IncomeHistoryOptions", "Order", "Position", "Market", "ExchangeAccountConfig", "ExchangeOptions", "ValidateAccountResult", "UpdateOrderOpts", "ExchangeAccount", "ClosedPnlEntry", "IncomeRecord", "StoreUpdateIds", "PublicExchangeOptions"];
+ const parse = (file) => ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+ const baseline = parse(baselinePath);
+-const boundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource'];
++const boundaries = ['RemoteSigner', 'PayloadSigner', 'TransportProvider', 'PublicDataSource', 'LocalSignerMetadata', 'RustPublicFeedPolicy'];
+ const { declarations, enums } = dependencies(baseline, ["OrderRiskProfile", "CoinBalance", "Balance", "Ticker", "PublicTrade", "OptionChainQuery", "OptionChainRow", "AccountGreeks", "Candle", "Execution", "OrderBookOrders", "OrderBook", "PlaceOrderOpts", "HistoricalTrade", "HistoricalTradeOptions", "OHLCVOptions", "OHLCVSOptions", "ExecutionsOptions", "OrderHistoryOptions", "HistoricalOrder", "StoreDataLoaded", "StoreOptions", "FetchedLeverage", "DisplayedMargin", "IncomeHistoryOptions", "Order", "Position", "Market", "ExchangeAccountConfig", "ExchangeOptions", "ValidateAccountResult", "UpdateOrderOpts", "ExchangeAccount", "ClosedPnlEntry", "IncomeRecord", "StoreUpdateIds", "PublicExchangeOptions", "ExchangeName", "DataProvenance", "IncomeCategory", "RequestOutcome", "RequestOutcomeCounts", "MessageHandlerStatsType", "SecondsTimeframe", "ExtendedTimeframe", "AnyTimeframe"], boundaries);
+ const index = new Map(declarations.map(d => [d.name.text, d]));
+ const rawFiles = fs.readdirSync(path.join(crate, 'bindings', 'raw')).filter(f => f.endsWith('.ts')).sort();
+diff --git a/sdk-rs/safe-cex-types/tests/strict_codec_inventory.rs b/sdk-rs/safe-cex-types/tests/strict_codec_inventory.rs
+--- a/sdk-rs/safe-cex-types/tests/strict_codec_inventory.rs
++++ b/sdk-rs/safe-cex-types/tests/strict_codec_inventory.rs
+@@ -42,6 +42,7 @@
+     for relative in [
+         "src/lib.rs",
+         "src/position.rs",
++        "src/options.rs",
+         "src/store_model.rs",
+         "src/extra_model.rs",
+         "src/accounts.rs",
+diff --git a/packages/safe-cex/src/exchanges/rust/publicFeed.ts b/packages/safe-cex/src/exchanges/rust/publicFeed.ts
+--- a/packages/safe-cex/src/exchanges/rust/publicFeed.ts
++++ b/packages/safe-cex/src/exchanges/rust/publicFeed.ts
+@@ -449,7 +449,7 @@
+ const tickerRow = (ticker: Ticker, observations = true): TickerRow => {
+   const row: TickerRow = {
+     symbol: ticker.symbol,
+-    midPrice: Number.isFinite(ticker.midPrice) ? ticker.midPrice! : null,
++    midPrice: typeof ticker.midPrice === 'number' && Number.isFinite(ticker.midPrice) ? ticker.midPrice : null,
+   };
+   for (const field of tickerFields) if (Number.isFinite(ticker[field])) row[field] = ticker[field];
+   if (observations && ticker.observedAt) row.observedAt = [...ticker.observedAt];
+diff --git a/packages/safe-cex/package.json b/packages/safe-cex/package.json
+--- a/packages/safe-cex/package.json
++++ b/packages/safe-cex/package.json
+@@ -17,7 +17,7 @@
+     "test-unit": "vitest run",
+     "test-unit-watch": "vitest watch --ui",
+     "test-wasm": "SAFE_CEX_WASM_TESTS=1 vitest run",
+-    "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit && node --test ../../sdk-rs/safe-cex-types/tests/position-contract.cjs",
++    "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit && node --test ../../sdk-rs/safe-cex-types/tests/position-contract.cjs ../../sdk-rs/safe-cex-types/tests/options-contract.cjs",
+     "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit"
+   },
+   "dependencies": {

@@ -119,7 +119,7 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
     import { createHash } from 'node:crypto';
     import { syncBuiltinESMExports } from 'node:module';
     import { expectedCheckpointPlan } from ${JSON.stringify(new URL('./tape.mjs', import.meta.url).href)};
-    import { venueOf } from ${JSON.stringify(new URL('./venues.mjs', import.meta.url).href)};
+    import { replayVenueOf } from ${JSON.stringify(new URL('./venues.mjs', import.meta.url).href)};
     const records = ${JSON.stringify(records)};
     const venue = ${JSON.stringify(venue)};
     const isPrivate = ${JSON.stringify(isPrivate)};
@@ -177,7 +177,7 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
         // Orderly and Coinbase require exactly one result per taped command.
         // This smoke tape has none; populated command comparisons run below.
         commands: strictCommandCount ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
-        checkpoints: args.includes('--performance') ? [] : expectedCheckpointPlan(records, venueOf(venue), impl).map((point) => ({ ...point, markets: [], tickers: [], books: {}, ...(isPrivate ? { account: emptyAccount() } : {}) })),
+        checkpoints: args.includes('--performance') ? [] : expectedCheckpointPlan(records, replayVenueOf(venue), impl).map((point) => ({ ...point, markets: [], tickers: [], books: {}, ...(isPrivate ? { account: emptyAccount() } : {}) })),
         transportReceipt: {},
         ...(isPrivate ? { account: emptyAccount() } : {}),
       };
@@ -324,6 +324,10 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
             if (!defect.includes('no-cpu')) output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 3;
             if (defect.includes('ticker')) output.tickers[0].last = 999;
             if (defect.includes('transport')) output.transportReceipt = { changed: true };
+            if (defect.includes('retained')) {
+              output.metrics.heapUsedBytes = 130;
+              output.metrics.heapRetainedBytes = output.metrics.retainedBytes = 30;
+            }
             if (defect.includes('memory')) output.metrics.heapBeforeBytes--;
           }
         }
@@ -544,6 +548,20 @@ test('a re-measure decides only CPU: the discarded first set keeps its non-CPU f
     assert.ok(!result.report.failures.some((line) => line.includes('Rust is slower than TS')), `${defect}: the CPU verdict cleared`);
     assert.match(result.report.failures.join('\n'), pattern, `${defect}: the first set's failure is retained`);
   }
+});
+
+test('gate CLI retains a valid first-set retained-memory threshold failure after CPU clears', () => {
+  const control = gate('bybitinverse', false, 'first-set-no-cpu-retained');
+  assert.equal(control.status, 1, control.stderr);
+  assert.equal(control.report.remeasure, undefined);
+  const result = gate('bybitinverse', false, 'first-set-retained');
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.report.status, 'FAIL');
+  assert.deepEqual(result.report.failures, control.report.failures);
+  assert.match(result.report.failures.join('\n'), /retained memory: Rust must be at least 10% below TS \(ts=20, rust=30\)/);
+  assert.deepEqual(result.report.remeasure.firstDifferences, [], 'all first-set raw memory arithmetic and workload checks pass');
+  assert.ok(result.report.samples.rust.every((sample) => sample.retainedBytes === 10 && sample.processCpuMs === 1),
+    'passing final samples cannot erase the first memory verdict');
 });
 
 test('gate CLI reports command timeouts as incomplete failures and keeps runner crashes fatal', () => {

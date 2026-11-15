@@ -153,9 +153,11 @@ fn identity_preparation_refusal_releases_root_and_can_reuse_command_and_credits(
 #[test]
 fn parked_identity_provider_refusal_and_timeout_each_settle_once_then_recover() {
     for expire in [false, true] {
-        let (mut e, a) = identity_with(false, false);
+        let mut e = identity_engine(false);
         let local = e.signer();
         e.set_signer(Some(std::sync::Arc::new(Parked))).unwrap();
+        e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
+        let a: Vec<_> = e.drain_actions().collect();
         let p = token(&a, "accountPositions");
         let attempt = sign_attempt(&mut e, NOW, p);
         let at = if expire { NOW + 20_000. } else { NOW + 1. };
@@ -198,6 +200,101 @@ fn parked_identity_provider_refusal_and_timeout_each_settle_once_then_recover() 
             r#"{"code":0,"data":{"account":{"userID":"recovered"}}}"#,
         );
         assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:42,result}) if result.contains("recovered"))));
+    }
+}
+
+#[test]
+fn identity_provider_switch_revokes_old_preparation_and_parked_signature_then_recovers() {
+    for prepare_first in [false, true] {
+        let mut e = identity_engine(false);
+        let replacement = e.signer();
+        e.set_signer(Some(std::sync::Arc::new(Parked))).unwrap();
+        e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
+        let a: Vec<_> = e.drain_actions().collect();
+        let p = token(&a, "accountPositions");
+        let attempt = prepare_first.then(|| sign_attempt(&mut e, NOW, p));
+        if let Some(attempt) = attempt {
+            assert!(e.signing_pending(attempt));
+        } else {
+            assert!(e.http_preparation_pending(p));
+        }
+
+        e.set_signer(replacement).unwrap();
+        if let Some(attempt) = attempt {
+            assert!(!e.signing_pending(attempt));
+            e.handle(
+                NOW + 1.,
+                Event::Signed {
+                    attempt,
+                    result: Err(SignError::Refused),
+                },
+            );
+        } else {
+            e.http_prepared(
+                NOW + 1.,
+                p,
+                Prepared {
+                    id: p.attempt().request.0,
+                    expires_at: None,
+                },
+            );
+        }
+        let a: Vec<_> = e.drain_actions().collect();
+        identity_failure(&a, safe_cex_engine::ErrorKind::InvalidInput);
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Sign { .. } | Action::SignedOutbound { .. }))
+        );
+        assert!(!a.iter().any(|a| matches!(a, Action::ManagedHttp(action)
+            if matches!(action.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. } | HttpAction::BindGroup { .. }))));
+        assert!(!e.http_preparation_pending(p));
+
+        e.http_prepared(
+            NOW + 2.,
+            p,
+            Prepared {
+                id: p.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        if let Some(attempt) = attempt {
+            e.handle(
+                NOW + 2.,
+                Event::Signed {
+                    attempt,
+                    result: Err(SignError::Refused),
+                },
+            );
+        }
+        assert!(e.drain_actions().next().is_none());
+
+        e.handle(
+            NOW + 3.,
+            Event::Command(Command::FetchAccount { command: 42 }),
+        );
+        let a = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 3.);
+        let r = request(&a, "accountPositions");
+        response(
+            &mut e,
+            NOW + 4.,
+            r.id,
+            200,
+            r#"{"code":0,"data":{"account":{"userID":"replacement-owner"}}}"#,
+        );
+        let a: Vec<_> = e.drain_actions().collect();
+        assert_eq!(
+            a.iter()
+                .filter(
+                    |a| matches!(a, Action::Notice(Notice::CommandDone { command: 42, result })
+                if result.contains("replacement-owner"))
+                )
+                .count(),
+            1
+        );
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]

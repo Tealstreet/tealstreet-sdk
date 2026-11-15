@@ -22,6 +22,8 @@ export class MoveCommand extends BaseCommand {
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
     if (this.simulationGate(ctx)) return this.success();
+    const invalid = this.refuseUnknownArgs(ctx, [1, 2]);
+    if (invalid) return invalid;
     const orderIdArg = this.getArg(ctx, 1);
     const priceArg = this.getArg(ctx, 2);
 
@@ -75,15 +77,15 @@ export class MoveCommand extends BaseCommand {
     // Parse the price - can be absolute (50000) or relative (+10, -5)
     let newPrice: number;
     if (priceArg.startsWith('+') || priceArg.startsWith('-')) {
-      const offset = parseFloat(priceArg);
-      if (isNaN(offset)) {
+      const offset = this.parseOrderNumber(priceArg);
+      if (!Number.isFinite(offset)) {
         this.printError(ctx, `Invalid price offset: ${priceArg}`);
         return this.error('Invalid price');
       }
       newPrice = order.price + offset;
     } else {
-      newPrice = parseFloat(priceArg);
-      if (isNaN(newPrice)) {
+      newPrice = this.parseOrderNumber(priceArg);
+      if (!Number.isFinite(newPrice)) {
         this.printError(ctx, `Invalid price: ${priceArg}`);
         return this.error('Invalid price');
       }

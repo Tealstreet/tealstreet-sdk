@@ -1,5 +1,6 @@
 //! TxFlow testnet perpetuals, using separate node and API-service feeds.
 mod account;
+mod agent;
 mod candle_read;
 mod history;
 mod local_context;
@@ -22,17 +23,19 @@ use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use wire::*;
 
 pub const REST_URL: &str = "https://rpc.txflow-testnet.xyz";
 pub const API_VERSION: &str = "2026-08-16";
+const TICKER_CACHE_ENTRIES: usize = 128;
+const TICKER_CACHE_FRAME_BYTES: usize = 512;
 #[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
-    pub secret: Option<String>,
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
     pub application_id: Option<String>,
     pub vault: Option<String>,
 }
@@ -40,7 +43,7 @@ safe_cex_crypto::redacted_debug!(Options);
 impl safe_cex_crypto::secrets::EraseSecrets for Options {
     fn erase_secrets(&mut self) {
         safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
+        self.credentials = None;
     }
 }
 
@@ -54,7 +57,11 @@ impl Options {
         }
         if !self.public_data_only {
             safe_cex_crypto::ethereum::get_address(self.application_id.as_deref().unwrap_or(""))?;
-            safe_cex_crypto::ethereum::private_key_address(self.secret.as_deref().unwrap_or(""))?;
+            self.credentials
+                .as_ref()
+                .ok_or("TxFlow agent signing provider is required")?
+                .signing_ref()
+                .map_err(|_| "TxFlow agent signing provider is required")?;
         }
         Ok(())
     }
@@ -76,6 +83,7 @@ pub enum Pending {
         valid: bool,
     },
     Account(account::Request),
+    Agent(agent::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
     SocketRefresh,
@@ -110,10 +118,16 @@ struct Sub<'a> {
 pub struct TxFlow {
     pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::AccountState,
+    pub(crate) credentials:
+        safe_cex_engine::credential_selection::Slots<safe_cex_engine::signing::Identity>,
     pub(crate) trading: trading::Trading,
     pub(crate) assets: HashMap<String, u32>,
     pub(crate) coins: HashMap<String, String>,
-    pub(crate) instruments: HashMap<u32, Instrument>,
+    // Ordered: per-frame ticker and context lookups avoid SipHash on venue IDs.
+    pub(crate) instruments: BTreeMap<u32, Instrument>,
+    /// Every instrument's decimal index still resolves to its own name in `coins`.
+    numeric_coins_exact: bool,
+    ticker_frames: HashMap<String, TickerRow>,
     historical_assets: HashMap<String, Option<u32>>,
     historical_coins: HashMap<String, String>,
     node: Connection,
@@ -131,14 +145,22 @@ pub struct TxFlow {
 }
 impl TxFlow {
     pub fn new(options: Options) -> Self {
+        let credentials = safe_cex_engine::credential_selection::Slots::new(
+            options.credentials.clone(),
+            None,
+            Default::default(),
+        );
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
+            credentials,
             account: Default::default(),
             trading: Default::default(),
             assets: Default::default(),
             coins: Default::default(),
             instruments: Default::default(),
+            numeric_coins_exact: false,
+            ticker_frames: Default::default(),
             historical_assets: Default::default(),
             historical_coins: Default::default(),
             node: Default::default(),
@@ -427,9 +449,59 @@ impl TxFlow {
             }
         }
     }
+    /// The instrument's cached ticker row, when it still names this instrument.
+    fn cached_ticker(cx: &Cx<'_, Pending>, instrument: &Instrument) -> Option<u32> {
+        instrument.ticker_index.filter(|index| {
+            cx.store
+                .tickers()
+                .get(*index as usize)
+                .is_some_and(|ticker| ticker.symbol == instrument.name)
+        })
+    }
+    /// A canonical decimal coin names an instrument by index, exactly as `coins` does.
+    fn numeric_instrument<'a>(
+        instruments: &'a BTreeMap<u32, Instrument>,
+        exact: bool,
+        coin: &str,
+    ) -> Option<&'a Instrument> {
+        let canonical = !coin.is_empty()
+            && coin.bytes().all(|b| b.is_ascii_digit())
+            && (coin.len() == 1 || !coin.starts_with('0'));
+        if !exact || !canonical {
+            return None;
+        }
+        instruments.get(&coin.parse().ok()?)
+    }
+    fn context_row(&mut self, cx: &mut Cx<'_, Pending>, row: ContextFrame<'_>) {
+        let mask = Self::context_mask(&row.ctx);
+        if let Some(instrument) =
+            Self::numeric_instrument(&self.instruments, self.numeric_coins_exact, &row.coin)
+        {
+            let symbol = instrument.name.as_str();
+            if let Some(index) = Self::cached_ticker(cx, instrument) {
+                cx.store
+                    .update_ticker_at(index, |t| Self::context_update(t, row.ctx));
+            } else {
+                Self::context(cx, symbol, row.ctx);
+            }
+            self.live_tickers.record(cx.store, symbol, mask);
+        } else if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
+            Self::context(cx, &symbol, row.ctx);
+            self.live_tickers.record(cx.store, &symbol, mask);
+        }
+    }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
-        let Ok(frame) = PublicFrame::decode(text) else {
-            return false;
+        let cached = (text.len() <= TICKER_CACHE_FRAME_BYTES)
+            .then(|| self.ticker_frames.get(text))
+            .flatten()
+            .copied();
+        let (frame, cache_hit) = if let Some(row) = cached {
+            (PublicFrame::Ticker(row), true)
+        } else {
+            let Ok(frame) = PublicFrame::decode(text) else {
+                return false;
+            };
+            (frame, false)
         };
         // Errors are transport controls even when this mixed socket owns no public feed.
         if cx.public_feed_policy() != PublicFeedPolicy::Direct
@@ -442,31 +514,31 @@ impl TxFlow {
         }
         match frame {
             PublicFrame::Contexts(rows) => {
+                cx.record_socket_topic(&["@allAssetCtxs|||||||"]);
                 for row in rows.ctxs {
-                    if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
-                        let mask = Self::context_mask(&row.ctx);
-                        Self::context(cx, &symbol, row.ctx);
-                        self.live_tickers.record(cx.store, &symbol, mask);
-                    }
+                    self.context_row(cx, row);
                 }
             }
             PublicFrame::Context(row) => {
-                if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
-                    let mask = Self::context_mask(&row.ctx);
-                    Self::context(cx, &symbol, row.ctx);
-                    self.live_tickers.record(cx.store, &symbol, mask);
-                }
+                cx.record_socket_topic(&["@activeAssetCtx|", &row.coin, "||||||"]);
+                self.context_row(cx, row);
             }
             PublicFrame::Ticker(row) => {
                 if let Some(instrument) = self.instruments.get(&row.instrument_id) {
+                    if !cache_hit
+                        && text.len() <= TICKER_CACHE_FRAME_BYTES
+                        && self.ticker_frames.len()
+                            < self.instruments.len().min(TICKER_CACHE_ENTRIES)
+                    {
+                        self.ticker_frames.insert(text.to_owned(), row);
+                    }
+                    cx.record_socket_topic_number(
+                        &["@ticker|", &instrument.base_currency, "||||||"],
+                        row.instrument_id as u64,
+                    );
                     let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
-                    if let Some(index) = instrument.ticker_index.filter(|index| {
-                        cx.store
-                            .tickers()
-                            .get(*index as usize)
-                            .is_some_and(|ticker| ticker.symbol == symbol)
-                    }) {
+                    if let Some(index) = Self::cached_ticker(cx, instrument) {
                         cx.store.update_ticker_at(index, |ticker| {
                             Self::ticker_update(ticker, row, false)
                         });
@@ -477,6 +549,7 @@ impl TxFlow {
                 }
             }
             PublicFrame::Depth(row) => {
+                cx.record_socket_topic(&["@l2Book|", &row.coin, "||||||"]);
                 if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                     && ladder.time.is_none_or(|t| row.time >= t)
@@ -505,6 +578,7 @@ impl TxFlow {
             }
             PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
+                    cx.record_socket_topic(&["@candle|", &row.s, "|", &row.i, "|||||"]);
                     if let Some(symbol) = self.coin_symbol(&row.s)
                         && let Some(interval) = Interval::parse(&row.i)
                         && self.candles.contains_key(&(symbol.to_owned(), interval))
@@ -658,7 +732,70 @@ impl TxFlow {
 }
 impl Venue for TxFlow {
     fn http_plans() -> bool {
-        false
+        true
+    }
+    fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+        Some(&safe_cex_engine::nonce::HYPERLIQUID_AGENT)
+    }
+    fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+        if self.options.public_data_only || self.options.validate().is_err() {
+            safe_cex_engine::AddressSetupSlots::None
+        } else {
+            safe_cex_engine::AddressSetupSlots::Primary
+        }
+    }
+    fn dispatch_nonce() -> bool {
+        true
+    }
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[trading::PACING]
+    }
+    fn http_release_domain() -> Option<safe_cex_engine::request_context::ReleaseDomain> {
+        Some(safe_cex_engine::request_context::ReleaseDomain {
+            pacings: &[trading::PACING],
+            members: safe_cex_engine::request_context::DomainMembers::Mutations,
+        })
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.refresh_orders(cx);
+    }
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        retired: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trade_owner_retired(retired)
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trade_preflight_ready(cx, owner);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trade_plan_ready(cx, owner);
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
     }
 
     fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
@@ -704,6 +841,11 @@ impl Venue for TxFlow {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
+        self.credentials = safe_cex_engine::credential_selection::Slots::new(
+            cx.address_nonce_identities().primary.clone(),
+            None,
+            Default::default(),
+        );
         self.metadata(cx);
     }
     fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
@@ -865,7 +1007,7 @@ impl Venue for TxFlow {
                 let mut markets = Vec::new();
                 let mut assets = HashMap::new();
                 let mut coins = HashMap::new();
-                let mut instruments = HashMap::new();
+                let mut instruments = BTreeMap::new();
                 let mut ticker_queue = VecDeque::new();
                 for row in rows {
                     if let Some(market) = row.market() {
@@ -910,9 +1052,19 @@ impl Venue for TxFlow {
                 for (_, context) in self.ticker_contexts.drain() {
                     let _ = cx.finish_http_context(&context);
                 }
+                self.numeric_coins_exact = instruments
+                    .iter()
+                    .all(|(index, row)| coins.get(&index.to_string()) == Some(&row.name));
                 self.assets = assets;
                 self.coins = coins;
                 self.instruments = instruments;
+                self.ticker_frames = HashMap::with_capacity(
+                    if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+                        self.instruments.len().min(TICKER_CACHE_ENTRIES)
+                    } else {
+                        0
+                    },
+                );
                 self.catalogue_partial = skipped;
                 self.ticker_queue = ticker_queue;
                 self.ticker_seeded.clear();
@@ -986,6 +1138,7 @@ impl Venue for TxFlow {
             }
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
+            Pending::Agent(request) => self.agent_response(cx, request, Ok(response)),
             Pending::History(request) => self.history_response(cx, *request, response),
             Pending::SocketRefresh => {}
         }
@@ -1052,6 +1205,7 @@ impl Venue for TxFlow {
             }
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
+            Pending::Agent(request) => self.agent_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::SocketRefresh => {}
         }

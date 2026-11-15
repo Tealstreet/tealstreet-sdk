@@ -14,8 +14,9 @@ export function createKrakenRequestAudit({strict=true}={}){
   if((method==='GET'&&/\/v3\/(instruments|tickers|orderbook|history)$/.test(u.pathname))||u.pathname.startsWith('/api/charts/')){
    if(h.apikey||h.authent||h.nonce)throw Error('Kraken public request leaked credentials');return;
   }
-  const n=h.nonce;if(h.apikey!==KEY||!/^\d+$/.test(n??''))throw Error('Kraken missing authentication');
-  const nonce=BigInt(n);if((strict&&nonce<=previous)||Math.abs(Number(nonce/1000n)-now)>60_000)throw Error('Kraken nonce not fresh and increasing');previous=nonce>previous?nonce:previous;
+  const n=h.nonce??'';if(h.apikey!==KEY||(h.nonce!==undefined&&!/^\d+$/.test(n)))throw Error('Kraken missing authentication');
+  // Futures permits nonce omission; a supplied nonce still owns its ordering checks.
+  if(h.nonce!==undefined){const nonce=BigInt(n);if((strict&&nonce<=previous)||Math.abs(Number(nonce/1000n)-now)>60_000)throw Error('Kraken nonce not fresh and increasing');previous=nonce>previous?nonce:previous;}
   const path=u.pathname.replace(/^\/derivatives/,'');
   const bytes=method==='GET'?u.search.slice(1):body??'';
   if(typeof bytes!=='string')throw Error('Kraken signed body must be encoded bytes');

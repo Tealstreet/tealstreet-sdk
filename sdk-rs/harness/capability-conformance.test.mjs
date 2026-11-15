@@ -128,7 +128,6 @@ test('decoder rejection and unsupported dispatch never become deferred evidence'
 
 test('construction fixture covers known prerequisites and the options profile', () => {
   assert.equal(constructionProfiles('txflow')[0].testnet, true);
-  assert.equal(constructionProfiles('breakoutprop')[0].key, 'user');
   assert.equal(constructionProfiles('hyrotrader')[0].endpoints.rest, 'https://hyro.test');
   assert.deepEqual(constructionProfiles('bybit').map((options) => options.enableOptionMarkets ?? false), [false, true]);
 });

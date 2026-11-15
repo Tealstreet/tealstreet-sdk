@@ -1,3 +1,4 @@
+import { calculateTotalNotional } from '@tealstreet/safe-cex/src/utils/leverage';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, divide, multiply, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
 import { splitChain } from './tokenize';
@@ -629,7 +630,7 @@ function resolvePositionPriceConstant(tok: string, ctx: PreprocessContext): numb
       throw new Error(`$liq: multiple positions on ${ctx.symbol}, ambiguous`);
     }
     const liq = positions[0].liquidationPrice;
-    if (!Number.isFinite(liq) || liq <= 0) {
+    if (liq === null || !Number.isFinite(liq) || liq <= 0) {
       throw new Error(`$liq: liquidation price not available on ${ctx.symbol}`);
     }
     return liq;
@@ -700,6 +701,12 @@ const BALANCE_FIELD_BY_TOKEN: Record<string, 'free' | 'used' | 'total' | 'upnl'>
   $upnl: 'upnl',
 };
 
+function requireNotional(positions: ReadonlyArray<{ notional: number | null }>, token: string): number {
+  const value = calculateTotalNotional(positions);
+  if (value === null) throw new Error(`${token}: position notional is unknown`);
+  return value;
+}
+
 function resolveAccountNumber(tok: string, ctx: PreprocessContext): number {
   ctx.exchange?.syncAccountState?.();
   if (!ctx.exchange) {
@@ -734,19 +741,19 @@ function resolveAccountNumber(tok: string, ctx: PreprocessContext): number {
 
   if (tok === '$totallongusd' || tok === '$totalshortusd') {
     const wantSide = tok === '$totallongusd' ? PositionSide.Long : PositionSide.Short;
-    return positions.filter((p) => p.side === wantSide).reduce((acc, p) => acc + Math.abs(p.notional ?? 0), 0);
+    return requireNotional(positions.filter((p) => p.side === wantSide), tok);
   }
 
   if (tok === '$totallong' || tok === '$totalshort') {
     const wantSide = tok === '$totallong' ? PositionSide.Long : PositionSide.Short;
-    const notional = positions
-      .filter((p) => p.side === wantSide)
-      .reduce((acc, p) => acc + Math.abs(p.notional ?? 0), 0);
+    const notional = requireNotional(positions.filter((p) => p.side === wantSide), tok);
     const total = ctx.exchange.store?.balance?.total;
     if (typeof total !== 'number' || !Number.isFinite(total) || total === 0) {
       throw new Error(`${tok}: account total balance not available`);
     }
-    return notional / total;
+    const ratio = notional / total;
+    if (!Number.isFinite(ratio)) throw new Error(`${tok}: position notional ratio is unknown`);
+    return ratio;
   }
 
   if (tok === '$margin') {
@@ -756,7 +763,7 @@ function resolveAccountNumber(tok: string, ctx: PreprocessContext): number {
     }
     return focused.reduce((acc, p) => {
       const lev = Number.isFinite(p.leverage) && p.leverage > 0 ? p.leverage : 1;
-      return acc + Math.abs(p.notional ?? 0) / lev;
+      return acc + requireNotional([p], tok) / lev;
     }, 0);
   }
 
@@ -835,7 +842,6 @@ export function resolveDeferredCaptures(
   }
   return { command: result, emptyCaptures };
 }
-
 
 /**
  * Substitute only the condition half of a `when` form. See `WHEN_COMMAND`.

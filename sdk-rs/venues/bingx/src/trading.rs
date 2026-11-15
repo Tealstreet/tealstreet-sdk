@@ -4,10 +4,15 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+#[path = "trading/reference.rs"]
+mod reference;
+pub use reference::ReferenceRead;
 #[path = "trading/protection.rs"]
 pub(crate) mod protection;
 #[path = "trading/venue_state.rs"]
 mod venue_state;
+#[path = "trading/write_plan.rs"]
+mod write_plan;
 
 /// BingX key refusals (common codes): bad signature, key without the permission,
 /// incorrect key, IP not whitelisted. Reads and writes share this one list.
@@ -32,14 +37,17 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
 };
+use write_plan::Journals;
 
 const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
+const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
+    write: usize,
     command: CommandId,
     call: Call,
     plan: Plan,
@@ -86,6 +94,7 @@ enum Call {
     Place,
     Cancel {
         ids: Vec<String>,
+        symbol: String,
         absent_ok: bool,
     },
     Amend {
@@ -121,6 +130,7 @@ struct Step {
 struct Job {
     steps: VecDeque<Step>,
     continue_on_error: bool,
+    continue_after_refusal: bool,
     sets_both_hedged_sides: bool,
     // A trigger move cancels before placing; a failed placement must say so.
     replaces_cancelled: Option<(String, OrderSide, OrderType)>,
@@ -131,10 +141,11 @@ struct Job {
     restoring: bool,
     cancelled: bool,
     // A failed bracket leaves the placed entry without the protection the user asked for.
-    entry_with_brackets: Option<String>,
+    entry_with_brackets: Option<(String, usize)>,
 }
 struct Run {
     job: Job,
+    writes: Journals,
     plan: Plan,
     /// A serial Plan's next admitted call; independent Plans list their slots.
     next: Option<Slot>,
@@ -165,11 +176,20 @@ fn partial_failure_note(run: &Run, request: &Request, may_be_live: bool) -> Opti
             may_be_live,
         ));
     }
-    let symbol = run.job.entry_with_brackets.as_ref()?;
-    (!run.native_ids.is_empty()).then(|| {
-        let state = if may_be_live { "may not be" } else { "is not" };
-        format!("Your {symbol} entry was placed, but its stop or take profit {state} in place")
-    })
+    let (symbol, lots) = run.job.entry_with_brackets.as_ref()?;
+    let placed = run.writes.placed_count(*lots);
+    if placed == 0 {
+        return None;
+    }
+    let placement = if placed == *lots {
+        "placed"
+    } else {
+        "partially placed"
+    };
+    let state = if may_be_live { "may not be" } else { "is not" };
+    Some(format!(
+        "Your {symbol} entry was {placement}, but its stop or take profit {state} in place"
+    ))
 }
 struct Observation {
     order: Order,
@@ -437,6 +457,18 @@ fn parse_envelope(body: &str) -> Result<Envelope<'_>, serde_json::Error> {
 fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
+fn present_unknown(mut error: VenueError, note: Option<&str>) -> VenueError {
+    if error.venue_message.is_none() {
+        error.venue_message = Some(error.message.clone().into_boxed_str());
+    }
+    error.message = match note {
+        Some(note) => format!("{UNKNOWN_WORDS}. {note}"),
+        None => UNKNOWN_WORDS.into(),
+    };
+    error.outcome = Some(Outcome::Unknown);
+    error.presents = true;
+    error
+}
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
@@ -589,29 +621,15 @@ impl Trading {
         }
         match result {
             Ok(job) => {
-                let admitted = if job.continue_on_error {
-                    entry
-                        .admit_independent(cx, job.steps.len())
-                        .map(|plan| (plan, None))
-                } else {
-                    entry
-                        .admit_serial(cx, job.steps.len())
-                        .map(|(plan, slot)| (plan, Some(slot)))
-                };
-                if let Some((plan, next)) = admitted {
+                if job
+                    .guard
+                    .as_ref()
+                    .is_some_and(|guard| guard.needs_reference(cx.store, &self.references, cx.now))
+                {
                     on_entry(cx);
-                    self.retain_open_orders(cx.store);
-                    self.jobs.insert(
-                        id,
-                        Run {
-                            job,
-                            plan,
-                            next,
-                            native_ids: Vec::new(),
-                            error: None,
-                        },
-                    );
-                    self.advance(cx, credentials, id);
+                    self.read_reference(cx, entry, id, job);
+                } else {
+                    self.admit_job(cx, credentials, entry, id, job, on_entry);
                 }
             }
             Err(error) => {
@@ -620,6 +638,42 @@ impl Trading {
             }
         }
         true
+    }
+
+    fn admit_job(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: Option<&Credentials>,
+        entry: Entry,
+        id: CommandId,
+        job: Job,
+        on_entry: impl FnOnce(&mut Cx<'_, Pending>),
+    ) {
+        let count = job.steps.len();
+        let writes = Journals::new(&job.steps);
+        let admitted = if job.continue_on_error {
+            entry.admit_independent(cx, count).map(|plan| (plan, None))
+        } else {
+            entry
+                .admit_serial(cx, count)
+                .map(|(plan, slot)| (plan, Some(slot)))
+        };
+        if let Some((plan, next)) = admitted {
+            on_entry(cx);
+            self.retain_open_orders(cx.store);
+            self.jobs.insert(
+                id,
+                Run {
+                    job,
+                    writes,
+                    plan,
+                    next,
+                    native_ids: Vec::new(),
+                    error: None,
+                },
+            );
+            self.advance(cx, credentials, id);
+        }
     }
 
     fn advance(
@@ -631,13 +685,22 @@ impl Trading {
         let Some(run) = self.jobs.get_mut(&command) else {
             return;
         };
-        if run.error.is_some() && !run.job.continue_on_error && !run.job.restoring {
+        if run.error.is_some()
+            && !run.job.continue_on_error
+            && !run.job.continue_after_refusal
+            && !run.job.restoring
+        {
             let plan = run.plan.clone();
-            let error = run.error.clone().unwrap();
+            let error = run
+                .error
+                .clone()
+                .unwrap_or_else(|| unknown("BingX write failed"));
+            let error = run.writes.failure(error);
             let _ = cx.fail_plan(&plan, error);
             return;
         }
         if let Some(step) = run.job.steps.pop_front() {
+            let write = run.writes.begin(&step);
             let plan = run.plan.clone();
             let next = match run.next.take() {
                 Some(slot) => Ok(slot),
@@ -648,7 +711,10 @@ impl Trading {
             let slot = match next {
                 Ok(slot) => slot,
                 Err(error) => {
-                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    let error = error.venue_error().outcome(Outcome::NotSent);
+                    run.writes.record_failure(write, &step.call, error.clone());
+                    let error = run.writes.failure(error);
+                    let _ = cx.fail_plan(&plan, error);
                     return;
                 }
             };
@@ -666,7 +732,10 @@ impl Trading {
             let context = match issued {
                 Ok(context) => context,
                 Err(error) => {
-                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    let error = error.venue_error().outcome(Outcome::NotSent);
+                    run.writes.record_failure(write, &step.call, error.clone());
+                    let error = run.writes.failure(error);
+                    let _ = cx.fail_plan(&plan, error);
                     return;
                 }
             };
@@ -681,13 +750,18 @@ impl Trading {
                     _ => None,
                 };
                 if let Err(error) = cx.store.metadata_write_started(command, scope) {
+                    let error = error.outcome(Outcome::NotSent);
+                    run.writes.record_failure(write, &step.call, error.clone());
+                    let error = run.writes.failure(error);
                     let _ = cx.fail_plan(&plan, error);
                     return;
                 }
             }
-            if let Some(words) = run.job.unknown_words() {
-                let _ = cx.present_plan_failure(&plan, words);
-            }
+            let words = run
+                .job
+                .unknown_words()
+                .unwrap_or_else(|| UNKNOWN_WORDS.into());
+            let _ = cx.present_plan_failure(&plan, words);
             let protective = run.job.guard.is_some()
                 && (matches!(step.call, Call::Cancel { .. } | Call::Replace { .. })
                     || run.job.restoring);
@@ -697,6 +771,7 @@ impl Trading {
                 cx,
                 credentials,
                 Request {
+                    write,
                     command,
                     call: step.call,
                     plan,
@@ -711,6 +786,11 @@ impl Trading {
             );
         } else {
             let plan = run.plan.clone();
+            if let Some(error) = run.error.clone() {
+                let error = run.writes.failure(error);
+                let _ = cx.fail_plan(&plan, error);
+                return;
+            }
             let result = serde_json::to_string(&run.native_ids).unwrap_or_default();
             let _ = cx.done_plan(&plan, result);
         }
@@ -724,10 +804,15 @@ impl Trading {
     ) {
         let Some(credentials) = credentials else {
             let plan = request.plan.clone();
-            let _ = cx.fail_plan(
-                &plan,
-                not_sent("BingX credentials unavailable").kind(ErrorKind::AuthInvalid),
-            );
+            let error = not_sent("BingX credentials unavailable").kind(ErrorKind::AuthInvalid);
+            let error = if let Some(run) = self.jobs.get_mut(&request.command) {
+                run.writes
+                    .record_failure(request.write, &request.call, error.clone());
+                run.writes.failure(error)
+            } else {
+                error
+            };
+            let _ = cx.fail_plan(&plan, error);
             return;
         };
         let recipe = crate::sign::dispatch::Http::new(
@@ -773,23 +858,45 @@ impl Trading {
         };
         // A transport loss arrives here too; only a call never sent is certainly not live.
         let note = partial_failure_note(run, &request, error.outcome != Some(Outcome::NotSent));
-        let error = if run.job.cancelled {
+        let error = if !matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
+            && run.job.guard.is_none()
+        {
+            present_unknown(error, None)
+        } else if run.job.cancelled {
             run.job.protection_error(error, false)
         } else {
             error
         };
+        run.writes
+            .record_failure(request.write, &request.call, error.clone());
         let _ = run.error.get_or_insert(error.clone());
         if run.job.continue_on_error
+            && error.outcome == Some(Outcome::NotSent)
             && cx
                 .finish_plan_failed_call(&request.plan, &request.slot, &request.context)
                 .is_ok()
         {
             self.advance(cx, credentials, request.command);
         } else if let Some(note) = note {
+            let error = run.writes.failure(error);
             let _ = cx.fail_plan_noted(&request.plan, error, &note);
         } else {
+            let error = run.writes.failure(error);
             let _ = cx.fail_plan(&request.plan, error);
         }
+    }
+
+    fn journal_failure(&mut self, request: &Request, error: VenueError) -> VenueError {
+        let Some(run) = self
+            .jobs
+            .get_mut(&request.command)
+            .filter(|run| run.plan.owner() == request.plan.owner())
+        else {
+            return error;
+        };
+        run.writes
+            .record_failure(request.write, &request.call, error.clone());
+        run.writes.failure(error)
     }
     pub fn on_failed(
         &mut self,
@@ -814,6 +921,22 @@ impl Trading {
         for command in commands {
             self.jobs.remove(&command);
             self.retired_settings.push(command);
+        }
+    }
+
+    pub(crate) fn unproven_evidence(
+        &self,
+        request: &Request,
+        body: &str,
+        proof: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        evidence(body, proof);
+        if let Some(run) = self
+            .jobs
+            .get(&request.command)
+            .filter(|run| run.plan.owner() == request.plan.owner())
+        {
+            run.writes.evidence(proof);
         }
     }
 
@@ -994,7 +1117,9 @@ impl Trading {
             ) {
                 Ok(_) => Ok(ids),
                 Err(error) => {
-                    let _ = cx.fail_plan(&request.plan, error.venue_error());
+                    let error = self
+                        .journal_failure(&request, error.venue_error().outcome(Outcome::Unknown));
+                    let _ = cx.fail_plan(&request.plan, error);
                     return;
                 }
             }
@@ -1055,7 +1180,8 @@ impl Trading {
             let timestamp = crate::sign::timestamp::refused(response.body);
             let table = if half_refused {
                 &protection::REPLACEMENT_FAILED
-            } else if restoring && (timestamp || envelope.as_ref().is_ok_and(|e| e.code == 100001))
+            } else if (restoring || (request.write > 0 && !matches!(call, Call::Cancel { .. })))
+                && (timestamp || envelope.as_ref().is_ok_and(|e| e.code == 100001))
             {
                 &protection::RESTORE_AUTH
             } else if native
@@ -1073,7 +1199,9 @@ impl Trading {
             let fact = match cx.classify_write(&request.context, table, native.as_ref(), message) {
                 Ok(fact) => fact,
                 Err(error) => {
-                    let _ = cx.fail_plan(&request.plan, error.venue_error());
+                    let error = self
+                        .journal_failure(&request, error.venue_error().outcome(Outcome::Unknown));
+                    let _ = cx.fail_plan(&request.plan, error);
                     return;
                 }
             };
@@ -1111,7 +1239,9 @@ impl Trading {
             ) {
                 Ok(grant) => grant,
                 Err(error) => {
-                    let _ = cx.fail_plan(&request.plan, error.venue_error());
+                    let error = self
+                        .journal_failure(&request, error.venue_error().outcome(Outcome::Unknown));
+                    let _ = cx.fail_plan(&request.plan, error);
                     return;
                 }
             };
@@ -1126,7 +1256,8 @@ impl Trading {
                         self.queue(cx, credentials, request);
                     }
                     Err(error) => {
-                        let _ = cx.fail_plan(&request.plan, error.venue_error());
+                        let error = self.journal_failure(&request, error.venue_error());
+                        let _ = cx.fail_plan(&request.plan, error);
                     }
                 }
                 return;
@@ -1134,6 +1265,14 @@ impl Trading {
             if satisfied {
                 Ok(Vec::new())
             } else {
+                let mut error = error;
+                if error.outcome == Some(Outcome::Unknown) && !guarded {
+                    let note = self
+                        .jobs
+                        .get(&request.command)
+                        .and_then(|run| partial_failure_note(run, &request, true));
+                    error = present_unknown(error, note.as_deref());
+                }
                 Err(error)
             }
         };
@@ -1159,6 +1298,10 @@ impl Trading {
         {
             run.job.cancelled = true;
         }
+        run.writes.settle(&request, &result, canceled);
+        let uncertain = result
+            .as_ref()
+            .is_err_and(|error| error.outcome == Some(Outcome::Unknown));
         match result {
             Ok(ids) => {
                 run.native_ids.extend(ids);
@@ -1176,10 +1319,10 @@ impl Trading {
                 } else {
                     error
                 };
-                if guarded || run.error.is_none() {
+                if guarded || uncertain || run.error.is_none() {
                     run.error = Some(error);
                 }
-                if guarded {
+                if guarded || uncertain {
                     run.job.steps.clear();
                 }
                 if guarded
@@ -1188,13 +1331,15 @@ impl Trading {
                     && !restoring
                     && let Some(params) = run.job.restore.take()
                 {
-                    run.job.steps.push_back(Step {
+                    let restore = Step {
                         receipts: Vec::new(),
                         method: Method::Post,
                         path: ORDER,
                         params,
                         call: Call::Place,
-                    });
+                    };
+                    run.writes.restore(&restore);
+                    run.job.steps.push_back(restore);
                     run.job.restoring = true;
                 } else {
                     run.job.restoring = false;
@@ -1202,21 +1347,24 @@ impl Trading {
             }
         }
         // An ordered write continues only from this call's accepted DATA.
+        if uncertain {
+            let error = run
+                .writes
+                .failure(run.error.clone().unwrap_or_else(|| unknown(UNKNOWN_WORDS)));
+            let _ = cx.fail_plan(&request.plan, error);
+            return;
+        }
         let settled = if !run.job.continue_on_error
-            && (run.error.is_none() || run.job.restoring)
+            && (run.error.is_none() || run.job.restoring || run.job.continue_after_refusal)
             && !run.job.steps.is_empty()
         {
             cx.continue_serial_plan(
                 &request.plan,
                 &request.slot,
                 &request.context,
-                if run.job.restoring {
-                    safe_cex_engine::request_context::plan::SerialCall {
-                        attempts: 1,
-                        ..SERIAL
-                    }
-                } else {
-                    SERIAL
+                safe_cex_engine::request_context::plan::SerialCall {
+                    attempts: 1,
+                    ..SERIAL
                 },
             )
             .map(|slot| run.next = Some(slot))
@@ -1224,7 +1372,10 @@ impl Trading {
             cx.finish_plan_call(&request.plan, &request.slot, &request.context)
         };
         if settled.is_err() {
-            let _ = cx.fail_plan(&request.plan, unknown("BingX write settlement refused"));
+            let error = run
+                .writes
+                .failure(unknown("BingX write settlement refused"));
+            let _ = cx.fail_plan(&request.plan, error);
             return;
         }
         self.advance(cx, credentials, request.command);
@@ -1262,12 +1413,19 @@ impl Trading {
                 }
             }
         }
-        let mut job = Job::default();
+        let mut job = Job {
+            continue_after_refusal: true,
+            ..Job::default()
+        };
         for o in orders {
-            job.steps.extend(self.format(cx, o)?);
+            let steps = self.format(cx, o)?;
             if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {
-                job.entry_with_brackets = Some(o.symbol.clone());
+                let lots = steps.len()
+                    - usize::from(o.stop_loss.is_some())
+                    - usize::from(o.take_profit.is_some());
+                job.entry_with_brackets = Some((o.symbol.clone(), lots));
             }
+            job.steps.extend(steps);
         }
         Ok(job)
     }
@@ -1486,9 +1644,7 @@ impl Trading {
             if !cx.store.hedged() {
                 bracket = bracket.boolean("reduceOnly", true);
             }
-            for &lot in &lots {
-                out.push(place_step(bracket.clone().num("quantity", lot)));
-            }
+            out.push(place_step(bracket.num("quantity", amount)));
         }
         Ok(out)
     }
@@ -1511,6 +1667,7 @@ impl Trading {
                 params: Params::new().str("symbol", &market.id).str("orderId", id),
                 call: Call::Cancel {
                     ids: vec![id.clone()],
+                    symbol: o.symbol.clone(),
                     absent_ok: true,
                 },
             });
@@ -1532,6 +1689,7 @@ impl Trading {
             Params::new().str("symbol", &market.id),
             Call::Cancel {
                 ids,
+                symbol: symbol.into(),
                 absent_ok: false,
             },
         ))
@@ -1638,7 +1796,13 @@ impl Trading {
                         ("LONG", OrderSide::Sell) | ("SHORT", OrderSide::Buy)
                     ),
             };
-            guard
+            // Validate the original before reading; the full guard still gates admission
+            // after the requested reference arrives and every destructive final Claim.
+            let mut initial = guard.clone();
+            if guard.needs_reference(cx.store, &self.references, cx.now) {
+                initial.trigger = None;
+            }
+            initial
                 .check(cx.store, &self.references, cx.now, false)
                 .map_err(|e| e.message)?;
             if !meta.attached
@@ -1969,18 +2133,17 @@ fn split(amount: f64, max: f64, step: f64) -> Result<Vec<f64>, String> {
     if amount <= max {
         return Ok(vec![amount]);
     }
-    let mut size = num::adjust(max, step);
-    if size > max {
-        size = num::adjust(size - step, step);
-    }
-    if !size.is_finite() || size <= 0.0 {
-        return Err("Split order rounds to zero".into());
-    }
-    let lots = (amount / size).floor();
+    // Legacy TS: bingx.exchange.ts:1544-1564. Round equal lots and the native
+    // remainder independently; do not redistribute their rounding difference.
+    let lots = (amount / max).ceil();
     if lots > 10_000.0 {
         return Err("Order would require too many lots".into());
     }
-    let rest = num::adjust(amount - lots * size, step);
+    let rest = num::adjust(amount % max, step);
+    let size = num::adjust((amount - rest) / lots, step);
+    if !size.is_finite() || size <= 0.0 {
+        return Err("Split order rounds to zero".into());
+    }
     let mut result = vec![size; lots as usize];
     if rest > 0.0 {
         result.push(rest);

@@ -1,5 +1,6 @@
 import type { Order, PlaceOrderOpts } from '../types';
 
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { OrderType } from '../types';
 import { uuid } from '../utils/uuid';
 
@@ -73,7 +74,9 @@ export const withReplacementClientOrderId = (orderIds: string[], clientOrderId: 
   Object.assign(orderIds, { clientOrderId });
 
 export const replacementClientOrderIdOf = (orderIds: unknown): string | undefined => {
-  const clientOrderId = (orderIds as { clientOrderId?: unknown } | null | undefined)?.clientOrderId;
+  if (orderIds === null || (typeof orderIds !== 'object' && typeof orderIds !== 'function') || !('clientOrderId' in orderIds))
+    return undefined;
+  const clientOrderId = orderIds.clientOrderId;
   return typeof clientOrderId === 'string' && clientOrderId ? clientOrderId : undefined;
 };
 
@@ -85,8 +88,29 @@ export const encodeWorkerOrderIds = (orderIds: string[]): WorkerOrderIds => {
   return { orderIds: [...orderIds], ...(clientOrderId ? { clientOrderId } : {}) };
 };
 
-export const decodeWorkerOrderIds = ({ orderIds, clientOrderId }: WorkerOrderIds): ReplacementOrderIds =>
-  clientOrderId ? withReplacementClientOrderId([...orderIds], clientOrderId) : [...orderIds];
+const invalidWorkerOrderIds = (orderIds: readonly unknown[] | undefined, clientOrderId: unknown): never => {
+  const message = 'Invalid worker amendment result; reconcile before retrying';
+  const partialOrderIds = orderIds?.filter((id): id is string => typeof id === 'string') ?? [];
+  throw Object.assign(new ExchangeError(message, {
+    message, kind: 'internal', outcome: 'unknown', partial: { orderIds: partialOrderIds },
+  }), {
+    command: 'updateOrder',
+    ...(typeof clientOrderId === 'string' && clientOrderId ? { clientOrderId } : {}),
+  });
+};
+
+/** The write already ran: malformed replies retain known IDs and never prove NotSent. */
+export const decodeWorkerOrderIds = (result: unknown): ReplacementOrderIds => {
+  if (result === null || typeof result !== 'object' || Array.isArray(result))
+    return invalidWorkerOrderIds(undefined, undefined);
+  const rawIds = 'orderIds' in result ? result.orderIds : undefined;
+  const clientOrderId = 'clientOrderId' in result ? result.clientOrderId : undefined;
+  const orderIds: unknown[] | undefined = Array.isArray(rawIds) ? [...rawIds] : undefined;
+  if (!orderIds || !orderIds.every((id): id is string => typeof id === 'string')
+    || (clientOrderId !== undefined && typeof clientOrderId !== 'string'))
+    return invalidWorkerOrderIds(orderIds, clientOrderId);
+  return clientOrderId ? withReplacementClientOrderId(orderIds, clientOrderId) : orderIds;
+};
 
 /**
  * `definitive` is true only when the venue was asked about closed orders too

@@ -34,6 +34,8 @@ export const HARNESS_NOT_BUILT = Object.freeze([
   /^sdk-rs\/harness\/cpu-[^/]+\.mjs$/,
   /^sdk-rs\/harness\/bitget-paired-[^/]+\.mjs$/,
   /^sdk-rs\/harness\/family-measure\.mjs$/,
+  // Replay measurements/verdicts only; the import-graph test proves no build, loader or shipped host depends on it.
+  /^sdk-rs\/harness\/gate\.mjs$/,
   /^sdk-rs\/harness\/wasm-budget\.mjs$/,
 ]);
 const notBuilt = (rel) => HARNESS_NOT_BUILT.some((pattern) => pattern.test(rel));

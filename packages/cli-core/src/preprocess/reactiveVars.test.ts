@@ -23,7 +23,7 @@ function pos(p: Partial<Position> = {}): Position {
     unrealizedPnl: p.unrealizedPnl ?? 0,
     contracts: p.contracts ?? 1,
     liquidationPrice: p.liquidationPrice ?? 0,
-  } as Position;
+  };
 }
 
 function makeCtx(opts: {
@@ -244,11 +244,10 @@ describe('evaluateLiveVarSource', () => {
     });
 
     it('reads CURRENT position pnl on each evaluation', () => {
-      const ctx = makeCtx({
-        positions: [pos({ contracts: 1, unrealizedPnl: 10 })],
-      });
+      const position = { ...pos({ contracts: 1 }), unrealizedPnl: 10 };
+      const ctx = makeCtx({ positions: [position] });
       expect(evaluateLiveVarSource('x', '$pnl', ctx)).toBe(10);
-      (ctx.exchange!.store!.positions![0] as { unrealizedPnl: number }).unrealizedPnl = 25;
+      position.unrealizedPnl = 25;
       expect(evaluateLiveVarSource('x', '$pnl', ctx)).toBe(25);
     });
   });

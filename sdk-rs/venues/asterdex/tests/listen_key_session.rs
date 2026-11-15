@@ -1,5 +1,6 @@
 //! listenKey create and keepalive run as engine session writes. No
 //! credentials or live requests are used.
+use safe_cex_engine::signing_policy::PrivateFeedPolicy;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Method, Response, SocketId, TimerId};
 mod support;
 use safe_cex_venue_asterdex::AsterDex;
@@ -16,12 +17,16 @@ struct H {
     sockets: Vec<SocketId>,
     timers: Vec<(TimerId, f64)>,
     closed: Vec<SocketId>,
+    completed: Vec<u32>,
 }
 
 impl H {
     /// Boots to an open private stream, leaving the create in `requests`
     /// until `create` answers it.
     fn started() -> Self {
+        Self::with_policy(PrivateFeedPolicy::Streaming)
+    }
+    fn with_policy(policy: PrivateFeedPolicy) -> Self {
         let mut h = Self {
             engine: support::engine(Options {
                 key: Some("documented-key".into()),
@@ -33,7 +38,9 @@ impl H {
             sockets: vec![],
             timers: vec![],
             closed: vec![],
+            completed: vec![],
         };
+        h.engine.set_private_feed_policy(policy).unwrap();
         h.engine.start(h.now);
         h.collect();
         h.reply("/time", r#"{"serverTime":1700000000000}"#);
@@ -64,6 +71,9 @@ impl H {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(safe_cex_engine::Notice::CommandDone { command, .. }) => {
+                    self.completed.push(command)
+                }
                 _ => {}
             }
         }
@@ -136,6 +146,47 @@ impl H {
             }
         }
     }
+}
+
+#[test]
+fn rest_only_loads_and_polls_without_any_private_session_work() {
+    let mut h = H::with_policy(PrivateFeedPolicy::RestOnly);
+    assert!(
+        h.keys().is_empty(),
+        "REST-only must not create a listen key"
+    );
+    assert!(
+        h.sockets.is_empty(),
+        "REST-only must not open a private socket"
+    );
+    let loaded = h.engine.store().loaded();
+    assert!(loaded.balance && loaded.positions && loaded.orders);
+    let start = h.now;
+    h.run_until(start + 80_000.0, |_| false);
+    for suffix in ["/account", "/positionRisk", "/openOrders"] {
+        assert!(
+            h.requests
+                .iter()
+                .any(|r| r.url.split('?').next().unwrap().ends_with(suffix)),
+            "REST reconciliation must continue: {suffix}"
+        );
+    }
+    assert!(h.keys().is_empty(), "no listen-key retry or keepalive");
+    assert!(h.sockets.is_empty(), "no private reconnect");
+}
+
+#[test]
+fn rest_only_fresh_positions_does_not_require_a_private_feed() {
+    let mut h = H::with_policy(PrivateFeedPolicy::RestOnly);
+    h.event(Event::Command(safe_cex_engine::Command::Venue {
+        command: 71,
+        action: safe_cex_engine::VenueAction::ReadPositions,
+    }));
+    h.reply("/positionRisk", "[]");
+    assert!(
+        h.completed.contains(&71),
+        "an authoritative REST read answers the command"
+    );
 }
 
 #[test]

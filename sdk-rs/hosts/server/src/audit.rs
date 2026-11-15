@@ -13,7 +13,7 @@ pub struct Who {
     pub venue: String,
 }
 
-const ENGINE_OPS: [&str; 11] = [
+const ENGINE_OPS: [&str; 13] = [
     "placeOrders",
     "cancelOrders",
     "cancelOrdersWithSymbols",
@@ -24,12 +24,14 @@ const ENGINE_OPS: [&str; 11] = [
     "setMarginType",
     "setPositionMode",
     "setStpMode",
+    "setAccountTier",
+    "cancelAccountOrders",
     // Hyperliquid's dead-man switch: it cancels every open order at `time`.
     "scheduleCancel",
 ];
 
 /// Hosted `callMethod`s that change orders or account settings.
-pub const ORDER_METHODS: [&str; 16] = [
+pub const ORDER_METHODS: [&str; 19] = [
     "placeOrders",
     "placeOrder",
     "placeOrderWithClientOrderId",
@@ -46,6 +48,9 @@ pub const ORDER_METHODS: [&str; 16] = [
     "nukePositions",
     "nukeOrders",
     "stopAccountAlgos",
+    "delegatedCancelAccountOrders",
+    "delegatedSetStpMode",
+    "delegatedSetAccountTier",
 ];
 
 const COMMAND_FIELDS: [&str; 14] = [
@@ -107,6 +112,13 @@ pub fn command(command: &Value) -> Option<Map<String, Value>> {
         .filter(|op| ENGINE_OPS.contains(op))?;
     let mut fields = pick(command, &COMMAND_FIELDS);
     fields.insert("op".into(), op.into());
+    if op == "setAccountTier"
+        && let Some(tier) = command["tier"]
+            .as_str()
+            .filter(|tier| matches!(*tier, "standard" | "premium" | "plus"))
+    {
+        fields.insert("tier".into(), tier.into());
+    }
     if let Some(ids) = command["ids"].as_array() {
         fields.insert("ids".into(), ids.iter().filter_map(scalar).collect());
     }
@@ -261,6 +273,32 @@ pub fn log(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delegated_native_writes_keep_allowlisted_audit_and_refusal_coverage() {
+        let cancel =
+            command(&json!({"op":"cancelAccountOrders", "credential":"not-for-the-journal"}))
+                .unwrap();
+        assert_eq!(Value::Object(cancel), json!({"op":"cancelAccountOrders"}));
+        let tier = command(
+            &json!({"op":"setAccountTier", "tier":"premium", "credential":"not-for-the-journal"}),
+        )
+        .unwrap();
+        assert_eq!(
+            Value::Object(tier),
+            json!({"op":"setAccountTier", "tier":"premium"})
+        );
+        let malformed =
+            command(&json!({"op":"setAccountTier", "tier":"unvalidated-text"})).unwrap();
+        assert!(!malformed.contains_key("tier"));
+        for method in [
+            "delegatedCancelAccountOrders",
+            "delegatedSetStpMode",
+            "delegatedSetAccountTier",
+        ] {
+            assert!(ORDER_METHODS.contains(&method));
+        }
+    }
 
     #[test]
     fn a_dead_man_switch_is_audited_with_its_time() {

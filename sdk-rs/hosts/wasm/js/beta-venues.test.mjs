@@ -9,17 +9,17 @@ import {
 } from './beta-venues.mjs';
 import { familyLoader } from './family-loader.mjs';
 import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
+import { ExchangeError } from './host.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'polymarket', 'breakoutprop', 'txflow', 'weex',
-  'bitrue',
+  'polymarket', 'txflow', 'weex',
 ];
 
-test('the beta set is exactly the 44 IN venues in 23 families', () => {
-  assert.equal(betaVenueNames.length, 44);
+test('the beta set is exactly the 45 IN venues in 24 families', () => {
+  assert.equal(betaVenueNames.length, 45);
   assert.deepEqual(betaVenueFamilies, [
-    'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase',
+    'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitrue', 'bitunix', 'blofin', 'bybit', 'coinbase',
     'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',
     'paradex', 'phemex', 'woo',
   ]);
@@ -44,9 +44,19 @@ test('every beta venue keeps the family the full registry gives it', () => {
 test('OUT venues are refused by name and unknown ones as before', () => {
   for (const venue of OUT) {
     assert.doesNotThrow(() => venueFamily(venue), venue);
-    assert.throws(() => betaVenueFamily(venue), (error) => error instanceof BetaVenueUnavailableError && error.venue === venue);
+    assert.throws(() => betaVenueFamily(venue), (error) => error instanceof BetaVenueUnavailableError && error.venue === venue
+      && error instanceof ExchangeError && error.kind === 'unsupported' && error.outcome === 'notSent');
   }
-  assert.throws(() => betaVenueFamily('bitmex'), /unsupported Rust venue: bitmex/);
+});
+
+test('retired venues still saved on accounts refuse typed, by name', () => {
+  for (const venue of ['bitmex', 'bitmextestnet']) {
+    for (const resolve of [venueFamily, betaVenueFamily]) {
+      assert.throws(() => resolve(venue), (error) => error instanceof ExchangeError
+        && error.kind === 'unsupported' && error.outcome === 'notSent'
+        && error.message === `unsupported Rust venue: ${venue}`);
+    }
+  }
 });
 
 test('the beta loader refuses an OUT venue before importing any engine', async () => {
@@ -55,10 +65,11 @@ test('the beta loader refuses an OUT venue before importing any engine', async (
     imports.push(family);
     return { default: async () => {} };
   }, betaVenueFamily);
-  await assert.rejects(load('bitrue'), BetaVenueUnavailableError);
+  await assert.rejects(load('weex'), BetaVenueUnavailableError);
+  await load('bitrue');
   await load('okxeu');
   await load('lighter-robinhood');
-  assert.deepEqual(imports, ['okx', 'lighter']);
+  assert.deepEqual(imports, ['bitrue', 'okx', 'lighter']);
 });
 
 test('engine.beta.web.mjs is generated from the table and imports only beta families', () => {
@@ -66,4 +77,9 @@ test('engine.beta.web.mjs is generated from the table and imports only beta fami
   assert.equal(loader, betaLoaderSource(), 'run node js/generate-beta-loader.mjs');
   const imported = [...loader.matchAll(/import\('\.\.\/pkg\/web\/([a-z]+)\/safe_cex_wasm\.js'\)/g)].map((match) => match[1]);
   assert.deepEqual(imported, betaVenueFamilies);
+});
+
+test('BingX Spot belongs to the native family but stays outside beta admission until smoke', () => {
+  assert.equal(venueFamily('bingxspot'), 'bingx');
+  assert.throws(() => betaVenueFamily('bingxspot'), BetaVenueUnavailableError);
 });

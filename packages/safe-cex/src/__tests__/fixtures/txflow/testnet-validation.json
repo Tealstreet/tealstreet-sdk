@@ -1,0 +1,67 @@
+{
+  "network": "testnet",
+  "host": "https://rpc.txflow-testnet.xyz",
+  "date": "2026-11-08",
+  "privateKeysIncluded": false,
+  "captures": {
+    "initial-public-capture.json": "d962443b16c4ee88b833009f5f0766ff6ab8bc2f75e81fffb211b51f3bfe4c44",
+    "trading-public-capture.json": "7e010bfe51fdea5fb0aeba4aa66eb6e01bd5e53e7266cea9a6fdb18a995d3016",
+    "semantics-public-capture.json": "82546b1fd2873338372fe628b56dc8df3fa2ecbada84edbaba366ba9709c1ef6",
+    "semantics-explicit-margin-capture.json": "a7a2bb2765954e5fc8d69a51006ae59781cdaac451e3b01aaf5759a1e92a3f8f",
+    "revocation-public-capture.json": "384204d000b0e9ec7d224329a6b640c436f2eaf6828865c61f50306da91c31fb"
+  },
+  "observations": {
+    "funded": true,
+    "approvedAgent": true,
+    "orderModifyCancelCancelByCloid": "executed; native IDs reconciled through REST and orderUpdates",
+    "nodePong": {
+      "method": "PONG"
+    },
+    "apiPong": {
+      "channel": "pong"
+    },
+    "reconnectAllMids": "frames resumed after fresh subscription",
+    "unsupportedSubscription": "silently ignored while supported channels and heartbeats remain alive",
+    "allMidsRest": 403,
+    "allAssetCtxsRest": 403,
+    "reduceOnly": {
+      "position": "0.0002",
+      "requested": "0.0004",
+      "restOrigSz": "0.0002",
+      "restSz": "0.0002"
+    },
+    "positionTpslWithoutMargin": {
+      "code": 23002,
+      "message": "Place order failed: sl margin mode must be set"
+    },
+    "positionTpslWithCross": {
+      "partialRequested": "0.0001",
+      "partialRead": "0.0001",
+      "fullPositionRequested": "0",
+      "fullPositionRead": "0.0000"
+    },
+    "infinity": {
+      "code": 10001,
+      "message": "Invalid price format"
+    },
+    "notionalMarginAsset85": {
+      "size": "1",
+      "price": "0.000539",
+      "accepted": true,
+      "semanticsUnproven": true
+    },
+    "nonceReplay": {
+      "code": 40901,
+      "message": "Invalid transaction: Nonce already used"
+    },
+    "revokedAgent": {
+      "code": 20002,
+      "agentsAfter": 0
+    },
+    "finalPositions": 0,
+    "finalOpenOrders": 0,
+    "finalTpsl": 0,
+    "rateLimit": "No 429 induced; requests paced at least 250ms, so boundary and Retry-After not measured.",
+    "expiry": "No expiry field published; absence fails closed. No lifetime inferred."
+  }
+}

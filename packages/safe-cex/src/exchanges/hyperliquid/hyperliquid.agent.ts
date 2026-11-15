@@ -63,7 +63,10 @@ const ARBITRUM_SEPOLIA_CHAIN = {
 /**
  * Switch the wallet to the correct network for Hyperliquid signing
  */
-async function switchToCorrectNetwork(testnet: boolean): Promise<{ success: boolean; error?: string }> {
+async function switchToCorrectNetwork(
+  testnet: boolean,
+  assertCurrent: () => void,
+): Promise<{ success: boolean; error?: string }> {
   if (typeof window === 'undefined' || !window.ethereum) {
     return { success: false, error: 'No Ethereum wallet detected' };
   }
@@ -72,27 +75,33 @@ async function switchToCorrectNetwork(testnet: boolean): Promise<{ success: bool
   const targetChainId = targetChain.chainId;
 
   const trySwitch = async (): Promise<boolean> => {
+    assertCurrent();
     try {
       await window!.ethereum!.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: targetChainId }],
       });
-      return true;
     } catch {
+      assertCurrent();
       return false;
     }
+    assertCurrent();
+    return true;
   };
 
   const tryAddChain = async (): Promise<boolean> => {
+    assertCurrent();
     try {
       await window!.ethereum!.request({
         method: 'wallet_addEthereumChain',
         params: [targetChain],
       });
-      return true;
     } catch {
+      assertCurrent();
       return false;
     }
+    assertCurrent();
+    return true;
   };
 
   if (await trySwitch()) {
@@ -220,13 +229,24 @@ export async function submitAgentApproval(
  * @param expectedMainAddress - The expected main wallet address (for verification)
  * @param testnet - Whether to use testnet
  * @param agentName - Name for the agent wallet (auto-generated if not provided) - max 16 characters
+ * @param assertOwnerCurrent - Optional initiating-operation assertion; throw when its owner or lifetime changes
  * @returns The result including agent address and private key if successful
  */
 export async function createAgentWalletWithBrowserWallet(
   expectedMainAddress: string,
   testnet: boolean = false,
   agentName?: string,
+  assertOwnerCurrent?: () => void,
 ): Promise<AgentWalletCreationResult> {
+  const cancelled = 'Agent wallet creation cancelled-for-owner-change';
+  const assertCurrent = () => {
+    try {
+      assertOwnerCurrent?.();
+    } catch {
+      throw new Error(cancelled);
+    }
+  };
+  let provider: ethers.BrowserProvider | undefined;
   if (typeof window === 'undefined' || !window.ethereum) {
     return {
       success: false,
@@ -237,13 +257,15 @@ export async function createAgentWalletWithBrowserWallet(
   const walletName = agentName || generateAgentWalletName();
 
   try {
+    assertCurrent();
     // 1. Generate a new random wallet for the agent
     const agentWallet = ethers.Wallet.createRandom();
     const agentAddress = agentWallet.address;
     const agentPrivateKey = agentWallet.privateKey;
 
     // 2. Switch to the correct network
-    const networkResult = await switchToCorrectNetwork(testnet);
+    const networkResult = await switchToCorrectNetwork(testnet, assertCurrent);
+    assertCurrent();
     if (!networkResult.success) {
       return {
         success: false,
@@ -252,10 +274,26 @@ export async function createAgentWalletWithBrowserWallet(
     }
 
     // 3. Connect to browser wallet and get signer
-    const provider = new ethers.BrowserProvider(window!.ethereum!);
+    const wallet = window!.ethereum!;
+    // Ethers may defer another account request inside getSigner/signTypedData.
+    const guardedWallet: EthereumProvider = {
+      request: async (args) => {
+        assertCurrent();
+        try {
+          return await wallet.request(args);
+        } finally {
+          assertCurrent();
+        }
+      },
+    };
+    provider = new ethers.BrowserProvider(assertOwnerCurrent ? guardedWallet : wallet);
+    assertCurrent();
     await provider.send('eth_requestAccounts', []);
+    assertCurrent();
     const signer = await provider.getSigner();
+    assertCurrent();
     const mainAddress = await signer.getAddress();
+    assertCurrent();
 
     // 4. Verify address matches
     if (mainAddress.toLowerCase() !== expectedMainAddress.toLowerCase()) {
@@ -268,8 +306,10 @@ export async function createAgentWalletWithBrowserWallet(
     // 5. Sign the agent approval
     const { signature, nonce } = await signAgentApproval(signer, agentAddress, walletName, testnet);
 
-    // 6. Submit to Hyperliquid
+    // Signing can outlive the initiating login or mounted setup operation.
+    assertCurrent();
     const result = await submitAgentApproval(agentAddress, walletName, nonce, signature, testnet);
+    assertCurrent();
 
     if (result.success) {
       return {
@@ -282,6 +322,11 @@ export async function createAgentWalletWithBrowserWallet(
 
     return result;
   } catch (error) {
+    try {
+      assertCurrent();
+    } catch {
+      return { success: false, message: cancelled };
+    }
     // Handle user rejection
     if (error instanceof Error && error.message.includes('user rejected')) {
       return {
@@ -294,6 +339,8 @@ export async function createAgentWalletWithBrowserWallet(
       success: false,
       message: error instanceof Error ? error.message : 'Failed to create agent wallet',
     };
+  } finally {
+    if (assertOwnerCurrent) provider?.destroy();
   }
 }
 

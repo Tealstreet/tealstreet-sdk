@@ -216,6 +216,24 @@ fn no_primary_never_selects_secondary_and_removed_material_fails_atomically() {
 }
 
 #[test]
+fn mexc_http_capture_follows_its_compiled_feature() {
+    let (signer, ids) = fixture();
+    if cfg!(feature = "mexc") {
+        let output = capture(&signer, &ids, "mexc", http(QUERY));
+        assert_eq!(output.credential.as_deref(), Some("hosted-primary"));
+        assert_eq!(
+            output.signature.as_deref(),
+            Some("bb470a87cb02a5d4ef68700a516641a9862892ab7ed8025860c5a8f007a76a69")
+        );
+    } else {
+        assert!(matches!(
+            hosted_signing::prepare("mexc", &ids, http(QUERY)),
+            Err(SignError::Unsupported)
+        ));
+    }
+}
+
+#[test]
 fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
     let (_, ids) = fixture();
     for input in [
@@ -229,18 +247,41 @@ fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
     ] {
         assert!(serde_json::from_str::<Input>(input).is_err());
     }
-    // Unmigrated control family: MEXC (moved from Bitunix by #2190).
+    // MEXC, Bitrue and Kraken HTTP captures follow their compiled families.
     for venue in [
+        #[cfg(not(feature = "mexc"))]
         "mexc",
+        #[cfg(not(feature = "apexomni"))]
+        "apexomni",
+        #[cfg(not(feature = "bitrue"))]
+        "bitrue",
+        "coinbase",
+        "coinbasespot",
+        "grvt",
+        "hyperliquid",
+        "hyperliquidspot",
+        #[cfg(not(feature = "kraken"))]
+        "kraken",
+        "krakenspot",
+        "lighter",
+        "lighter-robinhood",
+        "paradex",
+        "polymarket",
+        "txflow",
+        "weex",
+        "mexc-unknown",
         "okx-unknown",
         "binance-unknown",
         "bybit-unknown",
         "",
     ] {
-        assert!(matches!(
-            hosted_signing::prepare(venue, &ids, http(QUERY)),
-            Err(SignError::Unsupported)
-        ));
+        assert!(
+            matches!(
+                hosted_signing::prepare(venue, &ids, http(QUERY)),
+                Err(SignError::Unsupported)
+            ),
+            "{venue}"
+        );
     }
     let venue = families()[0];
     assert!(matches!(

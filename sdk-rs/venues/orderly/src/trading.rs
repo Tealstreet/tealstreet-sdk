@@ -524,24 +524,26 @@ impl Orderly {
                 continue;
             }
             let amount = num::adjust(o.amount, market.precision.amount);
-            let units = (amount / market.precision.amount).round();
-            let cap = (market.limits.amount.max / market.precision.amount).floor();
-            if !units.is_finite()
-                || !cap.is_finite()
-                || cap < 1.0
-                || units > 9007199254740991.0
-                || (units / cap).ceil() > 100.0
+            // Legacy TS: orderly.exchange.ts:1073-1082. Equal rounded lots and
+            // a separate modulo tail intentionally preserve TS under-allocation.
+            let max = market.limits.amount.max;
+            let lots = if amount > max {
+                (amount / max).ceil()
+            } else {
+                1.0
+            };
+            let rest = if amount > max {
+                num::adjust(amount % max, market.precision.amount)
+            } else {
+                0.0
+            };
+            let qty = num::adjust((amount - rest) / lots, market.precision.amount);
+            let count = ts_lot_count(lots)?;
+            // TS `if (rest)` also excludes NaN after amount rounding overflows.
+            for (index, qty) in std::iter::repeat_n(qty, count)
+                .chain((rest != 0.0 && !rest.is_nan()).then_some(rest))
+                .enumerate()
             {
-                return Err("Orderly order exceeds supported split bounds".into());
-            }
-            let mut remaining = units;
-            let mut index = 0;
-            while remaining > 0.0 {
-                let lot = remaining.min(cap);
-                let qty = num::adjust(lot * market.precision.amount, market.precision.amount);
-                if qty < market.limits.amount.min {
-                    return Err("Orderly split leaves a below-minimum remainder".into());
-                }
                 let price = (o.kind == OrderType::Limit)
                     .then(|| num::adjust(o.price.unwrap(), market.precision.price));
                 let order_type = if o.kind == OrderType::Market {
@@ -594,8 +596,6 @@ impl Orderly {
                     body: Some(body),
                     effect: Effect::Place(order),
                 });
-                remaining -= lot;
-                index += 1;
             }
             if o.stop_loss.is_some() || o.take_profit.is_some() {
                 if !positional.insert((o.symbol.clone(), mode_ == MarginType::Isolated)) {
@@ -1235,11 +1235,7 @@ impl Orderly {
         let write = request.step.method != Method::Get;
         if write && (response.status == 408 || (500..600).contains(&response.status)) {
             let error = format!("Orderly HTTP {}: {}", response.status, response.body);
-            self.trade_lost(
-                cx,
-                request,
-                VenueError::new(error).outcome(Outcome::Unknown),
-            );
+            self.trade_lost(cx, request, ambiguous_write(VenueError::new(error)));
             return;
         }
         // A successful envelope with an unusable ACK cannot prove a write was rejected.
@@ -1538,7 +1534,7 @@ impl Orderly {
             if unknown_ack {
                 self.trade_lost(cx, request, VenueError::new(e).outcome(Outcome::Unknown));
             } else {
-                let mut error = answer_failure(response, e);
+                let mut error = answer_failure(response, e, write);
                 if !write {
                     // A read has no write outcome to classify.
                     error.outcome = None;
@@ -1594,6 +1590,8 @@ impl Orderly {
         error: VenueError,
         uncertain: bool,
     ) {
+        let lost = uncertain || error.outcome == Some(Outcome::Unknown);
+        let error = if lost { ambiguous_write(error) } else { error };
         match request.step.effect {
             Effect::Place(order) if !uncertain => cx.store.remove_orders(&[&order.id]),
             Effect::Place(order) => {
@@ -1652,11 +1650,17 @@ impl Orderly {
         else {
             return;
         };
-        // The first failure names the error; any lost leg makes the outcome unknown.
-        let lost = uncertain || error.outcome == Some(Outcome::Unknown);
-        let first = job.error.get_or_insert(error);
-        if lost {
-            first.outcome = Some(Outcome::Unknown);
+        // The first uncertainty owns the terminal warning and its diagnostics;
+        // a definitive earlier refusal must not hide a later ambiguous write.
+        if lost
+            && job
+                .error
+                .as_ref()
+                .is_none_or(|first| first.outcome != Some(Outcome::Unknown))
+        {
+            job.error = Some(error.outcome(Outcome::Unknown));
+        } else {
+            job.error.get_or_insert(error);
         }
         // Bulk cancellation's two families are independent writes, not replacements.
         if !job.keep_going {
@@ -1811,9 +1815,20 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
+fn ts_lot_count(lots: f64) -> Result<usize, &'static str> {
+    // lodash/times returns no equal lots above Number.MAX_SAFE_INTEGER.
+    // The caller still appends the separately computed modulo remainder.
+    if lots > 9_007_199_254_740_991.0 {
+        return Ok(0);
+    }
+    lots.to_string()
+        .parse::<usize>()
+        .map_err(|_| "Orderly lot count exceeds addressable storage")
+}
+
 /// An explicit refusal (`success: false` or a 4xx). Orderly's server-side and
 /// duplicate-request codes do not prove nothing happened.
-fn answer_failure(response: Response<'_>, message: String) -> VenueError {
+fn answer_failure(response: Response<'_>, message: String, write: bool) -> VenueError {
     #[derive(Deserialize)]
     struct Code {
         code: Option<i64>,
@@ -1826,6 +1841,12 @@ fn answer_failure(response: Response<'_>, message: String) -> VenueError {
         Some(code) => error.venue_code(code.to_string()),
         None => error,
     };
+    // A physically dispatched rate-limited write may already have taken effect.
+    // HTTP status outranks even a documented native refusal. Reads keep their
+    // existing classification below.
+    if write && (response.status == 429 || code == Some(-1003)) {
+        return ambiguous_write(error.kind(ErrorKind::RateLimited));
+    }
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
     match (response.status, code) {
         (_, Some(-1000 | -1011 | -1012)) => error.outcome(Outcome::Unknown),
@@ -1839,5 +1860,31 @@ fn answer_failure(response: Response<'_>, message: String) -> VenueError {
         // A 2xx `success: false` without a documented code.
         _ if serde_json::from_str::<crate::wire::Rest<'_>>(response.body).is_ok() => error,
         _ => error.outcome(Outcome::Unknown),
+    }
+}
+
+fn ambiguous_write(mut error: VenueError) -> VenueError {
+    error
+        .venue_message
+        .get_or_insert_with(|| error.message.into_boxed_str());
+    error.message = "Orderly write outcome is unknown. Check Open Orders".into();
+    error.outcome(Outcome::Unknown)
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::ts_lot_count;
+
+    #[test]
+    fn lodash_times_count_boundary_without_allocating() {
+        assert_eq!(ts_lot_count(1.0), Ok(1));
+        assert_eq!(ts_lot_count(101.0), Ok(101));
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(
+            ts_lot_count(9_007_199_254_740_991.0),
+            Ok(9_007_199_254_740_991)
+        );
+        assert_eq!(ts_lot_count(9_007_199_254_740_992.0), Ok(0));
+        assert_eq!(ts_lot_count(10_000_000_000_000_000.0), Ok(0));
     }
 }

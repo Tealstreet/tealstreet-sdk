@@ -21,6 +21,10 @@ export class NukeCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
+    const invalid = this.refuseUnknownArgs(ctx, args[1] ? [1] : []);
+    if (invalid) return invalid;
 
     // The running chasers and TWAPs the nuke stopped first, so none re-places.
     const reportStopped = (result: unknown) => {
@@ -76,7 +80,7 @@ export class NukeCommand extends TradingBaseCommand {
 
       default:
         this.printError(ctx, 'Malformed command, correct syntax is nuke <positions|pos|orders|ord|all>');
-        return this.error('Invalid syntax');
+        return this.error(`Invalid syntax: ${this.unknownOrderArgument(args[1])}`);
     }
   }
 }

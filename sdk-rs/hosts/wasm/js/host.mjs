@@ -238,6 +238,81 @@ export const builderAuthorizationOf = (value) => {
   return undefined;
 };
 
+/** Validate and clone a complete logical outcome array at host/worker boundaries. */
+export function writePlanElementsOf(value) {
+  return parseWritePlanElements(value, new WeakSet(), 0);
+}
+
+function writePlanErrorOf(value, active, depth) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.message !== 'string' || active.has(value) || depth > 32) return undefined;
+  active.add(value);
+  try {
+    const error = { message: value.message };
+    if (ERROR_KINDS.has(value.kind)) error.kind = value.kind;
+    if (ERROR_OUTCOMES.has(value.outcome)) error.outcome = value.outcome;
+    for (const key of ['venueCode', 'venueMessage'])
+      if (typeof value[key] === 'string') error[key] = value[key];
+    if (typeof value.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value.causeCode)) error.causeCode = value.causeCode;
+    const historyDecode = historyDecodeOf(value.historyDecode);
+    if (historyDecode) error.historyDecode = historyDecode;
+    const builder = builderAuthorizationOf(value.builderAuthorization);
+    if (builder) error.builderAuthorization = builder;
+    if (Number.isFinite(value.retryAfterMs) && value.retryAfterMs >= 0) error.retryAfterMs = value.retryAfterMs;
+    if (ERROR_PROTECTIONS.has(value.protection)) error.protection = value.protection;
+    if (value.partial && Array.isArray(value.partial.orderIds)
+      && value.partial.orderIds.every((id) => typeof id === 'string')) {
+      error.partial = { orderIds: [...value.partial.orderIds] };
+      for (const key of ['total', 'failedIndex'])
+        if (count(value.partial[key]) !== undefined) error.partial[key] = value.partial[key];
+    }
+    if (value.elements !== undefined) {
+      const elements = parseWritePlanElements(value.elements, active, depth + 1);
+      if (!elements) return undefined;
+      error.elements = elements;
+    }
+    return error;
+  } finally { active.delete(value); }
+}
+
+const APPLIED_EFFECTS = new Set(['cancel', 'amend', 'tradingStop', 'settings', 'deferredChild', 'positionTrigger']);
+
+function parseWritePlanElements(value, active, depth) {
+  if (!Array.isArray(value) || active.has(value) || depth > 32) return undefined;
+  active.add(value);
+  try {
+    const elements = [];
+    for (const row of value) {
+      if (!row || typeof row !== 'object' || Array.isArray(row) || count(row.index) === undefined
+        || (row.clientOrderId !== undefined && typeof row.clientOrderId !== 'string')) return undefined;
+      const element = { index: row.index };
+      if (row.clientOrderId !== undefined) element.clientOrderId = row.clientOrderId;
+      if (row.status === 'placed') {
+        if (!Array.isArray(row.orderIds) || !row.orderIds.length
+          || !Array.from(row.orderIds).every((id) => typeof id === 'string' && id.length > 0)) return undefined;
+        elements.push({ ...element, status: 'placed', orderIds: [...row.orderIds] });
+      } else if (row.status === 'applied') {
+        if (!APPLIED_EFFECTS.has(row.effect) || 'orderIds' in row || 'orderId' in row) return undefined;
+        const result = { ...element, status: 'applied', effect: row.effect };
+        for (const key of ['targetOrderId', 'positionKey']) {
+          if (row[key] === undefined) continue;
+          if (typeof row[key] !== 'string' || !row[key].length) return undefined;
+          result[key] = row[key];
+        }
+        elements.push(result);
+      } else if (row.status === 'notSent' || row.status === 'unknown') {
+        const error = row.error === undefined ? undefined : writePlanErrorOf(row.error, active, depth + 1);
+        if ((row.error !== undefined && !error) || (row.status === 'unknown' && !error)) return undefined;
+        const uncertain = error && (row.status === 'unknown' || !['notSent', 'rejected'].includes(error.outcome)
+          || error.partial?.orderIds.length > 0);
+        elements.push({ ...element, status: uncertain ? 'unknown' : row.status,
+          ...(error ? { error: uncertain ? { ...error, outcome: 'unknown' } : error } : {}) });
+      } else return undefined;
+    }
+    return elements;
+  } finally { active.delete(value); }
+}
+
 /** A classified venue failure (`engine/src/error.rs`). `message` is the text
  * hosts have always shown; `name` stays `Error` so displayed text is unchanged. */
 export class ExchangeError extends Error {
@@ -256,8 +331,11 @@ export class ExchangeError extends Error {
     if (venueMessage) this.venueMessage = venueMessage;
     if (Number.isFinite(detail.retryAfterMs) && detail.retryAfterMs >= 0) this.retryAfterMs = detail.retryAfterMs;
     if (ERROR_PROTECTIONS.has(detail.protection)) this.protection = detail.protection;
+    const elements = writePlanElementsOf(detail.elements);
+    if (elements) this.elements = elements;
     const ids = detail.partial?.orderIds;
-    if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
+    // Applied writes can carry partial counts without creating any order IDs.
+    if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
       this.partialOrderIds = [...ids];
       this.partialOrderCount = ids.length;
       const total = count(detail.partial.total);
@@ -375,6 +453,7 @@ export class EngineHost {
     this.socketStats = { public: socketStats(), business: socketStats(), private: socketStats() };
     this.timers = new Map();
     this.commands = new Map();
+    this.commandAdmissions = new Map();
     // Timed commands owning a sign attempt, HTTP request or managed preparation.
     this.stageCauses = new Map();
     this.stageCause = undefined;
@@ -439,10 +518,20 @@ export class EngineHost {
     finally { this.handlers.onDead?.(this.deadError); }
   }
 
+  checkAlgoOwner() {
+    if (this.disposed) return false;
+    if (!this.algoOwnerCurrent) return true;
+    let current = false;
+    try { current = this.algoOwnerCurrent() === true; } catch { /* An unavailable owner retires this host. */ }
+    if (current) return true;
+    this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
+    return false;
+  }
+
   // Preserve native argument counts without per-message closures or rest arrays.
   invoke(fn, a, b, c, d) {
     this.assertHttpHandoffIdle();
-    if (this.disposed) return;
+    if (!this.checkAlgoOwner()) return;
     try {
       // Failure is sticky and only engine calls set it: a passed post-call check
       // covers this call unless an engine call ran outside invoke since.
@@ -495,6 +584,7 @@ export class EngineHost {
     let timeoutMs;
     let onEvent;
     let onStage;
+    let assertCurrent;
     try {
       if (command.op === 'scheduleCancel' && command.time != null
           && (!Number.isSafeInteger(command.time) || command.time < 0)) {
@@ -506,6 +596,16 @@ export class EngineHost {
       if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');
       onStage = options?.onStage;
       if (onStage !== undefined && typeof onStage !== 'function') throw new TypeError('Command stage observer must be a function');
+      assertCurrent = options?.assertCurrent;
+      if (assertCurrent !== undefined) {
+        if (typeof assertCurrent !== 'function') throw new TypeError('Command owner check must be a function');
+        if (typeof this.engine.httpCommandOwner !== 'function') {
+          throw new ExchangeError('Engine predates command ownership checks; update the SDK/WASM', { kind: 'unsupported', outcome: 'notSent' });
+        }
+        if (assertCurrent() !== undefined) {
+          throw new ExchangeError('Command owner check must complete synchronously', { kind: 'invalidInput', outcome: 'notSent' });
+        }
+      }
     } catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'networkRestored' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles' || command.op === 'repairSubscription'
@@ -519,6 +619,7 @@ export class EngineHost {
         clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds,
         receiptKey: `${this.receiptSession ??= receiptSession(this.entropy)}:${reply}`, commandId: reply, orderIdentities: [] };
     } catch (error) { return Promise.reject(error); }
+    if (reply !== undefined && assertCurrent) this.commandAdmissions.set(reply, assertCurrent);
     const promise = reply === undefined
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent, onStage }));
@@ -698,15 +799,24 @@ export class EngineHost {
 
   /**
    * Close the open sockets of `channel` (or all) as an abnormal close, so the
-   * venue runs its own reconnect. Returns how many sockets were closed.
+   * venue runs its own reconnect. Optional recovery bounds retain pre-pause
+   * physical receipts until stale, without closing fresh/uninitialized siblings.
    */
-  reconnectSockets(channel) {
+  reconnectSockets(channel, recovery) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return 0;
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
       // A connect in flight is left alone, as in TS: a second connect would leak it.
-      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open || !this.sockets.has(id)) continue;
+      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open ||
+        !this.sockets.has(id) || this.socketRecords.get(id) !== record) continue;
+      if (recovery) {
+        if (!record.initialized || record.lastReceived <= 0) continue;
+        if (recovery.suspendedBefore !== undefined && record.lastReceived <= recovery.suspendedBefore)
+          record.recoveryReceipt = record.lastReceived;
+        if (record.recoveryReceipt !== record.lastReceived || record.lastReceived > recovery.staleBefore) continue;
+        record.recoveryReceipt = undefined;
+      }
       const socket = this.sockets.get(id);
       this.sockets.delete(id);
       this.socketClosed(id, 1006);
@@ -749,18 +859,32 @@ export class EngineHost {
 
   /** Start this account's Rust algos (chaser, TWAP, exec) on an `algos` engine
    * build. Their replies reach `handlers.onAlgoEmit(op, data)`. */
-  algoStart(accountName) {
+  algoStart(accountName, twapOwner, isOwnerCurrent) {
     this.assertHttpHandoffIdle();
-    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (!this.checkAlgoOwner()) throw this.deadError ?? new EngineDisposedError();
+    if (isOwnerCurrent !== undefined && typeof isOwnerCurrent !== 'function')
+      throw new TypeError('Algo owner check must be a function');
     if (typeof this.engine.algoStart !== 'function')
       throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
-    this.invoke(this.engine.algoStart, accountName, this.transport.now(), Date.now());
+    this.algoOwnerCurrent = isOwnerCurrent;
+    if (twapOwner !== undefined) {
+      const bound = twapOwner && typeof twapOwner.ownerId === 'string' && twapOwner.ownerId
+        && Number.isSafeInteger(twapOwner.generation) && twapOwner.generation >= 0;
+      const start = bound ? this.engine.algoStartOwned : this.engine.algoStartUnowned;
+      if (typeof start !== 'function')
+        throw new ExchangeError('This engine build predates TWAP ownership; update the engine to run algos', { kind: 'unsupported', outcome: 'notSent' });
+      // An owner hook without a current owner still starts algos; only TWAP restores are refused.
+      if (bound) this.invoke(start, accountName, JSON.stringify({ ownerId: twapOwner.ownerId, generation: twapOwner.generation }), this.transport.now(), Date.now());
+      else this.invoke(start, accountName, this.transport.now(), Date.now());
+    } else {
+      this.invoke(this.engine.algoStart, accountName, this.transport.now(), Date.now());
+    }
     if (this.deadError) throw this.deadError;
     this.algosStarted = true;
     this.armAlgos();
   }
 
-  get algosRunning() { return this.algosStarted && !this.disposed; }
+  get algosRunning() { return this.checkAlgoOwner() && this.algosStarted; }
 
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if the engine refuses it. */
   algoOp(op, data) {
@@ -882,6 +1006,7 @@ export class EngineHost {
     };
     for (const [id, pending] of this.commands) this.settleCommand(id, this.deadError
       ? new EngineDeadError(this.deadError.cause, pending.identity) : new EngineDisposedError(pending.identity, true), true);
+    this.commandAdmissions.clear();
     for (const id of this.socketFailures.keys()) attempt(() => this.clearSocketFailure(id));
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
@@ -903,6 +1028,7 @@ export class EngineHost {
     this.algosStarted = false;
     attempt(() => this.abandonAlgoStopAll());
     attempt(() => this.algosStopped?.resolve?.());
+    this.algoOwnerCurrent = undefined;
     attempt(() => this.transport.dispose?.());
     // Release provider-owned keys on normal disposal instead of retaining the
     // wasm allocation (and an injected callback) until garbage collection.
@@ -1016,7 +1142,7 @@ export class EngineHost {
         catch { finish(undefined, 'unavailable'); return; }
         if (settled) { clearTimer(); return; }
         Promise.resolve().then(() => {
-          if (controller.signal.aborted || this.disposed) return;
+          if (controller.signal.aborted || !this.checkAlgoOwner()) return;
           if (!execute) { finish(undefined, 'unavailable'); return; }
           executing = true;
           return execute({ signal: controller.signal });
@@ -1111,6 +1237,14 @@ export class EngineHost {
     const output = this.invoke(fn, ...args);
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     return output;
+  }
+
+  coinbaseSigningMetadata() {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw new EngineDisposedError();
+    if (typeof this.engine.coinbaseSigningMetadata !== 'function')
+      throw new ExchangeError('Coinbase signing metadata is unavailable', { kind: 'unsupported', outcome: 'notSent' });
+    return JSON.parse(this.invokeHosted(this.engine.coinbaseSigningMetadata));
   }
 
   hostedSigning(input) {
@@ -1263,7 +1397,7 @@ export class EngineHost {
 
   execute(action) {
     this.assertHttpHandoffIdle();
-    if (this.disposed) return;
+    if (!this.checkAlgoOwner()) return;
     const { engine, transport } = this;
     switch (action?.op) {
       case 'retireAddressSetup':
@@ -1293,10 +1427,12 @@ export class EngineHost {
         const channel = Object.hasOwn(this.socketStats, action.channel) ? action.channel : 'public';
         const channels = action.publicTopics === true && channel !== 'public' ? [channel, 'public'] : [channel];
         const stats = channels.map((role) => this.socketStats[role]);
-        const record = { channels, stats, open: false, initialized: false };
+        const record = { channels, stats, open: false, initialized: false, lastReceived: 0, recoveryReceipt: undefined };
         // One timestamp per carried channel; state changes notify once per socket.
         const received = () => {
           const now = Date.now();
+          record.lastReceived = now;
+          record.recoveryReceipt = undefined;
           for (const stat of stats) stat.lastReceived = now;
           if (record.initialized || !record.open) return;
           record.initialized = true;
@@ -1504,6 +1640,7 @@ export class EngineHost {
         break;
       }
       case 'done': {
+        this.commandAdmissions.delete(action.command);
         this.stage(action.command, 'reply');
         const pending = this.commands.get(action.command);
         if (!pending) {

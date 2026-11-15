@@ -12,11 +12,11 @@ const FORM: &str = "application/x-www-form-urlencoded";
 const FUTURES_HEADERS: &[(&str, &str)] = &[("Content-Type", FORM)];
 const SPOT_HEADERS: &[(&str, &str)] = &[("Content-Type", FORM), ("Accept", "application/json")];
 
-/// One selection and its non-Clone nonce authority, captured before command admission.
+/// One selection, with nonce authority only when explicitly requested.
 pub struct Selected {
     selection: Selection,
     identity: Identity,
-    claim: safe_cex_engine::nonce::NonceClaim,
+    claim: Option<safe_cex_engine::nonce::NonceClaim>,
     spot: bool,
 }
 impl Selected {
@@ -30,7 +30,23 @@ impl Selected {
         Ok(Self {
             selection,
             identity: identity.clone(),
-            claim,
+            claim: Some(claim),
+            spot: false,
+        })
+    }
+    /// Futures permits omitting Nonce, avoiding coordination across processes.
+    pub fn futures_without_nonce(
+        ids: &Identities,
+        role: CredentialRole,
+    ) -> Result<Self, safe_cex_engine::nonce::NonceSelectionError> {
+        let slots = super::setup::futures_slots(ids);
+        let (selection, identity) = slots
+            .select(role)
+            .map_err(|_| safe_cex_engine::nonce::NonceSelectionError::MissingCredential)?;
+        Ok(Self {
+            selection,
+            identity: identity.clone(),
+            claim: None,
             spot: false,
         })
     }
@@ -44,7 +60,7 @@ impl Selected {
         Ok(Self {
             selection,
             identity: identity.clone(),
-            claim,
+            claim: Some(claim),
             spot: true,
         })
     }
@@ -52,7 +68,7 @@ impl Selected {
         &self.selection
     }
     pub fn credential(&self) -> Credential {
-        self.selection.credential(self.identity.credential.clone())
+        self.selection.authority(&self.identity)
     }
     pub fn futures_http(
         self,
@@ -65,9 +81,10 @@ impl Selected {
         if self.spot {
             return Err(SignError::InvalidRequest);
         }
-        Http::futures(
+        Http::futures_inner(
             &self.identity,
             self.claim,
+            self.selection.slot(),
             method,
             path,
             form,
@@ -79,13 +96,19 @@ impl Selected {
         if !self.spot {
             return Err(SignError::InvalidRequest);
         }
-        Http::spot(&self.identity, self.claim, path, form, freshness_ms)
+        Http::spot(
+            &self.identity,
+            self.claim.ok_or(SignError::InvalidRequest)?,
+            path,
+            form,
+            freshness_ms,
+        )
     }
 }
 
 pub struct Http {
     identity: Identity,
-    claim: safe_cex_engine::nonce::NonceClaim,
+    claim: Option<safe_cex_engine::nonce::NonceClaim>,
     method: Method,
     url: String,
     body: Option<String>,
@@ -106,10 +129,33 @@ impl Http {
         testnet: bool,
         freshness_ms: f64,
     ) -> Result<Self, SignError> {
+        let slot = claim.slot();
+        Self::futures_inner(
+            identity,
+            Some(claim),
+            slot,
+            method,
+            path,
+            form,
+            testnet,
+            freshness_ms,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn futures_inner(
+        identity: &Identity,
+        claim: Option<safe_cex_engine::nonce::NonceClaim>,
+        slot: CredentialSlot,
+        method: Method,
+        path: &str,
+        form: &str,
+        testnet: bool,
+        freshness_ms: f64,
+    ) -> Result<Self, SignError> {
         let canonical = path.strip_prefix("/derivatives").unwrap_or(path);
         if !(canonical.starts_with("/api/v3/") || canonical.starts_with("/api/history/"))
             || path.contains('?')
-            || (claim.slot() == CredentialSlot::Secondary
+            || (slot == CredentialSlot::Secondary
                 && (method != Method::Get || canonical.starts_with("/api/history/")))
         {
             return Err(SignError::InvalidRequest);
@@ -154,7 +200,7 @@ impl Http {
         }
         Self::new(
             identity,
-            claim,
+            Some(claim),
             Method::Post,
             format!("https://api.kraken.com{path}"),
             Some(form.into()),
@@ -168,7 +214,7 @@ impl Http {
     #[allow(clippy::too_many_arguments)]
     fn new(
         identity: &Identity,
-        claim: safe_cex_engine::nonce::NonceClaim,
+        claim: Option<safe_cex_engine::nonce::NonceClaim>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -200,7 +246,11 @@ impl Http {
     pub fn body(&self) -> Option<&str> {
         self.body.as_deref()
     }
-    fn work(&self, nonce: u64, stamp_ms: f64) -> Result<(Option<String>, SignRequest), SignError> {
+    fn work(
+        &self,
+        nonce: Option<u64>,
+        stamp_ms: f64,
+    ) -> Result<(Option<String>, SignRequest), SignError> {
         let context = Context {
             venue: if self.spot { "krakenspot" } else { "kraken" }.into(),
             method: self.method.as_str().into(),
@@ -219,7 +269,7 @@ impl Http {
             self.spot,
             SignReceipt {
                 stamp_ms: Some(stamp_ms),
-                nonce: Some(nonce),
+                nonce,
                 ..Default::default()
             },
         )
@@ -243,7 +293,7 @@ impl Http {
 }
 impl SignStep for Http {
     fn nonce_claim(&self) -> Option<&safe_cex_engine::nonce::NonceClaim> {
-        Some(&self.claim)
+        self.claim.as_ref()
     }
     fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
         if self.spot {
@@ -262,13 +312,17 @@ impl SignStep for Http {
             return Err(SignError::InvalidRequest);
         };
         self.attest(request, self.body.as_deref())?;
-        let nonce = dispatch
-            .reserve_nonce(&self.claim)
-            .map_err(|error| match error {
-                safe_cex_engine::nonce::NonceError::InvalidTime
-                | safe_cex_engine::nonce::NonceError::InvalidClaim => SignError::InvalidRequest,
-                _ => SignError::Unavailable,
-            })?;
+        let nonce = self
+            .claim
+            .as_ref()
+            .map(|claim| {
+                dispatch.reserve_nonce(claim).map_err(|error| match error {
+                    safe_cex_engine::nonce::NonceError::InvalidTime
+                    | safe_cex_engine::nonce::NonceError::InvalidClaim => SignError::InvalidRequest,
+                    _ => SignError::Unavailable,
+                })
+            })
+            .transpose()?;
         let (body, work) = self.work(nonce, dispatch.stamp_ms())?;
         let receipt = work.receipt;
         request.body = body.clone();
@@ -305,13 +359,14 @@ impl SignStep for Http {
             vec![
                 ("APIKey", key.into()),
                 ("Authent", signature),
-                (
-                    "Nonce",
-                    receipt.nonce.ok_or(SignError::InvalidResult)?.to_string(),
-                ),
                 ("Content-Type", FORM.into()),
             ]
         };
+        if !self.spot
+            && let Some(nonce) = receipt.nonce
+        {
+            request.headers.insert(2, ("Nonce", nonce.to_string()));
+        }
         Ok(())
     }
     fn freshness_ms(&self) -> f64 {
@@ -325,7 +380,11 @@ pub(super) fn build_http_work(
     spot: bool,
     receipt: SignReceipt,
 ) -> Result<(Option<String>, SignRequest), SignError> {
-    let nonce_text = receipt.nonce.ok_or(SignError::InvalidRequest)?.to_string();
+    let nonce_text = match receipt.nonce {
+        Some(nonce) => nonce.to_string(),
+        None if spot => return Err(SignError::InvalidRequest),
+        None => String::new(),
+    };
     let body = if spot {
         Some(format!(
             "{}{}nonce={nonce_text}",
@@ -390,6 +449,124 @@ fn hash_work(
             },
         ],
         context: Context::default(),
+    }
+}
+/// Canonical Futures preimage for REST or a WS challenge, using owned refs only.
+pub fn canonical_work(
+    identity: &Identity,
+    payload: Vec<u8>,
+    receipt: SignReceipt,
+) -> Result<SignRequest, SignError> {
+    identity.validate().map_err(|_| SignError::InvalidRequest)?;
+    receipt.validate()?;
+    if payload.is_empty() {
+        return Err(SignError::InvalidRequest);
+    }
+    Ok(hash_work(
+        &identity.credential,
+        identity.signing_ref()?,
+        payload,
+        None,
+        receipt,
+    ))
+}
+
+/// Each frame remains owned by its physical socket through engine dispatch.
+pub struct WsAuth {
+    identity: Identity,
+    socket: safe_cex_engine::SocketId,
+    challenge: Option<(String, &'static str)>,
+    prepared: bool,
+}
+impl WsAuth {
+    pub fn challenge(identity: Identity, socket: safe_cex_engine::SocketId) -> Self {
+        Self {
+            identity,
+            socket,
+            challenge: None,
+            prepared: false,
+        }
+    }
+    pub fn subscribe(
+        identity: Identity,
+        socket: safe_cex_engine::SocketId,
+        challenge: String,
+        feed: &'static str,
+    ) -> Self {
+        Self {
+            identity,
+            socket,
+            challenge: Some((challenge, feed)),
+            prepared: false,
+        }
+    }
+    fn matches(&self, action: &Action) -> bool {
+        matches!(action, Action::WsSend { socket, text } if *socket == self.socket && text.is_empty())
+    }
+}
+impl SignStep for WsAuth {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        _: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        self.prepared = false;
+        if !self.matches(action) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.identity
+            .validate()
+            .map_err(|_| SignError::InvalidRequest)?;
+        let work = if let Some((challenge, _)) = &self.challenge {
+            canonical_work(
+                &self.identity,
+                challenge.as_bytes().to_vec(),
+                SignReceipt::default(),
+            )?
+        } else {
+            SignRequest {
+                receipt: SignReceipt::default(),
+                context: Context::default(),
+                operations: vec![Operation::Present {
+                    key: self.identity.credential.clone(),
+                }],
+            }
+        };
+        self.prepared = true;
+        Ok(work)
+    }
+    fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        use sha2::Digest;
+        if !self.matches(action)
+            || !std::mem::take(&mut self.prepared)
+            || result.receipt != SignReceipt::default()
+            || !result.headers.is_empty()
+            || result.values.len() != if self.challenge.is_some() { 3 } else { 1 }
+        {
+            return Err(SignError::InvalidResult);
+        }
+        let key = std::str::from_utf8(&result.values[0]).map_err(|_| SignError::InvalidResult)?;
+        if key.is_empty() || key.contains(['\r', '\n', '\0']) {
+            return Err(SignError::InvalidResult);
+        }
+        let text = if let Some((challenge, feed)) = &self.challenge {
+            if result.values[1] != sha2::Sha256::digest(challenge.as_bytes())[..]
+                || result.values[2].len() != 64
+            {
+                return Err(SignError::InvalidResult);
+            }
+            serde_json::json!({"event":"subscribe","feed":feed,"api_key":key,"original_challenge":challenge,"signed_challenge":STANDARD.encode(&result.values[2])}).to_string()
+        } else {
+            serde_json::json!({"event":"challenge","api_key":key}).to_string()
+        };
+        let Action::WsSend { text: out, .. } = action else {
+            return Err(SignError::InvalidResult);
+        };
+        *out = text;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
     }
 }
 /// Pure atomic work only; the socket owner binds challenge and physical epoch.

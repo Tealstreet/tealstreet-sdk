@@ -4,6 +4,7 @@
 // refused by name before any wasm is fetched. Account-mode policy (local key vs
 // remote or payload signer, Paradex local only) is not here: it is enforced at
 // construction by safe-cex's assertBetaAccount (exchanges/rust/betaVenues.ts).
+import { ExchangeError } from './host.mjs';
 import { venueFamily } from './venues.mjs';
 
 const betaVenues = Object.freeze({
@@ -19,6 +20,7 @@ const betaVenues = Object.freeze({
   bitget: { family: 'bitget' },
   bitgetinverse: { family: 'bitget' },
   bitgetusdc: { family: 'bitget' },
+  bitrue: { family: 'bitrue' },
   bitunix: { family: 'bitunix' },
   blofin: { family: 'blofin' },
   bybit: { family: 'bybit' },
@@ -57,9 +59,10 @@ export const betaVenueNames = Object.freeze(Object.keys(betaVenues).sort());
 
 export const betaVenueFamilies = Object.freeze([...new Set(Object.values(betaVenues).map((venue) => venue.family))].sort());
 
-export class BetaVenueUnavailableError extends Error {
+export class BetaVenueUnavailableError extends ExchangeError {
   constructor(venue) {
-    super(`${venue} is not available in the beta bundle`);
+    const message = `${venue} is not available in the beta bundle`;
+    super(message, { message, kind: 'unsupported', outcome: 'notSent' });
     this.name = 'BetaVenueUnavailableError';
     this.venue = venue;
   }

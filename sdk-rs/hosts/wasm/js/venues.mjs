@@ -1,5 +1,7 @@
 // Every Rust venue name and the family build (a hosts/wasm Cargo feature)
 // that contains it. Unknown names fail before any wasm is fetched.
+import { ExchangeError } from './host.mjs';
+
 const families = Object.freeze({
   apexomni: 'apexomni',
   asterdex: 'asterdex',
@@ -10,13 +12,13 @@ const families = Object.freeze({
   binanceoptions: 'binance',
   binancespot: 'binance',
   bingx: 'bingx',
+  bingxspot: 'bingx',
   bitget: 'bitget',
   bitgetinverse: 'bitget',
   bitgetusdc: 'bitget',
   bitrue: 'bitrue',
   bitunix: 'bitunix',
   blofin: 'blofin',
-  breakoutprop: 'breakoutprop',
   bybit: 'bybit',
   bybitdemo: 'bybit',
   bybitinverse: 'bybit',
@@ -55,6 +57,10 @@ const families = Object.freeze({
 export const venueFamilies = Object.freeze([...new Set(Object.values(families))].sort());
 
 export function venueFamily(venue) {
-  if (!Object.hasOwn(families, venue)) throw new Error(`unsupported Rust venue: ${venue}`);
+  if (!Object.hasOwn(families, venue)) {
+    // Retired names (e.g. bitmex) stay on saved accounts: refuse typed, so one account fails alone.
+    const message = `unsupported Rust venue: ${venue}`;
+    throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+  }
   return families[venue];
 }

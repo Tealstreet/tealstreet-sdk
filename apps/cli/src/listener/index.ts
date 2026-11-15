@@ -1,7 +1,7 @@
 import type { StandalonePlatformAdapter } from '../platform-adapter';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
+import { getStorageDir, onStorageOwnerChange } from '../storage-context';
+
 import { buildServeOptions } from './http';
 import { getListenerId } from './state';
 import { isListenerEnabled, isAccountSyncEnabled } from './config';
@@ -11,20 +11,19 @@ import { startTasksBroadcast, type TasksBroadcastHandle } from './tasks-broadcas
 import { startCrossTradeBroadcast, type CrossTradeBroadcastHandle } from './cross-trade-broadcast';
 import { gcTombstonedAccounts, getConfigFilePath } from '../config';
 import { gcTombstonedCrossTradeConfigs, getCrossTradeFilePath } from '../cross-trade-store';
-import { TASKS_FILE } from '../tasks-store';
+import { getTasksFilePath } from '../tasks-store';
 import { getHooksFilePath } from './hooks-store';
 import { logger } from '../logger';
-import { BRAND } from '../brand';
 
 // `fs.watch` throws permanently if the target file doesn't exist on bind.
 // Seed each broadcaster's target with a valid empty shape on startup so
 // the watcher attaches and subsequent edits (CLI or external) fire events.
 function ensureStateFilesExist(): void {
-  const dir = join(homedir(), BRAND.configDirName);
+  const dir = getStorageDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
   const seeds: Array<[string, string]> = [
     [getConfigFilePath(), JSON.stringify({ accounts: [] }, null, 2)],
-    [TASKS_FILE, JSON.stringify({ version: 1, tasks: [] }, null, 2)],
+    [getTasksFilePath(), JSON.stringify({ version: 1, tasks: [] }, null, 2)],
     [getHooksFilePath(), JSON.stringify({ hooks: [] }, null, 2)],
     [getCrossTradeFilePath(), JSON.stringify({ configs: [] }, null, 2)],
   ];
@@ -34,7 +33,7 @@ function ensureStateFilesExist(): void {
         // config.json and hooks.json later hold credentials.
         writeFileSync(path, seed, { mode: 0o600 });
       } catch (err) {
-        logger.warn(`listener: failed to seed ${path}: ${(err as Error).message}`);
+        logger.warn(`listener: failed to seed ${path}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -49,6 +48,7 @@ const DEFAULT_PORT = 53219;
 // cap), this catches the "where's the connect prompt?" case.
 const CLIENT_HINT_DELAY_MS = 75_000;
 
+let lastOptions: Parameters<typeof startListener>[0] | null = null;
 let server: ReturnType<typeof Bun.serve> | null = null;
 let accountsBroadcast: AccountsBroadcastHandle | null = null;
 let tasksBroadcast: TasksBroadcastHandle | null = null;
@@ -64,6 +64,7 @@ export async function startListener({
   processCommand: ProcessCommandFn;
   port?: number;
 }): Promise<void> {
+  lastOptions = { adapter, processCommand, port };
   if (server) return;
   if (!isListenerEnabled()) {
     adapter.printInfo('listener disabled (config.listener.enabled=false)');
@@ -78,7 +79,7 @@ export async function startListener({
     const removed = gcTombstonedCrossTradeConfigs();
     if (removed > 0) logger.info(`startup: GC'd ${removed} tombstoned cross-trade config(s)`);
   } catch (err) {
-    logger.warn(`cross-trade tombstone GC failed: ${(err as Error).message}`);
+    logger.warn(`cross-trade tombstone GC failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
     const listenerId = getListenerId();
@@ -142,3 +143,10 @@ export function stopListener(): void {
   server.stop(true);
   server = null;
 }
+
+onStorageOwnerChange(() => {
+  if (!lastOptions) return;
+  const options = lastOptions;
+  stopListener();
+  void startListener(options);
+});

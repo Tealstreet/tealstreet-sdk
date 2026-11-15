@@ -48,6 +48,11 @@ export class TrailCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
+    const operandIndex = args.findIndex((arg, index) => index > 0 && this.looksLikePrice(arg));
+    const invalid = this.refuseUnknownOrderArgs(ctx, operandIndex > 0 ? [operandIndex] : []);
+    if (invalid) return invalid;
     const targetSymbol = this.getTargetSymbol(ctx, []);
 
     const distanceArg = args.find((arg, index) => index > 0 && this.looksLikePrice(arg));

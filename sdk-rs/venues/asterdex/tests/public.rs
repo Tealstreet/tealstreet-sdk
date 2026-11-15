@@ -234,6 +234,62 @@ fn documented_partial_snapshot_is_sorted_and_authoritative() {
 }
 
 #[test]
+fn partial_depth_stream_first_reordered_and_escaped_envelopes_agree() {
+    let data = r#"{"s":"BTCUSDT","u":390497879,"b":[["7400","2"]],"a":[["7401","3"]]}"#;
+    for text in [
+        format!(r#"{{"stream":"btcusdt@depth20@100ms","data":{data}}}"#),
+        format!(r#"{{"data":{data},"stream":"btcusdt@depth20@100ms"}}"#),
+        format!(r#"{{"str\u0065am":"btcusdt@depth20@100ms","data":{data},"id":null,"e":null}}"#),
+    ] {
+        let mut h = Harness::ready();
+        h.subscribe();
+        h.message(DOCUMENTED_DEPTH);
+        h.message(&text);
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().bids(),
+            [(7400.0, 2.0)],
+            "{text}"
+        );
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().asks(),
+            [(7401.0, 3.0)],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn partial_depth_validates_whole_envelope_before_changing_the_book() {
+    let data = r#"{"s":"BTCUSDT","u":390497879,"b":[["7400","2"]],"a":[["7401","3"]]}"#;
+    for suffix in [
+        r#","id":1}"#,
+        r#","id":"1"}"#,
+        r#","e":3}"#,
+        r#","stream":"btcusdt@depth20@100ms"}"#,
+        r#","data":null}"#,
+        r#","id":null,"id":null}"#,
+        r#","other":[}"#,
+        "} trailing",
+    ] {
+        let text = format!(r#"{{"stream":"btcusdt@depth20@100ms","data":{data}{suffix}"#);
+        let mut h = Harness::ready();
+        h.subscribe();
+        h.message(DOCUMENTED_DEPTH);
+        h.message(&text);
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().best_bid(),
+            Some(7405.43),
+            "{text}"
+        );
+        assert_eq!(
+            h.engine.book("BTCUSDT").unwrap().best_ask(),
+            Some(7405.96),
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn malformed_crossed_zero_numeric_and_diff_frames_preserve_good_snapshot() {
     let mut h = Harness::ready();
     h.subscribe();
@@ -948,4 +1004,61 @@ fn unsupported_candle_intervals_are_rejected_not_served_as_one_hour() {
         result.as_ref().unwrap_err(),
         "AsterDEX does not support 8h candles"
     );
+}
+
+fn subscription_receipts(frame: &[u8]) -> Vec<(String, u32, f64)> {
+    use safe_cex_engine::wire::{section, sections};
+    let stats = sections(frame)
+        .find(|(kind, _)| *kind == section::MESSAGE_HANDLER_STATS)
+        .unwrap()
+        .1;
+    let strings = sections(frame)
+        .find(|(kind, _)| *kind == section::STRINGS)
+        .unwrap()
+        .1;
+    let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+    let text = |index: usize| {
+        let start =
+            u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap()) as usize;
+        let end =
+            u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap()) as usize;
+        let base = 4 + (count + 1) * 4;
+        std::str::from_utf8(&strings[base + start..base + end])
+            .unwrap()
+            .to_owned()
+    };
+    let rows: Vec<_> = stats[8..]
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .map(|row| {
+            (
+                text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize),
+                u32::from_le_bytes(row[8..12].try_into().unwrap()),
+                f64::from_le_bytes(row[16..24].try_into().unwrap()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows.len(),
+        u32::from_le_bytes(stats[..4].try_into().unwrap()) as usize
+    );
+    rows
+}
+
+#[test]
+fn subscription_receipt_observes_fast_depth_without_refreshing_tickers() {
+    let mut h = Harness::ready();
+    h.subscribe();
+    h.message(DOCUMENTED_DEPTH);
+    assert_eq!(h.engine.book("BTCUSDT").unwrap().best_bid(), Some(7405.43));
+    let rows = subscription_receipts(h.engine.snapshot_frame(h.now + 1.));
+    let depth = rows
+        .iter()
+        .find(|r| r.0.ends_with("btcusdt@depth20@100ms"))
+        .unwrap();
+    assert_eq!((depth.1, depth.2), (3, 1.));
+    let ticker = rows.iter().find(|r| r.0.ends_with("!ticker@arr")).unwrap();
+    assert_eq!(ticker.1, 1);
+    assert!(ticker.2.is_nan());
 }

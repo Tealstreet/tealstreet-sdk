@@ -12,6 +12,8 @@ mod routing;
 mod server;
 mod socket_health;
 mod transport;
+#[cfg(test)]
+mod websocket_write_tests;
 
 pub use routing::resolve;
 pub use routing::{
@@ -28,7 +30,8 @@ pub use socket_health::{
     SOCKET_STALE_MS, SocketDiagnostics, SocketHealth, SocketStats, SocketSummary,
 };
 pub use transport::{
-    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PreparedHttp, Transport,
+    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PreparedHttp,
+    SocketConnection, Transport, WebSocketWriteError, WebSocketWriter,
 };
 #[cfg(feature = "nonce-drain")]
 pub use transport::{DrainFuture, Drained};
@@ -126,6 +129,7 @@ pub struct Host<V: Venue, T: Transport> {
     events: Events,
     inbox: mpsc::UnboundedReceiver<HostEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
+    socket_writers: HashMap<SocketId, std::sync::Arc<dyn WebSocketWriter>>,
     socket_health: socket_health::SocketTracker,
     legacy_interest_observer: Option<InterestObserver>,
     timers: HashMap<TimerId, AbortHandle>,
@@ -186,7 +190,8 @@ impl<V: Venue, T: Transport> Drop for SetupRunOwner<V, T> {
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
-    pub fn new(engine: Engine<V>, transport: T) -> Self {
+    pub fn new(mut engine: Engine<V>, transport: T) -> Self {
+        engine.enable_websocket_write_host();
         let (events, inbox) = mpsc::unbounded_channel();
         Self {
             engine,
@@ -194,6 +199,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             events,
             inbox,
             sockets: HashMap::new(),
+            socket_writers: HashMap::new(),
             socket_health: Default::default(),
             legacy_interest_observer: None,
             timers: HashMap::new(),
@@ -425,6 +431,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.inbox.close();
         self.managed_http.clear();
         self.signing_tasks.clear();
+        for (_, writer) in self.socket_writers.drain() {
+            writer.retire();
+        }
         self.sockets.clear();
         if let Some(observer) = &self.legacy_interest_observer {
             observer.observe(InterestObservation::Dropped);
@@ -485,6 +494,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 )
             }
             HostEvent::WsClosed(socket, code) => {
+                if let Some(writer) = self.socket_writers.remove(&socket) {
+                    writer.retire();
+                }
                 self.sockets.remove(&socket);
                 if let Some(observer) = &self.legacy_interest_observer {
                     observer.observe(InterestObservation::TransportClosed { socket });
@@ -493,6 +505,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 engine.handle(now, Event::WsClosed { socket, code })
             }
             HostEvent::WsRouteExhausted(socket) => {
+                if let Some(writer) = self.socket_writers.remove(&socket) {
+                    writer.retire();
+                }
                 self.sockets.remove(&socket);
                 if let Some(observer) = &self.legacy_interest_observer {
                     observer.observe(InterestObservation::TransportClosed { socket });
@@ -566,7 +581,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 } => {
                     self.socket_health
                         .connecting(socket, channel.clone(), public_topics);
-                    let outgoing = self.transport.connect_encoding(
+                    let connection = self.transport.connect_socket(
                         binary,
                         socket,
                         url,
@@ -575,7 +590,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
                         context,
                         self.events.clone(),
                     );
-                    self.sockets.insert(socket, outgoing);
+                    if let Some(writer) = connection.writer {
+                        self.socket_writers.insert(socket, writer);
+                    }
+                    self.sockets.insert(socket, connection.outgoing);
                 }
                 Action::WsSend { socket, text } => {
                     if let Some(outgoing) = self.sockets.get(&socket) {
@@ -593,6 +611,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 }
                 // Dropping the sender closes the socket.
                 Action::WsClose { socket } => {
+                    if let Some(writer) = self.socket_writers.remove(&socket) {
+                        writer.retire();
+                    }
                     self.sockets.remove(&socket);
                     if let Some(observer) = &self.legacy_interest_observer {
                         observer.observe(InterestObservation::TransportClosed { socket });
@@ -603,8 +624,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::ManagedHttp(action) => {
                     self.turn(|host| host.execute_managed_http(*action));
                 }
-                Action::SignedOutbound { .. } => {
-                    unreachable!("engine drain unwraps signed outbound")
+                action @ Action::SignedOutbound { .. } => {
+                    let binding = safe_cex_engine::WebSocketWriteBinding::from_action(action)
+                        .expect("engine drain unwraps ordinary signing; only typed writes remain");
+                    self.turn(|host| host.execute_websocket_write(binding));
                 }
                 Action::RetireAddressSetup { .. } => {
                     self.terminal = Some(

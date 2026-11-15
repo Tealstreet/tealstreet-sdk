@@ -71,7 +71,7 @@ fn public() -> Driver {
 }
 fn ready(busy: bool) -> (Driver, Option<safe_cex_engine::HttpRequest>) {
     let (mut e, _) = support::ready();
-    let _ = e.drain_actions().count();
+    let _ = safe_cex_engine::test_support::prepared_actions(&mut e, 2000.);
     assert!(
         e.store().loaded().orders && e.store().loaded().positions && e.store().loaded().balance
     );
@@ -86,7 +86,8 @@ fn ready(busy: bool) -> (Driver, Option<safe_cex_engine::HttpRequest>) {
             }),
         );
         Some(
-            e.drain_actions()
+            safe_cex_engine::test_support::prepared_actions(&mut e, 2000.)
+                .into_iter()
                 .find_map(|a| match a {
                     Action::Http(r) => Some(r),
                     _ => None,
@@ -215,7 +216,7 @@ fn unsupported_batch_does_not_queue_behind_or_block_the_native_active_write() {
             },
         },
     );
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, 2001.);
     assert!(
         matches!(&out[..], [Action::Notice(Notice::CommandDone { command: 1, result })] if result == r#"["9007199254740995"]"#),
         "no delayed unsupported job or physical work: {out:?}"
@@ -227,7 +228,7 @@ fn unsupported_batch_does_not_queue_behind_or_block_the_native_active_write() {
             orders: vec![order()],
         }),
     );
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, 2002.);
     let requests: Vec<_> = out
         .iter()
         .filter_map(|a| match a {

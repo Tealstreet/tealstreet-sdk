@@ -285,7 +285,7 @@ fn uta() -> (Harness, Arc<AtomicBool>) {
 #[test]
 fn rollback_provider_refusal_preserves_original_native_rejection_details() {
     let (mut h, parked) = uta();
-    h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"usdt-futures","orderId":"stop","symbol":"BTCUSDT","qty":"0.5","stopLoss":"80","side":"sell","posSide":"long","status":"pending"}]}"#);
+    h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"usdt-futures","orderId":"stop","symbol":"BTCUSDT","qty":"0.5","stopLoss":"80","slTriggerBy":"market","slOrderType":"market","side":"sell","posSide":"long","status":"pending"}]}"#);
     h.command(Command::AmendOrder {
         command: 48,
         id: "stop".into(),
@@ -321,10 +321,14 @@ fn rollback_provider_refusal_preserves_original_native_rejection_details() {
     assert_eq!(error.venue_code.as_deref(), Some("40017"));
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
     assert_eq!(error.outcome, None);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
     // The note now comes from `end`, which every unfinished rollback reaches.
     assert_eq!(
         error.message,
-        "Bitget 40017: replace rejected (HTTP 200); Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused; protection rollback failed: Signing provider refused the request"
+        "Bitget 40017: replace rejected (HTTP 200); protection is not in place; re-place it now; Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused; protection rollback failed: Signing provider refused the request"
     );
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }

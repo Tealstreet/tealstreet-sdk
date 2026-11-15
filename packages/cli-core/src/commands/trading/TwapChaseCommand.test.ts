@@ -74,6 +74,34 @@ describe('TwapCommand — twap chase parsing', () => {
     cmd = new TwapCommand();
   });
 
+  it.each([
+    { command: 'twap buy $1000 duration=1h', side: OrderSide.Buy, chase: false },
+    { command: 'twap sell 1000$ slices=10 duration=1h', side: OrderSide.Sell, chase: false },
+    { command: 'twap chase buy 1000$ duration=1h slices=10', side: OrderSide.Buy, chase: true },
+    { command: 'twap chase sell $1000 into 10 over 60', side: OrderSide.Sell, chase: true },
+  ])('preserves side, size, slices and interval: $command', async ({ command, side, chase }) => {
+    const r = await cmd.execute(ctx(command.split(' '), makeExchange()));
+    expect(r).toMatchObject({
+      success: true,
+      taskAction: {
+        action: 'start', type: 'twap', params: {
+          symbol: 'BTCUSDT', side, progress: { filled: 0, total: 0.02, percentage: 0 },
+          params: { totalSize: 0.02, duration: 3_600_000, slices: 10, ordersExecuted: 0, useChaserOrders: chase },
+        },
+      },
+    });
+    const params = r.taskAction?.params?.params;
+    if (!params || !('slices' in params)) throw new Error('Expected TWAP parameters');
+    expect(params.duration / params.slices).toBe(360_000);
+    if (chase) {
+      expect(params).toMatchObject({ timeoutPct: 50, timeoutAction: 'market', failAction: 'market' });
+    } else {
+      expect(params).not.toHaveProperty('timeoutPct');
+      expect(params).not.toHaveProperty('timeoutAction');
+      expect(params).not.toHaveProperty('failAction');
+    }
+  });
+
   describe('argument validation', () => {
     it('rejects missing side', async () => {
       const ex = makeExchange();

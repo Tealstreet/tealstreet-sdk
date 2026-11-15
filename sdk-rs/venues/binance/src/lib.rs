@@ -28,7 +28,8 @@ use safe_cex_engine::socket_lifecycle::{
     TrafficPolicy,
 };
 use safe_cex_engine::{
-    Command, Cx, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue, num,
+    Command, Cx, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+    VenueError, num,
 };
 use sign::{Credentials, Query};
 use std::cell::{Cell, RefCell};
@@ -529,7 +530,7 @@ impl BinanceFutures {
     }
 
     /// Note request weight; near the limit, or on a 418/429, pause background reads.
-    fn observe_weight(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
+    fn observe_weight(&mut self, now: f64, response: &Response<'_>) {
         let pause = if matches!(response.status, 418 | 429) {
             Some(
                 response
@@ -548,7 +549,7 @@ impl BinanceFutures {
                 .map(|_| WEIGHT_PAUSE_MS)
         };
         if let Some(pause) = pause {
-            self.background_paused_until = self.background_paused_until.max(cx.now + pause);
+            self.background_paused_until = self.background_paused_until.max(now + pause);
         }
     }
 
@@ -923,6 +924,11 @@ impl BinanceFutures {
         match event_type(text) {
             Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
+                    if !self.is_spot() && !self.options.portfolio_margin {
+                        cx.record_socket_topic(&["!bookTicker"]);
+                    } else {
+                        cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
+                    }
                     let (bid, ask) = (num::parse(&event.b), num::parse(&event.a));
                     cx.store.update_ticker(&event.s, |t| {
                         t.bid = bid;
@@ -941,6 +947,10 @@ impl BinanceFutures {
     }
 
     fn apply_ticker(&mut self, cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+        cx.record_socket_topic(&["!ticker@arr"]);
+        if self.is_spot() {
+            cx.record_socket_symbol_topic(&event.s, &["@ticker"]);
+        }
         let last = num::parse(&event.c);
         let percentage = num::parse(&event.percentage);
         let volume = num::parse(&event.v);
@@ -995,6 +1005,7 @@ impl BinanceFutures {
                 }
             }
             Some("markPriceUpdate") => {
+                cx.record_socket_topic(&["!markPrice@arr@1s"]);
                 if let Ok(events) = serde_json::from_str::<Vec<MarkPriceEvent>>(text) {
                     for event in events {
                         let mark = num::parse(&event.p);
@@ -1015,6 +1026,7 @@ impl BinanceFutures {
             Some("kline") => {
                 if let Ok(event) = serde_json::from_str::<KlineEvent>(text) {
                     let k = &event.k;
+                    cx.record_socket_symbol_topic(&k.s, &["@kline_", &k.i]);
                     if let Some(interval) = Interval::parse(&k.i)
                         && self.candles.contains_key(&(k.s.to_string(), interval))
                     {
@@ -1032,6 +1044,7 @@ impl BinanceFutures {
     }
 
     fn on_depth(&mut self, cx: &mut Cx<'_, Pending>, event: DepthEvent<'_>) {
+        cx.record_socket_symbol_topic(&event.s, &["@depth"]);
         let paused = cx.now < self.rest_paused_until;
         let Some(state) = self.books.get_mut(event.s.as_ref()) else {
             return;
@@ -1362,6 +1375,25 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn write_failure_text() -> Option<fn(&VenueError) -> String> {
+        Some(trading::terminal_failure_text)
+    }
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        _: f64,
+        pending: &Pending,
+        response: Response<'_>,
+    ) {
+        let mut pending = pending;
+        while let Pending::Background(_, inner) = pending {
+            pending = inner;
+        }
+        if !matches!(pending, Pending::Options(_) | Pending::OptionsProduct(_)) {
+            self.observe_weight(now, &response);
+        }
+    }
+
     fn http_plans() -> bool {
         false
     }
@@ -1577,7 +1609,14 @@ impl Venue for BinanceFutures {
                 }
             }
             Channel::Market | Channel::SpotTicker(_) => self.on_market_frame(cx, text),
-            Channel::Private => self.on_user_event(cx, text),
+            Channel::Private => {
+                if event_type(text)
+                    .is_some_and(|event| !matches!(event, "listenKeyExpired" | "serverShutdown"))
+                {
+                    cx.record_socket_topic(&["private"]);
+                }
+                self.on_user_event(cx, text);
+            }
         }
     }
 
@@ -1737,7 +1776,7 @@ impl Venue for BinanceFutures {
             self.options_product_response(cx, *request, response);
             return;
         }
-        self.observe_weight(cx, &response);
+        self.observe_weight(cx.now, &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
             return;

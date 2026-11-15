@@ -298,7 +298,7 @@ impl Coinbase {
         };
         let kind = *kind;
         let generation = *generation;
-        let public = self.credentials.is_none() && self.options.spot_only;
+        let public = !self.signers.has_primary() && self.options.spot_only;
         let mut path = if public {
             "/api/v3/brokerage/market/products?limit=1000"
         } else {
@@ -1294,7 +1294,7 @@ impl Coinbase {
                 self.public.poll = None;
                 // Initial private reconciliation scans every working status and
                 // account family through the same paced REST queue.
-                if self.credentials.is_some() && !cx.store.loaded().orders {
+                if self.signers.has_primary() && !cx.store.loaded().orders {
                     self.public.poll = Some(cx.set_timer(self.public_poll_interval()));
                     return true;
                 }

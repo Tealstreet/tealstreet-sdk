@@ -1,4 +1,6 @@
 //! Commands are preflighted plans, then sent once in sequence.
+//! Venue-decoded Unknowns report accepted IDs, the uncertain request and withheld
+//! steps through passive command.unknown_inventory events before ending the job.
 use crate::account::id;
 use crate::sign::Params;
 use crate::wire::RestEnvelope;
@@ -21,6 +23,28 @@ use safe_cex_engine::{
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+fn unknown_inventory_row(
+    cx: &mut Cx<'_, Pending>,
+    command: u32,
+    scope: &'static str,
+    path: Option<&str>,
+    identity: Option<(&'static str, &str)>,
+) {
+    let mut fields = vec![("commandId", command.into()), ("scope", scope.into())];
+    if let Some(path) = path {
+        fields.push(("requestPath", path.into()));
+    }
+    if let Some((kind, id)) = identity {
+        fields.push((kind, id.into()));
+    }
+    cx.event(
+        safe_cex_engine::Level::Warn,
+        "command.unknown_inventory",
+        "The outcome is unknown. Check Open Orders",
+        fields,
+    );
+}
 
 fn local_mutation_policy() -> Policy {
     Policy {
@@ -688,26 +712,17 @@ impl Cryptocom {
         error: VenueError,
     ) {
         self.account.writes += 1;
-        let Physical::Write {
-            plan,
-            slot,
-            context,
-        } = &request.physical
-        else {
+        let Physical::Write { plan, .. } = &request.physical else {
             self.trade_reject(cx, request, error);
             return;
         };
-        if self
-            .trading
-            .jobs
-            .get(&request.command)
-            .is_some_and(|job| job.best_effort)
-            && cx.finish_plan_failed_call(plan, slot, context).is_ok()
-        {
-            self.trade_settled(cx);
-        } else {
-            let _ = cx.fail_plan(plan, error);
-        }
+        let mut error = error;
+        error.message = format!(
+            "{}. The outcome is unknown. Check Open Orders",
+            error.message
+        );
+        error.presents = true;
+        let _ = cx.fail_plan(plan, error);
     }
     fn trade_settled(&mut self, cx: &mut Cx<'_, Pending>) {
         self.trading.active = false;
@@ -807,6 +822,24 @@ impl Cryptocom {
                 })
         } else {
             None
+        }
+    }
+    // No retained outcome state: read the current request and remaining queue once.
+    fn report_unknown(&self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        let Some(job) = self.trading.jobs.get(&request.command) else {
+            return;
+        };
+        for id in &job.ids {
+            unknown_inventory_row(cx, request.command, "accepted", None, Some(("orderId", id)));
+        }
+        for (scope, step) in std::iter::once(("currentRequest", &request.step))
+            .chain(job.steps.iter().map(|step| ("withheld", step)))
+        {
+            let identity = match &step.call {
+                Call::Place(Some(receipt)) => Some(("clientOrderId", receipt.identity.as_str())),
+                _ => None,
+            };
+            unknown_inventory_row(cx, request.command, scope, Some(step.path), identity);
         }
     }
     pub(crate) fn trade_response(
@@ -950,6 +983,8 @@ impl Cryptocom {
             }
         };
         let accepted = matches!(&fact, WriteFact::Accepted { .. });
+        let unknown = matches!(&fact, WriteFact::Failed { fact, .. }
+            if fact.error().outcome == Some(safe_cex_engine::Outcome::Unknown));
         let diagnostic = match &fact {
             WriteFact::Failed { fact, .. } => Some(fact.error().message.clone()),
             _ => None,
@@ -974,6 +1009,17 @@ impl Cryptocom {
             }
             Ok(_) => {}
             Err(_) => return,
+        }
+        if unknown {
+            self.report_unknown(cx, &request);
+            let mut error = VenueError::new(format!(
+                "{}. The outcome is unknown. Check Open Orders",
+                diagnostic.as_deref().unwrap_or("Write was not confirmed")
+            ))
+            .outcome(Outcome::Unknown);
+            error.presents = true;
+            let _ = cx.fail_plan(plan, error);
+            return;
         }
         if let Some(message) = diagnostic {
             let _ = cx.command_error_context(context, message);

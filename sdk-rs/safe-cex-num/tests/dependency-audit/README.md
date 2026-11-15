@@ -1,5 +1,8 @@
 # Collation dependency audit
 
+Historical graph snapshots are retained byte-for-byte in `history/`. They describe
+the pinned baseline, including venues removed since that experiment.
+
 Baseline: `88214fcc06a0bd59ca86301d247c9f953514c49b`. Metadata and feature trees
 were resolved for all members without building the workspace. `changes.json`
 records the rejected ICU4X 2.1.1 proposal; `proposed-icu.patch` reproduces it.

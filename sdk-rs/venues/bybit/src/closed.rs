@@ -1,5 +1,4 @@
-//! Venue-reported closed positions: raw `/v5/position/closed-pnl` rows, which
-//! the host maps with the TS mappers (`mapBybitClosedPnl`, the journal adapter).
+//! One closed-position pager: raw journal rows and Rust-shaped reported PnL.
 use crate::history::windows;
 use crate::sign::Query;
 use crate::{BybitLinear, Category, Pending, Rest, Then};
@@ -20,6 +19,7 @@ const MAX_PAGES: u32 = 20;
 const LOOKBACK_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
 
 pub struct Request {
+    output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     history: ReadCursorHistory<String>,
     category: Category,
     symbol: Option<String>,
@@ -43,6 +43,25 @@ struct PageResult<'a> {
 }
 
 impl BybitLinear {
+    pub(crate) fn start_closed_pnl(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        account: String,
+    ) {
+        let output = safe_cex_engine::history_output::ClosedPnlOutput::new(
+            safe_cex_engine::ClosedPositionFormat::Bybit,
+            account,
+            self.variant.is_inverse(),
+            symbol.clone(),
+            cx.store.markets(),
+        );
+        self.start_closed_read(cx, command, symbol, from_ms, to_ms, Some(output));
+    }
+
     pub(crate) fn start_closed_positions(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -50,6 +69,18 @@ impl BybitLinear {
         symbol: Option<String>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
+    ) {
+        self.start_closed_read(cx, command, symbol, from_ms, to_ms, None);
+    }
+
+    fn start_closed_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     ) {
         // Every page is a leg of this caller root; its deadline bounds the walk.
         let Some(root) = self.caller_read_root(cx, true) else {
@@ -88,6 +119,7 @@ impl BybitLinear {
         let to = to_ms.unwrap_or(cx.protocol_now());
         let from = from_ms.unwrap_or(to - LOOKBACK_MS);
         let mut request = Request {
+            output,
             history: CursorHistory::new(
                 completion,
                 CursorWalk::new(MAX_PAGES),
@@ -112,7 +144,12 @@ impl BybitLinear {
         let leg = match self.page_leg(cx, request.history.root(), true) {
             Ok(leg) => leg,
             Err(error) => {
-                let _ = request.history.finish(cx, Err(error));
+                safe_cex_engine::history_output::finish(
+                    cx,
+                    request.history,
+                    Err(error),
+                    request.output,
+                );
                 return;
             }
         };
@@ -139,7 +176,7 @@ impl BybitLinear {
         mut error: VenueError,
     ) {
         error.message = format!("bybit closed-PnL fetch failed: {}", error.message);
-        let _ = request.history.finish(cx, Err(error));
+        safe_cex_engine::history_output::finish(cx, request.history, Err(error), request.output);
     }
 
     /// A page answer, delivered on `leg` (the page or its native re-read).
@@ -165,7 +202,12 @@ impl BybitLinear {
         let page = match page {
             Ok(page) => page,
             Err(error) => {
-                let _ = request.history.finish(cx, Err(error));
+                safe_cex_engine::history_output::finish(
+                    cx,
+                    request.history,
+                    Err(error),
+                    request.output,
+                );
                 return;
             }
         };
@@ -195,13 +237,23 @@ impl BybitLinear {
                 Some(window) => {
                     request.window = window;
                     if !request.history.restart_stage() {
-                        let _ = request.history.finish(cx, Ok(()));
+                        safe_cex_engine::history_output::finish(
+                            cx,
+                            request.history,
+                            Ok(()),
+                            request.output,
+                        );
                         return;
                     }
                     self.request_closed_page(cx, request);
                 }
                 None => {
-                    let _ = request.history.finish(cx, Ok(()));
+                    safe_cex_engine::history_output::finish(
+                        cx,
+                        request.history,
+                        Ok(()),
+                        request.output,
+                    );
                 }
             },
         }

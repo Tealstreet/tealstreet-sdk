@@ -45,10 +45,20 @@ const CONNECT_TIMEOUT_MS = 4_000;
 const CONNECT_AUDIT_MARGIN_MS = 2_000;
 const CONNECT_CHECK_TICK_MS = 1_000;
 
+type WebSocketFailureEvent = {
+  preventDefault?: () => void;
+  stopPropagation?: () => void;
+  stopImmediatePropagation?: () => void;
+  message?: unknown;
+  error?: unknown;
+  type?: string;
+};
+
 export class HOWWebSocket {
   ws?: ReconnectingWebSocket;
 
   private localClose = false;
+  private reportedReconnectFailure = false;
   readonly diagnostics = new ConnectionDiagnostics('HOW');
   readonly timerLateness = new HiddenTimerLateness();
   pingAt = 0;
@@ -157,28 +167,54 @@ export class HOWWebSocket {
     ws = new ReconnectingWebSocket(dialUrl, protocols, options);
     ws.binaryType = 'arraybuffer';
 
-    // Add error handler immediately to prevent uncaught errors
-    ws.addEventListener('error', this.handleWebSocketError as any);
-
-    // Also override onerror to catch any errors that might bypass addEventListener
-    ws.onerror = this.handleWebSocketError as any;
+    ws.onerror = this.handleWebSocketError;
 
     return ws;
   }
 
-  protected handleWebSocketError = (event: Event) => {
+  protected handleWebSocketError = (event: WebSocketFailureEvent) => {
     // Prevent the error from propagating
     event.preventDefault?.();
     event.stopPropagation?.();
     event.stopImmediatePropagation?.();
 
     // Extract error message if available
-    const errorMessage = (event as any)?.message || (event as any)?.error?.message || (event as any)?.type;
+    const errorMessage =
+      typeof event.message === 'string'
+        ? event.message
+        : event.error instanceof Error
+          ? event.error.message
+          : event.type || 'Unknown error';
+    // Node's ws exposes upgrade status here; browsers provide only an opaque error.
+    const authRefusal = /^Unexpected server response: (401|403)$/.exec(errorMessage);
+    if (authRefusal) {
+      this.reportAuthFailure(`WebSocket upgrade refused (HTTP ${authRefusal[1]})`);
+      return false;
+    }
 
+    this.reportReconnectFailures();
     // Log WebSocket errors (state errors are now prevented in send() method)
-    console.error(`WebSocket error: ${stripDiagnosticUrlQueries(String(errorMessage || 'Unknown error'))}`);
+    console.info(
+      `[HOWWebSocket] WebSocket error: ${stripDiagnosticUrlQueries(String(errorMessage || 'Unknown error'))}`,
+    );
     return false;
   };
+
+  private reportAuthFailure(error: string) {
+    this.epoch++;
+    this.authState = HOWWebSocketAuthState.Bad;
+    console.error(`[HOW] Tunnel auth failed: ${error}`);
+  }
+
+  private reportReconnectFailures() {
+    if (this.isDisposed || this.ws?.loopState.phase === 'stopped') return;
+    const retries = this.ws?.retryCount ?? 0;
+    if (retries < 3) this.reportedReconnectFailure = false;
+    else if (!this.isDisposed && !this.reportedReconnectFailure) {
+      this.reportedReconnectFailure = true;
+      console.error('[HOWWebSocket] Repeated connection failures; retrying');
+    }
+  }
 
   private validateAndSend(message: string, data: any, isTokenSend = false, redacted = false): boolean {
     // Pre-check WebSocket state to avoid the opaque DOMException
@@ -386,12 +422,11 @@ export class HOWWebSocket {
       try {
         const json = await decodeTradeTunnelMessage(msgData);
         if (json?.type === 'rpc.auth') {
-          this.epoch++;
           //{"type":"rpc.auth","error":"ExpiredSignature"}
           if (Boolean(json?.error)) {
-            console.error(`[HOW] Tunnel auth failed: ${json.error}`);
-            this.authState = HOWWebSocketAuthState.Bad;
+            this.reportAuthFailure(String(json.error));
           } else {
+            this.epoch++;
             this.authState = HOWWebSocketAuthState.Good;
           }
         }
@@ -444,10 +479,17 @@ export class HOWWebSocket {
     this.isTokenSent = false;
     this.authState = HOWWebSocketAuthState.Unknown;
     clearTimeout(this.lastMessageTimeout);
-    console.error('[HOWWebSocket] WebSocket connection disconnected, reconnecting...');
+    if (!this.isDisposed) {
+      if (event?.code === 4000 && this.ws?.loopState.phase === 'stopped') {
+        console.error('[HOWWebSocket] Reconnect retries exhausted');
+      } else {
+        this.reportReconnectFailures();
+        console.info('[HOWWebSocket] WebSocket connection disconnected, reconnecting...');
+      }
+    }
 
     for (const event of this._activeEventHandlers) {
-      console.error('[HOWWebSocket] emitting disconnect event for ', event);
+      console.info('[HOWWebSocket] emitting disconnect event');
       this.emit(event, { error: 'TradeTunnel connection lost, reconnecting...' });
     }
 

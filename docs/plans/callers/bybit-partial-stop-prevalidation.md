@@ -18,8 +18,12 @@ cancel, a failed release check reports Unprotected and asks the user to re-place
 
 A cancel ACK does not publish Canceled or authorize creation. A new managed read
 filters `/v5/order/realtime` by the exact orderId and symbol. Only a native
-Cancelled row with matching category, side, positionIdx, Partial kind, trigger,
-execution type/price, original native quantity and zero fill proves removal.
+Cancelled or Deactivated row with matching category, side, positionIdx, Partial
+kind, trigger, execution type/price, original native quantity and zero fill proves
+removal, including when the target reappears in a peer census. Partial mode
+accepts StopLoss/PartialStopLoss for the original SL and
+TakeProfit/PartialTakeProfit for the original TP in both removal and standalone
+put-back proof; opposite, unknown or missing kinds never match.
 A still-open or absent row gets at most three realtime reads, 100 ms apart,
 then one targeted history read (closed realtime rows can disappear on a venue
 restart). Missing, filled, changed, malformed or wrong-scope proof never creates

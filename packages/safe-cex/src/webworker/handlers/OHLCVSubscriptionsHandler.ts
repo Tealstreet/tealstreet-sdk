@@ -1,17 +1,21 @@
+import type { StoreWorkerOHLCVFrameRejection } from '../StoreWorkerPayload';
+
 import throttle from 'lodash/throttle';
 
-import { Candle } from '../../types';
+import { serializeCommandError } from '../../commandOutcome';
+import { Candle, OHLCVOptions } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
 interface SymbolIntervalSub {
   unsub: () => void;
-  throttleFn: any;
+  throttleFn?: ReturnType<typeof throttle<(candle: Candle) => void>>;
   // subIds.size IS the refcount — see OrderBookSubscriptionsHandler for why a
   // separate counter desyncs on a duplicate subId and strands the subscription.
   subIds: Set<string>;
   lastCandleTimestamp: number;
-  payloadDataBySubId: Map<string, any>;
+  payloadDataBySubId: Map<string, OHLCVOptions & { subId: string }>;
 }
 
 export class OHLCVSubscriptionsHandler extends BaseHandler {
@@ -21,6 +25,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
   // another exchange listener that never gets cleaned up.
   // In dedicated worker mode this is a no-op (one session = one subId per symbol+interval).
   private _subsByKey = new Map<string, SymbolIntervalSub>();
+  private _disposed = false;
 
   private _sendCandleUpdate = (sub: SymbolIntervalSub, c: Candle) => {
     for (const [subId, data] of sub.payloadDataBySubId) {
@@ -33,6 +38,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
   }
 
   handle(payload: StoreWorkerPayload): void {
+    if (this._disposed) return;
     switch (payload.op) {
       case 'subscribeOHLCV': {
         // Markets not loaded yet — buffer for later
@@ -41,7 +47,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         // Skip if symbol doesn't exist on this exchange
         const markets = this._exchange.store.markets;
         if (!markets.some((m) => m.symbol === payload.data.symbol)) {
-          console.warn(
+          diagnosticConsole.warn(
             `[OHLCVSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription${
               payload.data.reset ? ' and its forced repair' : ''
             }`,
@@ -67,8 +73,15 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         }
 
         // Create new subscription
+        let unsubscribe: (() => void) | undefined;
+        let stopped = false;
         const sub: SymbolIntervalSub = {
-          unsub: () => {},
+          unsub: () => {
+            if (stopped) return;
+            stopped = true;
+            sub.throttleFn?.cancel();
+            unsubscribe?.();
+          },
           throttleFn: undefined,
           subIds: new Set([subId]),
           lastCandleTimestamp: 0,
@@ -80,22 +93,52 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
           { trailing: true },
         );
         sub.throttleFn = f;
-
-        const ohlcvSub = this._exchange.listenOHLCV(data, (c) => {
-          if (c.timestamp !== sub.lastCandleTimestamp) {
-            try {
-              f?.flush?.();
-              sub.lastCandleTimestamp = c.timestamp;
-            } catch (_e) {
-              // Ignored
-            }
-          }
-          f(c);
-        });
-        sub.unsub = ohlcvSub || (() => {});
-
+        // Cancellation must see the subscription before a source can call back.
         this._subsByKey.set(key, sub);
-        repairIfReset();
+        try {
+          unsubscribe = this._exchange.listenOHLCV(
+            data,
+            (c) => {
+              if (this._disposed || stopped) return;
+              if (c.timestamp !== sub.lastCandleTimestamp) {
+                try {
+                  f?.flush?.();
+                  sub.lastCandleTimestamp = c.timestamp;
+                } catch (_e) {
+                  // Ignored
+                }
+              }
+              if (!this._disposed && !stopped) f(c);
+            },
+            (signal) => {
+              if (this._disposed || stopped) return;
+              f.cancel();
+              for (const subId of sub.subIds) {
+                const data: StoreWorkerOHLCVFrameRejection = {
+                  ...signal,
+                  subId,
+                  error: serializeCommandError(signal.error),
+                };
+                this._ctx.postMessage({ op: 'listenOHLCV:rejected', data });
+              }
+            },
+          );
+        } catch (error) {
+          if (this._subsByKey.get(key) === sub) this._subsByKey.delete(key);
+          sub.subIds.clear();
+          sub.payloadDataBySubId.clear();
+          sub.unsub();
+          throw error;
+        }
+        if (stopped) {
+          try {
+            unsubscribe?.();
+          } catch {
+            /* A cancelled registration still releases its late handle once. */
+          }
+        } else {
+          repairIfReset();
+        }
         break;
       }
       case 'unsubscribeOHLCV': {
@@ -110,13 +153,13 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
 
             if (sub.subIds.size === 0) {
               // Last subscriber — actually unsubscribe from exchange
+              this._subsByKey.delete(key);
               try {
                 sub.unsub();
                 sub.throttleFn?.cancel?.();
               } catch (_e) {
                 // Ignored
               }
-              this._subsByKey.delete(key);
             }
             break;
           }
@@ -124,5 +167,20 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         break;
       }
     }
+  }
+  dispose() {
+    this._disposed = true;
+    super.dispose();
+    for (const sub of this._subsByKey.values()) {
+      sub.subIds.clear();
+      sub.payloadDataBySubId.clear();
+      sub.throttleFn?.cancel();
+      try {
+        sub.unsub();
+      } catch {
+        /* Continue releasing other subscriptions. */
+      }
+    }
+    this._subsByKey.clear();
   }
 }

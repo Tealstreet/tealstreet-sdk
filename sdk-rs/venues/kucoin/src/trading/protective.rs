@@ -234,7 +234,9 @@ fn words(run: &Run, at: At) -> String {
         At::Proof => format!(
             "Your {symbol} {side} position's {kind} cancel was sent but could not be confirmed; its outcome is unknown and no replacement was sent. Check Open Orders"
         ),
-        At::Place => safe_cex_engine::error::stop_gone_text(symbol, order.side, order.kind, true),
+        At::Place => format!(
+            "Your {symbol} {side} position's {kind} replacement outcome is unknown. Check Open Orders before re-placing protection"
+        ),
         At::Restore => format!(
             "Your {symbol} {side} position's {kind} put-back outcome is unknown. Check Open Orders before re-placing protection"
         ),

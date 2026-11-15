@@ -1,10 +1,11 @@
 import type { Candle, Timeframe } from '../types';
+import type { CandleCacheSparseChunk } from './types';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { getCandleStartTime } from '../utils/getCandleStartTime';
-import { CandleCache, cleanCandles, fetchOHLCVWithExchange, getCandleCacheKey } from './CandleCache';
 import { MemoryCandleCacheBackend } from './backends/MemoryCandleCacheBackend';
+import { CandleCache, cleanCandles, fetchOHLCVWithExchange, getCandleCacheKey } from './CandleCache';
 
 const createCandle = (timestamp: number): Candle => ({
   timestamp,
@@ -15,7 +16,8 @@ const createCandle = (timestamp: number): Candle => ({
   volume: 1000,
 });
 
-const alignTimestamp = (timestamp: number, interval: Timeframe): number => getCandleStartTime(interval, timestamp / 1000) * 1000;
+const alignTimestamp = (timestamp: number, interval: Timeframe): number =>
+  getCandleStartTime(interval, timestamp / 1000) * 1000;
 
 describe('CandleCache', () => {
   it('cleans duplicate candles by timestamp', () => {
@@ -174,7 +176,7 @@ describe('CandleCache', () => {
         name: 'bitrue',
         fetchOHLCV,
         callMethodInWorker,
-      } as any,
+      },
       symbol: 'BTCUSDT',
       interval,
       fromMs: 1700000000000,
@@ -265,15 +267,16 @@ describe('CandleCache', () => {
     vi.useFakeTimers();
 
     const interval: Timeframe = '5m';
+    const loadAllChunks = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Map<number, CandleCacheSparseChunk>>(() => {}))
+      .mockResolvedValueOnce(new Map());
     const cache = new CandleCache({
       backendReadMode: 'hydrate-once',
       hydrationTimeoutMs: 10,
       maxConcurrentHydrations: 1,
       backend: {
-        loadAllChunks: vi
-          .fn()
-          .mockImplementationOnce(() => new Promise<Map<number, any>>(() => {}))
-          .mockResolvedValueOnce(new Map()),
+        loadAllChunks,
         persistChunks: vi.fn().mockResolvedValue(undefined),
       },
     });
@@ -302,8 +305,7 @@ describe('CandleCache', () => {
     await expect(firstFetch).resolves.toEqual([]);
     await expect(secondFetch).resolves.toEqual([]);
 
-    const backend = (cache as any).backend;
-    expect(backend.loadAllChunks).toHaveBeenCalledTimes(2);
+    expect(loadAllChunks).toHaveBeenCalledTimes(2);
 
     vi.useRealTimers();
   });
@@ -319,13 +321,11 @@ describe('CandleCache', () => {
     const offset = candleIndex % chunkSize;
     const staleCandle = { ...createCandle(baseTime), close: 101 };
     const freshCandle = { ...createCandle(baseTime), close: 109 };
-    const staleChunk = new Array(chunkSize);
+    const staleChunk = new Array<Candle | undefined>(chunkSize);
     staleChunk[offset] = staleCandle;
 
-    let resolveHydration!: (chunks: Map<number, any>) => void;
-    const hydration = new Promise<Map<number, any>>((resolve) => {
-      resolveHydration = resolve;
-    });
+    const { promise: hydration, resolve: resolveHydration } =
+      Promise.withResolvers<Map<number, CandleCacheSparseChunk>>();
     const cache = new CandleCache({
       chunkSize,
       hydrationTimeoutMs: 1,
@@ -374,7 +374,7 @@ describe('CandleCache', () => {
         name: 'binance',
         fetchOHLCV,
         callMethodInWorker: vi.fn(),
-      } as any,
+      },
       symbol: 'BTCUSDT',
       interval: '5m',
       fromMs: 1700000000000,
@@ -558,9 +558,7 @@ describe('CandleCache forming bar', () => {
   it('repeat calls inside one minute share one forming-bar read, and the next bar is read again', async () => {
     const cache = new CandleCache();
     const fetcher = vi.fn(async (opts: { from?: number }) =>
-      [barStart - 2 * minute, barStart - minute, barStart]
-        .filter((t) => t >= (opts.from ?? 0))
-        .map(createCandle),
+      [barStart - 2 * minute, barStart - minute, barStart].filter((t) => t >= (opts.from ?? 0)).map(createCandle),
     );
     await askUpToNow(cache, barStart + 1_000, fetcher);
     expect(fetcher).toHaveBeenCalledTimes(1);

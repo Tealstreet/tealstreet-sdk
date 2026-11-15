@@ -191,8 +191,21 @@ fn placed_quantities(kind: &str) -> Vec<String> {
 
 #[test]
 fn a_market_order_splits_at_the_market_maximum_and_a_limit_at_the_limit_maximum() {
-    assert_eq!(placed_quantities("market"), ["120", "120", "10"]);
-    assert_eq!(placed_quantities("limit"), ["250"]);
+    let market = placed_quantities("market");
+    assert_eq!(market, ["80", "80", "80", "10"]);
+    assert_eq!(
+        market
+            .iter()
+            .map(|q| q.parse::<f64>().unwrap())
+            .sum::<f64>(),
+        250.0
+    );
+    let limit = placed_quantities("limit");
+    assert_eq!(limit, ["250"]);
+    assert_eq!(
+        limit.iter().map(|q| q.parse::<f64>().unwrap()).sum::<f64>(),
+        250.0
+    );
 }
 
 #[test]

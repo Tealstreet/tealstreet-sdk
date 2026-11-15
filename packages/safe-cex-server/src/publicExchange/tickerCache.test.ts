@@ -1,4 +1,5 @@
-import type { ExchangeName, Ticker } from '@tealstreet/safe-cex/src/types';
+import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
+import type { Ticker } from '@tealstreet/safe-cex/src/generated/Ticker';
 
 import { describe, expect, it } from 'vitest';
 
@@ -10,7 +11,7 @@ import {
   writeTickerCacheSnapshot,
 } from './tickerCache';
 
-const BYBIT = 'bybit' as ExchangeName;
+const BYBIT: ExchangeName = 'bybit';
 
 function fakeRedis() {
   const store = new Map<string, string>();
@@ -34,7 +35,10 @@ function fakeRedis() {
   };
 }
 
-const ticker = (symbol: string, last: number) => ({ symbol, last }) as unknown as Ticker;
+const ticker = (symbol: string, last: number): Ticker => ({
+  id: symbol, symbol, last, bid: 0, ask: 0, mark: 0, index: 0,
+  percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+});
 
 describe('ticker cache', () => {
   it('round trips a snapshot', async () => {

@@ -48,6 +48,7 @@ impl ContextRegistry {
                     },
                     last_deadline: context.deadline(),
                     writes: None,
+                    engine_unknown: None,
                     mutation_declared: true,
                     pending: 0,
                     deliveries: 0,

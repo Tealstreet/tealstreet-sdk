@@ -50,7 +50,6 @@ mod serial_session {
         read: bool,
         unbound: bool,
         attempts: u8,
-        exempt: bool,
         immediate: bool,
         wrong_next: bool,
         use_read_evidence: bool,
@@ -73,7 +72,6 @@ mod serial_session {
         data: usize,
         failures: usize,
         unproven: std::cell::Cell<usize>,
-        exempt_calls: std::cell::Cell<usize>,
         preparation_errors: Vec<VenueError>,
         reconciliations: usize,
         continue_after_success: bool,
@@ -214,10 +212,6 @@ mod serial_session {
                 self.legacy_waits = Some((wait, retry_wait.unwrap_or(Err(Error::State))));
             }
         }
-        fn status_exempt_refusal(&self, _: &Context, response: Response<'_>) -> bool {
-            self.exempt_calls.set(self.exempt_calls.get() + 1);
-            self.exempt && code(response) == Some(1000)
-        }
         fn session_bearer(&self, generation: u64) -> SessionBearer {
             if self
                 .session
@@ -243,10 +237,13 @@ mod serial_session {
         fn unproven_http_evidence(
             &self,
             _: &Context,
-            _: Response<'_>,
-            _: &mut crate::request_context::UnprovenEvidence,
+            response: Response<'_>,
+            evidence: &mut crate::request_context::UnprovenEvidence,
         ) {
             self.unproven.set(self.unproven.get() + 1);
+            if let Some(code) = code(response) {
+                evidence.venue_code(&code.to_string());
+            }
         }
         fn on_response(
             &mut self,
@@ -455,7 +452,6 @@ mod serial_session {
         let mut e = crate::test_support::seeded_engine(Probe {
             read,
             attempts,
-            exempt: true,
             ..Default::default()
         });
         e.start(0.);
@@ -583,7 +579,7 @@ mod serial_session {
     fn seeded(read: bool, status: u16) -> (Engine<Probe>, Preparation, HttpRequest) {
         let mut e = start(read, 2);
         let (_, packet, actions) = auth(&mut e, status);
-        assert_eq!(e.venue.data, 1, "exempt native DATA reaches codec");
+        assert_eq!(e.venue.data, 1, "definite native DATA reaches codec");
         assert_eq!(
             e.venue.selected,
             vec![Ok(())],
@@ -647,12 +643,12 @@ mod serial_session {
         assert_eq!(e.venue.rejections, Some(0));
     }
     #[test]
-    fn parsed_408_refusal_reaches_data_and_resends_once() {
-        seeded(false, 408);
+    fn parsed_408_refusal_is_unknown_without_data_or_resend() {
+        strict(408, r#"{"code":1000}"#);
     }
     #[test]
-    fn parsed_503_refusal_reaches_data_and_resends_once() {
-        seeded(false, 503);
+    fn parsed_503_refusal_is_unknown_without_data_or_resend() {
+        strict(503, r#"{"code":1000}"#);
     }
     #[test]
     fn second_auth_refusal_cannot_send_a_third_attempt() {
@@ -737,9 +733,8 @@ mod serial_session {
         assert_eq!(e.venue.selected[1], Err(Error::RetryForbidden));
         assert!(e.venue.unchanged[1]);
     }
-    fn strict(status: u16, body: &str, exempt: bool) {
+    fn strict(status: u16, body: &str) {
         let mut e = start(false, 2);
-        e.venue.exempt = exempt;
         let token = prep(&drain(&mut e));
         release(&mut e, token, 0.);
         reply(&mut e, token, 1., status, body);
@@ -748,37 +743,40 @@ mod serial_session {
         assert!(e.venue.selected.is_empty());
         assert_eq!(failed(&actions).outcome, Some(crate::Outcome::Unknown));
         assert_eq!(e.venue.unproven.get(), 1);
+        if let Some(code) = code(Response {status, headers: "", body}) {
+            assert_eq!(failed(&actions).venue_code.as_deref(), Some(code.to_string().as_str()));
+        }
         no_http(&actions);
         #[cfg(feature = "order-locks")]
         assert!(e.io.core.order_locks.uncertain("BTCUSD"));
     }
     #[test]
     fn coded_408_without_auth_refusal_stays_unknown() {
-        strict(408, r#"{"code":1001}"#, true);
+        strict(408, r#"{"code":1001}"#);
     }
     #[test]
     fn coded_503_without_auth_refusal_stays_unknown() {
-        strict(503, r#"{"code":1001}"#, true);
+        strict(503, r#"{"code":1001}"#);
     }
     #[test]
     fn unparsed_408_stays_unknown() {
-        strict(408, "gateway timeout", true);
+        strict(408, "gateway timeout");
     }
     #[test]
     fn html_503_mentioning_1000_stays_unknown() {
-        strict(503, "<html>code 1000</html>", true);
+        strict(503, "<html>code 1000</html>");
     }
     #[test]
     fn unfinished_1000_json_stays_unknown() {
-        strict(503, r#"{"code":1000"#, true);
+        strict(503, r#"{"code":1000"#);
     }
     #[test]
     fn trailing_junk_after_1000_json_stays_unknown() {
-        strict(503, r#"{"code":1000}junk"#, true);
+        strict(503, r#"{"code":1000}junk"#);
     }
     #[test]
-    fn default_false_path_keeps_503_unknown() {
-        strict(503, r#"{"code":1000}"#, false);
+    fn parsed_429_refusal_is_unknown_without_data_or_resend() {
+        strict(429, r#"{"code":1000}"#);
     }
     #[test]
     fn six_read_calls_continue_five_released_failures_without_delay() {

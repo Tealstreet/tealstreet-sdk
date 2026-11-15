@@ -747,6 +747,20 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
+    fn observe_unproven_http_response(
+        &mut self,
+        now: f64,
+        protocol_now: f64,
+        _: &Pending,
+        response: Response<'_>,
+    ) {
+        if response.status == 429 {
+            self.paused_until = self
+                .paused_until
+                .max(now + rate::delay(response, protocol_now));
+        }
+    }
+
     fn managed_sockets() -> bool {
         true
     }
@@ -863,6 +877,7 @@ impl Venue for WeexFutures {
                 if let Ok(row) = serde_json::from_str::<Rows<'_, OneOrMany<TickerUpdate>>>(text)
                     && let Some(d) = row.d.first()
                 {
+                    cx.record_socket_topic(&[&row.s, "@ticker"]);
                     cx.store.update_ticker(&row.s, |t| {
                         if let Some(v) = d.c {
                             t.last = v;
@@ -886,7 +901,10 @@ impl Venue for WeexFutures {
                 }
             }
             "depth" => match serde_json::from_str::<DepthEvent<'_>>(text) {
-                Ok(row) => self.depth(cx, row),
+                Ok(row) => {
+                    cx.record_socket_topic(&[&row.s, "@depth200"]);
+                    self.depth(cx, row);
+                }
                 Err(_) => {
                     #[derive(serde::Deserialize)]
                     struct Symbol<'a> {
@@ -900,6 +918,7 @@ impl Venue for WeexFutures {
             "kline" => {
                 if let Ok(row) = serde_json::from_str::<Rows<'_, Vec<CandleEvent<'_>>>>(text) {
                     for c in row.d {
+                        cx.record_socket_topic(&[&row.s, "@kline_", &c.i, "_LAST_PRICE"]);
                         if let Some(i) = Interval::parse(&c.i)
                             && self.candles.contains_key(&(row.s.to_string(), i))
                         {
@@ -1294,6 +1313,10 @@ impl Venue for WeexFutures {
     ) {
         self.retire_trade(owner);
     }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account.invalidate_orders();
+        self.refresh_account(cx);
+    }
     fn unproven_http_evidence(
         &self,
         pending: &Pending,
@@ -1301,7 +1324,7 @@ impl Venue for WeexFutures {
         evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
         if let Task::Trade(request) = &pending.task {
-            request.unproven_evidence(response.body, evidence);
+            self.trade_unproven_evidence(request, response.body, evidence);
         }
     }
     fn capture_http_reconciliation(

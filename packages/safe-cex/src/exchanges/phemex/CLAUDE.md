@@ -671,3 +671,22 @@ that authoritative read before replacing the confirmed mode. Missing, unknown
 or rejected symbols never
 trigger writes for other markets. The account hedge indicator reflects whether
 any known symbol remains hedged.
+
+### Rust-backed leverage context confirmation
+
+`RustEngineExchange` exposes the optional `resolveLeverageContext(symbol)` helper
+when `bridge.helpers.resolveLeverageContext` is declared in the shared
+construction rules (currently Phemex). It returns `{ marginType, positionMode, longLeverage,
+shortLeverage }` or `undefined`, matching the TS reference helper used to confirm
+metadata. A worker mirror uses the existing `fetchLeverageForSymbol(symbol, true)` RPC
+to force this fresh read in both browser and hosted workers; it never
+starts a page engine or treats the call as a write.
+
+The native `fetchLeverage` command reads `/g-accounts/accountPositions` for the
+symbol and its USDT/USDC currency, including size-zero rows, without changing
+live account state. The current raw row wins over cached settings or positions.
+On a missing symbol or read failure the SDK uses symbol-scoped stored positions
+only if both margin type and position mode exist; otherwise it returns
+`undefined`. The default `fetchLeverageForSymbol(symbol)` cached-settings contract is
+unchanged. This helper does not confirm that an E2E deployment contains the SDK
+change; the deployed app must adopt the resulting SDK/WASM artifacts together.

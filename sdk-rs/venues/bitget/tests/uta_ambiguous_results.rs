@@ -64,7 +64,7 @@ fn a_busy_or_timeout_answer_to_a_moved_stop_says_it_may_be_live() {
             command: 9,
             id: "66".into(),
             price: Some(85.0),
-            amount: None,
+            amount: Some(0.0),
         });
         settle_settings(&mut h);
         let cancel = h.take("/cancel-strategy-order");

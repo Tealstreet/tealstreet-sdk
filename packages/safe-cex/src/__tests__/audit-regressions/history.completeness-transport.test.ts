@@ -4,6 +4,7 @@ import type { StoreWorkerPayload } from '../../webworker/StoreWorkerPayload';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
+import nativeUnknown from '../../../../../sdk-rs/engine/tests/fixtures/history-unknown-output.json';
 import { BaseExchange } from '../../exchanges/base';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -29,7 +30,7 @@ const transport = (
     calls.push(clone(message));
     main.emitter.emit('callMethod:done', calls.at(-1)!.data);
   };
-  const read = vi.fn(async ({ symbol }: { symbol: string }) =>
+  const read = vi.fn(async ({ symbol }: { symbol: string }): Promise<unknown[]> =>
     symbol === 'partial' ? marked([{ id: symbol }]) : [{ id: symbol }],
   );
   const worker = { name: 'bybit', [method]: read } as unknown as Exchange;
@@ -170,13 +171,41 @@ it('carries an actual command-correlated host event through the worker JSON resu
   }
 });
 
-it.each(['structured', 'json'])('returns a failed closed-PnL worker read as a correlated typed failure (%s)', async (kind) => {
-  const { main, read, calls } = transport((value) => kind === 'json' ? JSON.parse(JSON.stringify(value)) : structuredClone(value), 'fetchClosedPnl');
-  const error = Object.assign(new Error('relay disconnected'), { kind: 'network', venueCode: 'transport' });
-  read.mockRejectedValueOnce(error);
-  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-  try {
-    await expect(main.callMethodInWorker('fetchClosedPnl', { symbol: 'BTCUSDT' })).rejects.toMatchObject({ message: 'relay disconnected', kind: 'network', venueCode: 'transport' });
-    expect(calls.at(-1)?.data).toMatchObject({ success: false, requestId: expect.any(String) });
-  } finally { consoleError.mockRestore(); }
-});
+it.each(['structured', 'json'])(
+  'returns a failed closed-PnL worker read as a correlated typed failure (%s)',
+  async (kind) => {
+    const { main, read, calls } = transport(
+      (value) => (kind === 'json' ? JSON.parse(JSON.stringify(value)) : structuredClone(value)),
+      'fetchClosedPnl',
+    );
+    const error = Object.assign(new Error('relay disconnected'), { kind: 'network', venueCode: 'transport' });
+    read.mockRejectedValueOnce(error);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(main.callMethodInWorker('fetchClosedPnl', { symbol: 'BTCUSDT' })).rejects.toMatchObject({
+        message: 'relay disconnected',
+        kind: 'network',
+        venueCode: 'transport',
+      });
+      expect(calls.at(-1)?.data).toMatchObject({ success: false, requestId: expect.any(String) });
+    } finally {
+      consoleError.mockRestore();
+    }
+  },
+);
+
+it.each(['structured', 'json'])(
+  'preserves actual native null and zero through the worker/hosted reply (%s)',
+  async (kind) => {
+    const { main, read } = transport(
+      (value) => (kind === 'json' ? JSON.parse(JSON.stringify(value)) : structuredClone(value)),
+      'fetchClosedPnl',
+    );
+    read.mockResolvedValueOnce(nativeUnknown);
+    const result = await main.callMethodInWorker('fetchClosedPnl', { symbol: 'BTCUSDT' });
+    expect(result).toEqual(nativeUnknown);
+    expect(result).toHaveLength(2);
+    expect(result[0].unrealizedPnl).toBe(0);
+    expect(result[1].unrealizedPnl).toBeNull();
+  },
+);

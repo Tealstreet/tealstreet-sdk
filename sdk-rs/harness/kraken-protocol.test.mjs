@@ -17,6 +17,18 @@ test('REST oracle rejects replay nonces, stale timestamps and credential leakage
  const audit=createKrakenRequestAudit(),r=request('POST','/derivatives/api/v3/sendorder','cliOrdId=ts_test&size=1');audit(r);assert.throws(()=>audit(r),/nonce/);assert.throws(()=>createKrakenRequestAudit()({...r,now:now+60001}),/nonce/);
  assert.throws(()=>createKrakenRequestAudit()({...r,method:'GET',url:'https://futures.kraken.com/derivatives/api/v3/tickers'}),/leaked/);
 });
+test('REST oracle accepts optional nonce omission without relaxing supplied nonces or MACs',()=>{
+ const audit=createKrakenRequestAudit();
+ const supplied=request('GET','/derivatives/api/v3/accounts','');audit(supplied);
+ const omitted=request('GET','/derivatives/api/v3/accounts','','');delete omitted.headers.Nonce;
+ assert.doesNotThrow(()=>audit(omitted));
+ assert.doesNotThrow(()=>audit(omitted));
+ assert.throws(()=>audit(supplied),/nonce/);
+ for(const nonce of ['', 'invalid'])assert.throws(()=>createKrakenRequestAudit()({...omitted,headers:{...omitted.headers,Nonce:nonce}}),/authentication/);
+ assert.throws(()=>createKrakenRequestAudit()({...omitted,url:omitted.url+'?account=foreign'}),/signature/);
+ assert.throws(()=>createKrakenRequestAudit()({...omitted,headers:{...omitted.headers,APIKey:'foreign'}}),/authentication/);
+ assert.throws(()=>createKrakenRequestAudit()({...omitted,headers:{APIKey:'replay-key'}}),/signature/);
+});
 test('challenge subscriptions require current socket challenge and exact signature',()=>{
  const s={};sent(s,JSON.stringify({event:'challenge',api_key:'replay-key'}));received(s,JSON.stringify({event:'challenge',message:'test-challenge'}));
  const m={event:'subscribe',feed:'fills',api_key:'replay-key',original_challenge:'test-challenge',signed_challenge:krakenSignature('test-challenge')};sent(s,JSON.stringify(m));received(s,JSON.stringify({feed:'fills',fills:[]}));

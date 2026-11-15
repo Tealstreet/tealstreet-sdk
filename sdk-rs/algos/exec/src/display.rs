@@ -1,6 +1,7 @@
 //! Read-only CLI projections of the account's engine frames.
 use crate::placement::{Placement, n};
 use crate::{Evaluation, failed, resolve, rows};
+use safe_cex_position_math::calculate_position_account_leverage;
 use serde_json::{Value, json};
 use std::sync::OnceLock;
 fn catalog() -> &'static [Value] {
@@ -33,6 +34,19 @@ pub(crate) fn canonical(name: &str) -> Option<&'static str> {
 }
 fn s<'a>(value: &'a Value, key: &str) -> &'a str {
     value[key].as_str().unwrap_or("")
+}
+fn position_notional(position: &Value) -> f64 {
+    position["notional"]
+        .as_f64()
+        .filter(|value| value.is_finite())
+        .unwrap_or(f64::NAN)
+}
+fn format_known(value: f64, render: impl FnOnce(f64) -> String) -> String {
+    if value.is_finite() {
+        render(value)
+    } else {
+        "—".into()
+    }
 }
 fn table(headers: &[&str], rows: Vec<Vec<String>>, footer: Option<String>) -> String {
     let mut widths = headers.iter().map(|h| h.len()).collect::<Vec<_>>();
@@ -183,7 +197,7 @@ fn positions(symbol: &str, all: bool, side: Option<&str>, store: &Value) -> Stri
     let selected = rows(store, "positions")
         .iter()
         .filter(|p| {
-            n(p, "notional") != 0.
+            n(p, "contracts") != 0.
                 && (all || p["symbol"] == symbol)
                 && side.is_none_or(|side| p["side"] == side)
         })
@@ -212,24 +226,21 @@ fn positions(symbol: &str, all: bool, side: Option<&str>, store: &Value) -> Stri
             let upnl = n(p, "unrealizedPnl");
             pnl += upnl;
             let sign = if upnl >= 0. { "+" } else { "" };
-            let percent = if n(p, "entryPrice") > 0. {
-                upnl / n(p, "notional") * 100.
-            } else {
-                0.
-            };
-            let lev = if total > 0. {
-                n(p, "notional").abs() / total
-            } else {
-                0.
-            };
+            let notional = position_notional(p).abs();
+            let percent =
+                format_known(upnl / notional * 100., |value| format!("{sign}{value:.1}%"));
+            let lev = format_known(
+                calculate_position_account_leverage(notional, total),
+                |value| format!("{value:.2}"),
+            );
             vec![
                 symbol.into(),
                 s(p, "side").to_uppercase(),
-                money(n(p, "notional").abs()),
+                format_known(position_notional(p).abs(), money),
                 dollars(n(p, "entryPrice"), pp),
                 dollars(mark, pp),
-                format!("{sign}{} ({sign}{percent:.1}%)", money(upnl)),
-                format!("{lev:.2}/{}x", n(p, "leverage")),
+                format!("{sign}{} ({percent})", money(upnl)),
+                format!("{lev}/{}x", n(p, "leverage")),
             ]
         })
         .collect();
@@ -246,7 +257,7 @@ fn positions(symbol: &str, all: bool, side: Option<&str>, store: &Value) -> Stri
 fn position(symbol: &str, store: &Value) -> String {
     let Some(p) = rows(store, "positions")
         .iter()
-        .find(|p| p["symbol"] == symbol && n(p, "notional") != 0.)
+        .find(|p| p["symbol"] == symbol && n(p, "contracts") != 0.)
     else {
         return format!("No open position for {symbol}");
     };
@@ -278,17 +289,17 @@ fn position(symbol: &str, store: &Value) -> String {
     };
     let upnl = n(p, "unrealizedPnl");
     let sign = if upnl >= 0. { "+" } else { "" };
-    let percent = upnl / n(p, "notional").abs() * 100.;
+    let notional = position_notional(p).abs();
+    let percent = format_known(upnl / notional * 100., |value| format!("{sign}{value:.2}%"));
     let total = n(&store["balance"], "total");
-    let account_lev = if total != 0. {
-        n(p, "notional").abs() / total
-    } else {
-        0.
-    };
+    let account_lev = format_known(
+        calculate_position_account_leverage(notional, total),
+        |value| format!("{value:.2}x"),
+    );
     format!(
-        "\n{line}\n{symbol}  {}\n{line}\nSize:   {size} ({})\nEntry:  {} → {}\nuPnL:   {sign}{} ({sign}{percent:.2}%)\nLiq:    {}\nLev:    {account_lev:.2}x / {}x\n{line}",
+        "\n{line}\n{symbol}  {}\n{line}\nSize:   {size} ({})\nEntry:  {} → {}\nuPnL:   {sign}{} ({percent})\nLiq:    {}\nLev:    {account_lev} / {}x\n{line}",
         s(p, "side").to_uppercase(),
-        money(n(p, "notional").abs()),
+        format_known(position_notional(p).abs(), money),
         dollars(n(p, "entryPrice"), pp),
         dollars(mark, pp),
         money(upnl),
@@ -309,21 +320,27 @@ fn margin(store: &Value) -> String {
     }
     let positions = rows(store, "positions")
         .iter()
-        .filter(|p| n(p, "notional") != 0.);
+        .filter(|p| n(p, "contracts") != 0.);
     let (notional, pnl) = positions.fold((0., 0.), |(a, b), p| {
-        (a + n(p, "notional").abs(), b + n(p, "unrealizedPnl"))
+        (a + position_notional(p).abs(), b + n(p, "unrealizedPnl"))
     });
     let total = n(balance, "total");
-    let lev = if total > 0. { notional / total } else { 0. };
+    let lev = calculate_position_account_leverage(notional, total);
     table(
         &["Metric", "Value"],
         vec![
             vec!["Total Balance".into(), money(total)],
             vec!["Free Margin".into(), money(n(balance, "free"))],
             vec!["Used Margin".into(), money(n(balance, "used"))],
-            vec!["Position Size".into(), money(notional)],
-            vec!["Account Lev".into(), format!("{lev:.2}x")],
-            vec!["Margin Ratio".into(), format!("{:.1}%", lev * 100.)],
+            vec!["Position Size".into(), format_known(notional, money)],
+            vec![
+                "Account Lev".into(),
+                format_known(lev, |value| format!("{value:.2}x")),
+            ],
+            vec![
+                "Margin Ratio".into(),
+                format_known(lev * 100., |value| format!("{value:.1}%")),
+            ],
             vec![
                 "Unrealized PnL".into(),
                 format!("{}{}", if pnl >= 0. { "+" } else { "" }, money(pnl)),

@@ -11,32 +11,34 @@ import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
 
-it('admits KuCoin remote custody while undeclared venues still refuse before signing', () => {
+it.each(['kucoin', 'kucoinspot'] as const)('%s: admits KuCoin remote custody while undeclared venues still refuse before signing', (venue) => {
   const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-  expect(deriveRemoteSigningPolicy('kucoin')?.enabled).toBe(true);
-  expect(() => assertBetaAccount('kucoin', { remoteSigner })).not.toThrow();
-  for (const name of ['kucoinspot', 'krakenspot', 'cryptocom'] as const) {
+  expect(deriveRemoteSigningPolicy(venue)).toMatchObject({ enabled: true, payloadSupported: false, signatureEncoding: 'base64' });
+  expect(deriveRemoteSigningPolicy(venue)?.protectedHeaders).toEqual(deriveRemoteSigningPolicy('kucoin')?.protectedHeaders);
+  expect(() => assertBetaAccount(venue, { remoteSigner })).not.toThrow();
+  for (const name of ['krakenspot', 'mode'] as const) {
+    expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
     const prettyName = exchangeMetadata[name].prettyName;
-    expect(() => assertBetaAccount(name, { remoteSigner })).toThrow(
+    expect(() => assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner })).toThrow(
       `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
     );
-    expect(() => assertBetaAccount(name, { payloadSigner: vi.fn() })).toThrow(
+    expect(() => assertBetaAccount(name, { key: 'fixture-private-key', payloadSigner: vi.fn() })).toThrow(
       `${prettyName} delegated signing is unsupported in this build`,
     );
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
-it('keeps unsupported private PayloadSigner refused without a local fallback', () => {
+it.each(['kucoin', 'kucoinspot'] as const)('%s: keeps unsupported private PayloadSigner refused without a local fallback', (venue) => {
   expect(
     () =>
-      new DelegatedSignerSetup('kucoin', {
+      new DelegatedSignerSetup(venue, {
         key: 'fixture-key',
         secret: '',
         passphrase: 'fixture-pass',
         payloadSigner: vi.fn(),
       } as ExchangeOptions),
-  ).toThrow();
+  ).toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
 });
 
 const bytes = (text: string) => Array.from(new TextEncoder().encode(text));
@@ -82,7 +84,7 @@ const work = (broker = true): SignRequest => ({
   ],
 });
 const context = () => ({ signal: new AbortController().signal });
-function rig() {
+function rig(venue: 'kucoin' | 'kucoinspot') {
   const sign = vi.fn(async (request: RemoteSignerRequest) => {
     const descriptor = JSON.parse(request.wsAuth!.toSign) as { payload: string; brokerPrefix?: string };
     const macs = [mac('fixture-secret', descriptor.payload), mac('fixture-secret', 'fixture-passphrase')];
@@ -91,16 +93,16 @@ function rig() {
   });
   const remoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
   const provider = createRemoteSignerProvider({
-    exchangeName: 'kucoin',
+    exchangeName: venue,
     identities: { primary: identity },
     remoteSigner,
   });
   return { sign, provider };
 }
 
-it('delegates one atomic KuCoin batch with exact payload/MAC bytes and no passphrase/broker material on the wire', async () => {
+it.each(['kucoin', 'kucoinspot'] as const)('%s: delegates one atomic KuCoin batch with exact payload/MAC bytes and no passphrase/broker material on the wire', async (venue) => {
   for (const broker of [false, true]) {
-    const r = rig();
+    const r = rig(venue);
     const result = await r.provider(work(broker), context());
     const macs = [mac('fixture-secret', payload), mac('fixture-secret', 'fixture-passphrase')];
     if (broker) macs.push(mac('fixture-broker', '1700000000123partnerfixture-key'));
@@ -109,6 +111,7 @@ it('delegates one atomic KuCoin batch with exact payload/MAC bytes and no passph
       ...macs.map((value) => Array.from(Buffer.from(value, 'base64'))),
     ]);
     expect(r.sign).toHaveBeenCalledTimes(1);
+    expect(r.sign.mock.calls[0][0].exchangeName).toBe(venue);
     expect(r.sign.mock.calls[0][0].wsAuth).toEqual({
       outputFormat: 'kucoin-batch',
       toSign: JSON.stringify({
@@ -123,7 +126,7 @@ it('delegates one atomic KuCoin batch with exact payload/MAC bytes and no passph
   }
 });
 
-it('refuses unknown/cross-slot/partial batches before callbacks and redacts remote failures', async () => {
+it.each(['kucoin', 'kucoinspot'] as const)('%s: refuses unknown/cross-slot/partial batches before callbacks and redacts remote failures', async (venue) => {
   for (const mutate of [
     (request: SignRequest) => {
       request.operations.pop();
@@ -141,28 +144,28 @@ it('refuses unknown/cross-slot/partial batches before callbacks and redacts remo
       if (op.kind === 'sign') op.key = identity.signing;
     },
   ]) {
-    const r = rig();
+    const r = rig(venue);
     const request = work();
     mutate(request);
     await expect(r.provider(request, context())).rejects.toThrow('Remote signing request refused');
     expect(r.sign).not.toHaveBeenCalled();
   }
-  const r = rig();
+  const r = rig(venue);
   r.sign.mockRejectedValueOnce(new Error('fixture-secret fixture-passphrase fixture-broker'));
   await expect(r.provider(work(), context())).rejects.toThrow(/^Remote signing request refused$/);
 });
 
-it('refuses malformed/wrong-account responses and canceled late results atomically', async () => {
+it.each(['kucoin', 'kucoinspot'] as const)('%s: refuses malformed/wrong-account responses and canceled late results atomically', async (venue) => {
   for (const answer of [
     '{}',
     JSON.stringify({ credential: 'wrong', macs: [mac('x', 'y'), mac('x', 'z')] }),
     JSON.stringify({ credential: 'fixture-key', macs: ['not-a-mac', 'not-a-mac'] }),
   ]) {
-    const r = rig();
+    const r = rig(venue);
     r.sign.mockImplementationOnce(async ({ id }) => ({ id, wsAuthSignature: answer }));
     await expect(r.provider(work(false), context())).rejects.toThrow('Remote signing request refused');
   }
-  const r = rig();
+  const r = rig(venue);
   const abort = new AbortController();
   let release!: () => void;
   const held = new Promise<void>((resolve) => {

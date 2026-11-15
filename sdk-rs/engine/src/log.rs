@@ -200,6 +200,8 @@ pub mod code {
     pub const STREAM_MALFORMED: &str = "stream.malformed";
     /// The venue refused a subscription, or one would exceed its limits.
     pub const SUBSCRIPTION_REJECTED: &str = "subscription.rejected";
+    /// A demanded stream will be subscribed when its existing startup work completes.
+    pub const SUBSCRIPTION_DEFERRED: &str = "subscription.deferred";
     /// A repair ran: its topic, whether it resubscribed or reconnected, and the feed's last data.
     pub const SUBSCRIPTION_REPAIRED: &str = "subscription.repaired";
     /// The subscriptions one account's socket holds, against a venue's per-IP cap.

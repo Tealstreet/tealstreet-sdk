@@ -606,19 +606,28 @@ impl Bitrue {
         };
         positive(maximum, "maximum amount")?;
         let step = market.precision.amount;
-        let max_units = (maximum / step + 1e-9).floor();
-        let units = (amount / step).round();
-        if max_units < 1.0 || units > (u64::MAX / 2) as f64 {
-            return Err("Bitrue order size is not representable".into());
-        }
-        let parts = (units / max_units).ceil() as usize;
-        if parts > 1000 {
-            return Err("Bitrue order requires too many splits".into());
-        }
+        // Legacy TS: bitrue.exchange.ts:1180-1196. Keep its equal rounded lots
+        // and separate modulo tail, including any under/over-allocation.
+        let lots = if amount > maximum {
+            (amount / maximum).ceil()
+        } else {
+            1.0
+        };
+        let rest = if amount > maximum {
+            safe_cex_engine::num::adjust(amount % maximum, step)
+        } else {
+            0.0
+        };
+        let lot_size = safe_cex_engine::num::adjust((amount - rest) / lots, step);
+        let parts = lots
+            .to_string()
+            .parse::<usize>()
+            .map_err(|_| "Bitrue lot count exceeds addressable storage")?;
         if let Some(id) = &opts.client_order_id
             && (!caller_id(id)
                 || protective
                 || parts != 1
+                || rest != 0.0
                 || opts.take_profit.is_some()
                 || opts.stop_loss.is_some())
         {
@@ -657,17 +666,7 @@ impl Bitrue {
             trigger(opts.tp_trigger_type, StopTriggerType::LastPrice)?
         };
         let mut result = Vec::new();
-        let units = units as u64;
-        let each = units / parts as u64;
-        let remainder = units % parts as u64;
-        for index in 0..parts {
-            let quantity = safe_cex_engine::num::adjust(
-                (each + u64::from((index as u64) < remainder)) as f64 * step,
-                step,
-            );
-            if quantity < market.limits.amount.min {
-                return Err("Bitrue split is below the minimum".into());
-            }
+        for quantity in std::iter::repeat_n(lot_size, parts).chain((rest != 0.0).then_some(rest)) {
             let id = opts
                 .client_order_id
                 .clone()

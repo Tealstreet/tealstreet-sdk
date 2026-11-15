@@ -25,6 +25,7 @@ pub enum Kind {
     },
     Orders {
         revision: u64,
+        read_epoch: u64,
     },
     Token {
         epoch: safe_cex_engine::socket_lifecycle::Epoch,
@@ -383,6 +384,7 @@ impl KrakenSpot {
             vec![],
             Kind::Orders {
                 revision: self.account.revision,
+                read_epoch: cx.order_read_epoch(),
             },
         );
     }
@@ -593,6 +595,7 @@ impl KrakenSpot {
         cx: &mut Cx<'_, Pending>,
         text: &str,
         revision: u64,
+        read_epoch: u64,
     ) -> Result<(), String> {
         let e: Open<'_> =
             serde_json::from_str(text).map_err(|_| "Kraken Spot missing open orders")?;
@@ -673,7 +676,7 @@ impl KrakenSpot {
             cx.store.set_orders(rows);
             if clean {
                 cx.orders_fence_held(None);
-                cx.orders_reconciled(None);
+                cx.orders_reconciled_since(None, read_epoch);
             } else {
                 cx.orders_fence_held(Some(UNREADABLE_ORDER));
             }
@@ -692,13 +695,21 @@ impl KrakenSpot {
         let text = match result(response) {
             Ok(t) => t,
             Err(e) => {
+                let error =
+                    super::trading::write_failure(response.status, response.body, e.clone());
                 // An ambiguous write response cannot prove a signature refusal.
                 // Reads retain their bounded signature retry policy.
                 let is_trade = matches!(request.kind, Kind::Trade(_));
                 let definitive = response.status != 408
                     && response.status < 500
-                    && (response.status != 429 || !is_trade);
-                let signature_refused = definitive && e.contains("EAPI:Invalid signature");
+                    && (response.status != 429 || !is_trade)
+                    && (!is_trade || error.outcome == Some(safe_cex_engine::Outcome::Rejected));
+                let signature_refused = definitive
+                    && if is_trade {
+                        error.venue_code.as_deref() == Some("EAPI:Invalid signature")
+                    } else {
+                        e.contains("EAPI:Invalid signature")
+                    };
                 if signature_refused && request.signature_retries < 1 {
                     let mut r = request;
                     r.signature_retries += 1;
@@ -718,7 +729,6 @@ impl KrakenSpot {
                             .kind(safe_cex_engine::ErrorKind::AuthInvalid),
                     );
                 }
-                let error = super::trading::write_failure(response.status, response.body, e);
                 // A documented code in a 200 proves nothing rested; other refusals still read.
                 if response.status < 300
                     && error.outcome == Some(safe_cex_engine::Outcome::Rejected)
@@ -741,9 +751,12 @@ impl KrakenSpot {
                 }
                 r
             }
-            Kind::Orders { revision } => {
+            Kind::Orders {
+                revision,
+                read_epoch,
+            } => {
                 self.account.orders_flight = false;
-                let result = self.orders_response(cx, text, *revision);
+                let result = self.orders_response(cx, text, *revision, *read_epoch);
                 if self.account.orders_reconcile {
                     self.orders_read(cx);
                 }

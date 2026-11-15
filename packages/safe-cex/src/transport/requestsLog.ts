@@ -1,14 +1,24 @@
 import type { HttpPacket, HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import {
+  getWsDiagnosticsGeneration,
   isHeartbeatFrame,
   isWsDiagnosticsEnabled,
   redactWsDiagnosticPayload,
+  sanitizeWsDiagnosticFrame,
   WsDiagnosticSampler,
 } from '../utils/wsDiagnostics';
 
 /** The Requests Log events the TS (axios and BaseWebSocket) paths already emit. */
 export type RequestsLogEvent = 'grafana-http-request' | 'grafana-http-response' | 'grafana-pws' | 'grafana-pws-sub';
+
+/** Payload of the opt-in `ws-diagnostic` exchange/worker event. URLs and headers are never included. */
+export type WsDiagnosticEvent = {
+  venue: string;
+  channel: 'public' | 'private' | 'business';
+  direction: 'send' | 'receive';
+  message: string;
+};
 
 const BODY_CHARS = 4096;
 /** Enough of a body to redact as whole JSON before the log entry is capped. */
@@ -46,6 +56,7 @@ export const withRequestsLog = (
   transport: Transport,
   label: string,
   emit: (event: RequestsLogEvent, message: string) => void,
+  onWsDiagnostic?: (event: WsDiagnosticEvent) => void,
 ): Transport => {
   const offPath = (work: () => void) => {
     try {
@@ -129,30 +140,49 @@ export const withRequestsLog = (
         }
       : {}),
     connect: (url, handlers) => {
-      // Market data is not the private stream the log is for.
-      if ((handlers.channel ?? 'public') === 'public') return transport.connect(url, handlers);
-      const sampler = new WsDiagnosticSampler();
+      const channel = handlers.channel ?? 'public';
+      if (channel === 'public' && !onWsDiagnostic) return transport.connect(url, handlers);
+      let sampler: WsDiagnosticSampler | undefined;
       // A text frame is an immutable string; a binary one is logged by its length.
-      const frame = (event: RequestsLogEvent, data: string | number) => {
+      const frame = (direction: WsDiagnosticEvent['direction'], data: string | number) => {
         if (!enabled()) return;
+        const generation = getWsDiagnosticsGeneration();
+        const isCurrent = () => enabled() && generation === getWsDiagnosticsGeneration();
+        try {
+          sampler ??= new WsDiagnosticSampler();
+          if (sampler.drop()) return;
+        } catch {
+          return;
+        }
+        const frameSampler = sampler;
         offPath(() => {
-          if ((typeof data === 'string' && isHeartbeatFrame(data)) || sampler.drop()) return;
-          const message = typeof data === 'string' ? redactWsDiagnosticPayload(data) : `binary ${data} bytes`;
-          sampler.emit((entry) => emit(event, entry), label, message);
+          if (!isCurrent() || (typeof data === 'string' && data.length <= OBSERVED_CHARS && isHeartbeatFrame(data)))
+            return;
+          const message = typeof data === 'string' ? sanitizeWsDiagnosticFrame(data) : `binary ${data} bytes`;
+          frameSampler.emit(
+            (entry) => {
+              if (!isCurrent()) return;
+              onWsDiagnostic?.({ venue: label, channel, direction, message: entry });
+              if (channel !== 'public' && isCurrent())
+                emit(direction === 'send' ? 'grafana-pws-sub' : 'grafana-pws', entry);
+            },
+            label,
+            message,
+          );
         });
       };
       const socket = transport.connect(url, {
         ...handlers,
         onMessage: (message) => {
           handlers.onMessage(message);
-          frame('grafana-pws', message);
+          frame('receive', message);
         },
         ...(handlers.onBinary
           ? {
               onBinary: (data: Uint8Array) => {
                 const length = data.byteLength;
                 handlers.onBinary!(data);
-                frame('grafana-pws', length);
+                frame('receive', length);
               },
             }
           : {}),
@@ -160,7 +190,7 @@ export const withRequestsLog = (
       return {
         send: (message: string) => {
           socket.send(message);
-          frame('grafana-pws-sub', message);
+          frame('send', message);
         },
         close: () => socket.close(),
       };

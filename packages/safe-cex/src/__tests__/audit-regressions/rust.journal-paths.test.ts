@@ -47,7 +47,7 @@ const market = (overrides: Partial<Market>): Market =>
     limits: { amount: { min: 0.01, max: 1000 }, leverage: { min: 1, max: 100 } },
     contractSize: 0.01,
     ...overrides,
-  }) as Market;
+  }) satisfies Market;
 
 const BITUNIX_ROWS = [
   { positionId: 'p1', symbol: 'BTCUSDT', side: 'BUY', qty: '0.5', maxQty: '0.5', entryPrice: '60000', closePrice: '61000', fee: '1.2', funding: '0', realizedPNL: '498.8', leverage: '10', marginMode: 'CROSS', positionMode: 'ONE_WAY', ctime: '1700000000000', mtime: '1700000500000' },

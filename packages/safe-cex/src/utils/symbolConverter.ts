@@ -42,7 +42,6 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     case 'apexomni':
     case 'woo':
     case 'blofin':
-    case 'breakoutprop':
     case 'bitgetinverse':
     case 'bybitspot':
     case 'woofi':
@@ -54,6 +53,7 @@ export function toBinance(symbol: string, from: ExchangeName): string {
 
     // -- BingX: symbol is concat (BTCUSDT) ----------------------------------
     case 'bingx':
+    case 'bingxspot':
       return symbol;
 
     // -- Phemex: U1000SHIBUSDT → 1000SHIBUSDT (strip U prefix on multiplier symbols)
@@ -235,6 +235,7 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'binancespot':
     case 'bitget':
     case 'bingx':
+    case 'bingxspot':
     case 'bitunix':
     case 'asterdex':
     case 'apexomni':
@@ -244,7 +245,6 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'okxeu':
     case 'okxeudemo':
     case 'blofin':
-    case 'breakoutprop':
     case 'bitgetinverse':
     case 'bybitinverse':
     case 'bybitspot':

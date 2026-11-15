@@ -54,7 +54,9 @@ export function environmentIdentity(environment) {
   };
   keys(value, ['ImageOS', 'ImageVersion', 'arch', 'nodeVersion', 'nodeVersions'], 'environment');
   for (const field of ['ImageOS', 'ImageVersion', 'arch', 'nodeVersion']) if (typeof value[field] !== 'string' || !value[field]) fail(`missing environment ${field}`);
-  if (!value.nodeVersions || typeof value.nodeVersions !== 'object' || Array.isArray(value.nodeVersions) || !Object.keys(value.nodeVersions).length || Object.values(value.nodeVersions).some((v) => typeof v !== 'string' || !v)) fail('invalid Node versions');
+  if (!value.nodeVersions || typeof value.nodeVersions !== 'object' || Array.isArray(value.nodeVersions) || !Object.keys(value.nodeVersions).length) fail('invalid Node versions');
+  for (const [key, version] of Object.entries(value.nodeVersions))
+    if (typeof version !== 'string' || !version) fail(`invalid Node versions: ${JSON.stringify(key)}=${JSON.stringify(version)}`);
   if (`v${value.nodeVersions.node}` !== value.nodeVersion) fail('inconsistent Node version');
   return JSON.parse(canonical(value));
 }

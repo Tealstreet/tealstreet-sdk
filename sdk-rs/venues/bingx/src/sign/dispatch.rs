@@ -8,6 +8,7 @@ use safe_cex_engine::{Action, DispatchContext, Method, SignStep};
 
 /// Immutable native intent plus opaque provider references; no material custody.
 pub struct Http {
+    venue: &'static str,
     identity: Identity,
     method: Method,
     path: &'static str,
@@ -17,11 +18,20 @@ pub struct Http {
 impl Http {
     pub fn new(identity: Identity, method: Method, path: &'static str, params: Params) -> Self {
         Self {
+            venue: "bingx",
             identity,
             method,
             path,
             params,
             prepared: None,
+        }
+    }
+
+    /// Spot shares the wire/signing contract but retains its own provider scope.
+    pub fn spot(identity: Identity, method: Method, path: &'static str, params: Params) -> Self {
+        Self {
+            venue: "bingxspot",
+            ..Self::new(identity, method, path, params)
         }
     }
 
@@ -63,7 +73,7 @@ impl SignStep for Http {
             return Err(SignError::InvalidRequest);
         }
         let context = Context {
-            venue: "bingx".into(),
+            venue: self.venue.into(),
             method: self.method.as_str().into(),
             host: "open-api.bingx.com".into(),
             path: self.path.into(),

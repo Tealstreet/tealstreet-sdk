@@ -174,7 +174,7 @@ impl SignedRequest {
         !self.public && self.method == Method::Get && !self.listen_key() && !self.plan_write()
     }
 
-    fn plan_write(&self) -> bool {
+    pub(crate) fn plan_write(&self) -> bool {
         matches!(&self.pending, Pending::Trade(trade) if trade.plan().is_some())
     }
 
@@ -499,7 +499,7 @@ impl AsterDex {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Box<SignedRequest>,
-        response: Result<Response<'_>, &str>,
+        response: Result<Response<'_>, VenueError>,
     ) {
         let leg = request.read.clone();
         let mut reported = false;
@@ -750,7 +750,13 @@ impl AsterDex {
             let _ = cx.finish_http_context(&context);
         }
         if request.plan_write() {
-            self.on_plan_reply(cx, request, response);
+            self.on_plan_reply(
+                cx,
+                request,
+                response.map_err(|message| {
+                    VenueError::new(message).outcome(safe_cex_engine::Outcome::Unknown)
+                }),
+            );
             return;
         }
         if let (Some(read), Ok(_)) = (&request.read, &response) {
@@ -849,7 +855,7 @@ impl AsterDex {
         error: VenueError,
     ) {
         if request.plan_write() {
-            self.on_plan_reply(cx, request, Err(&error.message));
+            self.on_plan_reply(cx, request, Err(error));
             return;
         }
         if request.read.is_none() {

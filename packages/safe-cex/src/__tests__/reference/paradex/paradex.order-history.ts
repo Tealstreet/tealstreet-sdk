@@ -44,7 +44,7 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const mapParadexHistoricalOrder = (row: Record<string, any>): HistoricalOrder | null => {
+export const mapParadexHistoricalOrder = (row: Record<string, unknown>): HistoricalOrder | null => {
   const id = String(row.id ?? '');
   const symbol = String(row.market ?? '');
   const createdTime = toNumber(row.created_at);
@@ -70,7 +70,7 @@ export const mapParadexHistoricalOrder = (row: Record<string, any>): HistoricalO
         ? OrderStatus.Canceled
         : OrderStatus.Closed;
 
-  const flags: string[] = Array.isArray(row.flags) ? row.flags.map((f: any) => String(f).toUpperCase()) : [];
+  const flags: string[] = Array.isArray(row.flags) ? row.flags.map((f: unknown) => String(f).toUpperCase()) : [];
   const reduceOnly = flags.includes('REDUCE_ONLY');
 
   // Reduce-only is what separates a protective stop from an OPENING trigger, and paradex

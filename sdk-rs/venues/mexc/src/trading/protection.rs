@@ -2,23 +2,29 @@ use super::*;
 use std::collections::HashMap;
 
 #[derive(Clone, Default)]
-pub struct References([Option<(f64, f64)>; 3]);
+pub struct References([Option<(f64, f64, f64)>; 3]);
 impl References {
-    pub fn observe(&mut self, now: f64, values: [Option<f64>; 3]) {
+    pub fn observe(&mut self, now: f64, utc: f64, values: [Option<f64>; 3]) {
         for (slot, value) in self.0.iter_mut().zip(values) {
             if let Some(value) = value {
-                *slot =
-                    (value.is_finite() && value > 0.0 && now.is_finite()).then_some((value, now));
+                *slot = (value.is_finite() && value > 0.0 && now.is_finite() && utc.is_finite())
+                    .then_some((value, now, utc));
             }
         }
     }
-    fn get(&self, source: StopTriggerType, now: f64) -> Option<f64> {
-        let (value, at) = self.0[match source {
+    fn get(&self, source: StopTriggerType, now: f64, utc: f64) -> Option<f64> {
+        let (value, at, observed_utc) = self.0[match source {
             StopTriggerType::LastPrice => 0,
             StopTriggerType::MarkPrice => 1,
             StopTriggerType::IndexPrice => 2,
         }]?;
-        (now.is_finite() && (0.0..=5_000.0).contains(&(now - at))).then_some(value)
+        // Scheduling can stop during suspend. Both ages must remain fresh;
+        // a backwards UTC correction also requires a new own-source quote.
+        (now.is_finite()
+            && utc.is_finite()
+            && (0.0..=5_000.0).contains(&(now - at))
+            && (0.0..=5_000.0).contains(&(utc - observed_utc)))
+        .then_some(value)
     }
 }
 #[derive(Clone)]
@@ -68,6 +74,7 @@ fn reference(source: Option<f64>) -> Result<StopTriggerType, String> {
 struct GuardView<'a> {
     store: &'a safe_cex_engine::Store,
     now: f64,
+    utc: f64,
     refs: &'a HashMap<String, References>,
 }
 impl GuardView<'_> {
@@ -82,7 +89,7 @@ impl GuardView<'_> {
         let value = self
             .refs
             .get(&order.symbol)
-            .and_then(|r| r.get(reference(source).ok()?, self.now))
+            .and_then(|r| r.get(reference(source).ok()?, self.now, self.utc))
             .ok_or_else(|| "MEXC reference stale; stop not changed".to_owned())?;
         let gte =
             (take && order.side == OrderSide::Sell) || (!take && order.side == OrderSide::Buy);
@@ -114,36 +121,44 @@ pub fn guard(
     edit: &Edit,
     restore: bool,
 ) -> Result<(), String> {
-    guard_at(cx.store, cx.now, refs, edit, restore)
+    guard_at(cx.store, cx.now, cx.protocol_now(), refs, edit, restore)
 }
 // Every destructive amend send is checked here, including deferred/re-signed sends.
 // Read-only: a refusal leaves the original stop and the FIFO claim unchanged.
 pub fn guard_at(
     store: &safe_cex_engine::Store,
     now: f64,
+    utc: f64,
     refs: &HashMap<String, References>,
     edit: &Edit,
     restore: bool,
 ) -> Result<(), String> {
-    guard_send(store, now, refs, edit, restore, restore)
+    guard_send(store, now, utc, refs, edit, restore, restore)
 }
 pub fn replacement_guard_at(
     store: &safe_cex_engine::Store,
     now: f64,
+    utc: f64,
     refs: &HashMap<String, References>,
     edit: &Edit,
 ) -> Result<(), String> {
-    guard_send(store, now, refs, edit, true, false)
+    guard_send(store, now, utc, refs, edit, true, false)
 }
 fn guard_send(
     store: &safe_cex_engine::Store,
     now: f64,
+    utc: f64,
     refs: &HashMap<String, References>,
     edit: &Edit,
     after_cancel: bool,
     restore: bool,
 ) -> Result<(), String> {
-    let view = GuardView { store, now, refs };
+    let view = GuardView {
+        store,
+        now,
+        utc,
+        refs,
+    };
     let original = &edit.observed;
     if !after_cancel && store.order(&original.id) != Some(original) {
         return Err("MEXC original order changed or filled; stop not changed".into());
@@ -1082,7 +1097,7 @@ mod tests {
                     .references
                     .entry("BTCUSDT".into())
                     .or_default()
-                    .observe(cx.now, [None, Some(60000.), None]);
+                    .observe(cx.now, cx.protocol_now(), [None, Some(60000.), None]);
                 venue.trading.active=Some(Job{command:1,steps:VecDeque::new(),ids:vec![],gap:0.,total_orders:1,failed_index:None,effective:false,replaces:None,managed:None,protection:Some(Box::new(Edit{observed:order,scope:Scope::Plan,leg:None,price:Some(54000.),amount:Some(2.),native:r#"{"id":"o","symbol":"BTC_USDT","side":4,"orderType":5,"state":1,"vol":1,"triggerPrice":55000,"triggerType":2,"trend":2}"#.into(),replacement:None,restore:None,canceled:false,cancel_proven:false,restoring:false,refusal:None,started:cx.now}))});
                 let cancel_request = Request {
                     command: 1,
@@ -1104,11 +1119,11 @@ mod tests {
                 );
                 assert_eq!(venue.deferred_private.len(), 1);
                 if changed {
-                    venue
-                        .references
-                        .get_mut("BTCUSDT")
-                        .unwrap()
-                        .observe(cx.now, [None, Some(53000.), None]);
+                    venue.references.get_mut("BTCUSDT").unwrap().observe(
+                        cx.now,
+                        cx.protocol_now(),
+                        [None, Some(53000.), None],
+                    );
                 }
                 venue.defer_private = false;
                 venue.flush_private(cx);
@@ -1129,14 +1144,25 @@ mod tests {
     #[test]
     fn per_field_receipts_reject_future_nonfinite_zero_and_stale_values() {
         let mut refs = References::default();
-        refs.observe(1000., [Some(60000.), Some(61000.), Some(62000.)]);
-        assert_eq!(refs.get(StopTriggerType::MarkPrice, 6000.), Some(61000.));
-        assert_eq!(refs.get(StopTriggerType::MarkPrice, 6001.), None);
-        assert_eq!(refs.get(StopTriggerType::LastPrice, 999.), None);
-        assert_eq!(refs.get(StopTriggerType::IndexPrice, f64::NAN), None);
-        refs.observe(5999., [Some(63000.), None, Some(0.)]);
-        assert_eq!(refs.get(StopTriggerType::MarkPrice, 6001.), None);
-        assert_eq!(refs.get(StopTriggerType::LastPrice, 6001.), Some(63000.));
-        assert_eq!(refs.get(StopTriggerType::IndexPrice, 6000.), None);
+        refs.observe(1000., 1000., [Some(60000.), Some(61000.), Some(62000.)]);
+        assert_eq!(
+            refs.get(StopTriggerType::MarkPrice, 6000., 6000.),
+            Some(61000.)
+        );
+        assert_eq!(refs.get(StopTriggerType::MarkPrice, 6001., 6001.), None);
+        assert_eq!(refs.get(StopTriggerType::LastPrice, 999., 999.), None);
+        assert_eq!(refs.get(StopTriggerType::IndexPrice, f64::NAN, 1000.), None);
+        assert_eq!(refs.get(StopTriggerType::MarkPrice, 1000., f64::NAN), None);
+        assert_eq!(refs.get(StopTriggerType::MarkPrice, 1000., 6001.), None);
+        assert_eq!(refs.get(StopTriggerType::MarkPrice, 1000., 999.), None);
+        // A clock rollback cannot revive a receipt stale on scheduling time.
+        assert_eq!(refs.get(StopTriggerType::MarkPrice, 6001., 1000.), None);
+        refs.observe(5999., 5999., [Some(63000.), None, Some(0.)]);
+        assert_eq!(refs.get(StopTriggerType::MarkPrice, 6001., 6001.), None);
+        assert_eq!(
+            refs.get(StopTriggerType::LastPrice, 6001., 6001.),
+            Some(63000.)
+        );
+        assert_eq!(refs.get(StopTriggerType::IndexPrice, 6000., 6000.), None);
     }
 }

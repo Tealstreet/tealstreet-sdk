@@ -28,11 +28,13 @@ describe('virtualClock', () => {
     (virtualClock as any).offsetMs = 0;
     (virtualClock as any).receivedTimeSync = false;
     (virtualClock as any).syncInFlight = null;
+    (virtualClock as any).lastAfterClockStepSync = null;
     virtualClock.setServerTimeSource(undefined);
   });
 
   afterEach(() => {
     virtualClock.stop();
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -95,6 +97,212 @@ describe('virtualClock', () => {
   });
 
   describe('syncClientServerTime', () => {
+    it.each([
+      { afterClockStep: false, fail: false, stop: false },
+      { afterClockStep: true, fail: false, stop: false },
+      { afterClockStep: true, fail: true, stop: false },
+      { afterClockStep: true, fail: false, stop: true },
+    ])(
+      'retains in-flight steps until completion (initial=$afterClockStep, fail=$fail, stop=$stop)',
+      async ({ afterClockStep, fail, stop }) => {
+        const originalWindow = global.window;
+        (global as any).window = {};
+        let elapsed = 0;
+        vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+        let finish!: (time: number | undefined) => void;
+        const source = vi
+          .fn()
+          .mockImplementationOnce(
+            () =>
+              new Promise<number | undefined>((resolve) => {
+                finish = resolve;
+              }),
+          )
+          .mockImplementation(async () => Date.now());
+        vi.mocked(axios.get).mockRejectedValue(new Error('fixture venue unavailable'));
+        virtualClock.setServerTimeSource(source);
+        try {
+          const pending = virtualClock.syncClientServerTime({ afterClockStep });
+          for (let i = 0; i < 3; i++) {
+            expect(virtualClock.syncClientServerTime({ afterClockStep: true })).toBe(pending);
+          }
+          expect(source).toHaveBeenCalledOnce();
+          if (stop) virtualClock.stop();
+          finish(fail ? undefined : Date.now());
+          await pending;
+          await vi.advanceTimersByTimeAsync(0);
+          expect(source).toHaveBeenCalledTimes(afterClockStep || stop ? 1 : 2);
+          elapsed = 14_999;
+          await vi.advanceTimersByTimeAsync(14_999);
+          expect(source).toHaveBeenCalledTimes(afterClockStep || stop ? 1 : 2);
+          elapsed = 15_000;
+          await vi.advanceTimersByTimeAsync(1);
+          expect(source).toHaveBeenCalledTimes(stop ? 1 : 2);
+          expect(vi.getTimerCount()).toBe(0);
+        } finally {
+          (global as any).window = originalWindow;
+        }
+      },
+    );
+
+    it.each([false, true])('recovers real-provider sampling after a backward step (overlap=%s)', async (overlap) => {
+      const { tealstreetTimeSource } = await import('../transport/tealstreet/tealstreetTimeSource');
+      const originalWindow = global.window;
+      (global as any).window = {};
+      const epoch = 1_760_000_000_000;
+      vi.setSystemTime(epoch);
+      let elapsed = 0;
+      let stepDuringResponse = false;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      vi.mocked(axios.get).mockImplementation(async () => {
+        await Promise.resolve();
+        if (stepDuringResponse) {
+          stepDuringResponse = false;
+          vi.setSystemTime(Date.now() - 600_000);
+          void virtualClock.syncClientServerTime({ afterClockStep: true });
+        }
+        return { data: { unixMs: epoch + elapsed } };
+      });
+      const source = vi.fn(tealstreetTimeSource);
+      virtualClock.setServerTimeSource(source);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        elapsed = 1_000;
+        await vi.advanceTimersByTimeAsync(1_000);
+        vi.setSystemTime(Date.now() - 600_000);
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        stepDuringResponse = overlap;
+        elapsed = 15_000;
+        await vi.advanceTimersByTimeAsync(14_000);
+        expect(source).toHaveBeenCalledTimes(2);
+        elapsed = 29_999;
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(source).toHaveBeenCalledTimes(2);
+        elapsed = 30_000;
+        await vi.advanceTimersByTimeAsync(1);
+        expect.soft(virtualClock.getCurrentTimeMs()).toBe(epoch + elapsed);
+        expect.soft(source).toHaveBeenCalledTimes(overlap ? 3 : 2);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
+
+    it('coalesces suppressed clock steps and cancels their deferred resync on stop', async () => {
+      const originalWindow = global.window;
+      (global as any).window = {};
+      let elapsed = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const source = vi.fn(async () => Date.now());
+      virtualClock.setServerTimeSource(source);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        elapsed = 1_000;
+        for (let i = 0; i < 3; i++) await virtualClock.syncClientServerTime({ afterClockStep: true });
+        expect(vi.getTimerCount()).toBe(1);
+        expect(source).toHaveBeenCalledOnce();
+        virtualClock.stop();
+        elapsed = 15_000;
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(source).toHaveBeenCalledOnce();
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
+
+    it('rechecks the monotonic cooldown when a deferred timer fires early', async () => {
+      const originalWindow = global.window;
+      (global as any).window = {};
+      let elapsed = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const source = vi.fn(async () => Date.now());
+      virtualClock.setServerTimeSource(source);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        elapsed = 1_000;
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        await vi.advanceTimersByTimeAsync(14_000);
+        expect(source).toHaveBeenCalledOnce();
+        elapsed = 15_000;
+        await vi.advanceTimersByTimeAsync(14_000);
+        expect(source).toHaveBeenCalledTimes(2);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
+
+    it('rate limits completed clock-step syncs using monotonic elapsed time only', async () => {
+      const originalWindow = global.window;
+      (global as any).window = {};
+      let elapsed = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const source = vi.fn(async () => Date.now() + 5_000);
+      virtualClock.setServerTimeSource(source);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        for (const jump of [600_000, -1_200_000, 1_800_000]) {
+          vi.setSystemTime(Date.now() + jump);
+          elapsed += 1_000;
+          await virtualClock.syncClientServerTime({ afterClockStep: true });
+        }
+        elapsed = 14_999;
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        expect(source).toHaveBeenCalledOnce();
+        elapsed = 15_000;
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        expect(source).toHaveBeenCalledTimes(2);
+        await virtualClock.syncClientServerTime();
+        expect(source).toHaveBeenCalledTimes(3); // Routine sync is independent.
+      } finally {
+        (global as any).window = originalWindow;
+      }
+    });
+
+    it('limits Node clock-step notifications across all realm subscribers', async () => {
+      runtime.node = true;
+      const first = vi.fn();
+      const second = vi.fn();
+      const unsubscribeFirst = virtualClock.subscribeToTimeSync(first);
+      const unsubscribeSecond = virtualClock.subscribeToTimeSync(second);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        expect(first).toHaveBeenCalledOnce();
+        expect(second).toHaveBeenCalledOnce();
+        expect(axios.get).not.toHaveBeenCalled();
+      } finally {
+        unsubscribeFirst();
+        unsubscribeSecond();
+        runtime.node = false;
+      }
+    });
+
+    it('keeps the prior offset and publishes nothing when clock-step sources both fail', async () => {
+      const originalWindow = global.window;
+      (global as any).window = undefined;
+      const source = vi.fn().mockRejectedValue(new Error('fixture source unavailable'));
+      virtualClock.setServerTimeSource(source);
+      vi.mocked(axios.get).mockRejectedValue(new Error('fixture venue unavailable'));
+      virtualClock.syncFromServerTime(Date.now() + 10_000);
+      const offset = (virtualClock as any).offsetMs;
+      const observed = vi.fn();
+      const unsubscribe = virtualClock.subscribeToTimeSync(observed);
+      try {
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        expect(source).toHaveBeenCalledOnce();
+        expect(axios.get).toHaveBeenCalledOnce();
+        expect((virtualClock as any).offsetMs).toBe(offset);
+        expect(observed).not.toHaveBeenCalled();
+        await virtualClock.syncClientServerTime({ afterClockStep: true });
+        expect(source).toHaveBeenCalledOnce(); // Failed attempts cannot storm either.
+        expect(axios.get).toHaveBeenCalledOnce();
+      } finally {
+        unsubscribe();
+        (global as any).window = originalWindow;
+      }
+    });
+
     it('zeroes the offset on a Node/Bun server', async () => {
       runtime.node = true;
       virtualClock.syncFromServerTime(Date.now() + 10_000);
@@ -306,7 +514,9 @@ describe('virtualClock', () => {
     const originalWindow = global.window;
     (global as any).window = undefined;
     let done = false;
-    const start = virtualClock.start().then(() => { done = true; });
+    const start = virtualClock.start().then(() => {
+      done = true;
+    });
     await Promise.resolve();
     expect(done).toBe(false);
     const observed = vi.fn();

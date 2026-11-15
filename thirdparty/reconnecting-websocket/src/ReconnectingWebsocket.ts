@@ -19,6 +19,15 @@ const getGlobalWebSocket = (): WebSocket | undefined => {
  */
 const isWebSocket = (w: any) => typeof w !== 'undefined' && !!w && w.CLOSING === 2;
 
+const diagnosticUrl = (value: string): string => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'ws:' || url.protocol === 'wss:' ? `${url.origin}${url.pathname}` : '[unavailable]';
+  } catch {
+    return '[unavailable]';
+  }
+};
+
 export type Event = Events.Event;
 export type ErrorEvent = Events.ErrorEvent;
 export type CloseEvent = Events.CloseEvent;
@@ -276,18 +285,14 @@ export class ReconnectingWebSocket {
    * Resets retry counter;
    */
   public reconnect(code?: number, reason?: string) {
-    console.log(`[ReconnectingWebSocket] 🔄 reconnect() called - URL: ${this._url}, code: ${code}, reason: ${reason}`);
+    console.info('[ReconnectingWebSocket] reconnect() requested');
     this._shouldReconnect = true;
     this._closeCalled = false;
     this._connectLock = false; // Reset in case previous _connect() left it stuck
     this._retryCount = -1;
     if (!this._ws || this._ws.readyState === this.CLOSED) {
-      console.log(`[ReconnectingWebSocket] 📡 WebSocket is CLOSED or undefined, calling _connect()`);
       this._connect();
     } else {
-      console.log(
-        `[ReconnectingWebSocket] 🔌 WebSocket exists and not CLOSED (state: ${this._ws.readyState}), disconnecting then reconnecting`,
-      );
       this._disconnect(code, reason);
       this._connect();
     }
@@ -316,12 +321,12 @@ export class ReconnectingWebSocket {
    */
   public send(data: Message) {
     if (this._ws && this._ws.readyState === this.OPEN) {
-      this._debug('send', data);
+      this._debug('send');
       this._ws.send(data);
     } else {
       const { maxEnqueuedMessages = DEFAULT.maxEnqueuedMessages } = this._options;
       if (this._messageQueue.length < maxEnqueuedMessages) {
-        this._debug('enqueue', data);
+        this._debug('enqueue');
         this._messageQueue.push(data);
       }
     }
@@ -469,7 +474,7 @@ export class ReconnectingWebSocket {
           this._enterPhase('stopped');
           return;
         }
-        this._debug('connect', { url, protocols: this._protocols });
+        console.info(`[ReconnectingWebSocket] connecting - URL: ${diagnosticUrl(url)}`);
 
         // In Node.js, the ws library accepts options including headers
         // This is needed for CloudFront/proxies that require Origin header
@@ -530,6 +535,7 @@ export class ReconnectingWebSocket {
         // A URL provider that failed (no token yet, a refused key) retries through the
         // normal bounded reconnect delay; stopping here left the socket with no loop.
         if (!this._closeCalled && this._shouldReconnect) {
+          console.info('[ReconnectingWebSocket] URL: [unavailable]; connection attempt failed');
           const event = new Events.ErrorEvent(Error('WebSocket URL provider failed'), this);
           if (this.onerror) {
             this.onerror(event);
@@ -609,7 +615,7 @@ export class ReconnectingWebSocket {
   };
 
   private _handleError = (event: Events.ErrorEvent) => {
-    this._debug('error event', event.message);
+    this._debug('error event');
     this._disconnect(
       undefined,
       event.message === 'TIMEOUT' ? 'timeout' : undefined,

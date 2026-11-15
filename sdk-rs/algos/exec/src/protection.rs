@@ -158,7 +158,7 @@ pub(crate) fn prepare_close(
         .iter()
         .find(|m| m["symbol"] == symbol)
         .ok_or_else(|| format!("Market not found for {symbol}"))?;
-    let full = native_position(position, market);
+    let full = native_position(position, market)?;
     let side = if position["side"] == "long" {
         "sell"
     } else {

@@ -12,6 +12,7 @@ import {
   PositionSide,
   StoreData,
 } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { getTickerPredictedBestAsk } from '../../utils/getTickerPredictedBestAsk';
 import { getTickerPredictedBestBid } from '../../utils/getTickerPredictedBestBid';
 import { adjust } from '../../utils/safe-math';
@@ -65,6 +66,7 @@ export class ChaserOrderManager {
   private _chaserOrderInstances: ChaserOrderInstance[] = [];
 
   log(message: string, instance: ChaserOrderInstance) {
+    if (instance.exchange.isDisposed) return;
     instance.exchange.emitter.emit('log', `[CHASER${instance.id}] ${message}`);
     // console.log(`[CHASER${instance.id}] ${message}`);
   }
@@ -135,6 +137,7 @@ export class ChaserOrderManager {
       }
 
       await sleep(BYBIT_DEMO_PRIVATE_WS_STARTUP_GRACE_INTERVAL_MS);
+      if (exchange.isDisposed) return undefined;
       reason = this.getBybitDemoDeadPrivateWsReason(exchange);
     }
 
@@ -142,11 +145,16 @@ export class ChaserOrderManager {
   }
 
   add(instance: ChaserOrderInstance) {
+    if (instance.exchange.isDisposed) {
+      instance.markComplete('Exchange disposed while chase was active');
+      return;
+    }
     this._chaserOrderInstances.push(instance);
     void this.processInstance(instance).catch((error) => this.handleSupervisorError(instance, error, 'startup'));
   }
 
   private async handleSupervisorError(instance: ChaserOrderInstance, error: unknown, phase: string) {
+    if (instance.exchange.isDisposed) return;
     const detail = error instanceof Error ? error.message : String(error);
     const message = `Chaser supervisor failed during ${phase} for ${instance.options.symbol}: ${detail}`;
     this.log(message, instance);
@@ -235,7 +243,7 @@ export class ChaserOrderManager {
     // (post-only retries, slow HTTP) would still see a fresh order
     // land in the book after `cleanupInstance` already read the
     // stale `currentOrderIds` and spliced the instance.
-    if (instance.isStopped) {
+    if (instance.isStopped || exchange.isDisposed) {
       this.log(`tryPlaceOrders early-exit: instance is stopped`, instance);
       return [];
     }
@@ -283,10 +291,13 @@ export class ChaserOrderManager {
       orderIds = await exchange.placeOrder(clientOrderId ? { ...placeOpts, clientOrderId } : placeOpts);
       this.log(`placeOrder returned: ${JSON.stringify(orderIds)}`, instance);
     } catch (e) {
+      if (exchange.isDisposed) return [];
       placementError = e;
-      console.error(e);
+      diagnosticConsole.error(e);
       this.log(`placeOrder exception: ${e}`, instance);
     }
+
+    if (exchange.isDisposed) return [];
 
     if (clientOrderId && orderIds.length === 0) {
       const lost = placementError !== undefined && isUnknownOutcome(placementError);
@@ -294,6 +305,7 @@ export class ChaserOrderManager {
       // into `[]`, but most return it for an ordinary rejection, which retries.
       if (lost || placementError === undefined) {
         const order = await this.findLostPlacement(instance, clientOrderId, lost ? LOST_PLACEMENT_CHECKS_MS : [0]);
+        if (exchange.isDisposed) return [];
         const finished = order?.status === OrderStatus.Closed || order?.status === OrderStatus.Canceled;
         if (order && !finished) {
           orderIds = [order.id];
@@ -339,6 +351,7 @@ export class ChaserOrderManager {
     if (instance.isStopped && orderIds.length > 0) {
       this.log(`isStopped after placeOrder; cancelling just-placed ${JSON.stringify(orderIds)}`, instance);
       for (const orderId of orderIds) {
+        if (exchange.isDisposed) break;
         try {
           await exchange.cancelOrders([{ id: orderId, symbol: instance.options.symbol } as Order]);
         } catch {
@@ -380,8 +393,10 @@ export class ChaserOrderManager {
     delaysMs: number[],
   ): Promise<Order | undefined> {
     const lookup = async () => {
+      if (instance.exchange.isDisposed) return undefined;
       try {
         const result = await instance.exchange.findOrderByClientOrderId(instance.options.symbol, clientOrderId);
+        if (instance.exchange.isDisposed) return undefined;
         return result.found ? result.order : undefined;
       } catch (e) {
         this.log(`client order id lookup failed: ${e}`, instance);
@@ -389,6 +404,7 @@ export class ChaserOrderManager {
       }
     };
     for (const delayMs of delaysMs) {
+      if (instance.exchange.isDisposed) return undefined;
       if (instance.isStopped) return lookup();
       if (delayMs > 0) await sleep(delayMs);
       const order = await lookup();
@@ -402,6 +418,7 @@ export class ChaserOrderManager {
 
     this.log(`processInstance starting for ${instance.options.symbol}`, instance);
     const deadPrivateWsReason = await this.waitForBybitDemoPrivateWs(exchange);
+    if (exchange.isDisposed) return;
     if (deadPrivateWsReason) {
       const message =
         `Chaser for ${instance.options.symbol} is reconciling over REST: the Bybit Demo private WebSocket is not running - ${deadPrivateWsReason}. ` +
@@ -416,9 +433,12 @@ export class ChaserOrderManager {
       return;
     }
 
-    instance.currentOrderIds = await this.tryPlaceOrders(instance);
+    const initialOrderIds = await this.tryPlaceOrders(instance);
+    if (exchange.isDisposed) return;
+    instance.currentOrderIds = initialOrderIds;
     this.log(`initial orderIds: ${JSON.stringify(instance.currentOrderIds)}`, instance);
     await sleep(1000);
+    if (instance.isStopped || exchange.isDisposed) return;
 
     if (instance.currentOrderIds.length > 0) {
       // Use fill-based tracking for exchanges where order status updates may be delayed
@@ -498,6 +518,7 @@ export class ChaserOrderManager {
       };
 
       const updateOrders = async (orders: Order[]) => {
+        if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
         if (instance.pendingOrdersUpdate) {
           queuedOrdersCheck = true;
           await applyOrderFillState(orders);
@@ -518,7 +539,7 @@ export class ChaserOrderManager {
                   position.symbol === instance.options.symbol &&
                   position.side ===
                     (instance.options.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-                  position.notional !== 0,
+                  position.contracts !== 0,
               )
             ) {
               instance.markComplete();
@@ -529,6 +550,7 @@ export class ChaserOrderManager {
           }
 
           const isFilledOrStopped = await applyOrderFillState(orders);
+          if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
 
           if (instance.freshOrder) {
             instance.freshOrder = false;
@@ -570,7 +592,9 @@ export class ChaserOrderManager {
               this.log('cancelling orders', instance);
               try {
                 await exchange?.cancelOrders(ordersToCancel);
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
               } catch (cancelError: any) {
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
                 // For Hyperliquid: "already canceled, or filled" is expected when order was filled
                 // before we could cancel it - check fills via REST to confirm
                 const errorMsg = String(cancelError?.message || cancelError || '');
@@ -596,11 +620,13 @@ export class ChaserOrderManager {
             // replacement. Cancellation can have won even when its response is
             // ambiguous, so an unavailable or failed REST read is unsafe.
             if (useFillBasedTracking) {
+              if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
               try {
                 if (typeof (exchange as any).fetchFillsForOrderIds !== 'function') {
                   throw new Error('fill reconciliation is unavailable');
                 }
                 const fillsMap = await (exchange as any).fetchFillsForOrderIds(instance.currentOrderIds);
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
                 for (const [orderId, filledAmount] of fillsMap) {
                   // Only update if we got more filled than we knew about
                   this.log(`REST fills check: orderId=${orderId}, filledAmount=${filledAmount}`, instance);
@@ -614,6 +640,7 @@ export class ChaserOrderManager {
                   return;
                 }
               } catch (e) {
+                if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
                 const message = `Chaser reconciliation failed after cancellation; stopped before replacement: ${e}`;
                 this.log(message, instance);
                 instance.markComplete('Failed to reconcile fills after cancellation');
@@ -627,14 +654,17 @@ export class ChaserOrderManager {
               return;
             }
 
-            instance.currentOrderIds = await this.tryPlaceOrders(instance);
+            const orderIds = await this.tryPlaceOrders(instance);
+            if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
+            instance.currentOrderIds = orderIds;
             hasSeenOrders = false;
             await sleep(1000);
+            if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
             this.log('created new orders', instance);
           }
         } finally {
           instance.pendingOrdersUpdate = false;
-          if (queuedOrdersCheck && !isCleanedUp && !instance.isStopped) {
+          if (queuedOrdersCheck && !exchange.isDisposed && !isCleanedUp && !instance.isStopped) {
             queuedOrdersCheck = false;
             scheduleQueuedOrdersCheck?.();
           }
@@ -650,6 +680,7 @@ export class ChaserOrderManager {
           hasSeenOrders = true;
           consecutiveMissingOrderUpdates = 0;
           await updateOrders(orders);
+          if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
         }
 
         // A wholesale REST snapshot can have been fetched before the chaser's
@@ -678,6 +709,7 @@ export class ChaserOrderManager {
         orders.filter((order) => instance.currentOrderIds.includes(order.id));
 
       runPriceCheck = async (orders: Order[], confirmMissingOrders = false) => {
+        if (exchange.isDisposed || instance.isStopped || isCleanedUp) return;
         lastPriceCheckAt = Date.now();
 
         // `chase ... to <length>` termination — evaluate before any
@@ -859,7 +891,7 @@ export class ChaserOrderManager {
           (position) =>
             position.symbol === instance.options.symbol &&
             position.side === (instance.options.side === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) &&
-            position.notional !== 0,
+            position.contracts !== 0,
         )
       ) {
         instance.markComplete();
@@ -912,6 +944,7 @@ export class ChaserOrderManager {
       instance.currentOrderIds = [];
       try {
         for (const orderId of idsToCancel) {
+          if (exchange.isDisposed) break;
           const order =
             exchange.store.orders.find((o) => o.id === orderId) ||
             ({ id: orderId, symbol: instance.options.symbol } as Order);
@@ -935,6 +968,7 @@ export class ChaserOrderManager {
    * and on bybitdemo — whose order frames may never arrive — from the position.
    */
   private async emitComplete(instance: ChaserOrderInstance) {
+    if (instance.exchange.isDisposed) return;
     const stopReason = instance.state.stopReason;
     const orderIds = [...instance.everTrackedOrderIds];
     for (const orderId of orderIds) {
@@ -954,12 +988,14 @@ export class ChaserOrderManager {
     ) {
       try {
         const fillsMap: Map<string, number> = await fetchFills.call(instance.exchange, orderIds);
+        if (instance.exchange.isDisposed) return;
         for (const [orderId, filledAmount] of fillsMap) instance.setFilledAmount(orderId, filledAmount);
         reconciledOverRest = true;
       } catch (e) {
         this.log(`chaser:complete fill reconciliation failed: ${e}`, instance);
       }
     }
+    if (instance.exchange.isDisposed) return;
     const event: ChaserCompleteEvent = {
       id: instance.id,
       clientId: instance.options.clientId,

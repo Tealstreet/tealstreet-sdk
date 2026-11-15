@@ -2,6 +2,19 @@
 mod build_support;
 
 #[test]
+fn mexc_broker_header_does_not_gate_other_protected_headers() {
+    let output = build_support::generate(
+        r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+        "mexc":{"setupMapping":"mexc","remoteSigning":{"protectedHeaders":["ApiKey","source"]}},
+        "other":{"remoteSigning":{"protectedHeaders":["source"]}}}}"#,
+    )
+    .unwrap();
+    assert!(output.contains(r#"Some(&["ApiKey",#[cfg(feature = "mexc")] "source"])"#));
+    assert!(output.contains(r#"protected_headers: Some(&["source"])"#));
+    assert_eq!(output.matches(r#"#[cfg(feature = "mexc")]"#).count(), 1);
+}
+
+#[test]
 fn kucoin_broker_setup_declaration_does_not_enable_dispatch_or_hosted_signing() {
     let output = build_support::generate(
         r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
@@ -233,4 +246,44 @@ fn seconds_timestamp_wire_requires_exactly_one_declared_method_path_suffix() {
     ] {
         assert!(build_support::generate(&rules(wire)).is_err(), "{wire}");
     }
+}
+
+#[test]
+#[cfg(any(feature = "phemex", feature = "okx"))]
+fn helper_capabilities_compile_as_one_typed_shared_declaration() {
+    for (key, field) in [
+        ("resolveLeverageContext", "resolve_leverage_context"),
+        ("fetchAlgoOrders", "fetch_algo_orders"),
+    ] {
+        let json = serde_json::json!({"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":{(key):true}}}}}).to_string();
+        let output = build_support::generate(&json).unwrap();
+        assert!(output.contains("helpers: Some(HelperCapabilities"));
+        assert!(output.contains(&format!("{field}: Some(true)")));
+    }
+}
+
+#[test]
+fn helper_capability_typos_and_non_boolean_values_fail_closed() {
+    for declaration in [
+        r#"{"resolveLeverageContex":true}"#,
+        r#"{"resolveLeverageContext":"true"}"#,
+        r#"{"fetchAlgoOrders":1}"#,
+        r#"["fetchAlgoOrders"]"#,
+    ] {
+        let helpers: serde_json::Value = serde_json::from_str(declaration).unwrap();
+        let json = serde_json::json!({"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":helpers}}}}).to_string();
+        assert!(build_support::generate(&json).is_err());
+    }
+}
+
+#[test]
+#[cfg(not(any(feature = "phemex", feature = "okx")))]
+fn helper_metadata_is_omitted_without_helper_families() {
+    let json = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":{"resolveLeverageContext":true}}}}}"#;
+    let output = build_support::generate(json).unwrap();
+    assert!(
+        !output.contains("helpers:"),
+        "helper storage changes unrelated families"
+    );
+    assert!(!output.contains("HelperCapabilities"));
 }

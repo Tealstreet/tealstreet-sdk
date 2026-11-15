@@ -257,9 +257,22 @@ fn a_grouped_placement_settles_unknown_at_once_without_a_stream() {
     let out = ack(&mut e, &mut timers, &sent[0]);
     assert!(
         matches!(terminal(&out, 5), Some(Notice::CommandFailed { error, .. })
-            if error.outcome == Some(Outcome::Unknown) && error.message.contains("cannot confirm its legs")),
+            if error.outcome == Some(Outcome::Unknown) && error.message.contains(ENGINE_UNKNOWN_TEXT) && !error.message.contains("previously placed") && error.venue_message.as_deref().is_some_and(|text| text.contains("cannot confirm its legs"))),
         "{out:?}"
     );
+    let journal = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => event
+                .fields
+                .iter()
+                .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten()),
+            _ => None,
+        })
+        .expect("group Unknown journal");
+    let journal: serde_json::Value = serde_json::from_str(journal).unwrap();
+    assert_eq!(journal["unknown"].as_array().unwrap().len(), 3);
+    assert!(journal["placed"].as_array().unwrap().is_empty());
     let later = run(&mut e, &mut timers, NOW + 300_000.0);
     assert!(http(&later).is_empty(), "no re-send or read: {later:?}");
 }
@@ -422,7 +435,7 @@ fn a_source_refresh_settings_re_reads_the_account_snapshot_and_writes_nothing() 
 }
 
 #[test]
-fn v1_frame_keeps_identity_and_ordinary_writes_but_never_grants_mark_freshness() {
+fn v1_frame_keeps_ordinary_writes_without_inventing_native_stop_provenance() {
     let (mut e, mut timers) = page_engine();
     e.apply_frame(NOW, &source_frame(), true).unwrap();
     e.store_mut().update_order("42", |o| {
@@ -442,7 +455,7 @@ fn v1_frame_keeps_identity_and_ordinary_writes_but_never_grants_mark_freshness()
         }),
     );
     let out = run(&mut e, &mut timers, NOW + 1000.0);
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed{command:77,error}) if error.outcome==Some(Outcome::NotSent)&&error.message.contains("reference stale"))),"{out:?}");
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed{command:77,error}) if error.outcome==Some(Outcome::NotSent)&&error.message.contains("original unavailable"))),"{out:?}");
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
     e.handle(
         NOW + 1000.0,

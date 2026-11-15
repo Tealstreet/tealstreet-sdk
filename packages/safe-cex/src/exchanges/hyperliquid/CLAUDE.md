@@ -310,6 +310,17 @@ Agent wallets are limited-permission wallets that can trade on behalf of the mai
 
 Agent name format: `"Tealstreet XXXX"` (15 chars, max 16 chars, random alphanumeric suffix). Reference: `hyperliquid.agent.ts:generateAgentWalletName`.
 
+`createAgentWalletWithBrowserWallet(address, testnet, agentName?, assertOwnerCurrent?)`
+accepts a backward-compatible host assertion as its fourth argument. Capture the
+initiating owner and operation lifetime before calling; throw synchronously after
+login/profile replacement, logout, unmount or owner-generation change. The helper
+checks every wallet deferral, fallback chain request and ethers-internal provider
+request, then checks again before approval submission and before returning agent
+credentials. Retirement returns `success:false` with
+`Agent wallet creation cancelled-for-owner-change`; a request already submitted
+is not retracted. Guarded providers are destroyed at completion. Omission keeps
+the existing three-argument flow and successful approval/signature bytes.
+
 ### Builder Fees
 
 Builder fees (builder codes) allow Tealstreet to receive a portion of trading
@@ -324,6 +335,18 @@ the browser's copy, kept so the standalone approval page can validate a builder
 that arrived in a URL.
 
 **Flow**: On startup, check if user has approved builder fee via `maxBuilderFee` info type (`fetchBuilderFeeApproval`). If approved, include `builder` field in all order actions. Approval requires EIP-712 signing from the main wallet via `approveBuilderFeeWithBrowserWallet()`.
+
+The browser helper accepts an optional fifth `BuilderFeeApprovalGuard` argument:
+`{ assertCurrent?: () => void, signal?: AbortSignal }`. Hosts bind the synchronous
+assertion to the initiating owner/session, including pre-account flows, and throw
+or abort its signal when that binding is stale. Checks precede every deferred
+wallet mutation (including add-chain/switch retries), signing and submission.
+The guarded EIP-1193 provider also checks ethers' internal deferred requests and
+is destroyed when the attempt settles, stopping its pending startup retries.
+Stale work returns `success: false` with `Builder fee approval cancelled-for-owner-change`.
+Omitting the guard preserves legacy behavior. A change while a submission is already in
+flight cannot undo that send; the final check suppresses its stale success and
+telemetry. Hosts must still guard their own result handling and polling.
 
 **Builder addresses** (from `hyperliquid.constants.ts`):
 

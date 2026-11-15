@@ -1957,3 +1957,188 @@ fn a_trade_print_does_not_move_a_spot_market_order_price() {
         "mid 0.209265 + 5%"
     );
 }
+
+fn spot_cancel_status_trace(status: serde_json::Value, unknown: bool) {
+    let (mut e, _) = placed();
+    e.handle(
+        5000.,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "101".into(),
+            price: Some(0.002),
+            amount: Some(6000.),
+        }),
+    );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
+    let cancel = take_http(&mut e);
+    let body: serde_json::Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["action"]["type"], "cancel");
+    acknowledge(&mut e, &cancel, 5001., &serde_json::json!({"status":"ok","response":{"type":"cancel","data":{"statuses":[status]}}}).to_string());
+    let actions = prepared_now(&mut e);
+    let actions = support::advance_packet_timers(&mut e, actions, 20_000.);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+        "no replacement or retry after cancel failure"
+    );
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 2, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 2, .. })))
+    );
+    if unknown {
+        assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let events = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) => Some(event.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        support::assert_unknown_publication(
+            &serde_json::to_value(failures[0]).expect("error"),
+            &events,
+            2,
+        );
+    }
+}
+
+#[test]
+fn spot_cancel_errors_stop_before_replacement_including_terminal_misses() {
+    // TS hyperliquidspot.api.ts:78-95 throws; spot exchange:1205-1209 has no catch.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    for error in [
+        "Cannot cancel this order",
+        "Order was never placed, already canceled, or filled. asset=10001",
+    ] {
+        spot_cancel_status_trace(serde_json::json!({"error":error}), false);
+    }
+}
+
+#[test]
+fn spot_unknown_cancel_reply_keeps_fence_before_replacement() {
+    // TS spot exchange:1182-1187,1205-1209 does not validate this 2xx cancellation row.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    spot_cancel_status_trace(serde_json::json!({"mystery":true}), true);
+}
+
+fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, unknown: bool) {
+    let (mut e, _) = ready(true);
+    e.drain_plain().for_each(drop);
+    let mut first = order("HFUN/USDC");
+    first.client_order_id = None;
+    first.price = Some(0.002);
+    first.amount = 6000.;
+    let mut second = first.clone();
+    second.amount = 1.;
+    let orders = if failed {
+        vec![first.clone(), second, first]
+    } else {
+        vec![first, second]
+    };
+    e.handle(
+        5000.,
+        Event::Command(Command::PlaceOrders {
+            command: 72,
+            orders,
+        }),
+    );
+    let mut actions = prepared_now(&mut e);
+    let mut writes = Vec::new();
+    let mut terminals = Vec::new();
+    let mut events = Vec::new();
+    let mut unknown_failure = None;
+    for _ in 0..8 {
+        for action in &actions {
+            match action {
+                Action::Http(r) if r.url.ends_with("/exchange") => {
+                    let body: serde_json::Value =
+                        serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+                    writes.push(body["action"].clone());
+                    assert!(writes.len() <= 2, "no suffix or resend after failure");
+                    let statuses = if writes.len() == 2 {
+                        second_statuses.clone()
+                    } else {
+                        serde_json::json!([{"resting":{"oid":91}}])
+                    };
+                    support::reply(&mut e, r, 200, &serde_json::json!({"status":"ok","response":{"type":"order","data":{"statuses":statuses}}}).to_string());
+                }
+                Action::Notice(Notice::CommandDone { command: 72, .. }) => terminals.push(false),
+                Action::Notice(Notice::CommandFailed { command: 72, error }) => {
+                    if unknown {
+                        unknown_failure = Some(serde_json::to_value(error).expect("error"));
+                        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                        assert_eq!(
+                            error.partial.as_ref().expect("accepted prefix").order_ids,
+                            ["91"]
+                        );
+                        let elements = error.elements.as_ref().expect("journal");
+                        assert_eq!(elements.len(), 3);
+                        assert!(
+                            matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["91"])
+                        );
+                        assert!(matches!(
+                            &elements[1].result,
+                            safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+                        ));
+                        assert!(matches!(
+                            &elements[2].result,
+                            safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+                        ));
+                    }
+                    terminals.push(true);
+                }
+                Action::Notice(Notice::Event(event)) => events.push(event.clone()),
+                _ => {}
+            }
+        }
+        let next = prepared_now(&mut e);
+        actions = support::advance_packet_timers(&mut e, next, 20_000.);
+    }
+    if let Some(error) = unknown_failure {
+        support::assert_unknown_publication(&error, &events, 72);
+    }
+    assert_eq!(writes.len(), 2);
+    assert_eq!(terminals, vec![failed]);
+    for (wire, size) in writes.iter().zip(["6000", "1"]) {
+        assert_eq!(wire["type"], "order");
+        assert_eq!(wire["orders"].as_array().unwrap().len(), 1);
+        assert_eq!(wire["orders"][0]["a"], 10001);
+        assert_eq!(wire["orders"][0]["s"], size);
+        assert_eq!(wire["orders"][0]["p"], "0.002");
+    }
+}
+
+#[test]
+fn spot_serial_rows_pin_native_partial_sends_and_stop_after_refusal() {
+    // TS spot exchange:1007-1016 posts each row; API:78-95 throws before flatMap.
+    // exchanges/base.ts:1111-1114 stops the serial suffix after that throw.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    spot_serial_status_trace(serde_json::json!([{"resting":{"oid":92}}]), false, false);
+    spot_serial_status_trace(
+        serde_json::json!([{"error":"Order must have minimum value of $10."}]),
+        true,
+        false,
+    );
+}
+
+#[test]
+fn spot_unrecognized_or_empty_statuses_keep_unknown_fence_after_accepted_prefix() {
+    // TS spot exchange:787-790,1013-1016 drops unknown/empty rows; exchanges/base.ts:1111-1114 continues.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    for statuses in [serde_json::json!([]), serde_json::json!([{"mystery":true}])] {
+        spot_serial_status_trace(statuses, true, true);
+    }
+}

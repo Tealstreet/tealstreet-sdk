@@ -9,6 +9,31 @@ use safe_cex_exchange_server::{
 use serde_json::json;
 use std::time::Duration;
 
+// Independent valid rows for each trusted binding; never production migration logic.
+fn bound_row(
+    account: &safe_cex_exchange_server::accounts::Account,
+    id: &str,
+    options: &serde_json::Value,
+    state: &serde_json::Value,
+) -> serde_json::Value {
+    let owner = account.twap_owner.snapshot();
+    json!({"id":id,"ownerId":owner.owner_id,"ownerGeneration":owner.generation,"options":options,"state":state})
+}
+
+fn account_identity(registry: &safe_cex_exchange_server::accounts::Registry) -> String {
+    let holdings = testing::holdings(registry);
+    assert_eq!(holdings.len(), 1);
+    let (user, identity) = holdings.keys().next().unwrap();
+    assert_eq!(user, "target");
+    assert_eq!(identity.len(), 64);
+    assert!(
+        identity
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+    identity.clone()
+}
+
 async fn restored_state(reason: Option<interruption::Reason>) {
     tokio::task::LocalSet::new().run_until(async {
     let mut config=support::config(Duration::from_secs(60));
@@ -25,6 +50,8 @@ async fn restored_state(reason: Option<interruption::Reason>) {
     }
     let init:InitPayload=serde_json::from_value(json!({"accountName":"acct","exchangeName":"bybit","key":"k"})).unwrap();
     let _account=testing::trading_account(&app.registry,"target",&init);
+    let owner_id=account_identity(&app.registry);
+    assert_eq!(_account.twap_owner.snapshot().owner_id,owner_id,"TWAP restore tags follow registry identity");
     let address=support::serve(app).await;
     let mut page=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
     page.init(&init).await;
@@ -38,7 +65,7 @@ async fn restored_state(reason: Option<interruption::Reason>) {
       "precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true});
     let options=json!({"accountName":"acct","activeMarket":market,"size":0.1,"duration":10,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"});
     let state=json!({"accountName":"acct","activeMarket":market,"size":0.1,"ordersSizes":[0.01,0.01,0.01],"side":"buy","status":"running","ordersCount":10,"ordersExecuted":7,"nextOrderAt":now+60000,"origin":"web","createdAt":now-180000,"startedAt":now-180000});
-    page.op("acct","twap:state",json!([{"id":"transferred-twap","options":options,"state":state}])).await;
+    page.op("acct","twap:state",json!([bound_row(&_account,"transferred-twap",&options,&state)])).await;
     let store=page.until("store",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|!r.is_empty())).await;
     assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"],7,"progress preserved");
     assert_eq!(store["data"]["activeTWAPs"][0]["status"], if reason.is_some() { "paused" } else { "running" }, "interrupted cross-box restore must not auto-resume merely because the destination never fenced");
@@ -60,6 +87,11 @@ async fn lease_expired_marker_pauses_a_fresh_destinations_restored_twap() {
 #[tokio::test]
 async fn owner_released_marker_pauses_a_fresh_destinations_restored_twap() {
     restored_state(Some(interruption::Reason::OwnerReleased)).await;
+}
+#[tokio::test]
+async fn delegated_restart_marker_restores_client_twap_paused_then_explicitly_resumes() {
+    let reason = serde_json::from_value(json!("waiting-for-key")).expect("typed restart reason");
+    restored_state(Some(reason)).await;
 }
 #[tokio::test]
 async fn normal_restore_without_a_marker_keeps_its_running_state() {
@@ -88,6 +120,8 @@ async fn resume_survives_rebuild(same_box: bool) {
     }
     let init:InitPayload=serde_json::from_value(json!({"accountName":"acct","exchangeName":"bybit","key":"k"})).unwrap();
     let _account=testing::trading_account(&app.registry,"target",&init);
+    let owner_id=account_identity(&app.registry);
+    assert_eq!(_account.twap_owner.snapshot().owner_id,owner_id,"TWAP restore tags follow registry identity");
     let address=support::serve(app.clone()).await;
     let mut page=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
     page.init(&init).await;
@@ -101,7 +135,8 @@ async fn resume_survives_rebuild(same_box: bool) {
       "precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true});
     let options=json!({"accountName":"acct","activeMarket":market,"size":0.1,"duration":10,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"});
     let state=json!({"accountName":"acct","activeMarket":market,"size":0.1,"ordersSizes":[0.01,0.01,0.01],"side":"buy","status":"running","ordersCount":10,"ordersExecuted":7,"nextOrderAt":now+60000,"origin":"web","createdAt":now-180000,"startedAt":now-180000});
-    page.op("acct","twap:state",json!([{"id":"transferred-twap","options":options,"state":state}])).await;
+    let original_row=bound_row(&_account,"transferred-twap",&options,&state);
+    page.op("acct","twap:state",json!([original_row])).await;
     let store=page.until("store",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|!r.is_empty())).await;
     assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"],7,"progress preserved");
     assert_eq!(store["data"]["activeTWAPs"][0]["status"],"paused","interrupted cross-box restore must not auto-resume merely because the destination never fenced");
@@ -113,9 +148,12 @@ async fn resume_survives_rebuild(same_box: bool) {
     let mut returned=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
     returned.init(&init).await;
     returned.until("frame",|d|d["snapshot"]==true).await;
+    // The same owner keeps its generation across the rebuild, so its saved row stays restorable.
+    assert_eq!(_account.twap_owner.snapshot(),_replacement.twap_owner.snapshot(),"rebuild keeps the owner generation");
+    // Current-binding controls still exercise per-job acknowledgement, not row migration.
     returned.op("acct","twap:state",json!([
-      {"id":"transferred-twap","options":options,"state":state},
-      {"id":"unacknowledged-twap","options":options,"state":state}
+      bound_row(&_replacement,"transferred-twap",&options,&state),
+      bound_row(&_replacement,"unacknowledged-twap",&options,&state)
     ])).await;
     let restored=returned.until("store",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|!r.is_empty())).await;
     assert_eq!(restored["data"]["activeTWAPs"][0]["status"],"running","explicit resume must acknowledge the old interruption for later starts, or have a bounded expiry rule");
@@ -128,7 +166,7 @@ async fn resume_survives_rebuild(same_box: bool) {
     let mut newer=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
     newer.init(&init).await;
     newer.until("error",|d|d["data"][1]["forceToast"]==true).await;
-    newer.op("acct","twap:state",json!([{"id":"transferred-twap","options":options,"state":state}])).await;
+    newer.op("acct","twap:state",json!([bound_row(&_third,"transferred-twap",&options,&state)])).await;
     let restored=newer.until("store",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|rows|!rows.is_empty())).await;
     assert_eq!(restored["data"]["activeTWAPs"][0]["status"],"paused","newer marker must rearm an acknowledged job");
     newer.close().await;

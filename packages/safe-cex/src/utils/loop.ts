@@ -1,4 +1,5 @@
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { diagnosticConsole } from './diagnosticRedaction';
 
 // Tripwire: in practice every caller is a per-exchange tick that should have a
 // real minInterval from metadata. If we hit this fallback it means a metadata
@@ -11,7 +12,7 @@ const warnMissingInterval = (fn: () => void) => {
   const key = fn.toString().slice(0, 200);
   if (loggedMissingIntervalCallers.has(key)) return;
   loggedMissingIntervalCallers.add(key);
-  console.warn(
+  diagnosticConsole.warn(
     `[safe-cex] loop() called without a minInterval — defaulting to ${FALLBACK_MIN_INTERVAL_MS}ms. ` +
       `This is a safety fallback; the upstream caller should pass a real interval. Caller: ${key}`,
   );

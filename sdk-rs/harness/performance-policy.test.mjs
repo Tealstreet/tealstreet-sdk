@@ -57,6 +57,20 @@ test('retained memory keeps the 10% rule as a failure; an invalid baseline still
   assert.equal(median([4, 1, 8, 7, 3, 6, 5, 2]), 4.5);
 });
 
+test('a CPU re-measure preserves first-set retained-memory failures without duplicates', () => {
+  const first = performanceVerdict(pairs(TS), at(1.01, { retainedBytes: 130 }));
+  const memory = first.failures.filter((failure) => failure.includes('retained memory'));
+  assert.equal(memory.length, 1);
+  const cleared = remeasuredVerdict(first, performanceVerdict(pairs(TS), at(0.89)));
+  assert.deepEqual(cleared.failures, memory, 'passing re-measured memory cannot erase the first failure');
+  assert.equal(cleared.warnings.length, 3, 'the cleared CPU misses remain warnings');
+  const persisted = remeasuredVerdict(first, performanceVerdict(pairs(TS), at(0.89, { retainedBytes: 130 })));
+  assert.deepEqual(persisted.failures, memory, 'the same failure in both sets is reported once');
+  const later = performanceVerdict(pairs(TS), at(1.01, { retainedBytes: 140 }));
+  assert.deepEqual(remeasuredVerdict(first, later).failures, [...memory, ...later.failures].sort(),
+    'new re-measured CPU and memory failures still bind');
+});
+
 test('sub-100 ms CPU objectives fail only above 1.00x and draw no 10%-target warning', () => {
   const ts = pairs({ cpuMs: 4, steadyCpuMs: 60, processCpuMs: 400, retainedBytes: 100 });
   const rust = (values) => pairs({ cpuMs: 4, steadyCpuMs: 60, processCpuMs: 300, retainedBytes: 90, ...values });

@@ -1226,11 +1226,11 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
     const updates: Array<[Position, Position]> = [];
     for (const rawPosition of data) {
       try {
-        const mapped = this.parent.mapPosition(rawPosition as Record<string, any>);
+        const mapped = this.parent.mapPosition(rawPosition);
         if (mapped) {
           updates.push([mapped, mapped]);
         } else {
-          updates.push(...this.resolveExplicitlyClosedPositionUpdates(rawPosition as Record<string, any>));
+          updates.push(...this.resolveExplicitlyClosedPositionUpdates(rawPosition));
         }
       } catch (error: any) {
         this.parent.log(

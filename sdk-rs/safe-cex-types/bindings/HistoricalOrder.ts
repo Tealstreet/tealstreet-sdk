@@ -17,9 +17,18 @@ export type HistoricalOrder = {
     readonly positionSide?: PositionSide | 'both';
     readonly createdTime: number;
     readonly updatedTime?: number;
+    /**
+     * Venue-reported gross PnL; absence means unmapped or unreported, never zero.
+     */
     readonly realizedPnl?: number;
+    /**
+     * Positive is a cost to the trader; do not net rebates into fees.
+     */
     readonly fees?: number;
     readonly feeAsset?: string;
+    /**
+     * Positive is received by the trader, separate from fees.
+     */
     readonly rebate?: number;
     readonly rebateAsset?: string;
 };

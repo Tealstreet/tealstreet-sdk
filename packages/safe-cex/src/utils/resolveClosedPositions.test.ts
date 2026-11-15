@@ -2,29 +2,30 @@ import type { ClosedPnlEntry } from '../types';
 
 import { describe, expect, it } from 'vitest';
 
+import { compareClosedPnlTimes } from '../__tests__/reference/closed-pnl-sort';
+import { PositionSide } from '../types';
 import { resolveClosedPositions } from './resolveClosedPositions';
 
-const entry = (over: Partial<ClosedPnlEntry> = {}): ClosedPnlEntry =>
-  ({
-    // Required on the type: a producer must declare where the number came from, so a new
-    // one that forgets does not get the benefit of the doubt.
-    provenance: 'venue',
-    symbol: 'BTCUSDT',
-    notional: 100,
-    entryPrice: 10,
-    exitPrice: 11,
-    unrealizedPnl: 1,
-    side: 'long',
-    fees: 0.1,
-    time: 1,
-    closedTime: 2,
-    account: 'acct',
-    contracts: 10,
-    leverage: 1,
-    ...over,
-  }) as ClosedPnlEntry;
+const entry = (over: Partial<ClosedPnlEntry> = {}): ClosedPnlEntry => ({
+  // Required on the type: a producer must declare where the number came from, so a new
+  // one that forgets does not get the benefit of the doubt.
+  provenance: 'venue',
+  symbol: 'BTCUSDT',
+  notional: 100,
+  entryPrice: 10,
+  exitPrice: 11,
+  unrealizedPnl: 1,
+  side: PositionSide.Long,
+  fees: 0.1,
+  time: 1,
+  closedTime: 2,
+  account: 'acct',
+  contracts: 10,
+  leverage: 1,
+  ...over,
+});
 
-const opts = { symbol: 'BTCUSDT', accountName: 'acct' } as any;
+const opts = { symbol: 'BTCUSDT', accountName: 'acct' };
 
 describe('resolveClosedPositions', () => {
   it('marks a venue-reported axis independently verifiable', async () => {
@@ -114,9 +115,28 @@ describe('resolveClosedPositions', () => {
 it('propagates a reported read failure instead of trying derived data or claiming no history', async () => {
   const error = new Error('relay disconnected');
   let derived = false;
-  await expect(resolveClosedPositions({
-    fetchClosedPnl: async () => { throw error; },
-    deriveClosedPositions: async () => { derived = true; return []; },
-  }, opts, false)).rejects.toBe(error);
+  await expect(
+    resolveClosedPositions(
+      {
+        fetchClosedPnl: async () => {
+          throw error;
+        },
+        deriveClosedPositions: async () => {
+          derived = true;
+          return [];
+        },
+      },
+      opts,
+      false,
+    ),
+  ).rejects.toBe(error);
   expect(derived).toBe(false);
+});
+
+it('sorts known close dates before unknown without replacing null with zero', () => {
+  const unknown = entry({ closedTime: null });
+  const zero = entry({ closedTime: 0 });
+  const negative = entry({ closedTime: -1 });
+  expect([unknown, negative, zero].sort(compareClosedPnlTimes)).toEqual([zero, negative, unknown]);
+  expect(compareClosedPnlTimes(unknown, unknown)).toBe(0);
 });

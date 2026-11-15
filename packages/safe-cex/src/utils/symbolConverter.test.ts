@@ -40,7 +40,6 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'bitrue',
   'bitunix',
   'blofin',
-  'breakoutprop',
   'bybit',
   'bybitdemo',
   'hyrotrader',

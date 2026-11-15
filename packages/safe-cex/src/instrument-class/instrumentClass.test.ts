@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Market } from '../types';
+import type { Market } from '../generated/Market';
 import { classifyMarket, isNonCryptoInstrument, venuesWithInstrumentClassFn } from './resolve';
 
 /**
  * Payloads below are the real `/v5/market/instruments-info` rows, trimmed to the
  * fields this module reads, captured from the live linear category 2026-09-29.
  */
-const market = (info: Record<string, unknown>): Market =>
-  ({ id: String(info.symbol), symbol: String(info.symbol), base: '', quote: '', active: true, info }) as never;
+const market = (info: Record<string, unknown>): Market => ({
+  id: String(info.symbol), symbol: String(info.symbol), base: '', quote: '', active: true, info,
+  precision: { amount: 1, price: 1 },
+  limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
+});
 
 const SHOP = market({
   symbol: 'SHOPUSDT',
@@ -92,7 +95,7 @@ describe('what we refuse to guess', () => {
   });
 
   it('reports a market with no instruments-info payload', () => {
-    expect(classifyMarket('bybit', { symbol: 'XUSDT' } as never)).toMatchObject({ kind: 'unknown' });
+    expect(classifyMarket('bybit', { ...market({ symbol: 'XUSDT' }), info: undefined })).toMatchObject({ kind: 'unknown' });
   });
 
   /**

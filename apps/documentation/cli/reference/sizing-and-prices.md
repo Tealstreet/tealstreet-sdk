@@ -9,6 +9,12 @@ The grammar that fills `<size>` and `<price>` slots in every trading command.
 
 ---
 
+Order arguments must all belong to the command's grammar. Extra words or
+numbers refuse the command before a write. For entry brackets, use
+`buy $100 at 50000 stop 49500 tp 51000` (or the corresponding `sell` form).
+`stop PRICE` and `tp PRICE` use the price forms below; `sl=PRICE` and
+`tp=PRICE` are refused with a hint.
+
 ## Size
 
 | Form     | Meaning                                                |
@@ -18,6 +24,24 @@ The grammar that fills `<size>` and `<price>` slots in every trading command.
 | `50%`    | Percent — scope depends on command class _(see below)_ |
 | `50%bal` | Explicit percent of **free balance**                   |
 | `50%pos` | Explicit percent of **open position**                  |
+
+A `$` or balance-percent `buy` / `sell` size is converted to coin at the
+order's limit or `best` price, and a `$` size for a sized `stop` at its `at`
+price, rounded to the venue's price tick. Market orders use the last price;
+inverse contracts don't depend on price. An explicit stop size that rounds
+below the lot step is refused; only an omitted size requests a full-position stop.
+
+For a multi-symbol `buy` / `sell`, every leg is sized and validated before
+the first order is sent. A sub-lot size or invalid price on any leg refuses
+the whole command without placing earlier legs.
+
+`scale` gives each rung an equal dollar share, converted at that rung's price,
+so lower bids buy more coin. Position-percent and inverse sizes still split
+evenly in contracts. Each share is allocated before rounding **down** to the
+lot step, so rounding cannot increase its allocation. The remainder stays
+unallocated. If any share is below one lot, the whole ladder is refused before
+placement. For example, `$210 into 3` at a price of `100` with a one-unit lot
+refuses rather than submitting three one-unit orders worth `$300`.
 
 ### Default percent scope
 

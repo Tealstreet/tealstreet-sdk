@@ -131,6 +131,41 @@ fn leverage_signs_canonical_fields_and_sends_real_multipart() {
 }
 
 #[test]
+fn every_post_endpoint_matches_the_shared_hosted_semantic_goldens() {
+    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../packages/safe-cex/src/__tests__/fixtures/apexomni-post-signing.golden.json"
+    ))
+    .unwrap();
+    let credentials = LegacyCredentials {
+        key: Some("fixture-public".into()),
+        secret: Some("fixture-material".into()),
+        passphrase: Some("fixture-pass".into()),
+    };
+    for vector in vectors.as_array().unwrap() {
+        let fields: Vec<(String, String)> =
+            serde_json::from_value(vector["fields"].clone()).unwrap();
+        assert_eq!(sign::query(&fields), vector["canonical"].as_str().unwrap());
+        let path = vector["path"].as_str().unwrap();
+        let request = match vector["kind"].as_str().unwrap() {
+            "multipart" => sign::Request::multipart(path, fields),
+            "raw" => sign::Request::raw(path, sign::query(&fields)),
+            "form" => sign::Request::form(path, fields),
+            _ => panic!("unknown native body kind"),
+        };
+        let signed = sign::request(&credentials, 1700000000123., &request, false).unwrap();
+        assert_eq!(signed.body.as_deref(), vector["body"].as_str());
+        assert_eq!(
+            header(&signed, "Content-Type"),
+            vector["contentType"].as_str().unwrap()
+        );
+        assert_eq!(
+            header(&signed, "APEX-SIGNATURE"),
+            vector["signature"].as_str().unwrap()
+        );
+    }
+}
+
+#[test]
 fn legacy_resend_preserves_original_cancel_and_leverage_payloads() {
     // TS fix: retain original fields across the response-interceptor resend,
     // rather than signing transformed text or random multipart internals.

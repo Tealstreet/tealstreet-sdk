@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { CPU_COHORT_STEPS, sourceInputFingerprint, cohortKey, parseCohortJson, createGithubReader,
-  authenticateArtifactExecution, authenticateBitgetOracleRefusalArtifact, authenticateMeasurementWindow, formatMeasurementMarker, requireGithubResponseSize } from './cpu-cohort.mjs';
+  authenticateArtifactExecution, authenticateBitgetOracleRefusalArtifact, authenticateBitgetPairedFailureArtifact, authenticateMeasurementWindow, formatMeasurementMarker, requireGithubResponseSize } from './cpu-cohort.mjs';
 const anchor = { workflowId: 386369161, runNumber: 1, runId: 1000 };
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const git = (value) => createHash('sha1').update(value).digest('hex');
@@ -514,4 +514,44 @@ test('only the exact Bitget failed oracle step can authenticate a non-certifying
     x => { x.logBytes = Buffer.from(x.logBytes.toString().replace(at(10), at(18))); },
     x => { x.artifact.name = 'cpu-plan'; }];
   for (const change of changes) { const bad = oracleRefusalUpload(); change(bad); assert.throws(() => authenticateBitgetOracleRefusalArtifact(bad)); }
+});
+
+test('failed Bitget CPU markers require the exact issued upload receipt; copied or changed receipts refuse', () => {
+  const x = oracleRefusalUpload();
+  const message = 'Bitget paired steady: complete tip rejected (Rust/TS=1.03, q=1.04); anchor cannot rescue it';
+  const key = hash('failed-cpu-window');
+  x.logBytes = Buffer.from(x.logBytes.toString().replace(
+    'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available', message) +
+    `${at(6)} CPU_CASE_BEGIN ${key} ${at(6)}\n${at(9)} CPU_CASE_END ${key} ${at(9)}\n`);
+  const receipt = authenticateBitgetPairedFailureArtifact(x);
+  const args = { execution: { runId: String(x.run.id), jobId: String(x.job.id), runnerId: String(x.job.runner_id),
+    attempt: 1, measuredCheckoutSha: x.expectedCheckoutSha, startedAt: at(6), completedAt: at(9) },
+    key, job: x.job, logBytes: x.logBytes, failureReceipt: receipt };
+  assert.equal(authenticateMeasurementWindow(args).jobId, x.job.id);
+  assert.throws(() => authenticateBitgetOracleRefusalArtifact(x), /expected exact oracle/);
+  for (const failureReceipt of [undefined, { ...receipt }, { ...receipt, kind: 'cpu' }]) {
+    assert.throws(() => authenticateMeasurementWindow({ ...args, failureReceipt }), /execution identity/);
+  }
+  assert.throws(() => authenticateMeasurementWindow({ ...args, logBytes: Buffer.concat([x.logBytes, Buffer.from('\n')]) }), /execution identity/);
+  assert.throws(() => authenticateMeasurementWindow({ ...args, job: { ...x.job, runner_id: x.job.runner_id + 1 } }), /execution identity/);
+  for (const message of [
+    'Bitget paired steady: complete tip rejected (Rust/TS=NaN, q=1); anchor cannot rescue it',
+    'Bitget paired steady: complete tip rejected (Rust/TS=Infinity, q=1); anchor cannot rescue it',
+    'Bitget paired steady: complete tip rejected (Rust/TS=-1, q=1); anchor cannot rescue it',
+    'Bitget paired steady: complete tip rejected (Rust/TS=1, q=0); anchor cannot rescue it',
+    'NOT-CERTIFIED: anything',
+  ]) {
+    const bad = oracleRefusalUpload();
+    bad.logBytes = Buffer.from(bad.logBytes.toString().replace(/NOT-CERTIFIED:[^\n]+/, message));
+    assert.throws(() => authenticateBitgetPairedFailureArtifact(bad), /missing exact refusal/);
+  }
+  for (const change of [
+    x => { x.logBytes = Buffer.concat([x.logBytes, Buffer.from(`${at(11)} ${message}\n`)]); },
+    x => { x.logBytes = Buffer.from(x.logBytes.toString().replace(`${at(10)} ${message}`, `${at(18)} ${message}`)); },
+    x => { x.job.run_attempt = 2; }, x => { x.artifactBytes = Buffer.from('wrong bytes'); },
+    x => { x.job.steps[2].conclusion = 'failure'; },
+  ]) {
+    const bad = { ...x, job: structuredClone(x.job) }; change(bad);
+    assert.throws(() => authenticateBitgetPairedFailureArtifact(bad));
+  }
 });

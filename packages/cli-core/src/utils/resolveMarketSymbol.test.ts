@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { marketSymbolExists, resolveMarketSymbol } from './resolveMarketSymbol';
+import { marketSymbolExists, resolveCompleteMarketSymbol, resolveMarketSymbol } from './resolveMarketSymbol';
 
 const market = (symbol: string, base: string, quote: string) => ({ symbol, base, quote }) as never;
 
@@ -48,5 +48,19 @@ describe('marketSymbolExists', () => {
     expect(marketSymbolExists(MARKETS, 'btcusdt')).toBe(true);
     expect(marketSymbolExists(MARKETS, 'BTC')).toBe(false);
     expect(marketSymbolExists(undefined, 'BTCUSDT')).toBe(false);
+  });
+});
+
+describe('resolveCompleteMarketSymbol', () => {
+  it.each([
+    ['btc', 'BTCUSDT'],
+    ['ETHUSD', 'ETHUSD'],
+    ['BTCUSDC', 'BTCPERP'],
+    ['ETHFI', 'ETHFIUSDT'],
+    ['BTCsurprise', undefined],
+    ['ETHFItypo', undefined],
+    ['unknown', undefined],
+  ])('resolves only the full symbol or alias %s', (input, expected) => {
+    expect(resolveCompleteMarketSymbol(MARKETS, input)).toBe(expected);
   });
 });

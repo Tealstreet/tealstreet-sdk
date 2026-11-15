@@ -345,11 +345,12 @@ impl Woo {
                     self.malformed_rows,
                 );
                 let private = !self.options.public_data_only
-                    && self
-                        .options
-                        .key
-                        .as_deref()
-                        .is_some_and(|key| !key.is_empty());
+                    && (self.options.credentials.is_some()
+                        || self
+                            .options
+                            .key
+                            .as_deref()
+                            .is_some_and(|key| !key.is_empty()));
                 if !refresh && !private {
                     cx.store.set_balance(Default::default());
                     cx.store.set_positions(Vec::new());

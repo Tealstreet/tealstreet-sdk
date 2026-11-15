@@ -1,5 +1,5 @@
-//! Venue-reported closed positions: raw `/api/v1/account/positions-history`
-//! rows, which the host maps with the TS mappers. Rows dedupe on `historyId`,
+//! One closed-position pager: raw journal rows and native reported PnL.
+//! Rows dedupe on `historyId`,
 //! not `positionId`, and page by the smallest `historyId` seen.
 use super::*;
 use safe_cex_engine::CommandWait;
@@ -18,6 +18,7 @@ const PAGE: usize = 100;
 const MAX_PAGES: u32 = 100;
 
 pub struct Request {
+    output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     root: ReadRoot,
     leg: Option<ReadLeg>,
     history: ReadCursorHistory<String>,
@@ -79,6 +80,25 @@ fn older(id: &str, than: &str) -> bool {
 }
 
 impl Blofin {
+    pub(crate) fn start_closed_pnl(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        account: String,
+    ) {
+        let output = safe_cex_engine::history_output::ClosedPnlOutput::new(
+            safe_cex_engine::ClosedPositionFormat::Blofin,
+            account,
+            false,
+            symbol.clone(),
+            cx.store.markets(),
+        );
+        self.start_closed_read(cx, command, symbol, from_ms, to_ms, Some(output));
+    }
+
     pub(crate) fn start_closed_positions(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -86,6 +106,18 @@ impl Blofin {
         symbol: Option<String>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
+    ) {
+        self.start_closed_read(cx, command, symbol, from_ms, to_ms, None);
+    }
+
+    fn start_closed_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        output: Option<safe_cex_engine::history_output::ClosedPnlOutput>,
     ) {
         if !self.signed() {
             match cx.admit_caller_read_root(None, None) {
@@ -148,7 +180,7 @@ impl Blofin {
         self.request_closed_page(
             cx,
             Request {
-                root,
+                output,                root,
                 leg: None,
                 history: ReadCursorHistory::new(
                     completion,
@@ -319,7 +351,12 @@ impl Blofin {
         request.release(cx);
         match step {
             CursorStep::Done | CursorStep::Stalled(_) => {
-                let _ = request.history.finish(cx, Ok(()));
+                safe_cex_engine::history_output::finish(
+                    cx,
+                    request.history,
+                    Ok(()),
+                    request.output,
+                );
             }
             CursorStep::More(_) => self.request_closed_page(cx, request),
         }
@@ -336,6 +373,6 @@ impl Blofin {
             let _ = cx.finish_http_context(leg.context());
         }
         error.message = format!("BloFin closed positions: {}", error.message);
-        let _ = request.history.finish(cx, Err(error));
+        safe_cex_engine::history_output::finish(cx, request.history, Err(error), request.output);
     }
 }

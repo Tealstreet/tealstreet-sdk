@@ -990,30 +990,6 @@
       "binance": "QTUMUSDT"
     }
   ],
-  "breakoutprop": [
-    {
-      "symbol": "BTCUSD",
-      "base": "BTC",
-      "quote": "USD",
-      "id": "BTCUSD",
-      "_source": "code-verified",
-      "binance": "BTCUSD"
-    },
-    {
-      "symbol": "ETHUSD",
-      "base": "ETH",
-      "quote": "USD",
-      "id": "ETHUSD",
-      "binance": "ETHUSD"
-    },
-    {
-      "symbol": "SOLUSD",
-      "base": "SOL",
-      "quote": "USD",
-      "id": "SOLUSD",
-      "binance": "SOLUSD"
-    }
-  ],
   "bybit": [
     {
       "symbol": "BTCPERP",

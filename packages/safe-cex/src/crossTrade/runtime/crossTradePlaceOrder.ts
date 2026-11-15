@@ -5,9 +5,11 @@ import type { CrossTradePlaceOrderFn } from './CrossTradeManager';
 
 import { DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
 import { OrderSide, OrderType } from '../../types';
+import { diagnosticConsole } from '../../utils/diagnosticRedaction';
+import { assertNativeReduceAmount } from '../../utils/nativeAmountRules';
 import { adjust } from '../../utils/safe-math';
 
-const debug = (...args: any[]) => console.log('[CrossTradeManager]', ...args);
+const debug = (...args: any[]) => diagnosticConsole.log('[CrossTradeManager]', ...args);
 
 const SLIPPAGE_LIMIT = 0.009;
 
@@ -20,6 +22,16 @@ export const createCrossTradePlaceOrder = (deps: CrossTradePlaceOrderDeps): Cros
     const symbol = market.symbol;
     const exchange = deps.getExchange(account);
     if (!exchange) return;
+
+    if (reduceOnly) {
+      try {
+        assertNativeReduceAmount(amount, market, exchange.name);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        exchange.emitter.emit('warning', `Cross Trade: ${message}`);
+        throw error;
+      }
+    }
 
     if (copier.execution === 'Chase') {
       // Scan only the copier's own exchange — a duplicate-chaser check
@@ -86,7 +98,7 @@ export const createCrossTradePlaceOrder = (deps: CrossTradePlaceOrderDeps): Cros
         return await exchange.placeOrder(order);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        console.error('CrossTradeManager', 'Failed to place order', e);
+        diagnosticConsole.error('CrossTradeManager', 'Failed to place order', e);
         exchange.emitter.emit('warning', `Cross Trade: failed to place limit order on ${symbol}: ${message}`);
         throw e;
       }
@@ -109,7 +121,7 @@ export const createCrossTradePlaceOrder = (deps: CrossTradePlaceOrderDeps): Cros
         return await exchange.placeOrder(order);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        console.error('CrossTradeManager', 'Failed to place order', e);
+        diagnosticConsole.error('CrossTradeManager', 'Failed to place order', e);
         exchange.emitter.emit('warning', `Cross Trade: failed to place market order on ${symbol}: ${message}`);
         throw e;
       }

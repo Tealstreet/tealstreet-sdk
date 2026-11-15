@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Serialize)]
 // TS sends any JSON body; server decoding deliberately remains map-only.
-pub(crate) struct HttpRequestArgs<D = Map<String, serde_json::Value>> {
+pub(crate) struct HttpRequestArgs<D = serde_json::Value> {
     pub(crate) headers: Map<String, serde_json::Value>,
     pub(crate) method: String,
     pub(crate) url: String,
@@ -24,6 +24,25 @@ struct HttpRequestArgsWire<D> {
     #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<D>,
     params: Map<String, serde_json::Value>,
+}
+
+impl HttpRequestArgs {
+    /// A body is the exact signed text, a map, or (as JSON only) an array. Text goes
+    /// out verbatim under the client's own content type.
+    pub(crate) fn body_error(&self) -> Option<&'static str> {
+        let form_type = self.headers.iter().any(|(k, v)| {
+            k.eq_ignore_ascii_case("content-type")
+                && v.as_str().is_some_and(|v| {
+                    v.contains("application/x-www-form-urlencoded") || v.contains("multipart/form-data")
+                })
+        });
+        match &self.data {
+            None | Some(serde_json::Value::Object(_) | serde_json::Value::String(_)) => None,
+            Some(serde_json::Value::Array(_)) if !form_type => None,
+            Some(serde_json::Value::Array(_)) => Some("an array body cannot be sent as a form"),
+            Some(_) => Some("the body must be text, an object or an array"),
+        }
+    }
 }
 
 struct HttpRequestArgsMapVisitor<D>(std::marker::PhantomData<D>);

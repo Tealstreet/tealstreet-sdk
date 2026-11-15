@@ -84,7 +84,10 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
         error = error.outcome(
             if matches!(
                 kind,
-                ErrorKind::Network | ErrorKind::Internal | ErrorKind::VenueUnavailable
+                ErrorKind::Network
+                    | ErrorKind::Internal
+                    | ErrorKind::VenueUnavailable
+                    | ErrorKind::RateLimited
             ) {
                 Outcome::Unknown
             } else {
@@ -95,6 +98,28 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
     error
 }
 pub(crate) const NO_DATA: &str = "Bitunix response has no data";
+
+pub(crate) fn unproven_evidence(
+    response: Response<'_>,
+    evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+) {
+    #[derive(Deserialize)]
+    struct Metadata<'a> {
+        #[serde(default, borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+        #[serde(default, borrow, deserialize_with = "crate::wire::text")]
+        msg: Cow<'a, str>,
+    }
+    if let Ok(envelope) = serde_json::from_str::<Metadata<'_>>(response.body) {
+        if let Some(code) = envelope
+            .code
+            .and_then(|raw| serde_json::from_str::<Code>(raw.get()).ok())
+        {
+            evidence.venue_code(&code.0.to_string());
+        }
+        evidence.venue_message(&envelope.msg);
+    }
+}
 
 pub(crate) fn response_data<'a>(
     response: &Response<'a>,
@@ -241,7 +266,7 @@ mod tests {
                         error.outcome,
                         if !write {
                             None
-                        } else if code == 10001 {
+                        } else if matches!(code, 10001 | 10005 | 10006) {
                             Some(Outcome::Unknown)
                         } else {
                             Some(Outcome::Rejected)

@@ -1,0 +1,29 @@
+{
+  "recipientSeedByte": 17,
+  "senderSeedByte": 34,
+  "input": {
+    "publicKey": "e06Qm75//kTEZaIgA31gjuNYl9Me+XLwf3SJLLD3PxM=",
+    "attemptId": "synthetic-wallet-attempt",
+    "bootId": "synthetic-wallet-boot",
+    "exchangeName": "paradex",
+    "key": "0x456",
+    "secret": "",
+    "signingKey": "0x0000000000000000000000000000000000000000000000000000000000000001"
+  },
+  "frame": {
+    "t": "init",
+    "d": {
+      "accountName": "synthetic-wallet",
+      "exchangeName": "paradex",
+      "signingMode": "delegated",
+      "key": "0x456",
+      "paradexAddress": "0x123",
+      "subkeyAddress": "0x456",
+      "sealed": {
+        "attemptId": "synthetic-wallet-attempt",
+        "enc": "D6poTtKIZ7l/Smot7l34zpdOdrcBjj8iocTPJnhXDyA=",
+        "ciphertext": "KaKrxqPNe/C6rkZWAak7T2kRqFYLag09rMoQRjOBCAdCu+ZTBP/MzT8iN2+N73f3WEfx5PPn8CbGcMsC8AwjENkf79DuC/WnLjdnRFwkPSqRqeYOxYm91C314ltrYQJ11HJmSNV8pgHHqgTC0ESaj+Hn04xgKuY1FSOLAXY="
+      }
+    }
+  }
+}

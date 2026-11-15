@@ -19,7 +19,7 @@ function pos(partial: Partial<Position>): Position {
     unrealizedPnl: partial.unrealizedPnl ?? 0,
     contracts: partial.contracts ?? 1,
     liquidationPrice: partial.liquidationPrice ?? 0,
-  } as Position;
+  };
 }
 
 function makeCtx(positions: Position[] = []): PreprocessContext {

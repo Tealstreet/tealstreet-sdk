@@ -9,11 +9,13 @@
  *
  * @param notional - Position notional value (absolute)
  * @param accountBalance - Total account balance
- * @returns Account leverage ratio (e.g., 0.10 means 10% of account)
+ * @returns Account leverage ratio, or null for unavailable valuation
  */
-export function calculatePositionAccountLeverage(notional: number, accountBalance: number): number {
+export function calculatePositionAccountLeverage(notional: number | null, accountBalance: number): number | null {
+  if (typeof notional !== 'number' || !Number.isFinite(notional) || !Number.isFinite(accountBalance)) return null;
   if (accountBalance <= 0) return 0;
-  return Math.abs(notional) / accountBalance;
+  const leverage = Math.abs(notional) / accountBalance;
+  return Number.isFinite(leverage) ? leverage : null;
 }
 
 /**
@@ -22,23 +24,26 @@ export function calculatePositionAccountLeverage(notional: number, accountBalanc
  *
  * @param positions - Array of positions with notional values
  * @param accountBalance - Total account balance
- * @returns Total account leverage ratio
+ * @returns Total account leverage ratio, or null for an incomplete scope
  */
 export function calculateTotalAccountLeverage(
-  positions: Array<{ notional: number }>,
+  positions: ReadonlyArray<{ notional: number | null }>,
   accountBalance: number,
-): number {
-  if (accountBalance <= 0) return 0;
-  const totalNotional = positions.reduce((sum, pos) => sum + Math.abs(pos.notional), 0);
-  return totalNotional / accountBalance;
+): number | null {
+  return calculatePositionAccountLeverage(calculateTotalNotional(positions), accountBalance);
 }
 
 /**
  * Calculate total notional across positions
  *
  * @param positions - Array of positions with notional values
- * @returns Sum of absolute notional values
+ * @returns Sum of absolute notional values, or null for an incomplete scope
  */
-export function calculateTotalNotional(positions: Array<{ notional: number }>): number {
-  return positions.reduce((sum, pos) => sum + Math.abs(pos.notional), 0);
+export function calculateTotalNotional(positions: ReadonlyArray<{ notional: number | null }>): number | null {
+  let total = 0;
+  for (const { notional } of positions) {
+    if (typeof notional !== 'number' || !Number.isFinite(notional)) return null;
+    total += Math.abs(notional);
+  }
+  return Number.isFinite(total) ? total : null;
 }

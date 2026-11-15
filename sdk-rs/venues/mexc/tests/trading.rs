@@ -2338,6 +2338,46 @@ fn protective_quantity_edit_never_cancels_with_stale_reference() {
     );
 }
 
+#[test]
+fn protective_cancel_requires_a_new_quote_after_frozen_clock_sleep() {
+    for (jump, fresh) in [
+        (0., false),
+        (7_200_000., false),
+        (-7_200_000., false),
+        (7_200_000., true),
+    ] {
+        let (mut e, _, public) = guarded_fixture();
+        let origin = 1_800_000_000_000.;
+        assert!(e.sync_host_time(1000., origin + 1000.));
+        quote(&mut e, public, 1000., "\"fairPrice\":60000");
+        // Sleep/clock correction changes protocol UTC without advancing the
+        // scheduling clock. Neither a socket close nor a new quote has landed.
+        assert!(e.sync_host_time(1000., origin + 1000. + jump));
+        if fresh {
+            quote(&mut e, public, 1000., "\"fairPrice\":60000");
+        }
+        let inspect = protective_amend(&mut e, Some(70.), 1000.);
+        inspect_reply(&mut e, &inspect, 1010., &protective_plan_row(1));
+        let actions = prepared(&mut e, 1010.);
+        let allowed = fresh || jump == 0.;
+        assert_eq!(
+            actions.iter().any(|a| matches!(a,
+            Action::Http(r) if r.url.ends_with("/planorder/cancel"))),
+            allowed,
+            "UTC jump {jump}, fresh quote {fresh}"
+        );
+        if !allowed {
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { error, .. })
+                    if error.message.contains("reference stale"))));
+            assert_eq!(
+                e.store().order("guarded").unwrap().status,
+                OrderStatus::Open
+            );
+        }
+    }
+}
+
 fn guarded_fixture() -> (
     TestEngine,
     safe_cex_engine::SocketId,
@@ -3052,7 +3092,7 @@ fn protective_rate_limit_on_replacement_or_put_back_is_unknown_without_protectio
                 .unwrap();
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             assert!(error.protection.is_none());
-            assert!(error.message.contains("status is unknown"), "{error:?}");
+            assert!(error.message.contains("is unknown"), "{error:?}");
             assert!(error.message.contains("Open Orders") && error.message.contains("position"));
             assert!(!error.message.contains("both refused"));
         }
@@ -3098,7 +3138,7 @@ fn protective_native_rate_limit_is_unknown_without_not_changed_or_cancel() {
             .unwrap();
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(error.protection.is_none());
-        assert!(error.message.contains("status is unknown"), "{error:?}");
+        assert!(error.message.contains("is unknown"), "{error:?}");
         assert!(
             error.message.contains("Open Orders") && error.message.contains("position"),
             "{error:?}"
@@ -4006,7 +4046,7 @@ fn opening_parent_with_brackets_amend_keeps_the_legacy_wire() {
     assert_eq!(body["lossTrend"], 3);
     assert_eq!(body["profitTrend"], 2);
     wire.push(serde_json::json!({"method":request.method.as_str(),"url":request.url,"headers":request.headers,"body":request.body}));
-    let expected:serde_json::Value=serde_json::from_str(r#"[{"body":null,"headers":[["ApiKey","replay-key"],["Request-Time","2000"],["Signature","479a287be3d159fd6fb4b0d1785deadcb75e8b5421ca75c89d9d1c0a27219df3"],["Recv-Window","20000"],["Content-Type","application/json"]],"method":"GET","url":"https://api.mexc.com/api/v1/private/order/get/one"},{"body":"[\"one\"]","headers":[["ApiKey","replay-key"],["Request-Time","2050"],["Signature","bf068177982dc8f27511a549137d8342d32a49c53b306bfb977fdfce93156095"],["Recv-Window","20000"],["Content-Type","application/json"]],"method":"POST","url":"https://api.mexc.com/api/v1/private/order/cancel"},{"body":null,"headers":[["ApiKey","replay-key"],["Request-Time","2100"],["Signature","2525c94bd9a3d2e4e98a98bb3f64298cf30dfd1822da85040d6e67299a1a25fb"],["Recv-Window","20000"],["Content-Type","application/json"]],"method":"GET","url":"https://api.mexc.com/api/v1/private/order/get/one"},{"body":"{\"symbol\":\"BTC_USDT\",\"price\":\"58000\",\"vol\":60.0,\"side\":1,\"type\":1,\"openType\":2,\"leverage\":20.0,\"externalOid\":\"ts_j7sHRjFY3nmpX4uRVHBu\",\"stopLossPrice\":\"55000\",\"takeProfitPrice\":\"65000\",\"lossTrend\":3,\"profitTrend\":2}","headers":[["ApiKey","replay-key"],["Request-Time","2200"],["Signature","4926bb61f567d08fa817c0c0d52350b9b5646a3add4af021d95122d408b35f26"],["Recv-Window","20000"],["Content-Type","application/json"]],"method":"POST","url":"https://api.mexc.com/api/v1/private/order/submit"}]"#).unwrap();
+    let expected:serde_json::Value=serde_json::from_str(r#"[{"body":null,"headers":[["ApiKey","replay-key"],["Request-Time","2000"],["Signature","479a287be3d159fd6fb4b0d1785deadcb75e8b5421ca75c89d9d1c0a27219df3"],["Recv-Window","20000"],["Content-Type","application/json"],["source","TEAL"]],"method":"GET","url":"https://api.mexc.com/api/v1/private/order/get/one"},{"body":"[\"one\"]","headers":[["ApiKey","replay-key"],["Request-Time","2050"],["Signature","bf068177982dc8f27511a549137d8342d32a49c53b306bfb977fdfce93156095"],["Recv-Window","20000"],["Content-Type","application/json"],["source","TEAL"]],"method":"POST","url":"https://api.mexc.com/api/v1/private/order/cancel"},{"body":null,"headers":[["ApiKey","replay-key"],["Request-Time","2100"],["Signature","2525c94bd9a3d2e4e98a98bb3f64298cf30dfd1822da85040d6e67299a1a25fb"],["Recv-Window","20000"],["Content-Type","application/json"],["source","TEAL"]],"method":"GET","url":"https://api.mexc.com/api/v1/private/order/get/one"},{"body":"{\"symbol\":\"BTC_USDT\",\"price\":\"58000\",\"vol\":60.0,\"side\":1,\"type\":1,\"openType\":2,\"leverage\":20.0,\"externalOid\":\"ts_j7sHRjFY3nmpX4uRVHBu\",\"stopLossPrice\":\"55000\",\"takeProfitPrice\":\"65000\",\"lossTrend\":3,\"profitTrend\":2}","headers":[["ApiKey","replay-key"],["Request-Time","2200"],["Signature","4926bb61f567d08fa817c0c0d52350b9b5646a3add4af021d95122d408b35f26"],["Recv-Window","20000"],["Content-Type","application/json"],["source","TEAL"]],"method":"POST","url":"https://api.mexc.com/api/v1/private/order/submit"}]"#).unwrap();
     assert_eq!(serde_json::Value::Array(wire), expected);
 }
 

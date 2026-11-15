@@ -35,6 +35,8 @@ impl Log {
         } else {
             eprintln!("{line}");
         }
+        #[cfg(test)]
+        log_capture::record(&line);
     }
     pub fn info(message: &str) {
         Self::line("info", message);
@@ -49,6 +51,48 @@ impl Log {
             .to_string();
         eprintln!("{line}");
         crate::telemetry::capture(report);
+    }
+}
+
+/// Thread-local capture of the actual Log sink, excluded from production builds.
+#[cfg(test)]
+pub(crate) mod log_capture {
+    use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+
+    thread_local! {
+        static LINES: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    }
+
+    // Keep the guard on the thread whose sink it captures, including across awaits.
+    pub(crate) struct Capture(PhantomData<Rc<()>>);
+
+    pub(crate) fn capture() -> Capture {
+        LINES.with(|lines| {
+            let mut lines = lines.borrow_mut();
+            assert!(lines.is_none(), "log capture must not be nested");
+            *lines = Some(Vec::new());
+        });
+        Capture(PhantomData)
+    }
+
+    pub(super) fn record(line: &str) {
+        LINES.with(|lines| {
+            if let Some(lines) = lines.borrow_mut().as_mut() {
+                lines.push(line.to_owned());
+            }
+        });
+    }
+
+    impl Capture {
+        pub(crate) fn finish(self) -> Vec<String> {
+            LINES.with(|lines| lines.borrow_mut().take().expect("active log capture"))
+        }
+    }
+
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            LINES.with(|lines| *lines.borrow_mut() = None);
+        }
     }
 }
 

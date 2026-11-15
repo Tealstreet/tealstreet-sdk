@@ -58,7 +58,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     }
 
     const method = config.method?.toUpperCase?.() || 'GET';
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
+    // TODO: Audit whether HOW proxy re-serialization can break this signature.
     const params = config.params ? decodeURIComponent(qs.stringify(config.params)) : null;
     const url = `${config.url}${params ? `?${params}` : ''}`;
     // A replayed config carries the body axios already serialized: sign those bytes.
