@@ -26,6 +26,7 @@ const VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "bitunix",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -39,6 +40,7 @@ pub(crate) struct Seen {
     pub(crate) urls: Vec<String>,
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
+    pub(crate) bitunix_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -302,6 +304,9 @@ impl VenueIo {
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
+        if self.venue == "bitunix" {
+            return bitunix::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -366,6 +371,9 @@ impl Transport for VenueIo {
     ) -> mpsc::UnboundedSender<String> {
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
+        }
+        if self.venue == "bitunix" {
+            return bitunix::connect(self, socket, &url, events);
         }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
@@ -663,6 +671,15 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "bitunix" {
+        // Bitunix signs nonce + stamp + key + sorted query/body, without a route.
+        return canonical
+            .split_once("synthetic-other-key")
+            .or_else(|| canonical.split_once(KEY))
+            .expect("native Bitunix preimage contains its presented key")
+            .1
+            .into();
+    }
     if venue == "phemex" {
         // Native Phemex signs path + query + whole-second expiry; keep the read scope.
         return canonical
@@ -1128,3 +1145,6 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
+
+#[path = "bitunix_probe_tests.rs"]
+mod bitunix;
