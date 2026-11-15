@@ -19,6 +19,7 @@ const VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "bingx",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -30,6 +31,7 @@ pub(crate) struct Seen {
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
+    pub(crate) bingx_private_sockets: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -174,6 +176,9 @@ impl VenueIo {
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
+        if self.venue == "bingx" {
+            return bingx::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -229,6 +234,9 @@ impl Transport for VenueIo {
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
+        if self.venue == "bingx" {
+            return bingx::connect(self, socket, &url, events);
+        }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         let _ = events.send(HostEvent::WsMessage(
@@ -251,6 +259,8 @@ impl Transport for VenueIo {
             r.method == Method::Get
                 || (r.method == Method::Post
                     && ((self.venue == "binance" && path(&r).ends_with("listenKey"))
+                        || (self.venue == "bingx"
+                            && path(&r) == "/openApi/user/auth/userDataStream")
                         || (self.venue == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
@@ -529,7 +539,7 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .trim_start_matches(|c: char| c.is_ascii_digit())
             .to_owned();
     }
-    if venue == "binance" {
+    if matches!(venue, "binance" | "bingx") {
         return canonical
             .split('&')
             .filter(|part| !part.starts_with("timestamp="))
@@ -940,3 +950,6 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
+
+#[path = "bingx_probe_tests.rs"]
+mod bingx;

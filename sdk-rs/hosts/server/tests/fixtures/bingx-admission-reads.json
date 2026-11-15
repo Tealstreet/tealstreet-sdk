@@ -1,0 +1,69 @@
+{
+  "/openApi/swap/v2/quote/contracts": {
+    "code": 0,
+    "data": [
+      {
+        "symbol": "BTC-USDT",
+        "asset": "BTC",
+        "currency": "USDT",
+        "status": 1,
+        "quantityPrecision": 4,
+        "pricePrecision": 1,
+        "tradeMinLimit": "0.0001",
+        "maxLongLeverage": 125
+      }
+    ]
+  },
+  "/openApi/swap/v2/quote/ticker": {
+    "code": 0,
+    "data": [
+      {
+        "symbol": "BTC-USDT",
+        "lastPrice": "60000",
+        "priceChangePercent": "1",
+        "volume": "12",
+        "quoteVolume": "720000"
+      }
+    ]
+  },
+  "/openApi/swap/v2/quote/premiumIndex": {
+    "code": 0,
+    "data": [
+      {
+        "symbol": "BTC-USDT",
+        "markPrice": "60001",
+        "indexPrice": "60002",
+        "lastFundingRate": "0.01",
+        "nextFundingTime": 1700000000000
+      }
+    ]
+  },
+  "/openApi/swap/v3/user/balance": {
+    "code": 0,
+    "data": [
+      {
+        "asset": "USDT",
+        "balance": "1000",
+        "availableMargin": "950",
+        "usedMargin": "50",
+        "unrealizedProfit": "10"
+      }
+    ]
+  },
+  "/openApi/swap/v1/positionSide/dual": {
+    "code": 0,
+    "data": {
+      "dualSidePosition": false
+    }
+  },
+  "/openApi/swap/v2/user/positions": {
+    "code": 0,
+    "data": []
+  },
+  "/openApi/swap/v2/trade/openOrders": {
+    "code": 0,
+    "data": {
+      "orders": []
+    }
+  }
+}
