@@ -63,3 +63,33 @@ conflicts unless a maintainer asks you to resolve them.
 
 Merged mirror PRs sync upstream automatically. Do not attempt to access or
 modify the upstream monorepo from this mirror.
+
+## Carrying CLEARs Across a Plain Master Merge
+
+A clean master merge can carry existing eligible independent CLEARs at its exact
+first-parent SHA to the new head. It never creates a CLEAR. Check the existing
+verdicts, reviewer eligibility, any prior carry chain and outstanding FINDINGS;
+the proof does not inspect or grant approvals and does not override merge authority.
+
+```bash
+node scripts/prove-clean-master-merge.mjs <PR-number> <CLEARed-full-SHA>
+# Optionally post the pinned, idempotent proof comment:
+node scripts/prove-clean-master-merge.mjs <PR-number> <CLEARed-full-SHA> --post
+node --test scripts/prove-clean-master-merge.test.mjs
+```
+
+The CLI defaults to `Tealstreet/tealstreet-sdk`. For another GitHub repository,
+pass `--repo OWNER/REPO`; the origin must match that repository before any GitHub
+request. It fetches master and PR objects without checkout or dependency installation.
+It requires exactly two parents (the CLEARed head first, a fetched-master ancestor
+second), a clean exact-parent `git merge-tree --write-tree` equal to the head tree,
+and byte-identical canonical PR-only merge-base patches. Only text blob IDs and
+hunk start offsets are normalized; paths, modes, context, changed bytes, hunk counts
+and binary patches remain exact. Conflicts, manual merge edits, additional commits,
+changed patches, shallow/ambiguous history, unavailable evidence and a moving PR
+head fail closed. A failed proof requires normal independent review at the new head.
+
+A proof PASS does not waive new-head required CI checks. For write paths,
+`Rust / combined consumers` must actually RUN and conclude SUCCESS at the new
+head; SKIPPED/selected-out jobs and a green aggregate alone are insufficient.
+Maintainers still decide whether all existing reviews and other merge gates pass.

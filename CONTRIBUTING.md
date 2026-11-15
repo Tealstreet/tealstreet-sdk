@@ -74,3 +74,8 @@ match. Report a vulnerability as described in `SECURITY.md`, not in an issue.
 - If Git reports a conflict, stop and ask in the PR.
 - Keep PRs focused. A maintainer reviews and merges accepted changes.
 - Merged mirror PRs sync upstream automatically.
+
+For an already-reviewed PR refreshed only by a plain master merge, follow the
+[exact-head CLEAR carry rule](AGENTS.md#carrying-clears-across-a-plain-master-merge).
+The proof carries existing eligible reviews; it does not create approvals or waive
+new-head CI, including executed successful combined consumers for write paths.
