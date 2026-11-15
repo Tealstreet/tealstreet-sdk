@@ -1264,9 +1264,9 @@ mod bingx;
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
 
-#[path = "okxeudemo_probe_tests.rs"]
-mod okxeudemo;
 #[path = "mexc_probe_tests.rs"]
 mod mexc;
+#[path = "okxeudemo_probe_tests.rs"]
+mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;
