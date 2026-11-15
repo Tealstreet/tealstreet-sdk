@@ -58,7 +58,7 @@
     },
     {
       "venue": "kraken",
-      "reason": "No native Hosted REST origin; server Present/SHA256/HMAC-SHA512 bridge and private-startup proof are not built."
+      "reason": "Native Futures private-startup proof for the primary key, signed-path custody and replay/socket controls is not built."
     },
     {
       "venue": "kucoinspot",

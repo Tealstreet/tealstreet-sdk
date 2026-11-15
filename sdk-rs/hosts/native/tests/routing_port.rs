@@ -460,6 +460,7 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         Some("https://fapi.bitunix.com"),
     ),
     ("mexc", "https://api.mexc.com", None),
+    ("kraken", "https://futures.kraken.com", None),
     ("hyrotrader", "https://sim-tealstreet.hyro.site", None),
 ];
 

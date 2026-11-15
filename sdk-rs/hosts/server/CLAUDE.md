@@ -155,6 +155,11 @@ mode and identity/settings; refused proofs never change that mode. Resumed COSIG
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 
+ApeX remote signing uses the existing device `apexomni-batch` codec for native
+REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
+are installed; startup read coverage never proves OmniKey possession or changes
+COSIGNED catalog readiness by itself.
+
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
 Every exact `remoteSigning.enabled` venue needs native proof readiness or a
 reason in `src/delegated/cosigned-proof-exclusions.json`; remove its exclusion
