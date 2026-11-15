@@ -611,7 +611,18 @@ fn hyro_provider_refusal_preserves_an_earlier_ack_and_unknown_create() {
             );
         }
         // H2: Hyro creates are managed Plan legs; the second is signed at dispatch.
-        let actions = managed(&mut h.engine, h.now);
+        // The persistent harness retains prepared routes across the release wait.
+        h.collect();
+        if !lost {
+            h.advance(200.0);
+        }
+        let actions: Vec<_> = h
+            .notices
+            .iter()
+            .cloned()
+            .map(Action::Notice)
+            .chain(h.requests.iter().cloned().map(Action::Http))
+            .collect();
         let error = failed(&actions, 42);
         assert_eq!(
             error.outcome,
@@ -883,7 +894,19 @@ fn refused_retry_after_initial_dispatch(
             },
         );
     }
-    let retry_actions = prepare_parked(&mut h.engine, h.now);
+    let mut retry_actions = prepare_parked(&mut h.engine, h.now);
+    let wakes: Vec<_> = retry_actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms <= h.now + 200.0 => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in wakes {
+        h.now = h.now.max(at);
+        h.engine.handle(h.now, Event::TimerFired { timer });
+        retry_actions.extend(prepare_parked(&mut h.engine, h.now));
+    }
     let (attempt, retry_work) = work(retry_actions);
     assert!(retry_work.operations.iter().any(|op| matches!(op,safe_cex_engine::signing::Operation::Sign {payload,..} if matches!(payload.last(),Some(safe_cex_engine::signing::PayloadPart::Bytes {bytes}) if bytes==body.as_bytes()))),"retry must retain exact body and immutable client identity");
     assert_eq!(

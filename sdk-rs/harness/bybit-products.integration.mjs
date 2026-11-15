@@ -32,7 +32,7 @@ const quote = (symbol) => ({ symbol, lastPrice: '1000', bid1Price: '1000', ask1P
   markIv: '0.5', bid1Iv: '0.49', ask1Iv: '0.51', underlyingPrice: '99000', delta: symbol === CALL ? '0.4' : '-0.6', gamma: '0.01', vega: '12', theta: '-8' });
 const GREEKS = [{ baseCoin: 'BTC', totalDelta: '0.2', totalGamma: '0.03', totalVega: '9', totalTheta: '-7' }];
 
-function validate(request) {
+function validate(request, now = Date.now()) {
   const headers = Object.fromEntries((Array.isArray(request.headers) ? request.headers : Object.entries(request.headers ?? {})).map(([k, v]) => [k.toLowerCase(), String(v)]));
   const url = new URL(request.url), signed = request.method !== 'GET' || !url.pathname.startsWith('/v5/market/');
   if (!signed && !headers['x-bapi-sign']) return;
@@ -40,7 +40,7 @@ function validate(request) {
   assert.match(timestamp ?? '', /^\d+$/); assert.match(window ?? '', /^\d+$/);
   assert.equal(headers['x-bapi-api-key'], KEY);
   assert(Number(window) > 0 && Number(window) <= 60000);
-  assert(Number(timestamp) >= Date.now() - Number(window) && Number(timestamp) < Date.now() + 1000, 'native signing timestamp lies inside its receive window');
+  assert(Number(timestamp) >= now - Number(window) && Number(timestamp) < now + 1000, 'native signing timestamp lies inside its receive window');
   const payload = request.method === 'GET' ? url.search.slice(1) : request.body;
   const expected = createHmac('sha256', SECRET).update(timestamp + KEY + window + payload).digest('hex');
   assert.equal(headers['x-bapi-sign'], expected, `raw ${request.method} ${url.pathname} signature`);
@@ -112,6 +112,7 @@ function chain(rows) { return rows.map((row) => ({ market: market(row.market), q
 class Native {
   constructor(options) {
     this.now = Date.now(); this.resources = 0; this.requests = []; this.sockets = []; this.sent = []; this.results = new Map(); this.queue = [];
+    this.timers = new Map(); this.waitingClaims = new Map();
     this.engine = new WasmEngine('bybit', JSON.stringify({ key: KEY, secret: SECRET, ...options }));
     this.collect(this.engine.start(this.now)); this.run();
   }
@@ -126,17 +127,32 @@ class Native {
           this.collect(this.engine.httpPrepared(a.preparation, String(++this.resources), undefined, this.now));
         } else if (a.phase === 'bind') {
           const claim = JSON.parse(this.engine.httpClaim(a.permit, this.now));
+          if (claim.status === 'wait') {
+            assert(Number.isFinite(claim.until), 'waiting claim supplies a finite wake');
+            this.waitingClaims.set(a.permit, { action: a, at: claim.until });
+            continue;
+          }
+          this.waitingClaims.delete(a.permit);
+          assert(['released', 'denied'].includes(claim.status), 'known managed claim result');
           if (claim.status === 'released') this.queue.unshift({ ...a.packet, op: 'http' });
           this.collect(this.engine.prepareDispatch(this.now));
+        } else if (a.phase === 'cancel') {
+          for (const [permit, pending] of this.waitingClaims) {
+            if (pending.action.preparation === a.preparation) this.waitingClaims.delete(permit);
+          }
         }
         continue;
       }
       if (a.op === 'http') {
-        validate(a); this.requests.push(a); const body = JSON.stringify(response(a));
+        validate(a, this.now); this.requests.push(a); const body = JSON.stringify(response(a));
         this.collect(this.engine.httpStart(a.request, 200, '', this.now));
         this.collect(this.engine.httpChunk(a.request, new TextEncoder().encode(body), this.now));
         this.collect(this.engine.httpEnd(a.request, this.now));
-      } else if (a.op === 'wsConnect') {
+      } else if (a.op === 'setTimer') {
+        assert(Number.isFinite(a.at), 'engine timer supplies a finite wake');
+        this.timers.set(a.timer, a.at);
+      } else if (a.op === 'clearTimer') this.timers.delete(a.timer);
+      else if (a.op === 'wsConnect') {
         this.sockets.push(a); this.collect(this.engine.wsOpen(a.socket, this.now));
         if (a.url.endsWith('/private')) {
           this.collect(this.engine.wsMessage(a.socket, '{"op":"auth","success":true}', this.now));
@@ -147,9 +163,28 @@ class Native {
     }
   }
   command(command) {
-    this.now = Date.now();
+    this.now = Math.max(this.now, Date.now());
     const id = 100 + this.results.size;
-    this.collect(this.engine.command(JSON.stringify({ command: id, ...command }), this.now)); this.run();
+    this.collect(this.engine.command(JSON.stringify({ command: id, ...command }), this.now));
+    for (let count = 0; ; count++) {
+      assert(count < 500, 'native finite command wake sequence');
+      this.run();
+      if (this.results.has(id)) break;
+      const next = [
+        ...[...this.timers].map(([timer, at]) => ({ timer, at })),
+        ...[...this.waitingClaims].map(([permit, pending]) => ({ permit, ...pending })),
+      ].sort((a, b) => a.at - b.at)[0];
+      assert(next, `native wake for ${JSON.stringify(command)}`);
+      this.now = Math.max(this.now, next.at);
+      // At an equal timestamp the engine expiry runs before a waiting send.
+      if (next.timer !== undefined) {
+        this.timers.delete(next.timer);
+        this.collect(this.engine.timer(next.timer, this.now));
+      } else {
+        this.waitingClaims.delete(next.permit);
+        this.queue.push(next.action);
+      }
+    }
     const result = this.results.get(id); assert(result, `native result for ${JSON.stringify(command)}`);
     if (result.error) throw new Error(result.error);
     return JSON.parse(result.result);
@@ -158,7 +193,7 @@ class Native {
     const bytes = this.engine.snapshotFrame(this.now).slice();
     const store = new DefaultStore(); new FrameApplier(store).apply(new Frame(bytes.buffer), false); return store;
   }
-  free() { this.engine.free(); }
+  free() { this.waitingClaims.clear(); this.timers.clear(); this.engine.free(); }
 }
 async function ts(options) {
   const store = new DefaultStore(), requests = [];
@@ -302,5 +337,77 @@ test('native option position identity and Greeks survive frames without position
     assert.equal(native.store().positions.length, 0);
     const bytes = native.engine.snapshotFrame(native.now).slice();
     assert.equal(new Frame(bytes.buffer).positionGreeks()?.count ?? 0, 0);
+  } finally { native.free(); }
+});
+
+
+// Real WASM commands must finish through pacing, not by weakening the engine floor.
+test('native product fixture completes consecutive option writes on a fixed clock', (t) => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const native = new Native({ enableOptionMarkets: true });
+  try {
+    const released = [];
+    const claim = native.engine.httpClaim.bind(native.engine);
+    t.mock.method(native.engine, 'httpClaim', (permit, at) => {
+      const result = claim(permit, at);
+      if (JSON.parse(result).status === 'released') released.push(at);
+      return result;
+    });
+    for (let index = 0; index < 2; index++) {
+      const order = { symbol: CALL, type: 'limit', side: 'buy', amount: 0.02,
+        price: 1000, clientOrderId: `paced-option-${index}` };
+      assert.deepEqual(native.command({ op: 'placeOrders', orders: [order] }), [`accepted-${order.clientOrderId}`]);
+    }
+    const writes = native.requests.filter((r) => new URL(r.url).pathname === '/v5/order/create');
+    assert.equal(writes.length, 2);
+    assert.deepEqual(writes.map((r) => JSON.parse(r.body).orderLinkId), ['paced-option-0', 'paced-option-1']);
+    assert.equal(released.length, 2);
+    assert.equal(released[1] - released[0], 200, 'engine-owned physical pacing floor');
+  } finally { native.free(); }
+});
+
+test('native product fixture retains and reclaims the original waiting permit exactly once', (t) => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const native = new Native({ enableOptionMarkets: true });
+  try {
+    const claims = [];
+    const claim = native.engine.httpClaim.bind(native.engine);
+    t.mock.method(native.engine, 'httpClaim', (permit, at) => {
+      claims.push({ permit, at });
+      return claims.length === 1 ? JSON.stringify({ status: 'wait', until: at + 25 }) : claim(permit, at);
+    });
+    const order = { symbol: CALL, type: 'limit', side: 'sell', amount: 0.02, price: 1000, clientOrderId: 'waiting-option' };
+    assert.deepEqual(native.command({ op: 'placeOrders', orders: [order] }), ['accepted-waiting-option']);
+    assert.equal(claims.length, 2);
+    assert.equal(claims[0].permit, claims[1].permit, 'never replace a waiting permit or re-admit the write');
+    assert.equal(claims[1].at - claims[0].at, 25);
+    const writes = native.requests.filter((r) => new URL(r.url).pathname === '/v5/order/create');
+    assert.equal(writes.length, 1);
+    assert.deepEqual(JSON.parse(writes[0].body), { category: 'option', symbol: CALL, side: 'Sell',
+      orderType: 'Limit', qty: '0.02', price: '1000', timeInForce: 'GTC', reduceOnly: false, orderLinkId: 'waiting-option' });
+  } finally { native.free(); }
+});
+
+test('native product fixture expires a waiting claim on its original engine deadline without a write', (t) => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const native = new Native({ enableOptionMarkets: true });
+  try {
+    const claims = [];
+    t.mock.method(native.engine, 'httpClaim', (permit, at) => {
+      claims.push(permit);
+      return JSON.stringify({ status: 'wait', until: at + 1000 });
+    });
+    const order = { symbol: CALL, type: 'limit', side: 'buy', amount: 0.02, price: 1000, clientOrderId: 'expired-option' };
+    assert.throws(() => native.command({ op: 'placeOrders', orders: [order] }), /timed? ?out|expired/i);
+    assert(native.results.has(100), 'the engine, not the fixture watchdog, seals the command');
+    assert.equal(native.now - now, 20000, 'waiting never refreshes the engine call budget');
+    assert(claims.length > 1);
+    // Periodic account reads have independent permits during this long wait.
+    assert.equal(native.results.get(100).detail.kind, 'timeout');
+    assert.equal(native.results.get(100).detail.outcome, 'notSent');
+    assert.equal(native.requests.filter((r) => new URL(r.url).pathname === '/v5/order/create').length, 0);
   } finally { native.free(); }
 });

@@ -8,6 +8,7 @@ mod hyro;
 mod identity;
 mod leverage;
 mod options;
+mod pacing;
 mod paths;
 mod policy;
 mod refresh;
@@ -2794,7 +2795,16 @@ impl BybitLinear {
 
 impl Venue for BybitLinear {
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
-        &[history::ORDER_HISTORY_PACING]
+        &[history::ORDER_HISTORY_PACING, pacing::WRITE, pacing::BATCH]
+    }
+    fn http_pacing_sets(&self) -> &[safe_cex_engine::request_context::PacingSet] {
+        &[pacing::BATCH_SET]
+    }
+    fn http_release_domain() -> Option<safe_cex_engine::request_context::ReleaseDomain> {
+        Some(safe_cex_engine::request_context::ReleaseDomain {
+            pacings: &pacing::ADMITTED,
+            members: safe_cex_engine::request_context::DomainMembers::Mutations,
+        })
     }
     fn http_release_veto(
         &self,

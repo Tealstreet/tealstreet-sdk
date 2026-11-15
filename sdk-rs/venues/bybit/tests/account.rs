@@ -3451,6 +3451,7 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
         34,
         vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
     );
+    h.await_request("/v5/order/create-batch");
     assert!(
         h.has_request("/v5/order/create-batch"),
         "a fresh read clears the fence: {:?}",
@@ -3543,6 +3544,7 @@ fn cancel_all_after_an_unknown_placement_waits_for_the_fresh_read() {
         command: 63,
         symbol: "BTCUSDT".into(),
     });
+    h.await_request("/v5/order/cancel-all");
     assert!(
         h.has_request("/v5/order/cancel-all"),
         "the fresh read admits cancel-all: {:?}",
