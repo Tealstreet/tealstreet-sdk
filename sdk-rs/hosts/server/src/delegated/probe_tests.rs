@@ -26,6 +26,9 @@ const VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "woo",
+    "bingx",
+    "bitunix",
     "cryptocom",
 ];
 const KEY: &str = "synthetic-key";
@@ -40,6 +43,9 @@ pub(crate) struct Seen {
     pub(crate) urls: Vec<String>,
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
+    pub(crate) woo_socket_auths: usize,
+    pub(crate) bingx_private_sockets: usize,
+    pub(crate) bitunix_socket_auths: usize,
     pub(crate) cryptocom_socket_auths: usize,
     paths: Vec<String>,
 }
@@ -64,7 +70,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
-        "blofin" | "kucoin" => venue,
+        "blofin" | "kucoin" | "woo" | "bingx" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -301,8 +307,17 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "woo" {
+            return woo::response(self, r);
+        }
         if self.venue == "phemex" {
             return phemex::response(self, r);
+        }
+        if self.venue == "bingx" {
+            return bingx::response(self, r);
+        }
+        if self.venue == "bitunix" {
+            return bitunix::response(self, r);
         }
         if self.venue == "cryptocom" {
             return cryptocom::response(self, r);
@@ -369,8 +384,17 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "woo" {
+            return woo::connect(self, socket, &url, events);
+        }
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
+        }
+        if self.venue == "bingx" {
+            return bingx::connect(self, socket, &url, events);
+        }
+        if self.venue == "bitunix" {
+            return bitunix::connect(self, socket, &url, events);
         }
         if self.venue == "cryptocom" {
             return cryptocom::connect(self, socket, &url, events);
@@ -404,6 +428,8 @@ impl Transport for VenueIo {
                 || (r.method == Method::Post
                     && (self.venue == "cryptocom"
                         || (family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
+                        || (self.venue == "bingx"
+                            && path(&r) == "/openApi/user/auth/userDataStream")
                         || (self.venue == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
@@ -680,6 +706,24 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .unwrap()
             .into();
     }
+    if venue == "woo" {
+        return if canonical.contains('|') {
+            canonical.rsplit_once('|').unwrap().0.to_owned()
+        } else {
+            canonical
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .into()
+        };
+    }
+    if venue == "bitunix" {
+        // Bitunix signs nonce + stamp + key + sorted query/body, without a route.
+        return canonical
+            .split_once("synthetic-other-key")
+            .or_else(|| canonical.split_once(KEY))
+            .expect("native Bitunix preimage contains its presented key")
+            .1
+            .into();
+    }
     if venue == "phemex" {
         // Native Phemex signs path + query + whole-second expiry; keep the read scope.
         return canonical
@@ -691,7 +735,7 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .trim_start_matches(|c: char| c.is_ascii_digit())
             .to_owned();
     }
-    if family(venue) == "binance" {
+    if family(venue) == "binance" || venue == "bingx" {
         return canonical
             .split('&')
             .filter(|part| !part.starts_with("timestamp="))
@@ -750,6 +794,7 @@ async fn remote(
                     || text.contains("/users/self/verify")
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
+                    || venue == "woo" && text.starts_with('|')
                     || venue == "cryptocom" && text.starts_with("public/auth")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
@@ -1147,5 +1192,11 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
 
+#[path = "bingx_probe_tests.rs"]
+mod bingx;
+#[path = "bitunix_probe_tests.rs"]
+mod bitunix;
 #[path = "cryptocom_probe_tests.rs"]
 mod cryptocom;
+#[path = "woo_probe_tests.rs"]
+mod woo;

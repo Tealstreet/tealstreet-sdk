@@ -20,6 +20,9 @@ const READY: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "woo",
+    "bingx",
+    "bitunix",
     "cryptocom",
 ];
 const KEY: &str = "synthetic-key";
@@ -98,6 +101,7 @@ impl Device {
             || preimage.contains("/user/verify")
             || venue == "binancespot" && preimage.starts_with("apiKey=")
             || venue == "phemex" && !preimage.starts_with('/')
+            || venue == "woo" && preimage.starts_with('|')
             || venue == "cryptocom" && preimage.starts_with("public/auth");
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
@@ -756,6 +760,21 @@ async fn cosigned_bybit_proof_ignores_obsolete_delegated_rollout_field() {
 #[tokio::test]
 async fn cosigned_phemex_requires_connection_proof() {
     venue_case("phemex").await;
+}
+
+#[tokio::test]
+async fn cosigned_woo_requires_connection_proof() {
+    venue_case("woo").await;
+}
+
+#[tokio::test]
+async fn cosigned_bingx_requires_connection_proof() {
+    venue_case("bingx").await;
+}
+
+#[tokio::test]
+async fn cosigned_bitunix_requires_connection_proof() {
+    venue_case("bitunix").await;
 }
 
 #[tokio::test]
