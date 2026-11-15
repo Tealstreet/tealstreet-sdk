@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Test clean master merge proof
+        run: node --test scripts/prove-clean-master-merge.test.mjs
       - uses: ./.github/actions/prepare-yarn
         id: yarn
       - uses: ./.github/actions/install-yarn
