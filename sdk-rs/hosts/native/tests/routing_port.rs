@@ -7,6 +7,77 @@ use safe_cex_native::resolve::{
 use serde::Deserialize;
 
 #[test]
+fn apexomni_mainnet_rest_base_retains_api() {
+    let result = safe_cex_native::resolve::rest_base_url("apexomni", false);
+    assert!(
+        matches!(result, Ok("https://omni.apex.exchange/api")),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn apexomni_testnet_rest_base_retains_api() {
+    let result = safe_cex_native::resolve::rest_base_url("apexomni", true);
+    assert!(
+        matches!(result, Ok("https://testnet.omni.apex.exchange/api")),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn apexomni_hosted_rest_uses_how_without_rewriting_signed_origins() {
+    use safe_cex_native::{HttpRouteMode, resolve::route_bases};
+    for (testnet, base) in [
+        (false, "https://omni.apex.exchange/api"),
+        (true, "https://testnet.omni.apex.exchange/api"),
+    ] {
+        let inputs = account_transport(
+            "apexomni",
+            &AccountTransport {
+                testnet: Some(testnet),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(inputs.tealstreet_proxy, Some(true));
+        assert_eq!(inputs.tealstreet_tunnel, Some(true));
+        let plan = resolve_routing_plan("apexomni", &inputs, base, Provider::Tealstreet).unwrap();
+        assert_eq!(plan.http.mode, HttpRouteMode::How);
+        assert_eq!(
+            plan.http.tunnel_url.as_ref(),
+            Some(&route_bases().unwrap().tunnel["sg"])
+        );
+        assert!(plan.http.prefix.is_empty());
+        assert!(
+            !plan.http.authorize,
+            "proxy token authenticates HOW, not the venue request"
+        );
+        assert!(plan.http.header_aliases.is_empty());
+        for path in ["/v3/account", "/v3/account-balance", "/v3/open-orders"] {
+            let url = reqwest::Url::parse(&format!("{base}{path}")).unwrap();
+            assert_eq!(url.path(), format!("/api{path}"));
+        }
+        if testnet {
+            assert!(
+                plan.ws.private.host.is_none(),
+                "testnet retains its native QA socket"
+            );
+        } else {
+            let relay = reqwest::Url::parse(plan.ws.private.host.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                relay
+                    .query_pairs()
+                    .find(|(key, _)| key == "ts-relay")
+                    .unwrap()
+                    .1,
+                "wss://quote.omni.apex.exchange/realtime_private?v=2"
+            );
+        }
+        assert!(plan.ws.private.fallback.is_none());
+    }
+}
+
+#[test]
 fn woo_private_relay_keeps_the_application_id_for_proxy_and_tunnel_accounts() {
     assert_eq!(
         safe_cex_native::resolve::rest_base_url("woo", false).unwrap(),
@@ -153,6 +224,11 @@ fn an_override_proxy_url_input_refuses() {
 
 /// Each core venue's (mainnet, testnet) origin; `None` is a venue with no testnet.
 const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
+    (
+        "apexomni",
+        "https://omni.apex.exchange/api",
+        Some("https://testnet.omni.apex.exchange/api"),
+    ),
     (
         "binance",
         "https://fapi.binance.com",
