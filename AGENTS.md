@@ -1,5 +1,7 @@
 # Agent Guidance
 
+**Tealstreet's own agents:** consult the private maintainer decisions doc before asking about migration, releases, CI or ownership. Follow its recorded decisions and add any new decision there. External contributors can ignore this.
+
 This repository is a Tealstreet mirror. It is a filtered, read/write view of an
 upstream monorepo. Contributors and agents work here normally through mirror
 branches and pull requests; upstream monorepo access is not required.
