@@ -167,10 +167,22 @@ async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account
             let mut init = init();
             let account = testing::trading_account(&registry, "A", &init);
             for venue in ["hyrotrader", "binanceoptions", "bingxspot", "unknown"] {
-                assert!(
-                    safe_cex_native::resolve::rest_base_url(venue, false).is_err(),
-                    "{venue}: refusal control must lack a hosted origin"
-                );
+                if venue == "hyrotrader" {
+                    assert_eq!(
+                        safe_cex_native::resolve::rest_base_url(venue, false),
+                        Ok("https://sim-tealstreet.hyro.site")
+                    );
+                    assert_eq!(
+                        refuse_unhosted(venue),
+                        Err(HYROTRADER_UNHOSTED.into()),
+                        "the origin lookup does not provision hosted engine endpoints"
+                    );
+                } else {
+                    assert!(
+                        safe_cex_native::resolve::rest_base_url(venue, false).is_err(),
+                        "{venue}: refusal control must lack a hosted origin"
+                    );
+                }
                 init.exchange_name = venue.into();
                 let result = registry
                     .obtain_delegated("A", &init, 8, None, Arc::new(|_| true), pair())
