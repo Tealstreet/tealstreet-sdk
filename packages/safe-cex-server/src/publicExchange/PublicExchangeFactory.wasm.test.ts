@@ -130,26 +130,36 @@ describe('PublicExchangeFactory with the real native engine', () => {
     expect(input!.requests.filter((url) => url.includes(catalog))).toHaveLength(2);
   });
 
-  it('hydrates a warm Rust cache without network and refetches after an externally started handle', async () => {
-    const redis = new MemoryRedis();
-    setup();
-    factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
-    const first = await factory.get('binance');
-    const originalMarkets = first.markets;
-    await factory.dispose();
-    const count = input!.requests.length;
-    factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
-    const cached = await factory.get('binance');
-    expect(cached.markets).toEqual(originalMarkets);
-    expect(input!.requests).toHaveLength(count);
-    expect((cached.exchange as RustEngineExchange).hasStarted).toBe(false);
-    await cached.exchange.start();
-    const externallyStarted = cached.exchange;
-    await cached.forceRefreshMarkets('metadata-after-live-start');
-    expect(cached.exchange).not.toBe(externallyStarted);
-    expect(externallyStarted.isDisposed).toBe(true);
-    expect(input!.requests.filter((url) => url.includes(catalog))).toHaveLength(3);
-  });
+  it.each([
+    ['stable wall clock', 0],
+    ['UTC hour rolls forward', 1],
+    ['wall clock moves backward', -3_600_000],
+  ] as const)(
+    'hydrates a warm Rust cache without network (%s) and refetches after an externally started handle',
+    async (_label, delta) => {
+      let wallTime = Date.UTC(2026, 10, 15, 21, 59, 59, 999);
+      vi.spyOn(Date, 'now').mockImplementation(() => wallTime);
+      const redis = new MemoryRedis();
+      setup();
+      factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
+      const first = await factory.get('binance');
+      const originalMarkets = first.markets;
+      await factory.dispose();
+      const count = input!.requests.length;
+      wallTime += delta;
+      factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
+      const cached = await factory.get('binance');
+      expect(cached.markets).toEqual(originalMarkets);
+      expect(input!.requests).toHaveLength(count);
+      expect((cached.exchange as RustEngineExchange).hasStarted).toBe(false);
+      await cached.exchange.start();
+      const externallyStarted = cached.exchange;
+      await cached.forceRefreshMarkets('metadata-after-live-start');
+      expect(cached.exchange).not.toBe(externallyStarted);
+      expect(externallyStarted.isDisposed).toBe(true);
+      expect(input!.requests.filter((url) => url.includes(catalog))).toHaveLength(3);
+    },
+  );
 
   it('preserves the last successful engine and metadata if cache persistence fails', async () => {
     const redis = new MemoryRedis();
