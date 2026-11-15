@@ -14,6 +14,9 @@ WOO routing inputs also carry the public `applicationId`, retaining its private
 stream suffix when using the fleet relay. Hosted WOO resolves the venue
 mainnet/staging REST origins before startup and passes that application ID from
 account init into the routing plan. Signing admission remains registry-owned.
+Hosted KuCoin Spot resolves its own `https://api.kucoin.com` REST origin,
+independently of Futures' `https://api-futures.kucoin.com`. Both exact names
+refuse testnet rather than falling through to a production origin.
 The deployment can replace the Tealstreet hosts: `PROXY_PRIVATE_URL` sets every
 whitelisted private pool and `PROXY_PUBLIC_URL` the public CORS proxy (https), and
 `PROXY_TUNNEL_URL` every tunnel egress and the table routes under it (wss). Each
