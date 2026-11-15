@@ -119,6 +119,8 @@ Blofin, KuCoin and Phemex names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
+Exact WOO additionally uses its native v1/v3 private account reads and private
+socket HMAC authentication, with wrong-key, replay and foreign-socket controls.
 Variant tests pin product routes, origins and demo headers as well as the
 wrong-key, replay, foreign-socket and resident-preservation controls. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
