@@ -1,10 +1,6 @@
 {
   "exclusions": [
     {
-      "venue": "apexomni",
-      "reason": "No native Hosted REST origin; native private-read proof and complete zkLink order-signing coverage are not built."
-    },
-    {
       "venue": "asterdex",
       "reason": "Native legacy HMAC and v3 wallet/agent private-startup proof paths need separate server coverage; resolving an origin does not certify readiness."
     },

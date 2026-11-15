@@ -157,8 +157,9 @@ rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 
 ApeX remote signing uses the existing device `apexomni-batch` codec for native
 REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
-are installed; startup read coverage never proves OmniKey possession or changes
-COSIGNED catalog readiness by itself.
+are installed. Exact `apexomni` COSIGNED admission proves API credentials through
+native account, account-balance and open-orders reads, with wrong-key, replay
+and foreign-socket controls; this never proves OmniKey/L2-seed possession.
 
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
 Every exact `remoteSigning.enabled` venue needs native proof readiness or a
