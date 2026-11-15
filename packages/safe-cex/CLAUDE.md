@@ -866,6 +866,15 @@ amend with older WASM lacking this metadata refuses `unsupported` / `notSent`;
 consume matching SDK and WASM together. Owner loss after a committed cancel
 retains Unknown and the existing placement fence.
 
+A DELEGATED `workerMirror` never loads a page WASM engine or signs locally,
+even when its retained account options contain credentials. Generic manual writes
+refuse `unsupported` / `notSent`; the host's typed DELEGATED transport owns them.
+Public candles and private reads use the owning source. Startup and command guards
+also reject a mode change while page readiness is pending; a kept engine cannot
+execute new commands after the host changes the mirror to DELEGATED.
+Signing adapters retain that host and recheck at each credential/signature handoff
+and before publishing results, including later HTTP interceptor continuations.
+
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from
 `{ ...exchange.options, workerMirror: undefined }`; its signing host and any

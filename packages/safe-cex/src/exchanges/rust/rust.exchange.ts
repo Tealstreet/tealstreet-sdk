@@ -580,17 +580,43 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private signingHost = (): Pick<EngineHostType,
+    'hostedSigning' | 'hostedWalletSigning' | 'hostedSigningClock' | 'coinbaseSigningMetadata'
+  > & { assertCurrent(): void } => {
+    const host = this.host;
+    if (!host) throw this.pageWriterUnavailable('signing');
+    const assertCurrent = () => {
+      if (this.isDelegatedMirror || this.isDisposed || this.host !== host)
+        throw this.pageWriterUnavailable('signing');
+    };
+    return {
+      assertCurrent,
+      hostedSigning: async (input) => {
+        assertCurrent();
+        const result = await host.hostedSigning(input);
+        assertCurrent();
+        return result;
+      },
+      hostedWalletSigning: (input) => { assertCurrent(); return host.hostedWalletSigning(input); },
+      hostedSigningClock: () => { assertCurrent(); return host.hostedSigningClock(); },
+      coinbaseSigningMetadata: () => { assertCurrent(); return host.coinbaseSigningMetadata(); },
+    };
+  };
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureSigningHost();
-        return await signHostedHttp(
+        if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
+        const host = this.signingHost();
+        const result = await signHostedHttp(
           this.name,
           this.engineOptions,
           Boolean(this.signerSetup?.primaryComplete),
-          this.host!,
+          host,
           request,
         );
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted HTTP signing failed' };
       }
@@ -602,7 +628,11 @@ export class RustEngineExchange extends BaseExchange {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureSigningHost();
-        return await signHostedWsAuth(this.host!, request);
+        if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
+        const host = this.signingHost();
+        const result = await signHostedWsAuth(host, request);
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted WS auth signing failed' };
       }
@@ -1215,11 +1245,12 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private startFrameFed = async (): Promise<boolean> => {
+    if (this.isDelegatedMirror) return false;
     try {
       // Asked before any engine exists: a family without it builds nothing on main.
       const wasm = await loadWasmEngine(this.name);
       this.pageWriteSupported = wasm.WasmEngine.frameFedSupported?.(this.name);
-      if (this.pageWriteSupported !== true || this.isDisposed) return false;
+      if (this.pageWriteSupported !== true || this.isDisposed || this.isDelegatedMirror) return false;
       await this.ensureSigningHost();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1232,7 +1263,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!host || this.isDisposed || !this.frameFedEngine || typeof host.applyFrame !== 'function') return false;
     if (construction?.frameFed !== true) return false;
     if (this.signerSetup instanceof DelegatedSignerSetup) await host.prepareAddressSetup();
-    if (this.isDisposed || this.host !== host) return false;
+    if (this.isDisposed || this.host !== host || this.isDelegatedMirror) return false;
     this.frameFed = true;
     host.start();
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
@@ -1588,6 +1619,8 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Hosted signing builds the engine without starting it; a mirror still drops its frames. */
   private ensureSigningHost = (): Promise<void> => {
+    if (this.isDelegatedMirror)
+      return Promise.reject(this.pageWriterUnavailable('signing'));
     if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
     return (this.hostInitialization ??= this.createHost().catch((error: unknown) => {
       this.signerSetup?.dispose();
@@ -1659,6 +1692,8 @@ export class RustEngineExchange extends BaseExchange {
       }
     });
     if (this.isDisposed) throw new Error('Exchange disposed during startup');
+    if (this.isDelegatedMirror)
+      throw this.pageWriterUnavailable('startup');
     const { WasmEngine } = wasm;
     // Decided with the build, so a signing host built first is the same frame-fed engine.
     this.frameFedEngine = this.isWorkerMirror && !this.isPublicDataOnly && frameFedSupported(wasm, this.name);
@@ -1908,6 +1943,10 @@ export class RustEngineExchange extends BaseExchange {
     return this.options.workerMirror === true;
   }
 
+  private get isDelegatedMirror(): boolean {
+    return this.isWorkerMirror && this.options.signingMode === 'delegated';
+  }
+
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
   private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
     this.callWorkerForOwner(this.captureWorkerAdmission(), method, ...args);
@@ -2011,15 +2050,21 @@ export class RustEngineExchange extends BaseExchange {
     method: string, args: unknown[], send: () => Promise<T>, sendSource?: (admitted: WorkerAdmission) => Promise<T>,
   ): Promise<T> => {
     try {
+      if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
       const admitted = this.captureWorkerAdmission();
       if (!this.frameFedSettled) await this.untilFrameFedSettled(method);
       admitted?.(method, args);
       if (this.isDisposed) throw this.workerOwnerChanged(method, args);
+      if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
       if (!this.frameFed) {
         // A structurally unsupported LOCAL/COSIGNED mirror keeps its existing source writer.
         // A missing module/capability or a failed supported page engine must never reroute.
-        if (this.options.signingMode !== 'delegated' && this.pageWriteSupported === false && sendSource)
-          return await sendSource(admitted);
+        if (this.pageWriteSupported === false && sendSource) {
+          return await sendSource((sourceMethod, sourceArgs) => {
+            admitted?.(sourceMethod, sourceArgs);
+            if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
+          });
+        }
         throw this.pageWriterUnavailable(method);
       }
       return await send();
@@ -2089,7 +2134,8 @@ export class RustEngineExchange extends BaseExchange {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
-        if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
+        if (method === 'fetchOHLCV' && this.routesToWorker && !this.isDelegatedMirror &&
+          !getExchangeMetadata(this.name).fetchOHLCVInWorker)
           return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker) return local(...args);
         const viaWorker = (admitted: WorkerAdmission) =>
@@ -2834,6 +2880,8 @@ export class RustEngineExchange extends BaseExchange {
     if (this.options.publicDataOnly === true && PRIVATE_HISTORY_OPS.has(command.op))
       return Promise.reject(notReadOnPublicData(command.op));
     try {
+      if (this.isDelegatedMirror)
+        throw this.pageWriterUnavailable(command.op);
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
       // A cold wasm fetch: the worker takes calls before its engine is built. Reads wait.
