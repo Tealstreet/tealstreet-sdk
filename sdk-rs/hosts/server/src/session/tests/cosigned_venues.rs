@@ -22,6 +22,7 @@ const READY: &[&str] = &[
     "phemex",
     "woo",
     "bingx",
+    "mexc",
     "bitunix",
 ];
 const KEY: &str = "synthetic-key";
@@ -771,6 +772,11 @@ async fn cosigned_woo_requires_connection_proof() {
 #[tokio::test]
 async fn cosigned_bingx_requires_connection_proof() {
     venue_case("bingx").await;
+}
+
+#[tokio::test]
+async fn cosigned_mexc_requires_connection_proof() {
+    venue_case("mexc").await;
 }
 
 #[tokio::test]

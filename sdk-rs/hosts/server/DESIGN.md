@@ -757,7 +757,12 @@ classifier uses engine `ErrorKind` values: authentication failures are invalid,
 rate limits and transport failures are transient, and complete private startup
 is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
-frame-fed accounts cannot satisfy this check.
+frame-fed accounts cannot satisfy this check. MEXC mainnet proves its normal
+private position-mode, balance, positions and three order-surface reads using
+API-key/timestamp/query HMAC headers; private-stream login is also validated by
+the offline fixture. Wrong-key and replayed signatures fail before attachment,
+foreign sockets cannot settle signing work, and the resident stays unchanged.
+MEXC has no hosted testnet alias; public discovery never proves possession.
 
 Exact `bitunix` readiness uses that venue round trip, with the existing native
 double-SHA256 secret-suffix request signer. Its synthetic venue independently
