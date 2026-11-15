@@ -10,9 +10,18 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bybit",
     // Its native inverse proof and Brazil join now have their own positive/negative controls.
     "bybitinverse",
+    "bybitdemo",
+    "bybitspot",
     "binance",
+    "binancepm",
+    "binanceinverse",
+    "binancespot",
     "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
     "bitget",
+    "bitgetusdc",
     "blofin",
     "kucoin",
 ];

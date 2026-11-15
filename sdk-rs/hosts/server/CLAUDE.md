@@ -91,10 +91,11 @@ Private COSIGNED admissions require possession proof independently of
 DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
-as a fallback when its possession proof is unavailable. Exact Bybit base and
-inverse venues, plus Binance, OKX, Bitget, Blofin and KuCoin base venues, have
-private-startup proof coverage. Bybit inverse reuses its own native startup and
-HMAC signing, with inverse-product and Brazil-site session controls. Other
+as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
+Binance base/PM/inverse/spot, OKX base/EU/demo/EU-demo, Bitget base/USDC,
+Blofin and KuCoin names have native private-startup HMAC proof coverage.
+Variant tests pin product routes, origins and demo headers as well as the
+wrong-key, replay, foreign-socket and resident-preservation controls. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. Matching COSIGNED inits on an admitted connection and

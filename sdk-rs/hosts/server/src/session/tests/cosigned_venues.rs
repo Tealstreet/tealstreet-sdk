@@ -1,15 +1,24 @@
 //! Admission through the production Session path, independent of DELEGATED rollout.
 use super::*;
-use crate::delegated::probe::venue_tests::{Seen, operation};
+use crate::delegated::probe::venue_tests::{Seen, assert_variant_startup, operation};
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
 
 const READY: &[&str] = &[
     "bybit",
     "bybitinverse",
+    "bybitdemo",
+    "bybitspot",
     "binance",
+    "binancepm",
+    "binanceinverse",
+    "binancespot",
     "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
     "bitget",
+    "bitgetusdc",
     "blofin",
     "kucoin",
 ];
@@ -86,7 +95,8 @@ impl Device {
         let preimage = request["wsAuth"]["toSign"].as_str().unwrap();
         let socket_auth = preimage.starts_with("GET/realtime")
             || preimage.contains("/users/self/verify")
-            || preimage.contains("/user/verify");
+            || preimage.contains("/user/verify")
+            || venue == "binancespot" && preimage.starts_with("apiKey=");
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -271,6 +281,8 @@ async fn venue_case(venue: &'static str) {
     let account = resident.joined["acct"].account.clone();
     let provider = account.link.clone().unwrap();
     assert!(seen.lock().unwrap().signed_reads > 0);
+    assert_eq!(account.venue, venue);
+    assert_variant_startup(venue, &seen.lock().unwrap());
     if venue == "bybitinverse" {
         let seen = seen.lock().unwrap();
         assert_eq!(account.venue, "bybitinverse");
@@ -316,6 +328,51 @@ async fn venue_case(venue: &'static str) {
     }
     assert!(device.replayed > 0);
     resident.close();
+}
+
+#[tokio::test]
+async fn cosigned_variant_bybitdemo_requires_connection_proof() {
+    venue_case("bybitdemo").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_bybitspot_requires_connection_proof() {
+    venue_case("bybitspot").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_binancepm_requires_connection_proof() {
+    venue_case("binancepm").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_binanceinverse_requires_connection_proof() {
+    venue_case("binanceinverse").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_binancespot_requires_connection_proof() {
+    venue_case("binancespot").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_okxeu_requires_connection_proof() {
+    venue_case("okxeu").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_okxdemo_requires_connection_proof() {
+    venue_case("okxdemo").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_okxeudemo_requires_connection_proof() {
+    venue_case("okxeudemo").await;
+}
+
+#[tokio::test]
+async fn cosigned_variant_bitgetusdc_requires_connection_proof() {
+    venue_case("bitgetusdc").await;
 }
 
 #[tokio::test]

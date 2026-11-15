@@ -13,14 +13,18 @@ The exact proof-ready venue names are:
 | --- | --- |
 | `bybit` | Native private startup, existing Bybit session suite |
 | `bybitinverse` | Native inverse private startup, HMAC valid/wrong-key/replay controls and Brazil-site session suite |
+| `bybitdemo`, `bybitspot` | Native demo/spot private startup and shared HMAC/session negatives; exact origin and category checks |
 | `binance` | Native private startup and shared HMAC suite |
+| `binancepm`, `binanceinverse`, `binancespot` | Native PAPI/DAPI/spot private startup and shared HMAC/session negatives; exact product routes |
 | `okx` | Native private startup and shared HMAC suite |
+| `okxeu`, `okxdemo`, `okxeudemo` | Native EEA/demo startup and shared HMAC/session negatives; exact origins and simulated-trading headers |
 | `bitget` | Native private startup and shared HMAC suite |
+| `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 
-These names do not imply readiness for sibling spot, inverse, regional or demo
-variants. An unsupported proof returns the existing account error envelope with
+Only these exact names are admitted; the catalog never matches a family prefix.
+An unsupported proof returns the existing account error envelope with
 `initRefused: true`, `kind: "proof-unavailable"`, `transient: false` and
 `outcome: "notSent"`. The server attaches no holder, starts no signing request or
 probe, and leaves an existing resident account intact. An unknown or retired
