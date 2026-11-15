@@ -1,6 +1,7 @@
 //! Actor-preserving signer handover, with a barrier around every owned sign job.
 use super::*;
 use crate::envelope::ModeTransitionRefusal;
+use safe_cex_crypto::admission::{Family, PublicKey};
 use safe_cex_engine::signing::{
     Algorithm, Capability, Identities, Identity, KeyRef, Operation, OwnedSetupExecution,
     PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
@@ -15,6 +16,7 @@ pub(crate) struct AccountSigner {
     identities: Identities,
     link: Option<Arc<SignerLink>>,
     resident: Mutex<Option<ResidentCopy>>,
+    binding: Option<safe_cex_remote_signer::PublicBindingSource>,
 }
 // Engine handles retain dispatch access, never the account's erasure authority.
 struct EngineSigner {
@@ -44,11 +46,22 @@ impl AccountSigner {
         })
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn new(
         provider: Option<safe_cex_engine::signing::Provider>,
         identities: Identities,
         link: Option<Arc<SignerLink>>,
         resident: Option<ResidentCopy>,
+    ) -> Arc<Self> {
+        Self::new_bound(provider, identities, link, resident, None)
+    }
+
+    pub(super) fn new_bound(
+        provider: Option<safe_cex_engine::signing::Provider>,
+        identities: Identities,
+        link: Option<Arc<SignerLink>>,
+        resident: Option<ResidentCopy>,
+        binding: Option<safe_cex_remote_signer::PublicBindingSource>,
     ) -> Arc<Self> {
         Arc::new(Self {
             state: Arc::new(Mutex::new(State {
@@ -60,6 +73,7 @@ impl AccountSigner {
             identities,
             link,
             resident: Mutex::new(resident),
+            binding,
         })
     }
     pub(super) fn resident(&self) -> Option<ResidentCopy> {
@@ -70,7 +84,71 @@ impl AccountSigner {
         *self.resident.lock().unwrap() = Some(resident);
     }
 
+    pub(super) fn public_binding(
+        &self,
+        family: Family,
+    ) -> Result<Option<PublicKey>, ModeTransitionRefusal> {
+        let state = self.state.lock().unwrap();
+        let owner = self.resident.lock().unwrap();
+        if let Some(resident) = owner.as_ref() {
+            let key = resident
+                .identities()
+                .primary
+                .as_ref()
+                .ok_or(ModeTransitionRefusal::Unavailable)?
+                .signing_ref()
+                .map_err(|_| ModeTransitionRefusal::Unavailable)?;
+            return PublicKey::from_provider(family, &resident.provider(), key)
+                .map(Some)
+                .map_err(|_| ModeTransitionRefusal::Unavailable);
+        }
+        if state.active != 0 {
+            return Err(ModeTransitionRefusal::Busy);
+        }
+        self.read_original_binding(family)
+    }
+
+    fn read_original_binding(
+        &self,
+        family: Family,
+    ) -> Result<Option<PublicKey>, ModeTransitionRefusal> {
+        use ModeTransitionRefusal::Unavailable;
+        let original = self.original.as_ref().ok_or(Unavailable)?;
+        let key = self
+            .identities
+            .primary
+            .as_ref()
+            .ok_or(Unavailable)?
+            .signing_ref()
+            .map_err(|_| Unavailable)?;
+        if original.can_sign(key, family.algorithm()) != Capability::Supported {
+            return Err(Unavailable);
+        }
+        if let Some(source) = &self.binding {
+            return match source
+                .public_key(key, family.algorithm())
+                .map_err(|_| Unavailable)?
+            {
+                Some(bytes) => PublicKey::new(family, &bytes)
+                    .map(Some)
+                    .map_err(|_| Unavailable),
+                None => Err(Unavailable),
+            };
+        }
+        PublicKey::from_provider(family, original, key)
+            .map(Some)
+            .map_err(|_| Unavailable)
+    }
+
     pub(super) fn upgrade(&self, resident: ResidentCopy) -> Result<bool, ModeTransitionRefusal> {
+        self.upgrade_proven(resident, None)
+    }
+
+    pub(super) fn upgrade_proven(
+        &self,
+        resident: ResidentCopy,
+        public: Option<&PublicKey>,
+    ) -> Result<bool, ModeTransitionRefusal> {
         use ModeTransitionRefusal::{Busy, Unavailable};
         let mut state = self.state.lock().unwrap();
         let mut owner = self.resident.lock().unwrap();
@@ -83,28 +161,57 @@ impl AccountSigner {
         let original = self.original.as_ref().ok_or(Unavailable)?;
         let primary = self.identities.primary.as_ref().ok_or(Unavailable)?;
         let key = primary.signing_ref().map_err(|_| Unavailable)?;
-        // Address/nonce setup is sealed to the original provider lifetime.
-        // Such accounts need a separate safe handover; never rebuild their actor here.
-        if ![
+        let hmac = [
             Algorithm::HmacSha256,
             Algorithm::HmacSha512,
             Algorithm::Sha256SecretSuffix,
         ]
         .iter()
-        .any(|algorithm| original.can_sign(key, *algorithm) == Capability::Supported)
+        .any(|algorithm| original.can_sign(key, *algorithm) == Capability::Supported);
+        let families: Vec<_> = [
+            Family::Ethereum,
+            Family::Stark,
+            Family::Schnorr,
+            Family::Ed25519,
+        ]
+        .into_iter()
+        .filter(|family| original.can_sign(key, family.algorithm()) == Capability::Supported)
+        .collect();
+        if original.can_sign(key, Algorithm::Es256) == Capability::Supported
+            || (hmac && !families.is_empty())
+            || (!hmac && families.len() != 1)
+            || (public.is_some() && families.is_empty())
         {
             return Err(Unavailable);
         }
         let aliases = aliases(&self.identities, resident.identities()).map_err(|_| Unavailable)?;
         let provider = resident.provider();
+        let mapped = aliases.get(key).ok_or(Unavailable)?;
         for algorithm in [
             Algorithm::HmacSha256,
             Algorithm::HmacSha512,
             Algorithm::Sha256SecretSuffix,
+            Algorithm::Secp256k1Digest,
+            Algorithm::StarkDigest,
+            Algorithm::SchnorrDigest,
+            Algorithm::Ed25519,
         ] {
             if original.can_sign(key, algorithm) == Capability::Supported
-                && provider.can_sign(aliases.get(key).ok_or(Unavailable)?, algorithm)
-                    != Capability::Supported
+                && provider.can_sign(mapped, algorithm) != Capability::Supported
+            {
+                return Err(Unavailable);
+            }
+        }
+        if let Some(family) = families.first().copied() {
+            let bound = self.read_original_binding(family)?;
+            let expected = bound.as_ref().or(public).ok_or(Unavailable)?;
+            if expected.family() != family
+                || public.is_some_and(|proof| {
+                    proof.family() != family || proof.as_bytes() != expected.as_bytes()
+                })
+                || !expected
+                    .matches_provider(&provider, mapped)
+                    .map_err(|_| Unavailable)?
             {
                 return Err(Unavailable);
             }
@@ -733,3 +840,7 @@ mod registration_tests {
             .await;
     }
 }
+
+#[cfg(test)]
+#[path = "provider_lifetimes.rs"]
+mod provider_lifetimes;

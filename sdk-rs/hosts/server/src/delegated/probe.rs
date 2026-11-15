@@ -25,6 +25,9 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     // Its own Spot startup/read proof covers key, replay and physical-socket binding.
     "kucoinspot",
     "phemex",
+    "woo",
+    "bingx",
+    "bitunix",
 ];
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {
@@ -122,6 +125,14 @@ impl ProbeRefusal {
         transient: true,
         ..Self::INVALID
     };
+
+    pub(crate) fn transition(reason: crate::envelope::ModeTransitionRefusal) -> Self {
+        Self {
+            transient: reason.transient(),
+            transition: Some(reason),
+            ..Self::INVALID
+        }
+    }
 
     pub(crate) fn at(mut self, stage: RefusalStage) -> Self {
         self.stage = stage;

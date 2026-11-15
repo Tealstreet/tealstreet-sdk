@@ -1,0 +1,59 @@
+{
+  "/api/v1/futures/market/trading_pairs": {
+    "code": 0,
+    "data": [
+      {
+        "symbol": "BTCUSDT",
+        "base": "BTC",
+        "quote": "USDT",
+        "symbolStatus": "OPEN",
+        "basePrecision": 3,
+        "quotePrecision": 1,
+        "maxLimitOrderVolume": "100"
+      }
+    ]
+  },
+  "/api/v1/futures/market/tickers": {
+    "code": 0,
+    "data": [
+      {
+        "symbol": "BTCUSDT",
+        "last": "96000",
+        "open": "95000",
+        "markPrice": "96001",
+        "baseVol": "1000",
+        "quoteVol": "96000000"
+      }
+    ]
+  },
+  "/api/v1/futures/account": {
+    "code": 0,
+    "data": [
+      {
+        "marginCoin": "USDT",
+        "available": "900",
+        "margin": "100",
+        "frozen": "3",
+        "positionMode": "HEDGE",
+        "crossUnrealizedPNL": "10",
+        "isolationUnrealizedPNL": "2"
+      }
+    ]
+  },
+  "/api/v1/futures/position/get_pending_positions": {
+    "code": 0,
+    "data": {
+      "positionList": []
+    }
+  },
+  "/api/v1/futures/trade/get_pending_orders": {
+    "code": 0,
+    "data": {
+      "orderList": []
+    }
+  },
+  "/api/v1/futures/tpsl/get_pending_orders": {
+    "code": 0,
+    "data": []
+  }
+}

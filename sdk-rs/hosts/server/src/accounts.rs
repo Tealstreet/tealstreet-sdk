@@ -4,6 +4,7 @@ use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_d
 use crate::envelope::InitPayload;
 use crate::state::Log;
 use crate::threads::EngineThreads;
+use safe_cex_crypto::admission::Family;
 use safe_cex_native::DisposalCause;
 use safe_cex_native::resolve::{self, AccountTransport, Provider};
 use safe_cex_native::{
@@ -1543,6 +1544,17 @@ impl Registry {
         }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
+        let public = attempt
+            ._probe
+            .as_ref()
+            .and_then(|proof| proof.public_join.as_ref());
+        if public.is_some_and(|proof| {
+            existing
+                .as_ref()
+                .is_none_or(|current| !proof.account.ptr_eq(&Arc::downgrade(current)))
+        }) {
+            return Err("Account verification expired".into());
+        }
         if let Some(expected) = &apply
             && (expected.identity.is_none()
                 || !self.holds(expected, holder)
@@ -1574,11 +1586,14 @@ impl Registry {
                     if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
                         return Err("Account is retiring; account not attached".into());
                     }
-                    if account
-                        .signing
-                        .upgrade(resident)
-                        .map_err(|reason| reason.reason().to_owned())?
-                    {
+                    let upgraded = match public {
+                        Some(proof) => account
+                            .signing
+                            .upgrade_proven(resident, Some(&proof.public)),
+                        None => account.signing.upgrade(resident),
+                    }
+                    .map_err(|reason| reason.reason().to_owned())?;
+                    if upgraded {
                         account.broadcast_signing_mode();
                     }
                 }
@@ -1722,6 +1737,56 @@ impl Registry {
                 options,
                 remote,
             } = prepare(init, public_only, link.clone())?;
+            let remote = match remote {
+                Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
+                    let account_index = init
+                        .application_id
+                        .as_deref()
+                        .and_then(|value| value.parse().ok())
+                        .ok_or("Missing signer registration account")?;
+                    let index = init
+                        .api_key_index
+                        .as_deref()
+                        .and_then(|value| value.parse().ok())
+                        .ok_or("Missing signer registration index")?;
+                    let captured = authority.clone();
+                    let expiry = token.as_ref().map(|(_, expiry)| *expiry);
+                    let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+                        captured.check_admission().is_ok()
+                            && expiry.is_none_or(|expiry| expiry > now_ms())
+                    });
+                    let proxy_token = ProxyToken::new();
+                    proxy_token.set(token.clone());
+                    let transport =
+                        NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
+                            .with_venue(&venue)
+                            .with_io_guard(allowed.clone());
+                    #[cfg(test)]
+                    let transport =
+                        crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+                    let network = safe_cex_venues::lighter_registration::Network::from_options(
+                        venue == "lighter-robinhood",
+                        init.testnet == Some(true),
+                    );
+                    let public = crate::admission::fetch_lighter_registered_key(
+                        &transport,
+                        network,
+                        account_index,
+                        index,
+                        allowed,
+                    )
+                    .await
+                    .map_err(|_| "Signer registration unavailable")?;
+                    authority.check_admission()?;
+                    crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+                    Some(
+                        remote
+                            .with_registered_public_key(&public)
+                            .map_err(|error| error.to_string())?,
+                    )
+                }
+                remote => remote,
+            };
             let signer = remote.as_ref().map(|remote| remote.provider.clone());
             (link, plan, options, remote, signer, None)
         };
@@ -1732,8 +1797,15 @@ impl Registry {
             .transpose()
             .map_err(|_| "Invalid signer identities".to_owned())?
             .unwrap_or_default();
-        let signing =
-            AccountSigner::new(signer.clone(), identities, link.clone(), delegated.clone());
+        let signing = AccountSigner::new_bound(
+            signer.clone(),
+            identities,
+            link.clone(),
+            delegated.clone(),
+            remote
+                .as_ref()
+                .and_then(|remote| remote.public_binding_source()),
+        );
         let signer: Option<safe_cex_engine::signing::Provider> = if !delegated_build && !public_only
         {
             Some(signing.provider())
@@ -4899,16 +4971,43 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn asterdex_origins_use_existing_hosted_japan_how_route() {
+        for testnet in [false, true] {
+            let init = InitPayload {
+                account_name: "fixture-asterdex".into(),
+                exchange_name: "asterdex".into(),
+                testnet: Some(testnet),
+                tealstreet_proxy: Some(false),
+                tealstreet_tunnel: Some(false),
+                ..InitPayload::default()
+            };
+            for public_only in [false, true] {
+                let plan = routing_plan(&init, public_only).unwrap();
+                assert_eq!(plan.http.mode, safe_cex_native::HttpRouteMode::How);
+                assert_eq!(
+                    plan.http.tunnel_url,
+                    Some(resolve::route_bases().unwrap().tunnel["jp"].clone())
+                );
+                assert!(plan.http.prefix.is_empty());
+                assert!(!plan.http.authorize);
+                assert!(plan.http.header_aliases.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn a_venue_with_no_hosted_origin_is_refused_in_plain_words() {
+        // Binance Options is deliberately never hosted; keep this sentinel
+        // independent of venues whose REST-origin prerequisites are being added.
         let init = InitPayload {
             account_name: "a".into(),
-            exchange_name: "asterdex".into(),
+            exchange_name: "binanceoptions".into(),
             ..InitPayload::default()
         };
         let refusal = routing_plan(&init, true).unwrap_err();
         assert_eq!(
             refusal,
-            "asterdex cannot run on the Hosted server. Turn Hosted off to use this account."
+            "binanceoptions cannot run on the Hosted server. Turn Hosted off to use this account."
         );
     }
 

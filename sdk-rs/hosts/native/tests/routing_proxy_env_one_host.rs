@@ -40,4 +40,19 @@ fn no_route_to_the_fleet_carries_our_token() {
         resolve_routing_plan("okx", &inputs, "https://www.okx.com", Provider::Tealstreet).unwrap();
     assert_eq!(plan.http.prefix, FLEET);
     assert!(!plan.http.authorize);
+
+    let inputs = account_transport(
+        "mexc",
+        &AccountTransport {
+            tealstreet_tunnel: Some(true),
+            ..account
+        },
+    )
+    .unwrap();
+    let base = safe_cex_native::resolve::rest_base_url("mexc", false).unwrap();
+    let plan = resolve_routing_plan("mexc", &inputs, base, Provider::Tealstreet).unwrap();
+    assert_eq!(plan.http.prefix, FLEET);
+    assert!(!plan.http.authorize);
+    assert_eq!(plan.http.authorization_header, "Tealstreet-Authorization");
+    assert!(plan.http.header_aliases.is_empty());
 }

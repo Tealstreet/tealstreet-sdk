@@ -10,6 +10,10 @@ relay gate off. Its data is `src/routing/table.json`, generated from the TS tabl
 by `packages/safe-cex/src/transport/engine.native-routing-port.test.ts`
 (`UPDATE_NATIVE_ROUTING_PORT=1`), which also writes the TS plans that
 `tests/routing_port.rs` holds it to. Secondary read keys are not routed natively yet.
+Hosted AsterDEX resolves `https://fapi.asterdex.com` on mainnet and
+`https://fapi.asterdex-testnet.com` on testnet. Its existing account defaults keep
+REST on the Japan HOW egress even with saved proxy/tunnel flags off. WebSocket
+routing and the COSIGNED private-startup proof catalog are unchanged.
 WOO routing inputs also carry the public `applicationId`, retaining its private
 stream suffix when using the fleet relay. Hosted WOO resolves the venue
 mainnet/staging REST origins before startup and passes that application ID from
@@ -17,12 +21,25 @@ account init into the routing plan. Signing admission remains registry-owned.
 Hosted KuCoin Spot resolves its own `https://api.kucoin.com` REST origin,
 independently of Futures' `https://api-futures.kucoin.com`. Both exact names
 refuse testnet rather than falling through to a production origin.
+
+Hosted MEXC resolves its mainnet REST origin to `https://api.mexc.com` through
+the existing Japan proxy pool, including when the saved proxy flag is false.
+Saved MEXC tunnel flags are normalized off: MEXC cannot use HOW, and an old
+flag must not suppress the required REST proxy prefix.
+MEXC has no sandbox: hosted testnet refuses `NoBaseUrl`, never the live alias.
+Its direct WebSocket routing and COSIGNED private-startup proof catalog are unchanged.
 The deployment can replace the Tealstreet hosts: `PROXY_PRIVATE_URL` sets every
 whitelisted private pool and `PROXY_PUBLIC_URL` the public CORS proxy (https), and
 `PROXY_TUNNEL_URL` every tunnel egress and the table routes under it (wss). Each
 must name a `tealstreet.io` host, with no query; a trailing `/` is dropped. Unset
 keeps the table's hosts. The exchange server reads them once at startup
 (`resolve::route_bases`), refuses a malformed one, and logs the effective bases.
+
+Hosted Coinbase perpetuals resolve `https://drb.coinbase.com/api/v2`; Coinbase
+Spot resolves `https://api.coinbase.com`. Both retain the existing regional REST
+proxy and provider-owned JWT handling. Hosted testnet refuses rather than using
+live endpoints: the native engines do not implement the separate static Advanced
+Trade sandbox. Private-startup proof readiness is unchanged.
 
 A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
