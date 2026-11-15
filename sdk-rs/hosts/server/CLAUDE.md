@@ -130,6 +130,10 @@ Blofin, KuCoin, Phemex and BingX names have native private-startup HMAC proof co
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
+Exact Bitunix uses its existing native private-startup venue round trip and
+double-SHA256 secret-suffix signer, with independently checked synthetic private
+reads and wrong-key, replay, foreign-socket and resident-preservation controls.
+There is no server-local proof shortcut or trading write in that probe.
 Variant tests pin product routes, origins and demo headers as well as the
 wrong-key, replay, foreign-socket and resident-preservation controls. BingX perpetuals
 prove signed private account reads independently of API-key-only listen-key acquisition;

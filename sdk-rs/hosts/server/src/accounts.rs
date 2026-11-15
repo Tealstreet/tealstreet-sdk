@@ -4971,16 +4971,43 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn asterdex_origins_use_existing_hosted_japan_how_route() {
+        for testnet in [false, true] {
+            let init = InitPayload {
+                account_name: "fixture-asterdex".into(),
+                exchange_name: "asterdex".into(),
+                testnet: Some(testnet),
+                tealstreet_proxy: Some(false),
+                tealstreet_tunnel: Some(false),
+                ..InitPayload::default()
+            };
+            for public_only in [false, true] {
+                let plan = routing_plan(&init, public_only).unwrap();
+                assert_eq!(plan.http.mode, safe_cex_native::HttpRouteMode::How);
+                assert_eq!(
+                    plan.http.tunnel_url,
+                    Some(resolve::route_bases().unwrap().tunnel["jp"].clone())
+                );
+                assert!(plan.http.prefix.is_empty());
+                assert!(!plan.http.authorize);
+                assert!(plan.http.header_aliases.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn a_venue_with_no_hosted_origin_is_refused_in_plain_words() {
+        // Binance Options is deliberately never hosted; keep this sentinel
+        // independent of venues whose REST-origin prerequisites are being added.
         let init = InitPayload {
             account_name: "a".into(),
-            exchange_name: "asterdex".into(),
+            exchange_name: "binanceoptions".into(),
             ..InitPayload::default()
         };
         let refusal = routing_plan(&init, true).unwrap_err();
         assert_eq!(
             refusal,
-            "asterdex cannot run on the Hosted server. Turn Hosted off to use this account."
+            "binanceoptions cannot run on the Hosted server. Turn Hosted off to use this account."
         );
     }
 

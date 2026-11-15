@@ -6,7 +6,7 @@
     },
     {
       "venue": "asterdex",
-      "reason": "No native Hosted REST origin; legacy HMAC and v3 wallet/agent proof paths need separate server bridge coverage."
+      "reason": "Native legacy HMAC and v3 wallet/agent private-startup proof paths need separate server coverage; resolving an origin does not certify readiness."
     },
     {
       "venue": "backpack",
@@ -29,16 +29,12 @@
       "reason": "Production metadata disables this venue; native Hosted REST origin and private-startup proof are not built. Keep its live beta roster entry."
     },
     {
-      "venue": "bitunix",
-      "reason": "Native double-SHA private-startup proof with timestamp, replay and socket controls is not built."
-    },
-    {
       "venue": "coinbase",
-      "reason": "No native Hosted REST origin; server JWT/JWS ES256/EdDSA bridge and bound private-startup proof are not built."
+      "reason": "Bound native DRB private-startup proof for CDP JWT/JWS (ES256/EdDSA), account identity, expiry and replay/socket controls is not built."
     },
     {
       "venue": "coinbasespot",
-      "reason": "No native Hosted Spot origin; server JWT/JWS signing and exact Spot private-startup proof are not built."
+      "reason": "Bound native Advanced Trade Spot private-startup proof for CDP JWT/JWS, account identity, expiry and replay/socket controls is not built."
     },
     {
       "venue": "cryptocom",

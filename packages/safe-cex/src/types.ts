@@ -1,5 +1,13 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+export type {
+  JoinProofVenue,
+  JoinProofBytes32,
+  JoinProofStatement,
+  JoinProofRequest,
+  JoinProofResponse,
+  JoinProofEnvelope,
+} from './joinProof.types';
 export type { HistoricalOrder } from './generated/HistoricalOrder';
 export type { HistoricalTrade } from './generated/HistoricalTrade';
 export type { ClosedPnlEntry } from './generated/ClosedPnlEntry';

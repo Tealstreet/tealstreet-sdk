@@ -22,6 +22,7 @@ const READY: &[&str] = &[
     "kucoin",
     "phemex",
     "bingx",
+    "bitunix",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -778,6 +779,11 @@ async fn cosigned_bingx_requires_connection_proof() {
 #[tokio::test]
 async fn cosigned_okxeu_requires_connection_proof() {
     venue_case("okxeu").await;
+}
+
+#[tokio::test]
+async fn cosigned_bitunix_requires_connection_proof() {
+    venue_case("bitunix").await;
 }
 
 #[path = "cosigned_okxeu.rs"]

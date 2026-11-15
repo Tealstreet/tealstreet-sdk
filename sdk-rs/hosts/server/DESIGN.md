@@ -765,6 +765,11 @@ Config alone cannot complete the probe. Consecutive signature refusals allow
 one re-signed read then fail permanently; no admission budget is extended.
 EEA demo remains outside the exact COSIGNED proof-ready catalog.
 
+Exact `bitunix` readiness uses that venue round trip, with the existing native
+double-SHA256 secret-suffix request signer. Its synthetic venue independently
+checks nonce/timestamp/key/query signing bytes on the actual private startup
+reads; a public response or a signer result alone never completes admission.
+
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The COSIGNED catalog does not gate DELEGATED admission. COSIGNED coverage
 includes valid startup, a different signing key, a prior signature and a
