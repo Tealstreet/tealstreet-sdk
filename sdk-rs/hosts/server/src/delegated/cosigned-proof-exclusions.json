@@ -17,10 +17,6 @@
       "reason": "Client Hosted gate blocks this venue because no native server origin exists; options startup proof is not built."
     },
     {
-      "venue": "bingx",
-      "reason": "Native signed private-startup proof and replay/socket controls are not built; do not infer readiness from the HMAC codec."
-    },
-    {
       "venue": "bingxspot",
       "reason": "Production metadata disables Spot and the native Hosted origin/private proof are missing; fixture-only admission is not live support."
     },
