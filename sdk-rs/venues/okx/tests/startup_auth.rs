@@ -812,6 +812,47 @@ fn eea_streamed_catalogue_refusal_has_the_same_bounded_retry() {
 }
 
 #[test]
+fn eea_config_rate_limit_with_signature_body_is_a_typed_transient_failure() {
+    for demo in [false, true] {
+        let (mut engine, mut rig, config) = eea_config(demo, false);
+        respond_with(
+            &mut engine,
+            &config,
+            429,
+            "Retry-After: 12",
+            r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#,
+            1.,
+        );
+        let out = rig.take(&mut engine, 1.);
+        assert!(rig.failures.is_empty());
+        let diagnostic = out
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::Event(event))
+                    if event.fields.contains(&("kind", "rateLimited".into())) =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("HTTP 429 must retain its typed rate-limit diagnosis");
+        assert_eq!(diagnostic.code, "request.failed");
+        assert!(
+            diagnostic
+                .fields
+                .contains(&("retryAfterMs", 12_000.0.into()))
+        );
+        assert!(!out.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == "auth.rejected"
+        )));
+        let (at, _) = rig
+            .until(&mut engine, is_config)
+            .expect("rate limit keeps the retry");
+        assert!(at >= 12_001.);
+    }
+}
+
+#[test]
 fn eea_config_interrupted_signature_streak_remains_transient() {
     let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
     for interruption in [Some(503), Some(429), None] {
@@ -833,7 +874,16 @@ fn eea_config_interrupted_signature_streak_remains_transient() {
                 },
             );
         }
-        rig.take(&mut engine, at);
+        let out = rig.take(&mut engine, at);
+        assert!(!out.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == "auth.rejected"
+        )));
+        if interruption == Some(429) {
+            assert!(out.iter().any(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                    if event.fields.contains(&("kind", "rateLimited".into()))
+            )));
+        }
         let (next_at, retry) = rig.until(&mut engine, is_config).unwrap();
         if interruption == Some(429) {
             assert!(next_at >= at + 10_000.);

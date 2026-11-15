@@ -100,5 +100,8 @@ Config and keyed catalogue reads share the native authentication-code policy:
 one freshly signed retry after `50113`, then a permanent typed refusal on a
 second consecutive answer for that read and credential. Transport, rate and
 other replies reset the streak; retry floors and admission deadlines do not grow.
+Pending EEA config reads retain the HTTP rate/transport diagnosis on unproven
+responses, even when their body contains an authentication code. Such a reply
+cannot become a permanent credential refusal in the shared hosted probe.
 Public/frame-fed, non-EEA and already-configured refresh paths retain their
 existing behavior. No startup step places or replays a trading write.

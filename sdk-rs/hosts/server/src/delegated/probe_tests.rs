@@ -40,6 +40,7 @@ const PASS: &str = "synthetic-passphrase";
 pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
     pub(crate) config_refusals_remaining: usize,
+    pub(crate) config_refusal_status: Option<u16>,
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
     pub(crate) urls: Vec<String>,
@@ -485,7 +486,16 @@ impl Transport for VenueIo {
             seen.urls.push(r.url.clone());
         }
         let response = self.response(&r);
-        let status = if self.venue == "phemex" && response["code"] == 401 {
+        let status = if self.venue == "okxeu"
+            && path(&r) == "/api/v5/account/config"
+            && response["code"] == "50113"
+        {
+            self.seen
+                .lock()
+                .unwrap()
+                .config_refusal_status
+                .unwrap_or(200)
+        } else if self.venue == "phemex" && response["code"] == 401 {
             401
         } else {
             200
