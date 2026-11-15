@@ -152,3 +152,10 @@ e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-r
 9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:370
 9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:371
 9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:jwt:410
+
+# Synthetic CDP public names only, not signing material; current fixtures build
+# organizations/synthetic/apiKeys/synthetic from explicit public segments.
+# Exact historical fingerprints only; production and future changes stay scanned.
+49bdb3c28aa59a4042e22b7837e9733be189619d:sdk-rs/hosts/server/src/accounts/provider_lifetimes.rs:generic-api-key:323
+9552becb53db1487e1e1398685c4e48bd4f18220:sdk-rs/hosts/server/src/session/tests/provider_handover_refusals.rs:generic-api-key:13
+9552becb53db1487e1e1398685c4e48bd4f18220:sdk-rs/hosts/server/src/session/tests/provider_handover_refusals.rs:generic-api-key:44

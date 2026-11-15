@@ -24,6 +24,12 @@ pub(crate) struct MockVenue {
     material: String,
     pub observed: Arc<Mutex<Observed>>,
     admission: Option<crate::delegated::probe::venue_tests::VenueIo>,
+    registration: Option<Registration>,
+}
+#[derive(Clone)]
+struct Registration {
+    body: Value,
+    gate: Arc<tokio::sync::Semaphore>,
 }
 
 impl MockVenue {
@@ -33,6 +39,7 @@ impl MockVenue {
             material,
             observed: Arc::default(),
             admission: None,
+            registration: None,
         }
     }
 
@@ -46,6 +53,13 @@ impl MockVenue {
             seen: Arc::clone(&seen),
         });
         (mock, seen)
+    }
+
+    pub(crate) fn registered_key(body: Value, gate: Arc<tokio::sync::Semaphore>) -> Self {
+        Self {
+            registration: Some(Registration { body, gate }),
+            ..Self::new("synthetic".into(), "synthetic".into())
+        }
     }
 
     fn accepts(&self, request: &HttpRequest) -> bool {
@@ -99,7 +113,23 @@ impl Transport for MockVenue {
         }
         self.observed.lock().unwrap().preparations += 1;
         let venue = self.clone();
-        Box::pin(async move { Ok(Box::new(Prepared(venue)) as Box<dyn PreparedHttp>) })
+        Box::pin(async move {
+            if let Some(registration) = &venue.registration {
+                assert_eq!(
+                    intent,
+                    safe_cex_engine::request_context::RoutingIntent::Public
+                );
+                assert_eq!(request.method, Method::Get);
+                assert!(
+                    request
+                        .url
+                        .ends_with("/api/v1/apikeys?account_index=42&api_key_index=1")
+                );
+                assert!(request.headers.is_empty() && request.body.is_none());
+                registration.gate.acquire().await.unwrap().forget();
+            }
+            Ok(Box::new(Prepared(venue)) as Box<dyn PreparedHttp>)
+        })
     }
 
     fn connect(
@@ -129,6 +159,11 @@ impl Transport for MockVenue {
             return io.request(request, events);
         }
         self.observed.lock().unwrap().requests += 1;
+        if let Some(registration) = &self.registration {
+            self.observed.lock().unwrap().reads += 1;
+            answer(&events, request.id, registration.body.clone());
+            return;
+        }
         let path = request.url.split('?').next().unwrap();
         let private = request
             .headers

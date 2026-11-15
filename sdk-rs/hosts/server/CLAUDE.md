@@ -76,17 +76,28 @@ passes opaque refs to the engine and creates no remote signer link. Public mode
 is recorded explicitly. Unproved/trusted construction still refuses cross-mode
 attachment. Socket joins first prove their own credentials: COSIGNED can attach
 to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
-a COSIGNED HMAC resident without replacing its actor, orders or algo jobs.
-All outstanding signer futures/setup work must settle first; busy handovers
-refuse transiently without canceling or replaying them. Address/nonce-sealed
-non-HMAC lifetimes refuse explicitly as unavailable instead of being rebuilt.
-The original opaque refs map by identity role to the protected resident refs.
+a supported COSIGNED resident without replacing its actor, orders or algo jobs.
+Public-key handovers locally match the candidate to the original provider's
+completed Ethereum/Stark binding or canonical Ed25519 public identity. Schnorr
+pins its routed registered key before the original provider is published, then
+rechecks registration against that immutable binding and the candidate on join.
+Already-promoted actors compare their actual installed resident key. Unpinned
+legacy actors refuse explicitly with `mode_transition_unavailable`; a new lookup
+cannot invent their old key. Captured init/lease/expiry guards and exact actor
+binding survive every lookup. Same settings never revive a retired proof.
+All outstanding original sign futures/setup work must join before handover; busy
+handovers refuse transiently without canceling or replaying them. Engine-owned
+address seals, nonce ownership and original opaque refs survive unchanged;
+only dispatch refs map by identity role to the protected resident refs.
 Account-owned signer control retains the protected erasure authority; engine
 dispatch handles never retain it. Reconfiguration shares that authority between
 accounts, and the last account owner drop erases retained engine handles.
 Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
 registration's label/instanceId. Refusals have attached=false and no actualMode.
-Socket handover and private-read verification precede any transition.
+Socket handover and possession verification precede any transition. A verified
+resident public-key join uses the local key proof, not an unsigned startup read. Coinbase
+CDP remains explicitly proof-unavailable pending its COSIGNED JWT setup and
+venue-proof implementation; it never silently falls back to another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
@@ -115,12 +126,18 @@ DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
 Binance base/PM/inverse/spot, OKX base/demo, Bitget base/USDC,
-Blofin, KuCoin and Phemex names have native private-startup HMAC proof coverage.
+Blofin, KuCoin, Phemex and BingX names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
+Exact Bitunix uses its existing native private-startup venue round trip and
+double-SHA256 secret-suffix signer, with independently checked synthetic private
+reads and wrong-key, replay, foreign-socket and resident-preservation controls.
+There is no server-local proof shortcut or trading write in that probe.
 Variant tests pin product routes, origins and demo headers as well as the
-wrong-key, replay, foreign-socket and resident-preservation controls. Other
+wrong-key, replay, foreign-socket and resident-preservation controls. BingX perpetuals
+prove signed private account reads independently of API-key-only listen-key acquisition;
+Spot and testnet do not inherit that proof. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. The shared local-proof strategy captures canonical
@@ -135,6 +152,13 @@ and authoritative per-family facts must precede any activation. Matching COSIGNE
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
+
+COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
+Every exact `remoteSigning.enabled` venue needs native proof readiness or a
+reason in `src/delegated/cosigned-proof-exclusions.json`; remove its exclusion
+when proof lands. The 33-production-venue census is checked separately, and
+Cargo signing features are only a family cross-check. The reason list changes
+no runtime availability, admission or client fallback policy.
 
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;
