@@ -238,9 +238,7 @@ fn aliases(old: &Identities, new: &Identities) -> Result<Aliases, SignError> {
             Ok(())
         };
         pair(&old.credential, &new.credential)?;
-        if let Some(old) = old.signing_opt() {
-            pair(old, new.signing_ref()?)?;
-        }
+        pair(old.signing_ref()?, new.signing_ref()?)?;
         if let Some(old) = &old.passphrase {
             pair(old, new.passphrase.as_ref().ok_or(SignError::MissingKey)?)?;
         }
