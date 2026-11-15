@@ -19,6 +19,8 @@ it.each(['twap:start', 'chaser:start', 'exec'])('refuses %s when owner-bound sta
       throw new Error('authenticated owner changed during startup');
     }),
     algosRunning: true,
+    // Status is observational; a successful retry still needs execution admission.
+    checkAlgosForExecution: vi.fn(() => true),
     algoDispose: vi.fn(async () => {}),
     dispose: vi.fn(),
   };
@@ -27,10 +29,17 @@ it.each(['twap:start', 'chaser:start', 'exec'])('refuses %s when owner-bound sta
     expect(() => exchange.routeAlgoOp('acct', op, run, refuse)).not.toThrow();
     expect(run).not.toHaveBeenCalled();
     expect(refuse).toHaveBeenCalledExactlyOnceWith(`${op} was not run: authenticated owner changed during startup`);
+    expect(host.checkAlgosForExecution).not.toHaveBeenCalled();
     host.algoStart.mockImplementation(() => {});
     exchange.routeAlgoOp('acct', op, run, refuse);
     expect(run).toHaveBeenCalledTimes(1);
     expect(refuse).toHaveBeenCalledTimes(1);
+    expect(host.checkAlgosForExecution).toHaveBeenCalledExactlyOnceWith();
+    host.checkAlgosForExecution.mockReturnValue(false);
+    exchange.routeAlgoOp('acct', op, run, refuse);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(refuse).toHaveBeenCalledTimes(2);
+    expect(refuse).toHaveBeenLastCalledWith(`${op} was not run: the bybit engine stopped before it could run algos`);
   } finally {
     exchange.dispose();
   }
