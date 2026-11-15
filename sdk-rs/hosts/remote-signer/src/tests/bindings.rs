@@ -44,6 +44,26 @@ fn canonical_public_metadata_is_bound_to_the_original_ref_and_algorithm() {
 }
 
 #[test]
+fn invalid_grvt_metadata_stays_unbound_for_canonical_engine_validation() {
+    for address in [Value::Null, json!(""), json!("stale-invalid-address")] {
+        let (remote, options) = account(
+            closed_link(),
+            "grvt",
+            json!({"key":"synthetic-public-account", "grvtSignerAddress":address.clone()}),
+        );
+        assert_eq!(options["grvtSignerAddress"], address);
+        let (_, key, _) = refs(&options);
+        assert_eq!(
+            remote
+                .public_binding_source()
+                .unwrap()
+                .public_key(&key, Algorithm::Secp256k1Digest),
+            Err(SignError::Unavailable)
+        );
+    }
+}
+
+#[test]
 fn orderly_alias_bindings_do_not_change_hosted_eligibility() {
     for venue in ["orderly", "kodiakfi", "mode", "what", "woofi"] {
         // Exercise the existing provider codec without enabling a hosted venue.
