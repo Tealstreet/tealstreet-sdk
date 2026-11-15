@@ -20,6 +20,7 @@ const READY: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "bingx",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -757,4 +758,9 @@ async fn cosigned_bybit_proof_ignores_obsolete_delegated_rollout_field() {
 #[tokio::test]
 async fn cosigned_phemex_requires_connection_proof() {
     venue_case("phemex").await;
+}
+
+#[tokio::test]
+async fn cosigned_bingx_requires_connection_proof() {
+    venue_case("bingx").await;
 }
