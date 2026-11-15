@@ -166,7 +166,7 @@ async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account
             let registry = tests::registry();
             let mut init = init();
             let account = testing::trading_account(&registry, "A", &init);
-            for venue in ["hyrotrader", "binanceoptions", "kucoinspot", "unknown"] {
+            for venue in ["hyrotrader", "binanceoptions", "bingxspot", "unknown"] {
                 assert!(
                     safe_cex_native::resolve::rest_base_url(venue, false).is_err(),
                     "{venue}: refusal control must lack a hosted origin"
