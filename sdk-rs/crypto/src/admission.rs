@@ -275,3 +275,8 @@ fn immediate(provider: &Provider, request: SignRequest) -> Result<Vec<u8>, SignE
     }
     Ok(result.values.remove(0))
 }
+
+/// Canonical public facts; the caller retains authority and provenance.
+pub mod identity;
+/// Closed, additive join-proof payloads. They do not enable a signing path.
+pub mod wire;

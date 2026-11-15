@@ -27,3 +27,7 @@ compatibility alias. Mobile is DELEGATED-only; DELEGATED clients have no WASM
 engine or local signing, and every write is a typed v1 action over the existing
 hosted WebSocket. Current contract: `docs/plans/callers/delegated-action-frames.md`;
 older mode/transport discussions are explicitly superseded where they disagree.
+
+Closed join-proof v1 payloads and canonical public identity facts are documented
+in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
+enable Session admission, device signing dispatch or venue readiness.

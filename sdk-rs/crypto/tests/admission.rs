@@ -161,3 +161,6 @@ fn ethereum_message_matches_independent_typed_data_encoder() {
         safe_cex_crypto::ethereum::ethereum_message_hash(&proof.digest())
     );
 }
+
+#[path = "contracts/join_proof.rs"]
+mod join_proof_contract;
