@@ -135,7 +135,33 @@ async fn admitted_delegated_to_cosigned_mode_change_still_requires_a_new_proof()
     assert!(session.next_verification > verification);
     assert_eq!(session.joined["acct"].client.id, client);
     assert!(Arc::ptr_eq(&session.joined["acct"].account, &account));
+    let completion = complete(
+        &mut session,
+        &mut sent,
+        &mut done,
+        &mut Device::default(),
+        Answer::OtherKey,
+        Some("cosigned-requested"),
+    )
+    .await;
+    assert!(completion.probe.as_ref().unwrap().permit.is_err());
+    session.verification_completed(completion).await.unwrap();
     assert!(account.delegated().is_some());
+    assert!(session.pending_verifications.is_empty());
+    assert!(f.rejected.load(Ordering::SeqCst) > 0);
+    session
+        .init(init(Some("cosigned-after-refusal")))
+        .await
+        .unwrap();
+    assert!(
+        session.pending_verifications.contains_key("acct"),
+        "a refused COSIGNED proof cannot change the prior DELEGATED admission"
+    );
+    assert!(
+        session.pending_verifications["acct"]
+            .cosigned_link
+            .is_some()
+    );
     assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
     session.close();
 }
