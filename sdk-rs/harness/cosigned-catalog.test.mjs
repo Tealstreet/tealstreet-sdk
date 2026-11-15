@@ -30,10 +30,64 @@ function exactNames(names) {
   return new Set(names);
 }
 
+// Preserve offsets while hiding comments and string contents from declaration lookup.
+function rustSource(source) {
+  const text = source.split('');
+  const code = source.split('');
+  const hide = (from, to, comment) => {
+    for (let i = from; i < to; i++) {
+      code[i] = ' ';
+      if (comment) text[i] = ' ';
+    }
+  };
+  for (let i = 0; i < source.length;) {
+    const start = i;
+    if (source.startsWith('//', i)) {
+      i = source.indexOf('\n', i);
+      if (i < 0) i = source.length;
+      hide(start, i, true);
+    } else if (source.startsWith('/*', i)) {
+      let depth = 1;
+      i += 2;
+      while (i < source.length && depth) {
+        if (source.startsWith('/*', i)) { depth++; i += 2; }
+        else if (source.startsWith('*/', i)) { depth--; i += 2; }
+        else i++;
+      }
+      assert.equal(depth, 0, 'unterminated Rust comment');
+      hide(start, i, true);
+    } else {
+      const raw = /^r(#{0,255})"/.exec(source.slice(i));
+      if (raw) {
+        const end = '"' + raw[1];
+        i = source.indexOf(end, i + raw[0].length);
+        assert(i >= 0, 'unterminated Rust raw string');
+        i += end.length;
+        hide(start, i, false);
+      } else if (source[i] === '"') {
+        i++;
+        while (i < source.length && source[i] !== '"') {
+          i += source[i] === '\\' ? 2 : 1;
+        }
+        assert(i < source.length, 'unterminated Rust string');
+        hide(start, ++i, false);
+      } else {
+        const character = /^'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'/u.exec(source.slice(i));
+        if (character) { i += character[0].length; hide(start, i, false); }
+        else i++;
+      }
+    }
+  }
+  return { text: text.join(''), code: code.join('') };
+}
+
 function catalog(source) {
-  const matches = [...source.matchAll(/const PRIVATE_STARTUP_VENUES\s*:\s*&\[\s*&str\s*\]\s*=\s*&\[([\s\S]*?)\]\s*;/g)];
-  assert.equal(matches.length, 1, 'expected exactly one literal PRIVATE_STARTUP_VENUES');
-  const body = matches[0][1].replace(/\/\/[^\n]*/g, '').trim().replace(/,\s*$/, '');
+  const { text, code } = rustSource(source);
+  const definitions = [...code.matchAll(/\bconst\s+PRIVATE_STARTUP_VENUES\b/g)];
+  assert.equal(definitions.length, 1, 'expected exactly one live PRIVATE_STARTUP_VENUES');
+  const literal = /^const\s+PRIVATE_STARTUP_VENUES\s*:\s*&\[\s*&str\s*\]\s*=\s*&\[([\s\S]*?)\]\s*;/.exec(text.slice(definitions[0].index));
+  assert(literal, 'expected a literal PRIVATE_STARTUP_VENUES');
+  const body = literal[1].trim().replace(/,\s*$/, '');
   return exactNames(JSON.parse(`[${body}]`));
 }
 
@@ -137,4 +191,16 @@ test('catalog parsing rejects ambiguous, duplicate, unknown or executable entrie
   assert.throws(() => catalog(source.replace('"bybit",', '"bybit", "bybit",')), /duplicate exact venue/);
   assert.throws(() => catalog(source.replace('"bybit"', '"Bybit"')));
   assert.throws(() => catalog(source.replace('"bybit"', 'include!("other")')));
+});
+
+test('commented catalog cannot shadow a live alias or a second live definition', () => {
+  const literal = 'const PRIVATE_STARTUP_VENUES: &[&str] = &["bybit", "woo"];';
+  const alias = 'pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = ACTIVE;';
+  for (const commented of [`// ${literal}\n`, `/* ${literal} */`, `/* outer /* ${literal} */ end */`]) {
+    assert.throws(() => catalog(`const ACTIVE: &[&str] = &["bybit"];\n${commented}\n${alias}`));
+    assert.deepEqual([...catalog(`${commented}\n${literal}`)], ['bybit', 'woo']);
+  }
+  assert.throws(() => catalog(`${literal}\n${alias}`), /exactly one/);
+  assert.throws(() => catalog(`const NOTE: &str = r#"${literal}"#;\n${alias}`));
+  assert.deepEqual([...catalog(`const NOTE: &str = r#"${literal}"#;\n${literal}`)], ['bybit', 'woo']);
 });
