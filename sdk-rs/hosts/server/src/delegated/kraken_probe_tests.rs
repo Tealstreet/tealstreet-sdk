@@ -28,7 +28,7 @@ fn signature(material: &str, payload: &[u8]) -> String {
             context: Default::default(),
             operations: vec![Operation::Sign {
                 algorithm: Algorithm::HmacSha512,
-                key: ids.primary.unwrap().signing.unwrap(),
+                key: ids.primary.as_ref().unwrap().signing_ref().unwrap().clone(),
                 payload: vec![PayloadPart::Bytes {
                     bytes: safe_cex_crypto::sha256(payload).to_vec(),
                 }],

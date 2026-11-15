@@ -13,6 +13,7 @@ use super::*;
 
 mod apexomni;
 mod grvt;
+mod kraken;
 
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 
