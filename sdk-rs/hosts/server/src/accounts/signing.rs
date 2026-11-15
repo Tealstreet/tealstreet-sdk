@@ -62,12 +62,12 @@ impl AccountSigner {
         let provider = state.provider.clone().ok_or(SignError::Unavailable)?;
         if let Some(aliases) = &state.aliases {
             for operation in &request.operations {
-                if let Operation::Sign { key, algorithm, .. } = operation {
-                    if self.original.as_ref().is_none_or(|original| {
+                if let Operation::Sign { key, algorithm, .. } = operation
+                    && self.original.as_ref().is_none_or(|original| {
                         original.can_sign(key, *algorithm) != Capability::Supported
-                    }) {
-                        return Err(SignError::Unsupported);
-                    }
+                    })
+                {
+                    return Err(SignError::Unsupported);
                 }
             }
             map_request(&mut request, aliases)?;

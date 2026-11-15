@@ -1483,10 +1483,9 @@ impl Registry {
         let probed = proof.is_some();
         if let Some((reason, refusal)) =
             self.signing_mode_refusal_detail(user, init, public_only, delegated)
+            && (!probed || !matches!(reason, SigningModeRefusalReason::ResidentModeConflict))
         {
-            if !probed || !matches!(reason, SigningModeRefusalReason::ResidentModeConflict) {
-                return Err(refusal);
-            }
+            return Err(refusal);
         }
         if public_only
             && let Some(refusal) =
