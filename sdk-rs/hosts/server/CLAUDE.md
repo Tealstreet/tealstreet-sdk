@@ -92,7 +92,7 @@ DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
-Binance base/PM/inverse/spot, OKX base/EU/demo/EU-demo, Bitget base/USDC,
+Binance base/PM/inverse/spot, OKX base/demo, Bitget base/USDC,
 Blofin and KuCoin names have native private-startup HMAC proof coverage.
 Variant tests pin product routes, origins and demo headers as well as the
 wrong-key, replay, foreign-socket and resident-preservation controls. Other

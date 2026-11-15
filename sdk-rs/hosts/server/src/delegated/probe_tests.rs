@@ -20,9 +20,7 @@ const VENUES: &[&str] = &[
     "binanceinverse",
     "binancespot",
     "okx",
-    "okxeu",
     "okxdemo",
-    "okxeudemo",
     "bitget",
     "bitgetusdc",
     "blofin",
@@ -60,10 +58,54 @@ fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
-        "okx" | "okxeu" | "okxdemo" | "okxeudemo" => "okx",
+        "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
         "blofin" | "kucoin" => venue,
         _ => panic!("no private-read fixture for {venue}"),
+    }
+}
+
+fn spot_subscription_reply(value: &Value) -> Value {
+    let refused = || json!({"id":value["id"],"status":401,"error":{"code":-2015,"msg":"synthetic signature refusal"}});
+    if value["method"] != "userDataStream.subscribe.signature" {
+        return refused();
+    }
+    let params = &value["params"];
+    let Some(key) = params["apiKey"].as_str() else {
+        return refused();
+    };
+    let material = match key {
+        KEY => SECRET,
+        "synthetic-other-key" => "synthetic-other-material",
+        _ => return refused(),
+    };
+    let (Some(window), Some(stamp)) = (params["recvWindow"].as_u64(), params["timestamp"].as_u64())
+    else {
+        return refused();
+    };
+    let preimage = format!("apiKey={key}&recvWindow={window}&timestamp={stamp}");
+    if params["signature"] != hmac_sha256(material.as_bytes(), preimage.as_bytes(), Encoding::Hex) {
+        return refused();
+    }
+    json!({"id":value["id"],"status":200,"result":{"subscriptionId":1}})
+}
+
+#[test]
+fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
+    for (key, material) in [
+        (KEY, SECRET),
+        ("synthetic-other-key", "synthetic-other-material"),
+    ] {
+        let preimage = format!("apiKey={key}&recvWindow=5000&timestamp=1");
+        let valid = json!({"id":"fixture","method":"userDataStream.subscribe.signature","params":{"apiKey":key,"recvWindow":5000,"timestamp":1,"signature":hmac_sha256(material.as_bytes(),preimage.as_bytes(),Encoding::Hex)}});
+        assert_eq!(spot_subscription_reply(&valid)["status"], 200);
+        for field in ["signature", "apiKey", "timestamp"] {
+            let mut invalid = valid.clone();
+            invalid["params"][field] = "invalid".into();
+            let reply = spot_subscription_reply(&invalid);
+            assert_eq!(reply["status"], 401, "{field}");
+            assert!(reply.get("result").is_none());
+        }
     }
 }
 
@@ -93,11 +135,6 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
             "https://api.binance.com",
             "/api/v3/account",
             "/api/v3/openOrders",
-        ),
-        "okxeu" | "okxeudemo" => (
-            "https://eea.okx.com",
-            "/api/v5/account/config",
-            "/api/v5/trade/orders-pending",
         ),
         "okxdemo" => (
             "https://openapi.okx.com",
@@ -129,7 +166,7 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
         "{venue}: missing exact product: {:?}",
         seen.urls
     );
-    if matches!(venue, "okxdemo" | "okxeudemo") {
+    if venue == "okxdemo" {
         assert_eq!(
             seen.demo_private_reads, seen.signed_reads,
             "every demo private read needs the simulated header"
@@ -336,24 +373,7 @@ impl Transport for VenueIo {
                     continue;
                 };
                 let reply = if spot_private {
-                    assert_eq!(v["method"], "userDataStream.subscribe.signature");
-                    let p = &v["params"];
-                    let material = match p["apiKey"].as_str() {
-                        Some(KEY) => SECRET,
-                        Some("synthetic-other-key") => "synthetic-other-material",
-                        _ => panic!("unknown synthetic subscription key"),
-                    };
-                    let preimage = format!(
-                        "apiKey={}&recvWindow={}&timestamp={}",
-                        p["apiKey"].as_str().unwrap(),
-                        p["recvWindow"],
-                        p["timestamp"]
-                    );
-                    assert_eq!(
-                        p["signature"],
-                        hmac_sha256(material.as_bytes(), preimage.as_bytes(), Encoding::Hex)
-                    );
-                    json!({"id":v["id"],"status":200,"result":{"subscriptionId":1}})
+                    spot_subscription_reply(&v)
                 } else {
                     json!({"event":v["op"],"op":v["op"],"success":true,"code":"0","msg":"","type":"ack","id":v["id"]})
                 };
@@ -871,19 +891,7 @@ fn admission_fixture_checks_private_routes_even_when_signature_headers_are_missi
             "X-MBX-APIKEY",
         ),
         (
-            "okxeu",
-            "/api/v5/public/instruments",
-            "/api/v5/account/config",
-            "OK-ACCESS-SIGN",
-        ),
-        (
             "okxdemo",
-            "/api/v5/public/instruments",
-            "/api/v5/account/config",
-            "OK-ACCESS-SIGN",
-        ),
-        (
-            "okxeudemo",
             "/api/v5/public/instruments",
             "/api/v5/account/config",
             "OK-ACCESS-SIGN",

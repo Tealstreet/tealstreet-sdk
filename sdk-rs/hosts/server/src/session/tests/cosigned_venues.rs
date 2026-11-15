@@ -14,9 +14,7 @@ const READY: &[&str] = &[
     "binanceinverse",
     "binancespot",
     "okx",
-    "okxeu",
     "okxdemo",
-    "okxeudemo",
     "bitget",
     "bitgetusdc",
     "blofin",
@@ -356,18 +354,8 @@ async fn cosigned_variant_binancespot_requires_connection_proof() {
 }
 
 #[tokio::test]
-async fn cosigned_variant_okxeu_requires_connection_proof() {
-    venue_case("okxeu").await;
-}
-
-#[tokio::test]
 async fn cosigned_variant_okxdemo_requires_connection_proof() {
     venue_case("okxdemo").await;
-}
-
-#[tokio::test]
-async fn cosigned_variant_okxeudemo_requires_connection_proof() {
-    venue_case("okxeudemo").await;
 }
 
 #[tokio::test]

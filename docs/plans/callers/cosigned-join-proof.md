@@ -17,11 +17,14 @@ The exact proof-ready venue names are:
 | `binance` | Native private startup and shared HMAC suite |
 | `binancepm`, `binanceinverse`, `binancespot` | Native PAPI/DAPI/spot private startup and shared HMAC/session negatives; exact product routes |
 | `okx` | Native private startup and shared HMAC suite |
-| `okxeu`, `okxdemo`, `okxeudemo` | Native EEA/demo startup and shared HMAC/session negatives; exact origins and simulated-trading headers |
+| `okxdemo` | Native demo startup and shared HMAC/session negatives; exact origin and simulated-trading headers |
 | `bitget` | Native private startup and shared HMAC suite |
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
+
+EEA aliases remain unready: their cold signed catalog discovery retries signature
+error `50113`; it needs separate refusal-policy coverage before admission.
 
 Only these exact names are admitted; the catalog never matches a family prefix.
 An unsupported proof returns the existing account error envelope with
