@@ -142,7 +142,15 @@ prove signed private account reads independently of API-key-only listen-key acqu
 Spot and testnet do not inherit that proof. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
-are consumed internally. Matching COSIGNED repeats require the same socket-admitted
+are consumed internally. The shared local-proof strategy captures canonical
+server-owned identity facts before entering the same proof queue and pacer.
+It issues a closed admission challenge and verifies the raw reply against the
+actual receiving socket, or verifies the temporary protected DELEGATED provider.
+The permit records its socket only after verification; final attachment checks
+that receipt, the original instance/token/lease and the local admission deadline.
+No production public-key venue selects this strategy yet. Synthetic Session
+fixtures select it without changing the readiness catalog; device integration
+and authoritative per-family facts must precede any activation. Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
