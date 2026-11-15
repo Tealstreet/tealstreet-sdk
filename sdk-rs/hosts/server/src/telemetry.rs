@@ -38,6 +38,7 @@ const TAGS: &[&str] = &[
     "startup_refused",
 ];
 const EXTRAS: &[&str] = &["user_tag", "suppressed_since_last_event"];
+const LEASE_WORK_COUNTS: &[&str] = &["running_jobs", "paused_jobs", "pending_work"];
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -298,6 +299,10 @@ pub fn scrub(text: &str) -> String {
 /// The event that leaves: allowlisted fields only, identity set here rather
 /// than inferred by the SDK.
 fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> Event<'static> {
+    let lease_fence = event
+        .tags
+        .get("kind")
+        .is_some_and(|kind| kind == "router_lease.fenced");
     let mut tags: BTreeMap<String, String> = event
         .tags
         .into_iter()
@@ -311,11 +316,18 @@ fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> E
     let mut extra: BTreeMap<String, Value> = event
         .extra
         .into_iter()
-        .filter(|(key, _)| EXTRAS.contains(&key.as_str()))
-        .map(|(key, value)| match value {
-            Value::String(text) => (key, Value::String(scrub(&text))),
-            other @ Value::Number(_) => (key, other),
-            _ => (key, Value::Null),
+        .filter_map(|(key, value)| {
+            if LEASE_WORK_COUNTS.contains(&key.as_str()) {
+                return (lease_fence && value.as_u64().is_some()).then_some((key, value));
+            }
+            if !EXTRAS.contains(&key.as_str()) {
+                return None;
+            }
+            Some(match value {
+                Value::String(text) => (key, Value::String(scrub(&text))),
+                other @ Value::Number(_) => (key, other),
+                _ => (key, Value::Null),
+            })
         })
         .collect();
     if suppressed > 0 {
@@ -495,6 +507,9 @@ pub struct Report<'a> {
     /// not loaded, never which read failed.
     pub startup_unloaded: Option<&'static str>,
     pub startup_refused: Option<bool>,
+    pub running_jobs: Option<usize>,
+    pub paused_jobs: Option<usize>,
+    pub pending_work: Option<usize>,
 }
 
 impl Report<'_> {
@@ -520,6 +535,15 @@ impl Report<'_> {
         let mut extra = BTreeMap::new();
         if let Some(user_tag) = &self.user_tag {
             extra.insert("user_tag".to_owned(), Value::String(user_tag.clone()));
+        }
+        for (key, count) in [
+            ("running_jobs", self.running_jobs),
+            ("paused_jobs", self.paused_jobs),
+            ("pending_work", self.pending_work),
+        ] {
+            if let Some(count) = count {
+                extra.insert(key.into(), count.into());
+            }
         }
         // One issue per condition and target, not per venue message.
         let fingerprint: Vec<String> = [Some(self.kind), self.target, self.error_kind]
@@ -581,6 +605,9 @@ fn from_native<'a>(report: &safe_cex_native::report::ErrorReport<'a>) -> Report<
         venue_code: report.venue_code,
         startup_unloaded: report.startup_unloaded,
         startup_refused: report.startup_refused,
+        running_jobs: None,
+        paused_jobs: None,
+        pending_work: None,
     }
 }
 
@@ -606,6 +633,91 @@ mod tests {
 
     fn captured(identity: Identity, send: impl FnOnce()) -> Vec<Event<'static>> {
         with_captured_events_options(send, client_options(DSN, identity).unwrap())
+    }
+
+    #[test]
+    fn router_lease_fence_numeric_work_counts_survive_allowlisting() {
+        let events = captured(Identity::default(), || {
+            let mut event = report_event(&Report {
+                kind: "router_lease.fenced",
+                summary: "router lease fenced; running algos stopped on this box",
+                ..Default::default()
+            });
+            for (key, count) in [("running_jobs", 1), ("paused_jobs", 2), ("pending_work", 3)] {
+                event.extra.insert(key.into(), count.into());
+            }
+            event
+                .extra
+                .insert("job_ids".into(), "synthetic-private-job".into());
+            sentry::capture_event(event);
+        });
+        let event = &events[0];
+        assert_eq!(event.level, Level::Error);
+        for (key, count) in [("running_jobs", 1), ("paused_jobs", 2), ("pending_work", 3)] {
+            assert_eq!(event.extra.get(key), Some(&Value::from(count)));
+        }
+        assert!(!event.extra.contains_key("job_ids"));
+    }
+
+    #[test]
+    fn router_lease_fence_report_produces_numeric_work_counts() {
+        let events = captured(Identity::default(), || {
+            sentry::capture_event(report_event(&Report {
+                kind: "router_lease.fenced",
+                summary: "router lease fenced; running algos stopped on this box",
+                running_jobs: Some(2),
+                paused_jobs: Some(1),
+                pending_work: Some(3),
+                ..Default::default()
+            }));
+        });
+        assert_eq!(events[0].level, Level::Error);
+        assert_eq!(
+            events[0].message.as_deref(),
+            Some("router lease fenced; running algos stopped on this box")
+        );
+        assert_eq!(events[0].extra["running_jobs"], 2);
+        assert_eq!(events[0].extra["paused_jobs"], 1);
+        assert_eq!(events[0].extra["pending_work"], 3);
+        assert_eq!(events[0].extra.len(), 3);
+    }
+
+    #[test]
+    fn router_lease_fence_work_counts_reject_non_counts_and_unrelated_events() {
+        for kind in ["router_lease.fenced", "account.start_failed"] {
+            for value in [
+                Value::String("synthetic-private-job".into()),
+                Value::from(-1),
+                Value::from(1.5),
+                Value::Bool(true),
+                Value::Null,
+                serde_json::json!({"secret":"synthetic-only"}),
+                serde_json::json!([1]),
+            ] {
+                let events = captured(Identity::default(), || {
+                    let mut event = report_event(&Report {
+                        kind,
+                        summary: "fixed summary",
+                        ..Default::default()
+                    });
+                    for key in ["running_jobs", "paused_jobs", "pending_work"] {
+                        event.extra.insert(key.into(), value.clone());
+                    }
+                    sentry::capture_event(event);
+                });
+                assert!(events[0].extra.is_empty());
+            }
+        }
+        let events = captured(Identity::default(), || {
+            let mut event = report_event(&Report {
+                kind: "account.start_failed",
+                summary: "fixed summary",
+                ..Default::default()
+            });
+            event.extra.insert("running_jobs".into(), 1.into());
+            sentry::capture_event(event);
+        });
+        assert!(events[0].extra.is_empty());
     }
 
     #[test]
@@ -817,6 +929,12 @@ mod tests {
             ]
         );
         assert_eq!(EXTRAS, ["user_tag", "suppressed_since_last_event"]);
+        // A8 adds only unsigned work counts on router_lease.fenced; other events
+        // retain the existing closed extra-field set.
+        assert_eq!(
+            LEASE_WORK_COUNTS,
+            ["running_jobs", "paused_jobs", "pending_work"]
+        );
     }
 
     #[test]

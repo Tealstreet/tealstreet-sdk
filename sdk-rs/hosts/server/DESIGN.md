@@ -126,7 +126,8 @@ What it captures:
   on an engine thread never waits on Sentry), sending the code location and
   never the payload;
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
-  fencing, a failing signer, and algo shutdown deadlines;
+  fencing with running algos, a failing signer, and algo shutdown deadlines;
+  zero-running fences are journal-only info, including paused/pending-only work;
 - the native host's account start failures and venue, relay and HTTP-tunnel
   transport failures, through `safe_cex_native::report`. Each account's
   transport is built `with_venue`, so its failures carry `venue` beside `kind`
@@ -142,7 +143,9 @@ Every event is rebuilt from an allowlist:
 - tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
   `target`;
 - extras `user_tag` (a hash, never the user ID) and
-  `suppressed_since_last_event`.
+  `suppressed_since_last_event`; `router_lease.fenced` additionally allows unsigned
+  numeric `running_jobs`, `paused_jobs` and `pending_work` from the pre-disposal
+  work snapshot, never job IDs or payloads.
 
 Account names, URLs with their query, auth headers, key-shaped strings and
 payloads do not leave. Events are throttled to one per fingerprint per 60 s

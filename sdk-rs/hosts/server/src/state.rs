@@ -50,6 +50,8 @@ impl Log {
         let line = json!({"level": "error", "service": "exchange-server", "kind": report.kind, "msg": message})
             .to_string();
         eprintln!("{line}");
+        #[cfg(test)]
+        log_capture::record(&line);
         crate::telemetry::capture(report);
     }
 }
