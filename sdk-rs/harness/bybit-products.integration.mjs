@@ -32,7 +32,7 @@ const quote = (symbol) => ({ symbol, lastPrice: '1000', bid1Price: '1000', ask1P
   markIv: '0.5', bid1Iv: '0.49', ask1Iv: '0.51', underlyingPrice: '99000', delta: symbol === CALL ? '0.4' : '-0.6', gamma: '0.01', vega: '12', theta: '-8' });
 const GREEKS = [{ baseCoin: 'BTC', totalDelta: '0.2', totalGamma: '0.03', totalVega: '9', totalTheta: '-7' }];
 
-function validate(request) {
+function validate(request, now = Date.now()) {
   const headers = Object.fromEntries((Array.isArray(request.headers) ? request.headers : Object.entries(request.headers ?? {})).map(([k, v]) => [k.toLowerCase(), String(v)]));
   const url = new URL(request.url), signed = request.method !== 'GET' || !url.pathname.startsWith('/v5/market/');
   if (!signed && !headers['x-bapi-sign']) return;
@@ -40,7 +40,7 @@ function validate(request) {
   assert.match(timestamp ?? '', /^\d+$/); assert.match(window ?? '', /^\d+$/);
   assert.equal(headers['x-bapi-api-key'], KEY);
   assert(Number(window) > 0 && Number(window) <= 60000);
-  assert(Number(timestamp) >= Date.now() - Number(window) && Number(timestamp) < Date.now() + 1000, 'native signing timestamp lies inside its receive window');
+  assert(Number(timestamp) >= now - Number(window) && Number(timestamp) < now + 1000, 'native signing timestamp lies inside its receive window');
   const payload = request.method === 'GET' ? url.search.slice(1) : request.body;
   const expected = createHmac('sha256', SECRET).update(timestamp + KEY + window + payload).digest('hex');
   assert.equal(headers['x-bapi-sign'], expected, `raw ${request.method} ${url.pathname} signature`);
@@ -112,6 +112,7 @@ function chain(rows) { return rows.map((row) => ({ market: market(row.market), q
 class Native {
   constructor(options) {
     this.now = Date.now(); this.resources = 0; this.requests = []; this.sockets = []; this.sent = []; this.results = new Map(); this.queue = [];
+    this.timers = new Map(); this.waitingClaims = new Map();
     this.engine = new WasmEngine('bybit', JSON.stringify({ key: KEY, secret: SECRET, ...options }));
     this.collect(this.engine.start(this.now)); this.run();
   }
@@ -126,17 +127,32 @@ class Native {
           this.collect(this.engine.httpPrepared(a.preparation, String(++this.resources), undefined, this.now));
         } else if (a.phase === 'bind') {
           const claim = JSON.parse(this.engine.httpClaim(a.permit, this.now));
+          if (claim.status === 'wait') {
+            assert(Number.isFinite(claim.until), 'waiting claim supplies a finite wake');
+            this.waitingClaims.set(a.permit, { action: a, at: claim.until });
+            continue;
+          }
+          this.waitingClaims.delete(a.permit);
+          assert(['released', 'denied'].includes(claim.status), 'known managed claim result');
           if (claim.status === 'released') this.queue.unshift({ ...a.packet, op: 'http' });
           this.collect(this.engine.prepareDispatch(this.now));
+        } else if (a.phase === 'cancel') {
+          for (const [permit, pending] of this.waitingClaims) {
+            if (pending.action.preparation === a.preparation) this.waitingClaims.delete(permit);
+          }
         }
         continue;
       }
       if (a.op === 'http') {
-        validate(a); this.requests.push(a); const body = JSON.stringify(response(a));
+        validate(a, this.now); this.requests.push(a); const body = JSON.stringify(response(a));
         this.collect(this.engine.httpStart(a.request, 200, '', this.now));
         this.collect(this.engine.httpChunk(a.request, new TextEncoder().encode(body), this.now));
         this.collect(this.engine.httpEnd(a.request, this.now));
-      } else if (a.op === 'wsConnect') {
+      } else if (a.op === 'setTimer') {
+        assert(Number.isFinite(a.at), 'engine timer supplies a finite wake');
+        this.timers.set(a.timer, a.at);
+      } else if (a.op === 'clearTimer') this.timers.delete(a.timer);
+      else if (a.op === 'wsConnect') {
         this.sockets.push(a); this.collect(this.engine.wsOpen(a.socket, this.now));
         if (a.url.endsWith('/private')) {
           this.collect(this.engine.wsMessage(a.socket, '{"op":"auth","success":true}', this.now));
@@ -147,9 +163,28 @@ class Native {
     }
   }
   command(command) {
-    this.now = Date.now();
+    this.now = Math.max(this.now, Date.now());
     const id = 100 + this.results.size;
-    this.collect(this.engine.command(JSON.stringify({ command: id, ...command }), this.now)); this.run();
+    this.collect(this.engine.command(JSON.stringify({ command: id, ...command }), this.now));
+    for (let count = 0; ; count++) {
+      assert(count < 500, 'native finite command wake sequence');
+      this.run();
+      if (this.results.has(id)) break;
+      const next = [
+        ...[...this.timers].map(([timer, at]) => ({ timer, at })),
+        ...[...this.waitingClaims].map(([permit, pending]) => ({ permit, ...pending })),
+      ].sort((a, b) => a.at - b.at)[0];
+      assert(next, `native wake for ${JSON.stringify(command)}`);
+      this.now = Math.max(this.now, next.at);
+      // At an equal timestamp the engine expiry runs before a waiting send.
+      if (next.timer !== undefined) {
+        this.timers.delete(next.timer);
+        this.collect(this.engine.timer(next.timer, this.now));
+      } else {
+        this.waitingClaims.delete(next.permit);
+        this.queue.push(next.action);
+      }
+    }
     const result = this.results.get(id); assert(result, `native result for ${JSON.stringify(command)}`);
     if (result.error) throw new Error(result.error);
     return JSON.parse(result.result);
@@ -158,7 +193,7 @@ class Native {
     const bytes = this.engine.snapshotFrame(this.now).slice();
     const store = new DefaultStore(); new FrameApplier(store).apply(new Frame(bytes.buffer), false); return store;
   }
-  free() { this.engine.free(); }
+  free() { this.waitingClaims.clear(); this.timers.clear(); this.engine.free(); }
 }
 async function ts(options) {
   const store = new DefaultStore(), requests = [];
@@ -370,7 +405,9 @@ test('native product fixture expires a waiting claim on its original engine dead
     assert(native.results.has(100), 'the engine, not the fixture watchdog, seals the command');
     assert.equal(native.now - now, 20000, 'waiting never refreshes the engine call budget');
     assert(claims.length > 1);
-    assert(claims.every((permit) => permit === claims[0]));
+    // Periodic account reads have independent permits during this long wait.
+    assert.equal(native.results.get(100).detail.kind, 'timeout');
+    assert.equal(native.results.get(100).detail.outcome, 'notSent');
     assert.equal(native.requests.filter((r) => new URL(r.url).pathname === '/v5/order/create').length, 0);
   } finally { native.free(); }
 });

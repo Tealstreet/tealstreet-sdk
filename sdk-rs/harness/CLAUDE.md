@@ -61,3 +61,7 @@ pinned profile and 10 KiB reserve rule; older measured floors remain retained.
 Merge ebeb0b38c973 independently remeasures the same TxFlow and WEEX byte
 counts (2,149,614 and 2,028,106), retaining both floors and the pinned profile.
 The exact merged module hashes are recorded beside their budget entries.
+
+Bybit product parity fixtures service the engine's set/clear timers and retain
+original waiting HTTP permits until release or cancellation. Their monotonic
+virtual clock also validates native signature timestamps; waits never refresh deadlines.
