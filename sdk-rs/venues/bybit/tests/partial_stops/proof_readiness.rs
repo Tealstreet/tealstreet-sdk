@@ -236,6 +236,7 @@ fn replacement_after_peer_census(missing_lineage: bool) -> Harness {
         h.result(91)
     );
     page(&mut h, "/v5/order/history", vec![normal]);
+    h.advance(200.0);
     assert!(
         h.has_request("/v5/position/trading-stop"),
         "{:?}",

@@ -12,3 +12,7 @@ The host ownership observation/teardown contract lives in
 
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
+
+Bybit REST mutation release budgets and their conservative batch fallback cost
+are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.md#bybit-rest-write-pacing).
+The engine owns the clocks and fences; native rate-limit uncertainty is unchanged.

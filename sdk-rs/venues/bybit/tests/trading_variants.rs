@@ -331,7 +331,7 @@ fn assert_allocation_quantities(
             serde_json::json!({"retCode":0,"result":results[0]})
         };
         h.reply(request.id, 200, &response.to_string());
-        h.advance(25.0);
+        h.advance(200.0);
     }
     assert_eq!(
         quantities, expected,
@@ -1047,6 +1047,7 @@ fn hyro_identical_concurrent_submissions_share_one_dispatch() {
     created(&mut h, "first");
     assert_eq!(h.result(1), h.result(2));
     place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    h.await_request("/v5/order/create");
     assert!(h.has_request("/v5/order/create"));
 }
 
@@ -1763,6 +1764,7 @@ fn hyro_trailing_stop_noop_succeeds_and_definitive_rejection_allows_retry() {
     );
     assert!(h.result(2).unwrap().is_err());
     place(&mut h, 3, vec![opts]);
+    h.await_request("/v5/position/trading-stop");
     assert!(h.has_request("/v5/position/trading-stop"));
     assert!(
         h.progress.is_empty(),
@@ -2017,6 +2019,7 @@ fn hyro_receipts_cover_shared_write_late_waiter_and_retained_accepted_lots() {
         );
     }
     created(&mut h, "first");
+    h.await_request("/v5/order/create");
     let second = link(h.requests.first().unwrap());
     place(&mut h, 93, orders);
     let late: Vec<_> = h
@@ -2115,6 +2118,7 @@ fn hyro_rejected_later_link_is_not_replayed_as_a_new_waiters_identity() {
         r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
     );
     place(&mut h, 92, orders);
+    h.await_request("/v5/order/create");
     let replacement = link(h.requests.first().unwrap());
     assert_ne!(replacement, rejected);
     let rows: Vec<_> = h
@@ -2816,6 +2820,7 @@ fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
     for command in [2, 3] {
         place(&mut h, command, vec![order("BTCUSDT", 1.0)]);
         answer_link_absent(&mut h, &id);
+        h.advance(200.0);
         while h.has_request("/v5/order/create") {
             let create = h.take("/v5/order/create");
             sends += 1;
@@ -3841,7 +3846,8 @@ fn managed_mode_redos_do_not_start_the_final_write_plan_deadline() {
         r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
     );
     let write = h.take("/v5/order/create-batch");
-    assert_eq!(write.timeout_ms, Some(20_000));
+    // The native window starts before the 200ms physical-release wait.
+    assert_eq!(write.timeout_ms, Some(19_800));
     h.reply(
         write.id,
         200,
@@ -3982,7 +3988,8 @@ fn hyro_cancel_runs_on_the_ordinary_plan_with_a_native_window() {
         ids: vec!["plan-cancel".into()],
     });
     let cancel = h.take("/v5/order/cancel");
-    assert_eq!(cancel.timeout_ms, Some(20_000), "a managed Plan call");
+    // Pacing spends, rather than extends, the admitted native window.
+    assert_eq!(cancel.timeout_ms, Some(19_800), "a managed Plan call");
 }
 
 /// H1b: a lost Hyro cancel reconciles with one fresh Hyro snapshot.
@@ -5400,6 +5407,7 @@ fn an_unknown_inverse_placement_reconciles_on_the_inverse_category_and_releases(
     while h.has_request("/v5/position/list") {
         resolve_mode(&mut h, "BTCUSD");
     }
+    h.await_request("/v5/order/create-batch");
     assert!(
         h.has_request("/v5/order/create-batch"),
         "the clean inverse read releases the fence: {:?}",
@@ -6229,7 +6237,7 @@ fn fast_713_second_clock_write_retry_is_re_signed_and_never_replayed_twice() {
     );
     assert_eq!(
         Harness::header(&second, "X-BAPI-TIMESTAMP"),
-        Some(server.to_string())
+        Some((server + 200.0).to_string())
     );
     assert_ne!(
         Harness::header(&first, "X-BAPI-SIGN"),
@@ -6401,6 +6409,7 @@ fn assert_serial_plan_failure(status: Option<u16>) {
     let first = h.take("/v5/order/create");
     let first_link = link(&first);
     h.reply(first.id, 200, &serde_json::json!({"retCode":0,"result":{"orderId":"placed-first","orderLinkId":first_link}}).to_string());
+    h.await_request("/v5/order/create");
     assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
     let second = h.take("/v5/order/create");
     let second_link = link(&second);

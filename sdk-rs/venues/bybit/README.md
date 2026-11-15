@@ -63,6 +63,23 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   and REST snapshots. A timeout/transport failure is not proof of a rejected
   order; retain the existing identity-based reconciliation before retrying.
 
+## Bybit REST write pacing
+
+Ordinary writes share the engine's mutation release domain across commands.
+Single writes have a 200ms floor, restoring the legacy transport's five-request
+budget. A plan using create-batch or cancel-batch also shares a 1200ms floor:
+Bybit counts orders within a batch, so two commands cannot each release ten
+orders in the same second. Smaller batches and single-order fallbacks in such
+a plan conservatively use that same batch floor. Existing per-plan batch waits
+remain; unrelated reads and history's separate pacing remain unchanged.
+
+The floors advance only on actual engine Claim release, not queueing or a
+response. Held work retains its original owner, credential, deadline and
+release-time fences. No venue timer, shadow queue, extended deadline or
+rate-limit resend is introduced. Native rate-limited writes retain the shared
+engine's Unknown classification and Open Orders guidance. This per-engine
+budget cannot account for another app or another engine using the same UID.
+
 ## Browser reachability and beta gates
 
 Hyro is admitted in development and preview by the existing metadata. Production
