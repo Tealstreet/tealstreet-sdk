@@ -13,20 +13,8 @@
       "reason": "Ed25519 native private-startup proof, key encoding, account binding and replay/socket controls are not built."
     },
     {
-      "venue": "binanceinverse",
-      "reason": "Exact binanceinverse native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
-    },
-    {
       "venue": "binanceoptions",
       "reason": "Client Hosted gate blocks this venue because no native server origin exists; options startup proof is not built."
-    },
-    {
-      "venue": "binancepm",
-      "reason": "Exact binancepm native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
-    },
-    {
-      "venue": "binancespot",
-      "reason": "Exact binancespot native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "bingx",
@@ -41,24 +29,12 @@
       "reason": "Production metadata disables this variant; exact inverse account-mode/private-startup proof is not built."
     },
     {
-      "venue": "bitgetusdc",
-      "reason": "Exact bitgetusdc native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
-    },
-    {
       "venue": "bitrue",
       "reason": "Production metadata disables this venue; native Hosted REST origin and private-startup proof are not built. Keep its live beta roster entry."
     },
     {
       "venue": "bitunix",
       "reason": "Native double-SHA private-startup proof with timestamp, replay and socket controls is not built."
-    },
-    {
-      "venue": "bybitdemo",
-      "reason": "Exact bybitdemo native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
-    },
-    {
-      "venue": "bybitspot",
-      "reason": "Exact bybitspot native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "coinbase",
@@ -107,10 +83,6 @@
     {
       "venue": "mexc",
       "reason": "No native Hosted REST origin; native signed private-startup proof distinguishing signing-optional/read/token layouts is not built."
-    },
-    {
-      "venue": "okxdemo",
-      "reason": "Exact okxdemo native private-startup proof is not yet catalog-qualified on master; tracked by SDK #3542. Base-family readiness does not prove this variant."
     },
     {
       "venue": "okxeu",
