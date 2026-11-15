@@ -745,6 +745,10 @@ is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
 frame-fed accounts cannot satisfy this check.
 
+Crypto.com uses its native signed JSON startup reads for positions, balance and
+regular/advanced open orders. Hosted routing preserves the native mainnet/UAT
+origins; readiness does not replace per-connection proof or scope checks.
+
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The COSIGNED catalog does not gate DELEGATED admission. COSIGNED coverage
 includes valid startup, a different signing key, a prior signature and a
