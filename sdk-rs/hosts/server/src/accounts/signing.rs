@@ -514,6 +514,18 @@ mod tests {
         assert!(calls.lock().unwrap().is_empty());
     }
     #[test]
+    fn missing_signing_role_refuses_instead_of_building_partial_aliases() {
+        let old = Identities {
+            primary: Some(Identity::new(KeyRef("old/credential".into()), None)),
+            secondary: None,
+        };
+        assert_eq!(
+            aliases(&old, &identities("new")),
+            Err(SignError::MissingKey)
+        );
+    }
+
+    #[test]
     fn missing_identity_role_refuses_before_retiring_browser_signing() {
         let (signer, _, link) = signer();
         let absent = ResidentCopy::test_provider(Arc::new(Recording {
