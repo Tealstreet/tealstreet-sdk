@@ -4,27 +4,6 @@ use crate::delegated::probe::venue_tests::{Seen, assert_variant_startup, operati
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
 
-const READY: &[&str] = &[
-    "bybit",
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    "phemex",
-    "woo",
-    "bingx",
-    "mexc",
-    "bitunix",
-];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
 
