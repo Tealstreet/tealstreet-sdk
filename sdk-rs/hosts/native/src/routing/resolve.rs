@@ -424,6 +424,8 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         "phemex" => pick("https://api.phemex.com", "https://testnet-api.phemex.com"),
         "woo" => pick("https://api.woox.io", "https://api.staging.woox.io"),
         "bitunix" => "https://fapi.bitunix.com",
+        // MEXC has no sandbox; never use its live origin for a hosted testnet account.
+        "mexc" if !testnet => "https://api.mexc.com",
         "kucoin" if !testnet => "https://api-futures.kucoin.com",
         "backpack" if !testnet => "https://api.backpack.exchange",
         "grvt" => pick("https://trades.grvt.io", "https://trades.testnet.grvt.io"),
@@ -463,6 +465,9 @@ pub fn account_transport(
         Some(true)
     } else if name == "lighter" {
         // The relay refuses Lighter's URL, so an old row's flag would stop it starting.
+        Some(false)
+    } else if name == "mexc" {
+        // MEXC cannot use HOW; an old tunnel flag must not suppress its required REST proxy.
         Some(false)
     } else {
         account.tealstreet_tunnel

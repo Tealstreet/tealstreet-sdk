@@ -85,4 +85,28 @@ fn deployed_proxy_hosts_join_venue_urls_exactly_as_typescript() {
         "{:?}",
         plan.http.header_aliases
     );
+
+    let mexc = account_transport(
+        "mexc",
+        &AccountTransport {
+            tealstreet_proxy: Some(false),
+            tealstreet_tunnel: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let base = safe_cex_native::resolve::rest_base_url("mexc", false).unwrap();
+    let plan = resolve_routing_plan("mexc", &mexc, base, Provider::Tealstreet).unwrap();
+    assert_eq!(plan.http.prefix, PRIVATE.trim_end_matches('/'));
+    assert!(!plan.http.authorize);
+    assert_eq!(plan.http.authorization_header, "Tealstreet-Authorization");
+    assert!(plan.http.header_aliases.is_empty());
+    assert!(plan.http.tunnel_url.is_none());
+    assert_eq!(
+        join(
+            &plan.http.prefix,
+            "https://api.mexc.com/api/v1/private/account/assets?currency=USDT"
+        ),
+        "https://proxies.tyo.tealstreet.io/api/exchange_proxy/https://api.mexc.com/api/v1/private/account/assets?currency=USDT"
+    );
 }
