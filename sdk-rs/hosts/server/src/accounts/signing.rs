@@ -238,9 +238,7 @@ fn aliases(old: &Identities, new: &Identities) -> Result<Aliases, SignError> {
             Ok(())
         };
         pair(&old.credential, &new.credential)?;
-        if let Some(old) = old.signing_opt() {
-            pair(old, new.signing_ref()?)?;
-        }
+        pair(old.signing_ref()?, new.signing_ref()?)?;
         if let Some(old) = &old.passphrase {
             pair(old, new.passphrase.as_ref().ok_or(SignError::MissingKey)?)?;
         }
@@ -513,6 +511,18 @@ mod tests {
         );
         assert!(calls.lock().unwrap().is_empty());
     }
+    #[test]
+    fn missing_signing_role_refuses_instead_of_building_partial_aliases() {
+        let old = Identities {
+            primary: Some(Identity::new(KeyRef("old/credential".into()), None)),
+            secondary: None,
+        };
+        assert_eq!(
+            aliases(&old, &identities("new")),
+            Err(SignError::MissingKey)
+        );
+    }
+
     #[test]
     fn missing_identity_role_refuses_before_retiring_browser_signing() {
         let (signer, _, link) = signer();
