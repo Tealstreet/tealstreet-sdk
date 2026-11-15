@@ -23,8 +23,10 @@ async fn startup(material: &str) -> (Result<(), crate::delegated::probe::ProbeRe
     let (finished, result) = tokio::sync::oneshot::channel();
     // Exercise the real pending-session wire without declaring ApeX proof-ready.
     // The separate catalog qualification must still use ordinary Session::init.
-    session.start_probe_verification("acct".into(), Some((link.clone(), lifetime)), async move {
-        let result = crate::delegated::probe::run(
+    // Native actors need the engine thread's LocalSet; the Session verification
+    // future itself is Send and only awaits that actor's completion.
+    let native = tokio::task::spawn_local(async move {
+        crate::delegated::probe::run(
             "apexomni",
             &remote.options_json,
             remote.provider,
@@ -32,7 +34,12 @@ async fn startup(material: &str) -> (Result<(), crate::delegated::probe::ProbeRe
             safe_cex_native::ServerConfig::default(),
             Arc::new(|| true),
         )
-        .await;
+        .await
+    });
+    session.start_probe_verification("acct".into(), Some((link.clone(), lifetime)), async move {
+        let result = native
+            .await
+            .expect("native actor must settle without a harness panic");
         let _ = finished.send(result);
         (Err(crate::delegated::Refused), None)
     });
