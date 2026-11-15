@@ -225,6 +225,11 @@ fn an_override_proxy_url_input_refuses() {
 /// Each core venue's (mainnet, testnet) origin; `None` is a venue with no testnet.
 const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
     (
+        "apexomni",
+        "https://omni.apex.exchange/api",
+        Some("https://testnet.omni.apex.exchange/api"),
+    ),
+    (
         "binance",
         "https://fapi.binance.com",
         Some("https://demo-fapi.binance.com"),
