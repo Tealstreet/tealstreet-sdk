@@ -44,6 +44,8 @@ pub enum Verdict {
     Satisfied(SatisfiedIntent),
     /// Exact native proof of nonce rejection before execution; never a resend.
     NonceRefused,
+    /// Exact native proof of a rate-limit rejection; never a resend.
+    RateLimitRefused,
 }
 
 impl Verdict {
@@ -53,13 +55,14 @@ impl Verdict {
             Self::Unknown(kind) => kind,
             Self::Satisfied(_) => None,
             Self::NonceRefused => Some(ErrorKind::InvalidInput),
+            Self::RateLimitRefused => Some(ErrorKind::RateLimited),
         }
     }
 
     pub fn is_refusal(self) -> bool {
         matches!(
             self,
-            Self::Refused(_) | Self::RefusedResend(_) | Self::NonceRefused
+            Self::Refused(_) | Self::RefusedResend(_) | Self::NonceRefused | Self::RateLimitRefused
         )
     }
 }
@@ -170,13 +173,15 @@ impl CodeTable {
         let verdict = row.map_or(self.unlisted, |row| row.verdict);
         // A phrase only names which refusal it is: it never upgrades an unproven
         // or resend-granting verdict.
-        if let (Verdict::Refused(_), Some(phrase)) = (verdict, self.phrase(native, intent)) {
+        if let (Verdict::Refused(_), Some(phrase)) = (verdict, self.phrase(native, intent))
+            && matches!(phrase.verdict, Verdict::Refused(_))
+        {
             return scoped(phrase.verdict, intent);
         }
-        if verdict == Verdict::NonceRefused
+        if matches!(verdict, Verdict::NonceRefused | Verdict::RateLimitRefused)
             && !row.is_some_and(|row| matches!(row.key, Key::Int(_) | Key::Text(_)))
         {
-            return Verdict::Unknown(Some(ErrorKind::InvalidInput));
+            return Verdict::Unknown(verdict.kind());
         }
         scoped(verdict, intent)
     }
@@ -214,7 +219,7 @@ impl CodeTable {
             .iter()
             .find(|(documented, _)| *documented == status)
             .map(|(_, verdict)| *verdict)
-            .filter(|verdict| *verdict != Verdict::NonceRefused)
+            .filter(|verdict| !matches!(verdict, Verdict::NonceRefused | Verdict::RateLimitRefused))
     }
 }
 
@@ -297,7 +302,8 @@ fn write_verdict(verdict: Verdict, intent: Intent, released: Released<'_>) -> Ve
     {
         return unproven;
     }
-    if verdict.kind() == Some(ErrorKind::RateLimited) {
+    // Only an exact, table-admitted native rejection can prove a rate-limited write.
+    if verdict.kind() == Some(ErrorKind::RateLimited) && verdict != Verdict::RateLimitRefused {
         Verdict::Unknown(Some(ErrorKind::RateLimited))
     } else {
         verdict
@@ -327,7 +333,9 @@ pub fn error(
     error.kind = verdict.kind();
     if intent != Intent::Read {
         error.outcome = match verdict {
-            Verdict::Refused(_) | Verdict::RefusedResend(_) => Some(Outcome::Rejected),
+            Verdict::Refused(_) | Verdict::RefusedResend(_) | Verdict::RateLimitRefused => {
+                Some(Outcome::Rejected)
+            }
             Verdict::Unknown(_) => Some(Outcome::Unknown),
             Verdict::Satisfied(_) => None,
             Verdict::NonceRefused => Some(Outcome::NotSent),
@@ -629,7 +637,13 @@ pub fn read(
             None
         }
         (Verdict::Unknown(_), _) => Some(header.map_or(ReadRetry::ReadFailure, ReadRetry::After)),
-        (Verdict::Refused(_) | Verdict::Satisfied(_) | Verdict::NonceRefused, _) => None,
+        (
+            Verdict::Refused(_)
+            | Verdict::Satisfied(_)
+            | Verdict::NonceRefused
+            | Verdict::RateLimitRefused,
+            _,
+        ) => None,
     };
     ReadFailure { error, retry }
 }
@@ -652,8 +666,11 @@ pub fn assert_table(table: &CodeTable) {
             "row {index}: a rate limit waits; it never resends"
         );
         assert!(
-            row.verdict != Verdict::NonceRefused || matches!(row.key, Key::Int(_) | Key::Text(_)),
-            "nonce refusal needs one exact native code"
+            !matches!(
+                row.verdict,
+                Verdict::NonceRefused | Verdict::RateLimitRefused
+            ) || matches!(row.key, Key::Int(_) | Key::Text(_)),
+            "nonce/rate-limit refusal needs one exact native code"
         );
         if let Key::Range(low, high) = row.key {
             assert!(low <= high, "row {index}: empty range");
@@ -707,7 +724,10 @@ pub fn assert_table(table: &CodeTable) {
     assert!(
         !matches!(
             table.unlisted,
-            Verdict::Satisfied(_) | Verdict::RefusedResend(_) | Verdict::NonceRefused
+            Verdict::Satisfied(_)
+                | Verdict::RefusedResend(_)
+                | Verdict::NonceRefused
+                | Verdict::RateLimitRefused
         ),
         "unlisted codes cannot be Satisfied or RefusedResend"
     );

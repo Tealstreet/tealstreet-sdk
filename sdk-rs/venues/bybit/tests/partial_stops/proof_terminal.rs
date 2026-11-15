@@ -48,6 +48,7 @@ fn assert_restored_after_census(h: &mut Harness) {
         200,
         r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
     );
+    h.advance(200.0);
     assert!(
         h.has_request("/v5/position/trading-stop"),
         "standalone target must remain restorable"
@@ -190,6 +191,7 @@ fn first_read_field_matrix_preserves_real_identity_and_economic_mismatches() {
             h.unknown.contains(&91),
             "changed {field} unexpectedly accepted"
         );
+        h.advance(200.0);
         assert!(!advanced(&h));
         assert!(!h.has_request("/v5/position/trading-stop"));
         assert!(!h.has_request("/v5/order/history"));

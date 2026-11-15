@@ -13,9 +13,16 @@ use tokio::sync::mpsc;
 
 const VENUES: &[&str] = &[
     "bybitinverse",
+    "bybitdemo",
+    "bybitspot",
     "binance",
+    "binancepm",
+    "binanceinverse",
+    "binancespot",
     "okx",
+    "okxdemo",
     "bitget",
+    "bitgetusdc",
     "blofin",
     "kucoin",
     "phemex",
@@ -30,6 +37,8 @@ pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
+    pub(crate) urls: Vec<String>,
+    pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
     paths: Vec<String>,
@@ -49,13 +58,132 @@ fn path(r: &HttpRequest) -> &str {
     let after_host = r.url.split_once("://").unwrap().1;
     &after_host[after_host.find('/').unwrap()..]
 }
+fn family(venue: &str) -> &str {
+    match venue {
+        "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
+        "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
+        "okx" | "okxdemo" => "okx",
+        "bitget" | "bitgetusdc" => "bitget",
+        "blofin" | "kucoin" | "bingx" => venue,
+        _ => panic!("no private-read fixture for {venue}"),
+    }
+}
+
+fn spot_subscription_reply(value: &Value) -> Value {
+    let refused = || json!({"id":value["id"],"status":401,"error":{"code":-2015,"msg":"synthetic signature refusal"}});
+    if value["method"] != "userDataStream.subscribe.signature" {
+        return refused();
+    }
+    let params = &value["params"];
+    let Some(key) = params["apiKey"].as_str() else {
+        return refused();
+    };
+    let material = match key {
+        KEY => SECRET,
+        "synthetic-other-key" => "synthetic-other-material",
+        _ => return refused(),
+    };
+    let (Some(window), Some(stamp)) = (params["recvWindow"].as_u64(), params["timestamp"].as_u64())
+    else {
+        return refused();
+    };
+    let preimage = format!("apiKey={key}&recvWindow={window}&timestamp={stamp}");
+    if params["signature"] != hmac_sha256(material.as_bytes(), preimage.as_bytes(), Encoding::Hex) {
+        return refused();
+    }
+    json!({"id":value["id"],"status":200,"result":{"subscriptionId":1}})
+}
+
+#[test]
+fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
+    for (key, material) in [
+        (KEY, SECRET),
+        ("synthetic-other-key", "synthetic-other-material"),
+    ] {
+        let preimage = format!("apiKey={key}&recvWindow=5000&timestamp=1");
+        let valid = json!({"id":"fixture","method":"userDataStream.subscribe.signature","params":{"apiKey":key,"recvWindow":5000,"timestamp":1,"signature":hmac_sha256(material.as_bytes(),preimage.as_bytes(),Encoding::Hex)}});
+        assert_eq!(spot_subscription_reply(&valid)["status"], 200);
+        for field in ["signature", "apiKey", "timestamp"] {
+            let mut invalid = valid.clone();
+            invalid["params"][field] = "invalid".into();
+            let reply = spot_subscription_reply(&invalid);
+            assert_eq!(reply["status"], 401, "{field}");
+            assert!(reply.get("result").is_none());
+        }
+    }
+}
+
+pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    let (origin, private, product) = match venue {
+        "bybitdemo" => (
+            "https://api-demo.bybit.com",
+            "/v5/account/wallet-balance",
+            "category=linear",
+        ),
+        "bybitspot" => (
+            "https://api.bybit.com",
+            "/v5/account/wallet-balance",
+            "category=spot",
+        ),
+        "binancepm" => (
+            "https://papi.binance.com",
+            "/papi/v1/balance",
+            "/papi/v1/um/openOrders",
+        ),
+        "binanceinverse" => (
+            "https://dapi.binance.com",
+            "/dapi/v1/account",
+            "/dapi/v1/openOrders",
+        ),
+        "binancespot" => (
+            "https://api.binance.com",
+            "/api/v3/account",
+            "/api/v3/openOrders",
+        ),
+        "okxdemo" => (
+            "https://openapi.okx.com",
+            "/api/v5/account/config",
+            "/api/v5/trade/orders-pending",
+        ),
+        "bitgetusdc" => (
+            "https://api.bitget.com",
+            "/api/v2/mix/account/accounts",
+            "productType=usdc-futures",
+        ),
+        _ => return,
+    };
+    assert_eq!(
+        safe_cex_native::resolve::rest_base_url(venue, false).unwrap(),
+        origin
+    );
+    assert!(
+        seen.urls
+            .iter()
+            .any(|url| url.split('?').next() == Some(format!("{origin}{private}").as_str())),
+        "{venue}: missing private native route: {:?}",
+        seen.urls
+    );
+    assert!(
+        seen.urls
+            .iter()
+            .any(|url| url.starts_with(origin) && url.contains(product)),
+        "{venue}: missing exact product: {:?}",
+        seen.urls
+    );
+    if venue == "okxdemo" {
+        assert_eq!(
+            seen.demo_private_reads, seen.signed_reads,
+            "every demo private read needs the simulated header"
+        );
+    }
+}
 impl VenueIo {
     fn authenticated(&self, r: &HttpRequest) -> Option<bool> {
         let route = path(r).split('?').next().unwrap();
         // Native startup can attach credentials to public discovery. Public
         // responses cannot verify the joined key; only private reads count.
-        let public = match self.venue {
-            "bybitinverse" => route.starts_with("/v5/market/"),
+        let public = match family(self.venue) {
+            "bybit" => route.starts_with("/v5/market/"),
             "binance" => [
                 "exchangeInfo",
                 "ticker/24hr",
@@ -86,8 +214,8 @@ impl VenueIo {
         };
         let suffix = r.body.as_deref().unwrap_or("");
         let h = |name: &str| header(r, name).unwrap_or("");
-        let key = h(match self.venue {
-            "bybitinverse" => "X-BAPI-API-KEY",
+        let key = h(match family(self.venue) {
+            "bybit" => "X-BAPI-API-KEY",
             "binance" => "X-MBX-APIKEY",
             "okx" => "OK-ACCESS-KEY",
             "bitget" | "blofin" => "ACCESS-KEY",
@@ -102,8 +230,8 @@ impl VenueIo {
         let mac = |payload: String, encoding| {
             hmac_sha256(material.as_bytes(), payload.as_bytes(), encoding)
         };
-        match self.venue {
-            "bybitinverse" => {
+        match family(self.venue) {
+            "bybit" => {
                 let payload = r.url.split_once('?').map_or("", |(_, query)| query);
                 h("X-BAPI-SIGN")
                     == mac(
@@ -126,7 +254,7 @@ impl VenueIo {
                 h("X-MBX-APIKEY") == key && sig == mac(payload.into(), Encoding::Hex)
             }
             "okx" | "bitget" => {
-                let prefix = if self.venue == "okx" {
+                let prefix = if family(self.venue) == "okx" {
                     "OK-ACCESS-"
                 } else {
                     "ACCESS-"
@@ -183,10 +311,11 @@ impl VenueIo {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
             seen.inverse_private_reads += usize::from(r.url.contains("category=inverse"));
+            seen.demo_private_reads += usize::from(header(r, "x-simulated-trading") == Some("1"));
             if !valid {
                 seen.refused += 1;
-                return match self.venue {
-                    "bybitinverse" => {
+                return match family(self.venue) {
+                    "bybit" => {
                         json!({"retCode":10004,"retMsg":"synthetic signature refusal","result":{}})
                     }
                     "binance" => json!({"code":-2015,"msg":"synthetic refusal"}),
@@ -201,14 +330,23 @@ impl VenueIo {
         let fixtures: Value =
             serde_json::from_str(include_str!("../../tests/fixtures/admission-reads.json"))
                 .unwrap();
-        let bodies = fixtures[self.venue].as_object().unwrap();
+        let variants: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/admission-variant-reads.json"
+        ))
+        .unwrap();
+        let bodies = variants
+            .get(self.venue)
+            .or_else(|| fixtures.get(family(self.venue)))
+            .or_else(|| fixtures.get(self.venue))
+            .and_then(Value::as_object)
+            .unwrap();
         let url = path(r).split('?').next().unwrap();
         let mut response = bodies
             .iter()
             .find(|(key, _)| key.as_str() != "*" && url.ends_with(key.as_str()))
             .map_or(&bodies["*"], |(_, body)| body)
             .clone();
-        if self.venue == "bybitinverse" {
+        if family(self.venue) == "bybit" {
             // Bybit syncs its signing clock from this field. A frozen capture repeats
             // signing bytes across distinct attempts, unlike a live venue clock.
             response["time"] = crate::accounts::now_ms().into();
@@ -243,12 +381,18 @@ impl Transport for VenueIo {
             socket,
             json!({"type":"welcome"}).to_string(),
         ));
+        let venue = self.venue;
+        let spot_private = venue == "binancespot" && url.contains("/ws-api/");
         tokio::task::spawn_local(async move {
             while let Some(text) = rx.recv().await {
                 let Ok(v) = serde_json::from_str::<Value>(&text) else {
                     continue;
                 };
-                let reply = json!({"event":v["op"],"op":v["op"],"success":true,"code":"0","msg":"","type":"ack","id":v["id"]});
+                let reply = if spot_private {
+                    spot_subscription_reply(&v)
+                } else {
+                    json!({"event":v["op"],"op":v["op"],"success":true,"code":"0","msg":"","type":"ack","id":v["id"]})
+                };
                 let _ = events.send(HostEvent::WsMessage(socket, reply.to_string()));
             }
         });
@@ -258,7 +402,7 @@ impl Transport for VenueIo {
         assert!(
             r.method == Method::Get
                 || (r.method == Method::Post
-                    && ((self.venue == "binance" && path(&r).ends_with("listenKey"))
+                    && ((family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
                         || (self.venue == "bingx"
                             && path(&r) == "/openApi/user/auth/userDataStream")
                         || (self.venue == "kucoin"
@@ -267,11 +411,11 @@ impl Transport for VenueIo {
                                 .any(|endpoint| path(&r).ends_with(*endpoint))))),
             "admission may only read account state or obtain a read-feed token"
         );
-        self.seen
-            .lock()
-            .unwrap()
-            .paths
-            .push(path(&r).split('?').next().unwrap().into());
+        {
+            let mut seen = self.seen.lock().unwrap();
+            seen.paths.push(path(&r).split('?').next().unwrap().into());
+            seen.urls.push(r.url.clone());
+        }
         let response = self.response(&r);
         let status = if self.venue == "phemex" && response["code"] == 401 {
             401
@@ -473,6 +617,7 @@ async fn admission_hmac_private_startup_accepts_valid_pairs() {
                     "{venue} must perform a signed private read"
                 );
                 assert_eq!(seen.refused, 0);
+                assert_variant_startup(venue, &seen);
             }
         })
         .await;
@@ -534,12 +679,12 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .trim_end_matches(|c: char| c.is_ascii_digit())
             .into();
     }
-    if venue == "bybitinverse" {
+    if family(venue) == "bybit" {
         return canonical
             .trim_start_matches(|c: char| c.is_ascii_digit())
             .to_owned();
     }
-    if matches!(venue, "binance" | "bingx") {
+    if family(venue) == "binance" || venue == "bingx" {
         return canonical
             .split('&')
             .filter(|part| !part.starts_with("timestamp="))
@@ -597,6 +742,7 @@ async fn remote(
                 text.starts_with("GET/realtime")
                     || text.contains("/users/self/verify")
                     || text.contains("/user/verify")
+                    || venue == "binancespot" && text.starts_with("apiKey=")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -882,6 +1028,48 @@ fn admission_fixture_checks_private_routes_even_when_signature_headers_are_missi
             "bitget",
             "/api/v2/mix/market/contracts",
             "/api/v2/account/settings",
+            "ACCESS-SIGN",
+        ),
+        (
+            "bybitdemo",
+            "/v5/market/instruments-info",
+            "/v5/account/wallet-balance",
+            "X-BAPI-SIGN",
+        ),
+        (
+            "bybitspot",
+            "/v5/market/instruments-info",
+            "/v5/account/wallet-balance",
+            "X-BAPI-SIGN",
+        ),
+        (
+            "binancepm",
+            "/fapi/v1/exchangeInfo",
+            "/papi/v1/balance",
+            "X-MBX-APIKEY",
+        ),
+        (
+            "binanceinverse",
+            "/dapi/v1/exchangeInfo",
+            "/dapi/v1/account",
+            "X-MBX-APIKEY",
+        ),
+        (
+            "binancespot",
+            "/api/v3/exchangeInfo",
+            "/api/v3/account",
+            "X-MBX-APIKEY",
+        ),
+        (
+            "okxdemo",
+            "/api/v5/public/instruments",
+            "/api/v5/account/config",
+            "OK-ACCESS-SIGN",
+        ),
+        (
+            "bitgetusdc",
+            "/api/v2/mix/market/contracts",
+            "/api/v2/mix/account/accounts",
             "ACCESS-SIGN",
         ),
         (

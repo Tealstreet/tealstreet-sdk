@@ -126,7 +126,8 @@ What it captures:
   on an engine thread never waits on Sentry), sending the code location and
   never the payload;
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
-  fencing, a failing signer, and algo shutdown deadlines;
+  fencing with running algos, a failing signer, and algo shutdown deadlines;
+  zero-running fences are journal-only info, including paused/pending-only work;
 - the native host's account start failures and venue, relay and HTTP-tunnel
   transport failures, through `safe_cex_native::report`. Each account's
   transport is built `with_venue`, so its failures carry `venue` beside `kind`
@@ -142,7 +143,9 @@ Every event is rebuilt from an allowlist:
 - tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
   `target`;
 - extras `user_tag` (a hash, never the user ID) and
-  `suppressed_since_last_event`.
+  `suppressed_since_last_event`; `router_lease.fenced` additionally allows unsigned
+  numeric `running_jobs`, `paused_jobs` and `pending_work` from the pre-disposal
+  work snapshot, never job IDs or payloads.
 
 Account names, URLs with their query, auth headers, key-shaped strings and
 payloads do not leave. Events are throttled to one per fingerprint per 60 s
@@ -528,8 +531,7 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
 - **Private COSIGNED join proof:** fresh connections use the same isolated native
   probe and admission path as DELEGATED, using shared hosted eligibility.
-  Exact `bybit`, `bybitinverse`, `binance`, `okx`, `bitget`, `blofin`, `kucoin`,
-  `phemex` and `bingx` are proof-ready.
+  The exact proof-ready names and variant controls are listed in the host contract below.
   Other private COSIGNED venues return an init refusal with
   `kind: "proof-unavailable"`, `initRefused: true`, `transient: false` and
   `outcome: "notSent"`; they do not fall back to registry attachment.
@@ -733,8 +735,8 @@ Public-only accounts, unsupported/unhosted venues and existing early-subscriptio
 handling retain their previous paths. Fixed synthetic interoperability and RFC
 test data live in `tests/data/`.
 
-The shared startup admission runner makes exact `bybit`, `bybitinverse`,
-`binance`, `okx`, `bitget`, `blofin`, `kucoin`, `phemex` and `bingx` proof-ready for COSIGNED. It runs the selected
+The shared startup admission runner uses the exact COSIGNED names in
+`delegated/probe.rs`, documented in the host contract above. It runs the selected
 venue's existing native private startup with either the remote provider or the
 local provider; it does not build a second set of REST requests. Its result
 classifier uses engine `ErrorKind` values: authentication failures are invalid,

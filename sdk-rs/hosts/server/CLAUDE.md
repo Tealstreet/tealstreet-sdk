@@ -5,6 +5,17 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Router lease-fence diagnostics
+
+Router lease fences snapshot `Running::jobs()` before disposal. The journal
+includes `running_jobs`, `paused_jobs` and `pending_work`. Only a positive running
+algo count logs error and sends `router_lease.fenced` to Sentry with the fixed
+summary “router lease fenced; running algos stopped on this box”. Zero running
+algos logs info with “router lease fenced; no running algos on this box”, including
+paused-only or pending-only work; info remains journal-only. Only unsigned numeric
+counts are allowed for that event; job IDs, labels and payloads stay excluded. Lease retirement,
+account disposal and algo stop/pause behavior are unchanged.
+
 ## Public topic diagnostics
 
 `POST /admin/public-topics` accepts an empty body or `{}` (1024-byte limit).
@@ -102,12 +113,14 @@ Private COSIGNED admissions require possession proof independently of
 DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
-as a fallback when its possession proof is unavailable. Exact Bybit base and
-inverse venues, plus Binance, OKX, Bitget, Blofin, KuCoin, Phemex and BingX base venues, have
-private-startup proof coverage. Bybit inverse reuses its own native startup and
-HMAC signing, with inverse-product and Brazil-site session controls. Phemex
+as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
+Binance base/PM/inverse/spot, OKX base/demo, Bitget base/USDC,
+Blofin, KuCoin, Phemex and BingX names have native private-startup HMAC proof coverage.
+Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
-HMAC proof with wrong-key, replay and foreign-socket controls. BingX perpetuals
+HMAC proof with wrong-key, replay and foreign-socket controls.
+Variant tests pin product routes, origins and demo headers as well as the
+wrong-key, replay, foreign-socket and resident-preservation controls. BingX perpetuals
 prove signed private account reads independently of API-key-only listen-key acquisition;
 Spot and testnet do not inherit that proof. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
@@ -116,6 +129,13 @@ are consumed internally. Matching COSIGNED repeats require the same socket-admit
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
+
+COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
+Every exact `remoteSigning.enabled` venue needs native proof readiness or a
+reason in `src/delegated/cosigned-proof-exclusions.json`; remove its exclusion
+when proof lands. The 33-production-venue census is checked separately, and
+Cargo signing features are only a family cross-check. The reason list changes
+no runtime availability, admission or client fallback policy.
 
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;

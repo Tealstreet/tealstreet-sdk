@@ -74,7 +74,8 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
         // HTTP 200 can carry system or legacy IP limits. Released writes stay
         // Unknown through the engine's rate-limit rule; reads retain their kind.
         row(Key::Int(429), Verdict::Refused(ErrorKind::RateLimited)),
-        row(Key::Int(10006), Verdict::Refused(ErrorKind::RateLimited)),
+        // The UID budget rejects this request before execution (docs/v5/rate-limit).
+        row(Key::Int(10006), Verdict::RateLimitRefused),
         row(Key::Int(10018), Verdict::Refused(ErrorKind::RateLimited)),
         row(Key::Int(10010), Verdict::Refused(ErrorKind::AuthPermission)),
         row(Key::Int(33004), Verdict::Refused(ErrorKind::AuthExpired)),
@@ -208,7 +209,11 @@ const fn protective_rows() -> [Row; BYBIT.rows.len()] {
     let mut index = 0;
     while index < rows.len() {
         rows[index] = BYBIT.rows[index];
-        if let Verdict::Refused(ErrorKind::RateLimited) = rows[index].verdict {
+        // A protective edit may already have cancelled its previous stop.
+        if matches!(
+            rows[index].verdict,
+            Verdict::Refused(ErrorKind::RateLimited) | Verdict::RateLimitRefused
+        ) {
             rows[index].verdict = Verdict::Unknown(Some(ErrorKind::RateLimited));
         }
         if let Verdict::Satisfied(SatisfiedIntent::Setting) = rows[index].verdict {
@@ -254,7 +259,7 @@ fn native_rate_limits_keep_read_and_write_intents_distinct() {
         assert_eq!(read.kind, Some(ErrorKind::RateLimited), "{code}");
         assert_eq!(read.outcome, None, "{code}");
         assert_eq!(read.retry_after_ms, Some(2000.0), "{code}");
-        for table in [&BYBIT, &PROTECTIVE] {
+        for (table, protective) in [(&BYBIT, false), (&PROTECTIVE, true)] {
             for intent in [
                 Intent::Place,
                 Intent::Cancel,
@@ -269,7 +274,12 @@ fn native_rate_limits_keep_read_and_write_intents_distinct() {
                     Some(ErrorKind::RateLimited),
                     "{code}/{intent:?}"
                 );
-                assert_eq!(error.outcome, Some(Outcome::Unknown), "{code}/{intent:?}");
+                let expected = if code == 10006 && !protective {
+                    Outcome::Rejected
+                } else {
+                    Outcome::Unknown
+                };
+                assert_eq!(error.outcome, Some(expected), "{code}/{intent:?}");
                 assert_eq!(
                     error.venue_code,
                     Some(code.to_string()),
