@@ -45,10 +45,6 @@
       "reason": "No native Hosted Spot origin; server JWT/JWS signing and exact Spot private-startup proof are not built."
     },
     {
-      "venue": "cryptocom",
-      "reason": "No native Hosted REST origin; structured RPC nonce/params canonicalization and private-startup proof are not built."
-    },
-    {
       "venue": "grvt",
       "reason": "API-key login alone does not prove the separate ECDSA scalar; a fresh account/attempt-bound signing-key possession proof is not built."
     },
