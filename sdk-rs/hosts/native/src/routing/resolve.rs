@@ -390,6 +390,9 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         "binancepm" => pick("https://papi.binance.com", "https://demo-fapi.binance.com"),
         "binanceinverse" => pick("https://dapi.binance.com", "https://demo-dapi.binance.com"),
         "binancespot" => pick("https://api.binance.com", "https://testnet.binance.vision"),
+        // Hosted Options testnet stays closed despite the engine's legacy testnet mapping.
+        "binanceoptions" if testnet => return Err(RoutingError::NoBaseUrl(name.into())),
+        "binanceoptions" => "https://eapi.binance.com",
         "bybit" | "bybitinverse" | "bybitspot" => {
             pick("https://api.bybit.com", "https://api-testnet.bybit.com")
         }

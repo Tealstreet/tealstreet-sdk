@@ -1,4 +1,6 @@
-use safe_cex_exchange_server::accounts::{engine_options, prepare};
+use safe_cex_exchange_server::accounts::{
+    HYROTRADER_UNHOSTED, engine_options, prepare, refuse_unhosted,
+};
 use safe_cex_exchange_server::delegated::{DelegatedPair, prepare_delegated};
 use safe_cex_exchange_server::envelope::InitPayload;
 use safe_cex_remote_signer::{SignerLink, supports_remote_signing};
@@ -73,15 +75,55 @@ fn bybit_delegated_prepares_injected_private_provider_options() {
 
 #[test]
 fn delegated_is_refused_for_unhosted_venues_and_public_accounts() {
-    for venue in ["hyrotrader", "binanceoptions", "kucoin", "unknown"] {
-        assert!(prepare_delegated(&init(venue), pair()).is_err());
+    // Options is supported; HyroTrader still lacks hosted engine endpoint configuration.
+    for venue in ["hyrotrader", "txflow", "unknown"] {
+        assert!(
+            !safe_cex_exchange_server::delegated::enabled(venue),
+            "{venue}: missing-origin fixture must be unhosted"
+        );
+        if venue == "hyrotrader" {
+            assert_eq!(
+                safe_cex_native::resolve::rest_base_url(venue, false),
+                Ok("https://sim-tealstreet.hyro.site")
+            );
+            assert_eq!(refuse_unhosted(venue), Err(HYROTRADER_UNHOSTED.into()));
+        } else {
+            assert!(safe_cex_native::resolve::rest_base_url(venue, false).is_err());
+        }
+        assert!(matches!(
+            prepare_delegated(&init(venue), pair()),
+            Err(ref error) if error == "DELEGATED is not enabled for this venue"
+        ));
     }
+    // KuCoin has an origin but this fixture still lacks its required passphrase.
+    assert!(prepare_delegated(&init("kucoin"), pair()).is_err());
     let mut public = init("bybit");
     public.public_only = Some(true);
     assert!(prepare_delegated(&public, pair()).is_err());
     public.public_only = None;
     public.account_name = "__pub_bybit".into();
     assert!(prepare_delegated(&public, pair()).is_err());
+}
+
+#[test]
+fn binanceoptions_delegated_preparation_accepts_mainnet_but_refuses_hosted_testnet() {
+    for testnet in [None, Some(false)] {
+        let mut mainnet = init("binanceoptions");
+        mainnet.testnet = testnet;
+        assert!(safe_cex_exchange_server::delegated::enabled(
+            "binanceoptions"
+        ));
+        assert!(prepare(&mainnet, false, None).is_ok());
+        // Protected signer allocation deliberately refuses non-Linux platforms.
+        #[cfg(target_os = "linux")]
+        assert!(prepare_delegated(&mainnet, pair()).is_ok());
+    }
+    let mut testnet = init("binanceoptions");
+    testnet.testnet = Some(true);
+    assert!(matches!(
+        prepare_delegated(&testnet, pair()),
+        Err(ref error) if error == "binanceoptions cannot run on the Hosted server. Turn Hosted off to use this account."
+    ));
 }
 
 #[test]
