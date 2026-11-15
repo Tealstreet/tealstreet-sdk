@@ -87,7 +87,11 @@ trait AnyEngine {
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
+    #[cfg(any(
+        feature = "hosted-signing",
+        feature = "hosted-wallet",
+        feature = "hosted-join-proof"
+    ))]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
@@ -238,7 +242,11 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
-    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
+    #[cfg(any(
+        feature = "hosted-signing",
+        feature = "hosted-wallet",
+        feature = "hosted-join-proof"
+    ))]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         Engine::signing_clock(self, now)
     }

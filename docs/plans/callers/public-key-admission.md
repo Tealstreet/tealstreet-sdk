@@ -179,6 +179,12 @@ This handler performs no Session admission and enables no server venue. Existing
 constructor/custody and compiled-feature restrictions still apply; a generic
 method's presence is not proof of venue readiness.
 
+The reusable `hosted-join-proof` WASM feature is linked by default only in the
+Backpack candidate family (and therefore the combined build). Other standalone
+families retain their existing size-critical composition. Their activation slices
+must explicitly opt into the feature and certify their own optimized size before
+shipping. This build selection does not change the server admission catalog.
+
 ## Pending verification lifetime
 
 After queue admission, a fresh random server attempt and nonce bind the closed
