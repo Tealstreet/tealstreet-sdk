@@ -20,6 +20,7 @@ const READY: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "cryptocom",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -96,7 +97,8 @@ impl Device {
             || preimage.contains("/users/self/verify")
             || preimage.contains("/user/verify")
             || venue == "binancespot" && preimage.starts_with("apiKey=")
-            || venue == "phemex" && !preimage.starts_with('/');
+            || venue == "phemex" && !preimage.starts_with('/')
+            || venue == "cryptocom" && preimage.starts_with("public/auth");
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -676,11 +678,15 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
 
 #[tokio::test]
 async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
-    let (io, _) = MockVenue::for_admission("binance");
+    login_switch_case("binance").await;
+}
+
+async fn login_switch_case(venue: &'static str) {
+    let (io, _) = MockVenue::for_admission(venue);
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     let (mut alice, mut a_sent) = user_session(registry.clone(), "alice");
     let mut a_done = alice.take_verified();
-    alice.init(payload("binance")).await.unwrap();
+    alice.init(payload(venue)).await.unwrap();
     assert!(alice.pending_verifications.contains_key("acct"));
     // Withhold Alice's proof signature: her native proof is genuinely deferred.
     let request = tokio::time::timeout(Duration::from_secs(30), a_sent.recv())
@@ -695,7 +701,7 @@ async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
     bob.identity.resumable = false;
     let mut device = Device::default();
     proof(
-        "binance",
+        venue,
         &mut bob,
         &mut b_sent,
         &mut device,
@@ -757,4 +763,14 @@ async fn cosigned_bybit_proof_ignores_obsolete_delegated_rollout_field() {
 #[tokio::test]
 async fn cosigned_phemex_requires_connection_proof() {
     venue_case("phemex").await;
+}
+
+#[tokio::test]
+async fn cosigned_cryptocom_requires_connection_proof() {
+    venue_case("cryptocom").await;
+}
+
+#[tokio::test]
+async fn cosigned_cryptocom_login_switch_during_signing_await_is_isolated() {
+    login_switch_case("cryptocom").await;
 }

@@ -263,6 +263,11 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         Some("https://testnet-api.phemex.com"),
     ),
     (
+        "cryptocom",
+        "https://api.crypto.com/exchange/v1",
+        Some("https://uat-api.3ona.co/exchange/v1"),
+    ),
+    (
         "woo",
         "https://api.woox.io",
         Some("https://api.staging.woox.io"),

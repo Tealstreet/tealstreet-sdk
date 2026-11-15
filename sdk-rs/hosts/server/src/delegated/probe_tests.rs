@@ -26,6 +26,7 @@ const VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "cryptocom",
 ];
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
@@ -39,6 +40,7 @@ pub(crate) struct Seen {
     pub(crate) urls: Vec<String>,
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
+    pub(crate) cryptocom_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -302,6 +304,9 @@ impl VenueIo {
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
+        if self.venue == "cryptocom" {
+            return cryptocom::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -367,6 +372,9 @@ impl Transport for VenueIo {
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
+        if self.venue == "cryptocom" {
+            return cryptocom::connect(self, socket, &url, events);
+        }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         let _ = events.send(HostEvent::WsMessage(
@@ -394,7 +402,8 @@ impl Transport for VenueIo {
         assert!(
             r.method == Method::Get
                 || (r.method == Method::Post
-                    && ((family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
+                    && (self.venue == "cryptocom"
+                        || (family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
                         || (self.venue == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
@@ -663,6 +672,14 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "cryptocom" {
+        // Startup params are empty; the first digit begins the attempt-local nonce/id.
+        return canonical
+            .split(|c: char| c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .into();
+    }
     if venue == "phemex" {
         // Native Phemex signs path + query + whole-second expiry; keep the read scope.
         return canonical
@@ -733,6 +750,7 @@ async fn remote(
                     || text.contains("/users/self/verify")
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
+                    || venue == "cryptocom" && text.starts_with("public/auth")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -1128,3 +1146,6 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
+
+#[path = "cryptocom_probe_tests.rs"]
+mod cryptocom;
