@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 
 use super::*;
 
+mod apexomni;
 mod grvt;
 
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
