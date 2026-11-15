@@ -1,8 +1,8 @@
 //! Hosted Spot origin and existing KuCoin routing, without venue network I/O.
 use safe_cex_native::HttpRouteMode;
 use safe_cex_native::resolve::{
-    AccountTransport, Provider, RoutingError, RoutingInputs, account_transport, resolve_routing_plan,
-    rest_base_url, route_bases,
+    AccountTransport, Provider, RoutingError, RoutingInputs, account_transport,
+    resolve_routing_plan, rest_base_url, route_bases,
 };
 
 const SPOT: &str = "https://api.kucoin.com";
