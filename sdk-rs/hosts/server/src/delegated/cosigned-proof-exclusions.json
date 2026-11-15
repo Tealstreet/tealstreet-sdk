@@ -1,0 +1,132 @@
+{
+  "exclusions": [
+    {
+      "venue": "apexomni",
+      "reason": "No native Hosted REST origin; native private-read proof and complete zkLink order-signing coverage are not built."
+    },
+    {
+      "venue": "asterdex",
+      "reason": "No native Hosted REST origin; legacy HMAC and v3 wallet/agent proof paths need separate server bridge coverage."
+    },
+    {
+      "venue": "backpack",
+      "reason": "Ed25519 native private-startup proof, key encoding, account binding and replay/socket controls are not built."
+    },
+    {
+      "venue": "binanceinverse",
+      "reason": "Exact DAPI/inverse startup proof and negative controls are not built; base Binance readiness does not cover this variant."
+    },
+    {
+      "venue": "binanceoptions",
+      "reason": "Client Hosted gate blocks this venue because no native server origin exists; options startup proof is not built."
+    },
+    {
+      "venue": "binancepm",
+      "reason": "Exact PAPI portfolio-margin account-mode/private-startup proof and negative controls are not built."
+    },
+    {
+      "venue": "binancespot",
+      "reason": "Exact Spot listen-key and private-startup proof and negative controls are not built."
+    },
+    {
+      "venue": "bingx",
+      "reason": "Native signed private-startup proof and replay/socket controls are not built; do not infer readiness from the HMAC codec."
+    },
+    {
+      "venue": "bingxspot",
+      "reason": "Production metadata disables Spot and the native Hosted origin/private proof are missing; fixture-only admission is not live support."
+    },
+    {
+      "venue": "bitgetinverse",
+      "reason": "Production metadata disables this variant; exact inverse account-mode/private-startup proof is not built."
+    },
+    {
+      "venue": "bitgetusdc",
+      "reason": "Exact USDC productType/account-mode private-startup proof and negative controls are not built."
+    },
+    {
+      "venue": "bitrue",
+      "reason": "Production metadata disables this venue; native Hosted REST origin and private-startup proof are not built. Keep its live beta roster entry."
+    },
+    {
+      "venue": "bitunix",
+      "reason": "Native double-SHA private-startup proof with timestamp, replay and socket controls is not built."
+    },
+    {
+      "venue": "bybitdemo",
+      "reason": "Exact demo-origin/private-startup proof and negative controls are not built; base Bybit readiness does not cover demo."
+    },
+    {
+      "venue": "bybitspot",
+      "reason": "Exact Spot-category/private-startup proof and negative controls are not built; base Bybit readiness does not cover Spot."
+    },
+    {
+      "venue": "coinbase",
+      "reason": "No native Hosted REST origin; server JWT/JWS ES256/EdDSA bridge and bound private-startup proof are not built."
+    },
+    {
+      "venue": "coinbasespot",
+      "reason": "No native Hosted Spot origin; server JWT/JWS signing and exact Spot private-startup proof are not built."
+    },
+    {
+      "venue": "cryptocom",
+      "reason": "No native Hosted REST origin; structured RPC nonce/params canonicalization and private-startup proof are not built."
+    },
+    {
+      "venue": "grvt",
+      "reason": "API-key login alone does not prove the separate ECDSA scalar; a fresh account/attempt-bound signing-key possession proof is not built."
+    },
+    {
+      "venue": "hyperliquid",
+      "reason": "Address-based public reads do not prove the wallet key; fresh wallet/agent/vault possession and authorization proof is not built."
+    },
+    {
+      "venue": "hyperliquidspot",
+      "reason": "Spot address-based reads do not prove the wallet key; exact Spot wallet/agent/vault possession and authorization proof is not built."
+    },
+    {
+      "venue": "hyrotrader",
+      "reason": "Client Hosted gate blocks this venue because no native server origin exists; exact simulator startup proof is not built."
+    },
+    {
+      "venue": "kraken",
+      "reason": "No native Hosted REST origin; server Present/SHA256/HMAC-SHA512 bridge and private-startup proof are not built."
+    },
+    {
+      "venue": "kucoinspot",
+      "reason": "No native Hosted Spot REST origin; exact Spot bullet/private-startup proof with signed passphrase and socket controls is not built."
+    },
+    {
+      "venue": "lighter",
+      "reason": "Native expiring auth-token/private-startup proof bound to account, key slot and replay/socket authority is not built."
+    },
+    {
+      "venue": "lighter-robinhood",
+      "reason": "Production metadata disables this venue; its distinct origin/chain/account-slot private-startup proof is not built."
+    },
+    {
+      "venue": "mexc",
+      "reason": "No native Hosted REST origin; native signed private-startup proof distinguishing signing-optional/read/token layouts is not built."
+    },
+    {
+      "venue": "okxdemo",
+      "reason": "Exact simulated-trading-header/private-startup proof and negative controls are not built."
+    },
+    {
+      "venue": "okxeu",
+      "reason": "Exact EEA private-startup proof is incomplete; cold signed account/instruments refusal needs its own design, not unsigned discovery or longer deadlines."
+    },
+    {
+      "venue": "okxeudemo",
+      "reason": "Exact EEA simulated-trading private-startup proof is incomplete; cold signed account/instruments refusal needs its own design."
+    },
+    {
+      "venue": "paradex",
+      "reason": "Client Hosted gate awaits a live test; signed auth/JWT, address/subkey/derived-key validation and startup proof are not complete."
+    },
+    {
+      "venue": "txflow",
+      "reason": "Production metadata and beta/agent gates refuse this venue; native origin, agent signing and bound private-startup proof are not built."
+    }
+  ]
+}
