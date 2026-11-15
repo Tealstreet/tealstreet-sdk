@@ -347,9 +347,11 @@ impl Inner {
         options: &Map<String, Value>,
     ) -> Result<(), SignError> {
         if self.family == Family::Grvt
-            && let Some(address) = options.get("grvtSignerAddress")
+            && let Some(address) = options
+                .get("grvtSignerAddress")
+                .and_then(|value| prefixed(value, 20).ok())
         {
-            self.bind(&prefixed(address, 20)?)?;
+            self.bind(&address)?;
         }
         Ok(())
     }
