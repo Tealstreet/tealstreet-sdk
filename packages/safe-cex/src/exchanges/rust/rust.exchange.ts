@@ -3609,19 +3609,27 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
+    const admitted = this.routesToWorker ? this.captureWorkerAdmission() : undefined;
     const ready = this.capabilitiesFor('fetchSymbolMaxLeverage');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const source = capabilities.maxLeverage;
     if (source === 'unsupported') throw new Error('Not implemented');
     if (source === 'rails') {
-      if (this.routesToWorker) return (await this.callWorker('fetchSymbolMaxLeverage', symbol)) as number;
+      if (this.routesToWorker) {
+        const leverage = (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number;
+        admitted?.('fetchSymbolMaxLeverage', [symbol]);
+        return leverage;
+      }
       const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
     if (source === 'query' && !this.isPublicDataOnly) {
-      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      const leverage = this.routesToWorker
+        ? (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number
+        : await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
       if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
       this.host?.flush();
       return leverage;

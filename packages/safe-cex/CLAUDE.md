@@ -878,7 +878,9 @@ worker, mirror-local, unsupported, or a write (moving to the main-thread writer
 engine); an unclassified method fails typecheck. Engine reads forward
 (`WORKER_FORWARDED_METHODS`, plus the Rust-only `fetchStpMode` and
 `fetchOrderBook`). `fetchLeverageForSymbol` and `fetchSymbolMaxLeverage` answer
-from frame-fed rails and ask the worker only for a venue read. On a mirror,
+from frame-fed rails and ask the worker only for a venue read. A private query-only
+maximum (Bitrue) also uses that source read, retaining its original owner through
+capability and reply waits; public-only market ceilings remain local. On a mirror,
 `validateAccount`, `fetchEngineSnapshot` and `snapshotFrame` throw a named
 `unsupported` error, and `fetchFillsForOrderIds` is never adopted;
 `WorkerMirrorExchange` is the type without them. Forwarding decides a method is
