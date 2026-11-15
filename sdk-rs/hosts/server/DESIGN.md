@@ -611,12 +611,26 @@ dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 A private socket always proves its own candidate credentials before crossing a
 resident mode. A COSIGNED join attaches to an existing DELEGATED actor and cannot
-downgrade it. A verified DELEGATED join can upgrade a COSIGNED HMAC actor,
-including its own parked copy, without restarting the actor or its jobs. An
-owned signing-work barrier refuses `mode_transition_busy` while any original
+downgrade it. A verified DELEGATED join can upgrade a supported COSIGNED actor,
+including its own parked copy, without restarting the actor or its jobs. Ethereum,
+Stark and Ed25519 candidates match the original provider's completed/canonical
+public binding locally. Initial COSIGNED Schnorr construction pins a routed,
+validated registration before publishing its provider; later joins require the
+current registration and candidate to match that immutable key. After promotion,
+the actual installed resident supplies the binding. Legacy actors without the
+initial binding refuse explicitly, rather than adopting a rotated slot's key.
+Public proof retains only a weak reference to the
+exact resident actor, and captured init, token and lease guards survive the lookup.
+A retired attempt or different actor cannot inherit it, including after settings
+return to their previous values. Existing DELEGATED residents use the same local
+public-key comparison before attachment; unsigned balance reads are not proof.
+An owned signing-work barrier refuses `mode_transition_busy` while any original
 sign future or setup execution remains unsettled. No work is canceled, retried
-or sent to both signers. Unsupported sealed address/nonce lifetimes refuse
-`mode_transition_unavailable`. These refusals leave the candidate unattached.
+or sent to both signers. The original engine dispatch handle, opaque refs,
+address/public-key seals and nonce ownership stay in place. Missing trusted
+bindings refuse `mode_transition_unavailable`. Coinbase CDP explicitly refuses
+as `proof-unavailable` until its COSIGNED JWT setup and private venue proof exist.
+These refusals leave the candidate unattached.
 
 The future provider, actual mode and protected resident are installed together.
 Only opaque key refs are translated, by primary/secondary identity role; receipt,
@@ -744,6 +758,11 @@ rate limits and transport failures are transient, and complete private startup
 is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
 frame-fed accounts cannot satisfy this check.
+
+Exact `bitunix` readiness uses that venue round trip, with the existing native
+double-SHA256 secret-suffix request signer. Its synthetic venue independently
+checks nonce/timestamp/key/query signing bytes on the actual private startup
+reads; a public response or a signer result alone never completes admission.
 
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The COSIGNED catalog does not gate DELEGATED admission. COSIGNED coverage
