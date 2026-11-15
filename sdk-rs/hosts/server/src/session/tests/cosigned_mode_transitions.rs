@@ -295,3 +295,6 @@ async fn assert_post_upgrade_typed_write(
         );
     }
 }
+
+#[path = "cosigned_repeated_init.rs"]
+mod repeated_init;

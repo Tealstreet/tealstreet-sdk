@@ -453,8 +453,11 @@ async fn joined_without_runtime_opt_in(
         out.clone(),
     );
     crate::accounts::tests::hold_live(&account, session.socket, out.outbox());
+    // Preserve the supplied fixture's original COSIGNED/DELEGATED account kind.
+    // The new argument records that provenance without changing its construction.
+    let admitted_mode = account.actual_signing_mode();
     session
-        .join(account.clone(), out.with_instance_id(None))
+        .join(account.clone(), out.with_instance_id(None), admitted_mode)
         .await;
     if account.delegated().is_some() {
         tokio::time::timeout(Duration::from_secs(5), async {
