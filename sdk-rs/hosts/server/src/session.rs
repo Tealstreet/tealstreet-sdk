@@ -4193,6 +4193,7 @@ mod tests {
                 assert_eq!(original.drain_close(), Some(Close::Moved));
                 original.close();
                 let (mut late, mut frames) = user_session(registry, "u");
+                // Keep this stopped-actor fixture's original non-DELEGATED admission.
                 late.join(
                     account, late.out.clone(), envelope::AccountSigningMode::Cosigned,
                 ).await;
@@ -4237,6 +4238,7 @@ mod tests {
                     .await
                     .expect("the account really ended");
                     let (mut late, mut frames) = user_session(registry, "u");
+                    // Keep this stopped-actor fixture's original non-DELEGATED admission.
                     late.join(
                         account,
                         late.out.clone(),
