@@ -759,11 +759,12 @@ is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
 frame-fed accounts cannot satisfy this check.
 
-OKX EEA mainnet authenticates native signed config before keyed catalogue
+OKX EEA mainnet and demo authenticate native signed config before keyed catalogue
 discovery, retaining the config authority until market-dependent settings apply.
 Config alone cannot complete the probe. Consecutive signature refusals allow
 one re-signed read then fail permanently; no admission budget is extended.
-EEA demo remains outside the exact COSIGNED proof-ready catalog.
+Exact EEA demo also proves its simulated-trading header on native startup reads;
+missing, mainnet-valued or duplicate headers cannot satisfy that proof.
 
 Exact `bitunix` readiness uses that venue round trip, with the existing native
 double-SHA256 secret-suffix request signer. Its synthetic venue independently

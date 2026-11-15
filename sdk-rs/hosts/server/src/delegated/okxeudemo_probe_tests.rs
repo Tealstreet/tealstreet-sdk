@@ -57,7 +57,7 @@ impl Transport for DemoIo {
                 }
                 HeaderControl::Duplicate => request
                     .headers
-                    .push(("x-simulated-trading".into(), "1".into())),
+                    .push(("x-simulated-trading", "1".into())),
                 HeaderControl::Unsigned => request
                     .headers
                     .retain(|(name, _)| !name.eq_ignore_ascii_case("OK-ACCESS-SIGN")),
