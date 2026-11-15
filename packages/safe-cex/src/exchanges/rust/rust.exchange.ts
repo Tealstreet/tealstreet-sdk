@@ -1208,7 +1208,7 @@ export class RustEngineExchange extends BaseExchange {
     this.updatePollingPolicy();
   };
 
-  private syncPollingPolicy = (): Promise<void> | undefined => {
+  private syncPollingPolicy = (mode: 'startup' | 'background'): Promise<void> | undefined => {
     if (!this.host || this.isDisposed || this.engineFailure) return;
     const resolved = this.getTickInterval();
     if (resolved === undefined) return;
@@ -1219,6 +1219,9 @@ export class RustEngineExchange extends BaseExchange {
     // The resolved tick still bounds a slowdown (auth backoff and server multiplier
     // caps), unless a venue's native cadence is already slower.
     const ceiling = scale === null ? undefined : resolved;
+    // Background policy has no user intent; the replacement applies its own policy.
+    // Startup still requires delivery, and user commands retain their handoff fence.
+    if (mode === 'background' && !this.algoOwnerCurrent(this.twapOwnerBinding)) return;
     if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling)
       return this.pollingPolicy.promise;
     // Install before dispatch: native actions can synchronously change policy again.
@@ -1234,7 +1237,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private updatePollingPolicy = (): void => {
-    void this.syncPollingPolicy()?.catch(() => {
+    void this.syncPollingPolicy('background')?.catch(() => {
       /* command() owns error reporting; the next check can retry. */
     });
   };
@@ -2287,7 +2290,7 @@ export class RustEngineExchange extends BaseExchange {
     try {
       let applied: Promise<void> | undefined;
       for (;;) {
-        const latest = this.syncPollingPolicy();
+        const latest = this.syncPollingPolicy('startup');
         if (!latest || latest === applied) break;
         await latest;
         applied = latest;

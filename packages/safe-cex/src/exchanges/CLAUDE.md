@@ -1638,6 +1638,15 @@ internal reads, capability waits and nuke retry timers. Composite operations pas
 that admission to every later cancel/close leg; nested calls cannot recapture a
 successor owner. Unchanged-owner command payloads and ordering remain identical.
 
+## Rust background polling-policy ownership
+
+Background polling-policy updates from auth feedback, multiplier changes and flush
+ticks drop when their captured owner/generation has retired. They send no
+`setPollScale`, do not mark the engine dead or reset its store, and leave account
+retirement to its owning lifetime. A replacement applies its own policy. Initial
+policy delivery remains mandatory before native startup; user-write and algo
+handoff fences remain strict. Current-owner policy failures still report and retry.
+
 The page readiness boundary reports local refusals once, including optional methods
 and the direct schedule-cancel/account-tier paths; caller rejection alone cannot
 replace the exchange error event. Already-reported command failures stay deduped.
