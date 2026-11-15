@@ -680,13 +680,12 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
     }
 }
 
-#[tokio::test]
-async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
-    let (io, _) = MockVenue::for_admission("binance");
+async fn login_switch_during_signing_await_is_isolated(venue: &'static str) {
+    let (io, _) = MockVenue::for_admission(venue);
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     let (mut alice, mut a_sent) = user_session(registry.clone(), "alice");
     let mut a_done = alice.take_verified();
-    alice.init(payload("binance")).await.unwrap();
+    alice.init(payload(venue)).await.unwrap();
     assert!(alice.pending_verifications.contains_key("acct"));
     // Withhold Alice's proof signature: her native proof is genuinely deferred.
     let request = tokio::time::timeout(Duration::from_secs(30), a_sent.recv())
@@ -700,20 +699,23 @@ async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
     let (mut bob, mut b_sent) = user_session(registry.clone(), "bob");
     bob.identity.resumable = false;
     let mut device = Device::default();
-    proof(
-        "binance",
-        &mut bob,
-        &mut b_sent,
-        &mut device,
-        Answer::Correct,
-    )
-    .await;
+    proof(venue, &mut bob, &mut b_sent, &mut device, Answer::Correct).await;
     assert_eq!(bob.joined["acct"].account.user, "bob");
     assert!(registry.held("alice", "acct", old_socket).is_none());
     assert!(registry.held("bob", "acct", bob.socket).is_some());
     assert!(a_done.try_recv().is_err());
     assert!(a_sent.try_recv().is_err());
     bob.close();
+}
+
+#[tokio::test]
+async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
+    login_switch_during_signing_await_is_isolated("binance").await;
+}
+
+#[tokio::test]
+async fn cosigned_kucoinspot_login_switch_during_signing_await_is_isolated() {
+    login_switch_during_signing_await_is_isolated("kucoinspot").await;
 }
 
 #[test]

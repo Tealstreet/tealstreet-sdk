@@ -115,10 +115,14 @@ DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
 Binance base/PM/inverse/spot, OKX base/demo, Bitget base/USDC,
-Blofin, KuCoin and Phemex names have native private-startup HMAC proof coverage.
+Blofin, KuCoin Futures/Spot and Phemex names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
+KuCoin Spot uses its own production origin and native account/active-order reads,
+plus the signed private read-feed token request. Its proof fixtures verify request
+and passphrase MACs; public discovery cannot substitute for private proof. Testnet
+remains unavailable. Each new COSIGNED socket proves its own key before attachment.
 Variant tests pin product routes, origins and demo headers as well as the
 wrong-key, replay, foreign-socket and resident-preservation controls. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.

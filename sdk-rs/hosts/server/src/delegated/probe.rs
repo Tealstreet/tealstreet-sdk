@@ -22,6 +22,8 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bitgetusdc",
     "blofin",
     "kucoin",
+    // Its own Spot startup/read proof covers key, replay and physical-socket binding.
+    "kucoinspot",
     "phemex",
 ];
 
