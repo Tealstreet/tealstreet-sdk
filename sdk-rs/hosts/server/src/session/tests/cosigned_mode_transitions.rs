@@ -131,6 +131,10 @@ async fn proved_delegated_upgrade_keeps_the_actor_and_announces_both_registratio
     let mut original = Resident::start(&f, &mut device).await;
     let before_generation = original.account.twap_owner.snapshot();
     let (mut joining, mut sent) = candidate(&f, "alice");
+    #[cfg(feature = "delegated-order-frames")]
+    {
+        joining.order_frames_enabled = true;
+    }
     let mut done = joining.take_verified();
     let request = payload(&mut joining, Some("upgrade"));
     joining.init(request).await.unwrap();
@@ -182,6 +186,8 @@ async fn proved_delegated_upgrade_keeps_the_actor_and_announces_both_registratio
                 && frame["d"]["data"]["reason"] == "requested")
     );
     assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+    #[cfg(feature = "delegated-order-frames")]
+    assert_post_upgrade_typed_write(&f, &mut joining, &mut sent, &mut original._sent).await;
     joining.close();
 }
 
@@ -217,4 +223,75 @@ async fn delegated_upgrade_with_a_mismatched_secret_keeps_cosigned_residency_unt
     original.untouched(&f);
     assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
     joining.close();
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+async fn assert_post_upgrade_typed_write(
+    fixture: &Fixture,
+    session: &mut Session,
+    sent: &mut crate::out::Receiver,
+    previous: &mut crate::out::Receiver,
+) {
+    let epoch = format!("{:012x}", crate::accounts::now_ms());
+    let intent = format!("{}-{}-7101-8101-000000000001", &epoch[..8], &epoch[8..]);
+    let params =
+        json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":50000});
+    let fingerprint = crate::order_contract::fingerprint("acct", &intent, &params, 1).unwrap();
+    session
+        .handle(
+            &json!({"t":"order.submit","d":{
+                "accountName":"acct","instanceId":"upgrade","intentId":intent,
+                "params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint
+            }})
+            .to_string(),
+        )
+        .await
+        .unwrap();
+    let mut acknowledged = false;
+    let outcome = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            assert_ne!(
+                frame["t"], "sign-req",
+                "the upgraded connection never signs on the browser"
+            );
+            assert_ne!(
+                frame["t"], "order.refused",
+                "the upgraded signer must admit this valid order"
+            );
+            match frame["t"].as_str() {
+                Some("order.ack") => {
+                    assert_eq!(frame["d"]["intentId"], intent);
+                    assert_eq!(frame["d"]["instanceId"], "upgrade");
+                    assert_eq!(frame["d"]["received"], true);
+                    acknowledged = true;
+                }
+                Some("order.outcome") => break frame,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("bounded protected post-upgrade write");
+    assert!(acknowledged);
+    assert_eq!(outcome["d"]["instanceId"], "upgrade");
+    assert_eq!(outcome["d"]["intentId"], intent);
+    assert_eq!(outcome["d"]["outcome"], "placed");
+    assert_eq!(outcome["d"]["clientOrderId"], intent);
+    assert_eq!(outcome["d"]["venueOrderId"], "loopback-order");
+    assert_eq!(fixture.private_writes.load(Ordering::SeqCst), 1);
+    let orders = fixture.orders.lock().unwrap();
+    assert_eq!(
+        orders.len(),
+        1,
+        "handover must not duplicate the venue write"
+    );
+    assert_eq!(orders[0]["orderLinkId"], intent);
+    while let Ok(text) = previous.try_recv() {
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        assert_ne!(
+            frame["t"], "sign-req",
+            "the former COSIGNED session never signs after handover"
+        );
+    }
 }
