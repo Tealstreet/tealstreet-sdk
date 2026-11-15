@@ -307,3 +307,85 @@ fn normalization_preserves_scope_and_exact_alias_separation() {
         assert!(Projection::from_json("owner", &index.to_string()).is_err());
     }
 }
+
+#[test]
+fn request_type_discriminant_refuses_unit_enum_object() {
+    let mut input = request();
+    input["type"] = json!({"join-proof":null});
+    assert!(Request::from_json(&input.to_string()).is_err());
+}
+#[test]
+fn request_venue_discriminant_refuses_unit_enum_object() {
+    let mut input = request();
+    input["exchangeName"] = json!({"backpack":null});
+    assert!(Request::from_json(&input.to_string()).is_err());
+}
+#[test]
+fn request_statement_kind_discriminant_refuses_unit_enum_object() {
+    let mut input = request();
+    input["joinProof"]["statement"]["kind"] = json!({"tealstreet-admission-v1":null});
+    assert!(Request::from_json(&input.to_string()).is_err());
+}
+#[test]
+fn refusal_error_discriminant_refuses_unit_enum_object() {
+    for error in ["Join proof refused", "Join proof unavailable"] {
+        let input = json!({"id":"request-1","error":{error:null}});
+        assert!(Response::from_json(&input.to_string(), Family::Ed25519).is_err());
+    }
+}
+#[test]
+fn identity_venue_discriminant_refuses_unit_enum_object() {
+    for case in vectors() {
+        let mut facts = case["facts"].clone();
+        let venue = facts["venue"].as_str().unwrap().to_owned();
+        facts["venue"] = json!({venue:null});
+        assert!(Projection::from_json("owner", &facts.to_string()).is_err());
+    }
+}
+#[test]
+fn identity_network_discriminant_refuses_unit_enum_object() {
+    for network in ["mainnet", "testnet"] {
+        let mut facts = vectors()[0]["facts"].clone();
+        facts["network"] = json!({network:null});
+        assert!(Projection::from_json("owner", &facts.to_string()).is_err());
+    }
+}
+#[test]
+fn string_discriminants_keep_request_and_statement_wire_bytes() {
+    let input = request();
+    let decoded = Request::from_json(&input.to_string()).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), input);
+    let statement = Statement::from_json(&input["joinProof"]["statement"].to_string()).unwrap();
+    assert_eq!(statement.digest(), decoded.statement().digest());
+}
+#[test]
+fn string_discriminants_keep_both_closed_refusals() {
+    for error in ["Join proof refused", "Join proof unavailable"] {
+        let input = json!({"id":"request-1","error":error});
+        assert_eq!(
+            serde_json::to_value(Response::from_json(&input.to_string(), Family::Ed25519).unwrap())
+                .unwrap(),
+            input
+        );
+    }
+}
+#[test]
+fn string_discriminants_keep_owner_and_network_binding() {
+    let mut facts = vectors()[0]["facts"].clone();
+    let main = Projection::from_json("owner-a", &facts.to_string())
+        .unwrap()
+        .digest();
+    assert_ne!(
+        main,
+        Projection::from_json("owner-b", &facts.to_string())
+            .unwrap()
+            .digest()
+    );
+    facts["network"] = "testnet".into();
+    assert_ne!(
+        main,
+        Projection::from_json("owner-a", &facts.to_string())
+            .unwrap()
+            .digest()
+    );
+}

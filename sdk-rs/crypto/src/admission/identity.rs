@@ -72,7 +72,9 @@ enum Network {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Facts {
+    #[serde(deserialize_with = "super::string_discriminant")]
     venue: Venue,
+    #[serde(deserialize_with = "super::string_discriminant")]
     network: Network,
     credential: Credential,
 }

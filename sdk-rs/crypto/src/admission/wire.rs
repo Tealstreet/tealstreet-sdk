@@ -31,8 +31,9 @@ struct Challenge {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Input {
     id: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", deserialize_with = "super::string_discriminant")]
     kind: Kind,
+    #[serde(deserialize_with = "super::string_discriminant")]
     exchange_name: Venue,
     account_name: String,
     instance_id: String,
@@ -149,6 +150,7 @@ struct InputSigned {
 #[serde(deny_unknown_fields)]
 struct InputRefused {
     id: String,
+    #[serde(deserialize_with = "super::string_discriminant")]
     error: Refusal,
 }
 impl Response {

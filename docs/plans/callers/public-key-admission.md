@@ -76,6 +76,8 @@ account configuration, URL, transaction or client assertion of validity.
 `admission::wire::Request::from_json` and `Response::from_json` are the closed
 Rust payload decoders. They bound JSON to 4096 bytes and reject duplicate,
 unknown, missing, null, mixed legacy signing fields and unsupported versions.
+Discriminants are JSON strings only; Serde externally tagged unit-enum objects
+are refused, including the nested Statement kind and public-facts venue/network.
 Statement decoding retains its 2048-byte bound; `issuedAtMs` must fit an unsigned
 JavaScript safe integer. Correlation labels are nonempty, untrimmed,
 control-free UTF-8: id/instance <=128 bytes, account <=512 bytes. Signatures use

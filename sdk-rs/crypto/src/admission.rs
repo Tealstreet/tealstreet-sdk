@@ -53,6 +53,17 @@ enum Kind {
     Admission,
 }
 
+// Serde unit enums also accept externally tagged objects. Wire discriminants
+// must first be strings, including when decoding an untagged response.
+fn string_discriminant<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = String::deserialize(deserializer)?;
+    T::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+}
+
 /// A closed descriptor, rather than a client-supplied digest or transaction.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -99,6 +110,7 @@ impl Statement {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         struct Wire {
+            #[serde(deserialize_with = "string_discriminant")]
             kind: Kind,
             attempt: String,
             identity_digest: [u8; 32],
