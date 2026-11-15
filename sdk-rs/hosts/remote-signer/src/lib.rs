@@ -229,6 +229,8 @@ pub fn remote_account(
         passphrase,
         passphrase_value,
         broker,
+        // Device-owned capability only; the server never receives an OmniKey seed.
+        zklink_seed: (venue == "apexomni").then(|| reference("zklink-seed")),
     };
     let mut identity = json!({ "credential": primary.credential.0, "signing": primary.signing.0 });
     if let Some(passphrase) = &primary.passphrase {
@@ -236,6 +238,9 @@ pub fn remote_account(
     }
     if let Some(broker) = &primary.broker {
         identity["extra"] = json!({ "kucoinBroker": broker.0 });
+    }
+    if let Some(seed) = &primary.zklink_seed {
+        identity["extra"]["zklinkSeed"] = seed.0.clone().into();
     }
     let api_key_index_present = options
         .get("apiKeyIndex")

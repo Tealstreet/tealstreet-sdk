@@ -202,3 +202,122 @@ async fn apexomni_batch_bridge_preserves_owned_contract_dependencies_and_result_
         json!({"contracts":[contract],"payload":[{"bytes":b"prefix"},{"contract":0},{"bytes":b"suffix"}]})
     );
 }
+
+fn contract_request(options: &Value) -> SignRequest {
+    let seed = KeyRef(
+        options["signing"]["primary"]["extra"]["zklinkSeed"]
+            .as_str()
+            .unwrap()
+            .into(),
+    );
+    let mut contract = vec![0; 36];
+    contract[0] = 0xfe;
+    contract[4] = 1;
+    let mut work = read(
+        options,
+        vec![
+            bytes("prefix"),
+            PayloadPart::Result {
+                index: 0,
+                encoding: Encoding::Hex,
+            },
+        ],
+    );
+    work.operations.insert(
+        0,
+        Operation::Sign {
+            algorithm: Algorithm::ZkLinkContract,
+            key: seed,
+            payload: vec![PayloadPart::Bytes { bytes: contract }],
+        },
+    );
+    work
+}
+
+#[tokio::test]
+async fn apexomni_batch_bridge_rejects_invalid_contract_graphs_before_device_io() {
+    let (link, seen) = device(Box::new(|_| {
+        panic!("invalid graph cannot reach the device")
+    }));
+    let (account, options) = account(
+        link,
+        "apexomni",
+        json!({"key":"pub","passphrase":"synthetic-passphrase"}),
+    );
+    for case in [
+        "foreign-seed",
+        "missing-reference",
+        "duplicate-reference",
+        "wrong-encoding",
+        "wrong-size",
+        "wrong-transaction",
+        "nonce",
+    ] {
+        let mut work = contract_request(&options);
+        match case {
+            "foreign-seed" => {
+                if let Operation::Sign { key, .. } = &mut work.operations[0] {
+                    *key = KeyRef("foreign".into());
+                }
+            }
+            "missing-reference" => {
+                if let Operation::Sign { payload, .. } = &mut work.operations[3] {
+                    payload.pop();
+                }
+            }
+            "duplicate-reference" => {
+                if let Operation::Sign { payload, .. } = &mut work.operations[3] {
+                    payload.push(payload[1].clone());
+                }
+            }
+            "wrong-encoding" => {
+                if let Operation::Sign { payload, .. } = &mut work.operations[3] {
+                    payload[1] = PayloadPart::Result {
+                        index: 0,
+                        encoding: Encoding::Base64,
+                    };
+                }
+            }
+            "wrong-size" => {
+                if let Operation::Sign { payload, .. } = &mut work.operations[0] {
+                    payload[0] = PayloadPart::Bytes {
+                        bytes: vec![0xfe; 35],
+                    };
+                }
+            }
+            "wrong-transaction" => {
+                if let Operation::Sign { payload, .. } = &mut work.operations[0] {
+                    payload[0] = PayloadPart::Bytes { bytes: vec![0; 36] };
+                }
+            }
+            "nonce" => work.receipt.nonce = Some(1),
+            _ => unreachable!(),
+        }
+        assert!(account.provider.sign(work).await.is_err(), "{case}");
+    }
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn apexomni_batch_bridge_rejects_noncanonical_contract_signatures_atomically() {
+    for signature in ["AB".repeat(64), "ab".repeat(63), "zz".repeat(64)] {
+        let (link, _) = device(Box::new(move |_| {
+            json!({"wsAuthSignature":json!({
+            "credential":"pub", "contracts":[signature],
+            "signature":base64::engine::general_purpose::STANDARD.encode(MAC)
+        }).to_string()})
+        }));
+        let (account, options) = account(
+            link,
+            "apexomni",
+            json!({"key":"pub","passphrase":"synthetic-passphrase"}),
+        );
+        assert!(
+            account
+                .provider
+                .sign(contract_request(&options))
+                .await
+                .is_err()
+        );
+    }
+}

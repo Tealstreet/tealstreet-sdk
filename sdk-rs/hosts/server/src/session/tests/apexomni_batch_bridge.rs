@@ -120,9 +120,15 @@ async fn apexomni_batch_bridge_session_different_key_cannot_complete_private_sta
     tokio::task::LocalSet::new()
         .run_until(async {
             let (result, reads) = startup("synthetic-other-material").await;
+            let refusal =
+                result.expect_err("wrong material cannot authenticate the original public key");
             assert!(
-                result.is_err(),
-                "wrong material cannot authenticate the original public key"
+                !refusal.transient,
+                "invalid credentials are a permanent refusal"
+            );
+            assert_eq!(
+                refusal.error_kind,
+                Some(safe_cex_engine::ErrorKind::AuthInvalid)
             );
             assert!(
                 reads > 0,
