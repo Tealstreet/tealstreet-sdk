@@ -23,6 +23,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "blofin",
     "kucoin",
     "phemex",
+    "woo",
     "bingx",
     "bitunix",
 ];
