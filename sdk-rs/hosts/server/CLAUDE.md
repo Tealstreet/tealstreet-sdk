@@ -103,11 +103,13 @@ DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base and
-inverse venues, plus Binance, OKX, Bitget, Blofin, KuCoin and Phemex base venues, have
+inverse venues, plus Binance, OKX, Bitget, Blofin, KuCoin, Phemex and BingX base venues, have
 private-startup proof coverage. Bybit inverse reuses its own native startup and
 HMAC signing, with inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
-HMAC proof with wrong-key, replay and foreign-socket controls. Other
+HMAC proof with wrong-key, replay and foreign-socket controls. BingX perpetuals
+prove signed private account reads independently of API-key-only listen-key acquisition;
+Spot and testnet do not inherit that proof. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. Matching COSIGNED repeats require the same socket-admitted
