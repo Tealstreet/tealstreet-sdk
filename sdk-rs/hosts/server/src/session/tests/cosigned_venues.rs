@@ -12,6 +12,7 @@ const READY: &[&str] = &[
     "bitget",
     "blofin",
     "kucoin",
+    "phemex",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -86,7 +87,8 @@ impl Device {
         let preimage = request["wsAuth"]["toSign"].as_str().unwrap();
         let socket_auth = preimage.starts_with("GET/realtime")
             || preimage.contains("/users/self/verify")
-            || preimage.contains("/user/verify");
+            || preimage.contains("/user/verify")
+            || venue == "phemex" && !preimage.starts_with('/');
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -490,6 +492,10 @@ async fn venue_case(venue: &'static str) {
     }
     let original_socket = provider.socket();
     for mode in [Answer::OtherKey, Answer::Replay] {
+        if venue == "phemex" && matches!(mode, Answer::Replay) {
+            // Phemex signs whole-second expiries; cross a real stamp boundary before replay.
+            tokio::time::sleep(Duration::from_millis(1100)).await;
+        }
         let before = seen.lock().unwrap().refused;
         let (mut candidate, mut sent) = user_session(registry.clone(), "alice");
         candidate.identity.resumable = false;
@@ -701,4 +707,9 @@ async fn cosigned_bybit_proof_ignores_obsolete_delegated_rollout_field() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn cosigned_phemex_requires_connection_proof() {
+    venue_case("phemex").await;
 }
