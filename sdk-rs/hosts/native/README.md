@@ -10,6 +10,10 @@ relay gate off. Its data is `src/routing/table.json`, generated from the TS tabl
 by `packages/safe-cex/src/transport/engine.native-routing-port.test.ts`
 (`UPDATE_NATIVE_ROUTING_PORT=1`), which also writes the TS plans that
 `tests/routing_port.rs` holds it to. Secondary read keys are not routed natively yet.
+Hosted AsterDEX resolves `https://fapi.asterdex.com` on mainnet and
+`https://fapi.asterdex-testnet.com` on testnet. Its existing account defaults keep
+REST on the Japan HOW egress even with saved proxy/tunnel flags off. WebSocket
+routing and the COSIGNED private-startup proof catalog are unchanged.
 WOO routing inputs also carry the public `applicationId`, retaining its private
 stream suffix when using the fleet relay. Hosted WOO resolves the venue
 mainnet/staging REST origins before startup and passes that application ID from

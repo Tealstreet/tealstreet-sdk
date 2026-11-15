@@ -382,6 +382,10 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://omni.apex.exchange/api",
             "https://testnet.omni.apex.exchange/api",
         ),
+        "asterdex" => pick(
+            "https://fapi.asterdex.com",
+            "https://fapi.asterdex-testnet.com",
+        ),
         "binance" => pick("https://fapi.binance.com", "https://demo-fapi.binance.com"),
         "binancepm" => pick("https://papi.binance.com", "https://demo-fapi.binance.com"),
         "binanceinverse" => pick("https://dapi.binance.com", "https://demo-dapi.binance.com"),

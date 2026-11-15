@@ -6,7 +6,7 @@
     },
     {
       "venue": "asterdex",
-      "reason": "No native Hosted REST origin; legacy HMAC and v3 wallet/agent proof paths need separate server bridge coverage."
+      "reason": "Native legacy HMAC and v3 wallet/agent private-startup proof paths need separate server coverage; resolving an origin does not certify readiness."
     },
     {
       "venue": "backpack",
