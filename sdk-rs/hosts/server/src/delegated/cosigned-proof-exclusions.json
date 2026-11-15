@@ -91,10 +91,6 @@
     {
       "venue": "txflow",
       "reason": "Production metadata and beta/agent gates refuse this venue; native origin, agent signing and bound private-startup proof are not built."
-    },
-    {
-      "venue": "woo",
-      "reason": "Native private-read/socket proof and application-id, timestamp, replay and holder controls are not built."
     }
   ]
 }
