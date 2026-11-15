@@ -41,6 +41,11 @@ proxy and provider-owned JWT handling. Hosted testnet refuses rather than using
 live endpoints: the native engines do not implement the separate static Advanced
 Trade sandbox. Private-startup proof readiness is unchanged.
 
+Hosted Binance Options resolves `https://eapi.binance.com` with the existing
+Japan egress policy and saved transport preferences. Hosted testnet refuses
+`NoBaseUrl`; this prerequisite does not enable the engine/reference's legacy
+testnet endpoint or change the private-startup proof catalog.
+
 A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
 ```ts

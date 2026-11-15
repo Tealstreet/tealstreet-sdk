@@ -14,7 +14,7 @@
     },
     {
       "venue": "binanceoptions",
-      "reason": "Client Hosted gate blocks this venue because no native server origin exists; options startup proof is not built."
+      "reason": "Bound native Options private-startup proof with account identity and wrong-key, replay and socket controls is not built."
     },
     {
       "venue": "bingxspot",
