@@ -204,6 +204,146 @@ async fn proof(
     }).await.expect("native proof settles");
 }
 
+fn positive_phase_ready(_venue: &str, loaded: bool, _device: &Device) -> bool {
+    loaded
+}
+
+fn captured_kucoin_startup() -> Device {
+    let mut device = Device::default();
+    for operation in [
+        "GET/api/v1/contracts/active",
+        "GET/api/v1/allTickers",
+        "POST/api/v1/bullet-public",
+        "GET/api/v1/positions",
+        "GET/api/v1/orders?status=active&currentPage=1&pageSize=100",
+        "GET/api/v1/stopOrders?status=active&currentPage=1&pageSize=100",
+        "GET/api/v1/account-overview?currency=USDT",
+        "GET/api/v2/position/getPositionMode",
+        "POST/api/v1/bullet-private",
+    ] {
+        device
+            .prior
+            .insert(operation.into(), "captured signature".into());
+    }
+    device
+}
+
+#[test]
+fn kucoin_positive_phase_waits_for_mode_and_private_feed_signatures() {
+    for last in [
+        [
+            "GET/api/v2/position/getPositionMode",
+            "POST/api/v1/bullet-private",
+        ],
+        [
+            "POST/api/v1/bullet-private",
+            "GET/api/v2/position/getPositionMode",
+        ],
+    ] {
+        let mut device = captured_kucoin_startup();
+        for operation in last {
+            device.prior.remove(operation);
+        }
+        assert!(
+            !positive_phase_ready("kucoin", true, &device),
+            "loaded store does not prove the mode/feed operations were signed"
+        );
+        device
+            .prior
+            .insert(last[0].into(), "captured signature".into());
+        assert!(
+            !positive_phase_ready("kucoin", true, &device),
+            "still waiting for {}",
+            last[1]
+        );
+        device
+            .prior
+            .insert(last[1].into(), "captured signature".into());
+        assert!(positive_phase_ready("kucoin", true, &device));
+    }
+}
+
+#[test]
+fn kucoin_positive_phase_requires_each_startup_operation() {
+    let complete = captured_kucoin_startup();
+    for operation in complete.prior.keys() {
+        let mut missing = captured_kucoin_startup();
+        missing.prior.remove(operation);
+        assert!(
+            !positive_phase_ready("kucoin", true, &missing),
+            "positive capture still lacks {operation}"
+        );
+    }
+}
+
+#[test]
+fn positive_phase_requires_loaded_state_even_with_complete_capture() {
+    let device = captured_kucoin_startup();
+    assert!(!positive_phase_ready("kucoin", false, &device));
+    assert!(positive_phase_ready("kucoin", true, &device));
+}
+
+#[tokio::test]
+async fn kucoin_loaded_actor_does_not_release_an_incomplete_positive_capture() {
+    let (io, _) = MockVenue::for_admission("kucoin");
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut session, mut sent) = user_session(registry, "alice");
+    session.identity.resumable = false;
+    let mut device = Device::default();
+    proof(
+        "kucoin",
+        &mut session,
+        &mut sent,
+        &mut device,
+        Answer::Correct,
+    )
+    .await;
+    load("kucoin", &mut session, &mut sent, &mut device).await;
+    let expected = captured_kucoin_startup();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while expected
+            .prior
+            .keys()
+            .any(|key| !device.prior.contains_key(key))
+        {
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            if frame["t"] == "sign-req" {
+                device
+                    .answer("kucoin", &mut session, frame, Answer::Correct)
+                    .await;
+            }
+        }
+    })
+    .await
+    .expect("capture genuine positive startup signatures for the fixture");
+    let account = session.joined["acct"].account.clone();
+    // Hold subsequent signer delivery while one genuinely captured signature is withheld.
+    let (_held, mut deferred, _) = crate::out::Out::channel(1);
+    for operation in [
+        "GET/api/v2/position/getPositionMode",
+        "POST/api/v1/bullet-private",
+    ] {
+        let captured = device.prior.remove(operation).unwrap();
+        {
+            let waiting = load("kucoin", &mut session, &mut deferred, &mut device);
+            tokio::pin!(waiting);
+            // Actor reads are FIFO: polling load first puts its read before this marker.
+            // Marker completion proves load observed readiness without a timing delay.
+            tokio::select! {
+                biased;
+                () = &mut waiting => panic!("loaded store released capture before {operation} was signed"),
+                loaded = account.handle.read(|s| {
+                    let l = s.loaded();
+                    l.markets && l.balance && l.orders && l.positions
+                }) => assert_eq!(loaded, Some(true)),
+            }
+        }
+        device.prior.insert(operation.into(), captured);
+        load("kucoin", &mut session, &mut deferred, &mut device).await;
+    }
+    session.close();
+}
+
 async fn load(
     venue: &str,
     session: &mut Session,
@@ -213,7 +353,7 @@ async fn load(
     let account = session.joined["acct"].account.clone();
     tokio::time::timeout(Duration::from_secs(30),async {
         loop {
-            if account.handle.read(|s|{let l=s.loaded();l.markets&&l.balance&&l.orders&&l.positions}).await==Some(true){break;}
+            if positive_phase_ready(venue, account.handle.read(|s|{let l=s.loaded();l.markets&&l.balance&&l.orders&&l.positions}).await==Some(true), device){break;}
             tokio::select! {
                 text=sent.recv()=>{ let frame:Value=serde_json::from_str(&text.unwrap()).unwrap(); if frame["t"]=="sign-req"{device.answer(venue,session,frame,Answer::Correct).await;} }
                 _=tokio::time::sleep(Duration::from_millis(5))=>{}
