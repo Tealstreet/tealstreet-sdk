@@ -41,7 +41,14 @@ fn no_route_to_the_fleet_carries_our_token() {
     assert_eq!(plan.http.prefix, FLEET);
     assert!(!plan.http.authorize);
 
-    let inputs = account_transport("mexc", &account).unwrap();
+    let inputs = account_transport(
+        "mexc",
+        &AccountTransport {
+            tealstreet_tunnel: Some(true),
+            ..account
+        },
+    )
+    .unwrap();
     let base = safe_cex_native::resolve::rest_base_url("mexc", false).unwrap();
     let plan = resolve_routing_plan("mexc", &inputs, base, Provider::Tealstreet).unwrap();
     assert_eq!(plan.http.prefix, FLEET);

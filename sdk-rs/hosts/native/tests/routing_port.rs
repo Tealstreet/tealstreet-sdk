@@ -333,6 +333,36 @@ fn mexc_mainnet_uses_the_existing_proxy_for_every_saved_proxy_preference() {
 }
 
 #[test]
+fn mexc_saved_tunnel_flags_keep_private_and_public_rest_on_the_japan_proxy() {
+    let base = safe_cex_native::resolve::rest_base_url("mexc", false).unwrap();
+    let table: serde_json::Value =
+        serde_json::from_str(include_str!("../src/routing/table.json")).unwrap();
+    let expected = table["hosts"]["privateProxy"]["jp"].as_str().unwrap();
+    assert!(!expected.is_empty());
+    for saved_tunnel in [None, Some(false), Some(true)] {
+        let account = AccountTransport {
+            tealstreet_proxy: Some(false),
+            tealstreet_tunnel: saved_tunnel,
+            ..Default::default()
+        };
+        let inputs = account_transport("mexc", &account).unwrap();
+        for public_only in [false, true] {
+            let inputs = RoutingInputs {
+                public_data_only: Some(public_only),
+                has_key: !public_only,
+                ..inputs.clone()
+            };
+            let plan = resolve_routing_plan("mexc", &inputs, base, Provider::Tealstreet).unwrap();
+            assert_eq!(plan.http.prefix, expected, "saved tunnel {saved_tunnel:?}");
+            assert_eq!(plan.http.mode, HttpRouteMode::Direct);
+            assert!(plan.http.tunnel_url.is_none());
+            assert!(plan.ws.public.host.is_none());
+            assert!(plan.ws.private.host.is_none());
+        }
+    }
+}
+
+#[test]
 fn mexc_hosted_testnet_refuses_instead_of_selecting_the_live_alias() {
     assert_eq!(
         safe_cex_native::resolve::rest_base_url("mexc", true),

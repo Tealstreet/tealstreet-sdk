@@ -16,6 +16,8 @@ mainnet/staging REST origins before startup and passes that application ID from
 account init into the routing plan. Signing admission remains registry-owned.
 Hosted MEXC resolves its mainnet REST origin to `https://api.mexc.com` through
 the existing Japan proxy pool, including when the saved proxy flag is false.
+Saved MEXC tunnel flags are normalized off: MEXC cannot use HOW, and an old
+flag must not suppress the required REST proxy prefix.
 MEXC has no sandbox: hosted testnet refuses `NoBaseUrl`, never the live alias.
 Its direct WebSocket routing and COSIGNED private-startup proof catalog are unchanged.
 The deployment can replace the Tealstreet hosts: `PROXY_PRIVATE_URL` sets every

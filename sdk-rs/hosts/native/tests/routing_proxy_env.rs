@@ -90,6 +90,7 @@ fn deployed_proxy_hosts_join_venue_urls_exactly_as_typescript() {
         "mexc",
         &AccountTransport {
             tealstreet_proxy: Some(false),
+            tealstreet_tunnel: Some(true),
             ..Default::default()
         },
     )

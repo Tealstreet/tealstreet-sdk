@@ -461,6 +461,9 @@ pub fn account_transport(
     } else if name == "lighter" {
         // The relay refuses Lighter's URL, so an old row's flag would stop it starting.
         Some(false)
+    } else if name == "mexc" {
+        // MEXC cannot use HOW; an old tunnel flag must not suppress its required REST proxy.
+        Some(false)
     } else {
         account.tealstreet_tunnel
     };
