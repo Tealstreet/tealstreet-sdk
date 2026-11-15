@@ -13,3 +13,14 @@ test('unknown schema/reason and malformed evidence are discarded', () => {
     assert.equal(new ExchangeError('invalid row', { historyDecode }).historyDecode, undefined);
   }
 });
+
+test('precise Kraken predicates survive serialization without arbitrary row data', () => {
+  for (const reason of ['quantityNegative', 'quantityZero', 'filledQuantityNegative',
+    'filledQuantityExceedsQuantity', 'quantityDecimal', 'filledQuantityDecimal',
+    'timestampDecimal', 'lastUpdateTimestampDecimal', 'limitPriceDecimal']) {
+    const detail = { schema: 'krakenOrders', reason, uid: 'private-id', quantity: 'private-amount' };
+    const error = new ExchangeError('Kraken order history rejected', { historyDecode: detail });
+    assert.deepEqual(error.historyDecode, { schema: 'krakenOrders', reason });
+    assert.equal(JSON.stringify(error.historyDecode).includes('private-'), false);
+  }
+});

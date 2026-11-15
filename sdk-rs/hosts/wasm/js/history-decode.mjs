@@ -6,6 +6,8 @@ const SCHEMAS = new Set([
 const REASONS = new Set([
   'rowShape', 'identity', 'symbol', 'quantity', 'filledQuantity', 'timestamp',
   'timestampOrder', 'side', 'orderStatus', 'orderType', 'fee', 'market', 'economics',
+  'quantityNegative', 'quantityZero', 'filledQuantityNegative', 'filledQuantityExceedsQuantity',
+  'quantityDecimal', 'filledQuantityDecimal', 'timestampDecimal', 'lastUpdateTimestampDecimal', 'limitPriceDecimal',
 ]);
 
 /** Copy only closed native row classifications across host/worker boundaries. */

@@ -231,6 +231,10 @@ impl Request {
         self.failed = None;
         self.decode_reason = None;
     }
+    fn order_refusal(&mut self, reason: HistoryDecodeReason, predicate: &'static str) -> String {
+        self.decode_reason = Some(reason);
+        format!("Kraken order history rejected: {predicate}")
+    }
     fn observe(&mut self, cx: &Cx<'_, Pending>, time: f64, id: &str) -> Result<bool, String> {
         if !time.is_finite() || time < 0.0 || id.is_empty() {
             return Err("Kraken history row has an invalid timestamp or identity".into());
@@ -449,6 +453,97 @@ enum OrderEvent<'a> {
     },
     #[serde(rename = "OrderNotFound")]
     NotFound(serde::de::IgnoredAny),
+}
+
+// Diagnose only after typed decoding rejects, using the same strict number decoder.
+// Closed labels replace serde's errors so no supplied row values enter a refusal.
+fn order_decode_predicate(text: &str) -> (HistoryDecodeReason, &'static str) {
+    let shape = (HistoryDecodeReason::RowShape, "rowShape");
+    let Ok(row) = serde_json::from_str::<serde_json::Value>(text) else {
+        return shape;
+    };
+    let Some(row) = row.as_object() else {
+        return shape;
+    };
+    match row.get("uid") {
+        None => return (HistoryDecodeReason::Identity, "identity.eventUid.missing"),
+        Some(value) if !value.is_string() => {
+            return (HistoryDecodeReason::Identity, "identity.eventUid.notString");
+        }
+        _ => {}
+    }
+    let invalid_number =
+        |value: Option<&serde_json::Value>| value.is_none_or(|value| number(value).is_err());
+    if invalid_number(row.get("timestamp")) {
+        return (
+            HistoryDecodeReason::TimestampDecimal,
+            "time.eventTimestamp.decimalParse",
+        );
+    }
+    let order = [
+        ("OrderPlaced", "order"),
+        ("OrderUpdated", "newOrder"),
+        ("OrderRejected", "order"),
+        ("OrderCancelled", "order"),
+        ("OrderEditRejected", "oldOrder"),
+    ]
+    .into_iter()
+    .find_map(|(event, field)| row.get("event")?.get(event)?.get(field)?.as_object());
+    let Some(order) = order else {
+        return shape;
+    };
+    for (field, reason, missing, not_string) in [
+        (
+            "uid",
+            HistoryDecodeReason::Identity,
+            "identity.uid.missing",
+            "identity.uid.notString",
+        ),
+        (
+            "tradeable",
+            HistoryDecodeReason::Symbol,
+            "identity.symbol.missing",
+            "identity.symbol.notString",
+        ),
+    ] {
+        match order.get(field) {
+            None => return (reason, missing),
+            Some(value) if !value.is_string() => return (reason, not_string),
+            _ => {}
+        }
+    }
+    for (field, reason, predicate) in [
+        (
+            "quantity",
+            HistoryDecodeReason::QuantityDecimal,
+            "economics.quantity.decimalParse",
+        ),
+        (
+            "filled",
+            HistoryDecodeReason::FilledQuantityDecimal,
+            "economics.filled.decimalParse",
+        ),
+        (
+            "timestamp",
+            HistoryDecodeReason::TimestampDecimal,
+            "time.timestamp.decimalParse",
+        ),
+        (
+            "limitPrice",
+            HistoryDecodeReason::LimitPriceDecimal,
+            "economics.limitPrice.decimalParse",
+        ),
+        (
+            "lastUpdateTimestamp",
+            HistoryDecodeReason::LastUpdateTimestampDecimal,
+            "time.lastUpdateTimestamp.decimalParse",
+        ),
+    ] {
+        if invalid_number(order.get(field)) {
+            return (reason, predicate);
+        }
+    }
+    shape
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -888,14 +983,19 @@ impl Kraken {
         request: &mut Request,
         text: &str,
     ) -> Result<(), String> {
-        let event: OrderEventWire<'_> = serde_json::from_str(text).map_err(|e| {
-            request.decode_reason = Some(HistoryDecodeReason::RowShape);
-            e.to_string()
+        let event: OrderEventWire<'_> = serde_json::from_str(text).map_err(|_| {
+            let (reason, predicate) = order_decode_predicate(text);
+            request.order_refusal(reason, predicate)
         })?;
         if event.uid.is_empty() {
-            request.decode_reason = Some(HistoryDecodeReason::Identity);
+            return Err(
+                request.order_refusal(HistoryDecodeReason::Identity, "identity.eventUid.empty")
+            );
         } else if !event.timestamp.is_finite() || event.timestamp < 0.0 {
-            request.decode_reason = Some(HistoryDecodeReason::Timestamp);
+            return Err(request.order_refusal(
+                HistoryDecodeReason::Timestamp,
+                "time.eventTimestamp.negative",
+            ));
         }
         if !request.observe(cx, event.timestamp, &event.uid)? {
             return Ok(());
@@ -910,23 +1010,41 @@ impl Kraken {
         };
         let symbol = order.tradeable.to_ascii_uppercase();
         let invalid = if order.uid.is_empty() {
-            Some(HistoryDecodeReason::Identity)
+            Some((HistoryDecodeReason::Identity, "identity.uid.empty"))
         } else if symbol.is_empty() {
-            Some(HistoryDecodeReason::Symbol)
-        } else if order.quantity < 0.0 || (order.quantity == 0.0 && !canceled) {
-            Some(HistoryDecodeReason::Quantity)
-        } else if order.filled < 0.0 || order.filled > order.quantity {
-            Some(HistoryDecodeReason::FilledQuantity)
+            Some((HistoryDecodeReason::Symbol, "identity.symbol.empty"))
+        } else if order.quantity < 0.0 {
+            Some((
+                HistoryDecodeReason::QuantityNegative,
+                "economics.quantity.negative",
+            ))
+        } else if order.quantity == 0.0 && !canceled {
+            Some((
+                HistoryDecodeReason::QuantityZero,
+                "economics.quantity.zeroForActiveOrder",
+            ))
+        } else if order.filled < 0.0 {
+            Some((
+                HistoryDecodeReason::FilledQuantityNegative,
+                "economics.filled.negative",
+            ))
+        } else if order.filled > order.quantity {
+            Some((
+                HistoryDecodeReason::FilledQuantityExceedsQuantity,
+                "economics.filled.exceedsQuantity",
+            ))
         } else if order.timestamp < 0.0 {
-            Some(HistoryDecodeReason::Timestamp)
+            Some((HistoryDecodeReason::Timestamp, "time.timestamp.negative"))
         } else if order.last_update_timestamp < order.timestamp {
-            Some(HistoryDecodeReason::TimestampOrder)
+            Some((
+                HistoryDecodeReason::TimestampOrder,
+                "time.lastUpdateTimestamp.beforeTimestamp",
+            ))
         } else {
             None
         };
-        if let Some(reason) = invalid {
-            request.decode_reason = Some(reason);
-            return Err("Kraken order history has invalid identity, time or economics".into());
+        if let Some((reason, predicate)) = invalid {
+            return Err(request.order_refusal(reason, predicate));
         }
         if !request.within(event.timestamp, &symbol) {
             return Ok(());

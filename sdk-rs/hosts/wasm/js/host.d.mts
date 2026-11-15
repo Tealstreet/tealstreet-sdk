@@ -6,7 +6,9 @@ export type HistoryDecodeDetail = {
   schema: 'bitgetClassicFills' | 'bitgetUtaFills' | 'bitgetClassicOrders' | 'bitgetUtaOrders'
     | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome';
   reason: 'rowShape' | 'identity' | 'symbol' | 'quantity' | 'filledQuantity' | 'timestamp'
-    | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics';
+    | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics'
+    | 'quantityNegative' | 'quantityZero' | 'filledQuantityNegative' | 'filledQuantityExceedsQuantity'
+    | 'quantityDecimal' | 'filledQuantityDecimal' | 'timestampDecimal' | 'lastUpdateTimestampDecimal' | 'limitPriceDecimal';
 };
 export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
 
