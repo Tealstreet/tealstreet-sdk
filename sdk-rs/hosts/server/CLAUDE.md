@@ -63,6 +63,9 @@ All outstanding signer futures/setup work must settle first; busy handovers
 refuse transiently without canceling or replaying them. Address/nonce-sealed
 non-HMAC lifetimes refuse explicitly as unavailable instead of being rebuilt.
 The original opaque refs map by identity role to the protected resident refs.
+Account-owned signer control retains the protected erasure authority; engine
+dispatch handles never retain it. Reconfiguration shares that authority between
+accounts, and the last account owner drop erases retained engine handles.
 Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
 registration's label/instanceId. Refusals have attached=false and no actualMode.
 Socket handover and private-read verification precede any transition.
