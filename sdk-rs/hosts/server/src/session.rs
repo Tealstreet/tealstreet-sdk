@@ -3195,6 +3195,7 @@ mod tests {
     use super::*;
     use safe_cex_remote_signer::Outbox;
 
+    mod apexomni_batch_bridge;
     mod apply_settings;
     mod cosigned_venues;
     mod delegated_probe;

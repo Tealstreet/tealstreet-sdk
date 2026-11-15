@@ -305,6 +305,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "apexomni" {
+            return apexomni::response(self, r);
+        }
         if self.venue == "woo" {
             return woo::response(self, r);
         }
@@ -379,6 +382,9 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "apexomni" {
+            return apexomni::connect(self, socket, &url, events);
+        }
         if self.venue == "woo" {
             return woo::connect(self, socket, &url, events);
         }
@@ -1174,6 +1180,8 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
 
+#[path = "apexomni_probe_tests.rs"]
+mod apexomni;
 #[path = "bingx_probe_tests.rs"]
 mod bingx;
 #[path = "bitunix_probe_tests.rs"]
