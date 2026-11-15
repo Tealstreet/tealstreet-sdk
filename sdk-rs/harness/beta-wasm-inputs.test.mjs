@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,6 +128,43 @@ test('harness files that only gate or measure a release leave the fingerprint al
   }
 });
 
+for (const path of [
+  'sdk-rs/harness/bitget-cpu-composition.mjs',
+  'sdk-rs/harness/bitget-cpu-profile.mjs',
+  'sdk-rs/harness/bitget-profile-names.py',
+]) {
+  test('retired diagnostic names do not exempt new build inputs: ' + path, () => {
+    const root = tree();
+    const file = join(root, path);
+    const absent = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+    writeFileSync(file, 'new build input');
+    const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+    assert.notEqual(before, absent, 'adding an input');
+    assert.ok(betaWasmInputPaths(root).includes(path), path);
+    writeFileSync(file, 'changed build input');
+    assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, 'editing an input');
+    rmSync(file);
+    assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, absent, 'removing an input');
+  });
+}
+
+test('Bitget diagnostic exclusions do not hide other harness files or documentation', () => {
+  const root = tree();
+  for (const path of [
+    'sdk-rs/harness/bitget-cpu-runtime.mjs',
+    'sdk-rs/harness/bitget-profile-names-extra.py',
+    'sdk-rs/harness/nested/bitget-cpu-profile.mjs',
+    'sdk-rs/harness/CLAUDE.md',
+  ]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), 'production');
+    const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+    assert.ok(betaWasmInputPaths(root).includes(path), path);
+    writeFileSync(join(root, path), 'production\n');
+    assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before, path);
+  }
+});
+
 test('replay gate edits leave the fingerprint alone while fingerprint-definition edits still move it', () => {
   const root = tree();
   const gate = join(root, 'sdk-rs/harness/gate.mjs');
@@ -149,6 +186,21 @@ test('replay gate edits leave the fingerprint alone while fingerprint-definition
 
 const REPO = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const read = (rel) => readFileSync(join(REPO, rel), 'utf8');
+
+test('temporary Bitget diagnostics and their workflow job are retired', () => {
+  const workflow = read('.github/workflows/rust.yml');
+  for (const name of ['bitget-cpu-composition.mjs', 'bitget-cpu-profile.mjs', 'bitget-profile-names.py']) {
+    const path = 'sdk-rs/harness/' + name;
+    assert.ok(!existsSync(join(REPO, path)), path);
+    assert.ok(!workflow.includes(path), path);
+  }
+  assert.doesNotMatch(workflow, /^  bitget-cpu-profile:/m);
+  assert.match(workflow, /^  bitget-paired:/m);
+  assert.ok(workflow.includes('node sdk-rs/harness/bitget-paired-run.mjs'));
+  assert.ok(read('sdk-rs/harness/bitget-paired-run.mjs').includes("new URL('./bitget-paired-ci.mjs', import.meta.url)"));
+  assert.ok(workflow.includes('cargo test --locked --workspace'));
+  assert.ok(!workflow.includes('--exclude safe-cex-venue-bitget'));
+});
 
 /** Relative module specifiers a file imports: static, side-effect and literal dynamic imports. */
 const specifiers = (text) =>
