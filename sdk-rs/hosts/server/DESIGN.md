@@ -531,7 +531,7 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
 - **Private COSIGNED join proof:** fresh connections use the same isolated native
   probe and admission path as DELEGATED, using shared hosted eligibility.
-  Exact `bybit`, `binance`, `okx`, `bitget`, `blofin` and `kucoin` are proof-ready.
+  The exact proof-ready names and variant controls are listed in the host contract below.
   Other private COSIGNED venues return an init refusal with
   `kind: "proof-unavailable"`, `initRefused: true`, `transient: false` and
   `outcome: "notSent"`; they do not fall back to registry attachment.
@@ -735,8 +735,8 @@ Public-only accounts, unsupported/unhosted venues and existing early-subscriptio
 handling retain their previous paths. Fixed synthetic interoperability and RFC
 test data live in `tests/data/`.
 
-The shared startup admission runner makes exact `bybit`, `bybitinverse`,
-`binance`, `okx`, `bitget`, `blofin`, `kucoin` and `phemex` proof-ready for COSIGNED. It runs the selected
+The shared startup admission runner uses the exact COSIGNED names in
+`delegated/probe.rs`, documented in the host contract above. It runs the selected
 venue's existing native private startup with either the remote provider or the
 local provider; it does not build a second set of REST requests. Its result
 classifier uses engine `ErrorKind` values: authentication failures are invalid,
