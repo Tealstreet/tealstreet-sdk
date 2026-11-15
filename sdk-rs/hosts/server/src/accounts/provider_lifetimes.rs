@@ -328,7 +328,7 @@ async fn coinbase_cdp_refuses_with_an_explicit_transition_reason() {
             ..Default::default()
         };
         let candidate: Credentials =
-            serde_json::from_value(json!({"key":init.key, "secret":""})).unwrap();
+            serde_json::from_str(&json!({"key":init.key, "secret":""}).to_string()).unwrap();
         let permit = registry.probe_permit("synthetic-user", &init).unwrap();
         let Err(refusal) = registry
             .probe_join(
@@ -347,4 +347,113 @@ async fn coinbase_cdp_refuses_with_an_explicit_transition_reason() {
         assert!(!refusal.transient);
         assert!(registry.accounts.lock().unwrap().is_empty());
     }
+}
+
+async fn remote_handover(venue: &str, family: Family) {
+    use base64::Engine as _;
+    let (local, new_ids) = provider(family, "resident", 7);
+    let new_key = new_ids
+        .primary
+        .as_ref()
+        .unwrap()
+        .signing_ref()
+        .unwrap()
+        .clone();
+    let public = PublicKey::from_provider(family, &local, &new_key).unwrap();
+    let public_bytes = public.as_bytes().to_vec();
+    let public_text = if family == Family::Ed25519 {
+        base64::engine::general_purpose::STANDARD.encode(&public_bytes)
+    } else {
+        format!("0x{}", safe_cex_crypto::hex(&public_bytes))
+    };
+    let (send, mut receive) = mpsc::unbounded_channel::<String>();
+    let link = SignerLink::new(1, Arc::new(move |frame| send.send(frame).is_ok()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (weak, count, answer) = (Arc::downgrade(&link), calls.clone(), public_text.clone());
+    tokio::spawn(async move {
+        while let Some(frame) = receive.recv().await {
+            let request: Value = serde_json::from_str(&frame).unwrap();
+            let format = request["d"]["wsAuth"]["outputFormat"].as_str().unwrap();
+            assert!(matches!(format, "hyperliquid-address" | "paradex-public"));
+            count.fetch_add(1, Ordering::SeqCst);
+            if let Some(link) = weak.upgrade() {
+                link.resolve(
+                    1,
+                    json!({"id":request["d"]["id"], "wsAuthSignature":answer}),
+                );
+            }
+        }
+    });
+    let metadata = json!({"key":if venue == "backpack" { public_text.clone() } else { "synthetic-public-account".into() }, "grvtSignerAddress":public_text});
+    let remote = safe_cex_remote_signer::remote_account(
+        link.clone(),
+        venue,
+        Some("synthetic-account".into()),
+        &metadata.to_string(),
+    )
+    .unwrap();
+    let options: Value = serde_json::from_str(&remote.options_json).unwrap();
+    let ids: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
+    let key = ids.primary.as_ref().unwrap().signing_ref().unwrap().clone();
+    let signer = AccountSigner::new(Some(remote.provider.clone()), ids, Some(link.clone()), None);
+    if matches!(venue, "hyperliquid" | "paradex") {
+        let operation = if family == Family::Ethereum {
+            Operation::PublicAddress { key: key.clone() }
+        } else {
+            Operation::PublicKey {
+                key: key.clone(),
+                algorithm: family.algorithm(),
+            }
+        };
+        let mut setup = signer
+            .create_public_address_setup(SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![operation],
+            })
+            .unwrap();
+        setup.start().unwrap();
+        assert_eq!(
+            signer.upgrade(ResidentCopy::test_provider_with_identities(
+                local.clone(),
+                new_ids.clone()
+            )),
+            Err(ModeTransitionRefusal::Busy)
+        );
+        let result = std::future::poll_fn(|cx| setup.poll_result(cx))
+            .await
+            .unwrap();
+        assert_eq!(result.values, vec![public_bytes]);
+        std::future::poll_fn(|cx| setup.poll_joined(cx))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        signer.upgrade(ResidentCopy::test_provider_with_identities(local, new_ids)),
+        Ok(true)
+    );
+    let before = calls.load(Ordering::SeqCst);
+    let statement = Statement::new("remote-lifetime", [2; 32], [3; 32], 1000).unwrap();
+    let request = statement.sign_request(family, &key, &[9; 32]).unwrap();
+    let signed = signer.sign_ready(&request).unwrap().unwrap();
+    assert!(public.verify(&statement, &signed.values[0]));
+    assert_eq!(calls.load(Ordering::SeqCst), before);
+    assert!(!link.is_available());
+}
+
+#[tokio::test]
+async fn completed_hyperliquid_remote_address_survives_handover() {
+    remote_handover("hyperliquid", Family::Ethereum).await;
+}
+#[tokio::test]
+async fn completed_paradex_remote_key_survives_handover() {
+    remote_handover("paradex", Family::Stark).await;
+}
+#[tokio::test]
+async fn grvt_remote_identity_survives_handover() {
+    remote_handover("grvt", Family::Ethereum).await;
+}
+#[tokio::test]
+async fn backpack_remote_identity_survives_handover() {
+    remote_handover("backpack", Family::Ed25519).await;
 }
