@@ -793,3 +793,6 @@ async fn shared_admission_uses_a_probe_after_the_resume_window() {
     session.identity.resumable = false;
     session.close();
 }
+
+#[path = "cosigned_mode_transitions.rs"]
+mod mode_transitions;
