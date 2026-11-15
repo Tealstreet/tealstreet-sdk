@@ -49,7 +49,7 @@ const fakeModule = (venue: ExchangeName, supported: boolean | undefined, constru
   return { module, commands, constructed };
 };
 
-describe('COSIGNED manual writes without a frame-fed implementation', () => {
+describe('Worker-mirror manual writes without a frame-fed implementation', () => {
   const exchanges: RustEngineExchange[] = [];
   afterEach(() => {
     exchanges.forEach((exchange) => exchange.dispose());
@@ -58,7 +58,7 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     vi.restoreAllMocks();
   });
 
-  const mirror = (venue: ExchangeName, options: Partial<ExchangeOptions> = {}) => {
+  const mirror = (venue: ExchangeName, options: Partial<ExchangeOptions> = {}, sourceId = 'hosted') => {
     const exchange = new RustEngineExchange(venue, {
       key: 'synthetic-key', secret: '11'.repeat(32), workerMirror: true,
       signingMode: 'cosigned', publicDataOnly: false, ...options,
@@ -68,30 +68,40 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const bridge = (event: { requestId: string; method: string; args: unknown[] }) => {
       calls.push({ method: event.method, args: event.args });
-      const result = event.method === 'updateOrder' ? { orderIds: ['hosted'], clientOrderId: 'replacement' }
-        : event.method.startsWith('place') ? ['hosted'] : null;
+      const result = event.method === 'updateOrder' ? { orderIds: [sourceId], clientOrderId: 'replacement' }
+        : event.method.startsWith('place') ? [sourceId] : null;
       exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result });
     };
     exchange.on('callMethod', bridge);
     return { exchange, calls, bridge };
   };
 
-  for (const venue of ['grvt', 'mexc'] as const) {
+  const sources: Array<{ venue: ExchangeName; signingMode: ExchangeOptions['signingMode']; sourceId: string }> = [
+    { venue: 'grvt', signingMode: 'cosigned', sourceId: 'hosted' },
+    { venue: 'mexc', signingMode: 'cosigned', sourceId: 'hosted' },
+    { venue: 'kraken', signingMode: 'local', sourceId: 'worker' },
+    { venue: 'kraken', signingMode: undefined, sourceId: 'worker' },
+    { venue: 'bitunix', signingMode: 'local', sourceId: 'worker' },
+    { venue: 'bitunix', signingMode: undefined, sourceId: 'worker' },
+    { venue: 'asterdex', signingMode: 'local', sourceId: 'worker' },
+    { venue: 'asterdex', signingMode: undefined, sourceId: 'worker' },
+  ];
+  for (const { venue, signingMode, sourceId } of sources) {
     for (const method of ['placeOrder', 'updateOrder', 'cancelOrders', 'stopLoss', 'takeProfit', 'callMethodInWorker'] as const) {
-      it(`${venue} sends ${method} once through the existing hosted method`, async () => {
+      it(`${venue} ${signingMode ?? 'legacy-local'} sends ${method} once through its existing ${sourceId} method`, async () => {
         const fake = fakeModule(venue, false);
         setWasmEngineLoader(async () => fake.module);
-        const { exchange, calls } = mirror(venue);
+        const { exchange, calls } = mirror(venue, { signingMode }, sourceId);
         const protective = { ...placed, reduceOnly: true,
           type: method === 'stopLoss' ? OrderType.StopLoss : OrderType.TakeProfit };
         const args = method === 'updateOrder' ? { order: placed, update: { price: 101 } }
           : { order: protective, update: { price: 101 } };
-        if (method === 'placeOrder') await expect(exchange.placeOrder(placed)).resolves.toEqual(['hosted']);
+        if (method === 'placeOrder') await expect(exchange.placeOrder(placed)).resolves.toEqual([sourceId]);
         else if (method === 'cancelOrders') await exchange.cancelOrders([placed]);
-        else if (method === 'callMethodInWorker') await expect(exchange.callMethodInWorker('placeOrder', placed)).resolves.toEqual(['hosted']);
+        else if (method === 'callMethodInWorker') await expect(exchange.callMethodInWorker('placeOrder', placed)).resolves.toEqual([sourceId]);
         else {
           const ids = await exchange.updateOrder(args);
-          expect(Array.from(ids)).toEqual(['hosted']);
+          expect(Array.from(ids)).toEqual([sourceId]);
           expect(ids).toHaveProperty('clientOrderId', 'replacement');
         }
         const wireMethod = ['stopLoss', 'takeProfit'].includes(method) ? 'updateOrder'
@@ -105,10 +115,10 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     }
   }
 
-  it('keeps Bybit manual place/amend/cancel on the page, never on the hosted RPC', async () => {
+  it.each(['local', 'cosigned', undefined] as const)('keeps Bybit %s manual writes on the page, never on the source RPC', async (signingMode) => {
     const fake = fakeModule('bybit', true);
     setWasmEngineLoader(async () => fake.module);
-    const { exchange, calls } = mirror('bybit');
+    const { exchange, calls } = mirror('bybit', { signingMode });
     await expect(exchange.frameFedReady).resolves.toBe(true);
     await expect(exchange.placeOrder(placed)).resolves.toEqual(['native']);
     await exchange.updateOrder({ order: placed, update: { price: 101 } });
@@ -118,39 +128,49 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     expect(calls).toEqual([]);
   });
 
-  it.each(['local', 'delegated', undefined] as const)('does not infer COSIGNED from a mirror (mode=%s)', async (signingMode) => {
-    const fake = fakeModule('mexc', false);
+  // SDK #3517's LOCAL refusal rows move to the positive worker-source matrix above.
+  // DELEGATED retains the refusal; a mirror alone must never grant that write route.
+  it.each(['kraken', 'bitunix', 'asterdex', 'mexc'] as const)('keeps %s DELEGATED off the source writer', async (venue) => {
+    const fake = fakeModule(venue, false);
     setWasmEngineLoader(async () => fake.module);
-    const { exchange, calls } = mirror('mexc', { signingMode });
+    const { exchange, calls } = mirror(venue, { signingMode: 'delegated' });
     await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
+    await expect(exchange.updateOrder({ order: placed, update: { price: 101 } })).rejects.toMatchObject({ outcome: 'notSent' });
+    await expect(exchange.cancelOrders([placed])).rejects.toMatchObject({ outcome: 'notSent' });
     expect(calls).toEqual([]);
-  });
-
-  it('uses the current mode when the host keeps a mirror across LOCAL/COSIGNED switches', async () => {
-    const fake = fakeModule('mexc', false);
-    setWasmEngineLoader(async () => fake.module);
-    const { exchange, calls } = mirror('mexc', { signingMode: 'local' });
-    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
-    exchange.options = { ...exchange.options, signingMode: 'cosigned' };
-    await expect(exchange.placeOrder(placed)).resolves.toEqual(['hosted']);
-    exchange.options = { ...exchange.options, signingMode: 'local' };
-    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
-    expect(calls).toEqual([{ method: 'placeOrder', args: [placed] }]);
     expect(fake.constructed).not.toHaveBeenCalled();
   });
 
-  it.each(['missing capability', 'failed supported construction', 'failed module load'])('never uses hosted RPC after %s', async (failure) => {
-    const fake = fakeModule('bybit', failure === 'missing capability' ? undefined : true, false);
-    setWasmEngineLoader(async () => { if (failure === 'failed module load') throw new Error('synthetic module failure'); return fake.module; });
-    const { exchange, calls } = mirror('bybit');
-    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
-    expect(calls).toEqual([]);
-  });
-
-  it('gives actionable text for a structurally unavailable writer', async () => {
+  it('reads the current mode when a kept mirror switches LOCAL/COSIGNED/DELEGATED', async () => {
     const fake = fakeModule('mexc', false);
     setWasmEngineLoader(async () => fake.module);
-    const { exchange } = mirror('mexc', { signingMode: 'local' });
+    const { exchange, calls } = mirror('mexc', { signingMode: 'local' }, 'source');
+    await expect(exchange.placeOrder(placed)).resolves.toEqual(['source']);
+    exchange.options = { ...exchange.options, signingMode: 'cosigned' };
+    await expect(exchange.placeOrder(placed)).resolves.toEqual(['source']);
+    exchange.options = { ...exchange.options, signingMode: 'delegated' };
+    await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
+    exchange.options = { ...exchange.options, signingMode: undefined };
+    await expect(exchange.placeOrder(placed)).resolves.toEqual(['source']);
+    expect(calls).toEqual(Array.from({ length: 3 }, () => ({ method: 'placeOrder', args: [placed] })));
+    expect(fake.constructed).not.toHaveBeenCalled();
+  });
+
+  for (const signingMode of ['local', 'cosigned', undefined] as const) {
+    it.each(['missing capability', 'failed supported construction', 'failed module load'])(`never uses source RPC in ${signingMode ?? 'legacy-local'} after %s`, async (failure) => {
+      const fake = fakeModule('bybit', failure === 'missing capability' ? undefined : true, false);
+      setWasmEngineLoader(async () => { if (failure === 'failed module load') throw new Error('synthetic module failure'); return fake.module; });
+      const { exchange, calls } = mirror('bybit', { signingMode });
+      await expect(exchange.placeOrder(placed)).rejects.toMatchObject({ outcome: 'notSent' });
+      expect(calls).toEqual([]);
+    });
+
+  }
+
+  it('gives actionable text for a structurally unavailable DELEGATED writer', async () => {
+    const fake = fakeModule('mexc', false);
+    setWasmEngineLoader(async () => fake.module);
+    const { exchange } = mirror('mexc', { signingMode: 'delegated' });
     await expect(exchange.placeOrder(placed)).rejects.toThrow('Turn cloud off to use this device');
   });
 
@@ -199,10 +219,10 @@ describe('COSIGNED manual writes without a frame-fed implementation', () => {
     expect(calls).toEqual([]);
   });
 
-  it('preserves an Unknown hosted result without re-sending or starting a page writer', async () => {
-    const fake = fakeModule('mexc', false);
+  it.each(sources)('preserves Unknown for $venue/$signingMode without another source or page send', async ({ venue, signingMode, sourceId }) => {
+    const fake = fakeModule(venue, false);
     setWasmEngineLoader(async () => fake.module);
-    const { exchange, calls, bridge } = mirror('mexc');
+    const { exchange, calls, bridge } = mirror(venue, { signingMode }, sourceId);
     exchange.off('callMethod', bridge);
     exchange.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
       calls.push({ method: event.method, args: event.args });

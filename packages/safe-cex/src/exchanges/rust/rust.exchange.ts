@@ -2008,7 +2008,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private withPageWriter = async <T>(
-    method: string, args: unknown[], send: () => Promise<T>, sendHosted?: (admitted: WorkerAdmission) => Promise<T>,
+    method: string, args: unknown[], send: () => Promise<T>, sendSource?: (admitted: WorkerAdmission) => Promise<T>,
   ): Promise<T> => {
     try {
       const admitted = this.captureWorkerAdmission();
@@ -2016,10 +2016,10 @@ export class RustEngineExchange extends BaseExchange {
       admitted?.(method, args);
       if (this.isDisposed) throw this.workerOwnerChanged(method, args);
       if (!this.frameFed) {
-        // Only a structurally unsupported COSIGNED venue uses its existing source writer.
+        // A structurally unsupported LOCAL/COSIGNED mirror keeps its existing source writer.
         // A missing module/capability or a failed supported page engine must never reroute.
-        if (this.options.signingMode === 'cosigned' && this.pageWriteSupported === false && sendHosted)
-          return await sendHosted(admitted);
+        if (this.options.signingMode !== 'delegated' && this.pageWriteSupported === false && sendSource)
+          return await sendSource(admitted);
         throw this.pageWriterUnavailable(method);
       }
       return await send();
@@ -3609,19 +3609,31 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
+    const mirrored = this.routesToWorker;
+    const admitted = this.captureWorkerAdmission();
     const ready = this.capabilitiesFor('fetchSymbolMaxLeverage');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const source = capabilities.maxLeverage;
     if (source === 'unsupported') throw new Error('Not implemented');
     if (source === 'rails') {
-      if (this.routesToWorker) return (await this.callWorker('fetchSymbolMaxLeverage', symbol)) as number;
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      if (mirrored) {
+        const leverage = (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number;
+        admitted?.('fetchSymbolMaxLeverage', [symbol]);
+        return leverage;
+      }
       const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
     if (source === 'query' && !this.isPublicDataOnly) {
-      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      const leverage = mirrored
+        ? (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number
+        : await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
       if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
       this.host?.flush();
       return leverage;
