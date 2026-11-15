@@ -86,3 +86,19 @@ settings-envelope messages and successful ACK handling are unchanged.
 and pins decoded diagnostics, accepted siblings, unchanged settings on failure,
 and no extra writes after a failure. The fixture uses the public documentation's
 example code/reason, not a private account response.
+
+
+## EEA private startup
+
+Private EEA startup authenticates the existing signed account-config read before
+signed account-instrument discovery, including when public markets are warm.
+Its parsed settings retain the original read authority and apply only after the
+catalogue settles; config alone proves no balance, orders or positions readiness.
+Both EEA aliases retain the EEA origin and demo headers where applicable.
+
+Config and keyed catalogue reads share the native authentication-code policy:
+one freshly signed retry after `50113`, then a permanent typed refusal on a
+second consecutive answer for that read and credential. Transport, rate and
+other replies reset the streak; retry floors and admission deadlines do not grow.
+Public/frame-fed, non-EEA and already-configured refresh paths retain their
+existing behavior. No startup step places or replays a trading write.

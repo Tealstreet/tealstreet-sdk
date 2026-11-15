@@ -27,3 +27,6 @@ compatibility alias. Mobile is DELEGATED-only; DELEGATED clients have no WASM
 engine or local signing, and every write is a typed v1 action over the existing
 hosted WebSocket. Current contract: `docs/plans/callers/delegated-action-frames.md`;
 older mode/transport discussions are explicitly superseded where they disagree.
+
+OKX EEA config-before-catalogue startup and bounded signature refusals are
+documented in [`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#eea-private-startup).

@@ -456,6 +456,13 @@ impl Okx {
     }
 
     fn load_catalogue(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.startup_rejected {
+            return;
+        }
+        if self.eea_config_required(cx) {
+            self.account_start(cx);
+            return;
+        }
         self.skipping_instruments.clear();
         self.catalogue_partial = false;
         self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
@@ -1405,7 +1412,13 @@ impl Venue for Okx {
             return;
         }
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
-            let _ = cx.finish_http_context(context);
+            let current = cx.validate_background_read_http_delivery(context).is_ok();
+            if !self.eea_authenticating(cx) || !current {
+                let _ = cx.finish_http_context(context);
+            }
+            if !current {
+                return;
+            }
         }
         if let Pending::Account(account::Request::LeverageRefresh { context, .. }) = &pending {
             let delivered = cx.validate_background_read_http_delivery(context).is_ok();
@@ -1426,10 +1439,16 @@ impl Venue for Okx {
             account::retire(cx, page.as_ref());
             return;
         }
-        if let Pending::Account(account::Request::Config { .. }) = &pending
-            && self.config_rejected(cx, response.body)
-        {
-            return;
+        let authentication_reply = response.status < 500 && !matches!(response.status, 418 | 429);
+        if let Pending::Account(account::Request::Config { context, .. }) = &pending {
+            if authentication_reply {
+                if self.config_rejected(cx, response.body) {
+                    let _ = cx.finish_http_context(context);
+                    return;
+                }
+            } else {
+                self.config_unanswered();
+            }
         }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
@@ -1452,6 +1471,16 @@ impl Venue for Okx {
             Self::retire_discovery(cx, &pending);
             return;
         }
+        if let Pending::Markets { kind, .. } = &pending {
+            if authentication_reply {
+                if self.catalogue_rejected(cx, *kind, response.body) {
+                    Self::retire_discovery(cx, &pending);
+                    return;
+                }
+            } else {
+                self.catalogue_unanswered(*kind);
+            }
+        }
         if let Pending::Account(account::Request::Config { .. }) = &pending {
             self.account.config_pause_ms =
                 safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
@@ -1469,6 +1498,7 @@ impl Venue for Okx {
             if matches!(pending, Pending::Markets { .. })
                 && self.options.eea
                 && self.credentials.is_some()
+                && !self.eea_authenticating(cx)
                 && let Some((code, msg)) = serde_json::from_str::<wire::Envelope<'_>>(response.body)
                     .ok()
                     .map(|e| (e.code.to_owned(), e.msg.to_owned()))
@@ -1580,11 +1610,18 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
+                let authenticated = match self.finish_eea_config(cx) {
+                    Some(Ok(())) => true,
+                    Some(Err(())) => break 'settle,
+                    None => false,
+                };
                 // A frame-fed engine loads public instrument metadata only.
                 if cx.frame_fed() {
-                } else if !was_loaded {
+                } else if !was_loaded || authenticated {
                     self.ticker_seed(cx, false);
-                    self.account_start(cx);
+                    if !authenticated {
+                        self.account_start(cx);
+                    }
                 } else if added {
                     self.ticker_seed(cx, true);
                     if self.connections[PUBLIC]
@@ -1706,6 +1743,9 @@ impl Venue for Okx {
         _headers: &str,
         error: &str,
     ) {
+        if let Pending::Markets { kind, .. } = &pending {
+            self.catalogue_unanswered(*kind);
+        }
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             Self::retire_discovery(cx, &pending);
             self.public_failed(
@@ -1794,6 +1834,9 @@ impl Venue for Okx {
         // A failed discovery read retires first, then takes the native failure path.
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             Self::retire_discovery(cx, &pending);
+        }
+        if let Pending::Markets { kind, .. } = &pending {
+            self.catalogue_unanswered(*kind);
         }
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);

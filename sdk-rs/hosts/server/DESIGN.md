@@ -759,6 +759,12 @@ is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
 frame-fed accounts cannot satisfy this check.
 
+OKX EEA mainnet authenticates native signed config before keyed catalogue
+discovery, retaining the config authority until market-dependent settings apply.
+Config alone cannot complete the probe. Consecutive signature refusals allow
+one re-signed read then fail permanently; no admission budget is extended.
+EEA demo remains outside the exact COSIGNED proof-ready catalog.
+
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The COSIGNED catalog does not gate DELEGATED admission. COSIGNED coverage
 includes valid startup, a different signing key, a prior signature and a
