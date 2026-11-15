@@ -7815,3 +7815,157 @@ fn write_pacing_is_shared_by_concurrent_scaled_commands() {
     assert_eq!(payload["request"].as_array().unwrap().len(), 10);
     assert_eq!(payload["request"][0]["symbol"], "ETHUSDT");
 }
+
+// Exact native 10006 proves non-placement; transport status or contradictory IDs do not.
+#[test]
+fn native_uid_limit_is_rejected_after_managed_http_end_without_resend() {
+    for variant in [Variant::Spot, Variant::Demo] {
+        let mut h = ready(variant);
+        place(&mut h, 9106, vec![order("BTCUSDT", 0.1)]);
+        let path = if variant.is_spot() {
+            "/v5/order/create"
+        } else {
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/create-batch"
+        };
+        let request = h.take(path);
+        if variant == Variant::Demo {
+            assert!(request.url.starts_with("https://api-demo.bybit.com/"));
+        }
+        let payload = br#"{"retCode":10006,"retMsg":"Too many visits. Exceeded the API Rate Limit.","result":{},"retExtInfo":{},"time":1700000000000}"#;
+        h.event(Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        });
+        h.event(Event::HttpChunk {
+            request: request.id,
+            data: &payload[..45],
+        });
+        assert!(
+            h.result(9106).is_none(),
+            "no terminal result before httpEnd"
+        );
+        h.event(Event::HttpChunk {
+            request: request.id,
+            data: &payload[45..],
+        });
+        h.event(Event::HttpEnd {
+            request: request.id,
+        });
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9106,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("one terminal rate-limit rejection");
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{variant:?}"
+        );
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(error.venue_code.as_deref(), Some("10006"));
+        assert!(!error.message.contains("The outcome is unknown"));
+        assert_eq!(
+            h.notices
+                .iter()
+                .filter(|notice| matches!(
+                    notice,
+                    safe_cex_engine::Notice::CommandFailed { command: 9106, .. }
+                ))
+                .count(),
+            1
+        );
+        h.advance(2000.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "rejection never grants a resend"
+        );
+    }
+}
+
+#[test]
+fn native_uid_limit_with_unproven_or_contradictory_evidence_stays_unknown() {
+    for (status, payload) in [
+        (
+            429,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{}}"#,
+        ),
+        (
+            500,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{"orderId":"contradiction"}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{"list":[{"orderId":"contradiction"}]},"retExtInfo":{"list":[{"code":0}]}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006.5,"retMsg":"rate limited","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{},"retCode":0}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        place(&mut h, 9107, vec![order("BTCUSDT", 0.1)]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        h.reply(request.id, status, payload);
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9107,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("unproven native answer fails");
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{payload}"
+        );
+        h.advance(2000.0);
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+#[test]
+fn native_uid_limit_batch_preserves_accepted_ids_without_unknown_or_resend() {
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 9108, vec![order("BTCUSDT", 0.1); 2]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"accepted"},{}]},"retExtInfo":{"list":[{"code":0},{"code":10006,"msg":"Too many visits"}]}}"#);
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 9108,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .expect("known partial failure");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_eq!(error.venue_code.as_deref(), Some("10006"));
+    assert!(!error.message.contains("The outcome is unknown"));
+    assert!(h.engine.store().order("accepted").is_some());
+    h.advance(2000.0);
+    assert!(!h.has_request("/v5/order/create"));
+}
