@@ -3609,24 +3609,28 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
-    const admitted = this.routesToWorker ? this.captureWorkerAdmission() : undefined;
+    const mirrored = this.routesToWorker;
+    const admitted = this.captureWorkerAdmission();
     const ready = this.capabilitiesFor('fetchSymbolMaxLeverage');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const source = capabilities.maxLeverage;
     if (source === 'unsupported') throw new Error('Not implemented');
     if (source === 'rails') {
-      if (this.routesToWorker) {
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      if (mirrored) {
         const leverage = (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number;
         admitted?.('fetchSymbolMaxLeverage', [symbol]);
         return leverage;
       }
       const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
     if (source === 'query' && !this.isPublicDataOnly) {
-      const leverage = this.routesToWorker
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      const leverage = mirrored
         ? (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number
         : await this.command<number>({ op: 'fetchMaxLeverage', symbol });
       admitted?.('fetchSymbolMaxLeverage', [symbol]);

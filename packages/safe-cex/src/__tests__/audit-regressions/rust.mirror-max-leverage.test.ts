@@ -10,7 +10,7 @@ const symbol = 'E-BTC-USDT';
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-function mirror(signingMode: ExchangeOptions['signingMode'], publicDataOnly = false) {
+function mirror(signingMode: ExchangeOptions['signingMode'], publicDataOnly = false, workerMirror = true) {
   const constructed = vi.fn(() => { throw new Error('A mirror must not construct an account engine'); });
   setWasmEngineLoader(async () => ({
     WasmEngine: Object.assign(constructed, { frameFedSupported: () => false }) as never,
@@ -22,7 +22,7 @@ function mirror(signingMode: ExchangeOptions['signingMode'], publicDataOnly = fa
     limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } }, info: {},
   } satisfies Market] });
   const exchange = new RustEngineExchange('bitrue', {
-    key: 'synthetic-key', secret: 'synthetic-secret', workerMirror: true, signingMode, publicDataOnly,
+    key: 'synthetic-key', secret: 'synthetic-secret', workerMirror, signingMode, publicDataOnly,
   }, store);
   exchanges.push(exchange);
   let generation = 1;
@@ -43,6 +43,8 @@ function mirror(signingMode: ExchangeOptions['signingMode'], publicDataOnly = fa
   exchange.on('callMethod', bridge);
   return {
     exchange, store, calls, constructed,
+    attach() { exchange.on('callMethod', bridge); },
+    detach() { exchange.off('callMethod', bridge); },
     result(value: number) { result = value; },
     defer() { deferred = true; },
     retire() { generation++; },
@@ -88,4 +90,53 @@ it.each(['local', 'cosigned'] as const)('retires a pending maximum read when its
   fixture.finish();
   expect(await pending).toMatchObject({ error: { code: 'WORKER_STOPPED' } });
   expect(fixture.calls).toHaveLength(1);
+});
+
+function deferCapabilities(exchange: RustEngineExchange) {
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => { release = resolve; });
+  const boundary = exchange as unknown as {
+    capabilitiesFor(method: string): unknown;
+    command(command: { op: string; symbol: string }): Promise<number>;
+  };
+  const original = boundary.capabilitiesFor.bind(exchange);
+  vi.spyOn(boundary, 'capabilitiesFor').mockImplementation((method) => ready.then(() => original(method)));
+  const native = vi.spyOn(boundary, 'command').mockResolvedValue(125);
+  const pending = exchange.fetchSymbolMaxLeverage(symbol).then(
+    (value) => ({ value }), (error: unknown) => ({ error }),
+  );
+  return { release, native, pending };
+}
+
+it('keeps the initiating native route when a legacy bridge attaches during capability readiness', async () => {
+  const fixture = mirror('local', false, false);
+  fixture.detach();
+  const held = deferCapabilities(fixture.exchange);
+  fixture.attach();
+  held.release();
+  expect(await held.pending).toEqual({ value: 125 });
+  expect(held.native).toHaveBeenCalledOnce();
+  expect(fixture.calls).toEqual([]);
+});
+
+it('refuses an old native read before a successor owner bridge or native engine can receive it', async () => {
+  const fixture = mirror('local', false, false);
+  fixture.detach();
+  const held = deferCapabilities(fixture.exchange);
+  fixture.retire();
+  fixture.attach();
+  held.release();
+  expect(await held.pending).toMatchObject({ error: { code: 'WORKER_STOPPED' } });
+  expect(held.native).not.toHaveBeenCalled();
+  expect(fixture.calls).toEqual([]);
+});
+
+it('refuses a removed initiating bridge before a native read during capability readiness', async () => {
+  const fixture = mirror('local', false, false);
+  const held = deferCapabilities(fixture.exchange);
+  fixture.detach();
+  held.release();
+  expect(await held.pending).toMatchObject({ error: { code: 'WORKER_STOPPED' } });
+  expect(held.native).not.toHaveBeenCalled();
+  expect(fixture.calls).toEqual([]);
 });
