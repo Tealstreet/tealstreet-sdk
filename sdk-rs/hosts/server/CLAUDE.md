@@ -132,6 +132,13 @@ mode and identity/settings; refused proofs never change that mode. Resumed COSIG
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 
+COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
+Every exact `remoteSigning.enabled` venue needs native proof readiness or a
+reason in `src/delegated/cosigned-proof-exclusions.json`; remove its exclusion
+when proof lands. The 33-production-venue census is checked separately, and
+Cargo signing features are only a family cross-check. The reason list changes
+no runtime availability, admission or client fallback policy.
+
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;
 overflow uses the existing transient refusal. Labels, settings, routing and
