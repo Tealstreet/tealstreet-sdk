@@ -580,18 +580,43 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private signingHost = (): Pick<EngineHostType,
+    'hostedSigning' | 'hostedWalletSigning' | 'hostedSigningClock' | 'coinbaseSigningMetadata'
+  > & { assertCurrent(): void } => {
+    const host = this.host;
+    if (!host) throw this.pageWriterUnavailable('signing');
+    const assertCurrent = () => {
+      if (this.isDelegatedMirror || this.isDisposed || this.host !== host)
+        throw this.pageWriterUnavailable('signing');
+    };
+    return {
+      assertCurrent,
+      hostedSigning: async (input) => {
+        assertCurrent();
+        const result = await host.hostedSigning(input);
+        assertCurrent();
+        return result;
+      },
+      hostedWalletSigning: (input) => { assertCurrent(); return host.hostedWalletSigning(input); },
+      hostedSigningClock: () => { assertCurrent(); return host.hostedSigningClock(); },
+      coinbaseSigningMetadata: () => { assertCurrent(); return host.coinbaseSigningMetadata(); },
+    };
+  };
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureSigningHost();
         if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
-        return await signHostedHttp(
+        const host = this.signingHost();
+        const result = await signHostedHttp(
           this.name,
           this.engineOptions,
           Boolean(this.signerSetup?.primaryComplete),
-          this.host!,
+          host,
           request,
         );
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted HTTP signing failed' };
       }
@@ -604,7 +629,10 @@ export class RustEngineExchange extends BaseExchange {
       try {
         await this.ensureSigningHost();
         if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
-        return await signHostedWsAuth(this.host!, request);
+        const host = this.signingHost();
+        const result = await signHostedWsAuth(host, request);
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted WS auth signing failed' };
       }

@@ -1,4 +1,4 @@
-import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineHost, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, Order } from '../../types';
 
@@ -26,7 +26,7 @@ const writes: Record<string, unknown[]> = {
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-function fixture(venue: ExchangeName = 'bybit', mode: ExchangeOptions['signingMode'] = 'delegated', waitAt?: 1 | 2) {
+function fixture(venue: ExchangeName = 'bybit', mode: ExchangeOptions['signingMode'] = 'delegated', waitAt?: 1 | 2, workerMirror = true) {
   const native: string[] = [];
   const idle = () => '[]';
   const frame = () => new Uint8Array(consumerFrame({ markets: [], tickers: [], positions: [], orders: [],
@@ -59,7 +59,7 @@ function fixture(venue: ExchangeName = 'bybit', mode: ExchangeOptions['signingMo
   });
   setWasmEngineLoader(loader);
   const exchange = new RustEngineExchange(venue, {
-    key: 'synthetic-key', secret: '11'.repeat(32), workerMirror: true, signingMode: mode,
+    key: 'synthetic-key', secret: '11'.repeat(32), workerMirror, signingMode: mode,
     ...(venue === 'lighter' ? { key: '', secret: '01' + '00'.repeat(39), apiKeyIndex: '0', applicationId: '9' } : {}),
   }, new DefaultStore());
   exchanges.push(exchange);
@@ -154,4 +154,65 @@ it.each(['signHttpRequest', 'signWsAuth'] as const)('retires %s across a ready-h
   f.exchange.options = { ...f.exchange.options, signingMode: 'delegated' };
   expect(await pending).toHaveProperty('error');
   expect(signing).not.toHaveBeenCalled();
+});
+
+const signingRequest = {
+  id: 'synthetic-signature', exchangeName: 'bybit' as const, type: 'http' as const,
+  config: { method: 'POST', url: '/v5/order/create', baseURL: 'https://api.bybit.com', data: {} },
+  wsAuth: { toSign: 'synthetic-preimage', outputFormat: 'hex' as const },
+};
+
+async function signingFixture(holdKind?: 'credential' | 'http' | 'wsAuth') {
+  const f = fixture('bybit', 'local');
+  await f.exchange.frameFedReady;
+  const host = Reflect.get(f.exchange, 'host') as Pick<EngineHost, 'hostedSigning' | 'hostedSigningClock'>;
+  vi.spyOn(host, 'hostedSigningClock').mockReturnValue({ stampMs: 1_700_000_000_000, revision: '1' });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const signing = vi.spyOn(host, 'hostedSigning').mockImplementation(async (input) => {
+    if (input.kind === holdKind) await held;
+    return { credential: 'synthetic-key', signature: '00' };
+  });
+  return { ...f, signing, release };
+}
+
+it.each(['signHttpRequest', 'signWsAuth'] as const)('preserves unchanged LOCAL %s through the real signing adapter', async (method) => {
+  const f = await signingFixture();
+  const result = await f.exchange[method](signingRequest);
+  expect(result).not.toHaveProperty('error');
+  expect(f.signing.mock.calls.map(([input]) => input.kind)).toEqual(
+    method === 'signHttpRequest' ? ['credential', 'http'] : ['wsAuth'],
+  );
+});
+
+it('blocks the later HTTP signing handoff after a DELEGATED switch during credential lookup', async () => {
+  const f = await signingFixture('credential');
+  const pending = f.exchange.signHttpRequest(signingRequest);
+  await vi.waitFor(() => expect(f.signing).toHaveBeenCalledWith({ kind: 'credential' }));
+  f.exchange.options = { ...f.exchange.options, signingMode: 'delegated' };
+  f.release();
+  const result = await pending;
+  expect(f.signing.mock.calls.map(([input]) => input.kind)).toEqual(['credential']);
+  expect(result).toHaveProperty('error');
+  expect(result.config).toBeUndefined();
+});
+
+it.each(['http', 'wsAuth'] as const)('does not publish a retired %s signing result', async (kind) => {
+  const f = await signingFixture(kind);
+  const pending = kind === 'http' ? f.exchange.signHttpRequest(signingRequest) : f.exchange.signWsAuth(signingRequest);
+  await vi.waitFor(() => expect(f.signing.mock.calls.some(([input]) => input.kind === kind)).toBe(true));
+  f.exchange.options = { ...f.exchange.options, signingMode: 'delegated' };
+  f.release();
+  const result = await pending;
+  expect(result).toHaveProperty('error');
+  expect(result.config).toBeUndefined();
+  expect(result.wsAuthSignature).toBeUndefined();
+});
+
+it('retains native engine ownership for a DELEGATED source instance', async () => {
+  const f = fixture('bybit', 'delegated', undefined, false);
+  f.exchange.off('callMethod');
+  await f.exchange.loadCapabilities();
+  expect(f.constructed).toHaveBeenCalledOnce();
+  expect(f.loader).toHaveBeenCalledOnce();
 });
