@@ -66,12 +66,13 @@ function fixture(venue: ExchangeName = 'bybit', mode: ExchangeOptions['signingMo
   exchange.setWorkerOwner(() => ({ ownerId: 'synthetic-owner', generation: 1 }));
   adoptEngineCapabilities(exchange);
   const source: string[] = [];
-  exchange.on('callMethod', (event: { requestId: string; method: string }) => {
+  const attachSource = () => exchange.on('callMethod', (event: { requestId: string; method: string }) => {
     source.push(event.method);
     exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: true,
       result: event.method.startsWith('place') ? ['source-order'] : [] });
   });
-  return { exchange, native, source, constructed, loader, module, releaseLoader };
+  attachSource();
+  return { exchange, native, source, constructed, loader, module, releaseLoader, attachSource };
 }
 
 it.each(Object.keys(writes))('DELEGATED %s uses neither the page engine nor generic source writer', async (method) => {
@@ -100,6 +101,74 @@ it.each(['local', 'cosigned'] as const)('preserves %s page and structurally unsu
     expect(f.native).toEqual(venue === 'bybit' ? ['placeOrders'] : []);
     expect(f.source).toEqual(venue === 'grvt' ? ['placeOrder'] : []);
   }
+});
+
+const sourceTransitions = (['local', 'cosigned'] as const).flatMap(mode =>
+  [false, true].flatMap(raw => [false, true].map(bridgeReady => ({ mode, raw, bridgeReady }))),
+);
+
+it.each(sourceTransitions)('refuses $mode source writes after a DELEGATED switch at the bridge wait (raw=$raw, ready=$bridgeReady)', async ({ mode, raw, bridgeReady }) => {
+  const f = fixture('grvt', mode);
+  await expect(f.exchange.frameFedReady).resolves.toBe(false);
+  expect(Reflect.get(f.exchange, 'pageWriteSupported')).toBe(false);
+  if (!bridgeReady) f.exchange.off('callMethod');
+  const bridgeWait = vi.spyOn(f.exchange as unknown as { untilWorkerBridge(): Promise<() => boolean> }, 'untilWorkerBridge');
+  const pending = raw ? f.exchange.callMethodInWorker('placeOrder', order) : f.exchange.placeOrder(order);
+  expect(bridgeWait).toHaveBeenCalledOnce();
+  expect(f.exchange.emitter.hasListeners('callMethod')).toBe(bridgeReady);
+  expect(f.source).toEqual([]);
+  f.exchange.options = { ...f.exchange.options, signingMode: 'delegated' };
+  if (!bridgeReady) f.attachSource();
+  const result = await pending.then(value => ({ value }), error => ({ error }));
+  expect(f.source).toEqual([]);
+  expect(result).toMatchObject({ error: { kind: 'unsupported', outcome: 'notSent' } });
+  expect(f.native).toEqual([]);
+  expect(f.constructed).not.toHaveBeenCalled();
+});
+
+it.each(['local', 'cosigned'] as const)('preserves an unchanged %s source write across the bridge wait', async (mode) => {
+  const f = fixture('grvt', mode);
+  await expect(f.exchange.frameFedReady).resolves.toBe(false);
+  f.exchange.off('callMethod');
+  const bridgeWait = vi.spyOn(f.exchange as unknown as { untilWorkerBridge(): Promise<() => boolean> }, 'untilWorkerBridge');
+  const pending = f.exchange.placeOrder(order);
+  expect(bridgeWait).toHaveBeenCalledOnce();
+  expect(f.source).toEqual([]);
+  f.attachSource();
+  await expect(pending).resolves.toEqual(['source-order']);
+  expect(f.source).toEqual(['placeOrder']);
+  expect(f.native).toEqual([]);
+});
+
+it.each(['local', 'cosigned'] as const)('preserves account reads after a %s to DELEGATED switch at the bridge wait', async (mode) => {
+  const f = fixture('grvt', mode);
+  await expect(f.exchange.frameFedReady).resolves.toBe(false);
+  f.exchange.off('callMethod');
+  const bridgeWait = vi.spyOn(f.exchange as unknown as { untilWorkerBridge(): Promise<() => boolean> }, 'untilWorkerBridge');
+  const pending = f.exchange.fetchBalance();
+  expect(bridgeWait).toHaveBeenCalledOnce();
+  f.exchange.options = { ...f.exchange.options, signingMode: 'delegated' };
+  f.attachSource();
+  await expect(pending).resolves.toEqual([]);
+  expect(f.source).toEqual(['fetchBalance']);
+  expect(f.native).toEqual([]);
+  expect(f.constructed).not.toHaveBeenCalled();
+});
+
+it('retains the initiating owner generation during the source bridge wait', async () => {
+  const f = fixture('grvt', 'local');
+  await expect(f.exchange.frameFedReady).resolves.toBe(false);
+  let generation = 1;
+  f.exchange.setWorkerOwner(() => ({ ownerId: 'synthetic-owner', generation }));
+  f.exchange.off('callMethod');
+  const bridgeWait = vi.spyOn(f.exchange as unknown as { untilWorkerBridge(): Promise<() => boolean> }, 'untilWorkerBridge');
+  const pending = f.exchange.placeOrder(order);
+  expect(bridgeWait).toHaveBeenCalledOnce();
+  generation += 1;
+  f.attachSource();
+  await expect(pending).rejects.toMatchObject({ code: 'WORKER_STOPPED', outcome: 'notSent' });
+  expect(f.source).toEqual([]);
+  expect(f.native).toEqual([]);
 });
 
 it('DELEGATED public candles and account reads stay on the source without loading WASM', async () => {

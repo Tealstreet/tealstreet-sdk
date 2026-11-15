@@ -2059,8 +2059,12 @@ export class RustEngineExchange extends BaseExchange {
       if (!this.frameFed) {
         // A structurally unsupported LOCAL/COSIGNED mirror keeps its existing source writer.
         // A missing module/capability or a failed supported page engine must never reroute.
-        if (this.pageWriteSupported === false && sendSource)
-          return await sendSource(admitted);
+        if (this.pageWriteSupported === false && sendSource) {
+          return await sendSource((sourceMethod, sourceArgs) => {
+            admitted?.(sourceMethod, sourceArgs);
+            if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
+          });
+        }
         throw this.pageWriterUnavailable(method);
       }
       return await send();
