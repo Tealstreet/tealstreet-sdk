@@ -41,6 +41,7 @@ pub(crate) struct Seen {
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
+    pub(crate) aster_private_sockets: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -64,7 +65,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
-        "blofin" | "kucoin" | "bingx" => venue,
+        "blofin" | "kucoin" | "bingx" | "asterdex" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -301,6 +302,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "asterdex" {
+            return asterdex::response(self, r);
+        }
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
@@ -369,6 +373,9 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "asterdex" {
+            return asterdex::connect(self, socket, &url, events);
+        }
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
@@ -405,6 +412,8 @@ impl Transport for VenueIo {
                     && ((family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
                         || (self.venue == "bingx"
                             && path(&r) == "/openApi/user/auth/userDataStream")
+                        || (self.venue == "asterdex"
+                            && path(&r).split('?').next() == Some("/fapi/v1/listenKey"))
                         || (self.venue == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
@@ -673,6 +682,16 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "asterdex" {
+        let descriptor: Value = serde_json::from_str(canonical).unwrap();
+        return descriptor["payload"]
+            .as_str()
+            .unwrap()
+            .split('&')
+            .filter(|part| !part.starts_with("timestamp="))
+            .collect::<Vec<_>>()
+            .join("&");
+    }
     if venue == "phemex" {
         // Native Phemex signs path + query + whole-second expiry; keep the read scope.
         return canonical
@@ -730,14 +749,27 @@ async fn remote(
             let frame: Value = serde_json::from_str(&frame).unwrap();
             let request = &frame["d"];
             assert_eq!(request["type"], "ws-auth");
-            let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":request["wsAuth"]["toSign"],"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
-            let (work, output) =
-                safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
-            let signed = provider.sign(work).await.unwrap();
-            let fresh = safe_cex_venues::hosted_signing::finish(output, &signed)
-                .unwrap()
-                .signature
-                .unwrap();
+            let fresh = if venue == "asterdex" {
+                asterdex::device_signature(
+                    request,
+                    KEY,
+                    if matches!(answer, DeviceAnswer::DifferentKey) {
+                        "synthetic-other-material"
+                    } else {
+                        SECRET
+                    },
+                )
+                .await
+            } else {
+                let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":request["wsAuth"]["toSign"],"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
+                let (work, output) =
+                    safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
+                let signed = provider.sign(work).await.unwrap();
+                safe_cex_venues::hosted_signing::finish(output, &signed)
+                    .unwrap()
+                    .signature
+                    .unwrap()
+            };
             let is_ws = request["wsAuth"]["toSign"].as_str().is_some_and(|text| {
                 text.starts_with("GET/realtime")
                     || text.contains("/users/self/verify")
@@ -1141,3 +1173,6 @@ mod phemex;
 
 #[path = "bingx_probe_tests.rs"]
 mod bingx;
+
+#[path = "asterdex_probe_tests.rs"]
+pub(crate) mod asterdex;

@@ -125,6 +125,16 @@ const declared = exactNames(Object.entries(rules)
   .filter(([, rule]) => rule.remoteSigning?.enabled === true).map(([name]) => name));
 const ready = catalog(catalogSource);
 const excluded = exclusions(exclusionRecords);
+
+test('AsterDEX readiness is V1-only with an explicit V3 shape exclusion', () => {
+  assert(ready.has('asterdex'), 'V1 native private-startup proof must be admitted');
+  assert(!excluded.has('asterdex'), 'whole-venue exclusion must not mask V1 readiness');
+  const shapes = JSON.parse(read('../hosts/server/src/delegated/cosigned-proof-exclusions.json')).excludedShapes;
+  assert(Array.isArray(shapes), 'partially-ready venues require explicit excluded shapes');
+  assert.deepEqual(shapes.map(({ venue, shape }) => ({ venue, shape })), [{ venue: 'asterdex', shape: 'v3' }]);
+  assert.equal(typeof shapes[0].reason, 'string');
+  assert(shapes[0].reason.trim());
+});
 const helperEligible = new Set([...declared].filter(name => !noServerOrigin.has(name) && !awaitingLiveTest.has(name)));
 // This generated snapshot is checked by rust:metadata:check. It only reconciles
 // the production cohort; the stronger all-declarations guard does not filter on it.

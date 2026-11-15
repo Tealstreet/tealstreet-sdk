@@ -21,6 +21,7 @@ const READY: &[&str] = &[
     "kucoin",
     "phemex",
     "bingx",
+    "asterdex",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
@@ -115,14 +116,23 @@ impl Device {
         .unwrap();
         let (provider, identities) =
             safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
-        let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":preimage,"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
-        let (work, output) =
-            safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
-        let signed = provider.sign(work).await.unwrap();
-        let fresh = safe_cex_venues::hosted_signing::finish(output, &signed)
-            .unwrap()
-            .signature
-            .unwrap();
+        let fresh = if venue == "asterdex" {
+            crate::delegated::probe::venue_tests::asterdex::device_signature(
+                request,
+                signing_key,
+                material,
+            )
+            .await
+        } else {
+            let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":preimage,"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
+            let (work, output) =
+                safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
+            let signed = provider.sign(work).await.unwrap();
+            safe_cex_venues::hosted_signing::finish(output, &signed)
+                .unwrap()
+                .signature
+                .unwrap()
+        };
         let signature = if socket_auth {
             fresh
         } else {
@@ -503,6 +513,9 @@ async fn venue_case(venue: &'static str) {
     }
     let original_socket = provider.socket();
     for mode in [Answer::OtherKey, Answer::Replay] {
+        if venue == "asterdex" && matches!(mode, Answer::Replay) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         if venue == "phemex" && matches!(mode, Answer::Replay) {
             // Phemex signs whole-second expiries; cross a real stamp boundary before replay.
             tokio::time::sleep(Duration::from_millis(1100)).await;
@@ -763,4 +776,55 @@ async fn cosigned_phemex_requires_connection_proof() {
 #[tokio::test]
 async fn cosigned_bingx_requires_connection_proof() {
     venue_case("bingx").await;
+}
+
+#[tokio::test]
+async fn cosigned_asterdex_v1_requires_connection_proof() {
+    venue_case("asterdex").await;
+}
+
+#[tokio::test]
+async fn cosigned_asterdex_wallet_shapes_stay_proof_unavailable_without_io() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let io = MockVenue::new(KEY.into(), MATERIAL.into());
+            let observed = io.observed.clone();
+            let registry = crate::accounts::testing::e2e_registry("alice", io);
+            for (key, main) in [
+                (format!("0x{}", "1".repeat(40)), None),
+                (
+                    format!("0x{}", "1".repeat(40)),
+                    Some(format!("0x{}", "2".repeat(40))),
+                ),
+                (KEY.into(), Some(format!("0x{}", "2".repeat(40)))),
+            ] {
+                let (mut session, mut sent) = user_session(registry.clone(), "alice");
+                let mut init = payload("asterdex");
+                init.key = key;
+                init.application_id = main;
+                session.init(init).await.unwrap();
+                assert!(session.pending_verifications.is_empty());
+                assert!(session.joined.is_empty());
+                let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+                    .map(|s| serde_json::from_str(&s).unwrap())
+                    .collect();
+                assert!(
+                    frames
+                        .iter()
+                        .any(|f| f["d"]["data"][1]["kind"] == "proof-unavailable")
+                );
+                assert!(
+                    !frames
+                        .iter()
+                        .any(|f| f["t"] == "sign-req" || f["d"]["op"] == "frame")
+                );
+                assert_eq!(registry.account_count(), 0);
+                session.close();
+            }
+            let observed = observed.lock().unwrap();
+            assert_eq!(observed.preparations, 0);
+            assert_eq!(observed.requests, 0);
+            assert_eq!(observed.sockets, 0);
+        })
+        .await;
 }
