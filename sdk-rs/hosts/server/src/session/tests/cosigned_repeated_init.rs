@@ -166,3 +166,74 @@ async fn resumed_cosigned_socket_keeps_snapshot_path_after_resident_upgrade() {
     session.identity.resumable = false;
     session.close();
 }
+
+#[tokio::test]
+async fn refused_mode_change_preserves_original_cosigned_admission() {
+    let f = fixture_with_auth(true).await;
+    let (mut session, mut sent) = candidate(&f, "alice");
+    let mut done = session.take_verified();
+    session.init(init(Some("original"))).await.unwrap();
+    let completion = complete(
+        &mut session,
+        &mut sent,
+        &mut done,
+        &mut Device::default(),
+        Answer::Correct,
+        Some("original"),
+    )
+    .await;
+    session.verification_completed(completion).await.unwrap();
+    let account = session.joined["acct"].account.clone();
+    let mut request = payload(&mut session, Some("refused-change"));
+    request.sealed.as_mut().unwrap().ciphertext.push('!');
+    session.init(request).await.unwrap();
+    assert!(session.pending_verifications.contains_key("acct"));
+    let completion = tokio::time::timeout(Duration::from_secs(5), done.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(completion.candidate.is_err());
+    session.verification_completed(completion).await.unwrap();
+    assert!(session.pending_verifications.is_empty());
+    assert!(account.delegated().is_none());
+    assert_snapshot_repeat(&mut session, &account, &f).await;
+    session.close();
+}
+
+#[tokio::test]
+async fn admitted_cosigned_changed_settings_and_identity_still_require_proof() {
+    let f = fixture_with_auth(true).await;
+    let mut resident = Resident::start(&f, &mut Device::default()).await;
+    resident
+        .account
+        .signing
+        .set_test_resident(crate::delegated::ResidentCopy::test_provider(Arc::new(
+            safe_cex_crypto::signer::LocalSigner::new(),
+        )));
+    let session = resident.session.as_mut().unwrap();
+    for change_identity in [false, true] {
+        let mut request = init(Some("changed-settings"));
+        if change_identity {
+            request.key = "synthetic-other-key".into();
+        } else {
+            request.enable_spot_markets = Some(true);
+            assert_ne!(resident.account.fingerprint, request.fingerprint());
+        }
+        let verification = session.next_verification;
+        let client = session.joined["acct"].client.id;
+        session.init(request).await.unwrap();
+        assert!(session.pending_verifications.contains_key("acct"));
+        assert!(
+            session.pending_verifications["acct"]
+                .cosigned_link
+                .is_some()
+        );
+        assert!(session.next_verification > verification);
+        assert_eq!(session.joined["acct"].client.id, client);
+        assert!(Arc::ptr_eq(
+            &session.joined["acct"].account,
+            &resident.account
+        ));
+    }
+    assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+}
