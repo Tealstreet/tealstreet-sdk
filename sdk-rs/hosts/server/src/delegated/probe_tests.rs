@@ -21,6 +21,7 @@ const VENUES: &[&str] = &[
     "binancespot",
     "okx",
     "okxdemo",
+    "okxeu",
     "bitget",
     "bitgetusdc",
     "blofin",
@@ -38,6 +39,8 @@ const PASS: &str = "synthetic-passphrase";
 #[derive(Default)]
 pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
+    pub(crate) config_refusals_remaining: usize,
+    pub(crate) config_refusal_status: Option<u16>,
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
     pub(crate) urls: Vec<String>,
@@ -68,7 +71,7 @@ fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
-        "okx" | "okxdemo" => "okx",
+        "okx" | "okxdemo" | "okxeu" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
         "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
         _ => panic!("no private-read fixture for {venue}"),
@@ -155,6 +158,11 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
             "/api/v5/account/config",
             "/api/v5/trade/orders-pending",
         ),
+        "okxeu" => (
+            "https://eea.okx.com",
+            "/api/v5/account/config",
+            "/api/v5/account/instruments?instType=FUTURES",
+        ),
         "bitgetusdc" => (
             "https://api.bitget.com",
             "/api/v2/mix/account/accounts",
@@ -180,6 +188,17 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
         "{venue}: missing exact product: {:?}",
         seen.urls
     );
+    if venue == "okxeu" {
+        assert_eq!(
+            seen.paths.first().map(String::as_str),
+            Some("/api/v5/account/config")
+        );
+        assert!(
+            seen.urls
+                .iter()
+                .any(|url| url == "https://eea.okx.com/api/v5/account/instruments?instType=SWAP")
+        );
+    }
     if venue == "okxdemo" {
         assert_eq!(
             seen.demo_private_reads, seen.signed_reads,
@@ -349,6 +368,17 @@ impl VenueIo {
                 };
             }
         }
+        if self.venue == "okxeu" && path(r) == "/api/v5/account/config" {
+            let mut seen = self.seen.lock().unwrap();
+            if seen.config_refusals_remaining > 0 {
+                seen.config_refusals_remaining -= 1;
+                seen.refused += 1;
+                return json!({"code":"50113","msg":"synthetic first signature refusal","data":[]});
+            }
+        }
+        if self.venue == "okxeu" && path(r) == "/api/v5/account/instruments?instType=FUTURES" {
+            return json!({"code":"0","msg":"","data":[]});
+        }
         let fixtures: Value =
             serde_json::from_str(include_str!("../../tests/fixtures/admission-reads.json"))
                 .unwrap();
@@ -363,9 +393,14 @@ impl VenueIo {
             .and_then(Value::as_object)
             .unwrap();
         let url = path(r).split('?').next().unwrap();
+        let fixture_url = if self.venue == "okxeu" && url == "/api/v5/account/instruments" {
+            "/api/v5/public/instruments"
+        } else {
+            url
+        };
         let mut response = bodies
             .iter()
-            .find(|(key, _)| key.as_str() != "*" && url.ends_with(key.as_str()))
+            .find(|(key, _)| key.as_str() != "*" && fixture_url.ends_with(key.as_str()))
             .map_or(&bodies["*"], |(_, body)| body)
             .clone();
         if family(self.venue) == "bybit" {
@@ -451,7 +486,16 @@ impl Transport for VenueIo {
             seen.urls.push(r.url.clone());
         }
         let response = self.response(&r);
-        let status = if self.venue == "phemex" && response["code"] == 401 {
+        let status = if self.venue == "okxeu"
+            && path(&r) == "/api/v5/account/config"
+            && response["code"] == "50113"
+        {
+            self.seen
+                .lock()
+                .unwrap()
+                .config_refusal_status
+                .unwrap_or(200)
+        } else if self.venue == "phemex" && response["code"] == 401 {
             401
         } else {
             200

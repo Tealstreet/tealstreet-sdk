@@ -35,11 +35,30 @@ fn ticker(id: &str) -> String {
     TICKER.replace("BTC-USDT-SWAP", id)
 }
 fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
+    let (engine, out, _) = catalog_with_config(options);
+    (engine, out)
+}
+fn catalog_with_config(options: Options) -> (Engine<Okx>, Vec<Action>, Option<Action>) {
     let eea = options.eea;
     let private = options.key.is_some();
     let mut e = crate::support::engine(options);
     e.start(0.0);
-    let a = take_http(&mut prepared(&mut e, 0.0));
+    let mut startup = prepared(&mut e, 0.0);
+    let config = if eea && private {
+        let config = take_http(&mut startup);
+        assert!(is_get(&config, "/account/config"));
+        reply(
+            &mut e,
+            &config,
+            &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+            0.5,
+        );
+        startup.extend(prepared(&mut e, 0.5));
+        Some(config)
+    } else {
+        None
+    };
+    let a = take_http(&mut startup);
     assert!(is_get(&a, "instruments?instType=SWAP"));
     if eea {
         assert!(
@@ -63,7 +82,11 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
     }
     assert!(e.store().loaded().markets);
     let mut out = prepared(&mut e, if eea { 2.0 } else { 1.0 });
-    let a = take_http(&mut out);
+    let index = out
+        .iter()
+        .position(|a| is_get(a, "tickers?instType=SWAP"))
+        .unwrap();
+    let a = out.remove(index);
     assert!(is_get(&a, "tickers?instType=SWAP"));
     reply(&mut e, &a, &rows(&[TICKER, &ticker("BTC-USD-SWAP")]), 3.0);
     if eea {
@@ -78,24 +101,16 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
         );
     }
     out.extend(prepared(&mut e, if eea { 4.0 } else { 3.0 }));
-    (e, out)
+    (e, out, config)
 }
 fn private_catalog() -> (Engine<Okx>, SocketId, Vec<Action>) {
-    let (mut e, out) = catalog(Options {
+    let (e, out) = catalog(Options {
         eea: true,
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
     });
-    let config = out.iter().find(|a| is_get(a, "/account/config")).unwrap();
-    reply(
-        &mut e,
-        config,
-        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
-        5.0,
-    );
-    let out = prepared(&mut e, 5.0);
     let private = out
         .iter()
         .find_map(|a| match a {
@@ -467,7 +482,7 @@ fn failed_later_product_position_refresh_keeps_both_previous_products() {
 }
 #[test]
 fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes() {
-    let (mut e, out) = catalog(Options {
+    let (mut e, out, config) = catalog_with_config(Options {
         eea: true,
         key: Some("primary".into()),
         secret: Some("primary-secret".into()),
@@ -479,17 +494,10 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
         }),
         ..Options::default()
     });
-    let config = out.iter().find(|a| is_get(a, "/account/config")).unwrap();
+    let config = config.as_ref().unwrap();
     assert!(
         matches!(config,Action::Http(r) if r.headers.iter().any(|(k,v)|*k=="OK-ACCESS-KEY"&&v=="secondary")&&r.headers.iter().any(|(k,v)|*k=="OK-ACCESS-PASSPHRASE"&&v=="secondary-pass"))
     );
-    reply(
-        &mut e,
-        config,
-        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
-        5.0,
-    );
-    let out = prepared(&mut e, 5.0);
     let private = out
         .iter()
         .find_map(|a| match a {
@@ -519,7 +527,7 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis() {
     let timer = out
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 2005.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == 2002.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -657,7 +665,7 @@ fn account_push_retains_real_usd_and_coin_details_and_live_order_margin() {
     let timer = out
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 2005.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == 2002.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -960,7 +968,14 @@ mod product_semantics {
             ..Options::default()
         });
         e.start(0.0);
-        let request = take_http(&mut prepared(&mut e, 0.0));
+        let mut initial = prepared(&mut e, 0.0);
+        if eea && private {
+            let config = take_http(&mut initial);
+            assert!(is_get(&config, "/api/v5/account/config"));
+            reply(&mut e, &config, &envelope(r#"{"posMode":"net_mode"}"#), 0.5);
+            initial.extend(prepared(&mut e, 0.5));
+        }
+        let request = take_http(&mut initial);
         assert!(
             matches!(&request, Action::Http(r) if r.url.contains(if eea && private { "/account/instruments?" } else { "/public/instruments?" }))
         );
@@ -988,7 +1003,11 @@ mod product_semantics {
             );
         }
         let mut initial = prepared(&mut e, if eea { 1.5 } else { 1.0 });
-        let request = take_http(&mut initial);
+        let index = initial
+            .iter()
+            .position(|a| is_get(a, "tickers?instType=SWAP"))
+            .unwrap();
+        let request = initial.remove(index);
         reply(
             &mut e,
             &request,
@@ -1209,12 +1228,6 @@ mod product_semantics {
     #[test]
     fn eea_private_reads_subscriptions_and_inverse_risk_keep_usd_units() {
         let (mut e, initial) = startup(true, true);
-        let config = initial
-            .iter()
-            .find(|a| is_get(a, "/api/v5/account/config"))
-            .unwrap();
-        reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
-        let initial = prepared(&mut e, 3.0);
         let private = socket(&initial, "/private");
         let positions = initial
             .iter()
@@ -1305,14 +1318,9 @@ mod product_semantics {
     #[test]
     fn inverse_and_xperp_placements_keep_native_lots_and_caller_ids() {
         let (mut e, initial) = startup(true, true);
-        let config = initial
-            .iter()
-            .find(|a| is_get(a, "/api/v5/account/config"))
-            .unwrap();
-        reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
         // Placement admission requires the complete account snapshot, including
         // both EEA products; config alone does not prove account readiness.
-        let mut pending = prepared(&mut e, 3.0);
+        let mut pending = initial;
         while let Some(request) = pending.pop() {
             let Action::Http(http) = &request else {
                 continue;
@@ -1952,12 +1960,7 @@ mod product_semantics {
 
     fn eea_account() -> (Engine<Okx>, SocketId, Vec<Action>) {
         let (mut e, initial) = startup(true, true);
-        let config = initial
-            .iter()
-            .find(|a| is_get(a, "/api/v5/account/config"))
-            .unwrap();
-        reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
-        let pending = prepared(&mut e, 3.0);
+        let pending = initial;
         let private = socket(&pending, "/private");
         e.handle(3.5, Event::WsOpened { socket: private });
         prepared(&mut e, 3.5);
