@@ -147,15 +147,29 @@ async fn admitted_delegated_to_cosigned_mode_change_still_requires_a_new_proof()
     assert!(session.next_verification > verification);
     assert_eq!(session.joined["acct"].client.id, client);
     assert!(Arc::ptr_eq(&session.joined["acct"].account, &account));
-    let completion = complete(
-        &mut session,
-        &mut sent,
-        &mut done,
-        &mut Device::default(),
-        Answer::OtherKey,
-        Some("cosigned-requested"),
-    )
-    .await;
+    let mut device = Device::default();
+    let completion = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            tokio::select! {
+                Some(text) = sent.recv() => {
+                    let frame: Value = serde_json::from_str(&text).unwrap();
+                    if frame["t"] == "sign-req" {
+                        assert_eq!(frame["d"]["instanceId"], "cosigned-requested");
+                        assert_eq!(frame["d"]["accountName"], "acct");
+                        device.answer(&mut session, frame, Answer::OtherKey).await;
+                    } else {
+                        // An already-attached socket keeps its original bound data stream.
+                        assert_eq!(frame["t"], "msg");
+                        assert_eq!(frame["d"]["accountName"], "acct");
+                        assert_eq!(frame["d"]["instanceId"], "delegated-admitted");
+                    }
+                }
+                completion = done.recv() => break completion.unwrap(),
+            }
+        }
+    })
+    .await
+    .expect("wrong-key proof settles while the original registration stays live");
     assert!(completion.probe.as_ref().unwrap().permit.is_err());
     session.verification_completed(completion).await.unwrap();
     assert!(account.delegated().is_some());
