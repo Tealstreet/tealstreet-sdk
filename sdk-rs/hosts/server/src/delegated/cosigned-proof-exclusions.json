@@ -9,10 +9,6 @@
       "reason": "Native legacy HMAC and v3 wallet/agent private-startup proof paths need separate server coverage; resolving an origin does not certify readiness."
     },
     {
-      "venue": "backpack",
-      "reason": "Ed25519 native private-startup proof, key encoding, account binding and replay/socket controls are not built."
-    },
-    {
       "venue": "binanceoptions",
       "reason": "Client Hosted gate blocks this venue because no native server origin exists; options startup proof is not built."
     },

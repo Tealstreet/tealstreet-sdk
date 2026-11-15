@@ -4,7 +4,7 @@ use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 
-// Exact COSIGNED venues with a private-startup proof and matching negative suite.
+// Exact COSIGNED venues with possession proof and matching negative suites.
 // Other COSIGNED joins refuse explicitly; DELEGATED uses shared hosted eligibility.
 pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bybit",
@@ -27,6 +27,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bingx",
     "mexc",
     "bitunix",
+    "backpack",
 ];
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {
