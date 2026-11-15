@@ -1102,6 +1102,12 @@ registry defaults or claiming broader product support:
 
 ## Consumer-blockers follow-up
 
+**Historical integration snapshot:** the mobile loader experiments in this table
+are not the current mobile execution direction. The 2026-11-13 policy is
+DELEGATED-only mobile, no client WASM/local signing, and typed v1 writes over
+the existing hosted WebSocket. The pinned test evidence is retained; earlier
+mobile-engine alternatives are superseded.
+
 Native feed ownership and public-factory lifecycle are implemented on
 `feat/rust-consumer-blockers`; no TS venue/default is deleted or changed.
 
