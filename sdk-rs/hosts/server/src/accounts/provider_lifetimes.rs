@@ -52,7 +52,7 @@ fn handover(family: Family) {
         Arc::new(|_| panic!("upgrade must not ask the device to sign")),
     );
     let signer = AccountSigner::new(Some(original.clone()), old_ids, Some(link.clone()), None);
-    let front: Provider = signer.clone();
+    let front = signer.provider();
     let statement = Statement::new("provider-lifetime", [2; 32], [3; 32], 1000).unwrap();
     let request = statement.sign_request(family, &old_key, &[9; 32]).unwrap();
     let before = original.sign_ready(&request).unwrap().unwrap();
@@ -60,7 +60,6 @@ fn handover(family: Family) {
         signer.upgrade(ResidentCopy::test_provider_with_identities(local, new_ids)),
         Ok(true)
     );
-    assert!(Arc::ptr_eq(&front, &(signer.clone() as Provider)));
     assert!(
         front.incarnation().is_none(),
         "a wrapper must never counterfeit a provider seal"
@@ -116,7 +115,7 @@ fn another_public_key_never_retires_the_original_provider() {
         assert!(link.is_available());
         assert!(signer.resident().is_none());
         assert_eq!(
-            signer.can_sign(&old_key, family.algorithm()),
+            signer.provider().can_sign(&old_key, family.algorithm()),
             Capability::Supported
         );
     }
@@ -139,7 +138,7 @@ fn unpolled_public_key_work_blocks_handover_without_cancellation() {
             .unwrap()
             .sign_request(family, &old_key, &[9; 32])
             .unwrap();
-        let work = signer.sign(request);
+        let work = signer.provider().sign(request);
         assert_eq!(
             signer.upgrade(ResidentCopy::test_provider_with_identities(local, new_ids)),
             Err(ModeTransitionRefusal::Busy)
@@ -224,6 +223,7 @@ async fn completed_address_result_stays_busy_until_owned_work_actually_joins() {
         None,
     );
     let mut setup = signer
+        .provider()
         .create_public_address_setup(SignRequest {
             receipt: Default::default(),
             context: Default::default(),
@@ -306,7 +306,7 @@ fn hmac_control_keeps_its_existing_handover_and_exact_bytes() {
         signer.upgrade(ResidentCopy::test_provider_with_identities(local, ids)),
         Ok(true)
     );
-    let actual = signer.sign_ready(&request).unwrap().unwrap();
+    let actual = signer.provider().sign_ready(&request).unwrap().unwrap();
     assert_eq!(actual.values, expected.values);
     assert_eq!(actual.receipt, expected.receipt);
 }
@@ -406,6 +406,7 @@ async fn remote_handover(venue: &str, family: Family) {
             }
         };
         let mut setup = signer
+            .provider()
             .create_public_address_setup(SignRequest {
                 receipt: Default::default(),
                 context: Default::default(),
@@ -428,6 +429,15 @@ async fn remote_handover(venue: &str, family: Family) {
             .await
             .unwrap();
     }
+    let (wrong, wrong_ids) = provider(family, "wrong-candidate", 8);
+    assert_eq!(
+        signer.upgrade(ResidentCopy::test_provider_with_identities(
+            wrong, wrong_ids
+        )),
+        Err(ModeTransitionRefusal::Unavailable)
+    );
+    assert!(link.is_available());
+    assert!(signer.resident().is_none());
     assert_eq!(
         signer.upgrade(ResidentCopy::test_provider_with_identities(local, new_ids)),
         Ok(true)
@@ -435,7 +445,7 @@ async fn remote_handover(venue: &str, family: Family) {
     let before = calls.load(Ordering::SeqCst);
     let statement = Statement::new("remote-lifetime", [2; 32], [3; 32], 1000).unwrap();
     let request = statement.sign_request(family, &key, &[9; 32]).unwrap();
-    let signed = signer.sign_ready(&request).unwrap().unwrap();
+    let signed = signer.provider().sign_ready(&request).unwrap().unwrap();
     assert!(public.verify(&statement, &signed.values[0]));
     assert_eq!(calls.load(Ordering::SeqCst), before);
     assert!(!link.is_available());
