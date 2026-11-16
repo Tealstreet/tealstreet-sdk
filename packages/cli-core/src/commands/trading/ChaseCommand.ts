@@ -276,8 +276,7 @@ export function formatAllChasersStatus(priceHistoryMap?: Map<string, number[]>):
 
   for (const instance of activeChasers) {
     const priceHistory = priceHistoryMap?.get(instance.id);
-    // Cast to ExchangeLike - Exchange has all the required properties
-    output += formatChaserStatus(instance, instance.exchange as unknown as ExchangeLike, priceHistory) + '\n';
+    output += formatChaserStatus(instance, instance.exchange, priceHistory) + '\n';
     output += `───────────────────────────────────────────────────────────────────────────────\n`;
   }
 
@@ -337,8 +336,8 @@ export class ChaseCommand extends TradingBaseCommand {
       reduceOnly ? 'position' : 'balance',
     );
     if (!reduceOnly) this.enforceFatfinger(ctx, symbol, size);
-    // ChaserOrderInstance requires the full Exchange type - cast through unknown
-    const instance = new ChaserOrderInstance(exchange as unknown as Exchange, {
+    // The legacy chaser consumes the full runtime exchange behind this command port.
+    const instance = new ChaserOrderInstance(exchange as Exchange, {
       symbol,
       size,
       side,

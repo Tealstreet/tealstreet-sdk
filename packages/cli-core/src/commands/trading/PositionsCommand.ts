@@ -58,7 +58,7 @@ export class PositionsCommand extends BaseCommand {
     };
 
     // Use shared formatter from MonitorCommand
-    const output = formatPositionsTable(filteredExchange as any);
+    const output = formatPositionsTable(filteredExchange);
     this.print(ctx, [output]);
     return this.success();
   }
