@@ -1,5 +1,6 @@
 //! Account snapshots are committed only after every scoped read succeeds.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::de::number;
@@ -1125,7 +1126,9 @@ impl Lighter {
         let account = self.account.account_index.unwrap();
         cx.send(
             socket,
-            format!(r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#),
+            ControlFrame::subscription(format!(
+                r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#
+            )),
         );
         if let Some(identity) = self.account.identity.clone() {
             let channel = format!("account_all_orders/{account}");
@@ -1139,7 +1142,9 @@ impl Lighter {
             ) {
                 Ok(recipe) => cx.send_signed(
                     socket,
-                    format!(r#"{{"type":"subscribe","channel":"{channel}"}}"#),
+                    ControlFrame::authentication(format!(
+                        r#"{{"type":"subscribe","channel":"{channel}"}}"#
+                    )),
                     recipe,
                 ),
                 Err(error) => cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, error),
@@ -1156,7 +1161,10 @@ impl Lighter {
         self.subscribe_private(cx, socket);
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
+            ControlFrame::heartbeat(format!(
+                r#"{{"type":"ping","timestamp":{}}}"#,
+                cx.protocol_now()
+            )),
         );
         self.refresh_account(cx);
         self.refresh_orders(cx);
@@ -1234,7 +1242,10 @@ impl Lighter {
         }
         cx.send(
             socket,
-            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.protocol_now()),
+            ControlFrame::heartbeat(format!(
+                r#"{{"type":"ping","timestamp":{}}}"#,
+                cx.protocol_now()
+            )),
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -2616,7 +2627,10 @@ impl Lighter {
         if frame.kind == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"type":"pong","timestamp":{}}}"#, cx.protocol_now()),
+                ControlFrame::heartbeat(format!(
+                    r#"{{"type":"pong","timestamp":{}}}"#,
+                    cx.protocol_now()
+                )),
             );
             return true;
         }

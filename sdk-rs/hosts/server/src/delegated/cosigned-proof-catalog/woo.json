@@ -1,0 +1,5 @@
+{
+  "status": "ready",
+  "probeTests": "src/delegated/probe_tests.rs",
+  "sessionTests": "src/session/tests/cosigned_venues.rs"
+}

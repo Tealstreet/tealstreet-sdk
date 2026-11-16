@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Address-based public reads do not prove the wallet key; fresh wallet/agent/vault possession and authorization proof is not built."
+}
