@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Client Hosted gate blocks this venue because no native server origin exists; exact simulator startup proof is not built."
+}

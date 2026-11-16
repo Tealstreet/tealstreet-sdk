@@ -3,6 +3,7 @@
 use safe_cex_crypto::signer::{
     LocalExtra, LocalExtras, LocalIdentity, LocalSetup, LocalSigner, Secret,
 };
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::signing::{
     CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, Identity,
@@ -96,7 +97,7 @@ impl Venue for Issue {
                 }
                 None => {
                     let socket = cx.connect("wss://quote.omni.apex.exchange/realtime_private");
-                    cx.send_signed(socket, String::new(), step);
+                    cx.send_signed(socket, ControlFrame::authentication(String::new()), step);
                 }
             }
         }

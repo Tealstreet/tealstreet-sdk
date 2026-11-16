@@ -11,28 +11,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
-const VENUES: &[&str] = &[
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "okxeu",
-    "okxeudemo",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    "phemex",
-    "woo",
-    "bingx",
-    "mexc",
-    "bitunix",
-];
+const VENUES: &[&str] = SHARED_PROBE_VENUES;
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
 const PASS: &str = "synthetic-passphrase";
@@ -52,6 +31,7 @@ pub(crate) struct Seen {
     pub(crate) bingx_private_sockets: usize,
     pub(crate) mexc_socket_auths: usize,
     pub(crate) bitunix_socket_auths: usize,
+    pub(crate) cryptocom_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -361,6 +341,9 @@ impl VenueIo {
         if self.venue == "bitunix" {
             return bitunix::response(self, r);
         }
+        if self.venue == "cryptocom" {
+            return cryptocom::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
@@ -461,6 +444,9 @@ impl Transport for VenueIo {
         if self.venue == "bitunix" {
             return bitunix::connect(self, socket, &url, events);
         }
+        if self.venue == "cryptocom" {
+            return cryptocom::connect(self, socket, &url, events);
+        }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         let _ = events.send(HostEvent::WsMessage(
@@ -488,7 +474,8 @@ impl Transport for VenueIo {
         assert!(
             r.method == Method::Get
                 || (r.method == Method::Post
-                    && ((family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
+                    && (self.venue == "cryptocom"
+                        || (family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
                         || (self.venue == "bingx"
                             && path(&r) == "/openApi/user/auth/userDataStream")
                         || (self.venue == "kucoin"
@@ -768,6 +755,14 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "cryptocom" {
+        // Startup params are empty; the first digit begins the attempt-local nonce/id.
+        return canonical
+            .split(|c: char| c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .into();
+    }
     if venue == "mexc" {
         return mexc::operation(canonical);
     }
@@ -860,6 +855,7 @@ async fn remote(
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
                     || venue == "woo" && text.starts_with('|')
+                    || venue == "cryptocom" && text.starts_with("public/auth")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -1074,14 +1070,13 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    let jwt_venues = super::coinbase_tests::VENUES;
     assert_eq!(
         PRIVATE_STARTUP_VENUES.len(),
-        VENUES.len() + 1 + jwt_venues.len()
+        VENUES.len() + STANDALONE_PROBE_VENUES.len()
     );
     for &venue in PRIVATE_STARTUP_VENUES {
         assert!(
-            venue == "bybit" || VENUES.contains(&venue) || jwt_venues.contains(&venue),
+            STANDALONE_PROBE_VENUES.contains(&venue) || VENUES.contains(&venue),
             "{venue}: missing offline suite"
         );
     }
@@ -1267,6 +1262,8 @@ mod bingx;
 
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
+#[path = "cryptocom_probe_tests.rs"]
+mod cryptocom;
 
 #[path = "mexc_probe_tests.rs"]
 mod mexc;
@@ -1274,3 +1271,25 @@ mod mexc;
 mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;
+
+#[test]
+fn generated_readiness_matches_every_per_venue_record() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/delegated/cosigned-proof-catalog");
+    let mut count = 0;
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        let venue = name.strip_suffix(".json").unwrap();
+        let record: Value =
+            serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap()).unwrap();
+        assert_eq!(
+            cosigned_ready(venue),
+            record["status"] == "ready",
+            "{venue}"
+        );
+        count += 1;
+    }
+    assert_eq!(count, 41);
+    assert!(!cosigned_ready("future-unproved-venue"));
+}
