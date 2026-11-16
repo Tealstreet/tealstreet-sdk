@@ -41,10 +41,6 @@
       "reason": "No native Hosted REST origin; structured RPC nonce/params canonicalization and private-startup proof are not built."
     },
     {
-      "venue": "grvt",
-      "reason": "API-key login alone does not prove the separate ECDSA scalar; a fresh account/attempt-bound signing-key possession proof is not built."
-    },
-    {
       "venue": "hyperliquid",
       "reason": "Address-based public reads do not prove the wallet key; fresh wallet/agent/vault possession and authorization proof is not built."
     },

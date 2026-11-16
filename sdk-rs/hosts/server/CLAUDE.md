@@ -150,9 +150,14 @@ It issues a closed admission challenge and verifies the raw reply against the
 actual receiving socket, or verifies the temporary protected DELEGATED provider.
 The permit records its socket only after verification; final attachment checks
 that receipt, the original instance/token/lease and the local admission deadline.
-No production public-key venue selects this strategy yet. Synthetic Session
-fixtures select it without changing the readiness catalog; device integration
-and authoritative per-family facts must precede any activation. Matching COSIGNED repeats require the same socket-admitted
+Exact GRVT selects this strategy with the authenticated owner and the captured
+`grvtTradingAccountId` and `grvtSignerAddress` used by engine construction.
+Both fields are required before proof; API-key login cannot prove its separate
+ECDSA scalar. Local secp256k1 recovery verifies a fresh account/attempt-bound
+admission statement, never a venue transaction. This proves possession, not venue
+authorization: ordinary startup retains login and private-read validation.
+Other public-key venues remain unavailable unless a synthetic fixture supplies
+a binding; their device integration and canonical facts precede activation. Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.

@@ -28,6 +28,8 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bingx",
     "mexc",
     "bitunix",
+    // GRVT uses a bound local scalar proof; API-key-only startup is not possession.
+    "grvt",
 ];
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {

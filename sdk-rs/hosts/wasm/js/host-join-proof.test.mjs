@@ -4,17 +4,19 @@ import test from 'node:test';
 import { EngineHost } from './host.mjs';
 
 const manifest = readFileSync(new URL('../Cargo.toml', import.meta.url), 'utf8');
-for (const family of ['asterdex', 'grvt', 'hyperliquid', 'lighter', 'orderly', 'paradex', 'polymarket', 'txflow']) {
+for (const family of ['asterdex', 'hyperliquid', 'lighter', 'orderly', 'paradex', 'polymarket', 'txflow']) {
   test(`${family} keeps admission dispatch opt-in until its own activation slice`, () => {
     const closure = manifest.split('\n').find(line => line.startsWith(`${family} = [`));
     assert(closure);
     assert(!closure.includes('"hosted-join-proof"'));
   });
 }
-test('Backpack carries the first activation candidate without enabling other family closures', () => {
-  const closure = manifest.split('\n').find(line => line.startsWith('backpack = ['));
-  assert(closure.includes('"hosted-join-proof"'));
-});
+for (const family of ['backpack', 'grvt']) {
+  test(`${family} carries admission dispatch in its standalone family`, () => {
+    const closure = manifest.split('\n').find(line => line.startsWith(`${family} = [`));
+    assert(closure.includes('"hosted-join-proof"'));
+  });
+}
 
 // Transport/capture lifecycle only; native and real WASM tests verify cryptography.
 function rig(signer) {

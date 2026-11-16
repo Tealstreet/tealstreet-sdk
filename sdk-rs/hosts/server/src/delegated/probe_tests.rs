@@ -1057,10 +1057,15 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    assert_eq!(PRIVATE_STARTUP_VENUES.len(), VENUES.len() + 1);
+    // GRVT has its separate production local-scalar Session suite.
+    let local_proofs = ["grvt"];
+    assert_eq!(
+        PRIVATE_STARTUP_VENUES.len(),
+        VENUES.len() + 1 + local_proofs.len()
+    );
     for &venue in PRIVATE_STARTUP_VENUES {
         assert!(
-            venue == "bybit" || VENUES.contains(&venue),
+            venue == "bybit" || VENUES.contains(&venue) || local_proofs.contains(&venue),
             "{venue}: missing offline suite"
         );
     }

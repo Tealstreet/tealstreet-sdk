@@ -1,5 +1,34 @@
 use crate::envelope::InitPayload;
 
+/// Freeze the same public signer and trading account used by GRVT construction.
+/// A login credential or proof reply cannot substitute for this separate signer.
+/// Venue authorization remains the ordinary engine startup's responsibility.
+pub(super) fn grvt_projection(
+    user: &str,
+    init: &InitPayload,
+) -> Result<safe_cex_crypto::admission::identity::Projection, String> {
+    let invalid = || "Invalid account identity".to_owned();
+    if init.exchange_name != "grvt" {
+        return Err(invalid());
+    }
+    key_id(init)?;
+    let signer = safe_cex_crypto::ethereum::get_address(
+        init.grvt_signer_address.as_deref().ok_or_else(invalid)?,
+    )
+    .map_err(|_| invalid())?;
+    let account = init
+        .grvt_trading_account_id
+        .as_deref()
+        .ok_or_else(invalid)?;
+    let facts = serde_json::json!({
+        "venue": "grvt",
+        "network": if init.testnet == Some(true) { "testnet" } else { "mainnet" },
+        "credential": { "kind": "grvt", "tradingAccount": account, "signer": signer }
+    });
+    safe_cex_crypto::admission::identity::Projection::from_json(user, &facts.to_string())
+        .map_err(|_| invalid())
+}
+
 pub(crate) fn enabled(init: &InitPayload) -> bool {
     init.exchange_name == "bybit"
         && crate::delegated::enabled(&init.exchange_name)

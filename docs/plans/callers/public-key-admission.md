@@ -145,13 +145,16 @@ continue to verify the domain-separated messages with the existing providers.
 
 ## Pending local verification
 
-The native server has a shared pending local-proof strategy, with no production
-venue activation. It uses the existing isolated SignerLink, one-active/four-waiting
+The native server has a shared pending local-proof strategy, with exact GRVT
+activation. It uses the existing isolated SignerLink, one-active/four-waiting
 identity queue, start pacer and final registry attachment. Canonical public facts
-are captured by the server before queueing; client init/reply JSON never supplies
-an expected key or a verification decision. The production resolver currently
-retains private-startup proofs and the existing COSIGNED readiness catalog.
-Family activation must supply authoritative facts and a complete device handler.
+are frozen from the captured credential construction before queueing; proof
+replies never supply an expected key or a verification decision. The production
+resolver selects local proof for exact GRVT using its captured
+engine-construction signer and trading-account fields, rejecting missing or
+malformed facts before the challenge. The reply cannot replace either fact.
+Its API-key login remains normal startup authorization, never scalar proof.
+Other families retain their existing strategy and require their own activation.
 
 ## Device challenge dispatch
 
@@ -179,8 +182,8 @@ This handler performs no Session admission and enables no server venue. Existing
 constructor/custody and compiled-feature restrictions still apply; a generic
 method's presence is not proof of venue readiness.
 
-The reusable `hosted-join-proof` WASM feature is linked by default only in the
-Backpack candidate family (and therefore the combined build). Other standalone
+The reusable `hosted-join-proof` WASM feature is linked by default in the
+Backpack candidate and GRVT families (and therefore the combined build). Other standalone
 families retain their existing size-critical composition. Their activation slices
 must explicitly opt into the feature and certify their own optimized size before
 shipping. This build selection does not change the server admission catalog.
