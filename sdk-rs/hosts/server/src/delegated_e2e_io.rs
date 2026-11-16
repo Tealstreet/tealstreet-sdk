@@ -25,6 +25,7 @@ pub(crate) struct MockVenue {
     pub observed: Arc<Mutex<Observed>>,
     admission: Option<crate::delegated::probe::venue_tests::VenueIo>,
     registration: Option<Registration>,
+    coinbase: Option<crate::delegated::probe::coinbase_tests::CoinbaseIo>,
 }
 #[derive(Clone)]
 struct Registration {
@@ -40,6 +41,14 @@ impl MockVenue {
             observed: Arc::default(),
             admission: None,
             registration: None,
+            coinbase: None,
+        }
+    }
+
+    pub(crate) fn for_coinbase(io: crate::delegated::probe::coinbase_tests::CoinbaseIo) -> Self {
+        Self {
+            coinbase: Some(io),
+            ..Self::new("synthetic".into(), "synthetic".into())
         }
     }
 
@@ -108,6 +117,9 @@ impl Transport for MockVenue {
         request: HttpRequest,
         intent: safe_cex_engine::request_context::RoutingIntent,
     ) -> HttpPrepareFuture {
+        if let Some(io) = &self.coinbase {
+            return io.prepare_http(request, intent);
+        }
         if let Some(io) = &self.admission {
             return io.prepare_http(request, intent);
         }
@@ -138,6 +150,9 @@ impl Transport for MockVenue {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if let Some(io) = &self.coinbase {
+            return io.connect(socket, url, events);
+        }
         if let Some(io) = &self.admission {
             return io.connect(socket, url, events);
         }
