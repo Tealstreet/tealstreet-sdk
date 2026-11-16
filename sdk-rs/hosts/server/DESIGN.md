@@ -803,6 +803,10 @@ Exact WOO uses the existing native startup's v1/v3 account reads and private
 socket authentication. Its offline fixture independently checks HMAC bytes,
 rejects unsigned reads, and accepts only startup reads and read-feed traffic.
 
+Exact ApeX uses native `/api/v3/account`, `account-balance` and `open-orders`
+reads through the existing `apexomni-batch` device signer. API credential proof
+does not prove OmniKey/L2-seed possession or change order-signing coverage.
+
 ## Frames (claude-19pt8s, web hosted client)
 
 The browser host (`ExchangeServerWorker.ts`) forwards only TEXT frames to the
