@@ -20,8 +20,8 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
                 let mut completed = session.take_verified();
                 let mut init = InitPayload {
                     account_name: "acct".into(),
-                    // Keep an excluded wallet family after Hyperliquid's local-proof activation.
-                    exchange_name: "grvt".into(),
+                    // GRVT and Hyperliquid are admitted; TxFlow keeps this excluded-wallet control.
+                    exchange_name: "txflow".into(),
                     key: KEY.into(),
                     ..Default::default()
                 };
@@ -29,11 +29,11 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
                     init.signing_mode = Some("delegated".into());
                     let offer = session
                         .handovers
-                        .issue("acct", "grvt", crate::accounts::now_ms())
+                        .issue("acct", "txflow", crate::accounts::now_ms())
                         .unwrap();
                     init.sealed = Some(crate::delegated::tests::seal(
                         &offer,
-                        "grvt",
+                        "txflow",
                         KEY,
                         br#"{"key":"synthetic-key","secret":"synthetic-material"}"#,
                     ));
