@@ -463,3 +463,58 @@ async fn grvt_delegated_candidate_checks_its_own_scalar_without_borrowing_reside
         })
         .await;
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn grvt_legacy_resident_key_mismatch_refuses_before_holding_the_actor() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Model a pre-local-proof DELEGATED actor: login could succeed with a
+            // scalar different from the signer declared in the old init metadata.
+            let registry = registry();
+            let credentials: crate::delegated::Credentials = serde_json::from_str(
+                &json!({"key":init().key,"secret":format!("{:064x}",2)}).to_string(),
+            )
+            .unwrap();
+            let installed = crate::delegated::prepare_delegated(&init(), credentials.pair())
+                .unwrap()
+                .resident;
+            let provider = installed.provider();
+            let reference = installed
+                .identities()
+                .primary
+                .as_ref()
+                .unwrap()
+                .signing_ref()
+                .unwrap()
+                .clone();
+            let resident = crate::accounts::testing::trading_account(&registry, "alice", &init());
+            resident.signing.set_test_resident(installed);
+            let original_link = resident.link.clone().unwrap();
+            let (mut session, mut sent) = user_session(registry.clone(), "alice");
+            let mut done = session.take_verified();
+            session.init(init()).await.unwrap();
+            let request = challenge(&mut sent).await;
+            session.handle(&response(&request, 1)).await.unwrap();
+            complete(&mut session, &mut done).await;
+            assert!(
+                session.joined.is_empty(),
+                "metadata signer cannot prove a different installed scalar"
+            );
+            assert!(!registry.holds(&resident, session.socket));
+            assert!(resident.delegated().is_some());
+            assert!(resident.handle.disposal_cause().is_none());
+            assert!(Arc::ptr_eq(resident.link.as_ref().unwrap(), &original_link));
+            let actual = safe_cex_crypto::admission::PublicKey::from_provider(
+                Family::Ethereum,
+                &provider,
+                &reference,
+            )
+            .unwrap();
+            assert_ne!(safe_cex_crypto::hex(actual.as_bytes()), &SIGNER[2..]);
+            no_snapshot(&mut sent);
+            session.close();
+            resident.handle.dispose();
+        })
+        .await;
+}
