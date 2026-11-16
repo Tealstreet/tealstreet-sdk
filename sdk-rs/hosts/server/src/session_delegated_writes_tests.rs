@@ -519,7 +519,8 @@ async fn delegated_manual_writes_require_hosted_venue_support() {
         .run_until(async {
             let registry = crate::accounts::tests::registry();
             let tape = Tape::default();
-            let account = delegated_account(&registry, "A", "hyrotrader", tape.clone());
+            // Hyro is now hosted; TxFlow retains the missing-native-origin refusal control.
+            let account = delegated_account(&registry, "A", "txflow", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             call(&mut session, "flag", "placeOrder", json!([placement()])).await;
             let result = reply(&mut sent, "flag").await;

@@ -832,13 +832,14 @@ async fn cosigned_hyrotrader_testnet_refuses_without_signing_or_venue_io() {
     let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
         .map(|frame| serde_json::from_str(&frame).unwrap())
         .collect();
-    assert!(
-        frames
-            .iter()
-            .any(|f| f["d"]["data"][1]["initRefused"] == true
-                && f["d"]["data"][1]["outcome"] == "notSent"
-                && f["d"]["data"][1]["transient"] == false)
-    );
+    // Network preparation uses the existing unverified envelope, which has no
+    // write outcome field; pin its full schema and the independent no-I/O proof.
+    let expected: Value = serde_json::from_str(&envelope::with_instance_id(
+        envelope::init_unverified("acct", false),
+        "proof-registration",
+    ))
+    .unwrap();
+    assert!(frames.contains(&expected), "{frames:?}");
     assert!(
         !frames
             .iter()

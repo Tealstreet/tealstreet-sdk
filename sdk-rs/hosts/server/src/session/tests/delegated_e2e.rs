@@ -261,8 +261,9 @@ async fn delegated_e2e_wrong_pair_replay_and_disabled_venue_leave_no_account() {
             fields["secret"] = "synthetic-other-material".into();
             bytes = serde_json::to_vec(&fields).unwrap();
         }
+        // Hyro is now hosted; TxFlow retains the missing-native-origin refusal control.
         let name = if case == "other-venue" {
-            "hyrotrader"
+            "txflow"
         } else {
             "bybit"
         };

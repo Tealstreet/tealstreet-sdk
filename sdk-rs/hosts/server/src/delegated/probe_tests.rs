@@ -131,10 +131,14 @@ fn hyro_socket_auth(value: &Value) -> bool {
         Some("synthetic-other-key") => "synthetic-other-material",
         _ => return false,
     };
-    let Some(expires) = args[1].as_u64() else {
+    let Some(expires) = args[1].as_str() else {
         return false;
     };
-    expires > crate::accounts::now_ms()
+    let Ok(expiry) = expires.parse::<u64>() else {
+        return false;
+    };
+    expires == expiry.to_string()
+        && expiry > crate::accounts::now_ms()
         && args[2]
             == hmac_sha256(
                 material.as_bytes(),
@@ -155,8 +159,12 @@ fn hyrotrader_admission_socket_checks_key_signature_and_expiry() {
             format!("GET/realtime{expires}").as_bytes(),
             Encoding::Hex,
         );
-        let valid = json!({"args":[key,expires,signature]});
+        // Native WsAuth serializes all three arguments as strings.
+        let valid = json!({"args":[key,expires.to_string(),signature]});
         assert!(hyro_socket_auth(&valid));
+        let mut numeric_expiry = valid.clone();
+        numeric_expiry["args"][1] = expires.into();
+        assert!(!hyro_socket_auth(&numeric_expiry));
         for field in [0, 1, 2] {
             let mut invalid = valid.clone();
             invalid["args"][field] = "invalid".into();
@@ -164,7 +172,7 @@ fn hyrotrader_admission_socket_checks_key_signature_and_expiry() {
         }
     }
     let expired =
-        json!({"args":[KEY,0,hmac_sha256(SECRET.as_bytes(), b"GET/realtime0", Encoding::Hex)]});
+        json!({"args":[KEY,"0",hmac_sha256(SECRET.as_bytes(), b"GET/realtime0", Encoding::Hex)]});
     assert!(!hyro_socket_auth(&expired));
 }
 
@@ -464,6 +472,15 @@ impl VenueIo {
         .unwrap();
         let bodies = variants
             .get(self.venue)
+            // Hyro's native linear V5 schema reuses this response corpus only;
+            // its actual REST/WS origins and HMACs are asserted independently.
+            .or_else(|| {
+                if self.venue == "hyrotrader" {
+                    variants.get("bybitdemo")
+                } else {
+                    None
+                }
+            })
             .or_else(|| fixtures.get(family(self.venue)))
             .or_else(|| fixtures.get(self.venue))
             .and_then(Value::as_object)
@@ -632,11 +649,48 @@ fn with_hosted_endpoints(venue: &str, mut options: Value) -> Value {
     options
 }
 
+// Keep the deliberate bad private-read key behind a valid Hyro handshake;
+// socket rejection itself is checked separately, and retries are not proof.
+struct HyroPrivateReadMismatch {
+    reads: safe_cex_engine::signing::Provider,
+    socket: safe_cex_engine::signing::Provider,
+}
+impl safe_cex_engine::signing::Signer for HyroPrivateReadMismatch {
+    fn sign(
+        &self,
+        request: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        if request.context.method == "WS" {
+            self.socket.sign(request)
+        } else {
+            self.reads.sign(request)
+        }
+    }
+}
+
 fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
     let mut options: safe_cex_venues::EngineOptions =
         serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
     let (provider, identities) =
         safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
+    let provider: safe_cex_engine::signing::Provider = if venue == "hyrotrader"
+        && material != SECRET
+    {
+        let mut socket_options =
+            serde_json::from_value(json!({"key":KEY,"secret":SECRET,"passphrase":PASS})).unwrap();
+        let (socket, socket_identities) =
+            safe_cex_venues::prepare_local_signer_for(venue, &mut socket_options).unwrap();
+        assert_eq!(
+            serde_json::to_value(&identities).unwrap(),
+            serde_json::to_value(&socket_identities).unwrap()
+        );
+        Arc::new(HyroPrivateReadMismatch {
+            reads: provider,
+            socket,
+        })
+    } else {
+        provider
+    };
     // Test setup uses the registry's real credential normalization. Runtime
     // admission remains gated separately; no test declaration enables a venue.
     super::super::PreparedDelegated {
