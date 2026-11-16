@@ -145,13 +145,18 @@ continue to verify the domain-separated messages with the existing providers.
 
 ## Pending local verification
 
-The native server has a shared pending local-proof strategy, with no production
-venue activation. It uses the existing isolated SignerLink, one-active/four-waiting
-identity queue, start pacer and final registry attachment. Canonical public facts
-are captured by the server before queueing; client init/reply JSON never supplies
-an expected key or a verification decision. The production resolver currently
-retains private-startup proofs and the existing COSIGNED readiness catalog.
-Family activation must supply authoritative facts and a complete device handler.
+The native server has a shared pending local-proof strategy. It uses the existing
+isolated SignerLink, one-active/four-waiting identity queue, start pacer and final
+registry attachment. Canonical public facts
+are captured by the server before queueing; a proof reply never supplies the
+expected key or a verification decision. Exact Paradex selects this strategy from
+its captured public account address and subkey public key, preserving native
+decimal/hex field spellings. The public init key must match the mode's existing
+account/subkey layout. Invalid facts refuse without selecting private startup.
+The existing device dispatcher signs the closed Stark recipe; DELEGATED verifies
+its temporary protected provider through the same strategy. Venue authorization
+remains ordinary startup's responsibility. Other venue activations must supply
+their own authoritative facts and complete device handler.
 
 ## Device challenge dispatch
 

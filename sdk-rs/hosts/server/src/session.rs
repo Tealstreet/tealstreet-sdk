@@ -3201,6 +3201,7 @@ mod tests {
     mod cosigned_venues;
     mod delegated_probe;
     mod local_proof;
+    mod paradex_local_proof;
     mod provider_handover_refusals;
     mod token_expiry;
 

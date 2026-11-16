@@ -6,6 +6,7 @@ use crate::delegated::{
 use safe_cex_crypto::admission::identity::Projection;
 
 mod local_proof;
+mod paradex;
 
 enum ProofStrategy {
     PrivateStartup,
@@ -122,6 +123,13 @@ impl Registry {
             let projection =
                 identity::backpack_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
             return Ok(ProofStrategy::Local(Arc::new(projection)));
+        }
+        if init.exchange_name == "paradex"
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            return paradex::projection(user, init)
+                .map(Arc::new)
+                .map(ProofStrategy::Local);
         }
         Ok(ProofStrategy::PrivateStartup)
     }

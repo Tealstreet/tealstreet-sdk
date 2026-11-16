@@ -26,6 +26,7 @@ The exact proof-ready venue names are:
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
+| `paradex` | One-use Stark admission challenge bound to the captured account address, subkey public key, authenticated owner and network; wrong-key, replay and foreign-socket controls |
 | `backpack` | Local Ed25519 challenge against the captured canonical base64 API public key; wrong-key, replay, foreign-socket and actual-WASM Session controls |
 
 Backpack public keys must decode canonically to exactly 32 bytes; missing,
@@ -57,6 +58,16 @@ EEA bootstrap retains the original config authority until catalogue completion;
 config success alone cannot satisfy private readiness. A second consecutive
 `50113` for a bootstrap read refuses permanently after one re-signed retry,
 without extending the captured admission deadline.
+
+Paradex captures its public account/subkey pair before queueing. COSIGNED's public
+init key matches the account address; key-only DELEGATED's public init key matches
+the subkey, with the scalar kept inside the sealed handover. Decimal and hex
+spellings normalize to the existing canonical projection, whose validators reject
+invalid field values and public points. Malformed facts never fall back to a
+private-startup proof. The same local verifier checks a temporary protected
+DELEGATED provider without a device request or retained-provider replacement.
+Normal venue startup still handles subkey authorization and venue refusals;
+local possession proof alone does not assert venue authorization.
 
 Only these exact names are admitted; the catalog never matches a family prefix.
 An unsupported proof returns the existing account error envelope with
