@@ -1,4 +1,5 @@
 {
-  "status": "excluded",
-  "reason": "Ed25519 native private-startup proof, key encoding, account binding and replay/socket controls are not built."
+  "status": "ready",
+  "probeTests": "src/session/tests/backpack_local_proof.rs",
+  "sessionTests": "src/session/tests/backpack_local_proof.rs"
 }

@@ -2,8 +2,8 @@
 
 A fresh private COSIGNED connection completes the existing pending-join probe
 before it attaches to an account, becomes its signer or receives account state.
-For private-startup proofs the server builds native requests on the account's
-existing route; a local public-key proof uses the closed admission challenge.
+The server builds native private-startup requests on the account's existing
+route, or a local admission challenge for a covered public-key venue.
 The joining device returns signatures through the existing `sign-req` /
 `sign-res` wire; it does not provide the request or a verification result.
 
@@ -27,6 +27,30 @@ The exact proof-ready venue names are:
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 | `paradex` | One-use Stark admission challenge bound to the captured account address, subkey public key, authenticated owner and network; wrong-key, replay and foreign-socket controls |
+| `backpack` | Local Ed25519 challenge against the captured canonical base64 API public key; wrong-key, replay, foreign-socket and actual-WASM Session controls |
+
+Backpack public keys must decode canonically to exactly 32 bytes; missing,
+malformed or zero public keys refuse before requesting a signature. The server
+derives the identity from its captured authenticated owner, venue/network and
+API key, never from response facts. Its local proof does not perform unsigned
+account reads or venue authentication. Ordinary engine startup still handles
+venue authorization and errors after possession is established.
+
+The native Backpack Session suite needs no browser artifacts. Its additional
+real-device test is explicitly ignored in that run because it needs Node 22 and
+a built Backpack module. Run it separately from `sdk-rs/` after
+`bash sdk-rs/harness/build.sh --venue backpack` from the repository root:
+
+```sh
+SAFE_CEX_BACKPACK_JOIN_WASM="$PWD/hosts/wasm/pkg/node/safe_cex_wasm.js" \
+  cargo test --locked -p safe-cex-exchange-server --features delegated-order-frames \
+  --lib backpack_actual_wasm_production_session_join_and_negatives -j1 \
+  -- --ignored --test-threads=1
+```
+
+This executes the production Session challenge through the actual WASM local
+provider for correct-key, different-key, replay and foreign-socket controls.
+It supplies only synthetic device keys and forbids HTTP and venue sockets.
 
 `okxeudemo` has its own exact catalog entry and demo-header/private-startup
 controls; EEA mainnet readiness alone never admits it.

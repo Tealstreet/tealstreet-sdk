@@ -117,7 +117,16 @@ impl Registry {
         {
             return Ok(ProofStrategy::Local(local));
         }
-        if init.exchange_name == "paradex" {
+        if init.exchange_name == "backpack"
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            let projection =
+                identity::backpack_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
+            return Ok(ProofStrategy::Local(Arc::new(projection)));
+        }
+        if init.exchange_name == "paradex"
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
             return paradex::projection(user, init)
                 .map(Arc::new)
                 .map(ProofStrategy::Local);
