@@ -22,6 +22,7 @@ const VENUES: &[&str] = &[
     "okx",
     "okxdemo",
     "okxeu",
+    "okxeudemo",
     "bitget",
     "bitgetusdc",
     "blofin",
@@ -40,6 +41,7 @@ const PASS: &str = "synthetic-passphrase";
 pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
     pub(crate) config_refusals_remaining: usize,
+    pub(crate) refused_private_path: Option<&'static str>,
     pub(crate) config_refusal_status: Option<u16>,
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
@@ -71,7 +73,7 @@ fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
-        "okx" | "okxdemo" | "okxeu" => "okx",
+        "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
         "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
         _ => panic!("no private-read fixture for {venue}"),
@@ -158,7 +160,7 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
             "/api/v5/account/config",
             "/api/v5/trade/orders-pending",
         ),
-        "okxeu" => (
+        "okxeu" | "okxeudemo" => (
             "https://eea.okx.com",
             "/api/v5/account/config",
             "/api/v5/account/instruments?instType=FUTURES",
@@ -188,7 +190,7 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
         "{venue}: missing exact product: {:?}",
         seen.urls
     );
-    if venue == "okxeu" {
+    if matches!(venue, "okxeu" | "okxeudemo") {
         assert_eq!(
             seen.paths.first().map(String::as_str),
             Some("/api/v5/account/config")
@@ -199,7 +201,7 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
                 .any(|url| url == "https://eea.okx.com/api/v5/account/instruments?instType=SWAP")
         );
     }
-    if venue == "okxdemo" {
+    if matches!(venue, "okxdemo" | "okxeudemo") {
         assert_eq!(
             seen.demo_private_reads, seen.signed_reads,
             "every demo private read needs the simulated header"
@@ -236,6 +238,17 @@ impl VenueIo {
         Some(self.valid_private_signature(r))
     }
     fn valid_private_signature(&self, r: &HttpRequest) -> bool {
+        if self.venue == "okxeudemo" {
+            let simulated: Vec<_> = r
+                .headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("x-simulated-trading"))
+                .map(|(_, value)| value.as_str())
+                .collect();
+            if simulated != ["1"] {
+                return false;
+            }
+        }
         let method = if r.method == Method::Get {
             "GET"
         } else {
@@ -353,7 +366,7 @@ impl VenueIo {
             seen.signed_reads += 1;
             seen.inverse_private_reads += usize::from(r.url.contains("category=inverse"));
             seen.demo_private_reads += usize::from(header(r, "x-simulated-trading") == Some("1"));
-            if !valid {
+            if !valid || seen.refused_private_path == Some(path(r).split('?').next().unwrap()) {
                 seen.refused += 1;
                 return match family(self.venue) {
                     "bybit" => {
@@ -368,7 +381,7 @@ impl VenueIo {
                 };
             }
         }
-        if self.venue == "okxeu" && path(r) == "/api/v5/account/config" {
+        if matches!(self.venue, "okxeu" | "okxeudemo") && path(r) == "/api/v5/account/config" {
             let mut seen = self.seen.lock().unwrap();
             if seen.config_refusals_remaining > 0 {
                 seen.config_refusals_remaining -= 1;
@@ -376,7 +389,9 @@ impl VenueIo {
                 return json!({"code":"50113","msg":"synthetic first signature refusal","data":[]});
             }
         }
-        if self.venue == "okxeu" && path(r) == "/api/v5/account/instruments?instType=FUTURES" {
+        if matches!(self.venue, "okxeu" | "okxeudemo")
+            && path(r) == "/api/v5/account/instruments?instType=FUTURES"
+        {
             return json!({"code":"0","msg":"","data":[]});
         }
         let fixtures: Value =
@@ -393,7 +408,9 @@ impl VenueIo {
             .and_then(Value::as_object)
             .unwrap();
         let url = path(r).split('?').next().unwrap();
-        let fixture_url = if self.venue == "okxeu" && url == "/api/v5/account/instruments" {
+        let fixture_url = if matches!(self.venue, "okxeu" | "okxeudemo")
+            && url == "/api/v5/account/instruments"
+        {
             "/api/v5/public/instruments"
         } else {
             url
@@ -1246,7 +1263,10 @@ mod bingx;
 
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
+
 #[path = "mexc_probe_tests.rs"]
 mod mexc;
+#[path = "okxeudemo_probe_tests.rs"]
+mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;

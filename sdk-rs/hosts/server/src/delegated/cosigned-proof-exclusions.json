@@ -73,10 +73,6 @@
       "reason": "Production metadata disables this venue; its distinct origin/chain/account-slot private-startup proof is not built."
     },
     {
-      "venue": "okxeudemo",
-      "reason": "Exact EEA simulated-trading private-startup proof is incomplete; cold signed account/instruments refusal needs its own design."
-    },
-    {
       "venue": "paradex",
       "reason": "Client Hosted gate awaits a live test; signed auth/JWT, address/subkey/derived-key validation and startup proof are not complete."
     },

@@ -16,6 +16,7 @@ const READY: &[&str] = &[
     "okx",
     "okxdemo",
     "okxeu",
+    "okxeudemo",
     "bitget",
     "bitgetusdc",
     "blofin",
@@ -790,6 +791,11 @@ async fn cosigned_okxeu_requires_connection_proof() {
 }
 
 #[tokio::test]
+async fn cosigned_okxeudemo_requires_connection_proof() {
+    venue_case("okxeudemo").await;
+}
+
+#[tokio::test]
 async fn cosigned_mexc_requires_connection_proof() {
     venue_case("mexc").await;
 }
@@ -801,3 +807,6 @@ async fn cosigned_bitunix_requires_connection_proof() {
 
 #[path = "cosigned_okxeu.rs"]
 mod eea;
+
+#[path = "cosigned_okxeudemo.rs"]
+mod eea_demo;

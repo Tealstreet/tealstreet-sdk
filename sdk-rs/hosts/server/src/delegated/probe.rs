@@ -19,6 +19,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "okx",
     "okxdemo",
     "okxeu",
+    "okxeudemo",
     "bitget",
     "bitgetusdc",
     "blofin",
