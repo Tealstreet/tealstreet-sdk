@@ -164,6 +164,16 @@ It issues a closed admission challenge and verifies the raw reply against the
 actual receiving socket, or verifies the temporary protected DELEGATED provider.
 The permit records its socket only after verification; final attachment checks
 that receipt, the original instance/token/lease and the local admission deadline.
+Exact GRVT selects this strategy with the authenticated owner and the captured
+`grvtTradingAccountId` and `grvtSignerAddress` used by engine construction.
+Both fields are required before proof; API-key login cannot prove its separate
+ECDSA scalar. Before holding an existing DELEGATED actor, local admission also
+compares the captured public key with the actual installed resident key; stale
+init metadata cannot substitute for that binding. Local secp256k1 recovery verifies
+a fresh account/attempt-bound
+admission statement, never a venue transaction. This proves possession, not venue
+authorization: ordinary startup retains login and private-read validation.
+
 Exact Lighter and Lighter Robinhood select it after a routed, bounded registration
 read on the captured account/API-key slot. The projection includes the registered
 Schnorr public key and exact network. A slot queue prevents label-based parallel

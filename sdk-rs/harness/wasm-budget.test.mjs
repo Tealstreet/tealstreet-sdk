@@ -3950,6 +3950,20 @@ test('#3530 typed Kraken diagnostics retain measured reserve and historical alia
   }
 });
 
+// GRVT scalar admission at 53f1649d9f2e09d8777127ea28eb53b4d13e75b3.
+// build.sh --venue grvt; Rust1.99.0, bindgen0.2.129, Binaryen132 twice -Oz.
+// Optimized web/Node SHA256 19b58267327bb19c7b508b01625e5b50423edd96e37efb96f8c30e3802f2c02b.
+test('GRVT scalar admission retains its measured 10 KiB reserve and historical floor', () => {
+  const measured = Math.max(2_043_354, 2_004_367);
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.grvt;
+  assert.equal(requiredCap, 2_054_144);
+  assert.ok(cap >= Math.max(requiredCap, 2_015_232));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'grvt'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'grvt'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'grvt'), /exceeds/);
+});
+
 // #3576 refreshed CI43806604286/job133099107519 measures Lighter with hosted-join-proof.
 // Source a86de005afb4, Rust1.99/bindgen0.2.129/Binaryen132, required twice-Oz.
 test('#3576 Lighter admission dispatcher retains measured reserve and alias floors', () => {

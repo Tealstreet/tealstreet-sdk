@@ -1,4 +1,5 @@
 {
-  "status": "excluded",
-  "reason": "API-key login alone does not prove the separate ECDSA scalar; a fresh account/attempt-bound signing-key possession proof is not built."
+  "status": "ready",
+  "probeTests": "src/session/tests/grvt_proof.rs",
+  "sessionTests": "src/session/tests/grvt_proof.rs"
 }

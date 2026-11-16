@@ -1611,6 +1611,9 @@ impl Registry {
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(proof) = attempt._probe.as_ref() {
+                    proof.check_resident_public(&account)?;
+                }
                 if let Some(expected) = &attempt.authority.proved_registration {
                     let actual = account
                         .signing
