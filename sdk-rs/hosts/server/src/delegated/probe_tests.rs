@@ -33,6 +33,8 @@ pub(crate) struct Seen {
     pub(crate) bitunix_socket_auths: usize,
     pub(crate) kraken_socket_auths: usize,
     pub(crate) kraken_authents: Vec<(String, String)>,
+    pub(crate) kraken_challenges: Vec<(String, String)>,
+    pub(crate) kraken_auth_gate: Option<Arc<tokio::sync::Semaphore>>,
     pub(crate) cryptocom_socket_auths: usize,
     paths: Vec<String>,
 }
@@ -773,6 +775,9 @@ enum DeviceAnswer {
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
     if venue == "kraken" {
+        if kraken::socket_preimage(canonical) {
+            return "kraken-private-challenge".into();
+        }
         let descriptor: Value = serde_json::from_str(canonical).unwrap();
         return descriptor["payload"]
             .as_str()
@@ -893,7 +898,8 @@ async fn remote(
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
-            let signature = if !is_ws && matches!(answer, DeviceAnswer::Replay) {
+            let proof_signature = if venue == "kraken" { is_ws } else { !is_ws };
+            let signature = if proof_signature && matches!(answer, DeviceAnswer::Replay) {
                 let old = prior
                     .lock()
                     .unwrap()
@@ -903,7 +909,7 @@ async fn remote(
                 assert_ne!(old, fresh, "a new attempt must sign fresh bytes");
                 old
             } else {
-                if !is_ws && matches!(answer, DeviceAnswer::Correct) {
+                if proof_signature && matches!(answer, DeviceAnswer::Correct) {
                     prior.lock().unwrap().insert(operation, fresh.clone());
                 }
                 fresh

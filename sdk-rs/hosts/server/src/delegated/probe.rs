@@ -7,6 +7,9 @@ use std::time::Duration;
 // Server-only build output from the per-venue proof records.
 include!(concat!(env!("OUT_DIR"), "/cosigned_catalog.rs"));
 
+#[path = "kraken_private_startup.rs"]
+mod kraken_private_startup;
+
 pub(crate) fn cosigned_ready(venue: &str) -> bool {
     PRIVATE_STARTUP_VENUES.contains(&venue)
 }
@@ -172,13 +175,22 @@ pub(crate) async fn run<T: Transport + 'static>(
     if !allowed() {
         return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::Authority));
     }
-    let (handle, task) = safe_cex_native::spawn_venue_account(
-        venue,
-        options_json,
-        transport,
-        Some(provider),
-        config,
-    )
+    let private = (venue == "kraken").then(|| Arc::new(kraken_private_startup::Gate::default()));
+    let (handle, task) = if let Some(gate) = &private {
+        safe_cex_native::spawn_venue_account(
+            venue,
+            options_json,
+            kraken_private_startup::PrivateStartup {
+                inner: transport,
+                gate: gate.clone(),
+                allowed: allowed.clone(),
+            },
+            Some(provider),
+            config,
+        )
+    } else {
+        safe_cex_native::spawn_venue_account(venue, options_json, transport, Some(provider), config)
+    }
     .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Construction))?;
     let mut actor = ProbeActor { handle, task };
     let result = async {
@@ -203,9 +215,10 @@ pub(crate) async fn run<T: Transport + 'static>(
                         let loaded = store.loaded();
                         loaded.markets && loaded.balance && loaded.orders && loaded.positions
                     }).await;
+                    if !allowed() { return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::Authority)); }
                     match loaded {
-                        Some(true) => return classify(Ok(())).into_result(),
-                        Some(false) => {},
+                        Some(true) if private.as_ref().is_none_or(|gate| gate.accepted()) => return classify(Ok(())).into_result(),
+                        Some(_) => {},
                         None => return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeClosed)),
                     }
                 }

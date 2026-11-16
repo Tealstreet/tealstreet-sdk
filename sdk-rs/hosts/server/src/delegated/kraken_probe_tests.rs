@@ -98,6 +98,7 @@ pub(super) fn connect(
     );
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let seen = io.seen.clone();
+    let gate = seen.lock().unwrap().kraken_auth_gate.clone();
     events.send(HostEvent::WsOpened(socket)).unwrap();
     tokio::task::spawn_local(async move {
         while let Some(text) = rx.recv().await {
@@ -118,7 +119,17 @@ pub(super) fn connect(
                             seen.lock().unwrap().refused += 1;
                             json!({"event":"error","message":"Invalid challenge"})
                         } else {
-                            seen.lock().unwrap().kraken_socket_auths += 1;
+                            {
+                                let mut seen = seen.lock().unwrap();
+                                seen.kraken_socket_auths += 1;
+                                seen.kraken_challenges.push((
+                                    challenge.clone(),
+                                    frame["signed_challenge"].as_str().unwrap().into(),
+                                ));
+                            }
+                            if let Some(gate) = &gate {
+                                gate.acquire().await.unwrap().forget();
+                            }
                             json!({"event":"subscribed","feed":feed})
                         }
                     } else {
@@ -137,6 +148,64 @@ pub(super) fn connect(
         }
     });
     tx
+}
+
+#[tokio::test]
+async fn kraken_loaded_rest_waits_for_the_private_challenge_acknowledgments() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            let seen = Arc::new(Mutex::new(Seen {
+                kraken_auth_gate: Some(gate.clone()),
+                ..Default::default()
+            }));
+            let prepared = local("kraken", SECRET);
+            let io = VenueIo {
+                venue: "kraken",
+                seen: seen.clone(),
+            };
+            let mut pending = tokio::task::spawn_local(async move {
+                run(
+                    "kraken",
+                    &prepared.options,
+                    prepared.resident.provider(),
+                    io,
+                    ServerConfig::default(),
+                    Arc::new(|| true),
+                )
+                .await
+            });
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let waiting = {
+                        let seen = seen.lock().unwrap();
+                        seen.signed_reads >= 3 && seen.kraken_socket_auths > 0
+                    };
+                    if waiting {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("native reads and the signed private handshake reached the fixture");
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), &mut pending)
+                    .await
+                    .is_err(),
+                "REST loading alone must not admit before fresh private authentication"
+            );
+            gate.add_permits(3);
+            assert!(
+                tokio::time::timeout(Duration::from_secs(3), pending)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .is_ok()
+            );
+            assert_eq!(seen.lock().unwrap().kraken_socket_auths, 3);
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -191,10 +260,15 @@ async fn kraken_two_private_startup_attempts_require_different_signed_bytes() {
                     .1
                     .clone()
             };
+            assert_eq!(authent(&first), authent(&second), "REST remains nonce-free");
+            assert_eq!(first.kraken_socket_auths, 3);
+            assert_eq!(second.kraken_socket_auths, 3);
+            let (first_challenge, first_signature) = &first.kraken_challenges[0];
+            let (second_challenge, second_signature) = &second.kraken_challenges[0];
+            assert_ne!(first_challenge, second_challenge);
             assert_ne!(
-                authent(&first),
-                authent(&second),
-                "fresh proofs must not reuse signing bytes"
+                first_signature, second_signature,
+                "fresh proofs must not reuse signed private challenge bytes"
             );
         })
         .await;
@@ -205,7 +279,11 @@ async fn kraken_native_remote_startup_checks_primary_batch_and_socket_binding() 
     tokio::task::LocalSet::new()
         .run_until(async {
             let prior = Arc::new(Mutex::new(HashMap::new()));
-            for answer in [DeviceAnswer::Correct, DeviceAnswer::DifferentKey] {
+            for answer in [
+                DeviceAnswer::Correct,
+                DeviceAnswer::DifferentKey,
+                DeviceAnswer::Replay,
+            ] {
                 let (prepared, link, task) = remote("kraken", answer, prior.clone()).await;
                 let (result, seen) = check("kraken", prepared).await;
                 {

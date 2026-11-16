@@ -112,9 +112,12 @@ impl Device {
             .unwrap()
             .signature
             .unwrap();
-        let signature = if socket_auth {
-            fresh
+        let proof_signature = if venue == "kraken" {
+            socket_auth
         } else {
+            !socket_auth
+        };
+        let signature = if proof_signature {
             let key = operation(venue, preimage);
             if matches!(mode, Answer::Replay) {
                 let prior = self
@@ -130,6 +133,8 @@ impl Device {
                 }
                 fresh
             }
+        } else {
+            fresh
         };
         let response = if matches!(mode, Answer::MissingSignature) {
             json!({"id":request["id"]})
@@ -684,11 +689,22 @@ async fn login_switch_case(venue: &'static str) {
     alice.init(payload(venue)).await.unwrap();
     assert!(alice.pending_verifications.contains_key("acct"));
     // Withhold Alice's proof signature: her native proof is genuinely deferred.
-    let request = tokio::time::timeout(Duration::from_secs(30), a_sent.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let request: Value = serde_json::from_str(&request).unwrap();
+    let request = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut device = Device::default();
+        loop {
+            let request: Value = serde_json::from_str(&a_sent.recv().await.unwrap()).unwrap();
+            if venue != "kraken"
+                || kraken::socket_preimage(request["d"]["wsAuth"]["toSign"].as_str().unwrap())
+            {
+                break request;
+            }
+            device
+                .answer(venue, &mut alice, request, Answer::Correct)
+                .await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(request["t"], "sign-req");
     let old_socket = alice.socket;
     alice.close();
@@ -761,6 +777,11 @@ async fn cosigned_woo_requires_connection_proof() {
 #[tokio::test]
 async fn cosigned_kraken_requires_connection_proof() {
     venue_case("kraken").await;
+}
+
+#[tokio::test]
+async fn cosigned_kraken_login_switch_during_private_challenge_is_isolated() {
+    login_switch_case("kraken").await;
 }
 
 #[tokio::test]
