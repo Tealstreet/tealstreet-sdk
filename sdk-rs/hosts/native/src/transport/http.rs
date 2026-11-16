@@ -66,6 +66,7 @@ struct Prepared {
     tunnel: Option<HowConnection>,
     guard: Option<super::IoGuard>,
     venue: Option<std::sync::Arc<str>>,
+    report_user: Option<crate::report::ReportUser>,
 }
 impl fmt::Debug for Prepared {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -92,6 +93,7 @@ struct Bound {
     route: String,
     guard: Option<super::IoGuard>,
     venue: Option<std::sync::Arc<str>>,
+    report_user: Option<crate::report::ReportUser>,
 }
 
 /// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
@@ -143,6 +145,7 @@ pub(super) fn prepare(
     let routing = transport.routing.clone();
     let guard = transport.io_guard.clone();
     let venue = transport.venue.clone();
+    let report_user = transport.report_user.clone();
     let started = Instant::now();
     let class = class.unwrap_or_else(|| RequestClass::legacy(request.method, &request.url));
     let budget_ms = class.timeout_ms(request.timeout_ms);
@@ -242,6 +245,7 @@ pub(super) fn prepare(
                 tunnel,
                 guard,
                 venue,
+                report_user,
             }) as Box<dyn PreparedHttp>)
         };
         tokio::time::timeout_at(deadline, operation)
@@ -357,6 +361,7 @@ impl PreparedHttp for Prepared {
             route,
             guard: self.guard.clone(),
             venue: self.venue.clone(),
+            report_user: self.report_user.clone(),
         }))
     }
 }
@@ -378,6 +383,7 @@ impl BoundHttp for Bound {
             route,
             guard,
             venue,
+            report_user,
         } = *self;
         let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
@@ -420,6 +426,7 @@ impl BoundHttp for Bound {
                 ),
                 started.elapsed(),
                 venue.as_deref(),
+                report_user.as_ref(),
             );
             let _ = events.send(HostEvent::HttpFailed(request, error));
         })

@@ -578,6 +578,7 @@ struct InitAuthority {
     admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
     probe_deadline: Option<tokio::time::Instant>,
+    proved_registration: Option<Arc<safe_cex_crypto::admission::PublicKey>>,
 }
 
 impl InitAuthority {
@@ -995,6 +996,15 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         _ => Map::new(),
     };
     fields.insert("venue".into(), init.exchange_name.clone().into());
+    if matches!(
+        init.exchange_name.as_str(),
+        "hyperliquid" | "hyperliquidspot"
+    ) {
+        fields.insert(
+            "hyperliquidSignerAddress".into(),
+            init.hyperliquid_signer_address.clone().into(),
+        );
+    }
     // An init that cannot route is refused at build; its raw flags still tell inits apart.
     let routing = match routing_plan(init, public_only) {
         Ok(plan) => serde_json::to_value(plan).unwrap_or(Value::Null),
@@ -1143,6 +1153,7 @@ impl Registry {
                     &crate::telemetry::Report {
                         kind: "router_lease.fenced",
                         summary,
+                        user_id: (!account.public_only).then_some(account.user.as_str()),
                         user_tag: Some(tag.clone()),
                         venue: Some(&account.venue),
                         running_jobs: Some(running_jobs),
@@ -1383,6 +1394,7 @@ impl Registry {
             admission_expires_at: None,
             probe_current: None,
             probe_deadline: None,
+            proved_registration: None,
         };
         authority.check_admission()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1578,6 +1590,7 @@ impl Registry {
             attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
             attempt.authority.probe_deadline = proof.local_deadline;
+            attempt.authority.proved_registration = proof.registered_public.clone();
             attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
@@ -1611,6 +1624,19 @@ impl Registry {
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(proof) = attempt._probe.as_ref() {
+                    proof.check_resident_public(&account)?;
+                }
+                if let Some(expected) = &attempt.authority.proved_registration {
+                    let actual = account
+                        .signing
+                        .public_binding(Family::Schnorr)
+                        .map_err(|_| "Signer registration unavailable")?
+                        .ok_or("Signer registration unavailable")?;
+                    if actual.as_bytes() != expected.as_bytes() {
+                        return Err("Signer registration changed during verification".into());
+                    }
+                }
                 if delegated && account.delegated().is_none() {
                     let resident = match setup {
                         Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
@@ -1624,11 +1650,15 @@ impl Registry {
                     if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
                         return Err("Account is retiring; account not attached".into());
                     }
-                    let upgraded = match public {
-                        Some(proof) => account
+                    let upgraded = match (public, attempt.authority.proved_registration.as_deref())
+                    {
+                        (Some(proof), _) => account
                             .signing
                             .upgrade_proven(resident, Some(&proof.public)),
-                        None => account.signing.upgrade(resident),
+                        (None, Some(public)) => {
+                            account.signing.upgrade_proven(resident, Some(public))
+                        }
+                        (None, None) => account.signing.upgrade(resident),
                     }
                     .map_err(|reason| reason.reason().to_owned())?;
                     if upgraded {
@@ -1739,6 +1769,60 @@ impl Registry {
         Ok(account)
     }
 
+    async fn registered_key_for_build(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        plan: &RoutingPlan,
+        token: Option<(String, u64)>,
+        authority: &InitAuthority,
+    ) -> Result<safe_cex_crypto::admission::PublicKey, String> {
+        let account_index = init
+            .application_id
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration account")?;
+        let index = init
+            .api_key_index
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration index")?;
+        let captured = authority.clone();
+        let expiry = token.as_ref().map(|(_, expiry)| *expiry);
+        let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+            captured.check_admission().is_ok() && expiry.is_none_or(|expiry| expiry > now_ms())
+        });
+        let proxy_token = ProxyToken::new();
+        proxy_token.set(token);
+        let transport = NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
+            .with_venue(&init.exchange_name)
+            .with_report_user(safe_cex_native::report::ReportUser::new(user))
+            .with_io_guard(allowed.clone());
+        #[cfg(test)]
+        let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+        let network = safe_cex_venues::lighter_registration::Network::from_options(
+            init.exchange_name == "lighter-robinhood",
+            init.testnet == Some(true),
+        );
+        let public = crate::admission::fetch_lighter_registered_key(
+            &transport,
+            network,
+            account_index,
+            index,
+            allowed,
+        )
+        .await
+        .map_err(|_| "Signer registration unavailable")?;
+        authority.check_admission()?;
+        crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+        if let Some(expected) = &authority.proved_registration
+            && expected.as_bytes() != public.as_bytes()
+        {
+            return Err("Signer registration changed during verification".into());
+        }
+        Ok(public)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn build(
         &self,
@@ -1766,6 +1850,24 @@ impl Registry {
                 DelegatedSetup::Pair(pair) => prepare_delegated(init, pair)?,
                 DelegatedSetup::Resident(resident) => resident.reconfigure(init)?,
             };
+            if authority.proved_registration.is_some() {
+                let public = self
+                    .registered_key_for_build(user, init, &plan, token.clone(), authority)
+                    .await?;
+                let reference = resident
+                    .identities()
+                    .primary
+                    .as_ref()
+                    .ok_or("Signer registration unavailable")?
+                    .signing_ref()
+                    .map_err(|_| "Signer registration unavailable")?;
+                if !public
+                    .matches_provider(&resident.provider(), reference)
+                    .map_err(|_| "Signer registration unavailable")?
+                {
+                    return Err("Signer registration changed during verification".into());
+                }
+            }
             let signer = Some(resident.provider());
             (None, plan, options, None, signer, Some(resident))
         } else {
@@ -1777,46 +1879,9 @@ impl Registry {
             } = prepare(init, public_only, link.clone())?;
             let remote = match remote {
                 Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
-                    let account_index = init
-                        .application_id
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration account")?;
-                    let index = init
-                        .api_key_index
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration index")?;
-                    let captured = authority.clone();
-                    let expiry = token.as_ref().map(|(_, expiry)| *expiry);
-                    let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
-                        captured.check_admission().is_ok()
-                            && expiry.is_none_or(|expiry| expiry > now_ms())
-                    });
-                    let proxy_token = ProxyToken::new();
-                    proxy_token.set(token.clone());
-                    let transport =
-                        NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
-                            .with_venue(&venue)
-                            .with_io_guard(allowed.clone());
-                    #[cfg(test)]
-                    let transport =
-                        crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
-                    let network = safe_cex_venues::lighter_registration::Network::from_options(
-                        venue == "lighter-robinhood",
-                        init.testnet == Some(true),
-                    );
-                    let public = crate::admission::fetch_lighter_registered_key(
-                        &transport,
-                        network,
-                        account_index,
-                        index,
-                        allowed,
-                    )
-                    .await
-                    .map_err(|_| "Signer registration unavailable")?;
-                    authority.check_admission()?;
-                    crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+                    let public = self
+                        .registered_key_for_build(user, init, &plan, token.clone(), authority)
+                        .await?;
                     Some(
                         remote
                             .with_registered_public_key(&public)
@@ -1870,6 +1935,7 @@ impl Registry {
             resident.configure(&mut config);
         }
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
+        config.report_user = (!public_only).then(|| safe_cex_native::report::ReportUser::new(user));
         // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {
             "public"
@@ -1936,6 +2002,9 @@ impl Registry {
                 return;
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
+            if let Some(user) = &config.report_user {
+                transport = transport.with_report_user(user.clone());
+            }
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
             #[cfg(test)]
             let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
@@ -2227,6 +2296,7 @@ impl Registry {
             &crate::telemetry::Report {
                 kind: "signer.failing",
                 summary: "signer keeps failing; account disposed",
+                user_id: Some(&account.user),
                 user_tag: Some(user_tag(&account.user)),
                 venue: Some(&account.venue),
                 ..Default::default()
@@ -2947,6 +3017,49 @@ pub mod testing {
             running,
         );
         bind_identity(&mut account, init);
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
+    }
+
+    #[cfg(test)]
+    pub(crate) fn registered_lighter_account(
+        registry: &Registry,
+        user: &str,
+        init: &InitPayload,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Arc<Account> {
+        let link = SignerLink::new(0, Arc::new(|_| false));
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let (mut account, inbox) = account_on(
+            HeldLoad {
+                placed: Arc::default(),
+                load_after_ms: Some(0.),
+                ticker: true,
+            },
+            (user, &init.account_name, &init.exchange_name),
+            Some(link.clone()),
+            init.fingerprint(),
+            running,
+        );
+        let remote = remote_account(
+            link.clone(),
+            &init.exchange_name,
+            Some(init.account_name.clone()),
+            &engine_options(init, false).to_string(),
+        )
+        .unwrap()
+        .with_registered_public_key(public)
+        .unwrap();
+        let options: Value = serde_json::from_str(&remote.options_json).unwrap();
+        let identities = serde_json::from_value(options["signing"].clone()).unwrap();
+        Arc::get_mut(&mut account).unwrap().signing = AccountSigner::new_bound(
+            Some(remote.provider.clone()),
+            identities,
+            Some(link.clone()),
+            None,
+            remote.public_binding_source(),
+        );
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account

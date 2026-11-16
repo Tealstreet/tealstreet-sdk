@@ -83,6 +83,8 @@ pub struct ServerConfig {
     /// Names the account in log lines this actor writes (a user tag, account and
     /// venue, never credentials); None for listener and test accounts.
     pub log_label: Option<String>,
+    /// Captured verified subject, used only by the host's diagnostic sink.
+    pub report_user: Option<crate::report::ReportUser>,
     /// Who signs this account (`hosted_cosign`, or `public` with no key), named on
     /// its start-failure line; None outside the Hosted server.
     pub signing_mode: Option<&'static str>,
@@ -108,6 +110,7 @@ impl Default for ServerConfig {
             max_frame_bytes: 16 * 1024 * 1024,
             io_timeout: Duration::from_secs(5),
             log_label: None,
+            report_user: None,
             signing_mode: None,
             interest_observer: None,
             #[cfg(feature = "venues")]
@@ -1221,6 +1224,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         );
         crate::report::report(&crate::report::ErrorReport {
             kind: crate::report::ErrorKind::AccountStartFailed,
+            user: self.config.report_user.as_ref(),
             label: Some(label),
             target: None,
             error_kind: error.kind.map(|kind| kind.as_str()),

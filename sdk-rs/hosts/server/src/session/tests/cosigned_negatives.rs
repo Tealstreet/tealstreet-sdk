@@ -485,8 +485,8 @@ async fn cosigned_test_admission_does_not_start_unavailable_venue_proofs() {
     let before = f.private_reads.load(Ordering::SeqCst);
     let (mut session, mut sent) = candidate(&f, "alice");
     let mut request = init(Some("other-venue"));
-    // Hyro and KuCoin Spot now prove joins; Hyperliquid Spot still requires possession proof.
-    request.exchange_name = "hyperliquidspot".into();
+    // Keep this wire-admission control on the still-excluded AsterDEX family.
+    request.exchange_name = "asterdex".into();
     assert!(crate::delegated::enabled(&request.exchange_name));
     assert!(!crate::delegated::probe::cosigned_ready(&request));
     session.init(request).await.unwrap();
