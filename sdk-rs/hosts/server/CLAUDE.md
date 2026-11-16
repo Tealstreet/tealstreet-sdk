@@ -186,7 +186,7 @@ cohorts. There is no shared list to edit when a venue proof lands. Follow
 The helper/production census is 41 / 40 / 33; disabled metadata remains visible
 in accounting. Cargo signing features are only a family cross-check. The catalog
 changes no DELEGATED eligibility, client fallback or signing/origin policy.
-Partially-ready AsterDEX also has an explicit `excludedShapes` V3 ledger record;
+Partially-ready `asterdex.json` requires the closed `excludedShapes: ["v3"]` field;
 V1 readiness never accounts for its unimplemented wallet proof. The accounting
 test rejects missing, duplicate, stale or unknown shape exclusions.
 

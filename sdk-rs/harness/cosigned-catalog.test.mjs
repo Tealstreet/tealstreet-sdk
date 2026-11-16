@@ -97,7 +97,11 @@ function catalog(files) {
       .map(match => JSON.parse(match[0]));
     assert.equal(new Set(keys).size, keys.length, 'duplicate record field');
     if (entry.status === 'ready') {
-      assert.deepEqual(Object.keys(entry).sort(), ['probeTests', 'sessionTests', 'status']);
+      const fields = ['probeTests', 'sessionTests', 'status'];
+      if (Object.hasOwn(entry, 'excludedShapes')) fields.push('excludedShapes');
+      assert.deepEqual(Object.keys(entry).sort(), fields.sort());
+      if (venue === 'asterdex') assert.deepEqual(entry.excludedShapes, ['v3']);
+      else assert(!Object.hasOwn(entry, 'excludedShapes'), `${venue}: unknown excludedShapes`);
       for (const field of ['probeTests', 'sessionTests']) {
         assert.equal(typeof entry[field], 'string', `missing ${field}`);
         assert.match(entry[field], /^src\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.rs$/);
