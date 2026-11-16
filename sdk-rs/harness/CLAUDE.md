@@ -68,5 +68,7 @@ virtual clock also validates native signature timestamps; waits never refresh de
 
 Shared artifact membership is frozen in `sdk-rs/artifact-census.json`. Additions
 and retirements update that independent census explicitly; value-only edits do not.
-Budget imports validate raw duplicate/name membership before evaluating the map;
+Budget imports validate raw duplicate/name membership before evaluating the map.
+The closed source scanner ignores nested template text and expressions, rejecting
+unsupported regex/division syntax instead of guessing their lexical boundaries;
 construction feature checks reject raw duplicate keys and missing policy rows.

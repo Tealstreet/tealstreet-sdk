@@ -51,11 +51,67 @@ export function readConstructionPolicy(source) {
   return rules;
 }
 
-// Only this closed literal grammar is accepted; comments and quoted strings are
-// tokenized before locating the declaration, so prose cannot supply live keys.
+// This budget file accepts strings, comments and nested templates, but no regex
+// or division syntax. Rejecting unsupported slash tokens keeps boundaries closed.
+function budgetTokens(source) {
+  let index = 0;
+  function quoted(quote) {
+    const start = index++;
+    while (index < source.length) {
+      const char = source[index++];
+      if (char === '\\') index++;
+      else if (char === quote) return source.slice(start, index);
+    }
+    throw new Error('unterminated budget string');
+  }
+  function template() {
+    index++;
+    while (index < source.length) {
+      const char = source[index++];
+      if (char === '\\') index++;
+      else if (char === '`') return;
+      else if (char === '$' && source[index] === '{') {
+        index++;
+        code(true);
+      }
+    }
+    throw new Error('unterminated budget template');
+  }
+  function code(interpolation = false) {
+    const tokens = [];
+    let depth = interpolation ? 1 : 0;
+    while (index < source.length) {
+      const char = source[index];
+      if (/\s/.test(char)) { index++; continue; }
+      if (source.startsWith('//', index)) {
+        while (index < source.length && !/[\n\r\u2028\u2029]/.test(source[index])) index++;
+        continue;
+      }
+      if (source.startsWith('/*', index)) {
+        const end = source.indexOf('*/', index + 2);
+        if (end === -1) throw new Error('unterminated budget comment');
+        index = end + 2;
+        continue;
+      }
+      if (char === '/') throw new Error('unsupported budget slash syntax');
+      if (char === '"' || char === "'") { tokens.push(quoted(char)); continue; }
+      if (char === '`') { template(); tokens.push('<template>'); continue; }
+      if (interpolation && char === '{') depth++;
+      if (interpolation && char === '}' && --depth === 0) { index++; return tokens; }
+      const token = source.slice(index).match(/^(?:[a-zA-Z_$][\w$]*|\d[\d_]*)/)?.[0] ?? char;
+      tokens.push(token);
+      index += token.length;
+    }
+    if (interpolation) throw new Error('unterminated budget interpolation');
+    return tokens;
+  }
+  return code();
+}
+
+// Only this closed literal grammar is accepted for the live export; inert
+// template text and its recursively scanned expressions cannot impersonate it.
 export function validateWasmBudgetSource(source) {
-  const tokens = (source.match(/\/\*[\s\S]*?\*\/|\/\/[^\n\r]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[a-zA-Z_$][\w$]*|\d[\d_]*|[^\s]/g) ?? [])
-    .filter(token => !token.startsWith('//') && !token.startsWith('/*'));
+  const tokens = budgetTokens(source);
   const declaration = ['export', 'const', 'WASM_VENUE_OVERRIDES', '=', 'Object', '.', 'freeze', '(', '{'];
   const starts = tokens.flatMap((_, index) => declaration.every((token, offset) => tokens[index + offset] === token) ? [index + declaration.length] : []);
   if (starts.length !== 1) throw new Error('expected one literal WASM_VENUE_OVERRIDES declaration');
@@ -75,6 +131,6 @@ export function validateWasmBudgetSource(source) {
     if (tokens[index] === ',') index++;
     else if (tokens[index] !== '}') throw new Error(`invalid budget separator: ${name}`);
   }
-  if (tokens[++index] !== ')') throw new Error('invalid budget literal boundary');
+  if (tokens[++index] !== ')' || tokens[++index] !== ';') throw new Error('invalid budget literal boundary');
   exactNames(names, census.budgetVenues, 'budget venues');
 }
