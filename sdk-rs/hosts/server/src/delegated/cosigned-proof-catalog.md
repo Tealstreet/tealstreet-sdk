@@ -26,7 +26,9 @@ Name the actual compiled test sources. The paths above select the existing
 shared HMAC probe and Session cohorts. A separate native or local possession
 suite names its own source, for example `src/delegated/cryptocom_probe_tests.rs`
 and `src/session/tests/cosigned_cryptocom.rs`; those entries do not enter the
-shared HMAC fixtures. Bybit keeps its existing probe in `src/delegated.rs`.
+shared HMAC fixtures. Bybit's standalone native private-read/HMAC controls live
+in `src/session/tests/cosigned_negatives.rs`, using the Session fixture chain
+in that directory.
 These references track coverage; they never substitute for running the real
 positive, wrong-key, replay, foreign-socket and ownership controls.
 

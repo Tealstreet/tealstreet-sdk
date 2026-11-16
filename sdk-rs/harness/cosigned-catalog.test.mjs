@@ -254,6 +254,10 @@ test('ready records name existing Rust proof suites within the server crate', ()
   }
 });
 
+test('Bybit standalone probe names its native private-read possession-proof suite', () => {
+  assert.equal(records.get('bybit').probeTests, 'src/session/tests/cosigned_negatives.rs');
+});
+
 test('independent venue promotions compose without editing a shared catalog', () => {
   const promoted = [...excluded.keys()].sort().slice(0, 2);
   assert.equal(promoted.length, 2);
