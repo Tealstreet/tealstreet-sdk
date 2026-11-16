@@ -456,3 +456,110 @@ async fn initial_registration_preparation_cannot_outlive_its_init() {
         })
         .await;
 }
+
+// Exercise the post-proof builder with a real Schnorr provider on every host.
+async fn cold_delegated_registration(registered_scalar: u8, refuse: bool) {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in ["lighter", "lighter-robinhood"] {
+                let resident = candidate(7);
+                let provider = resident.provider();
+                let reference = resident
+                    .identities()
+                    .primary
+                    .as_ref()
+                    .unwrap()
+                    .signing_ref()
+                    .unwrap();
+                let proved =
+                    PublicKey::from_provider(Family::Schnorr, &provider, reference).unwrap();
+                let registered = candidate(registered_scalar);
+                let registered_ref = registered
+                    .identities()
+                    .primary
+                    .as_ref()
+                    .unwrap()
+                    .signing_ref()
+                    .unwrap();
+                let public = PublicKey::from_provider(
+                    Family::Schnorr,
+                    &registered.provider(),
+                    registered_ref,
+                )
+                .unwrap();
+                let io = crate::delegated_e2e_io::MockVenue::registered_key(
+                    json!({"code":200,"api_keys":[{"account_index":42,"api_key_index":1,
+                    "public_key":safe_cex_crypto::hex(public.as_bytes())}]}),
+                    Arc::new(tokio::sync::Semaphore::new(1)),
+                );
+                let observed = io.observed.clone();
+                let registry = testing::e2e_registry("alice", io);
+                let init = InitPayload {
+                    account_name: "cold-lighter".into(),
+                    exchange_name: venue.into(),
+                    key: "synthetic-public-account".into(),
+                    application_id: Some("42".into()),
+                    api_key_index: Some("1".into()),
+                    signing_mode: Some("delegated".into()),
+                    ..Default::default()
+                };
+                let authority = InitAuthority {
+                    current: Arc::new(AtomicBool::new(true)),
+                    lease: None,
+                    probe_lease: None,
+                    admission_expires_at: Some(now_ms() + 60_000),
+                    probe_current: Some(Arc::new(AtomicBool::new(true))),
+                    probe_deadline: Some(tokio::time::Instant::now() + Duration::from_secs(30)),
+                    proved_registration: Some(Arc::new(proved)),
+                };
+                let result = registry
+                    .build(
+                        "alice",
+                        &init,
+                        false,
+                        crate::delegated::fingerprint(&init),
+                        Some(("synthetic-token".into(), now_ms() + 60_000)),
+                        1,
+                        Arc::new(|_| panic!("cold DELEGATED construction cannot contact a device")),
+                        &authority,
+                        Some(DelegatedSetup::Resident(Box::new(resident))),
+                    )
+                    .await;
+                if refuse {
+                    if let Ok((account, _)) = &result {
+                        account.handle.dispose();
+                    }
+                    let Err(error) = result else {
+                        panic!("a rotated registration cannot publish a cold DELEGATED provider");
+                    };
+                    assert_eq!(error, "Signer registration changed during verification");
+                    assert_eq!(testing::engine_count(&registry), 0);
+                    let seen = observed.lock().unwrap();
+                    assert_eq!(seen.reads, 1);
+                    assert_eq!(seen.sockets, 0);
+                    assert!(seen.writes.is_empty());
+                } else {
+                    let (account, remote) = result.unwrap();
+                    assert!(remote.is_none());
+                    assert!(account.link.is_none());
+                    assert!(Arc::ptr_eq(
+                        &provider,
+                        &account.delegated().unwrap().provider()
+                    ));
+                    account.handle.dispose();
+                }
+                assert_eq!(registry.account_count(), 0);
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn cold_delegated_registration_rotation_refuses_before_provider_publication() {
+    cold_delegated_registration(8, true).await;
+}
+
+#[tokio::test]
+async fn cold_delegated_matching_registration_keeps_the_original_provider() {
+    cold_delegated_registration(7, false).await;
+}

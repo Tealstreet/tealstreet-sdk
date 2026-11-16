@@ -350,8 +350,7 @@ async fn lighter_rotated_registration_cannot_attach_to_the_old_resident() {
         .await;
 }
 
-#[tokio::test]
-async fn lighter_registration_rotation_between_proof_and_cold_build_refuses_before_startup() {
+async fn lighter_registration_rotation_between_proof_and_cold_build(delegated: bool) {
     tokio::task::LocalSet::new()
         .run_until(async {
             for venue in VENUES {
@@ -368,9 +367,28 @@ async fn lighter_registration_rotation_between_proof_and_cold_build_refuses_befo
                 );
                 let (mut session, mut sent) = user_session(registry.clone(), "alice");
                 let mut done = session.take_verified();
-                session.init(init(venue, false)).await.unwrap();
-                let request = challenge(&mut sent).await;
-                session.handle(&response(&request, 7)).await.unwrap();
+                let mut payload = init(venue, false);
+                if delegated {
+                    payload.signing_mode = Some("delegated".into());
+                    let offer = session
+                        .handovers
+                        .issue(&payload.account_name, venue, now_ms())
+                        .unwrap();
+                    let credentials = json!({"key":payload.key,
+                        "secret":safe_cex_crypto::hex(&scalar(7))})
+                    .to_string();
+                    payload.sealed = Some(crate::delegated::tests::seal(
+                        &offer,
+                        venue,
+                        &payload.key,
+                        credentials.as_bytes(),
+                    ));
+                }
+                session.init(payload).await.unwrap();
+                if !delegated {
+                    let request = challenge(&mut sent).await;
+                    session.handle(&response(&request, 7)).await.unwrap();
+                }
                 let result = tokio::time::timeout(Duration::from_secs(5), done.recv())
                     .await
                     .unwrap()
@@ -719,4 +737,15 @@ async fn lighter_actor_aba_after_proof_cannot_reuse_a_completed_receipt() {
             }
         })
         .await;
+}
+
+#[tokio::test]
+async fn lighter_registration_rotation_between_proof_and_cold_build_refuses_before_startup() {
+    lighter_registration_rotation_between_proof_and_cold_build(false).await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn lighter_delegated_registration_rotation_after_proof_refuses_before_startup() {
+    lighter_registration_rotation_between_proof_and_cold_build(true).await;
 }
