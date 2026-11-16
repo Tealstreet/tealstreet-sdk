@@ -8,6 +8,19 @@ const PRIVATE: &[&str] = &[
     "/eapi/v1/openOrders",
 ];
 
+fn get_request(url: String) -> HttpRequest {
+    HttpRequest {
+        id: safe_cex_engine::RequestId(1),
+        method: Method::Get,
+        route: None,
+        timeout_ms: None,
+        url,
+        headers: vec![],
+        signer_headers: vec![],
+        body: None,
+    }
+}
+
 fn valid(request: &HttpRequest) -> bool {
     let material = match header(request, "X-MBX-APIKEY") {
         Some(KEY) => SECRET,
@@ -96,12 +109,12 @@ fn binanceoptions_private_fixture_requires_key_signature_and_fresh_timestamp() {
             let payload = format!("recvWindow=5000&timestamp={}", crate::accounts::now_ms());
             let signature = hmac_sha256(material.as_bytes(), payload.as_bytes(), Encoding::Hex);
             let mut request =
-                HttpRequest::get(format!("{ORIGIN}{route}?{payload}&signature={signature}"));
-            request.headers.push(("X-MBX-APIKEY".into(), key.into()));
+                get_request(format!("{ORIGIN}{route}?{payload}&signature={signature}"));
+            request.headers.push(("X-MBX-APIKEY", key.into()));
             assert_ne!(response(&io, &request)["code"], -2015);
             request.headers.clear();
             assert_eq!(response(&io, &request)["code"], -2015);
-            request.headers.push(("X-MBX-APIKEY".into(), key.into()));
+            request.headers.push(("X-MBX-APIKEY", key.into()));
             request.url = format!("{ORIGIN}{route}?{payload}");
             assert_eq!(response(&io, &request)["code"], -2015);
             let wrong = hmac_sha256(
@@ -129,7 +142,7 @@ fn binanceoptions_public_discovery_does_not_count_as_key_proof() {
         seen: Arc::default(),
     };
     for route in ["/eapi/v1/exchangeInfo", "/eapi/v1/ticker", "/eapi/v1/mark"] {
-        response(&io, &HttpRequest::get(format!("{ORIGIN}{route}")));
+        response(&io, &get_request(format!("{ORIGIN}{route}")));
     }
     assert_eq!(io.seen.lock().unwrap().signed_reads, 0);
 }
