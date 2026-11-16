@@ -452,3 +452,56 @@ async fn lighter_invalid_slot_facts_refuse_before_public_io() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn lighter_slot_queue_is_shared_across_untrusted_key_labels() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in VENUES {
+                assert!(crate::delegated::probe::cosigned_ready(venue));
+                let (registry, gate, observed) = registry(body(), 0);
+                let (mut first, mut first_sent) = user_session(registry.clone(), "alice");
+                let (mut second, mut second_sent) = user_session(registry.clone(), "alice");
+                let mut second_done = second.take_verified();
+                first.init(init(venue, false)).await.unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while observed.lock().unwrap().preparations == 0 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                let mut renamed = init(venue, false);
+                renamed.account_name = "another-label".into();
+                renamed.key = "another-public-label".into();
+                second.init(renamed).await.unwrap();
+                for _ in 0..10 {
+                    tokio::task::yield_now().await;
+                }
+                assert_eq!(
+                    observed.lock().unwrap().preparations,
+                    1,
+                    "labels cannot create a second active proof for one venue slot"
+                );
+                first.close();
+                gate.add_permits(2);
+                let request = challenge(&mut second_sent).await;
+                second.handle(&response(&request, 7)).await.unwrap();
+                let result = tokio::time::timeout(Duration::from_secs(5), second_done.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(result.probe.as_ref().unwrap().permit.is_ok());
+                assert_eq!(observed.lock().unwrap().preparations, 2);
+                assert!(second.joined.is_empty());
+                assert_eq!(registry.account_count(), 0);
+                while let Ok(text) = first_sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&text).unwrap();
+                    assert_ne!(frame["t"], "sign-req");
+                }
+                drop(result);
+                second.close();
+            }
+        })
+        .await;
+}
