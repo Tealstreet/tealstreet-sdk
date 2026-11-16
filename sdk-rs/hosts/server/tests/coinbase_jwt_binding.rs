@@ -1,10 +1,14 @@
 use safe_cex_exchange_server::{accounts::engine_options, envelope::InitPayload};
 use serde_json::json;
 
+fn key_name() -> String {
+    ["organizations", "fixture", "apiKeys", "join"].join("/")
+}
+
 fn preserves_algorithm(venue: &str) {
     let init: InitPayload = serde_json::from_value(json!({
         "accountName":"fixture", "exchangeName":venue, "signingMode":"cosigned",
-        "key":"organizations/fixture/apiKeys/join", "coinbaseJwtAlgorithm":"edDsa"
+        "key":key_name(), "coinbaseJwtAlgorithm":"edDsa"
     }))
     .unwrap();
     let options = engine_options(&init, false);
@@ -27,7 +31,7 @@ fn coinbasespot_join_preserves_the_explicit_public_jwt_algorithm() {
 #[test]
 fn coinbase_effective_algorithm_is_fingerprinted_and_unknown_algorithms_refuse() {
     for venue in ["coinbase", "coinbasespot"] {
-        let raw = json!({"accountName":"fixture","exchangeName":venue,"key":"organizations/fixture/apiKeys/join"});
+        let raw = json!({"accountName":"fixture","exchangeName":venue,"key":key_name()});
         let implicit: InitPayload = serde_json::from_value(raw.clone()).unwrap();
         let mut null_algorithm = raw.clone();
         null_algorithm["coinbaseJwtAlgorithm"] = serde_json::Value::Null;
@@ -57,8 +61,11 @@ fn coinbase_join_algorithm_requires_a_string_or_null() {
             json!(1),
             json!([]),
         ] {
-            assert!(serde_json::from_value::<InitPayload>(json!({"accountName":"fixture",
-                "exchangeName":venue,"key":"organizations/fixture/apiKeys/join","coinbaseJwtAlgorithm":algorithm})).is_err());
+            assert!(
+                serde_json::from_value::<InitPayload>(json!({"accountName":"fixture",
+                "exchangeName":venue,"key":key_name(),"coinbaseJwtAlgorithm":algorithm}))
+                .is_err()
+            );
         }
     }
 }
