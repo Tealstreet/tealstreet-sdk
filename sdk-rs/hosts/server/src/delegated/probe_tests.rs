@@ -655,7 +655,8 @@ fn with_hosted_endpoints(venue: &str, mut options: Value) -> Value {
 // Keep the deliberate bad private-read key behind a valid Hyro handshake;
 // socket rejection itself is checked separately, and retries are not proof.
 struct HyroPrivateReadMismatch {
-    reads: safe_cex_engine::signing::Provider,
+    // The owner must outlive the probe or protected read keys are erased.
+    reads: ResidentCopy,
     socket: safe_cex_engine::signing::Provider,
 }
 impl safe_cex_engine::signing::Signer for HyroPrivateReadMismatch {
@@ -666,9 +667,24 @@ impl safe_cex_engine::signing::Signer for HyroPrivateReadMismatch {
         if request.context.method == "WS" {
             self.socket.sign(request)
         } else {
-            self.reads.sign(request)
+            self.reads.provider().sign(request)
         }
     }
+}
+
+fn hyro_private_read_fixture(
+    mut prepared: super::super::PreparedDelegated,
+) -> super::super::PreparedDelegated {
+    let mut options =
+        serde_json::from_value(json!({"key":KEY,"secret":SECRET,"passphrase":PASS})).unwrap();
+    let (socket, identities) =
+        safe_cex_venues::prepare_local_signer_for("hyrotrader", &mut options).unwrap();
+    let actual: Value = serde_json::from_str(&prepared.options).unwrap();
+    assert_eq!(actual["signing"], serde_json::to_value(identities).unwrap());
+    let reads = prepared.resident;
+    prepared.resident =
+        ResidentCopy::test_provider(Arc::new(HyroPrivateReadMismatch { reads, socket }));
+    prepared
 }
 
 fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
@@ -676,30 +692,17 @@ fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
         serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
     let (provider, identities) =
         safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
-    let provider: safe_cex_engine::signing::Provider = if venue == "hyrotrader"
-        && material != SECRET
-    {
-        let mut socket_options =
-            serde_json::from_value(json!({"key":KEY,"secret":SECRET,"passphrase":PASS})).unwrap();
-        let (socket, socket_identities) =
-            safe_cex_venues::prepare_local_signer_for(venue, &mut socket_options).unwrap();
-        assert_eq!(
-            serde_json::to_value(&identities).unwrap(),
-            serde_json::to_value(&socket_identities).unwrap()
-        );
-        Arc::new(HyroPrivateReadMismatch {
-            reads: provider,
-            socket,
-        })
-    } else {
-        provider
-    };
     // Test setup uses the registry's real credential normalization. Runtime
     // admission remains gated separately; no test declaration enables a venue.
-    super::super::PreparedDelegated {
+    let prepared = super::super::PreparedDelegated {
         plan: Default::default(),
         options: with_hosted_endpoints(venue, json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false})).to_string(),
         resident: ResidentCopy::test_provider(provider),
+    };
+    if venue == "hyrotrader" && material != SECRET {
+        hyro_private_read_fixture(prepared)
+    } else {
+        prepared
     }
 }
 const KUCOIN_STARTUP_OPERATIONS: &[&str] = &[
@@ -853,6 +856,72 @@ async fn admission_hmac_private_startup_accepts_valid_pairs() {
         .await;
 }
 
+fn server_hyro_fixture(material: &str) -> super::super::PreparedDelegated {
+    let mut raw =
+        serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
+    let (provider, identities) =
+        safe_cex_venues::prepare_local_signer_for("hyrotrader", &mut raw).unwrap();
+    let init = crate::envelope::InitPayload {
+        exchange_name: "hyrotrader".into(),
+        account_name: "fixture".into(),
+        key: KEY.into(),
+        signing_mode: Some("delegated".into()),
+        ..Default::default()
+    };
+    let mut options = crate::accounts::engine_options(&init, false);
+    let fields = options.as_object_mut().unwrap();
+    fields.remove("key");
+    fields.remove("passphrase");
+    // Match real delegated serialization with native test custody only;
+    // do not inherit the low-level fixture's accountStartup override.
+    fields.insert("signing".into(), json!(identities));
+    fields.insert("publicDataOnly".into(), false.into());
+    fields.insert("remoteSigning".into(), false.into());
+    fields.insert("payloadSigner".into(), false.into());
+    super::super::PreparedDelegated {
+        plan: Default::default(),
+        options: options.to_string(),
+        resident: ResidentCopy::test_provider(provider),
+    }
+}
+
+#[tokio::test]
+async fn hyrotrader_server_options_accept_real_native_private_reads() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (answer, seen) = check("hyrotrader", server_hyro_fixture(SECRET)).await;
+            assert!(answer.is_ok(), "server options private proof: {answer:?}");
+            let seen = seen.lock().unwrap();
+            assert!(seen.signed_reads > 0);
+            assert_eq!(seen.refused, 0);
+            assert_variant_startup("hyrotrader", &seen);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn hyrotrader_server_options_refuse_wrong_private_read_material() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (answer, seen) = check(
+                "hyrotrader",
+                hyro_private_read_fixture(server_hyro_fixture("different-material")),
+            )
+            .await;
+            let seen = seen.lock().unwrap();
+            assert!(seen.signed_reads > 0);
+            assert!(seen.refused > 0);
+            assert!(matches!(
+                answer,
+                Err(ProbeRefusal {
+                    transient: false,
+                    ..
+                })
+            ));
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn hosted_venues_use_real_delegated_construction_and_the_existing_probe() {
     tokio::task::LocalSet::new()
@@ -876,6 +945,11 @@ async fn hosted_venues_use_real_delegated_construction_and_the_existing_probe() 
                     );
                     let prepared = crate::delegated::prepare_delegated(&init, pair)
                         .unwrap_or_else(|_| panic!("{venue}: hosted venue must construct"));
+                    let prepared = if venue == "hyrotrader" && !accepted {
+                        hyro_private_read_fixture(prepared)
+                    } else {
+                        prepared
+                    };
                     let (result, seen) = check(venue, prepared).await;
                     assert_eq!(result.is_ok(), accepted, "{venue}: {result:?}");
                     assert!(seen.lock().unwrap().signed_reads > 0);
