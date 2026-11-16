@@ -520,8 +520,8 @@ async fn lighter_delegated_pair_and_sealed_replay_preserve_original_provider() {
         for venue in VENUES {for mode in ["correct","wrong-key","replay"] {
             let mut payload=init(venue,false); payload.signing_mode=Some("delegated".into());
             let (registry,_,observed)=registry(body(),8);
-            let original:crate::delegated::Credentials=serde_json::from_value(json!({
-                "key":payload.key,"secret":safe_cex_crypto::hex(&scalar(7))})).unwrap();
+            let original:crate::delegated::Credentials=serde_json::from_str(&json!({
+                "key":payload.key,"secret":safe_cex_crypto::hex(&scalar(7))}).to_string()).unwrap();
             let retained=crate::delegated::prepare_delegated(&payload,original.pair()).unwrap().resident;
             let provider=retained.provider();
             let reference=retained.identities().primary.as_ref().unwrap().signing_ref().unwrap().clone();
